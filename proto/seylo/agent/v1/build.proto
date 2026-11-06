@@ -91,6 +91,11 @@ message GitSource {
   // keys for github.com, gitlab.com and bitbucket.org; other hosts fail
   // without it (no trust on first use).
   string ssh_known_hosts = 6;
+  // HTTPS user name the credential helper answers with token. Empty means
+  // "x-access-token" (GitHub; GitLab and Gitea take any name). Bitbucket
+  // needs "x-token-auth" for access tokens or the account's user name for
+  // app passwords. Older agents ignore it.
+  string username = 7; // added in 0.2 (gitproviders)
 }
 
 enum Builder {

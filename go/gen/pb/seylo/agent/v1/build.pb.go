@@ -463,6 +463,11 @@ type GitSource struct {
 	// keys for github.com, gitlab.com and bitbucket.org; other hosts fail
 	// without it (no trust on first use).
 	SshKnownHosts string `protobuf:"bytes,6,opt,name=ssh_known_hosts,json=sshKnownHosts,proto3" json:"ssh_known_hosts,omitempty"`
+	// HTTPS user name the credential helper answers with token. Empty means
+	// "x-access-token" (GitHub; GitLab and Gitea take any name). Bitbucket
+	// needs "x-token-auth" for access tokens or the account's user name for
+	// app passwords. Older agents ignore it.
+	Username      string `protobuf:"bytes,7,opt,name=username,proto3" json:"username,omitempty"` // added in 0.2 (gitproviders)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -535,6 +540,13 @@ func (x *GitSource) GetSshPrivateKey() string {
 func (x *GitSource) GetSshKnownHosts() string {
 	if x != nil {
 		return x.SshKnownHosts
+	}
+	return ""
+}
+
+func (x *GitSource) GetUsername() string {
+	if x != nil {
+		return x.Username
 	}
 	return ""
 }
@@ -1050,14 +1062,15 @@ const file_seylo_agent_v1_build_proto_rawDesc = "" +
 	"\x06source\"]\n" +
 	"\vImageSource\x12\x1c\n" +
 	"\treference\x18\x01 \x01(\tR\treference\x120\n" +
-	"\x04auth\x18\x02 \x01(\v2\x1c.seylo.agent.v1.RegistryAuthR\x04auth\"\xad\x01\n" +
+	"\x04auth\x18\x02 \x01(\v2\x1c.seylo.agent.v1.RegistryAuthR\x04auth\"\xc9\x01\n" +
 	"\tGitSource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x16\n" +
 	"\x06commit\x18\x03 \x01(\tR\x06commit\x12\x14\n" +
 	"\x05token\x18\x04 \x01(\tR\x05token\x12&\n" +
 	"\x0fssh_private_key\x18\x05 \x01(\tR\rsshPrivateKey\x12&\n" +
-	"\x0fssh_known_hosts\x18\x06 \x01(\tR\rsshKnownHosts\"\xae\x01\n" +
+	"\x0fssh_known_hosts\x18\x06 \x01(\tR\rsshKnownHosts\x12\x1a\n" +
+	"\busername\x18\a \x01(\tR\busername\"\xae\x01\n" +
 	"\rBuildResponse\x12\x12\n" +
 	"\x03log\x18\x01 \x01(\fH\x00R\x03log\x12;\n" +
 	"\bprogress\x18\x02 \x01(\v2\x1d.seylo.agent.v1.BuildProgressH\x00R\bprogress\x12B\n" +
