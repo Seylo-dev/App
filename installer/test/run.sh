@@ -482,6 +482,19 @@ expect_fail "release preflight refuses a run that would render a test-key instal
 preflight BRAND_MINISIGN_PUBLIC_KEY="$(sed -n 2p "$root/test/e2e-colima/keys/e2e-test.pub")"
 expect_fail "release preflight refuses the committed e2e test key" "TEST-ONLY e2e key"
 
+# Prompting needs a terminal that really opens. With no controlling terminal
+# (cloud-init, CI, ssh without -t) /dev/tty still reads as mode 666, so the old
+# -r/-w test said yes and the open killed the script under dash. A directory is
+# the same kind of trap: readable and writable, but it cannot be opened for writing.
+can_prompt_with() { # device: runs the installer's own can_prompt against it
+  ( INSTALLER_TEST_TTY=$1 && eval "$(sed -n '/^TTY_DEVICE=/p;/^can_prompt() {/,/^}/p' "$INSTALLER")" && can_prompt )
+}
+mkdir -p "$T/not-a-terminal"
+if can_prompt_with "$T/not-a-terminal"; then flunk "no terminal is detected as no terminal" "can_prompt said yes for an unopenable device"; else pass "no terminal is detected as no terminal"; fi
+: >"$T/a-terminal"
+if can_prompt_with "$T/a-terminal"; then pass "an openable terminal can be asked on"; else flunk "an openable terminal can be asked on" "can_prompt said no for a writable device"; fi
+if grep -q -- '-r /dev/tty' "$INSTALLER"; then flunk "the installer no longer trusts -r/-w on /dev/tty" "found -r /dev/tty"; else pass "the installer no longer trusts -r/-w on /dev/tty"; fi
+
 if [ "$failures" -gt 0 ]; then
   echo "installer tests: $failures failed"
   exit 1

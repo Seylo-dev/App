@@ -12,7 +12,7 @@ GO_MODULE := $(shell sed -n 's/^module //p' go/go.mod)
 VERSION_PKG := $(GO_MODULE)/internal/version
 
 .PHONY: help install gen gen-brand gen-proto gen-ts check-gen build build-go build-ts test test-go test-ts lint breaking \
-	test-installer installer panel-image release-check release-snapshot release-dry-run release e2e e2e-checks e2e-refresh e2e-down
+	test-installer test-release installer panel-image release-check release-snapshot release-dry-run release e2e e2e-checks e2e-refresh e2e-down
 
 help: ## List targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -45,7 +45,7 @@ build-go: ## Static bin/seylo (CGO_ENABLED=0; set GOOS/GOARCH to cross-compile)
 build-ts: ## apps/web/dist, then apps/panel/dist
 	bun run build
 
-test: test-go test-ts test-installer ## Run Go, TypeScript and installer tests
+test: test-go test-ts test-installer test-release ## Run Go, TypeScript, installer and release script tests
 
 test-go: ## Go tests with the race detector
 	@for d in $(GO_DIRS); do go -C $$d test -race ./... || exit 1; done
@@ -55,6 +55,9 @@ test-ts: ## bun test in every workspace
 
 test-installer: ## install.sh in --root mode against a fake signed release (skips without minisign)
 	installer/test/run.sh
+
+test-release: ## scripts/release-publish.sh against a fake draft release and ghcr.io (skips without minisign or jq)
+	installer/test/release-publish.sh
 
 lint: ## buf lint, gofmt, go vet, staticcheck, Biome, tsc
 	buf lint
@@ -78,9 +81,12 @@ panel-image: build-ts ## Build the panel image for this machine as <image>:$(VER
 release-check: ## Validate .goreleaser.yaml
 	$(BRAND_ENV) goreleaser check
 
+# The before hooks are skipped, so build/install.sh is rendered first:
+# checksums.txt lists it (.goreleaser.yaml checksum.extra_files).
 release-snapshot: ## Build the release binaries and install.sh into dist/ (no publish, sign or image)
+	scripts/render-installer.sh latest build/install.sh
 	$(BRAND_ENV) goreleaser release --snapshot --clean --skip=sign,docker,before
-	scripts/render-installer.sh latest dist/install.sh
+	cp build/install.sh dist/install.sh
 
 release-dry-run: ## goreleaser as in `make release`, publishing nothing: snapshot, signed, one panel image per platform loaded locally (MINISIGN_SECRET_KEY, MINISIGN_PASSWORD)
 	$(BRAND_ENV) goreleaser release --snapshot --clean

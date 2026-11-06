@@ -78,6 +78,16 @@ die() {
 	exit 1
 }
 
+# The terminal questions go to. Tests point it elsewhere.
+TTY_DEVICE=${INSTALLER_TEST_TTY:-/dev/tty}
+
+# True when there is a terminal to ask on. /dev/tty is mode 666 even with no
+# controlling terminal behind it (cloud-init, CI, ssh without -t), so testing
+# -r/-w says yes and the open then fails; only opening it tells.
+can_prompt() {
+	( : <"$TTY_DEVICE" >"$TTY_DEVICE" ) 2>/dev/null
+}
+
 usage() {
 	cat <<EOF
 $NAME installer
@@ -419,14 +429,14 @@ ensure_docker() {
 	fi
 	[ -z "$NO_DOCKER" ] || die "Docker is not installed or not running (--no-docker-install was given)"
 	if [ -z "$INSTALL_DOCKER" ]; then
-		if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
-			printf 'Docker is missing. Install it with the official script from get.docker.com? [y/N] ' >/dev/tty
-			read -r answer </dev/tty || answer=
+		if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ] && can_prompt; then
+			printf 'Docker is missing. Install it with the official script from get.docker.com? [y/N] ' >"$TTY_DEVICE"
+			read -r answer <"$TTY_DEVICE" || answer=
 			case $answer in [yY]*) INSTALL_DOCKER=1 ;; esac
 		fi
 	fi
 	[ -n "$INSTALL_DOCKER" ] || [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] ||
-		die "Docker is missing. Install it (https://docs.docker.com/engine/install/) or re-run with --install-docker"
+		die "Docker is missing. Install it (https://docs.docker.com/engine/install/) or re-run with --install-docker (sh -s -- --install-docker after the pipe)"
 	say "Installing Docker with get.docker.com"
 	tmp=$(mktemp)
 	if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ]; then

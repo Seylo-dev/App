@@ -1207,7 +1207,8 @@ built by `make release`):
 - `<slug>_linux_amd64`, `<slug>_linux_arm64`: static agent binaries, and
   the laptop CLI as `<slug>_darwin_amd64`, `<slug>_darwin_arm64`,
   `<slug>_windows_amd64.exe`, `<slug>_windows_arm64.exe`, with
-  `checksums.txt` and `checksums.txt.minisig`.
+  `checksums.txt` (sha256 of the binaries, `install.sh` and
+  `openapi.json`) and `checksums.txt.minisig`.
 - `install.sh`: the rendered installer (`scripts/render-installer.sh`).
 - `openapi.json`: the op API description (`scripts/gen-openapi.ts`); the
   docs sync their API reference from `releases/latest/download/openapi.json`.

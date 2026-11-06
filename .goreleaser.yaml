@@ -66,6 +66,13 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  # release.extra_files are not checksummed on their own: list them here
+  # too, so every file the release attaches is covered by a signature
+  # (scripts/release-publish.sh refuses a checksums.txt without them). This
+  # only adds lines to checksums.txt; release.extra_files uploads them.
+  extra_files:
+    - glob: build/install.sh
+    - glob: openapi.json
 
 signs:
   # minisign -S with the release key; MINISIGN_SECRET_KEY is the key file,
@@ -126,6 +133,10 @@ release:
     owner: "{{ .Env.BRAND_GITHUB_ORG }}"
     name: "{{ .Env.BRAND_GITHUB_REPO }}"
   draft: true
+  # Re-running the Draft release job replaces the draft an earlier run left
+  # instead of adding a second draft with the same tag (Publish refuses a tag
+  # that several releases carry).
+  replace_existing_draft: true
   # A vX.Y.Z-<pre> tag makes a pre-release, which GitHub never makes the
   # latest release: installs and updates follow releases/latest, and the
   # image gets no latest tag for it either.
