@@ -407,7 +407,7 @@ func TestRemoveLeavesForeignAlone(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "volumes", "data")); err != nil {
 		t.Fatalf("data deleted without delete_data: %v", err)
 	}
-	if !h.router.removed["svc"] || h.state.get("svc") != nil {
+	if !h.router.wasRemoved("svc") || h.state.get("svc") != nil {
 		t.Fatal("route or status left behind")
 	}
 	if fc, ok := h.eng.Get(foreign); !ok || !fc.Running {

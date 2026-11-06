@@ -175,6 +175,16 @@ func (r *fakeRouter) get(id string) []proxy.Upstream {
 	return r.upstreams[id]
 }
 
+// wasRemoved reports whether the route of id was removed (and not applied
+// since). Read it under the lock: Settled does not wait for a worker that a
+// late Docker event of a removed service starts, and that worker removes
+// the route once more.
+func (r *fakeRouter) wasRemoved(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.removed[id]
+}
+
 // memLogs records system lines (LogSource + LogAppender); Tail returns
 // nothing so crash reports read Docker's output.
 type memLogs struct {
