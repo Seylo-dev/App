@@ -5,9 +5,11 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/rpc/rpctest"
@@ -147,5 +149,49 @@ func TestCleanupRunsWhileThePanelIsDown(t *testing.T) {
 		if run.GetTrigger() != agentv1.CleanupTrigger_CLEANUP_TRIGGER_DISK || run.GetDiskPercent() != want || run.GetReclaimedBytes() != 1<<20 || run.GetRemovedCount() != 1 {
 			t.Fatalf("report %d = %v", i, run)
 		}
+	}
+}
+
+// The panel checks cron expressions with croner, which reads more than the
+// agent's parser (7 for Sunday). One the node cannot read reaches the panel
+// as one failed schedule run named after the desired revision, nothing is
+// pruned, and a later revision with the same schedule is not a second one.
+func TestUnreadableCleanupScheduleIsReported(t *testing.T) {
+	isolate(t)
+	pruner := &countingPruner{}
+	owners = append(owners, owner{"test-cleanup",
+		func(d *Deps) error {
+			d.Pruner = pruner
+			d.CleanupScheduler = newCleanupScheduler(d)
+			return nil
+		},
+		func(_ *Registry, d *Deps) error {
+			wireCleanupSchedule(d)
+			return nil
+		}})
+	panel := rpctest.NewFakePanel(t)
+	panel.AddJoinToken("tok")
+	layout := shortLayout(t)
+	if err := Join(layout, JoinOptions{PanelURL: panel.URL(), Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	a := startDaemon(t, layout)
+	panel.WaitConnected("")
+	ctx := context.Background()
+	schedule := &agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * 7", Images: true}
+	if _, _, err := a.d.deps.DesiredSync.Sync(ctx, &agentv1.DesiredState{Revision: 3, Settings: &agentv1.NodeSettings{Cleanup: schedule}}); err != nil {
+		t.Fatal(err)
+	}
+	run := panel.WaitReports(1)[0].Event.GetCleanupRun()
+	if run.GetRunId() != "cleanup-schedule-r3" || run.GetTrigger() != agentv1.CleanupTrigger_CLEANUP_TRIGGER_SCHEDULE ||
+		!strings.Contains(run.GetError(), "the schedule cannot be read on this node") {
+		t.Fatalf("run = %v", run)
+	}
+	if _, _, err := a.d.deps.DesiredSync.Sync(ctx, &agentv1.DesiredState{Revision: 4, Settings: &agentv1.NodeSettings{Cleanup: schedule}}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := len(panel.Reports()); n != 1 || pruner.n.Load() != 0 {
+		t.Fatalf("reports = %d, prunes = %d; want 1 and 0", n, pruner.n.Load())
 	}
 }

@@ -7,7 +7,7 @@ import { type cleanup, OpError, type OpOutput } from "@seylo/ops";
 import { type CleanupSchedule, CleanupScheduleSchema } from "@seylo/proto";
 import { parseVersion } from "../../agent-hub/version";
 import type { CleanupScheduleJson, nodes } from "../../db/schema";
-import { cronProblem, isTimeZone, nextCronRun } from "../../jobs/cron-expr";
+import { isTimeZone, nextCronRun, nodeCronProblem } from "../../jobs/cron-expr";
 
 type Schedule = OpOutput<typeof cleanup.getSchedule>["schedule"];
 
@@ -52,18 +52,11 @@ export function fromSchedule(s: Schedule): CleanupScheduleJson {
   };
 }
 
-/**
- * Cron syntax the agent's parser (robfig/cron, standard five fields) does not
- * read, while the panel's croner does: L, W and # (last day, nearest
- * weekday, nth weekday). A schedule with them would never run on the node.
- */
-const agentUnsupported = /(^|[\s,/-])L($|[\s,/-])|\d+[LW]\b|#/i;
-
-/** Throws BAD_REQUEST for a schedule the node could not run. */
+/** Throws BAD_REQUEST for a schedule the node could not run (also syntax only the panel's croner reads, see nodeCronProblem). */
 export function checkSchedule(json: CleanupScheduleJson, timeZone: string | null): void {
   if (json.cron !== null) {
     const zone = timeZone && isTimeZone(timeZone) ? timeZone : "UTC";
-    const problem = agentUnsupported.test(json.cron) ? "L, W and # are not supported" : cronProblem(json.cron, zone);
+    const problem = nodeCronProblem(json.cron, zone);
     if (problem) throw new OpError("BAD_REQUEST", `The schedule is not valid: ${problem}.`, { field: "schedule.cron" });
     if (!nextCronRun(json.cron, zone, new Date())) {
       throw new OpError("BAD_REQUEST", "The schedule never fires.", { field: "schedule.cron" });

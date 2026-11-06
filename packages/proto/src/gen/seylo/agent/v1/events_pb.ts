@@ -185,8 +185,11 @@ export type CleanupRun = Message<"seylo.agent.v1.CleanupRun"> & {
   removedCount: number;
 
   /**
-   * Why the run failed (Docker unreachable, a bad schedule); empty when it
-   * ran. A failed run may have removed some things first.
+   * Why the run failed (Docker unreachable); empty when it ran. A failed
+   * run may have removed some things first. A cron expression the node
+   * cannot read is reported as one failed SCHEDULE run that removed
+   * nothing, run_id "cleanup-schedule-r<desired revision>", once per
+   * changed schedule.
    *
    * @generated from field: string error = 8;
    */

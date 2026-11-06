@@ -106,10 +106,22 @@ export function recordManualRun(
   published(deps, run.nodeId);
 }
 
-const gib = 1024 ** 3;
-function size(bytes: number): string {
-  if (bytes >= gib) return `${(bytes / gib).toFixed(1)} GiB`;
-  return `${Math.round(bytes / 1024 ** 2)} MiB`;
+const units = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
+
+/**
+ * Bytes as the web app's formatBytes (apps/web/src/lib/format.ts) shows
+ * them, so an alert and the Cleanup view agree on a run: binary steps with
+ * the short names ("3 GB", "1.5 GB", "182 MB"), one decimal under 10.
+ */
+export function formatSize(bytes: number): string {
+  let value = Math.max(0, bytes);
+  let power = 0;
+  while (value >= 1024 && power < units.length - 1) {
+    value /= 1024;
+    power++;
+  }
+  const shown = value >= 10 || Number.isInteger(value) ? String(Math.round(value)) : value.toFixed(1);
+  return `${shown} ${units[power]}`;
 }
 
 /** Stores one reported run (idempotent per node and run id) and raises cleanup_ran or cleanup_failed. */
@@ -153,7 +165,7 @@ export function ingestRun(deps: Pick<Deps, "db" | "live" | "alerts">, nodeId: st
   deps.alerts.raise({
     event: "cleanup_ran",
     key: `cleanup:${nodeId}:${event.runId}`,
-    title: `Cleanup on ${node.name} freed ${size(Number(event.reclaimedBytes))}`,
+    title: `Cleanup on ${node.name} freed ${formatSize(Number(event.reclaimedBytes))}`,
     message: `Started by ${why}; ${event.removedCount} ${event.removedCount === 1 ? "item" : "items"}.`,
     nodeId,
     link,

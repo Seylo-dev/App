@@ -106,7 +106,7 @@ func newCleanupScheduler(d *Deps) *cleanup.LocalScheduler {
 // down, and starts the scheduler's loop.
 func wireCleanupSchedule(d *Deps) {
 	d.Feed.Subscribe(func(st *agentv1.DesiredState) {
-		if err := d.CleanupScheduler.Sync(st.GetSettings().GetCleanup()); err != nil {
+		if err := d.CleanupScheduler.Sync(st.GetRevision(), st.GetSettings().GetCleanup()); err != nil {
 			d.Logger.Error("syncing the cleanup schedule", "err", err)
 		}
 	})

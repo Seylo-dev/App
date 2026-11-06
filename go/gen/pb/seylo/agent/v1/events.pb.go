@@ -779,8 +779,11 @@ type CleanupRun struct {
 	// removed_count is the full count.
 	Removed      []string `protobuf:"bytes,6,rep,name=removed,proto3" json:"removed,omitempty"`
 	RemovedCount uint32   `protobuf:"varint,7,opt,name=removed_count,json=removedCount,proto3" json:"removed_count,omitempty"`
-	// Why the run failed (Docker unreachable, a bad schedule); empty when it
-	// ran. A failed run may have removed some things first.
+	// Why the run failed (Docker unreachable); empty when it ran. A failed
+	// run may have removed some things first. A cron expression the node
+	// cannot read is reported as one failed SCHEDULE run that removed
+	// nothing, run_id "cleanup-schedule-r<desired revision>", once per
+	// changed schedule.
 	Error string `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
 	// Use of the fullest disk when the run started, in percent; 0 when not
 	// read (schedule runs do not read it).

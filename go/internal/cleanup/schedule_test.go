@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/cron"
@@ -130,13 +133,23 @@ func (h *harness) report(t *testing.T) *agentv1.CleanupRun {
 	}
 }
 
+// noReport fails when a run is reported within a short while.
+func (h *harness) noReport(t *testing.T) {
+	t.Helper()
+	select {
+	case run := <-h.reports:
+		t.Fatalf("unexpected run: %v", run)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func daily(disk uint32) *agentv1.CleanupSchedule {
 	return &agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * *", DiskPercent: disk, Images: true, BuildCache: true, StoppedContainers: true}
 }
 
 func TestScheduleRunsAtTheCronTimeAndReports(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 3, 58, 30, 0, time.UTC))
-	if err := h.sched.Sync(daily(0)); err != nil {
+	if err := h.sched.Sync(1, daily(0)); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -172,7 +185,7 @@ func TestScheduleCapsReportedLines(t *testing.T) {
 	h.pruner.lines = MaxReportedLines + 50
 	s := daily(0)
 	s.UnusedVolumes = true
-	if err := h.sched.Sync(s); err != nil {
+	if err := h.sched.Sync(1, s); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -189,7 +202,7 @@ func TestScheduleCapsReportedLines(t *testing.T) {
 func TestScheduleFailureIsReported(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 3, 59, 30, 0, time.UTC))
 	h.pruner.err = errors.New("docker: cannot connect")
-	if err := h.sched.Sync(daily(0)); err != nil {
+	if err := h.sched.Sync(1, daily(0)); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -202,7 +215,7 @@ func TestScheduleFailureIsReported(t *testing.T) {
 
 func TestScheduleSkipsAMissedRunAfterAClockJump(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 3, 59, 30, 0, time.UTC))
-	if err := h.sched.Sync(daily(0)); err != nil {
+	if err := h.sched.Sync(1, daily(0)); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -224,7 +237,7 @@ func TestDisabledScheduleNeverRuns(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 3, 59, 30, 0, time.UTC))
 	s := daily(80)
 	s.Enabled = false
-	if err := h.sched.Sync(s); err != nil {
+	if err := h.sched.Sync(1, s); err != nil {
 		t.Fatal(err)
 	}
 	if h.sched.diskDue(95) {
@@ -241,7 +254,7 @@ func TestDisabledScheduleNeverRuns(t *testing.T) {
 func TestDiskTriggerPacing(t *testing.T) {
 	start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	h := newHarness(t, start)
-	if err := h.sched.Sync(daily(80)); err != nil {
+	if err := h.sched.Sync(1, daily(80)); err != nil {
 		t.Fatal(err)
 	}
 	at := func(d time.Duration) { h.clock.set(start.Add(d)) }
@@ -277,7 +290,7 @@ func TestDiskTriggerPacing(t *testing.T) {
 
 	// A crossing an hour after the last run runs at once.
 	h2 := newHarness(t, start)
-	if err := h2.sched.Sync(daily(80)); err != nil {
+	if err := h2.sched.Sync(1, daily(80)); err != nil {
 		t.Fatal(err)
 	}
 	h2.sched.diskRan()
@@ -292,7 +305,7 @@ func TestDiskTriggerRunsThroughTheLoop(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
 	// Disk trigger only: no cron expression.
 	s := &agentv1.CleanupSchedule{Enabled: true, DiskPercent: 80, Images: true}
-	if err := h.sched.Sync(s); err != nil {
+	if err := h.sched.Sync(1, s); err != nil {
 		t.Fatal(err)
 	}
 	h.start(t)
@@ -310,10 +323,71 @@ func TestBadCronKeepsTheDiskTrigger(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
 	s := daily(80)
 	s.Cron = "every day at four"
-	if err := h.sched.Sync(s); err == nil {
+	if err := h.sched.Sync(1, s); err == nil {
 		t.Fatal("a bad expression must be an error")
 	}
 	if !h.sched.diskDue(95) {
 		t.Fatal("the disk trigger must still work")
 	}
+}
+
+// The panel checks expressions with croner, which reads more than
+// robfig/cron (7 for Sunday, for one). One the node cannot read is
+// reported once as a failed schedule run, so the owner hears about it.
+func TestUnreadableCronIsReportedOnce(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
+	s := daily(0)
+	s.Cron = "0 4 * * 7"
+	if err := h.sched.Sync(5, s); err == nil {
+		t.Fatal("day of week 7 must be an error here")
+	}
+	h.start(t)
+	run := h.report(t)
+	if run.GetRunId() != "cleanup-schedule-r5" || run.GetTrigger() != agentv1.CleanupTrigger_CLEANUP_TRIGGER_SCHEDULE {
+		t.Fatalf("run = %v", run)
+	}
+	if !strings.Contains(run.GetError(), "the schedule cannot be read on this node") || !strings.Contains(run.GetError(), "above maximum") {
+		t.Fatalf("error = %q", run.GetError())
+	}
+	if run.GetStartedAt() == nil || run.GetFinishedAt() == nil {
+		t.Fatalf("run without times: %v", run)
+	}
+
+	// A new revision with the same schedule (other settings changed): no
+	// second report.
+	if err := h.sched.Sync(6, s); err == nil {
+		t.Fatal("still an error")
+	}
+	h.noReport(t)
+
+	// Changed to another bad expression: reported again, under the new revision.
+	other := proto.Clone(s).(*agentv1.CleanupSchedule)
+	other.Cron = "0 4 * * MON-SUN"
+	_ = h.sched.Sync(7, other)
+	if run := h.report(t); run.GetRunId() != "cleanup-schedule-r7" {
+		t.Fatalf("run = %v", run)
+	}
+
+	// Fixed: nothing more, and nothing was pruned along the way.
+	if err := h.sched.Sync(8, daily(0)); err != nil {
+		t.Fatal(err)
+	}
+	h.noReport(t)
+	if len(h.pruner.reqs) != 0 {
+		t.Fatalf("pruned %d times", len(h.pruner.reqs))
+	}
+}
+
+// A sync of an unreadable schedule that Run has not reported yet, then a
+// fixed one: nothing is reported.
+func TestFixedBeforeReportedIsNotReported(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
+	s := daily(0)
+	s.Cron = "0 4 * * 7"
+	_ = h.sched.Sync(1, s)
+	if err := h.sched.Sync(2, daily(0)); err != nil {
+		t.Fatal(err)
+	}
+	h.start(t)
+	h.noReport(t)
 }

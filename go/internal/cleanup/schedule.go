@@ -45,10 +45,11 @@ type Schedule interface {
 // state, which is kept on disk, so it keeps running while the panel is
 // down. Every run, failed or not, goes to Report.
 type Scheduler interface {
-	// Sync takes the node's current CleanupSchedule (nil or disabled: off).
-	// It returns an error for a cron expression it cannot read; the disk
-	// trigger still works then.
-	Sync(schedule *agentv1.CleanupSchedule) error
+	// Sync takes the node's current CleanupSchedule (nil or disabled: off)
+	// from the desired state with this revision. It returns an error for a
+	// cron expression it cannot read; the disk trigger still works then,
+	// and Run reports one failed CleanupRun for it (see unreadableRun).
+	Sync(revision uint64, schedule *agentv1.CleanupSchedule) error
 	// Run is the timer loop; it returns when ctx ends.
 	Run(ctx context.Context) error
 	// DiskUse hands over the fullest disk's use in percent after each disk
@@ -79,6 +80,9 @@ type LocalScheduler struct {
 	mu       sync.Mutex
 	settings *agentv1.CleanupSchedule
 	sched    Schedule
+	// unreadable is a failed run for a cron expression this node cannot
+	// read, waiting for Run to report it.
+	unreadable *agentv1.CleanupRun
 
 	// Owned by the Run goroutine: the last disk run, and whether one ran
 	// since the disk last went over the line.
@@ -103,14 +107,13 @@ func NewScheduler(opts SchedulerOptions) *LocalScheduler {
 }
 
 // Sync implements Scheduler.
-func (s *LocalScheduler) Sync(schedule *agentv1.CleanupSchedule) error {
+func (s *LocalScheduler) Sync(revision uint64, schedule *agentv1.CleanupSchedule) error {
 	var sched Schedule
 	var err error
 	if schedule.GetEnabled() && schedule.GetCron() != "" {
 		sched, err = s.opts.Parse(schedule.GetCron())
 		if err != nil {
 			sched = nil
-			err = fmt.Errorf("cleanup schedule: %w", err)
 		}
 	}
 	s.mu.Lock()
@@ -121,7 +124,16 @@ func (s *LocalScheduler) Sync(schedule *agentv1.CleanupSchedule) error {
 		s.settings = nil
 	}
 	s.sched = sched
+	switch {
+	case err != nil && changed:
+		s.unreadable = s.unreadableRun(revision, err)
+	case err == nil:
+		s.unreadable = nil
+	}
 	s.mu.Unlock()
+	if err != nil {
+		err = fmt.Errorf("cleanup schedule: %w", err)
+	}
 	if changed {
 		select {
 		case s.wake <- struct{}{}:
@@ -129,6 +141,36 @@ func (s *LocalScheduler) Sync(schedule *agentv1.CleanupSchedule) error {
 		}
 	}
 	return err
+}
+
+// unreadableRun is the failed run that tells the panel the node cannot
+// read the schedule's cron expression (the panel checks expressions with
+// another parser), so the owner gets cleanup_failed instead of a schedule
+// that silently never fires. Its id comes from the desired revision: the
+// same revision after an agent restart is the same run, which the panel
+// stores once. Only a changed schedule makes a new one.
+func (s *LocalScheduler) unreadableRun(revision uint64, err error) *agentv1.CleanupRun {
+	now := timestamppb.New(s.opts.Now())
+	return &agentv1.CleanupRun{
+		RunId:      fmt.Sprintf("cleanup-schedule-r%d", revision),
+		Trigger:    agentv1.CleanupTrigger_CLEANUP_TRIGGER_SCHEDULE,
+		StartedAt:  now,
+		FinishedAt: now,
+		Error:      "the schedule cannot be read on this node: " + err.Error(),
+	}
+}
+
+// reportUnreadable reports the pending unreadableRun, if any.
+func (s *LocalScheduler) reportUnreadable(ctx context.Context) {
+	s.mu.Lock()
+	run := s.unreadable
+	s.unreadable = nil
+	s.mu.Unlock()
+	if run == nil {
+		return
+	}
+	s.opts.Logger.Warn("the cleanup schedule cannot be read; reported as a failed run", "run_id", run.GetRunId(), "err", run.GetError())
+	s.report(ctx, run)
 }
 
 // DiskUse implements Scheduler. Only the latest reading is kept.
@@ -153,6 +195,7 @@ func (s *LocalScheduler) current() (*agentv1.CleanupSchedule, Schedule) {
 func (s *LocalScheduler) Run(ctx context.Context) error {
 	var due time.Time // zero: no cron run planned
 	plan := func() {
+		s.reportUnreadable(ctx)
 		_, sched := s.current()
 		due = time.Time{}
 		if sched != nil {
@@ -266,8 +309,12 @@ func (s *LocalScheduler) fire(ctx context.Context, trigger agentv1.CleanupTrigge
 	} else {
 		s.opts.Logger.Info("scheduled cleanup done", "run_id", run.GetRunId(), "reclaimed_bytes", run.GetReclaimedBytes(), "lines", run.GetRemovedCount())
 	}
-	// Durable: on disk before this returns, also while the panel is down,
-	// and not tied to ctx, which may be ending.
+	s.report(ctx, run)
+}
+
+// report queues a run durably: on disk before this returns, also while the
+// panel is down, and not tied to ctx, which may be ending.
+func (s *LocalScheduler) report(ctx context.Context, run *agentv1.CleanupRun) {
 	rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer rcancel()
 	if err := s.opts.Report(rctx, run); err != nil {

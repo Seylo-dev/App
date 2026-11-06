@@ -97,7 +97,7 @@ func TestITCleanupOnTheDiskTrigger(t *testing.T) {
 			return rec.Event(ctx, &agentv1.Event{Payload: &agentv1.Event_CleanupRun{CleanupRun: run}})
 		},
 	})
-	if err := sched.Sync(&agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * *", DiskPercent: 80, StoppedContainers: true}); err != nil {
+	if err := sched.Sync(2, &agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * *", DiskPercent: 80, StoppedContainers: true}); err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = sched.Run(ctx) }()

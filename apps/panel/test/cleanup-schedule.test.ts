@@ -10,6 +10,7 @@ import { cleanup, type OpInput } from "@seylo/ops";
 import { CleanupTrigger, ReportEventRequestSchema, ReportEventResponseSchema } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
 import { alerts, auditLog, cleanupRuns } from "../src/db/schema";
+import { formatSize } from "../src/modules/cleanup/runs";
 import { readDefaults } from "../src/modules/notifications/rules";
 import type { FakeAgent } from "./fake-agent";
 import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
@@ -101,6 +102,9 @@ describe("cleanup schedule", () => {
     // croner reads L and #, the agent's parser does not.
     await bad({ ...daily, cron: "0 4 L * *" }, "schedule.cron");
     await bad({ ...daily, cron: "0 4 * * 1#2" }, "schedule.cron");
+    // croner takes 7 for Sunday, the agent's parser stops at 6: refused, so it never silently stops running.
+    await bad({ ...daily, cron: "0 4 * * 7" }, "schedule.cron");
+    await bad({ ...daily, cron: "0 4 * * 1-7" }, "schedule.cron");
     await bad({ ...daily, cron: null, diskPercent: null }, "schedule");
     await bad({ ...daily, kinds: { images: false, buildCache: false, stoppedContainers: false, unusedVolumes: false } }, "schedule.kinds");
     // The disk line alone is fine, and so is a node that never reported a zone (UTC).
@@ -119,6 +123,14 @@ describe("cleanup schedule", () => {
     expect((await callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: daily }, { bearer: readOnly })).status).toBe(403);
     expect(cleanup.setSchedule.kind).toBe("destructive");
   });
+});
+
+test("alert sizes read like the web app's formatBytes", () => {
+  expect(formatSize(3 * 1024 ** 3)).toBe("3 GB");
+  expect(formatSize(1.5 * 1024 ** 3)).toBe("1.5 GB");
+  expect(formatSize(190840832)).toBe("182 MB");
+  expect(formatSize(12.4 * 1024 ** 2)).toBe("12 MB");
+  expect(formatSize(0)).toBe("0 B");
 });
 
 describe("cleanup runs", () => {
@@ -148,7 +160,8 @@ describe("cleanup runs", () => {
 
     const ran = panel.deps.db.select().from(alerts).where(eq(alerts.event, "cleanup_ran")).all();
     expect(ran).toHaveLength(1);
-    expect(ran[0]?.title).toBe("Cleanup on n1 freed 3.0 GiB");
+    // The same number and unit as the Cleanup view (the web's formatBytes).
+    expect(ran[0]?.title).toBe("Cleanup on n1 freed 3 GB");
     const failed = panel.deps.db.select().from(alerts).where(eq(alerts.event, "cleanup_failed")).all();
     expect(failed).toHaveLength(1);
     expect(failed[0]?.message).toContain("cannot connect");
