@@ -108,6 +108,10 @@ export function tabsFor(kind: ServiceKind | undefined): readonly ServiceTab[] {
     case "mariadb":
     case "mongo":
     case "redis":
+    case "valkey":
+    case "keydb":
+    case "dragonfly":
+    case "clickhouse":
       return databaseTabs;
     case "box":
       return boxTabs;

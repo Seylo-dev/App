@@ -121,13 +121,39 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
       ) : (
         <Skeleton className="h-[38px]" />
       )}
+      {db.internal.httpPort != null && (
+        <>
+          <span className="text-[12.5px] font-medium text-ink-strong">{t("serviceDatabase.httpUrl")}</span>
+          {conn ? (
+            conn.internal.httpUrl && (
+              <CopyField
+                value={conn.internal.httpUrl}
+                secret
+                masked={maskUrlPassword(conn.internal.httpUrl)}
+                aria-label={t("serviceDatabase.httpUrl")}
+                className="-mt-1.5"
+              />
+            )
+          ) : connError ? null : (
+            <Skeleton className="h-[38px]" aria-busy="true" />
+          )}
+        </>
+      )}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-2.5">
         <Tile label={t("serviceDatabase.host")} value={db.internal.host} />
         <Tile label={t("serviceDatabase.port")} value={String(db.internal.port)} />
-        {db.engine !== "redis" && <Tile label={t("serviceDatabase.database")} value={db.internal.database} />}
+        {db.internal.httpPort != null && <Tile label={t("serviceDatabase.httpPort")} value={String(db.internal.httpPort)} />}
+        {db.internal.database !== "" && <Tile label={t("serviceDatabase.database")} value={db.internal.database} />}
         <Tile label={t("serviceDatabase.user")} value={db.internal.user} />
         <Tile label={t("serviceDatabase.password")} value="" secret />
       </div>
+      {db.variant === "pgvector" && (
+        <p className="m-0 text-[12.5px] leading-normal text-ink-strong">
+          {t("serviceDatabase.pgvectorBefore")}{" "}
+          <code className="rounded-[5px] bg-field px-[5px] py-px font-mono text-xs">CREATE EXTENSION vector;</code>{" "}
+          {t("serviceDatabase.pgvectorAfter")}
+        </p>
+      )}
       {reset && <ResetPassword service={service} which="internal" onClose={() => setReset(false)} />}
     </Section>
   );
@@ -184,9 +210,10 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
           )}
           <div className="flex flex-wrap gap-x-[18px] gap-y-2 text-[12.5px] leading-normal text-ink-strong">
             <span>
-              {t("serviceDatabase.separateUserBefore")}{" "}
+              {/* The Redis-like engines have one user: the same one, only over TLS here. */}
+              {t(e.user === db.internal.user ? "serviceDatabase.sameUserBefore" : "serviceDatabase.separateUserBefore")}{" "}
               <b className="rounded-[5px] bg-field px-[5px] py-px font-mono text-xs font-medium text-foreground">{e.user}</b>{" "}
-              {t("serviceDatabase.separateUserAfter")}
+              {t(e.user === db.internal.user ? "serviceDatabase.sameUserAfter" : "serviceDatabase.separateUserAfter")}
             </span>
             <span>
               {t("serviceDatabase.allowedFrom")}{" "}
@@ -335,7 +362,7 @@ function ToolsCard({ service, db }: { service: ServiceDetail; db: Db }) {
     },
     onError: fail,
   });
-  const shellName = { postgres: "psql", mysql: "mysql", mariadb: "mariadb", mongo: "mongosh", redis: "redis-cli" }[db.engine];
+  const shellName = db.shellClient;
   return (
     <section aria-label={t("serviceDatabase.tools")} className="flex flex-col rounded-card bg-card px-5 pt-[18px] pb-2 shadow-card">
       <h2 className="m-0 mb-2 text-[15px] font-semibold">{t("serviceDatabase.tools")}</h2>
@@ -372,7 +399,9 @@ function ToolsCard({ service, db }: { service: ServiceDetail; db: Db }) {
         tone="gray"
         name={shellName}
         hint={
-          db.engine === "redis" ? t("serviceDatabase.shellHintRedis") : t("serviceDatabase.shellHint", { database: db.internal.database })
+          db.internal.database === ""
+            ? t("serviceDatabase.shellHintRedis")
+            : t("serviceDatabase.shellHint", { database: db.internal.database })
         }
         action={
           <Button size="sm" className="bg-muted shadow-none" onClick={() => setShell(true)}>
