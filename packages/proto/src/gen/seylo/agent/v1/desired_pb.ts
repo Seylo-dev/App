@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/desired.proto.
  */
 export const file_seylo_agent_v1_desired: GenFile = /*@__PURE__*/
-  fileDesc("ChxzZXlsby9hZ2VudC92MS9kZXNpcmVkLnByb3RvEg5zZXlsby5hZ2VudC52MSKxAQoMRGVzaXJlZFN0YXRlEhAKCHJldmlzaW9uGAEgASgEEi0KCHNlcnZpY2VzGAIgAygLMhsuc2V5bG8uYWdlbnQudjEuU2VydmljZVNwZWMSMAoIbmV0d29ya3MYAyADKAsyHi5zZXlsby5hZ2VudC52MS5Qcm9qZWN0TmV0d29yaxIuCghzZXR0aW5ncxgEIAEoCzIcLnNleWxvLmFnZW50LnYxLk5vZGVTZXR0aW5ncyIkCg5Qcm9qZWN0TmV0d29yaxISCgpwcm9qZWN0X2lkGAEgASgJIp4CCgxOb2RlU2V0dGluZ3MSMAoLbWFpbnRlbmFuY2UYASABKAsyGy5zZXlsby5hZ2VudC52MS5NYWludGVuYW5jZRIXCg9nYW1lc19maXJzdF9jcHUYAiABKAgSEgoKYWNtZV9lbWFpbBgDIAEoCRIXCg93aWxkY2FyZF9kb21haW4YBCABKAkSMwoNbG9nX3JldGVudGlvbhgFIAEoCzIcLnNleWxvLmFnZW50LnYxLkxvZ1JldGVudGlvbhIbChNtYXhfcGFyYWxsZWxfYnVpbGRzGAYgASgNEhMKC2F1dG9fdXBkYXRlGAcgASgIEi8KBmxiX3RscxgIIAEoCzIfLnNleWxvLmFnZW50LnYxLkxvYWRCYWxhbmNlclRscyJZCg9Mb2FkQmFsYW5jZXJUbHMSDgoGY2FfcGVtGAEgASgJEhAKCGNlcnRfcGVtGAIgASgJEg8KB2tleV9wZW0YAyABKAkSEwoLc2VydmVyX25hbWUYBCABKAkiWQoMTG9nUmV0ZW50aW9uEh0KFW1heF9ieXRlc19wZXJfc2VydmljZRgBIAEoBBIqCgdtYXhfYWdlGAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIkEKElN5bmNEZXNpcmVkUmVxdWVzdBIrCgVzdGF0ZRgBIAEoCzIcLnNleWxvLmFnZW50LnYxLkRlc2lyZWRTdGF0ZSJhChNTeW5jRGVzaXJlZFJlc3BvbnNlEhkKEWFjY2VwdGVkX3JldmlzaW9uGAEgASgEEi8KB3JlZnVzZWQYAiADKAsyHi5zZXlsby5hZ2VudC52MS5SZWZ1c2VkU2VydmljZSJJCg5SZWZ1c2VkU2VydmljZRISCgpzZXJ2aWNlX2lkGAEgASgJEhIKCmdlbmVyYXRpb24YAiABKAQSDwoHbWVzc2FnZRgDIAEoCSJVChNBcHBseVNlcnZpY2VSZXF1ZXN0EhAKCHJldmlzaW9uGAEgASgEEiwKB3NlcnZpY2UYAiABKAsyGy5zZXlsby5hZ2VudC52MS5TZXJ2aWNlU3BlYyIxChRBcHBseVNlcnZpY2VSZXNwb25zZRIZChFhY2NlcHRlZF9yZXZpc2lvbhgBIAEoBCJRChRSZW1vdmVTZXJ2aWNlUmVxdWVzdBIQCghyZXZpc2lvbhgBIAEoBBISCgpzZXJ2aWNlX2lkGAIgASgJEhMKC2RlbGV0ZV9kYXRhGAMgASgIIjIKFVJlbW92ZVNlcnZpY2VSZXNwb25zZRIZChFhY2NlcHRlZF9yZXZpc2lvbhgBIAEoBCIrChVSZXN0YXJ0U2VydmljZVJlcXVlc3QSEgoKc2VydmljZV9pZBgBIAEoCSIYChZSZXN0YXJ0U2VydmljZVJlc3BvbnNlQrcBChJjb20uc2V5bG8uYWdlbnQudjFCDERlc2lyZWRQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_google_protobuf_duration, file_seylo_agent_v1_routing, file_seylo_agent_v1_service]);
+  fileDesc("ChxzZXlsby9hZ2VudC92MS9kZXNpcmVkLnByb3RvEg5zZXlsby5hZ2VudC52MSKxAQoMRGVzaXJlZFN0YXRlEhAKCHJldmlzaW9uGAEgASgEEi0KCHNlcnZpY2VzGAIgAygLMhsuc2V5bG8uYWdlbnQudjEuU2VydmljZVNwZWMSMAoIbmV0d29ya3MYAyADKAsyHi5zZXlsby5hZ2VudC52MS5Qcm9qZWN0TmV0d29yaxIuCghzZXR0aW5ncxgEIAEoCzIcLnNleWxvLmFnZW50LnYxLk5vZGVTZXR0aW5ncyIkCg5Qcm9qZWN0TmV0d29yaxISCgpwcm9qZWN0X2lkGAEgASgJIuQCCgxOb2RlU2V0dGluZ3MSMAoLbWFpbnRlbmFuY2UYASABKAsyGy5zZXlsby5hZ2VudC52MS5NYWludGVuYW5jZRIXCg9nYW1lc19maXJzdF9jcHUYAiABKAgSEgoKYWNtZV9lbWFpbBgDIAEoCRIXCg93aWxkY2FyZF9kb21haW4YBCABKAkSMwoNbG9nX3JldGVudGlvbhgFIAEoCzIcLnNleWxvLmFnZW50LnYxLkxvZ1JldGVudGlvbhIbChNtYXhfcGFyYWxsZWxfYnVpbGRzGAYgASgNEhMKC2F1dG9fdXBkYXRlGAcgASgIEi8KBmxiX3RscxgIIAEoCzIfLnNleWxvLmFnZW50LnYxLkxvYWRCYWxhbmNlclRscxIwCgdjbGVhbnVwGAkgASgLMh8uc2V5bG8uYWdlbnQudjEuQ2xlYW51cFNjaGVkdWxlEhIKCmhvc3Rfc2hlbGwYCiABKAginwEKD0NsZWFudXBTY2hlZHVsZRIPCgdlbmFibGVkGAEgASgIEgwKBGNyb24YAiABKAkSFAoMZGlza19wZXJjZW50GAMgASgNEg4KBmltYWdlcxgEIAEoCBITCgtidWlsZF9jYWNoZRgFIAEoCBIaChJzdG9wcGVkX2NvbnRhaW5lcnMYBiABKAgSFgoOdW51c2VkX3ZvbHVtZXMYByABKAgiWQoPTG9hZEJhbGFuY2VyVGxzEg4KBmNhX3BlbRgBIAEoCRIQCghjZXJ0X3BlbRgCIAEoCRIPCgdrZXlfcGVtGAMgASgJEhMKC3NlcnZlcl9uYW1lGAQgASgJIlkKDExvZ1JldGVudGlvbhIdChVtYXhfYnl0ZXNfcGVyX3NlcnZpY2UYASABKAQSKgoHbWF4X2FnZRgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiJBChJTeW5jRGVzaXJlZFJlcXVlc3QSKwoFc3RhdGUYASABKAsyHC5zZXlsby5hZ2VudC52MS5EZXNpcmVkU3RhdGUiYQoTU3luY0Rlc2lyZWRSZXNwb25zZRIZChFhY2NlcHRlZF9yZXZpc2lvbhgBIAEoBBIvCgdyZWZ1c2VkGAIgAygLMh4uc2V5bG8uYWdlbnQudjEuUmVmdXNlZFNlcnZpY2UiSQoOUmVmdXNlZFNlcnZpY2USEgoKc2VydmljZV9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEg8KB21lc3NhZ2UYAyABKAkiVQoTQXBwbHlTZXJ2aWNlUmVxdWVzdBIQCghyZXZpc2lvbhgBIAEoBBIsCgdzZXJ2aWNlGAIgASgLMhsuc2V5bG8uYWdlbnQudjEuU2VydmljZVNwZWMiMQoUQXBwbHlTZXJ2aWNlUmVzcG9uc2USGQoRYWNjZXB0ZWRfcmV2aXNpb24YASABKAQiUQoUUmVtb3ZlU2VydmljZVJlcXVlc3QSEAoIcmV2aXNpb24YASABKAQSEgoKc2VydmljZV9pZBgCIAEoCRITCgtkZWxldGVfZGF0YRgDIAEoCCIyChVSZW1vdmVTZXJ2aWNlUmVzcG9uc2USGQoRYWNjZXB0ZWRfcmV2aXNpb24YASABKAQiKwoVUmVzdGFydFNlcnZpY2VSZXF1ZXN0EhIKCnNlcnZpY2VfaWQYASABKAkiGAoWUmVzdGFydFNlcnZpY2VSZXNwb25zZUK3AQoSY29tLnNleWxvLmFnZW50LnYxQgxEZXNpcmVkUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_duration, file_seylo_agent_v1_routing, file_seylo_agent_v1_service]);
 
 /**
  * DesiredState is everything the panel wants on one node. The agent stores
@@ -141,6 +141,28 @@ export type NodeSettings = Message<"seylo.agent.v1.NodeSettings"> & {
    * @generated from field: seylo.agent.v1.LoadBalancerTls lb_tls = 8;
    */
   lbTls?: LoadBalancerTls | undefined;
+
+  /**
+   * Docker cleanup the agent runs by itself on a schedule or when a disk
+   * fills up, also while the panel is down. Unset (older panels) or not
+   * enabled: no scheduled cleanup.
+   *
+   * added in 0.2 (nodeops)
+   *
+   * @generated from field: seylo.agent.v1.CleanupSchedule cleanup = 9;
+   */
+  cleanup?: CleanupSchedule | undefined;
+
+  /**
+   * The owner allowed root shells on this host from the panel (HostShell).
+   * The agent refuses HostShell while this is false and closes open ones
+   * when it turns false.
+   *
+   * added in 0.2 (nodeops)
+   *
+   * @generated from field: bool host_shell = 10;
+   */
+  hostShell: boolean;
 };
 
 /**
@@ -149,6 +171,69 @@ export type NodeSettings = Message<"seylo.agent.v1.NodeSettings"> & {
  */
 export const NodeSettingsSchema: GenMessage<NodeSettings> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_desired, 2);
+
+/**
+ * CleanupSchedule is when and what the agent cleans up by itself. It only
+ * ever touches resources labeled seylo.managed, like Prune. Each run is a
+ * durable CleanupRun event. added in 0.2 (nodeops)
+ *
+ * @generated from message seylo.agent.v1.CleanupSchedule
+ */
+export type CleanupSchedule = Message<"seylo.agent.v1.CleanupSchedule"> & {
+  /**
+   * @generated from field: bool enabled = 1;
+   */
+  enabled: boolean;
+
+  /**
+   * Five-field cron expression evaluated in the node's own time zone
+   * (/etc/localtime, NodeFacts.time_zone). Empty: only the disk trigger.
+   *
+   * @generated from field: string cron = 2;
+   */
+  cron: string;
+
+  /**
+   * Also run when the file system holding the data dir or Docker's root is
+   * more than this percent full (read by the disk checks every 10 minutes).
+   * At most once an hour, and every 6 hours while it stays above. 0 = off.
+   *
+   * @generated from field: uint32 disk_percent = 3;
+   */
+  diskPercent: number;
+
+  /**
+   * What to clean, as in PruneRequest.
+   *
+   * @generated from field: bool images = 4;
+   */
+  images: boolean;
+
+  /**
+   * @generated from field: bool build_cache = 5;
+   */
+  buildCache: boolean;
+
+  /**
+   * @generated from field: bool stopped_containers = 6;
+   */
+  stoppedContainers: boolean;
+
+  /**
+   * Docker volumes and data folders of services removed from this node
+   * (PruneRequest.orphaned_service_data).
+   *
+   * @generated from field: bool unused_volumes = 7;
+   */
+  unusedVolumes: boolean;
+};
+
+/**
+ * Describes the message seylo.agent.v1.CleanupSchedule.
+ * Use `create(CleanupScheduleSchema)` to create a new message.
+ */
+export const CleanupScheduleSchema: GenMessage<CleanupSchedule> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_desired, 3);
 
 /**
  * LoadBalancerTls is this node's identity on the LB entry point, issued by
@@ -192,7 +277,7 @@ export type LoadBalancerTls = Message<"seylo.agent.v1.LoadBalancerTls"> & {
  * Use `create(LoadBalancerTlsSchema)` to create a new message.
  */
 export const LoadBalancerTlsSchema: GenMessage<LoadBalancerTls> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 3);
+  messageDesc(file_seylo_agent_v1_desired, 4);
 
 /**
  * LogRetention bounds the per-service log store (logs/<service id>/). The
@@ -221,7 +306,7 @@ export type LogRetention = Message<"seylo.agent.v1.LogRetention"> & {
  * Use `create(LogRetentionSchema)` to create a new message.
  */
 export const LogRetentionSchema: GenMessage<LogRetention> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 4);
+  messageDesc(file_seylo_agent_v1_desired, 5);
 
 /**
  * SyncDesiredRequest replaces the whole desired state. The panel sends it
@@ -241,7 +326,7 @@ export type SyncDesiredRequest = Message<"seylo.agent.v1.SyncDesiredRequest"> & 
  * Use `create(SyncDesiredRequestSchema)` to create a new message.
  */
 export const SyncDesiredRequestSchema: GenMessage<SyncDesiredRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 5);
+  messageDesc(file_seylo_agent_v1_desired, 6);
 
 /**
  * @generated from message seylo.agent.v1.SyncDesiredResponse
@@ -271,7 +356,7 @@ export type SyncDesiredResponse = Message<"seylo.agent.v1.SyncDesiredResponse"> 
  * Use `create(SyncDesiredResponseSchema)` to create a new message.
  */
 export const SyncDesiredResponseSchema: GenMessage<SyncDesiredResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 6);
+  messageDesc(file_seylo_agent_v1_desired, 7);
 
 /**
  * RefusedService is one spec of a SyncDesired the agent refused.
@@ -304,7 +389,7 @@ export type RefusedService = Message<"seylo.agent.v1.RefusedService"> & {
  * Use `create(RefusedServiceSchema)` to create a new message.
  */
 export const RefusedServiceSchema: GenMessage<RefusedService> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 7);
+  messageDesc(file_seylo_agent_v1_desired, 8);
 
 /**
  * ApplyServiceRequest creates or updates one service. Deploys, rollbacks
@@ -331,7 +416,7 @@ export type ApplyServiceRequest = Message<"seylo.agent.v1.ApplyServiceRequest"> 
  * Use `create(ApplyServiceRequestSchema)` to create a new message.
  */
 export const ApplyServiceRequestSchema: GenMessage<ApplyServiceRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 8);
+  messageDesc(file_seylo_agent_v1_desired, 9);
 
 /**
  * @generated from message seylo.agent.v1.ApplyServiceResponse
@@ -348,7 +433,7 @@ export type ApplyServiceResponse = Message<"seylo.agent.v1.ApplyServiceResponse"
  * Use `create(ApplyServiceResponseSchema)` to create a new message.
  */
 export const ApplyServiceResponseSchema: GenMessage<ApplyServiceResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 9);
+  messageDesc(file_seylo_agent_v1_desired, 10);
 
 /**
  * @generated from message seylo.agent.v1.RemoveServiceRequest
@@ -378,7 +463,7 @@ export type RemoveServiceRequest = Message<"seylo.agent.v1.RemoveServiceRequest"
  * Use `create(RemoveServiceRequestSchema)` to create a new message.
  */
 export const RemoveServiceRequestSchema: GenMessage<RemoveServiceRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 10);
+  messageDesc(file_seylo_agent_v1_desired, 11);
 
 /**
  * @generated from message seylo.agent.v1.RemoveServiceResponse
@@ -395,7 +480,7 @@ export type RemoveServiceResponse = Message<"seylo.agent.v1.RemoveServiceRespons
  * Use `create(RemoveServiceResponseSchema)` to create a new message.
  */
 export const RemoveServiceResponseSchema: GenMessage<RemoveServiceResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 11);
+  messageDesc(file_seylo_agent_v1_desired, 12);
 
 /**
  * RestartServiceRequest restarts running instances without changing the
@@ -415,7 +500,7 @@ export type RestartServiceRequest = Message<"seylo.agent.v1.RestartServiceReques
  * Use `create(RestartServiceRequestSchema)` to create a new message.
  */
 export const RestartServiceRequestSchema: GenMessage<RestartServiceRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 12);
+  messageDesc(file_seylo_agent_v1_desired, 13);
 
 /**
  * @generated from message seylo.agent.v1.RestartServiceResponse
@@ -428,5 +513,5 @@ export type RestartServiceResponse = Message<"seylo.agent.v1.RestartServiceRespo
  * Use `create(RestartServiceResponseSchema)` to create a new message.
  */
 export const RestartServiceResponseSchema: GenMessage<RestartServiceResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 13);
+  messageDesc(file_seylo_agent_v1_desired, 14);
 

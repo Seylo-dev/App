@@ -99,3 +99,44 @@ message ShellInfo {
   // from the environment.
   repeated string command = 5;
 }
+
+// HostShell is a root login shell on the node itself, with a PTY. The first
+// request (sent in OPEN) must be `open`. added in 0.2 (nodeops)
+message HostShellRequest {
+  oneof message {
+    HostShellOpen open = 1;
+    bytes input = 2;
+    TerminalSize resize = 3;
+  }
+}
+
+message HostShellOpen {
+  TerminalSize size = 1;
+  // Who opened it ("name <email>"), for the agent's own log; the panel's
+  // audit log is the record that counts.
+  string opened_by = 2;
+  // Panel id of the session, echoed in the agent's log lines.
+  string session_id = 3;
+}
+
+message HostShellResponse {
+  oneof message {
+    bytes output = 1;
+    // The shell exited; the stream closes right after.
+    int32 exit_code = 2;
+    // Always the first message: where the shell runs.
+    HostShellInfo info = 3;
+  }
+}
+
+message HostShellInfo {
+  // Always "root".
+  string user = 1;
+  // The shell's home folder, for example "/root".
+  string working_dir = 2;
+  string hostname = 3;
+  // The login shell, for example ["-bash"].
+  repeated string command = 4;
+  // The agent hangs up after this long without input or output.
+  uint32 idle_timeout_seconds = 5;
+}

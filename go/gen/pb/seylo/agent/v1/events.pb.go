@@ -23,6 +23,57 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CleanupTrigger int32
+
+const (
+	CleanupTrigger_CLEANUP_TRIGGER_UNSPECIFIED CleanupTrigger = 0
+	// The cron expression of CleanupSchedule.
+	CleanupTrigger_CLEANUP_TRIGGER_SCHEDULE CleanupTrigger = 1
+	// A disk passed CleanupSchedule.disk_percent.
+	CleanupTrigger_CLEANUP_TRIGGER_DISK CleanupTrigger = 2
+)
+
+// Enum value maps for CleanupTrigger.
+var (
+	CleanupTrigger_name = map[int32]string{
+		0: "CLEANUP_TRIGGER_UNSPECIFIED",
+		1: "CLEANUP_TRIGGER_SCHEDULE",
+		2: "CLEANUP_TRIGGER_DISK",
+	}
+	CleanupTrigger_value = map[string]int32{
+		"CLEANUP_TRIGGER_UNSPECIFIED": 0,
+		"CLEANUP_TRIGGER_SCHEDULE":    1,
+		"CLEANUP_TRIGGER_DISK":        2,
+	}
+)
+
+func (x CleanupTrigger) Enum() *CleanupTrigger {
+	p := new(CleanupTrigger)
+	*p = x
+	return p
+}
+
+func (x CleanupTrigger) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CleanupTrigger) Descriptor() protoreflect.EnumDescriptor {
+	return file_seylo_agent_v1_events_proto_enumTypes[0].Descriptor()
+}
+
+func (CleanupTrigger) Type() protoreflect.EnumType {
+	return &file_seylo_agent_v1_events_proto_enumTypes[0]
+}
+
+func (x CleanupTrigger) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CleanupTrigger.Descriptor instead.
+func (CleanupTrigger) EnumDescriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{0}
+}
+
 type CrashAction int32
 
 const (
@@ -62,11 +113,11 @@ func (x CrashAction) String() string {
 }
 
 func (CrashAction) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[0].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[1].Descriptor()
 }
 
 func (CrashAction) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[0]
+	return &file_seylo_agent_v1_events_proto_enumTypes[1]
 }
 
 func (x CrashAction) Number() protoreflect.EnumNumber {
@@ -75,7 +126,7 @@ func (x CrashAction) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CrashAction.Descriptor instead.
 func (CrashAction) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{0}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{1}
 }
 
 type DeployStage int32
@@ -132,11 +183,11 @@ func (x DeployStage) String() string {
 }
 
 func (DeployStage) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[1].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[2].Descriptor()
 }
 
 func (DeployStage) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[1]
+	return &file_seylo_agent_v1_events_proto_enumTypes[2]
 }
 
 func (x DeployStage) Number() protoreflect.EnumNumber {
@@ -145,7 +196,7 @@ func (x DeployStage) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DeployStage.Descriptor instead.
 func (DeployStage) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{1}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{2}
 }
 
 type BuildStage int32
@@ -196,11 +247,11 @@ func (x BuildStage) String() string {
 }
 
 func (BuildStage) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[2].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[3].Descriptor()
 }
 
 func (BuildStage) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[2]
+	return &file_seylo_agent_v1_events_proto_enumTypes[3]
 }
 
 func (x BuildStage) Number() protoreflect.EnumNumber {
@@ -209,7 +260,7 @@ func (x BuildStage) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BuildStage.Descriptor instead.
 func (BuildStage) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{2}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{3}
 }
 
 type CronRunResult int32
@@ -252,11 +303,11 @@ func (x CronRunResult) String() string {
 }
 
 func (CronRunResult) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[3].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[4].Descriptor()
 }
 
 func (CronRunResult) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[3]
+	return &file_seylo_agent_v1_events_proto_enumTypes[4]
 }
 
 func (x CronRunResult) Number() protoreflect.EnumNumber {
@@ -265,7 +316,7 @@ func (x CronRunResult) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CronRunResult.Descriptor instead.
 func (CronRunResult) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{3}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{4}
 }
 
 type NodeAlertKind int32
@@ -329,11 +380,11 @@ func (x NodeAlertKind) String() string {
 }
 
 func (NodeAlertKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[4].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[5].Descriptor()
 }
 
 func (NodeAlertKind) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[4]
+	return &file_seylo_agent_v1_events_proto_enumTypes[5]
 }
 
 func (x NodeAlertKind) Number() protoreflect.EnumNumber {
@@ -342,7 +393,7 @@ func (x NodeAlertKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NodeAlertKind.Descriptor instead.
 func (NodeAlertKind) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{5}
 }
 
 type UpdateTarget int32
@@ -381,11 +432,11 @@ func (x UpdateTarget) String() string {
 }
 
 func (UpdateTarget) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[5].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[6].Descriptor()
 }
 
 func (UpdateTarget) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[5]
+	return &file_seylo_agent_v1_events_proto_enumTypes[6]
 }
 
 func (x UpdateTarget) Number() protoreflect.EnumNumber {
@@ -394,7 +445,7 @@ func (x UpdateTarget) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UpdateTarget.Descriptor instead.
 func (UpdateTarget) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 type AlertSeverity int32
@@ -433,11 +484,11 @@ func (x AlertSeverity) String() string {
 }
 
 func (AlertSeverity) Descriptor() protoreflect.EnumDescriptor {
-	return file_seylo_agent_v1_events_proto_enumTypes[6].Descriptor()
+	return file_seylo_agent_v1_events_proto_enumTypes[7].Descriptor()
 }
 
 func (AlertSeverity) Type() protoreflect.EnumType {
-	return &file_seylo_agent_v1_events_proto_enumTypes[6]
+	return &file_seylo_agent_v1_events_proto_enumTypes[7]
 }
 
 func (x AlertSeverity) Number() protoreflect.EnumNumber {
@@ -446,7 +497,7 @@ func (x AlertSeverity) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AlertSeverity.Descriptor instead.
 func (AlertSeverity) EnumDescriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{7}
 }
 
 // Event is the payload of EVENT frames after the handshake. Delivery
@@ -474,6 +525,7 @@ type Event struct {
 	//	*Event_NodeFacts
 	//	*Event_UpdateResult
 	//	*Event_BackupProgress
+	//	*Event_CleanupRun
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -622,6 +674,15 @@ func (x *Event) GetBackupProgress() *BackupProgress {
 	return nil
 }
 
+func (x *Event) GetCleanupRun() *CleanupRun {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_CleanupRun); ok {
+			return x.CleanupRun
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -673,6 +734,11 @@ type Event_BackupProgress struct {
 	BackupProgress *BackupProgress `protobuf:"bytes,20,opt,name=backup_progress,json=backupProgress,proto3,oneof"`
 }
 
+type Event_CleanupRun struct {
+	// Durable: a cleanup the agent ran by itself (CleanupSchedule).
+	CleanupRun *CleanupRun `protobuf:"bytes,21,opt,name=cleanup_run,json=cleanupRun,proto3,oneof"` // added in 0.2 (nodeops)
+}
+
 func (*Event_StateDelta) isEvent_Payload() {}
 
 func (*Event_DeployProgress) isEvent_Payload() {}
@@ -695,6 +761,127 @@ func (*Event_UpdateResult) isEvent_Payload() {}
 
 func (*Event_BackupProgress) isEvent_Payload() {}
 
+func (*Event_CleanupRun) isEvent_Payload() {}
+
+// CleanupRun is one scheduled or disk-triggered cleanup, reported through
+// the outbox, so runs while the panel is down arrive later. added in 0.2
+// (nodeops)
+type CleanupRun struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Unique per run; the panel dedupes on it.
+	RunId          string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Trigger        CleanupTrigger         `protobuf:"varint,2,opt,name=trigger,proto3,enum=seylo.agent.v1.CleanupTrigger" json:"trigger,omitempty"`
+	StartedAt      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	FinishedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	ReclaimedBytes uint64                 `protobuf:"varint,5,opt,name=reclaimed_bytes,json=reclaimedBytes,proto3" json:"reclaimed_bytes,omitempty"`
+	// What was removed, one line each as in PruneResponse.removed (lines that
+	// start with "not removed:" are removals that failed). At most 200 lines;
+	// removed_count is the full count.
+	Removed      []string `protobuf:"bytes,6,rep,name=removed,proto3" json:"removed,omitempty"`
+	RemovedCount uint32   `protobuf:"varint,7,opt,name=removed_count,json=removedCount,proto3" json:"removed_count,omitempty"`
+	// Why the run failed (Docker unreachable, a bad schedule); empty when it
+	// ran. A failed run may have removed some things first.
+	Error string `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
+	// Use of the fullest disk when the run started, in percent; 0 when not
+	// read (schedule runs do not read it).
+	DiskPercent   uint32 `protobuf:"varint,9,opt,name=disk_percent,json=diskPercent,proto3" json:"disk_percent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CleanupRun) Reset() {
+	*x = CleanupRun{}
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CleanupRun) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CleanupRun) ProtoMessage() {}
+
+func (x *CleanupRun) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CleanupRun.ProtoReflect.Descriptor instead.
+func (*CleanupRun) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CleanupRun) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *CleanupRun) GetTrigger() CleanupTrigger {
+	if x != nil {
+		return x.Trigger
+	}
+	return CleanupTrigger_CLEANUP_TRIGGER_UNSPECIFIED
+}
+
+func (x *CleanupRun) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *CleanupRun) GetFinishedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishedAt
+	}
+	return nil
+}
+
+func (x *CleanupRun) GetReclaimedBytes() uint64 {
+	if x != nil {
+		return x.ReclaimedBytes
+	}
+	return 0
+}
+
+func (x *CleanupRun) GetRemoved() []string {
+	if x != nil {
+		return x.Removed
+	}
+	return nil
+}
+
+func (x *CleanupRun) GetRemovedCount() uint32 {
+	if x != nil {
+		return x.RemovedCount
+	}
+	return 0
+}
+
+func (x *CleanupRun) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *CleanupRun) GetDiskPercent() uint32 {
+	if x != nil {
+		return x.DiskPercent
+	}
+	return 0
+}
+
 // CrashReport is sent once per crash. The panel alerts once per streak.
 type CrashReport struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -716,7 +903,7 @@ type CrashReport struct {
 
 func (x *CrashReport) Reset() {
 	*x = CrashReport{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -728,7 +915,7 @@ func (x *CrashReport) String() string {
 func (*CrashReport) ProtoMessage() {}
 
 func (x *CrashReport) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -741,7 +928,7 @@ func (x *CrashReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CrashReport.ProtoReflect.Descriptor instead.
 func (*CrashReport) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{1}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CrashReport) GetServiceId() string {
@@ -826,7 +1013,7 @@ type DeployProgress struct {
 
 func (x *DeployProgress) Reset() {
 	*x = DeployProgress{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[2]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +1025,7 @@ func (x *DeployProgress) String() string {
 func (*DeployProgress) ProtoMessage() {}
 
 func (x *DeployProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[2]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +1038,7 @@ func (x *DeployProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployProgress.ProtoReflect.Descriptor instead.
 func (*DeployProgress) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{2}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DeployProgress) GetServiceId() string {
@@ -897,7 +1084,7 @@ type BuildProgress struct {
 
 func (x *BuildProgress) Reset() {
 	*x = BuildProgress{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -909,7 +1096,7 @@ func (x *BuildProgress) String() string {
 func (*BuildProgress) ProtoMessage() {}
 
 func (x *BuildProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -922,7 +1109,7 @@ func (x *BuildProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildProgress.ProtoReflect.Descriptor instead.
 func (*BuildProgress) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{3}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *BuildProgress) GetBuildId() string {
@@ -974,7 +1161,7 @@ type HealthChanged struct {
 
 func (x *HealthChanged) Reset() {
 	*x = HealthChanged{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +1173,7 @@ func (x *HealthChanged) String() string {
 func (*HealthChanged) ProtoMessage() {}
 
 func (x *HealthChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +1186,7 @@ func (x *HealthChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthChanged.ProtoReflect.Descriptor instead.
 func (*HealthChanged) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *HealthChanged) GetServiceId() string {
@@ -1057,7 +1244,7 @@ type CronRun struct {
 
 func (x *CronRun) Reset() {
 	*x = CronRun{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1069,7 +1256,7 @@ func (x *CronRun) String() string {
 func (*CronRun) ProtoMessage() {}
 
 func (x *CronRun) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1082,7 +1269,7 @@ func (x *CronRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CronRun.ProtoReflect.Descriptor instead.
 func (*CronRun) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CronRun) GetServiceId() string {
@@ -1167,7 +1354,7 @@ type BackupResult struct {
 
 func (x *BackupResult) Reset() {
 	*x = BackupResult{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1179,7 +1366,7 @@ func (x *BackupResult) String() string {
 func (*BackupResult) ProtoMessage() {}
 
 func (x *BackupResult) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1192,7 +1379,7 @@ func (x *BackupResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupResult.ProtoReflect.Descriptor instead.
 func (*BackupResult) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BackupResult) GetBackupId() string {
@@ -1272,7 +1459,7 @@ type NodeAlert struct {
 
 func (x *NodeAlert) Reset() {
 	*x = NodeAlert{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1284,7 +1471,7 @@ func (x *NodeAlert) String() string {
 func (*NodeAlert) ProtoMessage() {}
 
 func (x *NodeAlert) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1297,7 +1484,7 @@ func (x *NodeAlert) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeAlert.ProtoReflect.Descriptor instead.
 func (*NodeAlert) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{7}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NodeAlert) GetKind() NodeAlertKind {
@@ -1351,7 +1538,7 @@ type UpdateResult struct {
 
 func (x *UpdateResult) Reset() {
 	*x = UpdateResult{}
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[8]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1363,7 +1550,7 @@ func (x *UpdateResult) String() string {
 func (*UpdateResult) ProtoMessage() {}
 
 func (x *UpdateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_events_proto_msgTypes[8]
+	mi := &file_seylo_agent_v1_events_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1376,7 +1563,7 @@ func (x *UpdateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateResult.ProtoReflect.Descriptor instead.
 func (*UpdateResult) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{8}
+	return file_seylo_agent_v1_events_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateResult) GetTarget() UpdateTarget {
@@ -1446,7 +1633,7 @@ var File_seylo_agent_v1_events_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1bseylo/agent/v1/events.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bseylo/agent/v1/backup.proto\x1a\x1cseylo/agent/v1/metrics.proto\x1a\x19seylo/agent/v1/node.proto\x1a\x1aseylo/agent/v1/state.proto\"\x9a\x06\n" +
+	"\x1bseylo/agent/v1/events.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bseylo/agent/v1/backup.proto\x1a\x1cseylo/agent/v1/metrics.proto\x1a\x19seylo/agent/v1/node.proto\x1a\x1aseylo/agent/v1/state.proto\"\xd9\x06\n" +
 	"\x05Event\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12=\n" +
 	"\vstate_delta\x18\n" +
@@ -1463,8 +1650,23 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"node_facts\x18\x12 \x01(\v2\x19.seylo.agent.v1.NodeFactsH\x00R\tnodeFacts\x12C\n" +
 	"\rupdate_result\x18\x13 \x01(\v2\x1c.seylo.agent.v1.UpdateResultH\x00R\fupdateResult\x12I\n" +
-	"\x0fbackup_progress\x18\x14 \x01(\v2\x1e.seylo.agent.v1.BackupProgressH\x00R\x0ebackupProgressB\t\n" +
-	"\apayload\"\x8b\x03\n" +
+	"\x0fbackup_progress\x18\x14 \x01(\v2\x1e.seylo.agent.v1.BackupProgressH\x00R\x0ebackupProgress\x12=\n" +
+	"\vcleanup_run\x18\x15 \x01(\v2\x1a.seylo.agent.v1.CleanupRunH\x00R\n" +
+	"cleanupRunB\t\n" +
+	"\apayload\"\xf6\x02\n" +
+	"\n" +
+	"CleanupRun\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\x128\n" +
+	"\atrigger\x18\x02 \x01(\x0e2\x1e.seylo.agent.v1.CleanupTriggerR\atrigger\x129\n" +
+	"\n" +
+	"started_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
+	"\vfinished_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"finishedAt\x12'\n" +
+	"\x0freclaimed_bytes\x18\x05 \x01(\x04R\x0ereclaimedBytes\x12\x18\n" +
+	"\aremoved\x18\x06 \x03(\tR\aremoved\x12#\n" +
+	"\rremoved_count\x18\a \x01(\rR\fremovedCount\x12\x14\n" +
+	"\x05error\x18\b \x01(\tR\x05error\x12!\n" +
+	"\fdisk_percent\x18\t \x01(\rR\vdiskPercent\"\x8b\x03\n" +
 	"\vCrashReport\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x1e\n" +
@@ -1550,7 +1752,11 @@ const file_seylo_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
 	"\vfinished_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"finishedAt*\x81\x01\n" +
+	"finishedAt*i\n" +
+	"\x0eCleanupTrigger\x12\x1f\n" +
+	"\x1bCLEANUP_TRIGGER_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18CLEANUP_TRIGGER_SCHEDULE\x10\x01\x12\x18\n" +
+	"\x14CLEANUP_TRIGGER_DISK\x10\x02*\x81\x01\n" +
 	"\vCrashAction\x12\x1c\n" +
 	"\x18CRASH_ACTION_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17CRASH_ACTION_RESTARTING\x10\x01\x12\x1d\n" +
@@ -1617,69 +1823,75 @@ func file_seylo_agent_v1_events_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_events_proto_rawDescData
 }
 
-var file_seylo_agent_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_seylo_agent_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_seylo_agent_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_seylo_agent_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_seylo_agent_v1_events_proto_goTypes = []any{
-	(CrashAction)(0),              // 0: seylo.agent.v1.CrashAction
-	(DeployStage)(0),              // 1: seylo.agent.v1.DeployStage
-	(BuildStage)(0),               // 2: seylo.agent.v1.BuildStage
-	(CronRunResult)(0),            // 3: seylo.agent.v1.CronRunResult
-	(NodeAlertKind)(0),            // 4: seylo.agent.v1.NodeAlertKind
-	(UpdateTarget)(0),             // 5: seylo.agent.v1.UpdateTarget
-	(AlertSeverity)(0),            // 6: seylo.agent.v1.AlertSeverity
-	(*Event)(nil),                 // 7: seylo.agent.v1.Event
-	(*CrashReport)(nil),           // 8: seylo.agent.v1.CrashReport
-	(*DeployProgress)(nil),        // 9: seylo.agent.v1.DeployProgress
-	(*BuildProgress)(nil),         // 10: seylo.agent.v1.BuildProgress
-	(*HealthChanged)(nil),         // 11: seylo.agent.v1.HealthChanged
-	(*CronRun)(nil),               // 12: seylo.agent.v1.CronRun
-	(*BackupResult)(nil),          // 13: seylo.agent.v1.BackupResult
-	(*NodeAlert)(nil),             // 14: seylo.agent.v1.NodeAlert
-	(*UpdateResult)(nil),          // 15: seylo.agent.v1.UpdateResult
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(*StateDelta)(nil),            // 17: seylo.agent.v1.StateDelta
-	(*MetricsReport)(nil),         // 18: seylo.agent.v1.MetricsReport
-	(*NodeFacts)(nil),             // 19: seylo.agent.v1.NodeFacts
-	(*BackupProgress)(nil),        // 20: seylo.agent.v1.BackupProgress
-	(*durationpb.Duration)(nil),   // 21: google.protobuf.Duration
-	(HealthState)(0),              // 22: seylo.agent.v1.HealthState
+	(CleanupTrigger)(0),           // 0: seylo.agent.v1.CleanupTrigger
+	(CrashAction)(0),              // 1: seylo.agent.v1.CrashAction
+	(DeployStage)(0),              // 2: seylo.agent.v1.DeployStage
+	(BuildStage)(0),               // 3: seylo.agent.v1.BuildStage
+	(CronRunResult)(0),            // 4: seylo.agent.v1.CronRunResult
+	(NodeAlertKind)(0),            // 5: seylo.agent.v1.NodeAlertKind
+	(UpdateTarget)(0),             // 6: seylo.agent.v1.UpdateTarget
+	(AlertSeverity)(0),            // 7: seylo.agent.v1.AlertSeverity
+	(*Event)(nil),                 // 8: seylo.agent.v1.Event
+	(*CleanupRun)(nil),            // 9: seylo.agent.v1.CleanupRun
+	(*CrashReport)(nil),           // 10: seylo.agent.v1.CrashReport
+	(*DeployProgress)(nil),        // 11: seylo.agent.v1.DeployProgress
+	(*BuildProgress)(nil),         // 12: seylo.agent.v1.BuildProgress
+	(*HealthChanged)(nil),         // 13: seylo.agent.v1.HealthChanged
+	(*CronRun)(nil),               // 14: seylo.agent.v1.CronRun
+	(*BackupResult)(nil),          // 15: seylo.agent.v1.BackupResult
+	(*NodeAlert)(nil),             // 16: seylo.agent.v1.NodeAlert
+	(*UpdateResult)(nil),          // 17: seylo.agent.v1.UpdateResult
+	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(*StateDelta)(nil),            // 19: seylo.agent.v1.StateDelta
+	(*MetricsReport)(nil),         // 20: seylo.agent.v1.MetricsReport
+	(*NodeFacts)(nil),             // 21: seylo.agent.v1.NodeFacts
+	(*BackupProgress)(nil),        // 22: seylo.agent.v1.BackupProgress
+	(*durationpb.Duration)(nil),   // 23: google.protobuf.Duration
+	(HealthState)(0),              // 24: seylo.agent.v1.HealthState
 }
 var file_seylo_agent_v1_events_proto_depIdxs = []int32{
-	16, // 0: seylo.agent.v1.Event.time:type_name -> google.protobuf.Timestamp
-	17, // 1: seylo.agent.v1.Event.state_delta:type_name -> seylo.agent.v1.StateDelta
-	9,  // 2: seylo.agent.v1.Event.deploy_progress:type_name -> seylo.agent.v1.DeployProgress
-	10, // 3: seylo.agent.v1.Event.build_progress:type_name -> seylo.agent.v1.BuildProgress
-	11, // 4: seylo.agent.v1.Event.health_changed:type_name -> seylo.agent.v1.HealthChanged
-	12, // 5: seylo.agent.v1.Event.cron_run:type_name -> seylo.agent.v1.CronRun
-	13, // 6: seylo.agent.v1.Event.backup_result:type_name -> seylo.agent.v1.BackupResult
-	14, // 7: seylo.agent.v1.Event.node_alert:type_name -> seylo.agent.v1.NodeAlert
-	18, // 8: seylo.agent.v1.Event.metrics:type_name -> seylo.agent.v1.MetricsReport
-	19, // 9: seylo.agent.v1.Event.node_facts:type_name -> seylo.agent.v1.NodeFacts
-	15, // 10: seylo.agent.v1.Event.update_result:type_name -> seylo.agent.v1.UpdateResult
-	20, // 11: seylo.agent.v1.Event.backup_progress:type_name -> seylo.agent.v1.BackupProgress
-	0,  // 12: seylo.agent.v1.CrashReport.action:type_name -> seylo.agent.v1.CrashAction
-	16, // 13: seylo.agent.v1.CrashReport.started_at:type_name -> google.protobuf.Timestamp
-	16, // 14: seylo.agent.v1.CrashReport.exited_at:type_name -> google.protobuf.Timestamp
-	1,  // 15: seylo.agent.v1.DeployProgress.stage:type_name -> seylo.agent.v1.DeployStage
-	2,  // 16: seylo.agent.v1.BuildProgress.stage:type_name -> seylo.agent.v1.BuildStage
-	21, // 17: seylo.agent.v1.BuildProgress.duration:type_name -> google.protobuf.Duration
-	22, // 18: seylo.agent.v1.HealthChanged.previous:type_name -> seylo.agent.v1.HealthState
-	22, // 19: seylo.agent.v1.HealthChanged.current:type_name -> seylo.agent.v1.HealthState
-	16, // 20: seylo.agent.v1.CronRun.started_at:type_name -> google.protobuf.Timestamp
-	16, // 21: seylo.agent.v1.CronRun.finished_at:type_name -> google.protobuf.Timestamp
-	3,  // 22: seylo.agent.v1.CronRun.result:type_name -> seylo.agent.v1.CronRunResult
-	16, // 23: seylo.agent.v1.BackupResult.started_at:type_name -> google.protobuf.Timestamp
-	16, // 24: seylo.agent.v1.BackupResult.finished_at:type_name -> google.protobuf.Timestamp
-	4,  // 25: seylo.agent.v1.NodeAlert.kind:type_name -> seylo.agent.v1.NodeAlertKind
-	6,  // 26: seylo.agent.v1.NodeAlert.severity:type_name -> seylo.agent.v1.AlertSeverity
-	5,  // 27: seylo.agent.v1.UpdateResult.target:type_name -> seylo.agent.v1.UpdateTarget
-	16, // 28: seylo.agent.v1.UpdateResult.started_at:type_name -> google.protobuf.Timestamp
-	16, // 29: seylo.agent.v1.UpdateResult.finished_at:type_name -> google.protobuf.Timestamp
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	18, // 0: seylo.agent.v1.Event.time:type_name -> google.protobuf.Timestamp
+	19, // 1: seylo.agent.v1.Event.state_delta:type_name -> seylo.agent.v1.StateDelta
+	11, // 2: seylo.agent.v1.Event.deploy_progress:type_name -> seylo.agent.v1.DeployProgress
+	12, // 3: seylo.agent.v1.Event.build_progress:type_name -> seylo.agent.v1.BuildProgress
+	13, // 4: seylo.agent.v1.Event.health_changed:type_name -> seylo.agent.v1.HealthChanged
+	14, // 5: seylo.agent.v1.Event.cron_run:type_name -> seylo.agent.v1.CronRun
+	15, // 6: seylo.agent.v1.Event.backup_result:type_name -> seylo.agent.v1.BackupResult
+	16, // 7: seylo.agent.v1.Event.node_alert:type_name -> seylo.agent.v1.NodeAlert
+	20, // 8: seylo.agent.v1.Event.metrics:type_name -> seylo.agent.v1.MetricsReport
+	21, // 9: seylo.agent.v1.Event.node_facts:type_name -> seylo.agent.v1.NodeFacts
+	17, // 10: seylo.agent.v1.Event.update_result:type_name -> seylo.agent.v1.UpdateResult
+	22, // 11: seylo.agent.v1.Event.backup_progress:type_name -> seylo.agent.v1.BackupProgress
+	9,  // 12: seylo.agent.v1.Event.cleanup_run:type_name -> seylo.agent.v1.CleanupRun
+	0,  // 13: seylo.agent.v1.CleanupRun.trigger:type_name -> seylo.agent.v1.CleanupTrigger
+	18, // 14: seylo.agent.v1.CleanupRun.started_at:type_name -> google.protobuf.Timestamp
+	18, // 15: seylo.agent.v1.CleanupRun.finished_at:type_name -> google.protobuf.Timestamp
+	1,  // 16: seylo.agent.v1.CrashReport.action:type_name -> seylo.agent.v1.CrashAction
+	18, // 17: seylo.agent.v1.CrashReport.started_at:type_name -> google.protobuf.Timestamp
+	18, // 18: seylo.agent.v1.CrashReport.exited_at:type_name -> google.protobuf.Timestamp
+	2,  // 19: seylo.agent.v1.DeployProgress.stage:type_name -> seylo.agent.v1.DeployStage
+	3,  // 20: seylo.agent.v1.BuildProgress.stage:type_name -> seylo.agent.v1.BuildStage
+	23, // 21: seylo.agent.v1.BuildProgress.duration:type_name -> google.protobuf.Duration
+	24, // 22: seylo.agent.v1.HealthChanged.previous:type_name -> seylo.agent.v1.HealthState
+	24, // 23: seylo.agent.v1.HealthChanged.current:type_name -> seylo.agent.v1.HealthState
+	18, // 24: seylo.agent.v1.CronRun.started_at:type_name -> google.protobuf.Timestamp
+	18, // 25: seylo.agent.v1.CronRun.finished_at:type_name -> google.protobuf.Timestamp
+	4,  // 26: seylo.agent.v1.CronRun.result:type_name -> seylo.agent.v1.CronRunResult
+	18, // 27: seylo.agent.v1.BackupResult.started_at:type_name -> google.protobuf.Timestamp
+	18, // 28: seylo.agent.v1.BackupResult.finished_at:type_name -> google.protobuf.Timestamp
+	5,  // 29: seylo.agent.v1.NodeAlert.kind:type_name -> seylo.agent.v1.NodeAlertKind
+	7,  // 30: seylo.agent.v1.NodeAlert.severity:type_name -> seylo.agent.v1.AlertSeverity
+	6,  // 31: seylo.agent.v1.UpdateResult.target:type_name -> seylo.agent.v1.UpdateTarget
+	18, // 32: seylo.agent.v1.UpdateResult.started_at:type_name -> google.protobuf.Timestamp
+	18, // 33: seylo.agent.v1.UpdateResult.finished_at:type_name -> google.protobuf.Timestamp
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_events_proto_init() }
@@ -1703,14 +1915,15 @@ func file_seylo_agent_v1_events_proto_init() {
 		(*Event_NodeFacts)(nil),
 		(*Event_UpdateResult)(nil),
 		(*Event_BackupProgress)(nil),
+		(*Event_CleanupRun)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_events_proto_rawDesc), len(file_seylo_agent_v1_events_proto_rawDesc)),
-			NumEnums:      7,
-			NumMessages:   9,
+			NumEnums:      8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

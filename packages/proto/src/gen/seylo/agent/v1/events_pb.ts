@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/events.proto.
  */
 export const file_seylo_agent_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("ChtzZXlsby9hZ2VudC92MS9ldmVudHMucHJvdG8SDnNleWxvLmFnZW50LnYxIoYFCgVFdmVudBIoCgR0aW1lGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIxCgtzdGF0ZV9kZWx0YRgKIAEoCzIaLnNleWxvLmFnZW50LnYxLlN0YXRlRGVsdGFIABI5Cg9kZXBsb3lfcHJvZ3Jlc3MYCyABKAsyHi5zZXlsby5hZ2VudC52MS5EZXBsb3lQcm9ncmVzc0gAEjcKDmJ1aWxkX3Byb2dyZXNzGAwgASgLMh0uc2V5bG8uYWdlbnQudjEuQnVpbGRQcm9ncmVzc0gAEjcKDmhlYWx0aF9jaGFuZ2VkGA0gASgLMh0uc2V5bG8uYWdlbnQudjEuSGVhbHRoQ2hhbmdlZEgAEisKCGNyb25fcnVuGA4gASgLMhcuc2V5bG8uYWdlbnQudjEuQ3JvblJ1bkgAEjUKDWJhY2t1cF9yZXN1bHQYDyABKAsyHC5zZXlsby5hZ2VudC52MS5CYWNrdXBSZXN1bHRIABIvCgpub2RlX2FsZXJ0GBAgASgLMhkuc2V5bG8uYWdlbnQudjEuTm9kZUFsZXJ0SAASMAoHbWV0cmljcxgRIAEoCzIdLnNleWxvLmFnZW50LnYxLk1ldHJpY3NSZXBvcnRIABIvCgpub2RlX2ZhY3RzGBIgASgLMhkuc2V5bG8uYWdlbnQudjEuTm9kZUZhY3RzSAASNQoNdXBkYXRlX3Jlc3VsdBgTIAEoCzIcLnNleWxvLmFnZW50LnYxLlVwZGF0ZVJlc3VsdEgAEjkKD2JhY2t1cF9wcm9ncmVzcxgUIAEoCzIeLnNleWxvLmFnZW50LnYxLkJhY2t1cFByb2dyZXNzSABCCQoHcGF5bG9hZCKiAgoLQ3Jhc2hSZXBvcnQSEgoKc2VydmljZV9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEhQKDGNvbnRhaW5lcl9pZBgDIAEoCRIRCglleGl0X2NvZGUYBCABKAUSEgoKb29tX2tpbGxlZBgFIAEoCBIOCgZzdHJlYWsYBiABKA0SKwoGYWN0aW9uGAcgASgOMhsuc2V5bG8uYWdlbnQudjEuQ3Jhc2hBY3Rpb24SEgoKbGFzdF9saW5lcxgIIAMoCRIuCgpzdGFydGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCglleGl0ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wInUKDkRlcGxveVByb2dyZXNzEhIKCnNlcnZpY2VfaWQYASABKAkSEgoKZ2VuZXJhdGlvbhgCIAEoBBIqCgVzdGFnZRgDIAEoDjIbLnNleWxvLmFnZW50LnYxLkRlcGxveVN0YWdlEg8KB21lc3NhZ2UYBCABKAkioAEKDUJ1aWxkUHJvZ3Jlc3MSEAoIYnVpbGRfaWQYASABKAkSKQoFc3RhZ2UYAiABKA4yGi5zZXlsby5hZ2VudC52MS5CdWlsZFN0YWdlEg8KB21lc3NhZ2UYAyABKAkSFAoMaW1hZ2VfZGlnZXN0GAQgASgJEisKCGR1cmF0aW9uGAUgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIqwBCg1IZWFsdGhDaGFuZ2VkEhIKCnNlcnZpY2VfaWQYASABKAkSFAoMY29udGFpbmVyX2lkGAIgASgJEi0KCHByZXZpb3VzGAMgASgOMhsuc2V5bG8uYWdlbnQudjEuSGVhbHRoU3RhdGUSLAoHY3VycmVudBgEIAEoDjIbLnNleWxvLmFnZW50LnYxLkhlYWx0aFN0YXRlEhQKDHByb2JlX291dHB1dBgFIAEoCSKJAgoHQ3JvblJ1bhISCgpzZXJ2aWNlX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIuCgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLQoGcmVzdWx0GAUgASgOMh0uc2V5bG8uYWdlbnQudjEuQ3JvblJ1blJlc3VsdBIRCglleGl0X2NvZGUYBiABKAUSEgoKbGFzdF9saW5lcxgHIAMoCRITCgtjcm9uX2pvYl9pZBgIIAEoCRIOCgZtYW51YWwYCSABKAgi9gEKDEJhY2t1cFJlc3VsdBIRCgliYWNrdXBfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEg8KB3N1Y2Nlc3MYAyABKAgSDQoFZXJyb3IYBCABKAkSEgoKc2l6ZV9ieXRlcxgFIAEoBBISCgpvYmplY3Rfa2V5GAYgASgJEi4KCnN0YXJ0ZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIaChJwcnVuZWRfb2JqZWN0X2tleXMYCSADKAkijAEKCU5vZGVBbGVydBIrCgRraW5kGAEgASgOMh0uc2V5bG8uYWdlbnQudjEuTm9kZUFsZXJ0S2luZBIvCghzZXZlcml0eRgCIAEoDjIdLnNleWxvLmFnZW50LnYxLkFsZXJ0U2V2ZXJpdHkSDwoHbWVzc2FnZRgDIAEoCRIQCghyZXNvbHZlZBgEIAEoCCKPAgoMVXBkYXRlUmVzdWx0EiwKBnRhcmdldBgBIAEoDjIcLnNleWxvLmFnZW50LnYxLlVwZGF0ZVRhcmdldBIRCgl1cGRhdGVfaWQYAiABKAkSFAoMZnJvbV92ZXJzaW9uGAMgASgJEhIKCnRvX3ZlcnNpb24YBCABKAkSDwoHc3VjY2VzcxgFIAEoCBITCgtyb2xsZWRfYmFjaxgGIAEoCBINCgVlcnJvchgHIAEoCRIuCgpzdGFydGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAqgQEKC0NyYXNoQWN0aW9uEhwKGENSQVNIX0FDVElPTl9VTlNQRUNJRklFRBAAEhsKF0NSQVNIX0FDVElPTl9SRVNUQVJUSU5HEAESHQoZQ1JBU0hfQUNUSU9OX0xFRlRfU1RPUFBFRBACEhgKFENSQVNIX0FDVElPTl9HQVZFX1VQEAMqlAIKC0RlcGxveVN0YWdlEhwKGERFUExPWV9TVEFHRV9VTlNQRUNJRklFRBAAEhgKFERFUExPWV9TVEFHRV9QVUxMSU5HEAESGQoVREVQTE9ZX1NUQUdFX1NUQVJUSU5HEAISIAocREVQTE9ZX1NUQUdFX0hFQUxUSF9DSEVDS0lORxADEiAKHERFUExPWV9TVEFHRV9TV0lUQ0hJTkdfUk9VVEUQBBIaChZERVBMT1lfU1RBR0VfVkVSSUZZSU5HEAUSHQoZREVQTE9ZX1NUQUdFX1NUT1BQSU5HX09MRBAGEhoKFkRFUExPWV9TVEFHRV9TVUNDRUVERUQQBxIXChNERVBMT1lfU1RBR0VfRkFJTEVEEAgq4wEKCkJ1aWxkU3RhZ2USGwoXQlVJTERfU1RBR0VfVU5TUEVDSUZJRUQQABIWChJCVUlMRF9TVEFHRV9RVUVVRUQQARIfChtCVUlMRF9TVEFHRV9GRVRDSElOR19TT1VSQ0UQAhIYChRCVUlMRF9TVEFHRV9CVUlMRElORxADEhcKE0JVSUxEX1NUQUdFX1BVU0hJTkcQBBIZChVCVUlMRF9TVEFHRV9TVUNDRUVERUQQBRIWChJCVUlMRF9TVEFHRV9GQUlMRUQQBhIZChVCVUlMRF9TVEFHRV9DQU5DRUxMRUQQByqnAQoNQ3JvblJ1blJlc3VsdBIfChtDUk9OX1JVTl9SRVNVTFRfVU5TUEVDSUZJRUQQABIdChlDUk9OX1JVTl9SRVNVTFRfU1VDQ0VFREVEEAESGgoWQ1JPTl9SVU5fUkVTVUxUX0ZBSUxFRBACEh0KGUNST05fUlVOX1JFU1VMVF9USU1FRF9PVVQQAxIbChdDUk9OX1JVTl9SRVNVTFRfU0tJUFBFRBAEKu4CCg1Ob2RlQWxlcnRLaW5kEh8KG05PREVfQUxFUlRfS0lORF9VTlNQRUNJRklFRBAAEhwKGE5PREVfQUxFUlRfS0lORF9ESVNLX0xPVxABEh4KGk5PREVfQUxFUlRfS0lORF9NRU1PUllfTE9XEAISHwobTk9ERV9BTEVSVF9LSU5EX0RPQ0tFUl9ET1dOEAMSIAocTk9ERV9BTEVSVF9LSU5EX1RSQUVGSUtfRE9XThAEEh4KGk5PREVfQUxFUlRfS0lORF9DTE9DS19TS0VXEAUSKAokTk9ERV9BTEVSVF9LSU5EX0NFUlRJRklDQVRFX0VYUElSSU5HEAYSIQodTk9ERV9BTEVSVF9LSU5EX1VQREFURV9GQUlMRUQQBxInCiNOT0RFX0FMRVJUX0tJTkRfSEVBTFRIX0NIRUNLX0ZBSUxFRBAIEiUKIU5PREVfQUxFUlRfS0lORF9QQU5FTF9NT1ZFX0ZBSUxFRBAJKnkKDFVwZGF0ZVRhcmdldBIdChlVUERBVEVfVEFSR0VUX1VOU1BFQ0lGSUVEEAASFwoTVVBEQVRFX1RBUkdFVF9BR0VOVBABEhcKE1VQREFURV9UQVJHRVRfUEFORUwQAhIYChRVUERBVEVfVEFSR0VUX0RPQ0tFUhADKoEBCg1BbGVydFNldmVyaXR5Eh4KGkFMRVJUX1NFVkVSSVRZX1VOU1BFQ0lGSUVEEAASFwoTQUxFUlRfU0VWRVJJVFlfSU5GTxABEhoKFkFMRVJUX1NFVkVSSVRZX1dBUk5JTkcQAhIbChdBTEVSVF9TRVZFUklUWV9DUklUSUNBTBADQrYBChJjb20uc2V5bG8uYWdlbnQudjFCC0V2ZW50c1Byb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_seylo_agent_v1_backup, file_seylo_agent_v1_metrics, file_seylo_agent_v1_node, file_seylo_agent_v1_state]);
+  fileDesc("ChtzZXlsby9hZ2VudC92MS9ldmVudHMucHJvdG8SDnNleWxvLmFnZW50LnYxIrkFCgVFdmVudBIoCgR0aW1lGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIxCgtzdGF0ZV9kZWx0YRgKIAEoCzIaLnNleWxvLmFnZW50LnYxLlN0YXRlRGVsdGFIABI5Cg9kZXBsb3lfcHJvZ3Jlc3MYCyABKAsyHi5zZXlsby5hZ2VudC52MS5EZXBsb3lQcm9ncmVzc0gAEjcKDmJ1aWxkX3Byb2dyZXNzGAwgASgLMh0uc2V5bG8uYWdlbnQudjEuQnVpbGRQcm9ncmVzc0gAEjcKDmhlYWx0aF9jaGFuZ2VkGA0gASgLMh0uc2V5bG8uYWdlbnQudjEuSGVhbHRoQ2hhbmdlZEgAEisKCGNyb25fcnVuGA4gASgLMhcuc2V5bG8uYWdlbnQudjEuQ3JvblJ1bkgAEjUKDWJhY2t1cF9yZXN1bHQYDyABKAsyHC5zZXlsby5hZ2VudC52MS5CYWNrdXBSZXN1bHRIABIvCgpub2RlX2FsZXJ0GBAgASgLMhkuc2V5bG8uYWdlbnQudjEuTm9kZUFsZXJ0SAASMAoHbWV0cmljcxgRIAEoCzIdLnNleWxvLmFnZW50LnYxLk1ldHJpY3NSZXBvcnRIABIvCgpub2RlX2ZhY3RzGBIgASgLMhkuc2V5bG8uYWdlbnQudjEuTm9kZUZhY3RzSAASNQoNdXBkYXRlX3Jlc3VsdBgTIAEoCzIcLnNleWxvLmFnZW50LnYxLlVwZGF0ZVJlc3VsdEgAEjkKD2JhY2t1cF9wcm9ncmVzcxgUIAEoCzIeLnNleWxvLmFnZW50LnYxLkJhY2t1cFByb2dyZXNzSAASMQoLY2xlYW51cF9ydW4YFSABKAsyGi5zZXlsby5hZ2VudC52MS5DbGVhbnVwUnVuSABCCQoHcGF5bG9hZCKUAgoKQ2xlYW51cFJ1bhIOCgZydW5faWQYASABKAkSLwoHdHJpZ2dlchgCIAEoDjIeLnNleWxvLmFnZW50LnYxLkNsZWFudXBUcmlnZ2VyEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIXCg9yZWNsYWltZWRfYnl0ZXMYBSABKAQSDwoHcmVtb3ZlZBgGIAMoCRIVCg1yZW1vdmVkX2NvdW50GAcgASgNEg0KBWVycm9yGAggASgJEhQKDGRpc2tfcGVyY2VudBgJIAEoDSKiAgoLQ3Jhc2hSZXBvcnQSEgoKc2VydmljZV9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEhQKDGNvbnRhaW5lcl9pZBgDIAEoCRIRCglleGl0X2NvZGUYBCABKAUSEgoKb29tX2tpbGxlZBgFIAEoCBIOCgZzdHJlYWsYBiABKA0SKwoGYWN0aW9uGAcgASgOMhsuc2V5bG8uYWdlbnQudjEuQ3Jhc2hBY3Rpb24SEgoKbGFzdF9saW5lcxgIIAMoCRIuCgpzdGFydGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCglleGl0ZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wInUKDkRlcGxveVByb2dyZXNzEhIKCnNlcnZpY2VfaWQYASABKAkSEgoKZ2VuZXJhdGlvbhgCIAEoBBIqCgVzdGFnZRgDIAEoDjIbLnNleWxvLmFnZW50LnYxLkRlcGxveVN0YWdlEg8KB21lc3NhZ2UYBCABKAkioAEKDUJ1aWxkUHJvZ3Jlc3MSEAoIYnVpbGRfaWQYASABKAkSKQoFc3RhZ2UYAiABKA4yGi5zZXlsby5hZ2VudC52MS5CdWlsZFN0YWdlEg8KB21lc3NhZ2UYAyABKAkSFAoMaW1hZ2VfZGlnZXN0GAQgASgJEisKCGR1cmF0aW9uGAUgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIqwBCg1IZWFsdGhDaGFuZ2VkEhIKCnNlcnZpY2VfaWQYASABKAkSFAoMY29udGFpbmVyX2lkGAIgASgJEi0KCHByZXZpb3VzGAMgASgOMhsuc2V5bG8uYWdlbnQudjEuSGVhbHRoU3RhdGUSLAoHY3VycmVudBgEIAEoDjIbLnNleWxvLmFnZW50LnYxLkhlYWx0aFN0YXRlEhQKDHByb2JlX291dHB1dBgFIAEoCSKJAgoHQ3JvblJ1bhISCgpzZXJ2aWNlX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIuCgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLQoGcmVzdWx0GAUgASgOMh0uc2V5bG8uYWdlbnQudjEuQ3JvblJ1blJlc3VsdBIRCglleGl0X2NvZGUYBiABKAUSEgoKbGFzdF9saW5lcxgHIAMoCRITCgtjcm9uX2pvYl9pZBgIIAEoCRIOCgZtYW51YWwYCSABKAgi9gEKDEJhY2t1cFJlc3VsdBIRCgliYWNrdXBfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEg8KB3N1Y2Nlc3MYAyABKAgSDQoFZXJyb3IYBCABKAkSEgoKc2l6ZV9ieXRlcxgFIAEoBBISCgpvYmplY3Rfa2V5GAYgASgJEi4KCnN0YXJ0ZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIaChJwcnVuZWRfb2JqZWN0X2tleXMYCSADKAkijAEKCU5vZGVBbGVydBIrCgRraW5kGAEgASgOMh0uc2V5bG8uYWdlbnQudjEuTm9kZUFsZXJ0S2luZBIvCghzZXZlcml0eRgCIAEoDjIdLnNleWxvLmFnZW50LnYxLkFsZXJ0U2V2ZXJpdHkSDwoHbWVzc2FnZRgDIAEoCRIQCghyZXNvbHZlZBgEIAEoCCKPAgoMVXBkYXRlUmVzdWx0EiwKBnRhcmdldBgBIAEoDjIcLnNleWxvLmFnZW50LnYxLlVwZGF0ZVRhcmdldBIRCgl1cGRhdGVfaWQYAiABKAkSFAoMZnJvbV92ZXJzaW9uGAMgASgJEhIKCnRvX3ZlcnNpb24YBCABKAkSDwoHc3VjY2VzcxgFIAEoCBITCgtyb2xsZWRfYmFjaxgGIAEoCBINCgVlcnJvchgHIAEoCRIuCgpzdGFydGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCgtmaW5pc2hlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAqaQoOQ2xlYW51cFRyaWdnZXISHwobQ0xFQU5VUF9UUklHR0VSX1VOU1BFQ0lGSUVEEAASHAoYQ0xFQU5VUF9UUklHR0VSX1NDSEVEVUxFEAESGAoUQ0xFQU5VUF9UUklHR0VSX0RJU0sQAiqBAQoLQ3Jhc2hBY3Rpb24SHAoYQ1JBU0hfQUNUSU9OX1VOU1BFQ0lGSUVEEAASGwoXQ1JBU0hfQUNUSU9OX1JFU1RBUlRJTkcQARIdChlDUkFTSF9BQ1RJT05fTEVGVF9TVE9QUEVEEAISGAoUQ1JBU0hfQUNUSU9OX0dBVkVfVVAQAyqUAgoLRGVwbG95U3RhZ2USHAoYREVQTE9ZX1NUQUdFX1VOU1BFQ0lGSUVEEAASGAoUREVQTE9ZX1NUQUdFX1BVTExJTkcQARIZChVERVBMT1lfU1RBR0VfU1RBUlRJTkcQAhIgChxERVBMT1lfU1RBR0VfSEVBTFRIX0NIRUNLSU5HEAMSIAocREVQTE9ZX1NUQUdFX1NXSVRDSElOR19ST1VURRAEEhoKFkRFUExPWV9TVEFHRV9WRVJJRllJTkcQBRIdChlERVBMT1lfU1RBR0VfU1RPUFBJTkdfT0xEEAYSGgoWREVQTE9ZX1NUQUdFX1NVQ0NFRURFRBAHEhcKE0RFUExPWV9TVEFHRV9GQUlMRUQQCCrjAQoKQnVpbGRTdGFnZRIbChdCVUlMRF9TVEFHRV9VTlNQRUNJRklFRBAAEhYKEkJVSUxEX1NUQUdFX1FVRVVFRBABEh8KG0JVSUxEX1NUQUdFX0ZFVENISU5HX1NPVVJDRRACEhgKFEJVSUxEX1NUQUdFX0JVSUxESU5HEAMSFwoTQlVJTERfU1RBR0VfUFVTSElORxAEEhkKFUJVSUxEX1NUQUdFX1NVQ0NFRURFRBAFEhYKEkJVSUxEX1NUQUdFX0ZBSUxFRBAGEhkKFUJVSUxEX1NUQUdFX0NBTkNFTExFRBAHKqcBCg1Dcm9uUnVuUmVzdWx0Eh8KG0NST05fUlVOX1JFU1VMVF9VTlNQRUNJRklFRBAAEh0KGUNST05fUlVOX1JFU1VMVF9TVUNDRUVERUQQARIaChZDUk9OX1JVTl9SRVNVTFRfRkFJTEVEEAISHQoZQ1JPTl9SVU5fUkVTVUxUX1RJTUVEX09VVBADEhsKF0NST05fUlVOX1JFU1VMVF9TS0lQUEVEEAQq7gIKDU5vZGVBbGVydEtpbmQSHwobTk9ERV9BTEVSVF9LSU5EX1VOU1BFQ0lGSUVEEAASHAoYTk9ERV9BTEVSVF9LSU5EX0RJU0tfTE9XEAESHgoaTk9ERV9BTEVSVF9LSU5EX01FTU9SWV9MT1cQAhIfChtOT0RFX0FMRVJUX0tJTkRfRE9DS0VSX0RPV04QAxIgChxOT0RFX0FMRVJUX0tJTkRfVFJBRUZJS19ET1dOEAQSHgoaTk9ERV9BTEVSVF9LSU5EX0NMT0NLX1NLRVcQBRIoCiROT0RFX0FMRVJUX0tJTkRfQ0VSVElGSUNBVEVfRVhQSVJJTkcQBhIhCh1OT0RFX0FMRVJUX0tJTkRfVVBEQVRFX0ZBSUxFRBAHEicKI05PREVfQUxFUlRfS0lORF9IRUFMVEhfQ0hFQ0tfRkFJTEVEEAgSJQohTk9ERV9BTEVSVF9LSU5EX1BBTkVMX01PVkVfRkFJTEVEEAkqeQoMVXBkYXRlVGFyZ2V0Eh0KGVVQREFURV9UQVJHRVRfVU5TUEVDSUZJRUQQABIXChNVUERBVEVfVEFSR0VUX0FHRU5UEAESFwoTVVBEQVRFX1RBUkdFVF9QQU5FTBACEhgKFFVQREFURV9UQVJHRVRfRE9DS0VSEAMqgQEKDUFsZXJ0U2V2ZXJpdHkSHgoaQUxFUlRfU0VWRVJJVFlfVU5TUEVDSUZJRUQQABIXChNBTEVSVF9TRVZFUklUWV9JTkZPEAESGgoWQUxFUlRfU0VWRVJJVFlfV0FSTklORxACEhsKF0FMRVJUX1NFVkVSSVRZX0NSSVRJQ0FMEANCtgEKEmNvbS5zZXlsby5hZ2VudC52MUILRXZlbnRzUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_seylo_agent_v1_backup, file_seylo_agent_v1_metrics, file_seylo_agent_v1_node, file_seylo_agent_v1_state]);
 
 /**
  * Event is the payload of EVENT frames after the handshake. Delivery
@@ -115,6 +115,16 @@ export type Event = Message<"seylo.agent.v1.Event"> & {
      */
     value: BackupProgress;
     case: "backupProgress";
+  } | {
+    /**
+     * Durable: a cleanup the agent ran by itself (CleanupSchedule).
+     *
+     * added in 0.2 (nodeops)
+     *
+     * @generated from field: seylo.agent.v1.CleanupRun cleanup_run = 21;
+     */
+    value: CleanupRun;
+    case: "cleanupRun";
   } | { case: undefined; value?: undefined };
 };
 
@@ -124,6 +134,79 @@ export type Event = Message<"seylo.agent.v1.Event"> & {
  */
 export const EventSchema: GenMessage<Event> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_events, 0);
+
+/**
+ * CleanupRun is one scheduled or disk-triggered cleanup, reported through
+ * the outbox, so runs while the panel is down arrive later. added in 0.2
+ * (nodeops)
+ *
+ * @generated from message seylo.agent.v1.CleanupRun
+ */
+export type CleanupRun = Message<"seylo.agent.v1.CleanupRun"> & {
+  /**
+   * Unique per run; the panel dedupes on it.
+   *
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: seylo.agent.v1.CleanupTrigger trigger = 2;
+   */
+  trigger: CleanupTrigger;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp started_at = 3;
+   */
+  startedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp finished_at = 4;
+   */
+  finishedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: uint64 reclaimed_bytes = 5;
+   */
+  reclaimedBytes: bigint;
+
+  /**
+   * What was removed, one line each as in PruneResponse.removed (lines that
+   * start with "not removed:" are removals that failed). At most 200 lines;
+   * removed_count is the full count.
+   *
+   * @generated from field: repeated string removed = 6;
+   */
+  removed: string[];
+
+  /**
+   * @generated from field: uint32 removed_count = 7;
+   */
+  removedCount: number;
+
+  /**
+   * Why the run failed (Docker unreachable, a bad schedule); empty when it
+   * ran. A failed run may have removed some things first.
+   *
+   * @generated from field: string error = 8;
+   */
+  error: string;
+
+  /**
+   * Use of the fullest disk when the run started, in percent; 0 when not
+   * read (schedule runs do not read it).
+   *
+   * @generated from field: uint32 disk_percent = 9;
+   */
+  diskPercent: number;
+};
+
+/**
+ * Describes the message seylo.agent.v1.CleanupRun.
+ * Use `create(CleanupRunSchema)` to create a new message.
+ */
+export const CleanupRunSchema: GenMessage<CleanupRun> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_events, 1);
 
 /**
  * CrashReport is sent once per crash. The panel alerts once per streak.
@@ -191,7 +274,7 @@ export type CrashReport = Message<"seylo.agent.v1.CrashReport"> & {
  * Use `create(CrashReportSchema)` to create a new message.
  */
 export const CrashReportSchema: GenMessage<CrashReport> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 1);
+  messageDesc(file_seylo_agent_v1_events, 2);
 
 /**
  * @generated from message seylo.agent.v1.DeployProgress
@@ -223,7 +306,7 @@ export type DeployProgress = Message<"seylo.agent.v1.DeployProgress"> & {
  * Use `create(DeployProgressSchema)` to create a new message.
  */
 export const DeployProgressSchema: GenMessage<DeployProgress> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 2);
+  messageDesc(file_seylo_agent_v1_events, 3);
 
 /**
  * @generated from message seylo.agent.v1.BuildProgress
@@ -264,7 +347,7 @@ export type BuildProgress = Message<"seylo.agent.v1.BuildProgress"> & {
  * Use `create(BuildProgressSchema)` to create a new message.
  */
 export const BuildProgressSchema: GenMessage<BuildProgress> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 3);
+  messageDesc(file_seylo_agent_v1_events, 4);
 
 /**
  * @generated from message seylo.agent.v1.HealthChanged
@@ -303,7 +386,7 @@ export type HealthChanged = Message<"seylo.agent.v1.HealthChanged"> & {
  * Use `create(HealthChangedSchema)` to create a new message.
  */
 export const HealthChangedSchema: GenMessage<HealthChanged> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 4);
+  messageDesc(file_seylo_agent_v1_events, 5);
 
 /**
  * @generated from message seylo.agent.v1.CronRun
@@ -366,7 +449,7 @@ export type CronRun = Message<"seylo.agent.v1.CronRun"> & {
  * Use `create(CronRunSchema)` to create a new message.
  */
 export const CronRunSchema: GenMessage<CronRun> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 5);
+  messageDesc(file_seylo_agent_v1_events, 6);
 
 /**
  * @generated from message seylo.agent.v1.BackupResult
@@ -427,7 +510,7 @@ export type BackupResult = Message<"seylo.agent.v1.BackupResult"> & {
  * Use `create(BackupResultSchema)` to create a new message.
  */
 export const BackupResultSchema: GenMessage<BackupResult> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 6);
+  messageDesc(file_seylo_agent_v1_events, 7);
 
 /**
  * @generated from message seylo.agent.v1.NodeAlert
@@ -462,7 +545,7 @@ export type NodeAlert = Message<"seylo.agent.v1.NodeAlert"> & {
  * Use `create(NodeAlertSchema)` to create a new message.
  */
 export const NodeAlertSchema: GenMessage<NodeAlert> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 7);
+  messageDesc(file_seylo_agent_v1_events, 8);
 
 /**
  * UpdateResult is the durable outcome of UpdateAgent, UpdatePanel or
@@ -528,7 +611,37 @@ export type UpdateResult = Message<"seylo.agent.v1.UpdateResult"> & {
  * Use `create(UpdateResultSchema)` to create a new message.
  */
 export const UpdateResultSchema: GenMessage<UpdateResult> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_events, 8);
+  messageDesc(file_seylo_agent_v1_events, 9);
+
+/**
+ * @generated from enum seylo.agent.v1.CleanupTrigger
+ */
+export enum CleanupTrigger {
+  /**
+   * @generated from enum value: CLEANUP_TRIGGER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The cron expression of CleanupSchedule.
+   *
+   * @generated from enum value: CLEANUP_TRIGGER_SCHEDULE = 1;
+   */
+  SCHEDULE = 1,
+
+  /**
+   * A disk passed CleanupSchedule.disk_percent.
+   *
+   * @generated from enum value: CLEANUP_TRIGGER_DISK = 2;
+   */
+  DISK = 2,
+}
+
+/**
+ * Describes the enum seylo.agent.v1.CleanupTrigger.
+ */
+export const CleanupTriggerSchema: GenEnum<CleanupTrigger> = /*@__PURE__*/
+  enumDesc(file_seylo_agent_v1_events, 0);
 
 /**
  * @generated from enum seylo.agent.v1.CrashAction
@@ -565,7 +678,7 @@ export enum CrashAction {
  * Describes the enum seylo.agent.v1.CrashAction.
  */
 export const CrashActionSchema: GenEnum<CrashAction> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 0);
+  enumDesc(file_seylo_agent_v1_events, 1);
 
 /**
  * @generated from enum seylo.agent.v1.DeployStage
@@ -627,7 +740,7 @@ export enum DeployStage {
  * Describes the enum seylo.agent.v1.DeployStage.
  */
 export const DeployStageSchema: GenEnum<DeployStage> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 1);
+  enumDesc(file_seylo_agent_v1_events, 2);
 
 /**
  * @generated from enum seylo.agent.v1.BuildStage
@@ -678,7 +791,7 @@ export enum BuildStage {
  * Describes the enum seylo.agent.v1.BuildStage.
  */
 export const BuildStageSchema: GenEnum<BuildStage> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 2);
+  enumDesc(file_seylo_agent_v1_events, 3);
 
 /**
  * @generated from enum seylo.agent.v1.CronRunResult
@@ -716,7 +829,7 @@ export enum CronRunResult {
  * Describes the enum seylo.agent.v1.CronRunResult.
  */
 export const CronRunResultSchema: GenEnum<CronRunResult> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 3);
+  enumDesc(file_seylo_agent_v1_events, 4);
 
 /**
  * @generated from enum seylo.agent.v1.NodeAlertKind
@@ -787,7 +900,7 @@ export enum NodeAlertKind {
  * Describes the enum seylo.agent.v1.NodeAlertKind.
  */
 export const NodeAlertKindSchema: GenEnum<NodeAlertKind> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 4);
+  enumDesc(file_seylo_agent_v1_events, 5);
 
 /**
  * @generated from enum seylo.agent.v1.UpdateTarget
@@ -818,7 +931,7 @@ export enum UpdateTarget {
  * Describes the enum seylo.agent.v1.UpdateTarget.
  */
 export const UpdateTargetSchema: GenEnum<UpdateTarget> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 5);
+  enumDesc(file_seylo_agent_v1_events, 6);
 
 /**
  * @generated from enum seylo.agent.v1.AlertSeverity
@@ -849,5 +962,5 @@ export enum AlertSeverity {
  * Describes the enum seylo.agent.v1.AlertSeverity.
  */
 export const AlertSeveritySchema: GenEnum<AlertSeverity> = /*@__PURE__*/
-  enumDesc(file_seylo_agent_v1_events, 6);
+  enumDesc(file_seylo_agent_v1_events, 7);
 

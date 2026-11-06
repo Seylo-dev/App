@@ -181,4 +181,11 @@ service AgentService {
     option (capability) = "volume.transfer.v1";
     option (stream_mode) = STREAM_MODE_RAW_UPLOAD;
   }
+
+  // A root login shell on the node itself (not in a container) with a PTY.
+  // Refused unless NodeSettings.host_shell is on and config.yml does not
+  // set no_host_shell; at most two at a time. added in 0.2 (nodeops)
+  rpc HostShell(stream HostShellRequest) returns (stream HostShellResponse) {
+    option (capability) = "node.host-shell.v1";
+  }
 }
