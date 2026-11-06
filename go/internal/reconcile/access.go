@@ -207,6 +207,21 @@ func (r *Runtime) syncNetworks(ctx context.Context) {
 		// resync.
 		return
 	}
+	// A network our containers still use stays, with the proxy on it: a
+	// service whose move to another project failed keeps serving from the
+	// old project's network until the panel moves it back.
+	inUse, err := r.o.Docker.ListContainers(ctx, r.scoped(nil))
+	if err != nil {
+		r.log.Warn("listing containers", "err", err)
+		return
+	}
+	for _, c := range inUse {
+		if docker.IsServiceInstance(c.Labels) {
+			if p := r.projectOf(c.ID, c.Labels); p != "" {
+				want[docker.ProjectNetwork(p)] = true
+			}
+		}
+	}
 	nets, err := r.o.Docker.ListNetworks(ctx, r.scoped(nil))
 	if err != nil {
 		r.log.Warn("listing networks", "err", err)
@@ -321,7 +336,7 @@ func (w *worker) buildStatus(ctx context.Context, spec *agentv1.ServiceSpec) *ag
 			inst.Health = wt.State()
 		}
 		st.Instances = append(st.Instances, inst)
-		if instanceHash(c.Labels, spec, hash) == hash {
+		if w.hashOf(c.ID, c.Labels, spec, hash) == hash {
 			if d.Running {
 				servingHash = true
 				running++
@@ -397,18 +412,24 @@ func (r *Runtime) Resolve(ctx context.Context, serviceID string, containerPort u
 		return "", err
 	}
 	hash := SpecHash(spec)
-	network := docker.ProjectNetwork(spec.GetProjectId())
 	var addrs, fallback []string
 	for _, c := range list {
 		if !docker.IsServiceInstance(c.Labels) || c.State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
 			continue
 		}
+		// Each container on its own project's network: during a move to
+		// another project the old copies are still on the old one.
+		network := docker.ProjectNetwork(r.projectOf(c.ID, c.Labels))
 		d, err := r.o.Docker.InspectContainer(ctx, c.ID)
 		if err != nil || !d.Running || d.Networks[network] == "" {
 			continue
 		}
 		a := net.JoinHostPort(d.Networks[network], strconv.Itoa(int(containerPort)))
-		if instanceHash(c.Labels, spec, hash) == hash {
+		served := instanceHash(c.Labels, spec, hash)
+		if v, ok := r.reattached.Load(c.ID); ok {
+			served = v.(reattachment).Hash
+		}
+		if served == hash {
 			addrs = append(addrs, a)
 		} else {
 			// An older generation while a deploy is in flight or failed.

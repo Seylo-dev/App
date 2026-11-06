@@ -261,20 +261,21 @@ func (h *harness) start() {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	rt, err := New(Options{
-		Docker:      h.eng,
-		Prober:      h.prober,
-		Crash:       crash.NewTracker(nil),
-		Layout:      h.layout,
-		Logger:      logger,
-		Desired:     h.desired,
-		Feed:        state.NewDesiredFeed(),
-		State:       h.state,
-		Reports:     h.rec,
-		Events:      h.rec,
-		Router:      h.router,
-		ResyncEvery: time.Hour,
-		LogWait:     time.Millisecond,
-		Logs:        h.logs,
+		Docker:        h.eng,
+		Prober:        h.prober,
+		Crash:         crash.NewTracker(nil),
+		Layout:        h.layout,
+		Logger:        logger,
+		Desired:       h.desired,
+		Feed:          state.NewDesiredFeed(),
+		State:         h.state,
+		Reports:       h.rec,
+		Events:        h.rec,
+		Router:        h.router,
+		ResyncEvery:   time.Hour,
+		LogWait:       time.Millisecond,
+		ReattachDrain: time.Millisecond,
+		Logs:          h.logs,
 	})
 	if err != nil {
 		h.t.Fatal(err)

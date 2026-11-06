@@ -33,6 +33,17 @@ type record struct {
 	// restart. A new generation or a manual restart clears them.
 	CrashStreak uint32    `json:"crash_streak,omitempty"`
 	LastCrash   time.Time `json:"last_crash,omitzero"`
+	// Reattached are containers that moved to another project's network
+	// without a restart (the service moved to another project), by
+	// container id. Their labels still name the old project and spec
+	// hash; this says which network they are on and which spec they run.
+	Reattached map[string]reattachment `json:"reattached,omitempty"`
+}
+
+// reattachment is where a re-attached container lives now.
+type reattachment struct {
+	Project string `json:"project"`
+	Hash    string `json:"hash"`
 }
 
 func recordPath(layout datadir.Layout, id string) (string, error) {

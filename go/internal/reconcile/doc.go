@@ -28,6 +28,16 @@
 // so projects cannot reach each other. Volumes are bind-backed named
 // volumes under services/<owner>/volumes/<name>.
 //
+// Moving to another project (reattach.go): a spec whose only change is
+// project_id moves the running containers instead of rolling new ones:
+// they join the new seylo-p-<project> with the same aliases, are health
+// checked on the new address, the route switches to it and is verified,
+// and after a short drain (Options.ReattachDrain) they leave the old
+// network. runtime.json records the container's new project and spec
+// hash, since its labels keep the old ones. A failed health check leaves
+// them on the old network and reports the generation FAILED. Networks our
+// containers still use are never removed or left by the proxy.
+//
 // Interfaces used by other packages:
 //
 //   - Engine (Runtime): SyncDesired, ApplyService, RemoveService and
