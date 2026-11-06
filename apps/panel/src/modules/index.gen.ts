@@ -15,6 +15,7 @@ import compose from "./compose";
 import cron from "./cron";
 import databases from "./databases";
 import deployments from "./deployments";
+import dockerHub from "./dockerHub";
 import domains from "./domains";
 import env from "./env";
 import exposures from "./exposures";
@@ -46,4 +47,4 @@ import users from "./users";
 import webhooks from "./webhooks";
 
 /** Every panel feature module; each one's default export is a defineModule() result. */
-export const modules = [ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, domains, env, exposures, files, git, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;
+export const modules = [ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;

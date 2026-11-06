@@ -98,7 +98,7 @@ function wildcardOf(ctx: Pick<OpContext, "db">, nodeId: string): string | null {
 }
 
 /** The automatic subdomain for a service: its name, or name-xxxx when another service has that host. */
-function autoSubdomain(ctx: Pick<OpContext, "db">, name: string, wildcard: string): string {
+export function autoSubdomain(ctx: Pick<OpContext, "db">, name: string, wildcard: string): string {
   const free = (sub: string) =>
     !ctx.db
       .select({ id: domains.id })

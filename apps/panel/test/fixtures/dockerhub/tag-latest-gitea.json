@@ -1,0 +1,55 @@
+{
+  "id": 239195552,
+  "images": [
+    {
+      "architecture": "amd64",
+      "features": "",
+      "variant": null,
+      "digest": "sha256:411af83e9be78029c0047a5f5a72f1d91b7c793ba5e5813b4e70a6bb8e4a0738",
+      "os": "linux",
+      "os_features": "",
+      "os_version": null,
+      "size": 72112517,
+      "status": "active",
+      "last_pulled": "2026-11-06T18:58:21.160819249Z",
+      "last_pushed": "2026-11-01T09:26:15.333369568Z"
+    },
+    {
+      "architecture": "arm64",
+      "features": "",
+      "variant": null,
+      "digest": "sha256:0543eb2049bacecb24645d023c5b3cddbd77bc47d35b2761d0b4c63cc4667292",
+      "os": "linux",
+      "os_features": "",
+      "os_version": null,
+      "size": 69331699,
+      "status": "active",
+      "last_pulled": "2026-11-06T18:58:20.865351938Z",
+      "last_pushed": "2026-11-01T09:26:14.922977386Z"
+    },
+    {
+      "architecture": "riscv64",
+      "features": "",
+      "variant": null,
+      "digest": "sha256:46584b9d50dfacac054a0dd456bc54eee2a965270076d36d4eee1eae36119e7f",
+      "os": "linux",
+      "os_features": "",
+      "os_version": null,
+      "size": 70264518,
+      "status": "active",
+      "last_pulled": "2026-11-06T19:00:07.311812436Z",
+      "last_pushed": "2026-11-01T09:26:14.500864694Z"
+    }
+  ],
+  "last_updated": "2026-11-01T09:26:22.585356Z",
+  "name": "latest",
+  "repository": 1078719,
+  "full_size": 72112517,
+  "v2": true,
+  "tag_status": "active",
+  "tag_last_pulled": "2026-11-06T19:00:07.311812436Z",
+  "tag_last_pushed": "2026-11-01T09:26:22.585356Z",
+  "media_type": "application/vnd.oci.image.index.v1+json",
+  "content_type": "image",
+  "digest": "sha256:8967bf9deaf3c5c4adae13519436dc1b20c646ac83fe37ae810c933a1045227d"
+}

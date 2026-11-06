@@ -24,9 +24,9 @@ import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { ComposePreview } from "../../lib/types";
 import { NodePicker, ProjectPicker } from "../pickers";
-import { KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
+import { type CatalogKind, KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
 
-type FormKind = Exclude<NewServiceKind, "template">;
+type FormKind = Exclude<NewServiceKind, CatalogKind>;
 type AppSource = "image" | "git" | "none";
 type Engine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis";
 

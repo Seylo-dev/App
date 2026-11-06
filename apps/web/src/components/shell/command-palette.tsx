@@ -6,7 +6,7 @@ import { nodes } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { StatusDot } from "@seylo/ui/components/chip";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@seylo/ui/components/command";
-import { IconFolder, IconFolderPlus, IconLayoutGrid, IconPlus, IconServer2, IconServerBolt } from "@tabler/icons-react";
+import { IconBrandDocker, IconFolder, IconFolderPlus, IconLayoutGrid, IconPlus, IconServer2, IconServerBolt } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
 import { kindTag, statusDisplay } from "../../lib/service-display";
@@ -50,6 +50,10 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           <CommandItem value={`action ${t("palette.fromTemplate")}`} onSelect={() => run(() => startNewService("template"))}>
             <IconLayoutGrid size={16} aria-hidden="true" />
             {t("palette.fromTemplate")}
+          </CommandItem>
+          <CommandItem value={`action ${t("palette.fromDockerHub")}`} onSelect={() => run(() => startNewService("dockerHub"))}>
+            <IconBrandDocker size={16} aria-hidden="true" />
+            {t("palette.fromDockerHub")}
           </CommandItem>
           <CommandItem
             value={`action ${t("palette.addNode")}`}

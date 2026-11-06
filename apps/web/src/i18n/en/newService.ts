@@ -10,6 +10,8 @@ export default {
   composeHint: "Paste a compose file or point at a repo",
   template: "From a template",
   templateHint: "n8n, Plausible, Uptime Kuma and more",
+  dockerHub: "From Docker Hub",
+  dockerHubHint: "Any image, with its ports, volumes and settings filled in",
   box: "Box",
   boxHint: "VS Code in the browser with your repo",
   cron: "Cron job",

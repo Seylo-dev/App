@@ -4,11 +4,11 @@
 
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { NewProjectDialog } from "../new-project-dialog";
-import type { NewServiceKind } from "../new-service/kinds";
+import type { CatalogKind, NewServiceKind } from "../new-service/kinds";
 import { NewServiceDialog } from "../new-service/new-service-dialog";
 import { CommandPalette } from "./command-palette";
 
-type FormKind = Exclude<NewServiceKind, "template">;
+type FormKind = Exclude<NewServiceKind, CatalogKind>;
 
 interface ShellActions {
   openPalette(): void;

@@ -12,5 +12,6 @@ export default {
   newApp: "New app",
   newDatabase: "New database",
   fromTemplate: "New service from a template",
+  fromDockerHub: "New service from a Docker Hub image",
   addNode: "Add a node",
 } as const;

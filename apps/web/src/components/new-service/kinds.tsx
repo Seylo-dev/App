@@ -3,7 +3,10 @@
 import { Chip, type ChipProps } from "@seylo/ui/components/chip";
 import type { MessageKey } from "../../i18n/t";
 
-export type NewServiceKind = "app" | "database" | "compose" | "template" | "box" | "cron";
+export type NewServiceKind = "app" | "database" | "compose" | "template" | "dockerHub" | "box" | "cron";
+
+/** Kinds that open a page (the catalog) instead of a create form. */
+export type CatalogKind = "template" | "dockerHub";
 
 export const newServiceKinds: readonly {
   kind: NewServiceKind;
@@ -16,6 +19,7 @@ export const newServiceKinds: readonly {
   { kind: "database", tag: "DB", tone: "sky", title: "newService.database", description: "newService.databaseHint" },
   { kind: "compose", tag: "CMP", tone: "green", title: "newService.compose", description: "newService.composeHint" },
   { kind: "template", tag: "TPL", tone: "violet", title: "newService.template", description: "newService.templateHint" },
+  { kind: "dockerHub", tag: "HUB", tone: "sky", title: "newService.dockerHub", description: "newService.dockerHubHint" },
   { kind: "box", tag: "BOX", tone: "amber", title: "newService.box", description: "newService.boxHint" },
   { kind: "cron", tag: "CRON", tone: "gray", title: "newService.cron", description: "newService.cronHint" },
 ];
