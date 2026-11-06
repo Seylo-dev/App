@@ -73,18 +73,38 @@ function badgeOf(v: unknown): SearchResult["badge"] {
   }
 }
 
-const badgeRank: Record<SearchResult["badge"], number> = { official: 0, verified: 1, openSource: 2, none: 2 };
+/** "Uptime Kuma" -> "uptime-kuma": a query as a repository name. */
+export function queryName(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, "-");
+}
 
-/** Official images first, then verified publishers, then the rest; Docker Hub's order within each. */
-export function rankResults(results: SearchResult[]): SearchResult[] {
+/** The repository is named exactly what was searched for ("gitea" for gitea/gitea, "nginx" for nginx). */
+export function isExactMatch(result: Pick<SearchResult, "repository">, query: string): boolean {
+  const name = queryName(query);
+  return result.repository === name || result.repository.split("/").pop() === name;
+}
+
+/**
+ * Official images and verified publishers first, then the rest in Docker
+ * Hub's order. Images named exactly what was searched for lead: the
+ * official one, then the others by pulls, so the project's own image
+ * (gitea/gitea, 400M pulls) is not buried under repackagings that happen
+ * to carry a badge.
+ */
+export function rankResults(results: SearchResult[], query: string): SearchResult[] {
+  const tier = (r: SearchResult) => {
+    const exact = isExactMatch(r, query);
+    if (exact) return r.badge === "official" ? 0 : 1;
+    return r.badge === "official" ? 2 : r.badge === "verified" ? 3 : 4;
+  };
   return results
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => badgeRank[a.r.badge] - badgeRank[b.r.badge] || a.i - b.i)
+    .map((r, i) => ({ r, i, tier: tier(r) }))
+    .sort((a, b) => a.tier - b.tier || (a.tier === 1 ? b.r.pullCount - a.r.pullCount : 0) || a.i - b.i)
     .map(({ r }) => r);
 }
 
 /** Docker Hub's search (api/search/v4): image repositories only, not extensions, MCP servers or hardened images. */
-export function parseSearchV4(body: unknown): { results: SearchResult[]; total: number } | null {
+export function parseSearchV4(body: unknown, query: string): { results: SearchResult[]; total: number } | null {
   const root = obj(body);
   if (!root || !Array.isArray(root.results)) return null;
   const results: SearchResult[] = [];
@@ -104,11 +124,11 @@ export function parseSearchV4(body: unknown): { results: SearchResult[]; total: 
       architectures: [...new Set(arr(item.architectures).map((a) => str(obj(a)?.name)))].filter((a) => knownArchitectures.has(a)),
     });
   }
-  return { results: rankResults(results), total: count(root.total) };
+  return { results: rankResults(results, query), total: count(root.total) };
 }
 
 /** The older search (v2/search/repositories): no publisher badges beyond "official". */
-export function parseSearchV2(body: unknown): { results: SearchResult[]; hasMore: boolean } | null {
+export function parseSearchV2(body: unknown, query: string): { results: SearchResult[]; hasMore: boolean } | null {
   const root = obj(body);
   if (!root || !Array.isArray(root.results)) return null;
   const results: SearchResult[] = [];
@@ -128,7 +148,7 @@ export function parseSearchV2(body: unknown): { results: SearchResult[]; hasMore
       architectures: [],
     });
   }
-  return { results: rankResults(results), hasMore: typeof root.next === "string" && root.next !== "" };
+  return { results: rankResults(results, query), hasMore: typeof root.next === "string" && root.next !== "" };
 }
 
 function platformOf(p: Json | null): string | null {

@@ -104,7 +104,7 @@ export const search = defineOp({
   kind: "query",
   summary: "Search Docker Hub",
   description:
-    "Searches Docker Hub for images by name or description. Official images and verified publishers come first, then the rest in Docker Hub's order, with pull counts, stars and badges. Answers are cached for 10 minutes.",
+    "Searches Docker Hub for images by name or description, with pull counts, stars and badges. Images named exactly what was searched for lead (the official one, then by pulls), then official images and verified publishers, then the rest in Docker Hub's order. Several words are also looked up as one hyphenated name. Answers are cached for 10 minutes.",
   input: Type.Object({
     query: Type.String({ minLength: 1, maxLength: 100 }),
     /** 1-based; 25 results a page. */

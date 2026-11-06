@@ -20,6 +20,7 @@ import { type Fetch, type HubResponse, hubFetch, jsonOf, sha256Digest } from "./
 import {
   displayRepository,
   hasVersionTag,
+  isExactMatch,
   manifestAccept,
   type ParsedConfig,
   parseConfig,
@@ -29,6 +30,8 @@ import {
   parseTag,
   parseTags,
   pickPlatform,
+  queryName,
+  rankResults,
   repositoryPath,
   type SearchResult,
   suggestTag,
@@ -129,27 +132,38 @@ export class DockerHubClient {
   // Search.
 
   async search(query: string, page: number): Promise<SearchPage> {
-    const q = query.trim().toLowerCase();
+    const q = query.trim().toLowerCase().replace(/\s+/g, " ");
     const key = `${q}|${page}`;
     const cached = this.searches.get(key);
     if (cached) return cached;
-    const from = (page - 1) * searchPageSize;
-    const v4 = await this.hub(`/api/search/v4?query=${encodeURIComponent(q)}&from=${from}&size=${searchPageSize}`);
-    let result: SearchPage | null = null;
-    if (v4.status === 200) {
-      const parsed = parseSearchV4(jsonOf(v4));
-      if (parsed) result = { results: parsed.results, page, hasMore: from + searchPageSize < parsed.total };
+    const found = await this.searchOnce(q, page);
+    let results = found.results;
+    // Docker Hub matches "uptime kuma" poorly (the project's own image is not
+    // on the first page) and "uptime-kuma" well: for words, also look for the
+    // repository named like that and put its exact matches in.
+    const named = queryName(q);
+    if (page === 1 && named !== q) {
+      const exact = (await this.searchOnce(named, 1)).results.filter((r) => isExactMatch(r, q));
+      const seen = new Set(exact.map((r) => r.repository));
+      results = rankResults([...exact, ...results.filter((r) => !seen.has(r.repository))], q);
     }
-    if (!result) {
-      // The website's search moved before; the older endpoint has fewer details but the same results.
-      this.warn("docker hub search v4 failed, using v2", { status: v4.status });
-      const v2 = await this.hub(`/v2/search/repositories/?query=${encodeURIComponent(q)}&page=${page}&page_size=${searchPageSize}`);
-      const parsed = v2.status === 200 ? parseSearchV2(jsonOf(v2)) : null;
-      if (!parsed) throw unavailable(`Docker Hub's search answered ${v2.status}.`);
-      result = { results: parsed.results, page, hasMore: parsed.hasMore };
-    }
+    const result: SearchPage = { results, page, hasMore: found.hasMore };
     this.searches.set(key, result);
     return result;
+  }
+
+  /** One page from the website's search (v4), else the older v2 endpoint. */
+  private async searchOnce(q: string, page: number): Promise<{ results: SearchResult[]; hasMore: boolean }> {
+    const from = (page - 1) * searchPageSize;
+    const v4 = await this.hub(`/api/search/v4?query=${encodeURIComponent(q)}&from=${from}&size=${searchPageSize}`);
+    const parsed = v4.status === 200 ? parseSearchV4(jsonOf(v4), q) : null;
+    if (parsed) return { results: parsed.results, hasMore: from + searchPageSize < parsed.total };
+    // The website's search moved before; the older endpoint has fewer details but the same results.
+    this.warn("docker hub search v4 failed, using v2", { status: v4.status });
+    const v2 = await this.hub(`/v2/search/repositories/?query=${encodeURIComponent(q)}&page=${page}&page_size=${searchPageSize}`);
+    const old = v2.status === 200 ? parseSearchV2(jsonOf(v2), q) : null;
+    if (!old) throw unavailable(`Docker Hub's search answered ${v2.status}.`);
+    return old;
   }
 
   // Tags.

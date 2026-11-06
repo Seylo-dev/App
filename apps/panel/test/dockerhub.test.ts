@@ -53,7 +53,7 @@ describe("reading Docker Hub", () => {
     expect((await callOp(panel, dockerHub.search, { query: "gitea" })).status).toBe(401);
     const search = await callOp(panel, dockerHub.search, { query: "gitea" }, { cookie: member });
     expect(search.status).toBe(200);
-    expect(search.body.results[0].badge).toBe("verified");
+    expect(search.body.results[0].repository).toBe("gitea/gitea");
     const tags = await callOp(panel, dockerHub.tags, { repository: "gitea/gitea" }, { cookie: member });
     expect(tags.body.suggested).toBe("28.3.0");
     const config = await callOp(panel, dockerHub.inspect, { repository: "gitea/gitea", tag: meta.tag, arch: "arm64" }, { cookie: member });
@@ -276,6 +276,7 @@ describe.if(process.env.DOCKERHUB_LIVE === "1")("live Docker Hub", () => {
     const search = await client.search("nginx", 1);
     expect(search.results[0]?.repository).toBe("nginx");
     expect(search.results[0]?.badge).toBe("official");
+    expect((await client.search("uptime kuma", 1)).results[0]?.repository).toBe("louislam/uptime-kuma");
     const tags = await client.tags("nginx", { page: 1, access: { login: null, privateAccess: false } });
     expect(tags.suggested).toMatch(/^\d+\.\d+\.\d+$/);
     const config = await client.inspect("nginx", tags.suggested as string, "amd64", { login: null, privateAccess: false });

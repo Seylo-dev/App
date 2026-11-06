@@ -16,6 +16,7 @@ import {
   parseSearchV4,
   parseTags,
   pickPlatform,
+  rankResults,
   repositoryPath,
   suggestTag,
 } from "../src/modules/dockerHub/parse";
@@ -44,22 +45,54 @@ async function opError(promise: Promise<unknown>): Promise<OpError> {
 }
 
 describe("parsing Docker Hub answers", () => {
-  test("v4 search keeps images only and puts official and verified first", () => {
-    const parsed = parseSearchV4(fixture("search-v4-gitea.json"));
+  test("v4 search keeps images only; exact names lead, then official and verified", () => {
+    const parsed = parseSearchV4(fixture("search-v4-gitea.json"), "gitea");
     const names = parsed?.results.map((r) => r.repository) ?? [];
     // Hardened images (dhi/*) live in another registry and are left out.
     expect(names).not.toContain("dhi/gitea");
-    expect(parsed?.results.slice(0, 2).map((r) => r.badge)).toEqual(["verified", "verified"]);
+    // Every */gitea, most pulled first (the project's own image), then the rest in Docker Hub's order.
+    expect(names.slice(0, 5)).toEqual(["gitea/gitea", "bitnamicharts/gitea", "vulhub/gitea", "sbx/gitea", "hkube/gitea"]);
+    expect(names.slice(5)).toEqual(["gitea/act_runner", "gitea/runner", "gitea/runner-images", "gitea/test-openldap"]);
     const gitea = parsed?.results.find((r) => r.repository === "gitea/gitea");
     expect(gitea).toMatchObject({ publisher: "gitea", badge: "none" });
     expect(gitea?.pullCount).toBeGreaterThan(300_000_000);
     expect(gitea?.architectures).toEqual(expect.arrayContaining(["amd64", "arm64"]));
     expect(gitea?.architectures).not.toContain("unknown");
     expect(parsed?.total).toBeGreaterThan(10);
+    // Without an exact name, official and verified publishers come first.
+    const loose = parseSearchV4(fixture("search-v4-gitea.json"), "git server");
+    expect(loose?.results.slice(0, 2).map((r) => r.badge)).toEqual(["verified", "verified"]);
+  });
+
+  test("ranking tiers: exact official, exact by pulls, official, verified, the rest", () => {
+    const r = (repository: string, badge: "official" | "verified" | "openSource" | "none", pullCount: number) => ({
+      repository,
+      badge,
+      pullCount,
+      publisher: "",
+      description: "",
+      stars: 0,
+      updatedAt: null,
+      architectures: [],
+    });
+    const ranked = rankResults(
+      [
+        r("acme/other", "none", 9),
+        r("kumahq/kuma", "verified", 5),
+        r("vendor/uptime-kuma", "verified", 10),
+        r("louislam/uptime-kuma", "none", 100),
+      ],
+      "Uptime Kuma",
+    );
+    expect(ranked.map((x) => x.repository)).toEqual(["louislam/uptime-kuma", "vendor/uptime-kuma", "kumahq/kuma", "acme/other"]);
+    expect(rankResults([r("nginx/nginx", "verified", 1), r("nginx", "official", 1)], "nginx").map((x) => x.repository)).toEqual([
+      "nginx",
+      "nginx/nginx",
+    ]);
   });
 
   test("v2 search maps official images to the Docker publisher", () => {
-    const parsed = parseSearchV2(fixture("search-v2-nginx.json"));
+    const parsed = parseSearchV2(fixture("search-v2-nginx.json"), "nginx");
     expect(parsed?.results[0]).toMatchObject({ repository: "nginx", badge: "official", publisher: "Docker" });
     expect(parsed?.results[1]?.repository).toBe("nginx/nginx-ingress");
     expect(parsed?.hasMore).toBe(true);
@@ -138,13 +171,36 @@ describe("search and tags", () => {
   test("search is cached for 10 minutes", async () => {
     const { hub, client, advance } = setup();
     const first = await client.search("gitea", 1);
-    expect(first.results[0]?.badge).toBe("verified");
+    expect(first.results[0]?.repository).toBe("gitea/gitea");
     expect(first.hasMore).toBe(true);
     await client.search("Gitea ", 1);
     expect(hub.count("hub.docker.com")).toBe(1);
     advance(11 * 60_000);
     await client.search("gitea", 1);
     expect(hub.count("hub.docker.com")).toBe(2);
+  });
+
+  test("words are also looked up as a repository name, and its exact matches lead", async () => {
+    const item = (id: string, badge = "none", pulls = 1) => ({ id, type: "image", badge, raw_pull_count: pulls, publisher: { name: "x" } });
+    const answers: Record<string, unknown> = {
+      "my app": { total: 2, results: [item("acme/other-app", "verified", 50), item("acme/app-tools")] },
+      "my-app": { total: 2, results: [item("someone/my-app", "none", 900), item("x/my-app-extra")] },
+    };
+    const queries: string[] = [];
+    const client = new DockerHubClient({
+      fetch: async (url) => {
+        const query = new URL(url).searchParams.get("query") ?? "";
+        queries.push(query);
+        return new Response(JSON.stringify(answers[query] ?? { total: 0, results: [] }), { status: 200 });
+      },
+    });
+    const page = await client.search("My  App", 1);
+    expect(queries).toEqual(["my app", "my-app"]);
+    expect(page.results.map((r) => r.repository)).toEqual(["someone/my-app", "acme/other-app", "acme/app-tools"]);
+    // One word needs no second lookup; later pages neither.
+    await client.search("gitea", 1);
+    await client.search("my app", 2);
+    expect(queries).toEqual(["my app", "my-app", "gitea", "my app"]);
   });
 
   test("falls back to the older search when v4 is gone", async () => {
