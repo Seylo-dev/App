@@ -8,12 +8,12 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Disabled buttons keep the pointer (for the not-allowed cursor) but never look hovered.
-        primary: "bg-primary text-primary-foreground shadow-primary not-disabled:hover:brightness-110",
-        secondary: "bg-secondary text-secondary-foreground shadow-control not-disabled:hover:bg-raised",
-        ghost: "bg-transparent text-muted-foreground not-disabled:hover:bg-muted not-disabled:hover:text-foreground",
-        destructive: "bg-destructive text-destructive-foreground not-disabled:hover:brightness-110",
-        dark: "bg-foreground text-background not-disabled:hover:opacity-90",
+        // hover-enabled (tailwind.css): disabled buttons never look hovered, and a caller's hover: class still wins.
+        primary: "bg-primary text-primary-foreground shadow-primary hover-enabled:brightness-110",
+        secondary: "bg-secondary text-secondary-foreground shadow-control hover-enabled:bg-raised",
+        ghost: "bg-transparent text-muted-foreground hover-enabled:bg-muted hover-enabled:text-foreground",
+        destructive: "bg-destructive text-destructive-foreground hover-enabled:brightness-110",
+        dark: "bg-foreground text-background hover-enabled:opacity-90",
       },
       size: {
         default: "h-[38px] px-[15px] text-[13.5px]",

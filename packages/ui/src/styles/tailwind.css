@@ -8,6 +8,20 @@
 
 @custom-variant dark (&:is([data-theme="seylo-night"] *, [data-theme="midnight"] *));
 
+/*
+ * Hover that skips disabled controls, at the specificity of one class
+ * (:where), so a screen's own hover: class on the same element still wins.
+ * The kit's Button uses it: disabled buttons keep pointer events for the
+ * not-allowed cursor but never look hovered.
+ */
+@custom-variant hover-enabled {
+  @media (hover: hover) {
+    &:where(:hover:not(:disabled)) {
+      @slot;
+    }
+  }
+}
+
 @theme inline {
   --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
