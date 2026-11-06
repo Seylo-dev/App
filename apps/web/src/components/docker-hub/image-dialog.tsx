@@ -15,7 +15,7 @@ import { Chip } from "@seylo/ui/components/chip";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { FieldSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { IconBrandDocker, IconX } from "@tabler/icons-react";
@@ -165,11 +165,7 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
           <DialogDescription className="truncate text-[12.5px]">{target.description || t("dockerHub.fromDockerHub")}</DialogDescription>
         </span>
         <DialogClose asChild>
-          <Button
-            size="icon"
-            className="ml-auto size-8 cursor-pointer rounded-control bg-muted shadow-none transition-colors duration-200"
-            aria-label={t("common.close")}
-          >
+          <Button size="icon" className="ml-auto size-8 rounded-control bg-muted shadow-none" aria-label={t("common.close")}>
             <IconX size={15} stroke={2} />
           </Button>
         </DialogClose>
@@ -219,11 +215,26 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
 
           {chosenTag !== null && inspect.isError && <QueryError error={inspect.error} onRetry={() => void inspect.refetch()} />}
           {(tags.isPending || (chosenTag !== null && inspect.isPending) || (config && !state)) && !inspect.isError && (
-            <div role="status" aria-busy="true" aria-label={t("dockerHub.reading")} className="flex flex-col gap-[13px]">
-              <Skeleton className="h-[58px]" />
-              <Skeleton className="h-[40px]" />
-              <Skeleton className="h-[76px]" />
-            </div>
+            <LoadingRegion label={t("dockerHub.reading")} className="flex flex-col gap-[13px]">
+              <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
+                <FieldSkeleton labelWidth="w-10" hint />
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
+                <span className="flex flex-col gap-0.5">
+                  <SkeletonText className="w-40 text-[13px]" />
+                  <SkeletonText className="w-64 text-xs" />
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                <SkeletonText className="mb-1.5 w-16 text-[13px]" />
+                <div className="flex items-center gap-2.5">
+                  <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+                  <SkeletonText className="w-28 text-[12.5px]" />
+                </div>
+              </div>
+              <FieldSkeleton labelWidth="w-20" hint />
+            </LoadingRegion>
           )}
           {config && state && (
             <>
@@ -237,18 +248,16 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
                         setState({ ...state, port, public: port === "" ? false : publicByDefault(Number(port)) });
                       }}
                     >
-                      <SelectTrigger id="hub-port" className="cursor-pointer transition-colors duration-200">
+                      <SelectTrigger id="hub-port">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {ports.map((port) => (
-                          <SelectItem key={port} value={String(port)} className="cursor-pointer">
+                          <SelectItem key={port} value={String(port)}>
                             <span className="font-mono">{port}</span>
                           </SelectItem>
                         ))}
-                        <SelectItem value="none" className="cursor-pointer">
-                          {t("dockerHub.portNone")}
-                        </SelectItem>
+                        <SelectItem value="none">{t("dockerHub.portNone")}</SelectItem>
                       </SelectContent>
                     </Select>
                   ) : (
@@ -267,15 +276,13 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
                       value={registryId ?? "anonymous"}
                       onValueChange={(value) => setRegistryChoice(value === "anonymous" ? null : value)}
                     >
-                      <SelectTrigger id="hub-login" className="cursor-pointer transition-colors duration-200">
+                      <SelectTrigger id="hub-login">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="anonymous" className="cursor-pointer">
-                          {t("dockerHub.pullAnonymous")}
-                        </SelectItem>
+                        <SelectItem value="anonymous">{t("dockerHub.pullAnonymous")}</SelectItem>
                         {logins.map((login) => (
-                          <SelectItem key={login.id} value={login.id} className="cursor-pointer">
+                          <SelectItem key={login.id} value={login.id}>
                             {login.name}
                           </SelectItem>
                         ))}
@@ -290,7 +297,7 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
                     id="hub-public"
                     checked={state.public}
                     onCheckedChange={(on) => setState({ ...state, public: on })}
-                    className="mt-0.5 duration-200"
+                    className="mt-0.5"
                   />
                   <span className="flex flex-col gap-0.5">
                     <span className="font-medium text-foreground">{t("dockerHub.public")}</span>
@@ -356,15 +363,10 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
             {errorMessage(create.error, t("common.unknownError"))}
           </span>
         )}
-        <Button className="ml-auto cursor-pointer transition-colors duration-200" onClick={onClose}>
+        <Button className="ml-auto" onClick={onClose}>
           {t("common.cancel")}
         </Button>
-        <Button
-          type="submit"
-          variant="primary"
-          className="cursor-pointer transition-colors duration-200"
-          disabled={!ready || create.isPending}
-        >
+        <Button type="submit" variant="primary" disabled={!ready || create.isPending}>
           {create.isPending ? t("dockerHub.creating") : deployNow ? t("dockerHub.create") : t("dockerHub.createOnly")}
         </Button>
       </div>
@@ -395,15 +397,28 @@ function EnvSection({ name, text, onChange }: { name: string; text: string; onCh
 function ImageFacts({ config, wrongArch }: { config: ImageConfig | undefined; wrongArch: string | null }) {
   if (!config) {
     return (
-      <div aria-busy="true" className="flex flex-col gap-2.5 rounded-card px-4 py-3.5" style={{ background: "var(--highlight)" }}>
+      <LoadingRegion
+        label={t("dockerHub.reading")}
+        className="flex min-w-0 flex-col gap-3 self-start rounded-card px-4 py-3.5 text-[12.5px]"
+        style={{ background: "var(--highlight)" }}
+      >
         <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
           <IconBrandDocker size={16} stroke={1.8} aria-hidden="true" />
           {t("dockerHub.image")}
         </span>
-        <Skeleton className="h-4 w-3/4 bg-card" />
-        <Skeleton className="h-4 w-1/2 bg-card" />
-        <Skeleton className="h-4 w-2/3 bg-card" />
-      </div>
+        {[
+          [t("dockerHub.digest"), "w-28"],
+          [t("dockerHub.platforms"), "w-24"],
+          [t("dockerHub.runs"), "w-3/4"],
+          [t("dockerHub.user"), "w-12"],
+          [t("dockerHub.healthcheck"), "w-2/3"],
+        ].map(([label, width]) => (
+          <div key={label} className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[11.5px] text-muted-foreground">{label}</span>
+            <SkeletonText className={width} />
+          </div>
+        ))}
+      </LoadingRegion>
     );
   }
   const health = config.healthcheck && config.healthcheck.test[0] !== "NONE" ? config.healthcheck.test.slice(1).join(" ") : null;
@@ -451,7 +466,7 @@ function ImageFacts({ config, wrongArch }: { config: ImageConfig | undefined; wr
       </Fact>
       {config.labels.length > 0 && (
         <details className="group">
-          <summary className="cursor-pointer text-muted-foreground transition-colors duration-200 hover:text-foreground">
+          <summary className="text-muted-foreground hover:text-foreground">
             {t("dockerHub.labels")} ({config.labels.length})
           </summary>
           <dl className="m-0 mt-1.5 flex flex-col gap-1">

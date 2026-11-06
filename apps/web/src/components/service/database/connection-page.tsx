@@ -177,7 +177,7 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
               />
             )
           ) : connError ? null : (
-            <Skeleton className="h-[38px]" aria-busy="true" />
+            <Skeleton className="h-[38px]" />
           )}
         </>
       )}

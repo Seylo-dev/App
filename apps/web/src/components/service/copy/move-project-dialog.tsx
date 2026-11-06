@@ -9,7 +9,7 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
@@ -96,11 +96,11 @@ export function MoveProjectDialog({
           {!projectId ? null : impact.isError ? (
             <OpErrorNote error={impact.error} />
           ) : !i ? (
-            <div role="status" className="flex flex-col gap-2" aria-busy="true" aria-label={t("common.loading")}>
-              <Skeleton className="h-4 w-2/3" />
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-4 w-3/5" />
-            </div>
+            // The usual answer: one line about what moves and the line on whether the containers keep running.
+            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3 text-[13px]">
+              <SkeletonText className="w-2/3" />
+              <SkeletonText className="w-3/4 text-[12.5px]" />
+            </LoadingRegion>
           ) : (
             <div className="flex flex-col gap-3 text-[13px]" data-testid="move-impact">
               {blocked && (
@@ -185,15 +185,8 @@ export function MoveProjectDialog({
             </p>
           )}
           <div className="flex justify-end gap-2">
-            <Button className="cursor-pointer duration-200" onClick={() => onOpenChange(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              className="cursor-pointer duration-200"
-              disabled={!i || blocked || move.isPending || (needsTick && !confirmed)}
-            >
+            <Button onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+            <Button type="submit" variant="primary" disabled={!i || blocked || move.isPending || (needsTick && !confirmed)}>
               {t("serviceCopy.move.submit")}
             </Button>
           </div>

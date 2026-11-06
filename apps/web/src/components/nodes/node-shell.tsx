@@ -10,7 +10,7 @@ import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconLock, IconTerminal2, IconX } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
@@ -139,7 +139,7 @@ function HostTerminal({ node, minutes, onClose }: { node: NodeDetail; minutes: n
             type="button"
             aria-label={t("nodeShell.close")}
             onClick={onClose}
-            className="flex cursor-pointer rounded-chip border-0 bg-transparent p-[5px] text-terminal-muted transition-colors duration-200 hover:text-terminal-foreground"
+            className="flex cursor-pointer rounded-chip border-0 bg-transparent p-[5px] text-terminal-muted hover:text-terminal-foreground"
           >
             <IconX size={14} stroke={1.9} />
           </button>
@@ -161,16 +161,19 @@ function HostTerminal({ node, minutes, onClose }: { node: NodeDetail; minutes: n
   );
 }
 
-/** Shaped like the allowed state: the chips, the limits line and the open button. */
-function ShellSkeleton() {
+/** Shaped like the off state, which every node starts in: the lock heading, the two-line hint and the button. */
+export function ShellSkeleton() {
   return (
-    <div role="status" aria-busy="true" aria-label={t("nodeShell.loading")} className="flex flex-col gap-3">
+    <LoadingRegion label={t("nodeShell.loading")} className="flex flex-col items-start gap-3 rounded-control bg-raised p-4">
       <div className="flex items-center gap-2">
-        <Skeleton className="h-5 w-16 rounded-chip" />
-        <Skeleton className="ml-auto h-8 w-20" />
+        <Skeleton className="size-[17px] shrink-0 rounded-[4px] bg-track" />
+        <SkeletonText ground className="w-44 text-sm" />
       </div>
-      <Skeleton className="h-3 w-96 max-w-full" />
-      <Skeleton className="h-9 w-40" />
-    </div>
+      <span className="flex w-full flex-col">
+        <SkeletonText ground className="w-full text-[12.5px] leading-relaxed" />
+        <SkeletonText ground className="w-2/3 text-[12.5px] leading-relaxed" />
+      </span>
+      <ButtonSkeleton size="sm" className="w-28 bg-track" />
+    </LoadingRegion>
   );
 }

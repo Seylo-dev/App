@@ -31,7 +31,7 @@ export function PopularRow({ onPick }: { onPick: (target: HubTarget) => void }) 
                 ...(image.env ? { env: image.env } : {}),
               })
             }
-            className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-card border-0 bg-card px-3 py-2.5 text-left text-foreground shadow-card transition-shadow duration-200 hover:shadow-popover"
+            className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-card border-0 bg-card px-3 py-2.5 text-left text-foreground shadow-card transition-shadow hover:shadow-popover"
           >
             <TemplateLogo slug={image.id} name={image.name} logoUrl={null} size={30} />
             <span className="flex min-w-0 flex-col">

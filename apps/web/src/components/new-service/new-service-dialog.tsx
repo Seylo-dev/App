@@ -17,7 +17,7 @@ import { Input, Label } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { FieldSkeleton, LoadingRegion } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 import { useNavigate } from "@tanstack/react-router";
@@ -400,10 +400,9 @@ function EngineVersion({
   const info = catalog.data?.engines.find((e) => e.engine === engine);
   if (!info) {
     return (
-      <div role="status" aria-busy="true" aria-label={t("newService.versionsLoading")} className="flex flex-col gap-1.5">
-        <Skeleton className="h-4 w-16" />
-        <Skeleton className="h-[38px]" />
-      </div>
+      <LoadingRegion label={t("newService.versionsLoading")}>
+        <FieldSkeleton labelWidth="w-14" hint />
+      </LoadingRegion>
     );
   }
   const variant = info.variants.find((v) => v.id === pgvector);

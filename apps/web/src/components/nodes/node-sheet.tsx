@@ -33,7 +33,7 @@ import { NodeCleanup } from "./node-cleanup";
 import { NodeGraphs } from "./node-graphs";
 import { NodeHealth } from "./node-health";
 import { NodeSettingsForm } from "./node-settings";
-import { NodeShell } from "./node-shell";
+import { NodeShell, ShellSkeleton } from "./node-shell";
 
 export type NodeView = "overview" | "health" | "cleanup" | "shell" | "settings";
 
@@ -108,9 +108,13 @@ function NodeSheetBody({
         {node.isError ? (
           <QueryError error={node.error} onRetry={() => void node.refetch()} />
         ) : node.isPending ? (
-          // The health checks only need the node's id; the other views wait for the node.
+          // The health checks and the cleanup only need the node's id; the other views wait for the node.
           view === "health" ? (
             <NodeHealth nodeId={nodeId} />
+          ) : view === "cleanup" ? (
+            <NodeCleanup nodeId={nodeId} />
+          ) : view === "shell" ? (
+            <ShellSkeleton />
           ) : (
             <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
               {view === "overview" ? <OverviewSkeleton /> : <SettingsSkeleton />}

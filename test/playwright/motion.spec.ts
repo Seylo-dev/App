@@ -109,6 +109,60 @@ test.describe("motion", () => {
     await expectSameWeight('nav[aria-label="Service sections"] > a');
   });
 
+  test("the catalog, node sheet and git provider switches slide one pill and keep the font weight", async ({ page }) => {
+    await installDemo(page, { overrides: { "gitProviders.list": () => ({ items: [] }) } });
+    /** Clicks `name` in the segmented `group` and records its pill's left edge on every frame for 500ms. */
+    const slide = async (group: Locator, name: string) => {
+      const pill = group.locator('[data-slot="active-indicator"]');
+      await expect(pill).toHaveCount(1);
+      // A sheet that is still sliding in moves the whole track: start once the pill stands still.
+      await expect
+        .poll(async () => {
+          const a = (await pill.boundingBox())?.x;
+          await page.waitForTimeout(100);
+          return a !== undefined && a === (await pill.boundingBox())?.x;
+        })
+        .toBe(true);
+      const from = (await pill.boundingBox())?.x ?? Number.NaN;
+      await group.evaluate((el) => {
+        const w = window as unknown as { __xs: number[] };
+        w.__xs = [];
+        const start = performance.now();
+        const sample = () => {
+          const found = el.querySelector('[data-slot="active-indicator"]');
+          if (found) w.__xs.push(found.getBoundingClientRect().left);
+          if (performance.now() - start < 500) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      const item = group.getByRole("radio", { name });
+      await item.click();
+      await page.waitForTimeout(650);
+      await expect(item).toHaveAttribute("data-state", "on");
+      await expect(pill).toHaveCount(1);
+      const to = (await item.boundingBox())?.x ?? Number.NaN;
+      expect(Math.abs(((await pill.boundingBox())?.x ?? Number.NaN) - to)).toBeLessThan(1);
+      const xs = await page.evaluate(() => (window as unknown as { __xs: number[] }).__xs);
+      const between = xs.filter((x) => x > Math.min(from, to) + 1 && x < Math.max(from, to) - 1);
+      expect(between.length, `frames between ${from} and ${to}: ${xs.join(", ")}`).toBeGreaterThan(0);
+      const weights = await group
+        .getByRole("radio")
+        .evaluateAll((els) => els.map((el) => `${el.getAttribute("data-state")}:${getComputedStyle(el).fontWeight}`));
+      expect(new Set(weights.map((w) => w.split(":")[1])).size, weights.join(", ")).toBe(1);
+    };
+
+    await page.goto("/templates");
+    await slide(page.getByRole("radiogroup", { name: "Catalog" }), "Docker Hub");
+
+    await page.goto(`/nodes?node=${ids.de}&view=overview`);
+    const views = page.getByRole("radiogroup", { name: "Node views" });
+    await slide(views, "Cleanup");
+    await slide(views, "Shell");
+
+    await page.goto("/settings/git-providers");
+    await slide(page.getByRole("radiogroup", { name: "Provider" }), "Bitbucket");
+  });
+
   test("with reduced motion the background moves at once", async ({ browser }) => {
     const context = await browser.newContext({ storageState: stateFile, reducedMotion: "reduce", viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();

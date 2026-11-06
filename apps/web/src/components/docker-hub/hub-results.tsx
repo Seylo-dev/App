@@ -10,7 +10,7 @@ import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { IconBrandDocker, IconCircleCheck, IconDownload, IconRosetteDiscountCheck, IconStar } from "@tabler/icons-react";
 import { useState } from "react";
 import { t } from "../../i18n/t";
@@ -79,17 +79,11 @@ function ResultsPage({
   }
   if (results.isPending) {
     return (
-      <div aria-busy="true" className="flex flex-col gap-2.5">
+      <LoadingRegion label={t("common.loading")} className="flex flex-col gap-2.5">
         {[0, 1, 2, 3, 4].map((key) => (
-          <div key={key} className="flex items-center gap-3 rounded-card bg-card px-4 py-3.5 shadow-card">
-            <Skeleton className="size-9 rounded-[9px]" />
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Skeleton className="h-4 w-48" />
-              <Skeleton className="h-3.5 w-3/4" />
-            </div>
-          </div>
+          <ResultRowSkeleton key={key} />
         ))}
-      </div>
+      </LoadingRegion>
     );
   }
   if (page === 1 && results.data.results.length === 0) {
@@ -105,7 +99,7 @@ function ResultsPage({
         <ResultRow key={result.repository} result={result} onPick={onPick} />
       ))}
       {last && hasNextPage(page, results.data.hasMore) && (
-        <Button className="cursor-pointer self-center transition-colors duration-200" onClick={onMore}>
+        <Button className="self-center" onClick={onMore}>
           {t("dockerHub.more")}
         </Button>
       )}
@@ -118,7 +112,7 @@ function ResultRow({ result, onPick }: { result: SearchResult; onPick: (target: 
     <button
       type="button"
       onClick={() => onPick({ repository: result.repository, description: result.description })}
-      className="flex min-w-0 cursor-pointer items-start gap-3 rounded-card border-0 bg-card px-4 py-3.5 text-left text-foreground shadow-card transition-shadow duration-200 hover:shadow-popover"
+      className="flex min-w-0 cursor-pointer items-start gap-3 rounded-card border-0 bg-card px-4 py-3.5 text-left text-foreground shadow-card transition-shadow hover:shadow-popover"
     >
       <TemplateLogo slug={result.repository} name={result.repository.split("/").pop() ?? result.repository} logoUrl={null} />
       <span className="flex min-w-0 flex-1 flex-col gap-1">
@@ -141,6 +135,24 @@ function ResultRow({ result, onPick }: { result: SearchResult; onPick: (target: 
         </span>
       </span>
     </button>
+  );
+}
+
+/** A result row while the page loads: logo, repository with its badge and publisher, a description line (most are one), the counts. */
+function ResultRowSkeleton() {
+  return (
+    <div className="flex min-w-0 items-start gap-3 rounded-card bg-card px-4 py-3.5 shadow-card">
+      <Skeleton className="size-9 shrink-0 rounded-[9px]" />
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex items-center gap-2">
+          <SkeletonText className="w-40 text-[13.5px]" />
+          <Skeleton className="h-[19px] w-[66px] shrink-0 rounded-chip" />
+          <SkeletonText className="w-16 text-xs" />
+        </span>
+        <SkeletonText className="w-3/4 text-[12.5px] leading-[1.45]" />
+        <SkeletonText className="w-56 text-[11.5px]" />
+      </span>
+    </div>
   );
 }
 

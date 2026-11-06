@@ -7,7 +7,7 @@ import { dockerHub } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Chip } from "@seylo/ui/components/chip";
 import { Popover, PopoverContent, PopoverTrigger } from "@seylo/ui/components/popover";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconCheck, IconChevronDown, IconSearch } from "@tabler/icons-react";
 import { useState } from "react";
@@ -41,14 +41,20 @@ export function TagPicker({
   const list = filter === "" ? firstPage : filtered.data?.tags;
   const loading = filter === "" ? firstPage === undefined : filtered.isPending;
 
-  if (firstPage === undefined && value === null) return <Skeleton aria-busy="true" className="h-[38px]" />;
+  if (firstPage === undefined && value === null) {
+    return (
+      <LoadingRegion label={t("dockerHub.reading")}>
+        <Skeleton className="h-[38px]" />
+      </LoadingRegion>
+    );
+  }
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           id={id}
           type="button"
-          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-card px-3 text-left text-[13.5px] text-foreground shadow-control transition-colors duration-200 hover:bg-raised"
+          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-card px-3 text-left text-[13.5px] text-foreground shadow-control hover:bg-raised"
         >
           <span className="truncate font-mono">{value ?? "-"}</span>
           {value !== null && value === suggested && (
@@ -74,7 +80,7 @@ export function TagPicker({
         </label>
         <div role="listbox" aria-label={t("dockerHub.tag")} aria-busy={loading} className="max-h-72 overflow-y-auto p-1.5">
           {filter !== "" && filtered.isError && <QueryError error={filtered.error} className="m-1" />}
-          {loading && !filtered.isError && [0, 1, 2, 3].map((key) => <Skeleton key={key} className="m-1 h-9" />)}
+          {loading && !filtered.isError && [0, 1, 2, 3].map((key) => <TagOptionSkeleton key={key} />)}
           {!loading && list?.length === 0 && (
             <p className="m-0 px-3 py-5 text-center text-[13px] text-muted-foreground">{t("dockerHub.tagNone")}</p>
           )}
@@ -106,7 +112,7 @@ function TagOption({ tag, selected, suggested, onPick }: { tag: TagInfo; selecte
       aria-selected={selected}
       onClick={onPick}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2.5 rounded-control border-0 bg-transparent px-2.5 py-2 text-left transition-colors duration-200 hover:bg-accent",
+        "flex w-full cursor-pointer items-center gap-2.5 rounded-control border-0 bg-transparent px-2.5 py-2 text-left hover:bg-accent",
         selected && "bg-accent",
       )}
     >
@@ -127,5 +133,15 @@ function TagOption({ tag, selected, suggested, onPick }: { tag: TagInfo; selecte
       </span>
       {selected && <IconCheck size={15} stroke={2} className="shrink-0 text-primary" aria-hidden="true" />}
     </button>
+  );
+}
+
+/** A tag option while the list loads: the tag name over its platforms, size and age. */
+function TagOptionSkeleton() {
+  return (
+    <div aria-hidden="true" className="flex flex-col gap-0.5 px-2.5 py-2">
+      <SkeletonText className="w-24 text-[13px]" />
+      <SkeletonText className="w-44 text-[11.5px]" />
+    </div>
   );
 }

@@ -8,7 +8,8 @@
 import { templates } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { SegmentedItem, SegmentPill, Segmented } from "@seylo/ui/components/segmented";
+import { EnterOnChange } from "@seylo/ui/components/motion";
+import { Segmented, SegmentedItem, SegmentPill } from "@seylo/ui/components/segmented";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
@@ -101,67 +102,70 @@ function TemplatesPage() {
         <SegmentedItem value="docker-hub">{t("dockerHub.tabDockerHub")}</SegmentedItem>
       </Segmented>
 
-      {hub && <HubResults query={hubQuery} onPick={setImage} />}
+      {/* Switching between the catalog and Docker Hub fades the content in, like a tab. */}
+      <EnterOnChange motionKey={hub ? "docker-hub" : "templates"} subtle className="flex min-w-0 flex-col gap-5">
+        {hub && <HubResults query={hubQuery} onPick={setImage} />}
 
-      {!hub && all.isPending && (
-        <div aria-hidden="true" className="flex max-w-full gap-0.5 self-start rounded-control bg-track p-[3px]">
-          {["w-9", "w-[86px]", "w-[74px]", "w-[82px]", "w-16", "w-12", "w-[104px]"].map((width) => (
-            <Skeleton key={width} className={`h-7 rounded-chip bg-card/70 ${width}`} />
-          ))}
-        </div>
-      )}
-      {!hub && categories.length > 0 && (
-        <fieldset
-          aria-label={t("templates.categories")}
-          className="m-0 flex max-w-full min-w-0 border-0 flex-wrap gap-0.5 self-start rounded-control bg-track p-[3px]"
-        >
-          <CategoryButton pressed={!search.category} onClick={() => pickCategory(undefined)}>
-            {t("templates.all")}
-          </CategoryButton>
-          {categories.map((category) => (
-            <CategoryButton key={category} pressed={search.category === category} onClick={() => pickCategory(category)}>
-              {category}
+        {!hub && all.isPending && (
+          <div aria-hidden="true" className="flex max-w-full gap-0.5 self-start rounded-control bg-track p-[3px]">
+            {["w-9", "w-[86px]", "w-[74px]", "w-[82px]", "w-16", "w-12", "w-[104px]"].map((width) => (
+              <Skeleton key={width} className={`h-7 rounded-chip bg-card/70 ${width}`} />
+            ))}
+          </div>
+        )}
+        {!hub && categories.length > 0 && (
+          <fieldset
+            aria-label={t("templates.categories")}
+            className="m-0 flex max-w-full min-w-0 border-0 flex-wrap gap-0.5 self-start rounded-control bg-track p-[3px]"
+          >
+            <CategoryButton pressed={!search.category} onClick={() => pickCategory(undefined)}>
+              {t("templates.all")}
             </CategoryButton>
-          ))}
-        </fieldset>
-      )}
+            {categories.map((category) => (
+              <CategoryButton key={category} pressed={search.category === category} onClick={() => pickCategory(category)}>
+                {category}
+              </CategoryButton>
+            ))}
+          </fieldset>
+        )}
 
-      {hub ? null : list.isError && !list.data ? (
-        <QueryError error={list.error} onRetry={() => void list.refetch()} />
-      ) : list.isPending ? (
-        <LoadingRegion label={t("common.loading")} className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
-          {[0, 1, 2, 3, 4, 5, 6, 7].map((key) => (
-            <TemplateCardSkeleton key={key} />
-          ))}
-        </LoadingRegion>
-      ) : list.data.templates.length === 0 ? (
-        <div className="rounded-card bg-card shadow-card">
-          <EmptyState icon={<IconLayoutGrid />} title={t("templates.empty")} description={t("templates.emptyHint")} />
-        </div>
-      ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
-          {list.data.templates.map((template) => (
-            <button
-              key={template.slug}
-              type="button"
-              onClick={() => setInstalling(template)}
-              className="flex min-w-0 cursor-pointer flex-col gap-2.5 rounded-card border-0 bg-card p-4 text-left text-foreground shadow-card transition-shadow hover:shadow-popover"
-            >
-              <span className="flex items-center gap-[11px]">
-                <TemplateLogo slug={template.slug} name={template.name} logoUrl={template.logoUrl} />
-                <span className="flex min-w-0 flex-col gap-px">
-                  <b className="truncate text-sm font-semibold">{template.name}</b>
-                  <span className="text-xs text-muted-foreground">{template.category}</span>
+        {hub ? null : list.isError && !list.data ? (
+          <QueryError error={list.error} onRetry={() => void list.refetch()} />
+        ) : list.isPending ? (
+          <LoadingRegion label={t("common.loading")} className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((key) => (
+              <TemplateCardSkeleton key={key} />
+            ))}
+          </LoadingRegion>
+        ) : list.data.templates.length === 0 ? (
+          <div className="rounded-card bg-card shadow-card">
+            <EmptyState icon={<IconLayoutGrid />} title={t("templates.empty")} description={t("templates.emptyHint")} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
+            {list.data.templates.map((template) => (
+              <button
+                key={template.slug}
+                type="button"
+                onClick={() => setInstalling(template)}
+                className="flex min-w-0 cursor-pointer flex-col gap-2.5 rounded-card border-0 bg-card p-4 text-left text-foreground shadow-card transition-shadow hover:shadow-popover"
+              >
+                <span className="flex items-center gap-[11px]">
+                  <TemplateLogo slug={template.slug} name={template.name} logoUrl={template.logoUrl} />
+                  <span className="flex min-w-0 flex-col gap-px">
+                    <b className="truncate text-sm font-semibold">{template.name}</b>
+                    <span className="text-xs text-muted-foreground">{template.category}</span>
+                  </span>
                 </span>
-              </span>
-              <span className="text-[12.5px] leading-[1.45] text-ink-strong">{template.description}</span>
-              <span className="mt-auto border-t border-divider pt-2.5 text-[11.5px] text-muted-foreground">{template.creates}</span>
-            </button>
-          ))}
-        </div>
-      )}
+                <span className="text-[12.5px] leading-[1.45] text-ink-strong">{template.description}</span>
+                <span className="mt-auto border-t border-divider pt-2.5 text-[11.5px] text-muted-foreground">{template.creates}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
-      {!hub && !search.category && !query && <PopularRow onPick={setImage} />}
+        {!hub && !search.category && !query && <PopularRow onPick={setImage} />}
+      </EnterOnChange>
 
       <InstallDialog template={installing} projectId={search.project} onClose={() => setInstalling(null)} />
       <ImageDialog target={image} projectId={search.project} onClose={() => setImage(null)} />

@@ -22,19 +22,19 @@ export function ServiceMenu({ service }: { service: ServiceDetail }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="icon" variant="ghost" aria-label={t("serviceCopy.menu.label")} className="cursor-pointer duration-200">
+          <Button size="icon" variant="ghost" aria-label={t("serviceCopy.menu.label")}>
             <IconDots size={16} stroke={2} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
           {canClone && (
-            <DropdownMenuItem className="transition-colors duration-200" onSelect={() => setOpen("clone")}>
+            <DropdownMenuItem onSelect={() => setOpen("clone")}>
               <IconCopy size={15} stroke={2} />
               {t("serviceCopy.menu.clone")}
             </DropdownMenuItem>
           )}
           {canMove && (
-            <DropdownMenuItem className="transition-colors duration-200" onSelect={() => setOpen("move")}>
+            <DropdownMenuItem onSelect={() => setOpen("move")}>
               <IconArrowsExchange size={15} stroke={2} />
               {t("serviceCopy.menu.moveProject")}
             </DropdownMenuItem>

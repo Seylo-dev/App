@@ -13,7 +13,7 @@ import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input, Label } from "@seylo/ui/components/input";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { IconRecycle } from "@tabler/icons-react";
@@ -41,7 +41,7 @@ export function NodeCleanup({ nodeId }: { nodeId: string }) {
       ) : (
         <ScheduleForm nodeId={nodeId} data={schedule.data} />
       )}
-      <section aria-label={t("nodeCleanup.runs")} aria-busy={runs.isPending} className="flex flex-col gap-2">
+      <section aria-label={t("nodeCleanup.runs")} className="flex flex-col gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
           <h3 className="m-0 text-sm font-semibold">{t("nodeCleanup.runs")}</h3>
           {runs.data && runs.data.bytesFreed30d > 0 && (
@@ -209,7 +209,7 @@ function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) 
             <label
               key={kind}
               htmlFor={`cleanup-kind-${kind}`}
-              className="flex cursor-pointer items-start gap-2.5 rounded-control bg-raised p-3 transition-colors duration-200 hover:bg-muted"
+              className="flex cursor-pointer items-start gap-2.5 rounded-control bg-raised p-3 transition-colors hover:bg-muted"
             >
               <Checkbox
                 id={`cleanup-kind-${kind}`}
@@ -230,7 +230,7 @@ function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) 
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground">
           {t("nodeCleanup.manual")}{" "}
-          <Link to="/settings/cleanup" className="font-medium transition-colors duration-200">
+          <Link to="/settings/cleanup" className="font-medium">
             {t("nodeCleanup.manualLink")}
           </Link>
         </span>
@@ -271,9 +271,7 @@ function RunRow({ run }: { run: Run }) {
       {run.error && <span className="text-[12.5px] text-chip-red-fg">{run.error}</span>}
       {run.lines.length > 0 && (
         <details className="group">
-          <summary className="cursor-pointer text-xs text-muted-foreground transition-colors duration-200 hover:text-foreground">
-            {t("nodeCleanup.details")}
-          </summary>
+          <summary className="text-xs text-muted-foreground hover:text-foreground">{t("nodeCleanup.details")}</summary>
           <ul className="m-0 mt-1.5 flex max-h-56 flex-col gap-0.5 overflow-y-auto rounded-control bg-raised p-3 pl-7 font-mono text-xs text-ink-strong">
             {run.lines.map((line, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: lines can repeat; their order is the identity.
@@ -287,39 +285,76 @@ function RunRow({ run }: { run: Run }) {
   );
 }
 
-/** Shaped like the form: the switch, the two trigger boxes and the four kinds. */
+/** Shaped like the form: the heading, the switch, the two trigger boxes, the four kinds and the save row. */
 function ScheduleSkeleton() {
   return (
-    <div role="status" aria-busy="true" aria-label={t("nodeCleanup.loading")} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <Skeleton className="h-4 w-36" />
-        <Skeleton className="h-3 w-80 max-w-full" />
+    <LoadingRegion label={t("nodeCleanup.loading")} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <SkeletonText className="w-36 text-sm" />
+        <SkeletonText className="w-80 text-[12.5px]" />
+      </div>
+      <div className="flex items-start gap-3">
+        <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
+        <SkeletonText className="w-44 text-[13.5px]" />
+      </div>
+      <div className="flex flex-col gap-2 rounded-control bg-raised p-3">
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="size-4 shrink-0 rounded-[4px] bg-track" />
+          <SkeletonText ground className="w-28 text-[13px]" />
+        </div>
+        <Skeleton className="ml-6.5 h-[38px] w-44 bg-track" />
+        <SkeletonText ground className="ml-6.5 w-64 text-xs" />
+      </div>
+      <div className="flex flex-col gap-2 rounded-control bg-raised p-3">
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="size-4 shrink-0 rounded-[4px] bg-track" />
+          <SkeletonText ground className="w-40 text-[13px]" />
+          <Skeleton className="h-[38px] w-20 bg-track" />
+        </div>
+        {/* The disk hint takes two lines at the sheet's width. */}
+        <span className="flex flex-col pl-6.5">
+          <SkeletonText ground className="w-full text-xs" />
+          <SkeletonText ground className="w-1/3 text-xs" />
+        </span>
+      </div>
+      <div className="flex flex-col gap-2">
+        <SkeletonText className="w-28 text-[13px]" />
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          {kinds.map((kind) => (
+            <div key={kind} className="flex items-start gap-2.5 rounded-control bg-raised p-3">
+              <Skeleton className="mt-0.5 size-4 shrink-0 rounded-[4px] bg-track" />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <SkeletonText ground className="w-24 text-[13px]" />
+                {/* Each row has a hint that wraps to a second line. */}
+                <span className="flex flex-col">
+                  <SkeletonText ground className="w-full text-xs" />
+                  <SkeletonText ground className="w-2/3 text-xs" />
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="flex items-center gap-3">
-        <Skeleton className="h-5 w-9 rounded-full" />
-        <Skeleton className="h-4 w-40" />
+        <SkeletonText className="w-56 text-xs" />
+        <ButtonSkeleton className="ml-auto w-16" />
       </div>
-      <Skeleton className="h-[92px]" />
-      <Skeleton className="h-[68px]" />
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-        {kinds.map((kind) => (
-          <Skeleton key={kind} className="h-[62px]" />
-        ))}
-      </div>
-    </div>
+    </LoadingRegion>
   );
 }
 
+/** Recent cleanups while they load: the trigger chip, what was freed, the item count and when. */
 function RunsSkeleton() {
   return (
-    <div className="flex flex-col">
+    <LoadingRegion label={t("common.loading")} className="flex flex-col">
       {[0, 1, 2].map((i) => (
-        <div key={i} className="flex items-center gap-2 border-t border-divider py-3">
-          <Skeleton className="h-5 w-20 rounded-chip" />
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="ml-auto h-3 w-14" />
+        <div key={i} className="flex items-center gap-2 border-t border-divider py-2.5 text-[13px]">
+          <Skeleton className="h-[22px] w-24 shrink-0 rounded-chip" />
+          <SkeletonText className="w-24" />
+          <SkeletonText className="w-14" />
+          <SkeletonText className="ml-auto w-14 text-xs" />
         </div>
       ))}
-    </div>
+    </LoadingRegion>
   );
 }

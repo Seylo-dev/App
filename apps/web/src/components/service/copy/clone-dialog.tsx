@@ -11,7 +11,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconCheck } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -137,11 +137,20 @@ export function CloneDialog({
           {preview.isError ? (
             <OpErrorNote error={preview.error} />
           ) : !p ? (
-            <div role="status" className="flex flex-col gap-2" aria-busy="true" aria-label={t("common.loading")}>
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-16 w-full" />
-            </div>
+            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5 text-[13px]">
+                <SkeletonText className="w-28 text-xs" />
+                <span className="flex items-center gap-2">
+                  <Skeleton className="size-3.5 shrink-0 rounded-full" />
+                  <SkeletonText className="w-48" />
+                </span>
+                <span className="flex items-center gap-2">
+                  <Skeleton className="size-3.5 shrink-0 rounded-full" />
+                  <SkeletonText className="w-40" />
+                </span>
+              </div>
+              <SkeletonText className="w-3/4 text-[12.5px]" />
+            </LoadingRegion>
           ) : (
             <>
               <div className="flex flex-col gap-1.5 text-[13px]">
@@ -169,12 +178,7 @@ export function CloneDialog({
                     className="grid gap-2 sm:grid-cols-2"
                     aria-label={t("serviceCopy.clone.data")}
                   >
-                    <RadioCard
-                      value="empty"
-                      title={t("serviceCopy.clone.empty")}
-                      description={t("serviceCopy.clone.emptyDescription")}
-                      className="transition-colors duration-200"
-                    />
+                    <RadioCard value="empty" title={t("serviceCopy.clone.empty")} description={t("serviceCopy.clone.emptyDescription")} />
                     <RadioCard
                       value="copy"
                       disabled={!p.data.available}
@@ -184,7 +188,6 @@ export function CloneDialog({
                           ? (blockedText(p.data.blockedBy) ?? undefined)
                           : t("serviceCopy.clone.copyDescription", { volumes: p.volumes.map((v) => v.name).join(", ") })
                       }
-                      className="transition-colors duration-200"
                     />
                   </RadioGroup>
                   {data === "copy" &&
@@ -248,15 +251,8 @@ export function CloneDialog({
             </p>
           )}
           <div className="flex justify-end gap-2">
-            <Button className="cursor-pointer duration-200" onClick={() => onOpenChange(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              className="cursor-pointer duration-200"
-              disabled={!p || clone.isPending || name.trim() === ""}
-            >
+            <Button onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+            <Button type="submit" variant="primary" disabled={!p || clone.isPending || name.trim() === ""}>
               {t("serviceCopy.clone.submit")}
             </Button>
           </div>

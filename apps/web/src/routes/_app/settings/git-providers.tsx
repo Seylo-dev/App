@@ -70,6 +70,7 @@ function Connections() {
             {
               id: "name",
               header: t("settingsGitProviders.list.name"),
+              skeletonWidth: "34.5%",
               cell: (p) => {
                 const Icon = icons[p.kind];
                 return (
@@ -84,11 +85,14 @@ function Connections() {
             {
               id: "host",
               header: t("settingsGitProviders.list.host"),
+              skeletonWidth: "15.3%",
               cell: (p) => <span className="font-mono text-[12.5px]">{p.workspace ? `${p.host}/${p.workspace}` : p.host}</span>,
             },
             {
               id: "account",
               header: t("settingsGitProviders.list.account"),
+              skeletonWidth: "13.7%",
+              skeletonLines: 2,
               cell: (p) => (
                 <span className="flex flex-col">
                   <span>{p.account ?? "-"}</span>
@@ -101,6 +105,7 @@ function Connections() {
             {
               id: "status",
               header: t("settingsGitProviders.list.statusNotes"),
+              skeletonWidth: "11.3%",
               cell: (p) => (
                 <Switch
                   checked={p.statusNotes}
@@ -222,7 +227,7 @@ function AddConnection() {
             {(["gitlab", "gitea", "bitbucket"] as const).map((k) => {
               const Icon = icons[k];
               return (
-                <SegmentedItem key={k} value={k} className="inline-flex items-center gap-1.5 transition-colors duration-200">
+                <SegmentedItem key={k} value={k} className="inline-flex items-center gap-1.5">
                   <Icon size={15} stroke={1.8} aria-hidden="true" />
                   {t(`settingsGitProviders.add.kinds.${k}`)}
                 </SegmentedItem>
@@ -276,12 +281,8 @@ function AddConnection() {
                 aria-label={t("settingsGitProviders.add.auth")}
                 className="self-start"
               >
-                <SegmentedItem value="token" className="transition-colors duration-200">
-                  {t("settingsGitProviders.add.auths.token")}
-                </SegmentedItem>
-                <SegmentedItem value="appPassword" className="transition-colors duration-200">
-                  {t("settingsGitProviders.add.auths.appPassword")}
-                </SegmentedItem>
+                <SegmentedItem value="token">{t("settingsGitProviders.add.auths.token")}</SegmentedItem>
+                <SegmentedItem value="appPassword">{t("settingsGitProviders.add.auths.appPassword")}</SegmentedItem>
               </Segmented>
             </Field>
           )}

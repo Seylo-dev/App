@@ -4,6 +4,7 @@
 // checked when a screen opens does not animate.
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { hostShellStatus, ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { stateFile } from "./helpers";
 
@@ -104,6 +105,82 @@ test.describe("loading placeholders", () => {
     await loaded(page);
     // Layout is exact here: the old rows were a quarter pixel short each.
     expectClose((await box(card)).height, before.height, "project card height", 0.2);
+  });
+
+  test("node sheet: the cleanup form and the host shell take their placeholders' room", async ({ page }) => {
+    // Only the view's own answers wait; the node and its runs are there.
+    await installDemo(page, {
+      delay: (opId) => (opId === "cleanup.getSchedule" || opId === "hostShell.status" ? 1500 : 0),
+      overrides: { "hostShell.status": (input) => ({ ...hostShellStatus(String(input.nodeId)), enabled: false, sessions: [] }) },
+    });
+    await page.goto(`/nodes?node=${ids.de}&view=cleanup`);
+    const sheet = page.getByRole("dialog");
+    const runs = sheet.getByRole("heading", { name: "Recent cleanups" });
+    await expect(sheet.getByRole("status", { name: "Loading the cleanup schedule" })).toHaveAttribute("aria-busy", "true");
+    await expect(runs).toBeVisible();
+    const before = await box(runs);
+    await expect(sheet.getByRole("button", { name: "Save schedule" })).toBeVisible({ timeout: 15_000 });
+    expectClose((await box(runs)).y, before.y, "Recent cleanups heading y", 2);
+
+    await sheet.getByRole("radio", { name: "Shell" }).click();
+    const loading = sheet.getByRole("status", { name: "Loading the host shell state" });
+    await expect(loading).toHaveAttribute("aria-busy", "true");
+    const placeholder = await box(loading);
+    const off = sheet.getByRole("region", { name: "Host shells are off for this node" });
+    await expect(off).toBeVisible({ timeout: 15_000 });
+    expectClose((await box(off)).height, placeholder.height, "host shell panel height", 2);
+  });
+
+  test("Docker Hub: a placeholder result is as tall as a result", async ({ page }) => {
+    await slowDemo(page, 1500, (opId) => opId === "dockerHub.search");
+    await page.goto("/templates?tab=docker-hub&q=gitea");
+    const results = page.getByRole("region", { name: "Docker Hub images" });
+    const placeholder = results.getByRole("status");
+    await expect(placeholder).toHaveAttribute("aria-busy", "true");
+    const rows = await boxes(placeholder.locator(":scope > div"));
+    await expect(results.getByRole("button").first()).toBeVisible({ timeout: 15_000 });
+    // Docker Hub descriptions are mostly one line, like the placeholder's.
+    const first = await box(results.getByRole("button").first());
+    expectClose(first.height, rows[0]?.height ?? 0, "result row height", 2);
+  });
+
+  test("git providers: the connection table's header cells keep their places", async ({ page }) => {
+    const now = new Date().toISOString();
+    await installDemo(page, {
+      delay: (opId) => (opId === "gitProviders.list" ? 1500 : 0),
+      overrides: {
+        "gitProviders.list": () => ({
+          items: [
+            {
+              id: "gp00000000000001",
+              kind: "gitlab",
+              name: "Company GitLab",
+              url: "https://gitlab.com",
+              host: "gitlab.com",
+              workspace: null,
+              authKind: "token",
+              account: "deploy-bot",
+              username: null,
+              statusNotes: true,
+              usedBy: 2,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        }),
+      },
+    });
+    await page.goto("/settings/git-providers");
+    const table = page.getByRole("table", { name: "Connections" });
+    await expect(table.locator('[data-slot="skeleton"]').first()).toBeVisible();
+    const before = await boxes(table.locator("th"));
+    await expect(table.locator('[data-slot="skeleton"]')).toHaveCount(0, { timeout: 15_000 });
+    const after = await boxes(table.locator("th"));
+    expect(after.length).toBe(before.length);
+    after.forEach((cell, i) => {
+      expectClose(cell.x, before[i]?.x ?? Number.NaN, `th ${i} x`, 5);
+      expectClose(cell.width, before[i]?.width ?? Number.NaN, `th ${i} width`, 5);
+    });
   });
 
   test("a checkbox that is checked when the screen opens does not animate", async ({ page }) => {
