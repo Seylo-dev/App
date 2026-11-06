@@ -93,6 +93,49 @@
   --shadow-sidebar: var(--sidebar-shadow);
 }
 
+/*
+ * Motion: every transition utility defaults to 200ms ease-out, so hover and
+ * focus changes fade instead of snapping. Enter and exit animations of
+ * overlays use the same duration (tw-animate-css, duration-200).
+ */
+@theme {
+  --default-transition-duration: 200ms;
+  --default-transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* What changes on hover, focus and selection: colors, fills, shadows (rings), opacity and filters (brightness). */
+@utility transition-interactive {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, box-shadow, opacity, filter;
+  transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+  transition-duration: var(--tw-duration, var(--default-transition-duration));
+}
+
+/* Loading placeholders: a soft light sweep over the muted block. */
+@utility skeleton-shimmer {
+  overflow: hidden;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, var(--skeleton-shine) 50%, transparent 100%);
+    transform: translateX(-100%);
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::after {
+      display: none;
+    }
+  }
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 /* Chart lines draw in once (a growing clip), fills fade in after. */
 @theme {
   --animate-chart-reveal: chart-reveal 1.6s ease-out both;
@@ -117,6 +160,15 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-chart-reveal,
   .animate-chart-fade {
+    animation: none;
+  }
+
+  /*
+   * Menus, dialogs, sheets and tooltips open and close at once (tw-animate-css
+   * enter and exit). Unlayered, so it wins over the utilities layer.
+   */
+  [class*="animate-in"],
+  [class*="animate-out"] {
     animation: none;
   }
 }

@@ -6,3 +6,67 @@
 
 /* Tailwind only scans this package by default; the UI kit lives in packages/ui. */
 @source "../../../packages/ui/src";
+
+@layer base {
+  /*
+   * Everything clickable shows the hand (Tailwind's preflight gives buttons
+   * the arrow), and disabled controls say so. :where() keeps these at zero
+   * specificity, so a cursor utility on an element still wins.
+   */
+  :where(
+    button,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    a[href],
+    summary,
+    label[for],
+    select,
+    input[type="file"],
+    input[type="checkbox"],
+    input[type="radio"]
+  ),
+  :where(input[type="file"])::file-selector-button {
+    cursor: pointer;
+  }
+
+  :where(button:disabled, select:disabled, input:disabled, textarea:disabled, [role]:is([aria-disabled="true"], [data-disabled])),
+  :where(input[type="file"]:disabled)::file-selector-button {
+    cursor: not-allowed;
+  }
+
+  /*
+   * Hover, focus and selection fade on every interactive element (200ms
+   * ease-out from the kit's theme), also where a screen styles one directly.
+   * A transition utility on the element replaces this. The editor and the
+   * terminal draw their own widgets and stay as they are.
+   */
+  :where(
+    a[href],
+    button,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    input,
+    textarea,
+    select,
+    summary,
+    label[for]
+  ):not(:where(.monaco-editor, .xterm) *) {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, box-shadow, opacity, filter;
+    transition-timing-function: var(--default-transition-timing-function);
+    transition-duration: var(--default-transition-duration);
+  }
+}

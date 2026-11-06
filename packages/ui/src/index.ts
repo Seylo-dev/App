@@ -21,6 +21,7 @@ export * from "./components/kbd";
 export * from "./components/key-value";
 export * from "./components/labels";
 export * from "./components/log-viewer";
+export * from "./components/motion";
 export * from "./components/page-header";
 export * from "./components/popover";
 export * from "./components/progress";
