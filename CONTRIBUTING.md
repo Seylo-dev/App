@@ -52,6 +52,7 @@ A real node agent needs Linux and Docker; see "Tests in a VM" below.
 | `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` |
 | `make breaking` | `buf breaking` against `main` |
 | `make release-snapshot` | Release binaries and `install.sh` into `dist/` (no signing, image or publish) |
+| `make release-dry-run` | goreleaser as a release runs it, in snapshot mode: signed, one panel image per platform loaded into Docker, nothing pushed |
 | `make e2e` | The three-VM end-to-end test (below) |
 
 Before you open a pull request:
@@ -154,12 +155,58 @@ ported from other projects keeps its original notice and is listed in
 
 ## Releases
 
-Maintainers only. `make release` runs from a `v*` tag with `GITHUB_TOKEN`,
-`MINISIGN_SECRET_KEY` (the release key file), `MINISIGN_PASSWORD` and a
-`docker login ghcr.io`. `scripts/release-preflight.sh` first refuses a
-placeholder or test signing key in `brand/brand.json`, a secret key that
-does not match it, `INSTALLER_TEST_PUBLIC_KEY` in the environment and a
-repository the token cannot push to. goreleaser then makes a draft release
-with the binaries, signed checksums, `install.sh`, `openapi.json` and the
-multi-arch panel image, and `scripts/release-manifest.sh` adds the signed
-update manifest. Review the draft before publishing it.
+Maintainers only. Releases are built by GitHub Actions
+(`.github/workflows/release.yml`) from a pushed `v*` tag and land as a
+draft that a maintainer publishes by hand.
+
+Once, before the first release:
+
+1. Make the release key pair with [minisign](https://jedisct1.github.io/minisign/):
+   `minisign -G -p release.pub -s release.key`. Keep the secret key and its
+   password offline (a password manager), never in the repository.
+2. Put the public key (the `RW...` line of `release.pub`) into
+   `brand/brand.json` as `minisignPublicKey`, run `make gen` and commit the
+   result. Installers, agents and panels only trust files signed by this key.
+3. Add two repository secrets (Settings > Secrets and variables > Actions):
+   `MINISIGN_SECRET_KEY` with the full contents of `release.key` and
+   `MINISIGN_PASSWORD` with its password.
+
+Each release:
+
+1. Run a dry run on `main`: Actions > Release > Run workflow, or
+   `gh workflow run release.yml -f dry_run=true`. It runs the same checks
+   and builds everything a release attaches (binaries, signed checksums,
+   `install.sh`, both panel images, the signed manifest), signed with a
+   throwaway key made inside the job, and publishes nothing. A run started
+   by hand with `dry_run` off is refused: real releases only come from tags.
+2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
+   The workflow checks that the tag is the version goreleaser derives, runs
+   `make install`, `make check-gen` and `make test`, then `make release`.
+   One release runs at a time, and a running release is never cancelled.
+3. Review the draft under Releases (files, notes) and publish it. Installs
+   and updates follow the latest published release, so nothing reaches
+   users before that. The image tags (`<version>`, and `latest` unless it is
+   a pre-release) are pushed to `ghcr.io/seylo-dev/seylo` when the draft is
+   made.
+4. After the first release only: the new package `ghcr.io/seylo-dev/seylo`
+   is private. In the org's Packages, open it, check that it is connected
+   to the `App` repository, and change its visibility to public (Package
+   settings), or installs cannot pull the panel image.
+
+If a tag release fails, fix the cause on `main`, delete the draft release
+if one was made, delete the tag (`git push origin :refs/tags/v0.1.0` and
+`git tag -d v0.1.0`) and tag again.
+
+`make release` is the local fallback and the step the workflow runs. It
+needs the `v*` tag checked out, `GITHUB_TOKEN`, `MINISIGN_SECRET_KEY` (the
+path of the key file), `MINISIGN_PASSWORD`, a `docker login ghcr.io` and a
+buildx builder that builds linux/amd64 and linux/arm64.
+`scripts/release-preflight.sh` first refuses a placeholder or test signing
+key in `brand/brand.json`, a secret key that does not match it,
+`INSTALLER_TEST_PUBLIC_KEY` in the environment and a repository the token
+cannot push to (in Actions: a workflow running in another repository than
+`brand.json`'s `githubOrg`/`githubRepo`). goreleaser then makes a draft
+release with the binaries, signed checksums, `install.sh`, `openapi.json`
+and the multi-arch panel image, and `scripts/release-manifest.sh` adds the
+signed update manifest. `make release-dry-run` is the goreleaser half of the
+dry run (it needs `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` too).
