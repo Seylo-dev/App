@@ -4,7 +4,8 @@ Bug reports, fixes and features are welcome. For anything bigger than a fix,
 open an issue first so we can agree on the approach before you write it.
 
 - Code, the installer and templates: this repository.
-- User documentation (https://docs.seylo.dev): [Seylo-dev/Docs](https://github.com/Seylo-dev/Docs).
+- User documentation (https://docs.seylo.dev): the docs app in the Website
+  repo, [Seylo-dev/Website `apps/docs`](https://github.com/Seylo-dev/Website/tree/main/apps/docs).
 - Security problems: not in a public issue; see [SECURITY.md](SECURITY.md).
 
 How the pieces fit together, the protocol and the code conventions are in

@@ -34,7 +34,7 @@ func keepFirst(pattern string) rule {
 }
 
 // Rules mirror (and go beyond) the site API's refusal rules (in the
-// private Website repo), so an upload is never refused for a secret this
+// Website repo), so an upload is never refused for a secret this
 // package should have caught.
 var secretRules = []rule{
 	// Tokens with a recognisable shape, anywhere in a line.

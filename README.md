@@ -11,7 +11,8 @@ port for the agent. Apps keep running, restarting and routing while the
 panel is away.
 
 Documentation: https://docs.seylo.dev (not online yet: until it is, read the
-pages in [Seylo-dev/Docs](https://github.com/Seylo-dev/Docs/tree/main/content/docs))
+pages in [Seylo-dev/Website](https://github.com/Seylo-dev/Website/tree/main/apps/docs/content/docs),
+the docs app's `content/docs`)
 
 > Status: pre-release. The panel, the agent and the installer run end to end
 > on test VMs (`make e2e`, 31 of 31 checks, results in
@@ -131,7 +132,8 @@ the three-VM end-to-end test (`make e2e`).
 ## Contributing and security
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Changes
-to the documentation go to [Seylo-dev/Docs](https://github.com/Seylo-dev/Docs).
+to the documentation go to the docs app in the Website repo,
+[Seylo-dev/Website `apps/docs`](https://github.com/Seylo-dev/Website/tree/main/apps/docs).
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## License

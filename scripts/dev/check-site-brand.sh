@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Maintainer check: brand/brand.json and the brand file of the private
-# Website repo (brand/brand.json there) must name the same site, docs and
+# Maintainer check: brand/brand.json and the brand file of the Website
+# repo (brand/brand.json there, which the landing page, the docs app in
+# apps/docs and the site API share) must name the same site, docs and
 # install URLs and the same GitHub repo: the agent's unit files, the
 # installer and the CLI link to what the site serves. By default it looks
 # for a Website checkout in ../seylo-site and skips when there is none.
-# The Docs repo's brand/brand.json can be passed as the argument too.
 #
 # Usage: scripts/dev/check-site-brand.sh [path to a brand.json]
 set -euo pipefail

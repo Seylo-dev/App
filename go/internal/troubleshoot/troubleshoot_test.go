@@ -234,7 +234,7 @@ func TestUpload(t *testing.T) {
 }
 
 // TestUploadToSite uploads a redacted report to a running site API (from
-// the private Website repo). Set SEYLO_TEST_SITE_URL to run it.
+// the Website repo). Set SEYLO_TEST_SITE_URL to run it.
 func TestUploadToSite(t *testing.T) {
 	site := os.Getenv("SEYLO_TEST_SITE_URL")
 	if site == "" {

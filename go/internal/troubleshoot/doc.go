@@ -6,7 +6,7 @@
 // assignments like DB_PASSWORD=...), setup and ticket links, PEM private
 // keys and email addresses become [REDACTED]; public IPs too with
 // RedactIPs. The rules are a superset of the site API's refusal rules
-// (in the private Website repo), so a redacted report is never refused.
+// (in the Website repo), so a redacted report is never refused.
 //
 // Upload posts the report to <site>/l (text body, at most 512 KiB) and
 // returns the link, its expiry and a delete token; a 422 from the site
