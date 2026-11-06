@@ -36,9 +36,11 @@ describe("template runner", () => {
   });
 
   test("memory bombs stop at the memory limit", async () => {
-    const bomb = "export function generate() { const a = []; for (;;) a.push('x'.repeat(1e5)); }";
-    await expect(runTemplate(bomb, {}, { memoryBytes: 8 * 1024 * 1024, timeoutMs: 5000 })).rejects.toThrow("generate() failed");
-  });
+    // Arrays of numbers grow memory fast (about 1.6 MB per push); repeated strings took seconds to reach the cap.
+    // The time limit is far away, so only the memory limit can stop this one.
+    const bomb = "export function generate() { const a = []; for (;;) a.push(new Array(1e5).fill(a.length)); }";
+    await expect(runTemplate(bomb, {}, { memoryBytes: 8 * 1024 * 1024, timeoutMs: 60_000 })).rejects.toThrow("out of memory");
+  }, 30_000);
 
   test("no host access: no imports, no fetch, no process", async () => {
     await expect(runTemplate('import fs from "fs"; export function generate() { return fs; }', {})).rejects.toThrow();
