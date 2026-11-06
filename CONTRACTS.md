@@ -83,7 +83,7 @@ packages use. "Built" means implemented and tested.
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox | Built (runs, failure, timeout, skip verified in the VM) |
 | `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli --rdb) in helpers from the database's own image, streamed multipart to S3/R2/MinIO (minio-go), `keep_last` retention, restores (staging folder swap, pg_restore/psql/mysql/mongorestore, Redis RDB swap), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress | Built (all five engines and volumes round-tripped through MinIO in the VM) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
-| `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun` | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
+| `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun`; an expression it cannot read is one failed `CleanupRun` per changed schedule | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
 | `hostshell` | Root login shells on the node itself for HostShell: a PTY from /dev/ptmx (`golang.org/x/sys/unix`), the agent user's login shell from /etc/passwd in a new session with a clean environment, `Manager` with the `Allowed` gate, at most 2, 15 minutes idle, `CloseAll` when the setting turns off, hang-up of the process group on close; Linux only | Built (PTY, cap, idle and close-all verified as root in the VM) |
 | `dbtools` | On-demand database web UIs (pgweb, phpMyAdmin, mongo-express, Redis Commander) signed in from the spec, stopped when idle; `ClientCommand` for pre-logged-in shells; `ExposedUsers` creates/rotates the exposed user and makes it TLS-only (Postgres: certificate + ssl + hostssl block; MySQL: SET PERSIST certificate + REQUIRE SSL; MariaDB: REQUIRE SSL on its own certificate), with the edge's ACME certificate for `tls_hostname` or a kept self-signed one | Built (all four UIs; exposed users, TLS-only logins and rotation in Postgres/MySQL/MariaDB/Mongo verified in the VM) |
 | `box` | Box idle sleep and wake through reconcile `SetSleeping`/`Resolve`, activity from edge requests and code-server's heartbeat file | Built (unit tested; not run against a real reconcile yet) |
@@ -283,7 +283,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   every 6 hours while it stays above. Runs use the same Pruner as Prune
   (one at a time, `seylo.managed` only; unused volumes only with
   `unused_volumes`) and every run, failed or not, is a durable
-  `CleanupRun` (at most 200 lines, `removed_count` is the total).
+  `CleanupRun` (at most 200 lines, `removed_count` is the total). A cron
+  expression the agent cannot read (the panel checks with another parser)
+  keeps the disk trigger and is reported once as a failed SCHEDULE run
+  that removed nothing ("the schedule cannot be read on this node: ...",
+  run id `cleanup-schedule-r<desired revision>`, so a restart on the same
+  revision is not a second one; a new one only when the schedule changes).
 - Host shells (`agent/host_shell.go`, `hostshell`): HostShell opens a root
   login shell on the node with a PTY. The agent refuses it
   (PERMISSION_DENIED) unless `NodeSettings.host_shell` is on and
@@ -638,8 +643,13 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   and unused tickets on the node (CONFLICT `reason: tooMany`, `hostShellOff`
   when off). Every 30 s an open shell checks that its browser session still
   exists, the person is still an active owner or admin and the setting is
-  on, and closes otherwise. Opening one raises a `security_change` alert;
-  turning them on raises one too.
+  on, and closes otherwise. A shell counts against the cap from the
+  socket's open, but is listed in `hostShell.status` and raises the
+  `security_change` alert only once the agent's stream answered (its
+  `HostShellInfo`); one the node refuses (config.yml `no_host_shell`, its
+  own cap, a setting it has not synced) raises none and is audited as
+  closed with `refused by the node: <message>`. Turning them on raises a
+  `security_change` alert too.
 - Model callers (transport `mcp` or `ai`, or any `mcp` token on any
   transport) only reach ops with `mcp: true`; everything else is FORBIDDEN.
 - Approval: a destructive op from a model fails with `APPROVAL_REQUIRED`
@@ -867,7 +877,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `mcp.authorizeClient` (the person, with `decision` and `access`) and
   `hostShell.close` (the person, `nodeId`, `nodeName`, `openedAt`,
   `durationSeconds`, `reason`, with the duration in `durationMs`; the open is
-  the `hostShell.open` op entry). Anonymous
+  the `hostShell.open` op entry). Open host shells are rows in
+  `host_shell_sessions` (their `last_seen_at` moves with the 30 s check), so
+  the next panel start writes the close of those a restart or crash ended,
+  with reason `the panel restarted`, `lastSeenAt` and the duration up to it. Anonymous
   client registration only goes to the panel log; `/oauth/register` is
   rate limited per address (strict class), clients nobody authorized are
   forgotten after 24 h, and at the 500-client cap the oldest unused one
@@ -884,8 +897,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (node, run id) in `cleanup_runs` (newest 100 per node, with manual
   `cleanup.run` calls) and raises `cleanup_ran` (off by default, key
   `cleanup:<node>:<run>`) or `cleanup_failed` (`cleanup-failed:<node>:<run>`).
-  `cleanup.setSchedule` is destructive (models need approval) and refuses
-  cron syntax the agent cannot read (`L`, `W`, `#`).
+  `cleanup.setSchedule` is destructive (models need approval). It and
+  `cron.create`/`cron.update` refuse cron syntax the panel's croner reads
+  but the agent's robfig/cron does not (`jobs/cron-expr.ts`
+  `nodeCronProblem`): `L`, `W`, `#`, and 7 for Sunday, also as the end of a
+  range (`1-7`, `MON-SUN`). Alert sizes use the web app's units (binary
+  steps, "3 GB").
 - Bodies read before authentication are capped while streaming: op JSON
   bodies at 4 MiB (`maxOpBodyBytes`, `readBodyText` in `@seylo/ops/elysia`),
   the GitHub webhook at 5 MiB (after answering 404 without an App). The
@@ -970,7 +987,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Re-auth scope: member invites, project and service grants and demotions are not gated (scoped access only), and API keys never are (admin keys may invite admins, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
-| Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one | Behaviour as described |
+| Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
