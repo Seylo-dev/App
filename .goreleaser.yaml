@@ -84,7 +84,8 @@ signs:
       - -x
       - "${signature}"
       - -t
-      - "{{ .ProjectName }} {{ .Version }} checksums.txt"
+      # Not .ProjectName: goreleaser does not render project_name.
+      - "{{ .Env.BRAND_SLUG }} {{ .Version }} checksums.txt"
     signature: "${artifact}.minisig"
 
 dockers_v2:

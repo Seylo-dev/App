@@ -172,25 +172,37 @@ jobs:
         run: |
           set -a && . installer/brand.env && set +a
           pub=$(sed -n 2p "$RUNNER_TEMP/dry-run-key/key.pub")
-          minisign -Vm dist/checksums.txt -P "$pub"
-          minisign -Vm dist/manifest.json -P "$pub"
-          (cd dist && sha256sum --strict --ignore-missing -c checksums.txt)
+          version=$(jq -r .version dist/metadata.json)
+          for f in checksums.txt manifest.json; do
+            out=$(minisign -Vm "dist/$f" -P "$pub")
+            echo "$out"
+            if ! grep -qxF "Trusted comment: $BRAND_SLUG $version $f" <<<"$out"; then
+              echo "::error::the signature of $f has an unexpected trusted comment"
+              exit 1
+            fi
+          done
+          # goreleaser keeps the binaries in per-target folders and uploads
+          # them under <slug>_<os>_<arch>; gather them under those names.
+          files="$RUNNER_TEMP/release-files"
+          mkdir "$files"
+          jq -r --arg prefix "${BRAND_SLUG}_" \
+            '.[] | select(.type == "Binary" and (.name | startswith($prefix))) | [.name, .path] | @tsv' \
+            dist/artifacts.json | while IFS=$'\t' read -r name path; do cp "$path" "$files/$name"; done
+          cp dist/checksums.txt dist/checksums.txt.minisig dist/manifest.json dist/manifest.json.minisig \
+            build/install.sh openapi.json "$files/"
+          (cd "$files" && sha256sum --strict -c checksums.txt)
           for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
             "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
-            checksums.txt checksums.txt.minisig manifest.json manifest.json.minisig; do
-            [ -s "dist/$f" ] || { echo "::error::dist/$f is missing"; exit 1; }
-          done
-          for f in build/install.sh openapi.json; do
-            [ -s "$f" ] || { echo "::error::$f is missing"; exit 1; }
+            checksums.txt checksums.txt.minisig install.sh openapi.json manifest.json manifest.json.minisig; do
+            [ -s "$files/$f" ] || { echo "::error::$f is missing"; exit 1; }
           done
           {
-            echo "### Dry run of $(jq -r .version dist/metadata.json) - nothing was published"
+            echo "### Dry run of $version - nothing was published"
             echo
             echo "Signed with a throwaway key made in this job. A tag release would attach:"
             echo
             echo '```'
-            (cd dist && ls -l "${BRAND_SLUG}"_* checksums.txt checksums.txt.minisig manifest.json manifest.json.minisig)
-            ls -l build/install.sh openapi.json
+            (cd "$files" && ls -l)
             echo '```'
             echo
             echo "Panel images (built per platform, not pushed):"
