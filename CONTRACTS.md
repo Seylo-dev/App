@@ -1367,22 +1367,33 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   images and verified publishers, then the rest in Docker Hub's order
   (website search `api/search/v4`, images only; `v2/search/repositories`
   when v4 fails); a query of several words is also looked up hyphenated.
-  Tags come newest first, 100 a page, with `suggested`: the most specific
-  version tag with latest's digest (looking one page further when needed),
-  else latest. Inspect reads the config for linux/amd64 or linux/arm64
-  (the caller's `arch` first): anonymous token from auth.docker.io, a free
-  HEAD for the digest, the manifest list, the platform manifest and the
-  config blob, each checked against its sha256. `client.ts` contacts only
-  `http.ts` `dockerHubHosts` (hub.docker.com, auth.docker.io,
-  registry-1.docker.io and Docker's blob CDNs production.cloudflare /
-  production.cloudfront.docker.com and its R2 bucket) over HTTPS, follows
-  redirects by hand only among them and never carries the Authorization
-  header to another host; bodies are capped while read. Caches are in
-  memory per panel: search 10 min, tags 30 min, configs by digest 7 days,
-  tokens until they expire. A 429 answers `RATE_LIMITED` (`details.reason:
-  dockerHubRateLimit`, `retryAfterSeconds`) and the client asks nothing
-  more of that limit (Hub API, HEADs, anonymous pulls, login pulls) until
-  it lifts. The oldest registry login for Docker Hub (`registries`, server
+  Pages go up to `searchMaxPage` (20, 25 results each): `hasMore` is false
+  there and the web's "Show more" stops. Tags come newest first, 100 a page,
+  with `suggested`: the most specific version tag with latest's digest
+  (looking one page further when needed), else latest. Inspect reads the
+  config for linux/amd64 or linux/arm64 (the caller's `arch` first):
+  anonymous token from auth.docker.io, a free HEAD for the digest, the
+  manifest list, the platform manifest and the config blob (at most 2 MiB),
+  each checked against its sha256. What is kept of a config is capped
+  (`configLimits`: 200 items a list, names 256 characters, values 4000,
+  label values 2000, VOLUME paths 500, and 64K characters for the whole
+  config, `configBudget`); an ENV entry whose value is too long is left out
+  rather than cut, so the image's own default applies. `registryId` is the
+  login a private image was read with (null for public ones); the web form
+  preselects it. `client.ts` contacts only `http.ts` `dockerHubHosts`
+  (hub.docker.com, auth.docker.io, registry-1.docker.io and Docker's blob
+  CDNs production.cloudflare / production.cloudfront.docker.com and its R2
+  bucket) over HTTPS, follows redirects by hand only among them and never
+  carries the Authorization header to another host; bodies are capped while
+  read. A redirect to any other host answers `UNAVAILABLE` naming that host
+  ("Docker Hub sent this panel to <host>"), and the panel log's `docker hub
+  request failed` line carries it in `detail`: that is the host to add when
+  Docker moves its CDN. Caches are in memory per panel: search 10 min, tags
+  30 min, configs by digest 7 days, tokens until they expire. A 429 answers
+  `RATE_LIMITED` (`details.reason: dockerHubRateLimit`, `retryAfterSeconds`)
+  and the client asks nothing more of that limit (Hub API, the
+  auth.docker.io token server, HEADs, anonymous pulls, login pulls) until it
+  lifts. The oldest registry login for Docker Hub (`registries`, server
   docker.io or an alias) is the panel's Docker Hub login: public images
   (proven by the anonymous HEAD) are pulled with its token so inspecting
   spends its limit; its private repositories are read (tags through a Hub
@@ -1390,13 +1401,13 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `registries.manage`, and those answers are cached apart. A refused login
   is not retried for 5 minutes. `dockerHub.create` makes one app like a
   template app (`templates/install.ts`): image `<repository>:<tag>`
-  (official images without `library/`), optional `registryId` (a Docker
-  Hub login, `assertSourceAllowed`), main TCP port, volumes named from
-  their paths (`volumeNameFor`), optional `command` (replaces CMD), the
+  (`imageRef`, official images without `library/`), optional `registryId` (a
+  Docker Hub login, `assertSourceAllowed`), main TCP port, volumes named
+  from their paths (`volumeNameFor`), optional `command` (replaces CMD), the
   .env (syntax checked, `checkEnvReferences`), the node's automatic domain
-  or first-run IP:port when `public` (default), then `queueDeploy`
-  (trigger `manual`) unless `deployNow` is false; the row is deleted again
-  when a later step fails. Tests replay recorded answers
+  or first-run IP:port when `public` (default), then `queueDeploy` (trigger
+  `manual`) unless `deployNow` is false; the row is deleted again when a
+  later step fails. Tests replay recorded answers
   (`test/fixtures/dockerhub`, `record.ts` re-records); `DOCKERHUB_LIVE=1`
   runs one live search, tag list and inspect.
 
