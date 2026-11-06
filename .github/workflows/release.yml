@@ -233,7 +233,7 @@ jobs:
           fetch-depth: 0 # goreleaser reads tags and the changelog from history
           persist-credentials: false
 
-      - name: Tag is the version goreleaser derives
+      - name: Tag is a release version on this commit
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -241,21 +241,28 @@ jobs:
             echo "::error::$TAG is not a vMAJOR.MINOR.PATCH[-PRERELEASE] tag"
             exit 1
           fi
-          # goreleaser releases the highest version tag on HEAD.
-          derived=$(git tag --points-at HEAD --sort=-version:refname | head -1)
-          if [ "$derived" != "$TAG" ]; then
-            echo "::error::goreleaser would release ${derived:-nothing} from this commit, not $TAG"
+          # make release passes the tag to goreleaser (GORELEASER_CURRENT_TAG),
+          # so other tags on the commit (an rc being promoted) do not matter.
+          if ! git tag --points-at HEAD | grep -qxF "$TAG"; then
+            echo "::error::$TAG does not point at the checked-out commit"
             exit 1
           fi
 
       - name: Release secrets are set
         env:
           KEY_SET: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+          PASSWORD_SET: ${{ secrets.MINISIGN_PASSWORD != '' }}
         run: |
+          missing=0
           if [ "$KEY_SET" != true ]; then
             echo "::error::the repository secret MINISIGN_SECRET_KEY is not set (CONTRIBUTING.md, Releases)"
-            exit 1
+            missing=1
           fi
+          if [ "$PASSWORD_SET" != true ]; then
+            echo "::error::the repository secret MINISIGN_PASSWORD is not set (CONTRIBUTING.md, Releases)"
+            missing=1
+          fi
+          exit "$missing"
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -320,6 +327,8 @@ jobs:
       # Preflight, goreleaser (draft release, image push), signed manifest.
       - name: make release
         env:
+          # Release exactly the pushed tag, not the highest tag on the commit.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MINISIGN_SECRET_KEY: ${{ runner.temp }}/release.key
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
@@ -338,6 +347,12 @@ jobs:
           fi
           draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
           [ "$draft" = true ] || { echo "::error::release $TAG is not a draft"; exit 1; }
+          # A pre-release tag must make a pre-release, or publishing it would
+          # make it the latest release that installs and updates follow.
+          want=false
+          [[ "$TAG" == *-* ]] && want=true
+          prerelease=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)
+          [ "$prerelease" = "$want" ] || { echo "::error::release $TAG has isPrerelease=$prerelease, want $want"; exit 1; }
           assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
           for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
             "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \

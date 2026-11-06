@@ -116,11 +116,20 @@ dockers_v2:
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.created: "{{ .Date }}"
 
+# With an rc and its final tag on the same commit, pick the final one (the
+# release workflow names the tag outright with GORELEASER_CURRENT_TAG).
+git:
+  prerelease_suffix: "-"
+
 release:
   github:
     owner: "{{ .Env.BRAND_GITHUB_ORG }}"
     name: "{{ .Env.BRAND_GITHUB_REPO }}"
   draft: true
+  # A vX.Y.Z-<pre> tag makes a pre-release, which GitHub never makes the
+  # latest release: installs and updates follow releases/latest, and the
+  # image gets no latest tag for it either.
+  prerelease: auto
   # install.sh is what the install host serves; openapi.json is the API
   # reference the docs sync from releases/latest/download/openapi.json.
   extra_files:

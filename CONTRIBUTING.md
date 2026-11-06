@@ -180,18 +180,21 @@ Each release:
    throwaway key made inside the job, and publishes nothing. A run started
    by hand with `dry_run` off is refused: real releases only come from tags.
 2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
-   The workflow checks that the tag is the version goreleaser derives, runs
-   `make install`, `make check-gen` and `make test`, then `make release`.
-   One release runs at a time, and a running release is never cancelled.
-3. Review the draft under Releases (files, notes) and publish it. Installs
+   The workflow checks that the tag is on the commit, runs `make install`,
+   `make check-gen` and `make test`, then `make release` for exactly that
+   tag. One release runs at a time, and a running release is never
+   cancelled. A `vX.Y.Z-<pre>` tag (`v0.1.0-rc.1`) makes a pre-release that
+   installs and updates do not follow; to promote it, tag the same commit
+   `vX.Y.Z`.
+3. The image tags (`<version>`, and `latest` unless it is a pre-release) are
+   pushed to `ghcr.io/seylo-dev/seylo` when the draft is made. On the first
+   release only, the new package is private: before publishing the draft,
+   open it in the org's Packages, check that it is connected to the `App`
+   repository and change its visibility to public (Package settings), or
+   installs cannot pull the panel image.
+4. Review the draft under Releases (files, notes) and publish it. Installs
    and updates follow the latest published release, so nothing reaches
-   users before that. The image tags (`<version>`, and `latest` unless it is
-   a pre-release) are pushed to `ghcr.io/seylo-dev/seylo` when the draft is
-   made.
-4. After the first release only: the new package `ghcr.io/seylo-dev/seylo`
-   is private. In the org's Packages, open it, check that it is connected
-   to the `App` repository, and change its visibility to public (Package
-   settings), or installs cannot pull the panel image.
+   users before that.
 
 If a tag release fails, fix the cause on `main`, delete the draft release
 if one was made, delete the tag (`git push origin :refs/tags/v0.1.0` and
