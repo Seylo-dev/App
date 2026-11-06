@@ -17,6 +17,11 @@ message DatabaseSpec {
   DatabaseExposure exposure = 5;
 }
 
+// The engines from VALKEY on need an agent that advertises the capability
+// "database.engines.v2" in NodeFacts.capabilities (it has no RPC of its
+// own): an older agent would run the container but fail its shell, web UI
+// and backups, and relay its exposed port without TLS. The panel creates
+// them only on such nodes and never sends their exposure to other agents.
 enum DatabaseEngine {
   DATABASE_ENGINE_UNSPECIFIED = 0;
   DATABASE_ENGINE_POSTGRES = 1;
@@ -24,6 +29,18 @@ enum DatabaseEngine {
   DATABASE_ENGINE_MARIADB = 3;
   DATABASE_ENGINE_MONGO = 4;
   DATABASE_ENGINE_REDIS = 5;
+  // Redis-compatible: valkey-cli, RDB dumps over the replication protocol.
+  DATABASE_ENGINE_VALKEY = 6; // added in 0.2 (engines)
+  // Redis-compatible: keydb-cli, RDB dumps; its append-only file is one
+  // file (appendonly.aof), not a folder.
+  DATABASE_ENGINE_KEYDB = 7; // added in 0.2 (engines)
+  // Redis-compatible: redis-cli; no replication dump, so backups run SAVE
+  // RDB into the data volume (the server runs with --dbfilename dump and
+  // --df_snapshot_format=false so its snapshots are dump.rdb).
+  DATABASE_ENGINE_DRAGONFLY = 8; // added in 0.2 (engines)
+  // Native protocol on 9000 (the port exposure uses), HTTP on 8123;
+  // backups are BACKUP/RESTORE through a file in the data volume.
+  DATABASE_ENGINE_CLICKHOUSE = 9; // added in 0.2 (engines)
 }
 
 // DatabaseCredentials let the agent open pre-logged-in shells, run dumps
