@@ -83,7 +83,8 @@ packages use. "Built" means implemented and tested.
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox | Built (runs, failure, timeout, skip verified in the VM) |
 | `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli --rdb) in helpers from the database's own image, streamed multipart to S3/R2/MinIO (minio-go), `keep_last` retention, restores (staging folder swap, pg_restore/psql/mysql/mongorestore, Redis RDB swap), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress | Built (all five engines and volumes round-tripped through MinIO in the VM) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
-| `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner` | Built (unlabeled look-alikes survive, verified in the VM) |
+| `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun` | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
+| `hostshell` | Root login shells on the node itself for HostShell: a PTY from /dev/ptmx (`golang.org/x/sys/unix`), the agent user's login shell from /etc/passwd in a new session with a clean environment, `Manager` with the `Allowed` gate, at most 2, 15 minutes idle, `CloseAll` when the setting turns off, hang-up of the process group on close; Linux only | Built (PTY, cap, idle and close-all verified as root in the VM) |
 | `dbtools` | On-demand database web UIs (pgweb, phpMyAdmin, mongo-express, Redis Commander) signed in from the spec, stopped when idle; `ClientCommand` for pre-logged-in shells; `ExposedUsers` creates/rotates the exposed user and makes it TLS-only (Postgres: certificate + ssl + hostssl block; MySQL: SET PERSIST certificate + REQUIRE SSL; MariaDB: REQUIRE SSL on its own certificate), with the edge's ACME certificate for `tls_hostname` or a kept self-signed one | Built (all four UIs; exposed users, TLS-only logins and rotation in Postgres/MySQL/MariaDB/Mongo verified in the VM) |
 | `box` | Box idle sleep and wake through reconcile `SetSleeping`/`Resolve`, activity from edge requests and code-server's heartbeat file | Built (unit tested; not run against a real reconcile yet) |
 | `jobrun` | Docker access of the jobs packages (moby client): one-off runs with streamed stdin/stdout/stderr, helpers by spec hash, on-demand helpers with idle reaping, Exec, cleanup inventory that re-checks `seylo.managed` before every removal; `jobrun/itest` is the VM test setup | Built (verified in the VM) |
@@ -170,7 +171,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   alerts) go through the agent's on-disk outbox and `PanelService.Report*`,
   deduped by outbox id. Progress, state deltas and metrics are best-effort
   EVENT frames. The panel stores only the durable kinds (deployProgress,
-  buildProgress, cronRun, backupResult, nodeAlert, updateResult; others get
+  buildProgress, cronRun, backupResult, nodeAlert, updateResult, cleanupRun; others get
   INVALID_ARGUMENT), at most 1 MiB per report (crash lines capped at 100 x
   2000 chars), about 10 per second per node (RESOURCE_EXHAUSTED past a burst
   of 600). A node may report only on services it runs (a placement, or a
@@ -269,7 +270,29 @@ Summary; the full rules are in `proto/README.md` and the comments of
   raises one DISK_LOW node alert per streak naming the full ones (one disk
   holding both counts once), resolved once all are at or under 85%. The
   first check after an agent start that finds them fine also sends the
-  resolve. No panel setting changes the threshold.
+  resolve. No panel setting changes the threshold. Every check also hands
+  the fullest disk's use to the scheduled cleanup's disk trigger.
+- Scheduled cleanup (`cleanup.LocalScheduler`, `agent/wire_jobs.go`): the
+  agent follows `NodeSettings.cleanup` from the desired state it keeps on
+  disk, so it runs while the panel is down and after agent restarts. A
+  cron expression (five fields, robfig/cron, in the node's own time zone:
+  `time.Local`, named in `NodeFacts.time_zone`) fires at its time; the
+  timer sleeps at most a minute, and a due time more than 5 minutes past
+  (clock jump, suspend) is skipped, like cron jobs. The disk trigger runs
+  when the fullest disk passes `disk_percent`, at most once an hour, and
+  every 6 hours while it stays above. Runs use the same Pruner as Prune
+  (one at a time, `seylo.managed` only; unused volumes only with
+  `unused_volumes`) and every run, failed or not, is a durable
+  `CleanupRun` (at most 200 lines, `removed_count` is the total).
+- Host shells (`agent/host_shell.go`, `hostshell`): HostShell opens a root
+  login shell on the node with a PTY. The agent refuses it
+  (PERMISSION_DENIED) unless `NodeSettings.host_shell` is on and
+  config.yml does not set `no_host_shell: true` (only someone with root
+  on the node can set that), checked for every shell on the agent, not
+  only on the panel; at most 2 at a time (RESOURCE_EXHAUSTED), hung up
+  after 15 minutes without input or output, and every open one is closed
+  when the setting turns off. The first message is `HostShellInfo`; the
+  agent's own log names who opened it (`opened_by`, `session_id`).
 - Refused specs: `reconcile.Runtime.Sync` validates each spec
   on its own. A refused one keeps the service's last valid spec (it keeps
   running) or is left out when there is none, the rest of the state is
@@ -330,7 +353,7 @@ local API, join and resume. The areas:
 | build | `wire_build.go` | `build`, `registry`, `compose` |
 | observe | `wire_observe.go` | `logs`, `metrics`, `console` (with `console/dockerapi`), `shell`, `fs` |
 | jobs | `wire_jobs.go` | `cron`, `backup`, `tunnel`, `cleanup`, `dbtools`, `box`, `jobrun` |
-| node | `wire_node.go` | `update`, `nodecheck`, `troubleshoot`, `cli`, `panelapi`, `systemd`, `version` |
+| node | `wire_node.go` (and `host_shell.go`) | `update`, `nodecheck`, `troubleshoot`, `cli`, `panelapi`, `systemd`, `version`, `hostshell` |
 
 - Each area has one file, `wire_<area>.go`, with two functions.
   `agent.Wire` runs every `provide<Area>(d *Deps) error` in the order
@@ -360,7 +383,8 @@ local API, join and resume. The areas:
   `Components`. Area blocks: runtime `Docker`, `Prober`, `Reconcile`;
   network `Router`, `Gate`, `Tickets`, `Wings`, `CPU`; build `Builder`;
   observe `Logs`, `Metrics`, `Files`; jobs `Cron`, `Backups`, `Cloudflare`,
-  `Pruner`; node `Updater`. A new cross-area field goes in the core block.
+  `Pruner`, `CleanupScheduler` (the node area feeds it the disk checks'
+  readings); node `Updater`. A new cross-area field goes in the core block.
 - Handlers (`Registry` is `rpc.Mux` for AgentService), by short method
   name:
 
@@ -416,6 +440,9 @@ local API, join and resume. The areas:
   unary calls, server and bidi streams, raw uploads and downloads, a
   cancel, durable reports and state deltas. `SEYLO_INTEROP_VM_TEST=<linux
   test binary>` runs the agent side in the test VM instead.
+  `testdata/nodeops-interop-driver.ts` (`TestInteropNodeOps`, run in the VM
+  for the PTY) does the same for scheduled cleanup and host shells through
+  the panel's own ops and sockets.
 
 ### Docker resources
 
@@ -600,6 +627,19 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   `invites.create` with role admin, `users.updateRole` to a higher role
   (admin or owner), `nodes.createJoinToken`. Member invites, grants and
   demotions are not gated.
+- Host shells (`modules/hostShell`): `hostShell.setEnabled` takes
+  `nodes.manage`, but turning host shells on needs the owner role and a
+  fresh browser session (`requireFreshSignIn`); turning them off works for
+  admins and API keys and closes every open one. `hostShell.open` needs
+  the global `nodes.hostShell` (owners and admins only, since global
+  actions are never granted), a fresh browser session (API keys and MCP
+  tokens are refused even with `*`; the op is `mcp: false`), the node
+  setting on, the agent's `node.host-shell.v1` and fewer than 2 open shells
+  and unused tickets on the node (CONFLICT `reason: tooMany`, `hostShellOff`
+  when off). Every 30 s an open shell checks that its browser session still
+  exists, the person is still an active owner or admin and the setting is
+  on, and closes otherwise. Opening one raises a `security_change` alert;
+  turning them on raises one too.
 - Model callers (transport `mcp` or `ai`, or any `mcp` token on any
   transport) only reach ops with `mcp: true`; everything else is FORBIDDEN.
 - Approval: a destructive op from a model fails with `APPROVAL_REQUIRED`
@@ -824,7 +864,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   may not add references outside the stack other than addresses
   (`compose/references.ts` `assertPushReferences`).
 - Audit events that are not ops: `writeAuditEvent` (`ops/audit.ts`) records
-  `mcp.authorizeClient` (the person, with `decision` and `access`). Anonymous
+  `mcp.authorizeClient` (the person, with `decision` and `access`) and
+  `hostShell.close` (the person, `nodeId`, `nodeName`, `openedAt`,
+  `durationSeconds`, `reason`, with the duration in `durationMs`; the open is
+  the `hostShell.open` op entry). Anonymous
   client registration only goes to the panel log; `/oauth/register` is
   rate limited per address (strict class), clients nobody authorized are
   forgotten after 24 h, and at the 500-client cap the oldest unused one
@@ -837,7 +880,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   reported `CERTIFICATE_FAILED` raises `certificate_failed` once per streak
   (key `certificate:<domainId>:<start>`) and stores the ACME error on the domain
   (`certificate.error`); ACTIVE resolves it. Issuer and expiry come from
-  `RouteStatus.certificate_*`.
+  `RouteStatus.certificate_*`. Every durable `CleanupRun` is stored once per
+  (node, run id) in `cleanup_runs` (newest 100 per node, with manual
+  `cleanup.run` calls) and raises `cleanup_ran` (off by default, key
+  `cleanup:<node>:<run>`) or `cleanup_failed` (`cleanup-failed:<node>:<run>`).
+  `cleanup.setSchedule` is destructive (models need approval) and refuses
+  cron syntax the agent cannot read (`L`, `W`, `#`).
 - Bodies read before authentication are capped while streaming: op JSON
   bodies at 4 MiB (`maxOpBodyBytes`, `readBodyText` in `@seylo/ops/elysia`),
   the GitHub webhook at 5 MiB (after answering 404 without an App). The
@@ -920,7 +968,9 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
 | Removing or changing the panel domain after nodes moved to it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node whose address before the move was an unpinned https:// address (another domain) has no fallback after the first cycle and cannot reach the panel until it rejoins (`seylo join --force`). Plain-HTTP nodes never move, so this does not reach them | Those nodes go offline after a domain removal or change; the node offline alert fires |
 | Re-auth scope: member invites, project and service grants and demotions are not gated (scoped access only), and API keys never are (admin keys may invite admins, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
-| Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it. The alert text says "Settings > Cleanup" while the screen is called "Docker cleanup" (`agent/disk_alert.go` `diskMessage`) | Fixed threshold; a slightly different screen name in the alert |
+| Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
+| Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
+| Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
@@ -972,6 +1022,7 @@ or the method descriptor's options (TS). Current names:
 | `tunnel.tcp.v1` | Tunnel |
 | `backup.run.v1` | RunBackup, RestoreBackup |
 | `node.prune.v1`, `node.update.v1`, `node.healthcheck.v1`, `node.troubleshoot.v1`, `node.reboot.v1`, `node.docker-update.v1` | Prune, UpdateAgent, RunHealthCheck, Troubleshoot, Reboot, UpdateDocker |
+| `node.host-shell.v1` | HostShell |
 | `node.agent-logs.v1` | AgentLogs |
 | `panel.report.v1` | ReportCrash, ReportEvent |
 | `node.panel-update.v1` | UpdatePanel |
@@ -1281,6 +1332,10 @@ origin only; a missing, used or expired ticket closes with 4401),
 20 GiB cap, or the declared `sizeBytes`). Tickets are single use, live one
 minute, sit in memory (`agent-hub/relay.ts`) and re-check the action on
 use. Terminal sessions close after 30 minutes without input or output.
+Host shells (`modules/hostShell`) use their own socket,
+`/api/streams/host-shell?t=`, with the same message shapes and the
+terminal relay (`startTerminal` in mode `host`); their tickets live in
+their own store and the session closes after 15 minutes idle.
 
 Updates: `updates.*` read `manifest.json` + `manifest.json.minisig` from
 the latest GitHub release, verified with
@@ -1315,7 +1370,7 @@ unless noted.
 
 | Area | Modules (ops + panel) | Other paths | Schema files |
 |---|---|---|---|
-| Agent hub and nodes: PanelService handlers, calls and streams to agents, in-memory node state, the desired-state compiler (DB rows to `DesiredState`/`ServiceSpec`), nodes (join tokens, can-build, wildcard, games-first, health checks, reboot, Docker updates), fleet updates, cleanup runs, relays for logs, metrics (rollups into metrics.db), console, shell and files | `nodes`, `updates`, `cleanup`, `logs`, `metrics`, `terminals`, `files` | `src/agent-hub/`, `src/desired/`, `src/db/metrics/`, `drizzle.metrics.config.ts`, `drizzle/metrics/` | `infra.ts`, `runtime.ts` |
+| Agent hub and nodes: PanelService handlers, calls and streams to agents, in-memory node state, the desired-state compiler (DB rows to `DesiredState`/`ServiceSpec`), nodes (join tokens, can-build, wildcard, games-first, health checks, reboot, Docker updates), fleet updates, cleanup runs and schedules, relays for logs, metrics (rollups into metrics.db), console, shell, host shells and files | `nodes`, `updates`, `cleanup`, `logs`, `metrics`, `terminals`, `hostShell`, `files` | `src/agent-hub/`, `src/desired/`, `src/db/metrics/`, `drizzle.metrics.config.ts`, `drizzle/metrics/` | `infra.ts`, `runtime.ts` |
 | People and access: setup link, email and password, GitHub device flow, sessions, TOTP and recovery codes, passkeys, API keys; users, invites and grants; the audit log; the op pipeline, permission checks and the op framework | `auth`, `setup`, `users`, `invites`, `grants`, `apiKeys`, `audit` | `src/auth/`, `src/security/`, `src/ops/`, `scripts/create-owner.ts`, `scripts/setup-link.ts` | `identity.ts`, `audit.ts` |
 | Services and deploys: projects, services (all kinds, compose stacks split into members), deploys, builds, releases and rollback, PR previews, push-to-deploy webhooks and deploy triggers, the per-panel GitHub App, git and registry credentials, templates (QuickJS runner) and the template catalog | `projects`, `services`, `compose`, `deployments`, `builds`, `previews`, `webhooks`, `github`, `git`, `registries`, `templates` | `src/template-runner/`, `templates/` (repository root) | `projects.ts`, `deploys.ts`, `git.ts`, `templates.ts` |
 | Networking, env and data: domains, DNS checks and the Cloudflare DNS link, middlewares, first-run IP:port access and redirect-then-close, the env editor backend and `${{svc.VAR}}` references, databases (engines, credentials, web UIs, exposure with TLS), backups and restores, dev access (timed expose, Cloudflare tunnels), Boxes, maintenance pages, signing edge tickets (with the key from `security/edge-ticket-key.ts`) | `domains`, `env`, `databases`, `backups`, `exposures`, `tunnels`, `boxes`, `maintenance` | `packages/env-analyzer/` | `env.ts`, `networking.ts`, `backups.ts` |
@@ -1414,7 +1469,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 `apps/web`, with the UI kit in `packages/ui`.
 
 - Screens: the shell (sidebar, command palette, layouts), dashboard,
-  project page, nodes, templates, setup and login are
+  project page, nodes (the node sheet's views: overview, health, cleanup,
+  shell, settings in `components/nodes/`), templates, setup and login are
   `src/routes/{__root,_app,login,setup}.tsx`, `src/routes/_app/` and
   `src/components/`. Every service and database page with all its tabs
   (overview, deployments, source, environment with Monaco, domains, logs,
@@ -1469,7 +1525,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   authenticator setup, CLI approval, GitHub link, passkey and a node join
   command each ask first and go through; `/reauth`; sign in again) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
-  four theme presets, plus the phone width and the accent check);
+  four theme presets, plus the phone width and the accent check),
+  `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
+  data: saving a schedule, allowing and opening a host shell);
   screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`
   narrow it.
 
