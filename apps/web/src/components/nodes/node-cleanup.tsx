@@ -6,7 +6,7 @@
 // cleanup) are listed too.
 
 import { cleanup, type OpInput, type OpOutput } from "@seylo/ops";
-import { useOp, useOpMutation } from "@seylo/ops/react";
+import { opQueryKey, useOp, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
@@ -20,7 +20,7 @@ import { IconRecycle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { t } from "../../i18n/t";
-import { errorMessage } from "../../lib/api";
+import { errorMessage, queryClient } from "../../lib/api";
 import { formatAgo, formatBytes, formatExpiresIn } from "../../lib/format";
 import { QueryError } from "../query-error";
 
@@ -76,7 +76,13 @@ function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) 
   const [useDisk, setUseDisk] = useState(saved.diskPercent !== null);
   const [disk, setDisk] = useState(String(saved.diskPercent ?? 80));
   const [picked, setPicked] = useState(saved.kinds);
-  const save = useOpMutation(cleanup.setSchedule, { onSuccess: () => toast.success(t("nodeCleanup.saved")) });
+  const save = useOpMutation(cleanup.setSchedule, {
+    onSuccess: () => {
+      toast.success(t("nodeCleanup.saved"));
+      // The live socket refreshes it too; this covers a socket that is down.
+      void queryClient.invalidateQueries({ queryKey: opQueryKey(cleanup.getSchedule, { nodeId }) });
+    },
+  });
 
   const next: Schedule = {
     enabled,

@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { formatAgo } from "../../lib/format";
+import { isReauthCancelled } from "../../lib/reauth";
 import type { NodeDetail } from "../../lib/types";
 import { QueryError } from "../query-error";
 import { TerminalPanel } from "../service/terminal/terminal-panel";
@@ -53,7 +54,9 @@ export function NodeShell({ node }: { node: NodeDetail }) {
         ) : (
           <span className="text-[12.5px] text-ink-strong">{t("nodeShell.ownerOnly")}</span>
         )}
-        {setEnabled.error && <Alert tone="danger">{errorMessage(setEnabled.error, t("common.unknownError"))}</Alert>}
+        {setEnabled.error && !isReauthCancelled(setEnabled.error) && (
+          <Alert tone="danger">{errorMessage(setEnabled.error, t("common.unknownError"))}</Alert>
+        )}
         <ConfirmDialog
           open={confirm}
           onOpenChange={setConfirm}
@@ -61,7 +64,14 @@ export function NodeShell({ node }: { node: NodeDetail }) {
           title={t("nodeShell.confirmTitle", { name: node.name })}
           description={t("nodeShell.confirmHint")}
           confirmLabel={t("nodeShell.enable")}
-          onConfirm={() => setEnabled.mutateAsync({ nodeId: node.id, enabled: true }).then(() => undefined)}
+          onConfirm={async () => {
+            try {
+              await setEnabled.mutateAsync({ nodeId: node.id, enabled: true });
+            } catch (error) {
+              // Closing the "Confirm it's you" dialog is not an error to show.
+              if (!isReauthCancelled(error)) throw error;
+            }
+          }}
         />
       </section>
     );
@@ -92,7 +102,9 @@ export function NodeShell({ node }: { node: NodeDetail }) {
             ))}
           </ul>
         )}
-        {setEnabled.error && <Alert tone="danger">{errorMessage(setEnabled.error, t("common.unknownError"))}</Alert>}
+        {setEnabled.error && !isReauthCancelled(setEnabled.error) && (
+          <Alert tone="danger">{errorMessage(setEnabled.error, t("common.unknownError"))}</Alert>
+        )}
       </section>
       {!s.available ? (
         <Alert tone="neutral">{t("nodeShell.unavailable")}</Alert>

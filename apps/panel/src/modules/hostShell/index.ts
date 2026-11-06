@@ -12,7 +12,6 @@ import { hostShell, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { requireFreshSignIn } from "../../auth/fresh";
-import { requireSession } from "../../auth/sign-in";
 import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { isSameOrigin } from "../../http/origin";
@@ -82,7 +81,6 @@ const setEnabled = implement(hostShell.setEnabled, (input, ctx) => {
 
 const open = implement(hostShell.open, (input, ctx) => {
   // Never an API key or MCP token, and only right after a sign-in or re-auth.
-  requireSession(ctx);
   const { user, sessionId } = requireFreshSignIn(ctx);
   const node = nodeRow(ctx, input.nodeId);
   if (!node.hostShell) {
