@@ -10,7 +10,7 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type APIRequestContext, expect, type Locator, type Page, type Response, test } from "@playwright/test";
-import { credentials, signIn, stateFile, submitPastRateLimit, totp } from "./helpers";
+import { credentials, postPastRateLimit, signIn, stateFile, submitPastRateLimit, totp, waitOut } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/reauth`;
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -41,12 +41,6 @@ function ageSessions(): void {
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Confirm it's you" });
 
 const isOp = (op: string) => (response: Response) => new URL(response.url()).pathname === `/api/v1/${op}`;
-
-async function waitOut(response: { json: () => Promise<unknown> }, page: Page): Promise<void> {
-  const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
-  const seconds = Number(/(\d+) seconds?/.exec(body.error?.message ?? "")?.[1] ?? 6);
-  await page.waitForTimeout((seconds + 1) * 1000);
-}
 
 /**
  * Clicks `button`, which sends `op`, until the answer is not 429. Strict ops
@@ -79,14 +73,6 @@ async function confirmThenRetried(page: Page, op: string, again: Locator, confir
 async function confirmWithPassword(page: Page, password = credentials.password): Promise<Response> {
   await dialog(page).getByLabel("Password").fill(password);
   return clickPastRateLimit(page, dialog(page).getByRole("button", { name: "Confirm" }), "auth.reauth");
-}
-
-async function postPastRateLimit(request: APIRequestContext, page: Page, op: string, data: unknown) {
-  for (let attempt = 0; ; attempt++) {
-    const response = await request.post(`/api/v1/${op}`, { data });
-    if (response.status() !== 429 || attempt === 5) return response;
-    await waitOut(response, page);
-  }
 }
 
 test.beforeEach(() => {
