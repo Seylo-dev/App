@@ -21,11 +21,13 @@ const result = (repository: string, publisher: string, badge: string, pullCount:
   architectures: ["amd64", "arm64"],
 });
 
+// In the order the panel ranks them (rankResults): every */gitea by pulls, so
+// the project's own image leads, then the rest in Docker Hub's order.
 const giteaResults = [
-  result("bitnamicharts/gitea", "VMware", "verified", 1_065_102, 0, "Bitnami Helm chart for Gitea"),
-  result("sbx/gitea", "Docker, Inc", "verified", 2_845, 0, "Gitea in a sandbox"),
   result("gitea/gitea", "gitea", "none", 393_711_408, 1_190, "Git with a cup of tea - A painless self-hosted Git service."),
+  result("bitnamicharts/gitea", "VMware", "verified", 1_065_102, 0, "Bitnami Helm chart for Gitea"),
   result("vulhub/gitea", "VulHub", "openSource", 12_730, 1, "Gitea images for vulnerability research"),
+  result("sbx/gitea", "Docker, Inc", "verified", 2_845, 0, "Gitea in a sandbox"),
   result("gitea/act_runner", "gitea", "none", 11_233_048, 64, "A runner for Gitea Actions"),
 ];
 
@@ -80,6 +82,7 @@ function config(repository: string, tagName: string, arch: string) {
     labels: [{ name: "org.opencontainers.image.source", value: `https://github.com/${repository}` }],
     createdAt: ago(5 * day),
     private: false,
+    registryId: null,
   };
 }
 

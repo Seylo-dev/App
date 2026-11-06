@@ -5,6 +5,7 @@ import {
   commandLine,
   defaultServiceName,
   formatCount,
+  hasNextPage,
   isNoiseEnv,
   portChoices,
   prefillEnv,
@@ -109,6 +110,14 @@ describe("display helpers", () => {
     expect(splitCommand('server /data --console-address ":9001"')).toEqual(["server", "/data", "--console-address", ":9001"]);
     expect(splitCommand("  sh -c 'echo hi there'  ")).toEqual(["sh", "-c", "echo hi there"]);
     expect(splitCommand("")).toEqual([]);
+  });
+
+  test("Show more stops at the last page dockerHub.search serves", () => {
+    expect(hasNextPage(1, true)).toBe(true);
+    expect(hasNextPage(19, true)).toBe(true);
+    // Page 21 would be refused, however many results Docker Hub still has.
+    expect(hasNextPage(20, true)).toBe(false);
+    expect(hasNextPage(3, false)).toBe(false);
   });
 });
 

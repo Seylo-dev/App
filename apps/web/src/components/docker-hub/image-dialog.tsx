@@ -112,8 +112,8 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
     dockerHubServers.has(r.server.toLowerCase()),
   );
 
-  // A private image needs the login on the node too.
-  const registryId = registryChoice === undefined ? (config?.private ? (logins[0]?.id ?? null) : null) : registryChoice;
+  // A private image needs the login on the node too: the one the panel read it with.
+  const registryId = registryChoice === undefined ? (config?.registryId ?? null) : registryChoice;
 
   // Refill the form when a different image config arrives (another tag).
   useEffect(() => {

@@ -4,7 +4,7 @@
 // Pure functions, so the form and the tests read the same rules.
 
 import { isSecretName, stringifyEnv } from "@seylo/env-analyzer";
-import type { dockerHub, OpOutput } from "@seylo/ops";
+import { dockerHub, type OpOutput } from "@seylo/ops";
 
 export type ImageConfig = OpOutput<typeof dockerHub.inspect>;
 export type SearchResult = OpOutput<typeof dockerHub.search>["results"][number];
@@ -115,6 +115,11 @@ export function formatCount(n: number): string {
   if (n < 1000) return String(n);
   const [value, unit] = n >= 1e9 ? [n / 1e9, "B"] : n >= 1e6 ? [n / 1e6, "M"] : [n / 1e3, "K"];
   return `${value >= 10 ? Math.floor(value) : Math.floor(value * 10) / 10}${unit}`;
+}
+
+/** Whether search results offer "Show more" after this page: Docker Hub has more and the next page is one dockerHub.search serves. */
+export function hasNextPage(page: number, hasMore: boolean): boolean {
+  return hasMore && page < dockerHub.searchMaxPage;
 }
 
 /** Splits a typed command into arguments: spaces separate, quotes group. */

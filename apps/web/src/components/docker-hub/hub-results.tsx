@@ -1,6 +1,7 @@
 // The Docker Hub tab of the Templates page: results for the search box in
-// the page header (dockerHub.search), official images and verified
-// publishers first, 25 at a time with "Show more". Before anything is
+// the page header (dockerHub.search) in the panel's order (images named
+// like the query, then official images and verified publishers), 25 at a
+// time with "Show more" up to dockerHub.searchMaxPage. Before anything is
 // typed it shows the popular images. Picking a result opens the setup form.
 
 import { dockerHub, OpError } from "@seylo/ops";
@@ -19,7 +20,7 @@ import { retryOp } from "../service/op-state";
 import { TemplateLogo } from "../templates/template-logo";
 import type { HubTarget } from "./image-dialog";
 import { PopularRow } from "./popular-row";
-import { formatCount, type SearchResult } from "./prefill";
+import { formatCount, hasNextPage, type SearchResult } from "./prefill";
 
 export function HubResults({ query, onPick }: { query: string; onPick: (target: HubTarget) => void }) {
   const [pages, setPages] = useState({ query, count: 1 });
@@ -103,7 +104,7 @@ function ResultsPage({
       {results.data.results.map((result) => (
         <ResultRow key={result.repository} result={result} onPick={onPick} />
       ))}
-      {last && results.data.hasMore && (
+      {last && hasNextPage(page, results.data.hasMore) && (
         <Button className="cursor-pointer self-center transition-colors duration-200" onClick={onMore}>
           {t("dockerHub.more")}
         </Button>

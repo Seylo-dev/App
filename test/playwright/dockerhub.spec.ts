@@ -6,6 +6,7 @@
 
 import { mkdirSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
+import { handlers as dockerHubHandlers } from "./demo/dockerhub";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { handlers as serviceHandlers, ids as svc } from "./demo/service";
@@ -50,10 +51,11 @@ test("search Docker Hub, pick an image and a tag, create it from the prefilled f
 
   await page.getByRole("searchbox", { name: "Search Docker Hub" }).fill("gitea");
   const results = page.getByRole("region", { name: "Docker Hub images" });
-  // Verified publishers come first.
-  await expect(results.getByRole("button").first()).toContainText("bitnamicharts/gitea");
-  await expect(results.getByRole("button").first()).toContainText("Verified");
-  await expect(results.getByRole("button", { name: /^gitea\/gitea / })).toContainText("393M pulls");
+  // The image named like the query leads (the project's own, most pulled), then the verified repackaging.
+  await expect(results.getByRole("button").first()).toContainText("gitea/gitea");
+  await expect(results.getByRole("button").first()).toContainText("393M pulls");
+  await expect(results.getByRole("button").nth(1)).toContainText("bitnamicharts/gitea");
+  await expect(results.getByRole("button").nth(1)).toContainText("Verified");
   await page.screenshot({ path: `${shots}/search.png`, fullPage: true });
 
   await results.getByRole("button", { name: /^gitea\/gitea / }).click();
@@ -96,6 +98,72 @@ test("search Docker Hub, pick an image and a tag, create it from the prefilled f
     deployNow: true,
   });
   expect(created?.env).toContain("GITEA_CUSTOM=/data/gitea");
+  expect(errors).toEqual([]);
+});
+
+test("Show more stops at the last page Docker Hub search serves", async ({ page }) => {
+  const errors = trackErrors(page);
+  const pages: number[] = [];
+  await installDemo(page, {
+    overrides: {
+      // Docker Hub always has more for a busy query; one result a page keeps the run short.
+      "dockerHub.search": (input) => {
+        const n = Number(input.page ?? 1);
+        pages.push(n);
+        const row = { repository: `demo/app-${n}`, publisher: "demo", description: "", pullCount: 1, stars: 0, badge: "none" };
+        return { results: [{ ...row, updatedAt: null, architectures: [] }], page: n, hasMore: true };
+      },
+    },
+  });
+  await page.goto(`/templates?project=${ids.acme}&tab=docker-hub&q=nginx`);
+  const results = page.getByRole("region", { name: "Docker Hub images" });
+  const more = page.getByRole("button", { name: "Show more" });
+  for (let n = 2; n <= 20; n++) {
+    await more.click();
+    await expect(results.getByRole("button", { name: new RegExp(`^demo/app-${n} `) })).toBeVisible();
+  }
+  // Page 20 is the last one dockerHub.search accepts: no button, no request for 21.
+  await expect(more).toHaveCount(0);
+  expect(Math.max(...pages)).toBe(20);
+  expect(errors).toEqual([]);
+});
+
+test("a private image preselects the Docker Hub login the panel read it with", async ({ page }) => {
+  const errors = trackErrors(page);
+  let created: Record<string, any> | null = null;
+  const login = (id: string, name: string, createdAt: string) => ({
+    id,
+    name,
+    server: "docker.io",
+    username: name,
+    usedBy: 0,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  await installDemo(page, {
+    overrides: {
+      // Sorted by name, as registries.list answers: the login that reads the image is the second one.
+      "registries.list": () => ({
+        registries: [login("reg0000000000002", "alpha-hub", "2026-10-02T10:00:00Z"), login("reg0000000000001", "zeta-hub", "2026-10-01T10:00:00Z")],
+      }),
+      "dockerHub.inspect": (input) => ({
+        ...(dockerHubHandlers["dockerHub.inspect"]?.(input) as object),
+        private: true,
+        registryId: "reg0000000000001",
+      }),
+      "dockerHub.create": (input) => {
+        created = input;
+        return { ...(serviceHandlers["services.get"]?.({ serviceId: svc.api }) as object), name: input.name };
+      },
+    },
+  });
+  await page.goto(`/templates?project=${ids.acme}&tab=docker-hub&q=gitea`);
+  await page.getByRole("region", { name: "Docker Hub images" }).getByRole("button", { name: /^gitea\/gitea / }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("combobox", { name: "Pull with" })).toContainText("zeta-hub");
+  await dialog.getByRole("button", { name: "Create and deploy" }).click();
+  await expect(page).toHaveURL(new RegExp(`/p/${svc.project}/s/${svc.api}`));
+  expect(created).toMatchObject({ repository: "gitea/gitea", registryId: "reg0000000000001" });
   expect(errors).toEqual([]);
 });
 
