@@ -8,8 +8,8 @@
 import { templates } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { SegmentedItem, SegmentPill, Segmented } from "@seylo/ui/components/segmented";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -97,16 +97,19 @@ function TemplatesPage() {
         }
         className="self-start"
       >
-        <SegmentedItem value="templates" className="transition-colors duration-200">
-          {t("dockerHub.tabTemplates")}
-        </SegmentedItem>
-        <SegmentedItem value="docker-hub" className="transition-colors duration-200">
-          {t("dockerHub.tabDockerHub")}
-        </SegmentedItem>
+        <SegmentedItem value="templates">{t("dockerHub.tabTemplates")}</SegmentedItem>
+        <SegmentedItem value="docker-hub">{t("dockerHub.tabDockerHub")}</SegmentedItem>
       </Segmented>
 
       {hub && <HubResults query={hubQuery} onPick={setImage} />}
 
+      {!hub && all.isPending && (
+        <div aria-hidden="true" className="flex max-w-full gap-0.5 self-start rounded-control bg-track p-[3px]">
+          {["w-9", "w-[86px]", "w-[74px]", "w-[82px]", "w-16", "w-12", "w-[104px]"].map((width) => (
+            <Skeleton key={width} className={`h-7 rounded-chip bg-card/70 ${width}`} />
+          ))}
+        </div>
+      )}
       {!hub && categories.length > 0 && (
         <fieldset
           aria-label={t("templates.categories")}
@@ -126,11 +129,11 @@ function TemplatesPage() {
       {hub ? null : list.isError && !list.data ? (
         <QueryError error={list.error} onRetry={() => void list.refetch()} />
       ) : list.isPending ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
-          {[0, 1, 2, 3, 4, 5].map((key) => (
-            <Skeleton key={key} className="h-[140px] rounded-card" />
+        <LoadingRegion label={t("common.loading")} className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((key) => (
+            <TemplateCardSkeleton key={key} />
           ))}
-        </div>
+        </LoadingRegion>
       ) : list.data.templates.length === 0 ? (
         <div className="rounded-card bg-card shadow-card">
           <EmptyState icon={<IconLayoutGrid />} title={t("templates.empty")} description={t("templates.emptyHint")} />
@@ -166,6 +169,28 @@ function TemplatesPage() {
   );
 }
 
+/** A template card while the catalog loads: logo, name and category, two lines of description, what it creates. */
+function TemplateCardSkeleton() {
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5 rounded-card bg-card p-4 shadow-card">
+      <span className="flex items-center gap-[11px]">
+        <Skeleton className="size-9 shrink-0 rounded-[9px]" />
+        <span className="flex min-w-0 flex-col gap-px">
+          <SkeletonText className="w-20 text-sm" />
+          <SkeletonText className="w-16 text-xs" />
+        </span>
+      </span>
+      <span className="flex flex-col">
+        <SkeletonText className="w-full text-[12.5px] leading-[1.45]" />
+        <SkeletonText className="w-2/3 text-[12.5px] leading-[1.45]" />
+      </span>
+      <span className="mt-auto border-t border-divider pt-2.5">
+        <SkeletonText className="w-20 text-[11.5px]" />
+      </span>
+    </div>
+  );
+}
+
 function CategoryButton({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
@@ -173,10 +198,11 @@ function CategoryButton({ pressed, onClick, children }: { pressed: boolean; onCl
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "h-7 cursor-pointer rounded-chip border-0 px-3 text-[12.5px]",
-        pressed ? "bg-card font-medium text-foreground shadow-segment" : "bg-transparent text-ink-strong hover:text-foreground",
+        "relative isolate h-7 cursor-pointer rounded-chip border-0 bg-transparent px-3 text-[12.5px]",
+        pressed ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >
+      {pressed && <SegmentPill layoutId="template-categories" />}
       {children}
     </button>
   );

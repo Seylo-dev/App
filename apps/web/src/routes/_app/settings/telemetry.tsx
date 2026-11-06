@@ -7,12 +7,14 @@ import { useOp } from "@seylo/ops/react";
 import { CodeBlock } from "@seylo/ui/components/code-block";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { SectionCard } from "@seylo/ui/components/section-card";
+import { SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { createFileRoute } from "@tanstack/react-router";
 import { formatDateTime, formatRelative } from "../../../components/settings/format";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { QueryView } from "../../../components/settings/op-state";
 import { SettingRow, SettingsPage } from "../../../components/settings/page";
+import { SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/telemetry")({
@@ -30,7 +32,22 @@ function TelemetryPage() {
   return (
     <SettingsPage title={t("settings.telemetry.title")} subtitle={t("settings.telemetry.subtitle")}>
       <SectionCard>
-        <QueryView query={state} skeletonRows={1}>
+        <QueryView
+          query={state}
+          skeleton={
+            <>
+              <SettingRowSkeleton titleWidth="w-44" />
+              <div className="flex flex-col">
+                {[0, 1].map((i) => (
+                  <div key={i} className="flex min-h-10 items-center gap-4 border-t border-divider py-2 first:border-t-0">
+                    <SkeletonText className="w-28 shrink-0 text-[13px] sm:w-36" />
+                    <SkeletonText className="w-48 text-[12.5px]" />
+                  </div>
+                ))}
+              </div>
+            </>
+          }
+        >
           {(data) => (
             <>
               <SettingRow

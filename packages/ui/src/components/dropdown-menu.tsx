@@ -1,6 +1,7 @@
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { DropdownMenu as Menu } from "radix-ui";
 import type * as React from "react";
+import { popperMotion } from "../lib/overlay-motion";
 import { cn } from "../lib/utils";
 
 export const DropdownMenu = Menu.Root;
@@ -9,16 +10,24 @@ export const DropdownMenuGroup = Menu.Group;
 export const DropdownMenuSub = Menu.Sub;
 export const DropdownMenuRadioGroup = Menu.RadioGroup;
 
-const surface =
-  "z-50 min-w-44 overflow-hidden rounded-control bg-popover p-1 text-popover-foreground shadow-popover outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95";
+const surface = cn(
+  "z-50 min-w-44 overflow-hidden rounded-control bg-popover p-1 text-popover-foreground shadow-popover outline-none",
+  popperMotion,
+);
 
 const item =
-  "relative flex cursor-pointer select-none items-center gap-2 rounded-chip px-2.5 py-[7px] text-[13px] text-ink-strong outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-muted data-[highlighted]:text-foreground data-[disabled]:opacity-50 [&_svg]:shrink-0 [&_svg]:text-ink-faint";
+  "relative flex cursor-pointer select-none items-center gap-2 rounded-chip px-2.5 py-[7px] text-[13px] text-ink-strong outline-none transition-interactive data-[disabled]:pointer-events-none data-[highlighted]:bg-muted data-[highlighted]:text-foreground data-[disabled]:opacity-50 [&_svg]:shrink-0 [&_svg]:text-ink-faint";
 
 export function DropdownMenuContent({ className, sideOffset = 6, align = "end", ...props }: React.ComponentProps<typeof Menu.Content>) {
   return (
     <Menu.Portal>
-      <Menu.Content data-slot="dropdown-menu" sideOffset={sideOffset} align={align} className={cn(surface, className)} {...props} />
+      <Menu.Content
+        data-slot="dropdown-menu"
+        sideOffset={sideOffset}
+        align={align}
+        className={cn(surface, "origin-(--radix-dropdown-menu-content-transform-origin)", className)}
+        {...props}
+      />
     </Menu.Portal>
   );
 }
@@ -86,7 +95,7 @@ export function DropdownMenuSubTrigger({ className, children, ...props }: React.
 export function DropdownMenuSubContent({ className, ...props }: React.ComponentProps<typeof Menu.SubContent>) {
   return (
     <Menu.Portal>
-      <Menu.SubContent className={cn(surface, className)} {...props} />
+      <Menu.SubContent className={cn(surface, "origin-(--radix-dropdown-menu-content-transform-origin)", className)} {...props} />
     </Menu.Portal>
   );
 }

@@ -12,6 +12,7 @@ import { Card } from "@seylo/ui/components/card";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Input } from "@seylo/ui/components/input";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
@@ -21,7 +22,7 @@ import { BrandAssetTile } from "../../../components/settings/appearance/brand-as
 import { CssEditor } from "../../../components/settings/appearance/css-editor";
 import { accentChoices, normalizeHex, presetSwatches } from "../../../components/settings/appearance/presets";
 import { invalidateOps } from "../../../components/settings/mutation";
-import { LoadingLines, OpErrorCallout, toastError } from "../../../components/settings/op-state";
+import { OpErrorCallout, toastError } from "../../../components/settings/op-state";
 import { t } from "../../../i18n/t";
 import { opClient } from "../../../lib/api";
 import { refreshBoot as refreshSharedBoot } from "../../../lib/theme";
@@ -49,11 +50,63 @@ function AppearancePage() {
   if (!appearance.data || !branding.data || !me.data) {
     return (
       <Shell>
-        <LoadingLines rows={6} />
+        <AppearanceSkeleton />
       </Shell>
     );
   }
   return <AppearanceEditor saved={appearance.data} savedBranding={branding.data} isOwner={me.data.viewer.role === "owner"} />;
+}
+
+/** The theme card, branding and custom CSS while the saved look loads; titles are real, values are placeholders. */
+function AppearanceSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")} className="flex flex-col gap-[18px]">
+      <Card className="gap-4 px-[22px] py-5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h2 className="m-0 text-[15px] font-semibold">{t("settingsAppearance.theme")}</h2>
+          <Skeleton className="ml-auto h-[35px] w-[184px]" />
+        </div>
+        <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[169px] rounded-card" />
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5 border-t border-divider pt-3.5 text-[13px]">
+          <span className="mr-0.5 font-medium text-ink-strong">{t("settingsAppearance.accent")}</span>
+          <Skeleton className="h-[30px] w-[88px] rounded-full" />
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="size-6 rounded-full" />
+          ))}
+          <Skeleton className="ml-1 h-9 w-[104px]" />
+        </div>
+      </Card>
+      <div className="flex flex-wrap items-start gap-4">
+        <Card className="min-w-0 flex-[1_1_340px] gap-3.5 px-[22px] py-5">
+          <h2 className="m-0 text-[15px] font-semibold">{t("settingsAppearance.branding.title")}</h2>
+          <div className="flex flex-col gap-1.5">
+            <SkeletonText className="w-20 text-[12.5px]" />
+            <Skeleton className="h-[38px]" />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-[72px]" />
+            ))}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <SkeletonText className="w-32 text-[12.5px]" />
+            <Skeleton className="h-[38px]" />
+          </div>
+          <SkeletonText className="w-56 text-[13px]" />
+        </Card>
+        <div className="flex h-[371px] min-w-0 flex-[1_1_340px] flex-col overflow-hidden rounded-card bg-terminal shadow-card">
+          <div className="flex flex-wrap items-center gap-2.5 bg-terminal-bar px-[18px] py-3.5">
+            <h2 className="m-0 text-[15px] font-semibold text-terminal-foreground">{t("settingsAppearance.css.title")}</h2>
+            <span className="text-xs text-terminal-muted">{t("settingsAppearance.css.hint")}</span>
+          </div>
+        </div>
+      </div>
+    </LoadingRegion>
+  );
 }
 
 function Shell({ actions, children }: { actions?: React.ReactNode; children: React.ReactNode }) {

@@ -14,6 +14,7 @@ import { Input } from "@seylo/ui/components/input";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
+import { FieldSkeleton, Skeleton } from "@seylo/ui/components/skeleton";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { ActionPicker } from "../action-picker";
@@ -51,7 +52,18 @@ export function UserSheet({
 function UserDetail({ userId, viewer, onClose }: { userId: string; viewer: { id: string; role: RoleName }; onClose: () => void }) {
   const query = useOp(users.get, { userId });
   return (
-    <QueryView query={query} className="p-5">
+    <QueryView
+      query={query}
+      className="flex flex-col gap-4 p-5"
+      skeleton={
+        <>
+          <FieldSkeleton labelWidth="w-14" />
+          <FieldSkeleton labelWidth="w-12" />
+          <FieldSkeleton labelWidth="w-10" />
+          <Skeleton className="h-28" />
+        </>
+      }
+    >
       {({ user, grants }) => <UserBody user={user} grants={grants} viewer={viewer} onClose={onClose} />}
     </QueryView>
   );

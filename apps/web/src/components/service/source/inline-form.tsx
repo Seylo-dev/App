@@ -5,7 +5,7 @@
 import { builds, services } from "@seylo/ops";
 import { useOp, useOpClient } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
@@ -18,7 +18,14 @@ const starter = "FROM nginx:1.27-alpine\nCOPY <<EOF /usr/share/nginx/html/index.
 
 export function InlineForm({ service }: { service: ServiceDetail }) {
   const settings = useOp(builds.getSettings, { serviceId: service.id }, { retry: retryOp });
-  if (settings.isPending) return <Skeleton className="h-80 w-full" />;
+  if (settings.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3">
+        <Skeleton className="h-[360px]" />
+        <SkeletonText className="w-80 text-xs" />
+        <ButtonSkeleton className="w-24" />
+      </LoadingRegion>
+    );
   if (settings.isError) return <OpErrorNote error={settings.error} />;
   return <InlineEditor service={service} initial={settings.data.settings.inlineDockerfile ?? starter} />;
 }

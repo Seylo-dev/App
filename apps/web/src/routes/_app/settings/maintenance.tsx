@@ -8,7 +8,8 @@ import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
-import { SectionCard } from "@seylo/ui/components/section-card";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { createFileRoute } from "@tanstack/react-router";
@@ -17,6 +18,7 @@ import { formatRelative } from "../../../components/settings/format";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { QueryView } from "../../../components/settings/op-state";
 import { Field, FormActions, SettingRow, SettingsPage } from "../../../components/settings/page";
+import { FormActionsSkeleton, SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/maintenance")({
@@ -30,9 +32,33 @@ function MaintenancePage() {
   const query = useOp(maintenance.getGlobal, {});
   return (
     <SettingsPage title={t("settings.maintenance.title")} subtitle={t("settings.maintenance.subtitle")}>
-      <QueryView query={query}>{(data) => <MaintenanceForm key={data.updatedAt ?? "new"} saved={data} />}</QueryView>
+      <QueryView query={query} skeleton={<MaintenanceSkeleton />} className="flex flex-col gap-5">
+        {(data) => <MaintenanceForm key={data.updatedAt ?? "new"} saved={data} />}
+      </QueryView>
       <Preview />
     </SettingsPage>
+  );
+}
+
+function MaintenanceSkeleton() {
+  return (
+    <>
+      <SectionCardSkeleton header={false}>
+        <SettingRowSkeleton titleWidth="w-32" />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-32" description="w-80" footer={<SkeletonText className="w-32" />}>
+        <div className="flex flex-col gap-1.5">
+          <SkeletonText className="w-20 text-[12.5px]" />
+          <Skeleton className="h-[88px]" />
+          <SkeletonText className="w-60 text-xs" />
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Skeleton className="h-[65px] bg-raised" />
+          <Skeleton className="h-[65px] bg-raised" />
+        </div>
+        <FormActionsSkeleton />
+      </SectionCardSkeleton>
+    </>
   );
 }
 
@@ -117,7 +143,7 @@ function Preview() {
   const preview = useOp(maintenance.preview, {});
   return (
     <SectionCard title={t("settings.maintenance.previewTitle")} description={t("settings.maintenance.previewDescription")}>
-      <QueryView query={preview} skeletonRows={4}>
+      <QueryView query={preview} skeleton={<Skeleton className="h-[380px] bg-raised" />}>
         {(data) => (
           // No scripts, no same-origin: the page is shown, never run with the panel's cookies.
           <iframe

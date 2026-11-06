@@ -26,12 +26,18 @@ export function ProjectActivity({ projectId }: { projectId: string }) {
       <DataTable
         aria-label={t("project.tabs.activity")}
         loading={list.isPending}
+        skeletonRows={5}
         rows={list.data?.entries ?? []}
         getRowId={(entry) => entry.id}
         empty={<EmptyState compact icon={<IconActivity />} title={t("project.activity.empty")} />}
         columns={[
           { id: "when", header: t("project.activity.when"), cell: (entry) => formatAgo(entry.at), width: "120px" },
-          { id: "who", header: t("project.activity.who"), cell: (entry) => <span className="truncate">{entry.actor.label}</span> },
+          {
+            id: "who",
+            header: t("project.activity.who"),
+            skeletonWidth: "39%",
+            cell: (entry) => <span className="truncate">{entry.actor.label}</span>,
+          },
           {
             id: "what",
             header: t("project.activity.what"),
@@ -40,6 +46,7 @@ export function ProjectActivity({ projectId }: { projectId: string }) {
           {
             id: "outcome",
             header: t("project.activity.outcome"),
+            skeletonWidth: "22%",
             cell: (entry) =>
               entry.outcome === "ok" ? (
                 <Chip tone="green">{t("project.activity.ok")}</Chip>

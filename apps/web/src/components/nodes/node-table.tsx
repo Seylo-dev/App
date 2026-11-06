@@ -3,13 +3,13 @@
 // the can-build and games-first switches; Health and Settings. The live
 // topic "panel" refreshes it when a node changes or reports usage.
 
-import { nodes, updates } from "@seylo/ops";
+import { nodes, system, updates } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { Tip } from "@seylo/ui/components/tooltip";
 import { cn } from "@seylo/ui/lib/utils";
@@ -32,6 +32,8 @@ const healthTone = { pass: "text-status-ok", warn: "text-status-busy", fail: "te
 
 export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView) => void }) {
   const list = useOp(nodes.list, {});
+  // The sidebar already knows how many nodes there are: one placeholder row each.
+  const nodeCount = useOp(system.info, {}).data?.nodes.total ?? 3;
   const failed = (error: unknown) => toast.error(errorMessage(error, t("common.unknownError")));
   const setCanBuild = useOpMutation(nodes.setCanBuild, { onSuccess: () => void list.refetch(), onError: failed });
   const setGamesFirst = useOpMutation(nodes.setGamesFirstCpu, { onSuccess: () => void list.refetch(), onError: failed });
@@ -43,7 +45,7 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
 
   return (
-    <section aria-label={t("nodes.list")} className="relative overflow-x-auto rounded-card bg-card shadow-card">
+    <section aria-label={t("nodes.list")} aria-busy={list.isPending} className="relative overflow-x-auto rounded-card bg-card shadow-card">
       <table className="w-full min-w-[980px] border-collapse text-[13px]">
         <thead>
           <tr className="text-left text-xs text-muted-foreground">
@@ -59,13 +61,11 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
           </tr>
         </thead>
         <tbody>
-          {list.isPending && (
-            <tr>
-              <td colSpan={7} className="px-[18px] py-4">
-                <Skeleton className="h-16" />
-              </td>
-            </tr>
-          )}
+          {list.isPending &&
+            Array.from({ length: Math.max(1, nodeCount) }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per node.
+              <NodeRowSkeleton key={i} />
+            ))}
           {list.data?.nodes.length === 0 && (
             <tr>
               <td colSpan={7}>
@@ -197,6 +197,58 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
         </tbody>
       </table>
     </section>
+  );
+}
+
+/**
+ * A node row while the list loads, in the real row's cells and line
+ * heights. The cells carry the widths the columns get with typical data,
+ * so the header wraps the same way before and after.
+ */
+function NodeRowSkeleton() {
+  return (
+    <tr>
+      <Td first className="w-[257px]">
+        <div className="flex items-start gap-3">
+          <Skeleton className="size-8 shrink-0 rounded-full" />
+          <div className="flex min-w-0 flex-col">
+            <SkeletonText className="w-20 text-[13.5px] leading-[18px]" />
+            <SkeletonText className="mt-0.5 w-32 text-xs" />
+            <Skeleton className="mt-[7px] h-[21px] w-20 rounded-chip" />
+          </div>
+        </div>
+      </Td>
+      <Td className="w-[142px]">
+        <SkeletonText className="w-24 text-[12.5px] leading-[18px]" />
+        <SkeletonText className="mt-[3px] w-28 text-xs" />
+      </Td>
+      <Td className="w-[230px]">
+        <div className="grid grid-cols-[34px_minmax(0,1fr)_76px] items-center gap-x-2.5 gap-y-2 text-xs text-muted-foreground">
+          {[t("nodes.cpu"), t("nodes.ram"), t("nodes.disk")].map((label) => (
+            <span key={label} className="contents">
+              <span>{label}</span>
+              <Skeleton className="h-1.5 rounded-[3px]" />
+              <SkeletonText className="w-12" />
+            </span>
+          ))}
+        </div>
+      </Td>
+      <Td className="w-[107px]">
+        <SkeletonText className="w-12 text-[12.5px] leading-[18px]" />
+      </Td>
+      <Td className="w-[98px]">
+        <SkeletonText className="w-12 text-[12.5px] leading-[18px]" />
+      </Td>
+      <Td className="w-[107px]">
+        <SkeletonText className="w-16 text-[12.5px] leading-[18px]" />
+      </Td>
+      <Td last className="w-[190px] text-right whitespace-nowrap">
+        <div className="flex justify-end gap-1.5">
+          <Skeleton className="h-7 w-[74px] rounded-[7px]" />
+          <Skeleton className="h-7 w-[66px] rounded-[7px]" />
+        </div>
+      </Td>
+    </tr>
   );
 }
 

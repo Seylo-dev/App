@@ -9,7 +9,7 @@ import { cn } from "../lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./dropdown-menu";
 import { EmptyState } from "./empty-state";
 import { useUiLabels } from "./labels";
-import { Skeleton } from "./skeleton";
+import { SkeletonText } from "./skeleton";
 
 export type { SortState } from "../lib/sort";
 
@@ -22,6 +22,15 @@ export interface DataTableColumn<T> {
   align?: "left" | "right";
   /** Width like "120px" or "30%"; omit to share the rest. */
   width?: string;
+  /**
+   * The width this column usually ends up with once rows are in, like "18%"
+   * (of the table) or "140px". Only the loading placeholder cells take it,
+   * so the header stays where it is when the rows arrive. Give it to every
+   * column but one: that one takes the rest, as it does with real rows.
+   */
+  skeletonWidth?: string;
+  /** 2 when the cells show a 13px line over a 12px detail line (a name and its email), so placeholder rows are as tall. */
+  skeletonLines?: 1 | 2;
   className?: string;
   /** Hide the column under the md breakpoint. */
   hideOnMobile?: boolean;
@@ -55,6 +64,8 @@ export interface DataTableProps<T> {
   empty?: ReactNode;
   /** Skeleton rows while the first page loads. */
   loading?: boolean;
+  /** How many skeleton rows: about as many as the first page usually has. Default 3. */
+  skeletonRows?: number;
   /** Below this width the table scrolls sideways instead of squeezing. */
   minWidth?: number;
   /** No card around it (when it sits inside a SectionCard). */
@@ -73,6 +84,7 @@ export function DataTable<T>({
   onRowClick,
   empty,
   loading = false,
+  skeletonRows = 3,
   minWidth,
   bare = false,
   className,
@@ -128,7 +140,7 @@ export function DataTable<T>({
                       onClick={() => toggleSort(col.id)}
                       title={active && !sort?.desc ? labels.sortDescending : labels.sortAscending}
                       className={cn(
-                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-medium text-inherit hover:text-foreground",
+                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-medium text-inherit transition-interactive hover:text-foreground",
                         active && "text-foreground",
                         col.align === "right" && "flex-row-reverse",
                       )}
@@ -160,18 +172,23 @@ export function DataTable<T>({
         <tbody>
           {loading &&
             rows.length === 0 &&
-            [0, 1, 2].map((n) => (
+            Array.from({ length: skeletonRows }, (_, n) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows.
               <tr key={`skeleton-${n}`}>
                 {columns.map((col, i) => (
                   <td
                     key={col.id}
+                    style={col.skeletonWidth ? { width: col.skeletonWidth } : undefined}
                     className={cn(
-                      "border-t border-divider py-4 first:border-t-0",
+                      "border-t border-divider py-3.5",
                       pad(i, i === colCount - 1),
                       col.hideOnMobile && "max-md:hidden",
+                      col.className,
                     )}
                   >
-                    <Skeleton className="h-3.5 w-3/4" />
+                    {/* The row's 13px line (and the 12px detail line), so the row is as tall as a loaded one. */}
+                    <SkeletonText className={cn("w-3/4", col.align === "right" && "ml-auto")} />
+                    {col.skeletonLines === 2 && <SkeletonText className={cn("w-1/2 text-xs", col.align === "right" && "ml-auto")} />}
                   </td>
                 ))}
                 {rowActions && <td className="border-t border-divider" />}
@@ -188,7 +205,7 @@ export function DataTable<T>({
               <tr
                 key={getRowId(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={cn("align-middle", onRowClick && "cursor-pointer hover:bg-raised")}
+                className={cn("align-middle", onRowClick && "cursor-pointer transition-colors hover:bg-raised")}
               >
                 {columns.map((col, i) => (
                   <td
@@ -211,7 +228,7 @@ export function DataTable<T>({
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         aria-label={labels.rowActions}
-                        className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
+                        className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
                       >
                         <IconDots size={16} />
                       </DropdownMenuTrigger>

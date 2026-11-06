@@ -11,7 +11,6 @@ import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Skeleton } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
@@ -26,6 +25,7 @@ import { volumesOf } from "../files/volumes";
 import { formatBytes, formatDateTime, formatDuration, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { RowsSkeleton } from "../service-skeletons";
 import { isDatabaseKind } from "../status";
 import type { ServiceDetail } from "../use-service";
 import { PolicyDialog } from "./policy-dialog";
@@ -91,9 +91,7 @@ export function BackupsPage({ service }: { service: ServiceDetail }) {
           </span>
         </div>
         {policies.isPending ? (
-          <div className="border-t border-divider px-5 py-4">
-            <Skeleton className="h-10" />
-          </div>
+          <RowsSkeleton rows={1} lead="switch" width="w-24" />
         ) : policies.isError ? (
           <div className="border-t border-divider px-5 py-4">
             <OpErrorNote error={policies.error} />
@@ -220,7 +218,7 @@ function RunsCard({ service }: { service: ServiceDetail }) {
         <h2 className="m-0 text-[15px] font-semibold">{t("serviceBackups.runs")}</h2>
       </div>
       {first.isPending ? (
-        <Skeleton className="mx-5 mb-4 h-10" />
+        <RowsSkeleton rows={4} lead="dot" lines={1} width="w-24" className="py-2.5" />
       ) : first.isError ? (
         <OpErrorNote error={first.error} className="mx-5 mb-4" />
       ) : runs.length === 0 ? (

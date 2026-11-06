@@ -46,7 +46,7 @@ export function CodeBlock({ code, title, tone = "light", noCopy = false, wrap = 
               type="button"
               onClick={() => void copy(code)}
               className={cn(
-                "ml-auto flex h-7 cursor-pointer items-center gap-1.5 rounded-chip border-0 bg-transparent px-2 text-[12px]",
+                "ml-auto flex h-7 cursor-pointer items-center gap-1.5 rounded-chip border-0 bg-transparent px-2 text-[12px] transition-interactive",
                 dark ? "text-terminal-muted hover:bg-terminal" : "text-ink-faint hover:bg-muted hover:text-foreground",
               )}
             >

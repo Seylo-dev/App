@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { credentials, openDashboard, signIn, stateFile, submitPastRateLimit, totp } from "./helpers";
+import { credentials, openDashboard, postPastRateLimit, signIn, stateFile, submitPastRateLimit, totp } from "./helpers";
 
 const shots = process.env.SHOTS_DIR ?? "shots";
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -198,6 +198,8 @@ test.describe("signed in", () => {
   test("sign-in with two-factor authentication asks for the code", async ({ page, browser }) => {
     // Two waits for a fresh 30 s code plus rate-limit pauses.
     test.setTimeout(240_000);
+    // Adding an authenticator needs a fresh sign-in; this session may be older than 15 minutes.
+    expect((await postPastRateLimit(page.request, page, "auth.reauth", { password: credentials.password })).ok()).toBe(true);
     const enroll = await page.request.post("/api/v1/auth.totpEnroll", { data: {} });
     test.skip(enroll.status() === 501, "auth.totpEnroll is not built yet");
     const { secret } = (await enroll.json()) as { secret: string };

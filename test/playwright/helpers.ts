@@ -2,7 +2,7 @@
 // creates through /setup, and signing in through the real form.
 
 import { createHmac } from "node:crypto";
-import { expect, type Locator, type Page } from "@playwright/test";
+import { type APIRequestContext, type APIResponse, expect, type Locator, type Page } from "@playwright/test";
 
 export const credentials = {
   email: process.env.OWNER_EMAIL ?? "owner@example.com",
@@ -32,19 +32,37 @@ export async function signIn(page: Page, account = credentials): Promise<void> {
 /**
  * Clicks `button` until `success` shows. Sign-in style ops are rate limited
  * and the form says how long to wait, so it waits that long and tries again.
+ * The alert is read without waiting for it: it can be replaced or gone by the
+ * time it is read, and waiting on a missing alert would hang the test.
  */
 export async function submitPastRateLimit(page: Page, button: Locator, success: Locator): Promise<void> {
   const alert = page.getByRole("alert");
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     if (await success.isVisible()) return;
     await button.click();
     await expect(success.or(alert).first()).toBeVisible();
     if (await success.isVisible()) return;
-    const wait = /Try again in (\d+) seconds?/.exec((await alert.textContent()) ?? "");
+    const wait = /Try again in (\d+) seconds?/.exec((await alert.allTextContents()).join(" "));
     if (!wait) break;
     await page.waitForTimeout((Number(wait[1]) + 1) * 1000);
   }
   await expect(success).toBeVisible();
+}
+
+/** Waits out a 429 answer: as long as its message says, or 6 s. */
+export async function waitOut(response: { json: () => Promise<unknown> }, page: Page): Promise<void> {
+  const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+  const seconds = Number(/(\d+) seconds?/.exec(body.error?.message ?? "")?.[1] ?? 6);
+  await page.waitForTimeout((seconds + 1) * 1000);
+}
+
+/** Posts an op until the answer is not 429 (at most 6 tries). Returns the last answer. */
+export async function postPastRateLimit(request: APIRequestContext, page: Page, op: string, data: unknown): Promise<APIResponse> {
+  for (let attempt = 0; ; attempt++) {
+    const response = await request.post(`/api/v1/${op}`, { data });
+    if (response.status() !== 429 || attempt === 5) return response;
+    await waitOut(response, page);
+  }
 }
 
 /** RFC 6238 code (SHA-1, 6 digits, 30 s) for a base32 secret, at `time` in ms. */

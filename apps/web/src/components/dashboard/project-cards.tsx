@@ -5,7 +5,8 @@
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { SegmentPill } from "@seylo/ui/components/segmented";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconFolder } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
@@ -47,10 +48,11 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
       </div>
 
       {data.pending && data.projects.length === 0 && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          <Skeleton className="h-[62px] rounded-card" />
-          <Skeleton className="h-[62px] rounded-card" />
-        </div>
+        <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <ProjectCardSkeleton rows={3} />
+          <ProjectCardSkeleton rows={2} />
+          <ProjectCardSkeleton rows={0} />
+        </LoadingRegion>
       )}
       {!data.pending && data.projects.length === 0 && (
         <div className="rounded-card bg-card shadow-card">
@@ -119,13 +121,65 @@ function ProjectCard({ project, services, onToggle }: { project: Project; servic
           {project.serviceCount === 0 && (
             <p className="m-0 border-t border-divider px-2 py-3 text-[12.5px] text-muted-foreground">{t("dashboard.noServices")}</p>
           )}
-          {project.serviceCount > 0 && !services && <Skeleton className="mx-2 mb-2 h-10" />}
+          {project.serviceCount > 0 && !services && (
+            <LoadingRegion label={t("common.loading")}>
+              {Array.from({ length: project.serviceCount }, (_, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+                <ServiceRowSkeleton key={i} />
+              ))}
+            </LoadingRegion>
+          )}
           {rows.map((service) => (
             <ServiceRow key={service.id} service={service} />
           ))}
         </div>
       )}
     </article>
+  );
+}
+
+/** A project card before the projects load: tile, name and counts, and a few service rows. */
+function ProjectCardSkeleton({ rows }: { rows: number }) {
+  return (
+    <div aria-hidden="true" className="min-w-0 overflow-hidden rounded-card bg-card shadow-card">
+      <div className="flex items-center gap-2.5 px-4 py-[15px]">
+        <Skeleton className="size-8 shrink-0" />
+        <div className="flex min-w-0 flex-col gap-px">
+          <SkeletonText className="w-24 text-sm" />
+          <SkeletonText className="w-32 text-xs" />
+        </div>
+      </div>
+      {rows > 0 && (
+        <div className="flex flex-col px-2 pb-2">
+          {Array.from({ length: rows }, (_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+            <ServiceRowSkeleton key={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A service row while the project's services load, in ServiceRow's line
+ * boxes: the status chip is one 11.5px line plus its 2px padding, like the
+ * real chip. It assumes a running service (with a usage line); a stopped
+ * one is 3px shorter.
+ */
+function ServiceRowSkeleton() {
+  return (
+    <div aria-hidden="true" className="flex items-center gap-2.5 border-t border-divider px-2 py-[9px]">
+      <Skeleton className="h-7 w-[34px] shrink-0 rounded-chip" />
+      <span className="flex min-w-0 flex-1 flex-col gap-px">
+        <SkeletonText className="w-20 text-[13.5px]" />
+        <SkeletonText className="w-44 text-[11.5px]" />
+      </span>
+      <span className="ml-auto flex shrink-0 flex-col items-end gap-[3px]">
+        <Skeleton className="h-[calc(1lh+4px)] w-16 rounded-chip text-[11.5px]" />
+        <SkeletonText className="w-20 text-[11.5px]" />
+      </span>
+    </div>
   );
 }
 
@@ -162,10 +216,11 @@ function TrackButton({ active, onClick, children }: { active: boolean; onClick: 
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "cursor-pointer rounded-chip border-0 px-[11px] py-[5px] text-[12.5px]",
-        active ? "bg-card text-foreground shadow-segment" : "bg-transparent text-ink-strong hover:text-foreground",
+        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px]",
+        active ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >
+      {active && <SegmentPill layoutId="dashboard-expand" />}
       {children}
     </button>
   );

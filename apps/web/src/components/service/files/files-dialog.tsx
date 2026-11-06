@@ -14,7 +14,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } fr
 import { Input } from "@seylo/ui/components/input";
 import { Progress } from "@seylo/ui/components/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import {
   IconArrowLeft,
@@ -227,10 +227,16 @@ function Listing({ root, path, onPath, onOpen }: { root: Root; path: string; onP
       )}
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-divider">
         {list.isPending ? (
-          <div className="flex flex-col gap-2 p-5">
-            <Skeleton className="h-8" />
-            <Skeleton className="h-8" />
-          </div>
+          <LoadingRegion label={t("common.loading")}>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center gap-2.5 border-b border-divider px-[18px] py-3.5">
+                <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+                <SkeletonText className="w-40 text-[13px]" />
+                <SkeletonText className="ml-auto w-14 text-[13px]" />
+                <SkeletonText className="w-24 text-[13px]" />
+              </div>
+            ))}
+          </LoadingRegion>
         ) : list.isError ? (
           <OpErrorNote error={list.error} className="m-5" />
         ) : (
@@ -456,7 +462,11 @@ function FileEditor({ root, entry, onBack }: { root: Root; entry: Entry; onBack:
       </div>
       <div className="min-h-0 flex-1 border-t border-divider">
         {file.isPending ? (
-          <Skeleton className="m-5 h-40" />
+          <LoadingRegion label={t("common.loading")} className="flex min-h-0 flex-1 flex-col gap-[9px] p-5">
+            {["w-64", "w-80", "w-48", "w-96", "w-56", "w-72"].map((width) => (
+              <Skeleton key={width} className={`h-3 max-w-full rounded-chip ${width}`} />
+            ))}
+          </LoadingRegion>
         ) : file.isError ? (
           <OpErrorNote error={file.error} className="m-5" />
         ) : file.data.encoding === "base64" ? (

@@ -6,7 +6,8 @@ import { auth } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Input } from "@seylo/ui/components/input";
-import { SectionCard } from "@seylo/ui/components/section-card";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
+import { ButtonSkeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useSettingsMutation } from "../../../components/settings/mutation";
@@ -16,6 +17,7 @@ import { GithubLinkSection } from "../../../components/settings/security/github-
 import { PasskeysSection } from "../../../components/settings/security/passkeys";
 import { SessionsSection } from "../../../components/settings/security/sessions";
 import { TwoFactorSection } from "../../../components/settings/security/two-factor";
+import { FieldSkeleton, FormActionsSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 import { isReauthCancelled } from "../../../lib/reauth";
 
@@ -28,7 +30,7 @@ function SecurityPage() {
   return (
     <SettingsPage title={t("settingsSecurity.title")} subtitle={t("settingsSecurity.subtitle")}>
       <ProfileSection />
-      <QueryView query={security}>
+      <QueryView query={security} skeleton={<SecuritySkeleton />} className="flex flex-col gap-5">
         {(data) => (
           <>
             <PasswordSection passwordSet={data.passwordSet} />
@@ -47,10 +49,54 @@ function ProfileSection() {
   const me = useOp(auth.whoami, {});
   return (
     <SectionCard title={t("settingsSecurity.profile.title")}>
-      <QueryView query={me} skeletonRows={1}>
+      <QueryView
+        query={me}
+        skeleton={
+          <>
+            <FormGrid>
+              <FieldSkeleton hint={false} labelWidth="w-12" />
+              <FieldSkeleton labelWidth="w-12" />
+            </FormGrid>
+            <FormActionsSkeleton />
+          </>
+        }
+        className="flex flex-col gap-3"
+      >
         {(data) => <ProfileForm key={data.viewer.name} name={data.viewer.name} email={data.viewer.email} />}
       </QueryView>
     </SectionCard>
+  );
+}
+
+/** Password, two-factor, passkeys and GitHub sign-in while the account's security loads. */
+function SecuritySkeleton() {
+  return (
+    <>
+      <SectionCardSkeleton titleWidth="w-24" description="w-80">
+        <FormGrid>
+          <FieldSkeleton span hint={false} labelWidth="w-32" />
+          <FieldSkeleton hint={false} labelWidth="w-28" />
+          <FieldSkeleton hint={false} labelWidth="w-32" />
+        </FormGrid>
+        <FormActionsSkeleton width="w-36" />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-48" description="w-96">
+        <div className="flex gap-2">
+          <ButtonSkeleton className="w-44" />
+        </div>
+      </SectionCardSkeleton>
+      <SectionCardSkeleton flush titleWidth="w-20" description="w-96" actions={<ButtonSkeleton size="sm" className="w-28" />}>
+        {[0, 1].map((i) => (
+          <div key={i} className="flex items-center gap-3 border-t border-divider px-[18px] py-3.5">
+            <SkeletonText className="w-32 text-[13px]" />
+            <SkeletonText className="ml-auto w-24 text-[13px]" />
+          </div>
+        ))}
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-36" description="w-96">
+        <ButtonSkeleton className="w-44" />
+      </SectionCardSkeleton>
+    </>
   );
 }
 

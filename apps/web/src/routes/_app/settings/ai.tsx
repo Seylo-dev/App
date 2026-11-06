@@ -10,8 +10,9 @@ import { DataTable } from "@seylo/ui/components/data-table";
 import { Input } from "@seylo/ui/components/input";
 import { Progress, usageTone } from "@seylo/ui/components/progress";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
-import { SectionCard } from "@seylo/ui/components/section-card";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { StatTile } from "@seylo/ui/components/stat-tile";
 import { Switch } from "@seylo/ui/components/switch";
@@ -22,6 +23,7 @@ import { formatUsd } from "../../../components/settings/format";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { OpErrorCallout, QueryView } from "../../../components/settings/op-state";
 import { Field, FormActions, SettingRow, SettingsPage } from "../../../components/settings/page";
+import { FieldSkeleton, FormActionsSkeleton, SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/ai")({
@@ -36,9 +38,56 @@ function AiPage() {
   const query = useOp(ai.settings, {});
   return (
     <SettingsPage title={t("settingsAi.title")} subtitle={t("settingsAi.subtitle")}>
-      <QueryView query={query}>{(data) => <AiSettingsForm key={JSON.stringify(data)} saved={data} />}</QueryView>
+      <QueryView query={query} skeleton={<AiSkeleton />} className="flex flex-col gap-4">
+        {(data) => <AiSettingsForm key={JSON.stringify(data)} saved={data} />}
+      </QueryView>
       <Usage />
     </SettingsPage>
+  );
+}
+
+function AiSkeleton() {
+  return (
+    <>
+      <SectionCardSkeleton header={false}>
+        <SettingRowSkeleton titleWidth="w-44" />
+        <SettingRowSkeleton titleWidth="w-56" />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-36" description="w-96">
+        <FieldSkeleton span hint />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-24" description="w-[min(480px,100%)]">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Skeleton className="h-[65px] bg-raised" />
+          <Skeleton className="h-[65px] bg-raised" />
+        </div>
+        <SettingRowSkeleton titleWidth="w-48" />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-28" description="w-80">
+        <FieldSkeleton hint className="sm:w-64" />
+        <FormActionsSkeleton />
+      </SectionCardSkeleton>
+    </>
+  );
+}
+
+/** The month's tiles and the two usage tables while they load. */
+function UsageSkeleton() {
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-raised px-4 py-3">
+            <SkeletonText className="w-20 text-[12.5px]" />
+            <SkeletonText className="w-16 text-[22px]" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Skeleton className="h-40 bg-raised" />
+        <Skeleton className="h-40 bg-raised" />
+      </div>
+    </>
   );
 }
 
@@ -212,7 +261,9 @@ function Usage() {
       {query.error ? (
         <OpErrorCallout error={query.error} onRetry={() => void query.refetch()} />
       ) : (
-        <QueryView query={query}>{(data) => <UsageBody data={data} />}</QueryView>
+        <QueryView query={query} skeleton={<UsageSkeleton />} className="flex flex-col gap-4">
+          {(data) => <UsageBody data={data} />}
+        </QueryView>
       )}
     </SectionCard>
   );

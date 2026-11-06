@@ -71,13 +71,21 @@ export function SessionsSection() {
             {
               id: "ip",
               header: t("settingsSecurity.sessions.ip"),
+              skeletonWidth: "18%",
               cell: (s) => <span className="font-mono text-[12.5px]">{s.ip ?? "-"}</span>,
             },
-            { id: "started", header: t("settingsSecurity.sessions.started"), cell: (s) => formatDateTime(s.createdAt), hideOnMobile: true },
+            {
+              id: "started",
+              header: t("settingsSecurity.sessions.started"),
+              skeletonWidth: "25%",
+              cell: (s) => formatDateTime(s.createdAt),
+              hideOnMobile: true,
+            },
             {
               id: "seen",
               header: t("settingsSecurity.sessions.lastActive"),
               align: "right",
+              skeletonWidth: "15%",
               sortValue: (s) => s.lastSeenAt,
               cell: (s) => <span className="text-muted-foreground">{formatRelative(s.lastSeenAt)}</span>,
             },

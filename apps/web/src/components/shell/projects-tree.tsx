@@ -6,6 +6,8 @@
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { StatusDot } from "@seylo/ui/components/chip";
+import { ActiveIndicator } from "@seylo/ui/components/motion";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
@@ -19,7 +21,7 @@ import { useShell } from "./shell-context";
 
 export function ProjectsTree() {
   const shell = useShell();
-  const { data } = useOp(projects.list, {});
+  const { data, isPending } = useOp(projects.list, {});
   const prefs = useProjectPrefs();
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -40,6 +42,19 @@ export function ProjectsTree() {
 
       <ul aria-label={t("nav.projects")} className="-mt-2 m-0 flex list-none flex-col gap-px p-0">
         {data?.projects.length === 0 && <li className="px-2.5 py-1.5 text-[12.5px] text-ink-ghost">{t("sidebar.noProjects")}</li>}
+        {isPending && (
+          <li>
+            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-px">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center py-[7px] pr-2.5 pl-2.5">
+                  <Skeleton className="mr-[9px] size-3.5 shrink-0 rounded-[4px]" />
+                  <Skeleton className="mr-[9px] size-5 shrink-0 rounded-chip" />
+                  <SkeletonText className="w-20 text-[13.5px]" />
+                </div>
+              ))}
+            </LoadingRegion>
+          </li>
+        )}
         {data?.projects.map((project) => {
           const open = !project.collapsed;
           const Chevron = open ? IconChevronDown : IconChevronRight;
@@ -92,7 +107,7 @@ export function ProjectsTree() {
                   <span className="ml-auto text-xs font-normal text-muted-foreground">{project.serviceCount}</span>
                 </Link>
               </div>
-              {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} />}
+              {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} />}
             </li>
           );
         })}
@@ -102,10 +117,22 @@ export function ProjectsTree() {
 }
 
 /** Service rows under an expanded project: status dot, name, and a chip while it is busy. */
-function ProjectServices({ projectId }: { projectId: string }) {
+function ProjectServices({ projectId, count }: { projectId: string; count: number }) {
   const list = useOp(services.list, { projectId });
   useLiveTopic(`project:${projectId}`);
   if (list.isError) return <p className="m-0 py-1 pr-2.5 pl-[43px] text-xs text-ink-ghost">{t("sidebar.servicesUnavailable")}</p>;
+  if (list.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")} className="flex flex-col gap-px">
+        {Array.from({ length: count }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: one placeholder per service the project has.
+          <div key={i} className="flex items-center gap-[9px] py-1.5 pr-2.5 pl-[43px]">
+            <Skeleton className="size-1.5 shrink-0 rounded-full" />
+            <SkeletonText className="w-16 text-[13px]" />
+          </div>
+        ))}
+      </LoadingRegion>
+    );
   // Compose members are reached through their stack, so only top-level services are listed.
   const rows = list.data?.services.filter((service) => service.parentId === null) ?? [];
   return (
@@ -117,14 +144,20 @@ function ProjectServices({ projectId }: { projectId: string }) {
             <Link
               to="/p/$projectId/s/$serviceId"
               params={{ projectId, serviceId: service.id }}
-              className="flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:bg-accent data-[status=active]:text-accent-foreground"
+              className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
             >
-              <StatusDot status={status.dot} />
-              <span className="truncate">{service.name}</span>
-              {isBusy(service.status) && (
-                <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
-                  {status.label.toLowerCase()}
-                </span>
+              {({ isActive }) => (
+                <>
+                  {/* The same sliding background as the main navigation (sidebar.tsx). */}
+                  {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                  <StatusDot status={status.dot} />
+                  <span className="truncate">{service.name}</span>
+                  {isBusy(service.status) && (
+                    <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
+                      {status.label.toLowerCase()}
+                    </span>
+                  )}
+                </>
               )}
             </Link>
           </li>

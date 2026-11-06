@@ -200,15 +200,18 @@ function History() {
   const cursor = before.at(-1);
   const query = useOp(updates.history, cursor ? { limit: 20, before: cursor } : { limit: 20 });
   const columns: DataTableColumn<Run>[] = [
-    { id: "when", header: t("settings.updates.when"), cell: (run) => formatDateTime(run.createdAt) },
+    // Placeholder widths: what the columns get with typical runs; the steps column takes the rest.
+    { id: "when", header: t("settings.updates.when"), skeletonWidth: "28%", cell: (run) => formatDateTime(run.createdAt) },
     {
       id: "version",
       header: t("settings.updates.version"),
+      skeletonWidth: "10.5%",
       cell: (run) => <span className="font-mono text-[12.5px]">{run.targetVersion}</span>,
     },
     {
       id: "trigger",
       header: t("settings.updates.trigger"),
+      skeletonWidth: "16%",
       cell: (run) => t(`settings.updates.triggers.${run.trigger}`),
       hideOnMobile: true,
     },
@@ -233,6 +236,7 @@ function History() {
       id: "status",
       header: t("settings.updates.state"),
       align: "right",
+      skeletonWidth: "12%",
       cell: (run) => <Chip tone={runTones[run.status]}>{t(`settings.updates.runStatus.${run.status}`)}</Chip>,
     },
   ];

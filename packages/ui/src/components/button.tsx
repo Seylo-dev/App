@@ -4,15 +4,16 @@ import type * as React from "react";
 import { cn } from "../lib/utils";
 
 export const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-[7px] whitespace-nowrap rounded-control border-0 font-medium transition-[background-color,box-shadow,color] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex shrink-0 cursor-pointer items-center justify-center gap-[7px] whitespace-nowrap rounded-control border-0 font-medium transition-interactive disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        primary: "bg-primary text-primary-foreground shadow-primary hover:brightness-110",
-        secondary: "bg-secondary text-secondary-foreground shadow-control hover:bg-raised",
-        ghost: "bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
-        destructive: "bg-destructive text-destructive-foreground hover:brightness-110",
-        dark: "bg-foreground text-background hover:opacity-90",
+        // hover-enabled (tailwind.css): disabled buttons never look hovered, and a caller's hover: class still wins.
+        primary: "bg-primary text-primary-foreground shadow-primary hover-enabled:brightness-110",
+        secondary: "bg-secondary text-secondary-foreground shadow-control hover-enabled:bg-raised",
+        ghost: "bg-transparent text-muted-foreground hover-enabled:bg-muted hover-enabled:text-foreground",
+        destructive: "bg-destructive text-destructive-foreground hover-enabled:brightness-110",
+        dark: "bg-foreground text-background hover-enabled:opacity-90",
       },
       size: {
         default: "h-[38px] px-[15px] text-[13.5px]",

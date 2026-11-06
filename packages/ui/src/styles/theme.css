@@ -90,6 +90,9 @@
   /* The sidebar's node card. */
   --highlight: linear-gradient(160deg, #e7eeff 0%, #f3f7ff 100%);
 
+  /* The light sweep over loading placeholders. */
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+
   /* Radii: cards 12, controls 8, chips 6. */
   --radius: 12px;
   --radius-control: 8px;
@@ -193,6 +196,7 @@
   --shadow-primary: none;
   --shadow-segment: inset 0 0 0 1px #2a3350;
   --shadow-popover: 0 0 0 1px #2a3350, 0 12px 32px rgb(0 0 0 / 0.4);
+  --skeleton-shine: rgb(255 255 255 / 0.05);
   color-scheme: dark;
 }
 
@@ -287,5 +291,6 @@
   --shadow-primary: none;
   --shadow-segment: inset 0 0 0 1px #2e2e38;
   --shadow-popover: 0 0 0 1px #2e2e38, 0 12px 32px rgb(0 0 0 / 0.5);
+  --skeleton-shine: rgb(255 255 255 / 0.05);
   color-scheme: dark;
 }

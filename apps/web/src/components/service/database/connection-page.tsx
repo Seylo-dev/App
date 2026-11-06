@@ -12,8 +12,9 @@ import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
+import { SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
@@ -69,7 +70,7 @@ export function ConnectionPage({ service }: { service: ServiceDetail }) {
     { retry: retryOp, refetchInterval: (q) => (q.state.data?.webUi.running ? 30_000 : false) },
   );
   const conn = useOp(databases.connection, { serviceId: service.id }, { retry: retryOp });
-  if (db.isPending) return <Skeleton className="h-96 rounded-card" />;
+  if (db.isPending) return <ConnectionSkeleton />;
   if (db.isError) return <OpErrorNote error={db.error} />;
   return (
     <div className="flex flex-wrap items-start gap-4">
@@ -82,6 +83,47 @@ export function ConnectionPage({ service }: { service: ServiceDetail }) {
         <BackupsSummary service={service} />
       </div>
     </div>
+  );
+}
+
+/** Both columns while the database loads: the connection cards on the left, tools and backups on the right. */
+function ConnectionSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")} className="flex flex-wrap items-start gap-4">
+      <div className="flex min-w-0 flex-[999_1_520px] flex-col gap-4">
+        <SectionCardSkeleton titleWidth="w-36" description={false} actions={<ButtonSkeleton size="sm" className="w-28" />}>
+          <SkeletonText className="w-24 text-[12.5px]" />
+          <Skeleton className="-mt-1.5 h-[38px]" />
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-2.5">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex min-w-0 flex-col gap-[5px]">
+                <SkeletonText className="w-12 text-xs" />
+                <Skeleton className="h-[35.5px]" />
+              </div>
+            ))}
+          </div>
+        </SectionCardSkeleton>
+        <SectionCardSkeleton titleWidth="w-32" description="w-80">
+          <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <SkeletonText className="w-40 text-[13.5px]" />
+              <SkeletonText className="w-64 text-[12.5px]" />
+            </div>
+            <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
+          </div>
+        </SectionCardSkeleton>
+      </div>
+      <div className="flex max-w-[400px] min-w-0 flex-[1_1_320px] flex-col gap-4">
+        <SectionCardSkeleton titleWidth="w-20" description="w-56">
+          <ButtonSkeleton size="sm" className="w-28" />
+          <ButtonSkeleton size="sm" className="w-24" />
+        </SectionCardSkeleton>
+        <SectionCardSkeleton titleWidth="w-24" description="w-48">
+          <SkeletonText className="w-40 text-[13px]" />
+          <SkeletonText className="w-32 text-[13px]" />
+        </SectionCardSkeleton>
+      </div>
+    </LoadingRegion>
   );
 }
 

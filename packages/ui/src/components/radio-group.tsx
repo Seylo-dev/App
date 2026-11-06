@@ -10,7 +10,7 @@ export function RadioGroupItem({ className, ...props }: React.ComponentProps<typ
   return (
     <RadioPrimitive.Item
       className={cn(
-        "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border border-input bg-card p-0 outline-none",
+        "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border border-input bg-card p-0 outline-none transition-interactive",
         "focus-visible:ring-3 focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary",
         className,
       )}
@@ -39,7 +39,7 @@ export function RadioCard({
   return (
     <RadioPrimitive.Item
       className={cn(
-        "flex cursor-pointer items-start gap-3 rounded-control border-0 bg-raised p-3 text-left shadow-none outline-none transition-shadow",
+        "flex cursor-pointer items-start gap-3 rounded-control border-0 bg-raised p-3 text-left shadow-none outline-none transition-interactive",
         "focus-visible:ring-3 focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50",
         "data-[state=checked]:bg-card data-[state=checked]:shadow-[inset_0_0_0_1.5px_var(--primary),var(--shadow-control)]",
         className,

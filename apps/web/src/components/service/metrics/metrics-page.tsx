@@ -8,7 +8,7 @@ import { useOp } from "@seylo/ops/react";
 import { Card } from "@seylo/ui/components/card";
 import { DataTable } from "@seylo/ui/components/data-table";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { StatTile } from "@seylo/ui/components/stat-tile";
 import { useState } from "react";
@@ -42,7 +42,7 @@ export function MetricsPage({ service }: { service: ServiceDetail }) {
         <span className="text-[12.5px] text-muted-foreground">{t("serviceMetrics.memoryNote")}</span>
       </div>
       {data.isPending ? (
-        <Skeleton className="h-96 w-full rounded-card" />
+        <MetricsSkeleton />
       ) : data.isError ? (
         <OpErrorNote error={data.error} />
       ) : (
@@ -198,6 +198,45 @@ function Charts({ service, data }: { service: ServiceDetail; data: Data }) {
         </Card>
       )}
     </>
+  );
+}
+
+/** The four tiles and three charts while the samples load, with their real labels. */
+function MetricsSkeleton() {
+  const tiles = [t("service.usage.cpu"), t("service.usage.memory"), t("serviceMetrics.peakMemory"), t("service.usage.network")];
+  const charts: [string, number, string?][] = [
+    [t("service.usage.cpu"), 180],
+    [t("service.usage.memory"), 180],
+    [t("service.usage.network"), 160, "xl:col-span-2"],
+  ];
+  return (
+    <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {tiles.map((label) => (
+          <div key={label} className="flex min-w-0 flex-col gap-1.5 rounded-card bg-card px-[18px] py-4 shadow-card">
+            <span className="truncate text-[12.5px] text-muted-foreground">{label}</span>
+            <SkeletonText className="w-20 text-[22px]" />
+            <SkeletonText className="w-16 text-[12px]" />
+            <Skeleton className="mt-1 h-7" />
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        {charts.map(([title, height, span]) => (
+          <Card key={title} className={span}>
+            <div className="flex flex-wrap items-baseline gap-2.5">
+              <h2 className="m-0 text-[15px] font-semibold">{title}</h2>
+              <SkeletonText className="w-32 text-xs" />
+            </div>
+            <Skeleton style={{ height }} />
+            <div className="flex gap-1.5">
+              <Skeleton className="h-[31px] w-[86px] rounded-[7px]" />
+              <Skeleton className="h-[31px] w-[66px] rounded-[7px]" />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </LoadingRegion>
   );
 }
 

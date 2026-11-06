@@ -7,7 +7,7 @@ import { opQueryKey, useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconAlertTriangle, IconCircleCheck, IconCircleMinus, IconCircleX, IconHeart } from "@tabler/icons-react";
 import { t } from "../../i18n/t";
@@ -43,7 +43,14 @@ export function NodeHealth({ nodeId }: { nodeId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        {data?.checkedAt ? (
+        {report.isPending ? (
+          <>
+            <Skeleton className="h-[22px] w-16 rounded-chip" />
+            <Skeleton className="h-[22px] w-20 rounded-chip" />
+            <Skeleton className="h-[22px] w-[70px] rounded-chip" />
+            <SkeletonText className="w-24 text-xs" />
+          </>
+        ) : data?.checkedAt ? (
           <>
             {data.summary.fail > 0 && <Chip tone="red">{t("nodes.healthCheck.failCount", { count: data.summary.fail })}</Chip>}
             {data.summary.warn > 0 && <Chip tone="amber">{t("nodes.healthCheck.warnCount", { count: data.summary.warn })}</Chip>}
@@ -62,7 +69,17 @@ export function NodeHealth({ nodeId }: { nodeId: string }) {
       {report.isError ? (
         <QueryError error={report.error} onRetry={() => void report.refetch()} />
       ) : report.isPending ? (
-        <Skeleton className="h-40" />
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-2">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="flex gap-3 rounded-control p-3">
+              <Skeleton className="mt-px size-[18px] shrink-0 rounded-full" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <SkeletonText className="w-36 text-[13.5px]" />
+                <SkeletonText className="w-56 text-[12.5px]" />
+              </div>
+            </div>
+          ))}
+        </LoadingRegion>
       ) : results.length === 0 ? (
         <EmptyState
           compact

@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { LogViewer, useLogBuffer } from "@seylo/ui/components/log-viewer";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import {
@@ -74,10 +74,11 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
             )}
           </div>
           {first.isPending ? (
-            <div className="flex flex-col gap-2 border-t border-divider px-5 py-4">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
+            <LoadingRegion label={t("common.loading")}>
+              {[0, 1, 2, 3].map((i) => (
+                <DeploymentRowSkeleton key={i} />
+              ))}
+            </LoadingRegion>
           ) : first.isError ? (
             <div className="border-t border-divider px-5 py-4">
               <OpErrorNote error={first.error} />
@@ -104,16 +105,50 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
           )}
         </Card>
         {side && <SideLog service={service} d={side} />}
+        {first.isPending && <Skeleton className="min-w-0 flex-[1_1_420px] self-stretch rounded-card bg-terminal" />}
       </div>
       <DeployLogModal serviceId={service.id} deployment={open} onClose={() => setOpen(null)} />
     </>
   );
 }
 
+/** DeploymentRow's layout while the history loads: the status circle, title line, chips and the row buttons. */
+function DeploymentRowSkeleton() {
+  return (
+    <div className="flex items-start gap-3 border-t border-divider px-5 py-3.5">
+      <Skeleton className="size-8 shrink-0 rounded-full" />
+      <div className="flex min-w-0 flex-[1_1_200px] flex-col gap-[7px]">
+        <div className="flex min-h-[22px] items-center gap-2">
+          <SkeletonText className="w-48 text-[13.5px]" />
+          <SkeletonText className="w-14 text-xs" />
+          <SkeletonText className="ml-auto w-16 text-xs" />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {["w-28", "w-24", "w-[92px]", "w-14"].map((width) => (
+            <Skeleton key={width} className={`h-[22px] rounded-chip ${width}`} />
+          ))}
+        </div>
+      </div>
+      <div className="ml-auto flex shrink-0 gap-1.5">
+        <Skeleton className="h-8 w-[70px]" />
+        <Skeleton className="h-8 w-[92px]" />
+        <Skeleton className="size-8" />
+      </div>
+    </div>
+  );
+}
+
 /** One page of older deployments, loaded with the cursor of the page before. */
 function OlderPage({ service, cursor, onLogs }: { service: ServiceDetail; cursor: string; onLogs: (d: Deployment) => void }) {
   const page = useOp(deployments.list, { serviceId: service.id, limit: pageSize, cursor }, { retry: retryOp });
-  if (page.isPending) return <Skeleton className="mx-5 my-3 h-12" />;
+  if (page.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")}>
+        {[0, 1, 2].map((i) => (
+          <DeploymentRowSkeleton key={i} />
+        ))}
+      </LoadingRegion>
+    );
   if (page.isError) return <OpErrorNote error={page.error} className="mx-5 my-3" />;
   return (
     <>

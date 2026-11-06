@@ -14,7 +14,8 @@ import { DataTable } from "@seylo/ui/components/data-table";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
 import { KeyValue } from "@seylo/ui/components/key-value";
-import { SectionCard } from "@seylo/ui/components/section-card";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
+import { ButtonSkeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconBrandGithub, IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -24,6 +25,7 @@ import { formatDate } from "../../../components/settings/format";
 import { invalidateOps, useSettingsMutation } from "../../../components/settings/mutation";
 import { OpErrorCallout, QueryView, toastError } from "../../../components/settings/op-state";
 import { Field, SettingsPage } from "../../../components/settings/page";
+import { FieldSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 interface GithubSearch {
@@ -47,7 +49,7 @@ function GithubPage() {
   return (
     <SettingsPage title={t("settingsGithub.title")} subtitle={t("settingsGithub.subtitle")}>
       <FinishManifest />
-      <QueryView query={status}>
+      <QueryView query={status} skeleton={<GithubSkeleton />} className="flex flex-col gap-5">
         {(data) => (
           <>
             {data.app ? <AppSection data={data} /> : <CreateApp webhookUrl={data.webhookUrl} />}
@@ -121,6 +123,34 @@ function CreateApp({ webhookUrl }: { webhookUrl: string | null }) {
 }
 
 type Installation = OpOutput<typeof github.installations>["installations"][number];
+
+/** The App card (facts and webhook) and the installations table while the status loads. */
+function GithubSkeleton() {
+  return (
+    <>
+      <SectionCardSkeleton titleWidth="w-28" description="w-96" actions={<ButtonSkeleton size="sm" className="w-[132px]" />}>
+        <div className="flex flex-col">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex min-h-10 items-center gap-4 border-t border-divider py-2 first:border-t-0">
+              <SkeletonText className="w-28 shrink-0 text-[13px] sm:w-36" />
+              <SkeletonText className="w-24 text-[13.5px]" />
+            </div>
+          ))}
+        </div>
+        <FieldSkeleton labelWidth="w-24" />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton flush titleWidth="w-28" description="w-80" actions={<ButtonSkeleton size="sm" className="w-44" />}>
+        {[0, 1].map((i) => (
+          <div key={i} className="flex items-center gap-3 border-t border-divider px-[18px] py-3.5">
+            <SkeletonText className="w-24 text-[13px]" />
+            <SkeletonText className="w-28 text-[13px]" />
+            <SkeletonText className="ml-auto w-28 text-[13px]" />
+          </div>
+        ))}
+      </SectionCardSkeleton>
+    </>
+  );
+}
 
 function AppSection({ data }: { data: Status }) {
   const app = data.app;

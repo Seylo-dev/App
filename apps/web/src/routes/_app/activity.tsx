@@ -119,6 +119,7 @@ function ActivityPage() {
             bare
             aria-label={t("activity.title")}
             loading={pages.isPending}
+            skeletonRows={5}
             rows={entries}
             getRowId={(e) => e.id}
             onRowClick={setOpen}
@@ -138,6 +139,7 @@ function ActivityPage() {
               {
                 id: "who",
                 header: t("activity.who"),
+                skeletonWidth: "37%",
                 cell: (e) => (
                   <span className="flex min-w-0 items-center gap-2">
                     <Chip tone={actorTones[e.actor.type]}>{t(`activity.actors.${e.actor.type}`)}</Chip>
@@ -148,6 +150,7 @@ function ActivityPage() {
               {
                 id: "what",
                 header: t("activity.what"),
+                skeletonLines: 2,
                 cell: (e) => (
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{opSentence(e.opId)}</span>
@@ -163,12 +166,14 @@ function ActivityPage() {
                 id: "from",
                 header: t("activity.from"),
                 hideOnMobile: true,
+                skeletonWidth: "12%",
                 cell: (e) => <span className="font-mono text-xs text-muted-foreground">{e.ip ?? "-"}</span>,
               },
               {
                 id: "outcome",
                 header: t("activity.result"),
                 align: "right",
+                skeletonWidth: "17%",
                 cell: (e) =>
                   e.outcome === "ok" ? (
                     <Chip tone="green">{t("activity.outcomes.ok")}</Chip>

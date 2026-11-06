@@ -8,7 +8,7 @@ import { useOp, useOpClient, useOpMutation } from "@seylo/ops/react";
 import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Kbd } from "@seylo/ui/components/kbd";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconAlertCircle, IconBraces, IconEye, IconEyeOff } from "@tabler/icons-react";
@@ -33,7 +33,7 @@ const emptyContext = (service: ServiceDetail): AnalyzeContext => ({
 
 export function EnvironmentPage({ service }: { service: ServiceDetail }) {
   const saved = useOp(env.get, { serviceId: service.id }, { retry: retryOp, staleTime: Number.POSITIVE_INFINITY });
-  if (saved.isPending) return <Skeleton className="h-[480px] w-full rounded-card" />;
+  if (saved.isPending) return <EnvironmentSkeleton />;
   if (saved.isError) return <OpErrorNote error={saved.error} />;
   return <EnvironmentEditor key={service.id} service={service} initial={saved.data} />;
 }
@@ -268,10 +268,70 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
               <OpErrorNote error={references.error} />
             </div>
           ) : (
-            <Skeleton className="h-80 max-w-[380px] min-w-0 flex-[1_1_320px] rounded-card" />
+            <ReferencesSkeleton />
           ))}
       </div>
       <SharedVariablesSheet projectId={service.projectId} open={sharedOpen} onOpenChange={setSharedOpen} />
+    </div>
+  );
+}
+
+/** The editor card (title bar, 420px of lines, status bar) and the references panel while the variables load. */
+export function EnvironmentSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")} className="flex flex-wrap items-start gap-4">
+      <div className="min-w-0 flex-[999_1_520px] rounded-card bg-card shadow-card">
+        <div className="flex items-center gap-2.5 border-b border-divider px-4 py-3.5">
+          <SkeletonText className="w-24 text-[15px]" />
+          <SkeletonText className="w-40 text-[12.5px]" />
+          <div className="ml-auto flex gap-1.5">
+            <ButtonSkeleton size="icon" className="size-8" />
+            <ButtonSkeleton size="sm" className="w-[104px]" />
+            <ButtonSkeleton size="sm" className="w-[74px]" />
+          </div>
+        </div>
+        <div className="flex h-[420px] flex-col gap-[9px] px-4 py-3">
+          {["w-40", "w-52", "w-44", "w-96", "w-60", "w-72", "w-80", "w-64", "w-48", "w-56"].map((width) => (
+            <div key={width} className="flex items-center gap-4">
+              <Skeleton className="h-3 w-3 shrink-0 rounded-chip" />
+              <Skeleton className={`h-3 max-w-full rounded-chip ${width}`} />
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3.5 rounded-b-card border-t border-divider bg-raised px-4 py-2.5 text-xs">
+          <SkeletonText className="w-48" />
+          <SkeletonText className="ml-auto w-24" />
+        </div>
+      </div>
+      <ReferencesSkeleton />
+    </LoadingRegion>
+  );
+}
+
+/** The references panel while the project's services load. */
+function ReferencesSkeleton() {
+  return (
+    <div className="flex max-w-[380px] min-w-0 flex-[1_1_320px] flex-col rounded-card bg-card shadow-card">
+      <div className="flex flex-col gap-1 border-b border-divider px-[18px] pt-4 pb-3">
+        <SkeletonText className="w-24 text-[15px]" />
+        <SkeletonText className="w-full text-[12.5px]" />
+        <SkeletonText className="w-40 text-[12.5px]" />
+      </div>
+      <div className="flex flex-col gap-4 px-[18px] pt-3 pb-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-[22px] w-8 rounded-chip" />
+              <SkeletonText className="w-20 text-[13px]" />
+              <SkeletonText className="w-24 text-xs" />
+            </div>
+            <div className="flex gap-1.5">
+              <Skeleton className="h-[22px] w-[92px] rounded-chip" />
+              <Skeleton className="h-[22px] w-24 rounded-chip" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

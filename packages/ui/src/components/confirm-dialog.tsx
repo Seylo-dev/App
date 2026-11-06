@@ -1,5 +1,6 @@
 import { AlertDialog } from "radix-ui";
 import { type ReactNode, useEffect, useId, useState } from "react";
+import { dialogMotion, overlayMotion } from "../lib/overlay-motion";
 import { cn } from "../lib/utils";
 import { Button } from "./button";
 import { Input } from "./input";
@@ -75,12 +76,12 @@ export function ConfirmDialog({
   return (
     <AlertDialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-foreground/20 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <AlertDialog.Overlay className={cn("fixed inset-0 z-50 bg-foreground/20", overlayMotion)} />
         <AlertDialog.Content
           data-slot="confirm-dialog"
           className={cn(
             "fixed top-[18%] left-1/2 z-50 w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-card bg-popover p-5 text-popover-foreground shadow-popover outline-none",
-            "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+            dialogMotion,
           )}
         >
           <form onSubmit={run} className="flex flex-col gap-4">

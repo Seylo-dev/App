@@ -1,6 +1,7 @@
 import "./index.css";
 import { OpClientProvider } from "@seylo/ops/react";
 import { UiLabelsProvider } from "@seylo/ui/components/labels";
+import { MotionProvider } from "@seylo/ui/components/motion";
 import { Toaster } from "@seylo/ui/components/toast";
 import { TooltipProvider } from "@seylo/ui/components/tooltip";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -37,11 +38,13 @@ createRoot(root).render(
     <QueryClientProvider client={queryClient}>
       <OpClientProvider client={opClient}>
         <UiLabelsProvider labels={uiLabels()}>
-          <TooltipProvider>
-            <RouterProvider router={router} />
-            <Toaster />
-            <ReauthHost />
-          </TooltipProvider>
+          <MotionProvider>
+            <TooltipProvider>
+              <RouterProvider router={router} />
+              <Toaster />
+              <ReauthHost />
+            </TooltipProvider>
+          </MotionProvider>
         </UiLabelsProvider>
       </OpClientProvider>
     </QueryClientProvider>

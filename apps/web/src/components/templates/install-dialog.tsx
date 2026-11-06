@@ -10,7 +10,7 @@ import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { FieldSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconShieldCheck, IconX } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -134,7 +134,12 @@ function InstallForm({ summary, fixedProjectId, onClose }: { summary: TemplateSu
           <Labeled id="tpl-node" label={t("newService.node")}>
             <NodePicker id="tpl-node" value={nodeId} onChange={setNodeId} />
           </Labeled>
-          {detail.isPending && <Skeleton className="h-24" />}
+          {detail.isPending && (
+            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+              <FieldSkeleton labelWidth="w-28" />
+              <FieldSkeleton labelWidth="w-20" />
+            </LoadingRegion>
+          )}
           {detail.isError && <QueryError error={detail.error} onRetry={() => void detail.refetch()} />}
           {fields.map((field) => (
             <FieldInput key={field.key} field={field} value={current[field.key]} onChange={(value) => setValue(field.key, value)} />
@@ -191,7 +196,14 @@ function Preview({
       <b className="font-semibold text-foreground">{t("newService.thisCreates")}</b>
       {preview.isError && <QueryError error={preview.error} />}
       {!preview.data && !preview.isError && (
-        <span className="text-[12.5px] text-muted-foreground">{detail ? t("templates.previewPending") : t("common.loading")}</span>
+        <LoadingRegion label={detail ? t("templates.previewPending") : t("common.loading")} className="flex flex-col gap-[9px]">
+          {[0, 1].map((i) => (
+            <span key={i} className="flex items-center gap-[9px]">
+              <Skeleton className="h-[22px] w-[34px] rounded-chip bg-card" />
+              <SkeletonText ground className="w-60" />
+            </span>
+          ))}
+        </LoadingRegion>
       )}
       {preview.data?.services.map((service) => {
         const tag = kindTag({ kind: service.kind, templateSlug: null, protected: false });

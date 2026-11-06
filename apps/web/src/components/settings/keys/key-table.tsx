@@ -19,6 +19,16 @@ import { OpErrorCallout } from "../op-state";
 
 type Key = OpOutput<typeof apiKeys.list>["keys"][number];
 
+/**
+ * What the columns get with typical keys, for the loading rows (the scope
+ * column takes the rest). MCP tokens carry the client's name, so their
+ * name column is wider.
+ */
+const skeletonWidths = {
+  api: { name: "19.5%", used: "16%", expires: "14%" },
+  mcp: { name: "34%", used: "14.5%", expires: "12%" },
+} as const;
+
 export function KeyTable({
   kind,
   everyone,
@@ -53,6 +63,8 @@ export function KeyTable({
           {
             id: "name",
             header: t("settingsKeys.create.name"),
+            skeletonWidth: skeletonWidths[kind].name,
+            skeletonLines: 2,
             sortValue: (key) => key.name,
             cell: (key) => (
               <span className="flex min-w-0 flex-col">
@@ -88,6 +100,7 @@ export function KeyTable({
             id: "used",
             header: t("settingsKeys.lastUsed"),
             hideOnMobile: true,
+            skeletonWidth: skeletonWidths[kind].used,
             sortValue: (key) => key.lastUsedAt ?? "",
             cell: (key) => (
               <span className="text-muted-foreground">{key.lastUsedAt ? formatRelative(key.lastUsedAt) : t("settings.never")}</span>
@@ -97,6 +110,7 @@ export function KeyTable({
             id: "expires",
             header: t("settingsKeys.expires"),
             hideOnMobile: true,
+            skeletonWidth: skeletonWidths[kind].expires,
             align: "right",
             sortValue: (key) => key.expiresAt ?? "9999",
             cell: (key) => (

@@ -19,7 +19,7 @@ import {
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
 import { SectionCard } from "@seylo/ui/components/section-card";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
@@ -33,6 +33,7 @@ import { Field, parseIntOrNull, ToggleRow } from "../field";
 import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { RowsSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
 
 type Rule = OpOutput<typeof notifications.serviceAlerts>["rules"][number];
@@ -56,7 +57,26 @@ function RulesCard({ service }: { service: ServiceDetail }) {
   return (
     <SectionCard title={t("serviceAlerts.rulesTitle")} description={t("serviceAlerts.rulesBody")}>
       {data.isPending ? (
-        <Skeleton className="h-32" />
+        // The events are fixed, so their names show right away; switches and channels wait for the rules.
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="text-[13.5px] font-medium">{t("serviceAlerts.useDefaults")}</span>
+              <span className="text-[12.5px] leading-normal text-muted-foreground">{t("serviceAlerts.useDefaultsHint")}</span>
+            </div>
+            <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
+          </div>
+          <div className="flex flex-col">
+            {alerts.serviceAlertEvents.map((event) => (
+              <div key={event} className="flex items-center gap-3 border-t border-divider py-2.5 text-[13px]">
+                <Skeleton className="h-4 w-7 shrink-0 rounded-full" />
+                <span className="min-w-0 flex-1 text-muted-foreground">{t(`serviceAlerts.events.${event}`)}</span>
+                <Skeleton className="h-8 w-24" />
+              </div>
+            ))}
+          </div>
+          <ButtonSkeleton className="w-[60px]" />
+        </LoadingRegion>
       ) : data.isError ? (
         <OpErrorNote error={data.error} />
       ) : (
@@ -207,7 +227,7 @@ function UptimeCard({ service }: { service: ServiceDetail }) {
         </Button>
       </div>
       {checks.isPending ? (
-        <Skeleton className="mx-5 mb-4 h-10" />
+        <RowsSkeleton rows={1} lead="dot" width="w-44" />
       ) : checks.isError ? (
         <OpErrorNote error={checks.error} className="mx-5 mb-4" />
       ) : checks.data.checks.length === 0 ? (
@@ -282,7 +302,12 @@ function CheckRow({ service, check: c, onEdit }: { service: ServiceDetail; check
 
 function CheckHistory({ serviceId, checkId }: { serviceId: string; checkId: string }) {
   const history = useOp(uptime.history, { serviceId, checkId, range: "24h" }, { retry: retryOp });
-  if (history.isPending) return <Skeleton className="h-24" />;
+  if (history.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")}>
+        <Skeleton className="h-24" />
+      </LoadingRegion>
+    );
   if (history.isError) return <OpErrorNote error={history.error} compact />;
   const h = history.data;
   return (
@@ -389,7 +414,7 @@ function RecentAlerts({ service }: { service: ServiceDetail }) {
         <h2 className="m-0 text-[15px] font-semibold">{t("serviceAlerts.recent")}</h2>
       </div>
       {list.isPending ? (
-        <Skeleton className="mx-5 mb-4 h-10" />
+        <RowsSkeleton rows={2} lead="circle" width="w-48" action={false} />
       ) : list.isError ? (
         <OpErrorNote error={list.error} className="mx-5 mb-4" />
       ) : list.data.alerts.length === 0 ? (

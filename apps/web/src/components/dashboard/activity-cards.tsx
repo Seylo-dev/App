@@ -4,7 +4,7 @@
 
 import { alerts, deployments } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
@@ -31,7 +31,7 @@ export function RecentDeploys() {
       {list.isError ? (
         <QueryError error={list.error} onRetry={() => void list.refetch()} className="mt-1 mb-2.5" />
       ) : list.isPending ? (
-        <Skeleton className="mb-2.5 h-12" />
+        <FeedSkeleton />
       ) : list.data.deployments.length === 0 ? (
         <Empty>{t("dashboard.noDeploys")}</Empty>
       ) : (
@@ -97,7 +97,7 @@ export function AlertsCard() {
       {list.isError ? (
         <QueryError error={list.error} onRetry={() => void list.refetch()} className="mt-1 mb-2.5" />
       ) : list.isPending ? (
-        <Skeleton className="mb-2.5 h-12" />
+        <FeedSkeleton />
       ) : list.data.alerts.length === 0 ? (
         <Empty>{t("dashboard.noAlerts")}</Empty>
       ) : (
@@ -140,6 +140,24 @@ function FeedRow({ tone, title, text, when }: { tone: Tone; title: ReactNode; te
       </span>
       <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{when}</span>
     </div>
+  );
+}
+
+/** Three feed rows while the list loads (FeedRow's sizes). */
+function FeedSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-center gap-3 border-t border-divider py-2.5">
+          <Skeleton className="size-8 shrink-0 rounded-full" />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <SkeletonText className="w-28 text-[13.5px]" />
+            <SkeletonText className="w-56 text-[12.5px]" />
+          </span>
+          <SkeletonText className="ml-auto w-12 text-xs" />
+        </div>
+      ))}
+    </LoadingRegion>
   );
 }
 

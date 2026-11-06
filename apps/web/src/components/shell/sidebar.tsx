@@ -2,16 +2,20 @@
 // command palette trigger, main navigation, the projects tree, the nodes
 // card and the signed-in person. Under the md breakpoint only the brand
 // row and a menu button show; the rest opens below them and closes again
-// on navigation.
+// on navigation. The selected item's background is one shared element
+// (layoutId "sidebar-nav", also used by the service rows in the projects
+// tree) that slides to the item you click.
 
 import { displayName } from "@seylo/brand";
 import { approvals, system } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Chip } from "@seylo/ui/components/chip";
 import { Kbd } from "@seylo/ui/components/kbd";
+import { ActiveIndicator } from "@seylo/ui/components/motion";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconMenu2, IconSearch, IconX } from "@tabler/icons-react";
 import { Link, useRouterState } from "@tanstack/react-router";
+import { m } from "motion/react";
 import { useEffect, useState } from "react";
 import { t } from "../../i18n/t";
 import { useLiveUp } from "../../lib/live";
@@ -40,7 +44,9 @@ export function Sidebar() {
   useEffect(() => setMenuOpen(false), [path]);
 
   return (
-    <nav
+    // layoutRoot: the sidebar is sticky, so the sliding background measures against it, not the scrolled page.
+    <m.nav
+      layoutRoot
       aria-label={t("nav.main")}
       className="box-border flex w-full flex-col gap-3.5 bg-sidebar px-3.5 pt-[18px] pb-3.5 text-sidebar-foreground shadow-sidebar md:sticky md:top-0 md:h-dvh md:w-[248px] md:shrink-0 md:overflow-y-auto"
     >
@@ -71,7 +77,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={shell.openPalette}
-          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-field pr-2.5 pl-3 text-[13px] text-muted-foreground"
+          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-field pr-2.5 pl-3 text-[13px] text-muted-foreground hover:text-foreground"
         >
           <IconSearch size={15} stroke={1.8} aria-hidden="true" />
           <span className="truncate">{t("nav.search")}</span>
@@ -84,19 +90,24 @@ export function Sidebar() {
               key={item.to}
               to={item.to}
               activeOptions={{ exact: item.exact }}
-              className="flex items-center gap-[11px] rounded-control px-2.5 py-2 text-[13.5px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:bg-accent data-[status=active]:font-medium data-[status=active]:text-accent-foreground"
+              className="relative isolate flex items-center gap-[11px] rounded-control px-2.5 py-2 text-[13.5px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
             >
-              <item.icon size={17} stroke={1.8} aria-hidden="true" />
-              {t(item.label)}
-              {item.to === "/nodes" && info.data && (
-                <span className="ml-auto rounded-chip bg-muted px-[7px] py-px text-[11.5px] font-medium text-ink-strong">
-                  {info.data.nodes.total}
-                </span>
-              )}
-              {item.to === "/approvals" && pendingCount > 0 && (
-                <span className="ml-auto rounded-chip bg-chip-amber-bg px-[7px] py-px text-[11.5px] font-medium text-chip-amber-fg">
-                  {pendingCount}
-                </span>
+              {({ isActive }) => (
+                <>
+                  {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                  <item.icon size={17} stroke={1.8} aria-hidden="true" />
+                  {t(item.label)}
+                  {item.to === "/nodes" && info.data && (
+                    <span className="ml-auto rounded-chip bg-muted px-[7px] py-px text-[11.5px] font-medium text-ink-strong">
+                      {info.data.nodes.total}
+                    </span>
+                  )}
+                  {item.to === "/approvals" && pendingCount > 0 && (
+                    <span className="ml-auto rounded-chip bg-chip-amber-bg px-[7px] py-px text-[11.5px] font-medium text-chip-amber-fg">
+                      {pendingCount}
+                    </span>
+                  )}
+                </>
               )}
             </Link>
           ))}
@@ -108,6 +119,6 @@ export function Sidebar() {
         <NodesCard online={info.data?.nodes.online} total={info.data?.nodes.total} />
         <UserRow />
       </div>
-    </nav>
+    </m.nav>
   );
 }

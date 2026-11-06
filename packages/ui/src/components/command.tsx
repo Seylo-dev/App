@@ -57,7 +57,7 @@ export function CommandItem({ className, ...props }: React.ComponentProps<typeof
   return (
     <CommandPrimitive.Item
       className={cn(
-        "flex cursor-pointer items-center gap-2.5 rounded-control px-2.5 py-2 text-[13.5px] text-ink-strong data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
+        "flex cursor-pointer items-center gap-2.5 rounded-control px-2.5 py-2 text-[13.5px] text-ink-strong transition-interactive data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
         className,
       )}
       {...props}

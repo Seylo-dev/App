@@ -9,8 +9,8 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input } from "@seylo/ui/components/input";
-import { SectionCard } from "@seylo/ui/components/section-card";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
+import { LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
@@ -26,7 +26,14 @@ const actionTone = { create: "green", update: "blue", delete: "red", unchanged: 
 
 export function ComposeFilePage({ service }: { service: ServiceDetail }) {
   const stack = useOp(compose.get, { serviceId: service.id }, { retry: retryOp });
-  if (stack.isPending) return <Skeleton className="h-96 w-full rounded-card" />;
+  if (stack.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")}>
+        <SectionCardSkeleton titleWidth="w-28" description="w-96">
+          <Skeleton className="h-[460px]" />
+        </SectionCardSkeleton>
+      </LoadingRegion>
+    );
   if (stack.isError) return <OpErrorNote error={stack.error} />;
   return <ComposeEditor service={service} initial={stack.data.source} />;
 }

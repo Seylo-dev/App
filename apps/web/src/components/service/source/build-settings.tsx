@@ -10,7 +10,7 @@ import { Input } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { FieldSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
@@ -28,7 +28,19 @@ export function BuildSettingsCard({ service, dockerfileOnly = false }: { service
   return (
     <SectionCard title={t("serviceSource.build.title")} description={t("serviceSource.build.description")}>
       {settings.isPending ? (
-        <Skeleton className="h-40 w-full" />
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+          {!dockerfileOnly && (
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2.5">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-[62px] bg-raised" />
+              ))}
+            </div>
+          )}
+          <div className="grid gap-4 md:grid-cols-2">
+            <FieldSkeleton hint />
+            <FieldSkeleton hint />
+          </div>
+        </LoadingRegion>
       ) : settings.isError ? (
         <OpErrorNote error={settings.error} />
       ) : (

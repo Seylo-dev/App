@@ -14,6 +14,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { Input, Label } from "@seylo/ui/components/input";
+import { SegmentPill } from "@seylo/ui/components/segmented";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconCheck } from "@tabler/icons-react";
@@ -111,10 +112,11 @@ function SetupPage() {
             key={item}
             aria-current={index === current ? "step" : undefined}
             className={cn(
-              "flex items-center gap-2 rounded-chip py-1.5 pr-3 pl-[7px] text-ink-strong",
-              index === current && "bg-card font-medium text-foreground shadow-segment",
+              "relative isolate flex items-center gap-2 rounded-chip py-1.5 pr-3 pl-[7px] text-ink-strong transition-colors",
+              index === current && "text-foreground",
             )}
           >
+            {index === current && <SegmentPill layoutId="setup-steps" />}
             <span
               className={cn(
                 "flex size-5 items-center justify-center rounded-full font-mono text-[11px] font-medium",

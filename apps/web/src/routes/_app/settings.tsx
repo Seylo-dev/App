@@ -1,9 +1,11 @@
 // The settings layout: the section list on the left (a scrolling row on
 // phones) and the section on the right. Each section renders its own
-// title row, as in the design boards.
+// title row, as in the design boards. The selected section's background
+// slides between sections, and a section's content fades in when it opens.
 
+import { ActiveIndicator, EnterOnChange } from "@seylo/ui/components/motion";
 import { cn } from "@seylo/ui/lib/utils";
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useChildMatches } from "@tanstack/react-router";
 import type * as React from "react";
 import { accountNav, type SettingsNavItem, settingsNav } from "../../components/settings-nav";
 import { t } from "../../i18n/t";
@@ -13,6 +15,7 @@ export const Route = createFileRoute("/_app/settings")({
 });
 
 function SettingsLayout() {
+  const section = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   return (
     <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:gap-7">
       <nav
@@ -28,9 +31,9 @@ function SettingsLayout() {
           <NavLink key={item.to} item={item} />
         ))}
       </nav>
-      <div className="min-w-0 flex-1">
+      <EnterOnChange motionKey={section} subtle className="min-w-0 flex-1">
         <Outlet />
-      </div>
+      </EnterOnChange>
     </div>
   );
 }
@@ -43,9 +46,14 @@ function NavLink({ item }: { item: SettingsNavItem }) {
   return (
     <Link
       to={item.to}
-      className="shrink-0 whitespace-nowrap rounded-control px-2.5 py-2 text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:bg-accent data-[status=active]:font-medium data-[status=active]:text-accent-foreground"
+      className="relative isolate shrink-0 whitespace-nowrap rounded-control px-2.5 py-2 text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
     >
-      {t(item.label)}
+      {({ isActive }) => (
+        <>
+          {isActive && <ActiveIndicator layoutId="settings-nav" className="rounded-control bg-accent" />}
+          {t(item.label)}
+        </>
+      )}
     </Link>
   );
 }
