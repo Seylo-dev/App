@@ -2,7 +2,7 @@
 // names, live deployment, members, address, live status and usage) and maps
 // them to the op shapes ServiceSummary and ServiceDetail.
 
-import { OpError, type services as serviceOps } from "@seylo/ops";
+import { databases as dbOps, OpError, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
@@ -17,7 +17,7 @@ export type ServiceDetail = Static<typeof serviceOps.ServiceDetail>;
 type SourceSummary = Static<typeof serviceOps.SourceSummary>;
 
 const activeStatuses = ["queued", "building", "deploying"] as const;
-const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis"]);
+const databaseKinds: ReadonlySet<string> = new Set(dbOps.databaseEngineIds);
 
 /** Names compare without case. */
 export function nameKey(name: string): string {

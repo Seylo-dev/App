@@ -16,6 +16,7 @@ import { deployments, servicePlacements, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { implement } from "../../ops/implement";
+import { assertEngineRunsOn } from "../databases/capability";
 import { engineFor, finish, nextGeneration } from "../deployments/engine";
 import { appendLog } from "../deployments/logs";
 import { hasActiveDeploy } from "../deployments/queue";
@@ -38,6 +39,7 @@ export const move = implement(serviceOps.move, (input, ctx) => {
   const from = (placements[0] as (typeof placements)[number]).nodeId;
   if (from === input.toNodeId) throw new OpError("BAD_REQUEST", "The service already runs on this node.", { field: "toNodeId" });
   assertNode(ctx.db, input.toNodeId);
+  assertEngineRunsOn(ctx.db, ctx.agents, svc.id, input.toNodeId, nodeNames(ctx.db, [input.toNodeId]).get(input.toNodeId));
   if (!svc.liveDeploymentId) throw new OpError("CONFLICT", "Deploy the service before moving it.");
   if (hasActiveDeploy(ctx, svc.id)) throw new OpError("CONFLICT", "Wait for the running deploy to finish.");
   const live = ctx.db.select().from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get();

@@ -53,11 +53,17 @@ export const TemplateDatabase = Type.Object({
     Type.Literal("mariadb"),
     Type.Literal("mongo"),
     Type.Literal("redis"),
+    Type.Literal("valkey"),
+    Type.Literal("keydb"),
+    Type.Literal("dragonfly"),
+    Type.Literal("clickhouse"),
   ]),
   data: Type.Object({
     serviceName: ServiceName,
     /** Major version, for example "17"; default the engine's newest. */
     version: Type.Optional(Type.String({ maxLength: 20 })),
+    /** Image variant, for example "pgvector" for postgres. */
+    variant: Type.Optional(Type.String({ minLength: 1, maxLength: 30, pattern: "^[a-z0-9-]+$" })),
     database: Type.Optional(Type.String({ minLength: 1, maxLength: 63, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" })),
     user: Type.Optional(Type.String({ minLength: 1, maxLength: 63, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" })),
     password: Type.Optional(Type.String({ minLength: 12, maxLength: 128, pattern: "^[A-Za-z0-9._~-]+$" })),

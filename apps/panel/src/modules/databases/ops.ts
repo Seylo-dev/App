@@ -1,7 +1,8 @@
-// Database op handlers: create a database service with generated
-// credentials, read it, its connection details, password resets (applied
-// inside the running database through the agent's Exec), the web UI and
-// shell links, and TLS exposure through the agent's portgate.
+// Database op handlers: the engine catalog, create a database service with
+// generated credentials, read it, its connection details, password resets
+// (applied inside the running database through the agent's Exec, or by the
+// restart a new environment causes), the web UI and shell links, and TLS
+// exposure through the agent's portgate.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { parseEnv } from "@seylo/env-analyzer";
@@ -29,14 +30,18 @@ import { readServiceEnv } from "../env/store";
 import { insertService } from "../services/insert";
 import { defaultContainer } from "../services/spec";
 import terminalsModule from "../terminals";
+import { nodeHasCapability } from "./capability";
 import { edgeToolLink } from "./edge-ticket";
 import {
   changePasswordExec,
   containerCommand,
   defaultDatabaseName,
   engines,
+  enginesCapability,
   engineVersion,
+  engineVersions,
   generatePassword,
+  generateUserName,
   healthCommand,
 } from "./engines";
 import {
@@ -86,9 +91,17 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
     name: info.service.name,
     engine: info.row.engine,
     version: info.row.version,
+    variant: info.row.variant,
     nodeId: info.node?.id ?? "",
     nodeName: info.node?.name ?? "",
-    internal: { host: internal.host, port: internal.port, database: internal.database, user: internal.user },
+    internal: {
+      host: internal.host,
+      port: internal.port,
+      database: internal.database,
+      user: internal.user,
+      httpPort: info.engine.httpPort,
+    },
+    shellClient: info.engine.shellClient,
     exposure: {
       enabled: info.exposure !== null,
       host: address?.host ?? null,
@@ -115,20 +128,51 @@ function afterChange(ctx: OpContext, info: { service: { id: string; projectId: s
   invalidateService(ctx, info.service.id, [dbOps.get.id, dbOps.connection.id, exposureOps.get.id, envOps.references.id]);
 }
 
+export const listEngines = implement(dbOps.engines, () => ({
+  engines: Object.values(engines).map((e) => ({
+    engine: e.engine,
+    label: e.label,
+    port: e.port,
+    versions: e.versions.map(({ version, image }) => ({ version, image })),
+    variants: e.variants.map((v) => ({ id: v.id, label: v.label, versions: v.versions.map(({ version, image }) => ({ version, image })) })),
+    defaultUser: e.defaultUser,
+    hasDatabase: e.hasDatabase,
+    shellClient: e.shellClient,
+    webUiTool: e.webUiTool,
+  })),
+}));
+
 export const create = implement(dbOps.create, (input, ctx) => {
   const engine = engines[input.engine];
-  const version = engineVersion(input.engine, input.version);
+  const versions = engineVersions(input.engine, input.variant);
+  if (!versions) {
+    const offered = engine.variants.map((v) => v.id);
+    throw new OpError(
+      "BAD_REQUEST",
+      offered.length
+        ? `${engine.label} has no ${input.variant} image. Pick ${offered.join(" or ")}, or leave the variant out.`
+        : `${engine.label} has no image variants.`,
+      { field: "variant" },
+    );
+  }
+  const version = engineVersion(input.engine, input.version, input.variant);
   if (!version) {
     throw new OpError(
       "BAD_REQUEST",
-      `${engine.label} ${input.version} is not offered. Pick one of ${engine.versions.map((v) => v.version).join(", ")}.`,
-      {
-        field: "version",
-      },
+      `${engine.label}${input.variant ? ` with ${input.variant}` : ""} ${input.version} is not offered. Pick one of ${versions.map((v) => v.version).join(", ")}.`,
+      { field: "version" },
     );
   }
-  if (input.engine === "redis" && input.user && input.user !== "default") {
-    throw new OpError("BAD_REQUEST", "Redis has one user, default.", { field: "user" });
+  if (engine.redisLike && input.user && input.user !== "default") {
+    throw new OpError("BAD_REQUEST", `${engine.label} has one user, default.`, { field: "user" });
+  }
+  // An older agent would run it without its shell, web UI, backups or TLS on the exposed port.
+  if (engine.needsAgentCapability && !nodeHasCapability(ctx.db, ctx.agents, input.nodeId, enginesCapability)) {
+    throw new OpError(
+      "CONFLICT",
+      `The agent on this node does not run ${engine.label} yet. Update the node (or wait until it has connected once), then try again.`,
+      { field: "nodeId", reason: "agentTooOld" },
+    );
   }
   const password = input.password ?? generatePassword();
   const user = userOf(ctx.principal);
@@ -160,9 +204,10 @@ export const create = implement(dbOps.create, (input, ctx) => {
         serviceId: row.id,
         engine: input.engine,
         version: version.version,
+        variant: input.variant ?? null,
         databaseName: engine.hasDatabase ? (input.database ?? defaultDatabaseName(input.name)) : "",
-        adminUser: input.user ?? engine.defaultUser,
-        exposedUser: input.engine === "redis" ? "default" : "external",
+        adminUser: input.user ?? engine.defaultUser ?? generateUserName(input.engine === "clickhouse" ? "ch" : "admin"),
+        exposedUser: engine.redisLike ? "default" : "external",
       })
       .run();
     writeSecret(tx, ctx.secrets, row.id, adminPasswordSecret, password);
@@ -184,8 +229,8 @@ export const connection = implement(dbOps.connection, (input, ctx) => {
 
 /** Services of the project whose env uses this database's credentials. */
 function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo, user: "internal" | "exposed"): string[] {
-  const variables = user === "internal" ? ["PASSWORD", "INTERNAL_URL"] : ["EXPOSED_URL"];
-  if (info.row.engine === "redis") variables.push("PASSWORD", "INTERNAL_URL", "EXPOSED_URL");
+  const variables = user === "internal" ? ["PASSWORD", "INTERNAL_URL", "INTERNAL_HTTP_URL"] : ["EXPOSED_URL"];
+  if (info.engine.redisLike) variables.push("PASSWORD", "INTERNAL_URL", "EXPOSED_URL");
   const name = info.service.name.toLowerCase();
   const rows = ctx.db
     .select({ id: services.id })
@@ -204,12 +249,13 @@ function servicesUsingCredentials(ctx: OpContext, info: DatabaseInfo, user: "int
 export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
   const password = input.password ?? generatePassword();
-  // Redis has one user: both choices change it.
-  const internalUser = input.user === "internal" || info.row.engine === "redis";
-  if (internalUser) {
+  // The Redis-like engines have one user: both choices change it.
+  const internalUser = input.user === "internal" || info.engine.redisLike;
+  // Engines that read the password from their environment take it with the restart the new env causes.
+  const exec = internalUser ? changePasswordExec(info.row.engine, info.admin.user, password) : null;
+  if (exec) {
     if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
     // Change it inside the running database first; only store it once that worked.
-    const exec = changePasswordExec(info.row.engine, info.admin.user, password);
     const result = await ctx.agents.call(
       info.node.id,
       "exec",
@@ -252,6 +298,12 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
   if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
   const node = info.node;
+  // An older agent would relay the port without TLS; the desired state leaves it closed there anyway.
+  if (input.enabled && info.engine.needsAgentCapability && !nodeHasCapability(ctx.db, ctx.agents, node.id, enginesCapability)) {
+    throw new OpError("CONFLICT", `The agent on ${node.name} cannot expose ${info.engine.label} with TLS yet. Update the node first.`, {
+      reason: "agentTooOld",
+    });
+  }
   const tlsHostname = input.tlsHostname === undefined ? info.row.tlsHostname : input.tlsHostname?.toLowerCase() || null;
   if (tlsHostname && !hostnamePattern.test(tlsHostname)) {
     throw new OpError("BAD_REQUEST", `${tlsHostname} is not a host name.`, { field: "tlsHostname" });

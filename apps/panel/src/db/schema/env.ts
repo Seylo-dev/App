@@ -46,7 +46,7 @@ export const projectEnv = sqliteTable("project_env", {
   updatedAt: updatedAt(),
 });
 
-export type DatabaseEngine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis";
+export type DatabaseEngine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis" | "valkey" | "keydb" | "dragonfly" | "clickhouse";
 
 /**
  * The non-secret facts of a database service. Passwords live in
@@ -60,7 +60,9 @@ export const serviceDatabases = sqliteTable("service_databases", {
   engine: text("engine").$type<DatabaseEngine>().notNull(),
   /** Major version as chosen, for example "17". */
   version: text("version").notNull(),
-  /** Default database; empty for Redis. */
+  /** Image variant of the engine ("pgvector"); null for its plain image. Added in 0.2. */
+  variant: text("variant"),
+  /** Default database; empty for the Redis-like engines. */
   databaseName: text("database_name").notNull().default(""),
   adminUser: text("admin_user").notNull(),
   /** Separate TLS-only user for exposed access. */

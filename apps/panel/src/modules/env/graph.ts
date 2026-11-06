@@ -56,7 +56,7 @@ export interface EnvGraph {
 }
 
 /** Variables whose value carries a database password. */
-const credentialVariables = new Set(["PASSWORD", "INTERNAL_URL", "EXPOSED_URL"]);
+const credentialVariables = new Set(["PASSWORD", "INTERNAL_URL", "INTERNAL_HTTP_URL", "EXPOSED_URL"]);
 
 export function isCredentialVariable(service: GraphService, variable: string): boolean {
   return service.isDatabase && credentialVariables.has(variable);
@@ -74,6 +74,8 @@ function builtinsFor(deps: Pick<Deps, "db" | "secrets">, row: ServiceRow): { bui
     values.set("INTERNAL_URL", internal.url);
     values.set("INTERNAL_HOST", internal.host);
     values.set("INTERNAL_PORT", String(internal.port));
+    if (internal.httpUrl) values.set("INTERNAL_HTTP_URL", internal.httpUrl);
+    if (info.engine.httpPort !== null) values.set("INTERNAL_HTTP_PORT", String(info.engine.httpPort));
     values.set("EXPOSED_URL", outside?.url ?? "");
     values.set("EXPOSED_HOST", outside?.host ?? "");
     values.set("EXPOSED_PORT", outside ? String(outside.port) : "");

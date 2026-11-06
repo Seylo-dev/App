@@ -11840,6 +11840,22 @@
                               "type": "string"
                             },
                             {
+                              "const": "valkey",
+                              "type": "string"
+                            },
+                            {
+                              "const": "keydb",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dragonfly",
+                              "type": "string"
+                            },
+                            {
+                              "const": "clickhouse",
+                              "type": "string"
+                            },
+                            {
                               "const": "box",
                               "type": "string"
                             },
@@ -12187,6 +12203,22 @@
                               },
                               {
                                 "const": "redis",
+                                "type": "string"
+                              },
+                              {
+                                "const": "valkey",
+                                "type": "string"
+                              },
+                              {
+                                "const": "keydb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "dragonfly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "clickhouse",
                                 "type": "string"
                               },
                               {
@@ -12608,6 +12640,22 @@
                             },
                             {
                               "const": "redis",
+                              "type": "string"
+                            },
+                            {
+                              "const": "valkey",
+                              "type": "string"
+                            },
+                            {
+                              "const": "keydb",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dragonfly",
+                              "type": "string"
+                            },
+                            {
+                              "const": "clickhouse",
                               "type": "string"
                             },
                             {
@@ -13829,6 +13877,22 @@
                               },
                               {
                                 "const": "redis",
+                                "type": "string"
+                              },
+                              {
+                                "const": "valkey",
+                                "type": "string"
+                              },
+                              {
+                                "const": "keydb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "dragonfly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "clickhouse",
                                 "type": "string"
                               },
                               {
@@ -16330,6 +16394,9 @@
                         },
                         "password": {
                           "type": "string"
+                        },
+                        "httpUrl": {
+                          "type": "string"
                         }
                       }
                     },
@@ -16393,7 +16460,7 @@
       "post": {
         "operationId": "databases.create",
         "summary": "Create a database",
-        "description": "Creates a Postgres, MySQL, MariaDB, Mongo or Redis service in a project on one node, with generated credentials (or the ones given) and a data volume. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure.",
+        "description": "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions and variants. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure.",
         "tags": [
           "databases"
         ],
@@ -16451,12 +16518,34 @@
                       {
                         "const": "redis",
                         "type": "string"
+                      },
+                      {
+                        "const": "valkey",
+                        "type": "string"
+                      },
+                      {
+                        "const": "keydb",
+                        "type": "string"
+                      },
+                      {
+                        "const": "dragonfly",
+                        "type": "string"
+                      },
+                      {
+                        "const": "clickhouse",
+                        "type": "string"
                       }
                     ]
                   },
                   "version": {
                     "maxLength": 20,
                     "pattern": "^[0-9A-Za-z._-]+$",
+                    "type": "string"
+                  },
+                  "variant": {
+                    "minLength": 1,
+                    "maxLength": 30,
+                    "pattern": "^[a-z0-9-]+$",
                     "type": "string"
                   },
                   "nodeId": {
@@ -16500,10 +16589,12 @@
                     "name",
                     "engine",
                     "version",
+                    "variant",
                     "nodeId",
                     "nodeName",
                     "internal",
                     "exposure",
+                    "shellClient",
                     "webUi",
                     "createdAt"
                   ],
@@ -16546,11 +16637,40 @@
                         {
                           "const": "redis",
                           "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
                         }
                       ]
                     },
                     "version": {
                       "type": "string"
+                    },
+                    "variant": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 30,
+                          "pattern": "^[a-z0-9-]+$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "nodeId": {
                       "pattern": "^[a-z0-9]{16}$",
@@ -16582,6 +16702,18 @@
                         },
                         "user": {
                           "type": "string"
+                        },
+                        "httpPort": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       }
                     },
@@ -16692,6 +16824,9 @@
                           ]
                         }
                       }
+                    },
+                    "shellClient": {
+                      "type": "string"
                     },
                     "webUi": {
                       "type": "object",
@@ -16743,6 +16878,190 @@
         "x-mcp": true
       }
     },
+    "/api/v1/databases.engines": {
+      "get": {
+        "operationId": "databases.engines",
+        "summary": "List database engines",
+        "description": "Lists the engines databases.create accepts, with their major versions, image variants (pgvector), default users and tools. Images are pinned to exact versions.",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "engines"
+                  ],
+                  "properties": {
+                    "engines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "engine",
+                          "label",
+                          "port",
+                          "versions",
+                          "variants",
+                          "defaultUser",
+                          "hasDatabase",
+                          "shellClient",
+                          "webUiTool"
+                        ],
+                        "properties": {
+                          "engine": {
+                            "anyOf": [
+                              {
+                                "const": "postgres",
+                                "type": "string"
+                              },
+                              {
+                                "const": "mysql",
+                                "type": "string"
+                              },
+                              {
+                                "const": "mariadb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "mongo",
+                                "type": "string"
+                              },
+                              {
+                                "const": "redis",
+                                "type": "string"
+                              },
+                              {
+                                "const": "valkey",
+                                "type": "string"
+                              },
+                              {
+                                "const": "keydb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "dragonfly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "clickhouse",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "port": {
+                            "type": "integer"
+                          },
+                          "versions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "version",
+                                "image"
+                              ],
+                              "properties": {
+                                "version": {
+                                  "type": "string"
+                                },
+                                "image": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "variants": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "label",
+                                "versions"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "minLength": 1,
+                                  "maxLength": 30,
+                                  "pattern": "^[a-z0-9-]+$",
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "versions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "required": [
+                                      "version",
+                                      "image"
+                                    ],
+                                    "properties": {
+                                      "version": {
+                                        "type": "string"
+                                      },
+                                      "image": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "defaultUser": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "hasDatabase": {
+                            "type": "boolean"
+                          },
+                          "shellClient": {
+                            "type": "string"
+                          },
+                          "webUiTool": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
     "/api/v1/databases.get": {
       "get": {
         "operationId": "databases.get",
@@ -16784,10 +17103,12 @@
                     "name",
                     "engine",
                     "version",
+                    "variant",
                     "nodeId",
                     "nodeName",
                     "internal",
                     "exposure",
+                    "shellClient",
                     "webUi",
                     "createdAt"
                   ],
@@ -16830,11 +17151,40 @@
                         {
                           "const": "redis",
                           "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
                         }
                       ]
                     },
                     "version": {
                       "type": "string"
+                    },
+                    "variant": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 30,
+                          "pattern": "^[a-z0-9-]+$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "nodeId": {
                       "pattern": "^[a-z0-9]{16}$",
@@ -16866,6 +17216,18 @@
                         },
                         "user": {
                           "type": "string"
+                        },
+                        "httpPort": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       }
                     },
@@ -16976,6 +17338,9 @@
                           ]
                         }
                       }
+                    },
+                    "shellClient": {
+                      "type": "string"
                     },
                     "webUi": {
                       "type": "object",
@@ -17031,7 +17396,7 @@
       "post": {
         "operationId": "databases.openShell",
         "summary": "Open a database shell",
-        "description": "Returns a ticket for a terminal already signed in to the database (psql, mysql, mongosh, redis-cli). The web app passes it to the terminal socket; it works once and expires in a minute.",
+        "description": "Returns a ticket for a terminal already signed in to the database (psql, mysql, mongosh, redis-cli, valkey-cli, keydb-cli, clickhouse-client). The web app passes it to the terminal socket; it works once and expires in a minute.",
         "tags": [
           "databases"
         ],
@@ -17108,7 +17473,7 @@
       "post": {
         "operationId": "databases.openWebUi",
         "summary": "Open the database web UI",
-        "description": "Returns a one-time link to the database's web UI (pgweb, Adminer, mongo-express or Redis Commander), already signed in. The tool starts on first use and stops when idle.",
+        "description": "Returns a one-time link to the database's web UI (pgweb, phpMyAdmin, mongo-express, Redis Commander or ClickHouse's Play page), already signed in. The tool starts on first use and stops when idle.",
         "tags": [
           "databases"
         ],
@@ -17177,7 +17542,7 @@
       "post": {
         "operationId": "databases.resetPassword",
         "summary": "Reset a database password",
-        "description": "Sets a new password for the admin user (internal) or the exposed user. Services that reference the password get it on their next deploy or restart; anything else using the old password stops connecting.",
+        "description": "Sets a new password for the admin user (internal) or the exposed user. Services that reference the password get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
         "tags": [
           "databases"
         ],
@@ -17344,10 +17709,12 @@
                     "name",
                     "engine",
                     "version",
+                    "variant",
                     "nodeId",
                     "nodeName",
                     "internal",
                     "exposure",
+                    "shellClient",
                     "webUi",
                     "createdAt"
                   ],
@@ -17390,11 +17757,40 @@
                         {
                           "const": "redis",
                           "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
                         }
                       ]
                     },
                     "version": {
                       "type": "string"
+                    },
+                    "variant": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 30,
+                          "pattern": "^[a-z0-9-]+$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "nodeId": {
                       "pattern": "^[a-z0-9]{16}$",
@@ -17426,6 +17822,18 @@
                         },
                         "user": {
                           "type": "string"
+                        },
+                        "httpPort": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       }
                     },
@@ -17536,6 +17944,9 @@
                           ]
                         }
                       }
+                    },
+                    "shellClient": {
+                      "type": "string"
                     },
                     "webUi": {
                       "type": "object",
@@ -29128,6 +29539,22 @@
                         },
                         {
                           "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
                           "type": "string"
                         },
                         {
@@ -44382,6 +44809,22 @@
                           "type": "string"
                         },
                         {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
+                        },
+                        {
                           "const": "box",
                           "type": "string"
                         },
@@ -45613,6 +46056,22 @@
                           "type": "string"
                         },
                         {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
+                        },
+                        {
                           "const": "box",
                           "type": "string"
                         },
@@ -46770,6 +47229,22 @@
                               },
                               {
                                 "const": "redis",
+                                "type": "string"
+                              },
+                              {
+                                "const": "valkey",
+                                "type": "string"
+                              },
+                              {
+                                "const": "keydb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "dragonfly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "clickhouse",
                                 "type": "string"
                               },
                               {
@@ -48307,6 +48782,22 @@
                         },
                         {
                           "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
                           "type": "string"
                         },
                         {
@@ -49882,6 +50373,22 @@
                         },
                         {
                           "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
                           "type": "string"
                         },
                         {
@@ -53295,6 +53802,22 @@
                                 "type": "string"
                               },
                               {
+                                "const": "valkey",
+                                "type": "string"
+                              },
+                              {
+                                "const": "keydb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "dragonfly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "clickhouse",
+                                "type": "string"
+                              },
+                              {
                                 "const": "box",
                                 "type": "string"
                               },
@@ -54134,6 +54657,22 @@
                               },
                               {
                                 "const": "redis",
+                                "type": "string"
+                              },
+                              {
+                                "const": "valkey",
+                                "type": "string"
+                              },
+                              {
+                                "const": "keydb",
+                                "type": "string"
+                              },
+                              {
+                                "const": "dragonfly",
+                                "type": "string"
+                              },
+                              {
+                                "const": "clickhouse",
                                 "type": "string"
                               },
                               {

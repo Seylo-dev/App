@@ -135,7 +135,7 @@ export function planServices(
       return {
         name: s.data.serviceName,
         kind: s.type,
-        image: `${s.type}${s.data.version ? ` ${s.data.version}` : ""}`,
+        image: `${s.type}${s.data.variant ? ` (${s.data.variant})` : ""}${s.data.version ? ` ${s.data.version}` : ""}`,
         ports: [],
         internalOnly: true,
         domains: [],
@@ -213,6 +213,7 @@ export async function installTemplate(ctx: OpContext, input: InstallInput & { de
           engine: s.type,
           nodeId: input.nodeId,
           ...(s.data.version ? { version: s.data.version } : {}),
+          ...(s.data.variant ? { variant: s.data.variant } : {}),
           ...(s.data.database ? { database: s.data.database } : {}),
           ...(s.data.user ? { user: s.data.user } : {}),
           ...(s.data.password ? { password: s.data.password } : {}),

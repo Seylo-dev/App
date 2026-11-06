@@ -27,7 +27,7 @@ export const appVariables: readonly BuiltinVariable[] = [
   v("INTERNAL_PORT", "plain", "main container port"),
 ];
 
-/** Postgres, MySQL, MariaDB, Mongo and Redis. */
+/** Every database engine. */
 export const databaseVariables: readonly BuiltinVariable[] = [
   v("INTERNAL_URL", "internal", "connection URL on the project network"),
   v("INTERNAL_HOST", "internal", "host name on the project network"),
@@ -40,8 +40,17 @@ export const databaseVariables: readonly BuiltinVariable[] = [
   v("DATABASE", "plain", "default database"),
 ];
 
-const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis"]);
+/** ClickHouse adds its HTTP interface (the native protocol is INTERNAL_URL). */
+export const clickhouseVariables: readonly BuiltinVariable[] = [
+  ...databaseVariables,
+  v("INTERNAL_HTTP_URL", "internal", "HTTP interface URL on the project network (port 8123), with the password"),
+  v("INTERNAL_HTTP_PORT", "plain", "HTTP interface port on the project network"),
+];
+
+/** Database service kinds; @seylo/ops databaseEngineIds lists the same (this package has no dependencies). */
+const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"]);
 
 export function builtinVariablesFor(serviceKind: string): readonly BuiltinVariable[] {
+  if (serviceKind === "clickhouse") return clickhouseVariables;
   return databaseKinds.has(serviceKind) ? databaseVariables : appVariables;
 }

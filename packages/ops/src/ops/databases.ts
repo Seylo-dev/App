@@ -1,9 +1,10 @@
-// Managed databases: Postgres, MySQL, MariaDB, Mongo and Redis services
-// with generated credentials, internal and exposed connection URLs, an
+// Managed databases: Postgres (optionally with pgvector), MySQL, MariaDB,
+// Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse services with
+// generated credentials, internal and exposed connection URLs, an
 // on-demand web UI and a pre-logged-in shell (both opened with short-lived
 // edge tickets), and TLS exposure through the agent's portgate.
 
-import { Type } from "@sinclair/typebox";
+import { type Static, Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Id, Timestamp } from "../schemas";
@@ -16,7 +17,27 @@ export const DatabaseEngine = Type.Union([
   Type.Literal("mariadb"),
   Type.Literal("mongo"),
   Type.Literal("redis"),
+  Type.Literal("valkey"),
+  Type.Literal("keydb"),
+  Type.Literal("dragonfly"),
+  Type.Literal("clickhouse"),
 ]);
+
+/** Every engine id, in the order screens list them; also the service kinds of databases. */
+export const databaseEngineIds = [
+  "postgres",
+  "mysql",
+  "mariadb",
+  "mongo",
+  "redis",
+  "valkey",
+  "keydb",
+  "dragonfly",
+  "clickhouse",
+] as const satisfies readonly Static<typeof DatabaseEngine>[];
+
+/** An image with extensions on the engine's majors: "pgvector" (Postgres). */
+export const DatabaseVariant = Type.String({ minLength: 1, maxLength: 30, pattern: "^[a-z0-9-]+$" });
 
 /** A service name: it is also the internal host name. */
 export const DatabaseName = ServiceName;
@@ -30,9 +51,11 @@ export const PublicPort = Type.Integer({ minimum: 1024, maximum: 65535 });
 export const ConnectionSummary = Type.Object({
   host: Type.String(),
   port: Type.Integer({ minimum: 1, maximum: 65535 }),
-  /** Default database; empty for Redis. */
+  /** Default database; empty for the Redis-like engines. */
   database: Type.String(),
   user: Type.String(),
+  /** ClickHouse's HTTP interface on the same host; null for other engines. */
+  httpPort: Type.Optional(Type.Union([Type.Integer({ minimum: 1, maximum: 65535 }), Type.Null()])),
 });
 
 export const DatabaseExposure = Type.Object({
@@ -65,13 +88,17 @@ export const Database = Type.Object({
   engine: DatabaseEngine,
   /** Engine version as chosen, for example "17" for Postgres. */
   version: Type.String(),
+  /** Image variant ("pgvector"); null for the engine's plain image. */
+  variant: Type.Union([DatabaseVariant, Type.Null()]),
   nodeId: Id,
   nodeName: Type.String(),
   /** For services of the project on the same node: host = the service name. */
   internal: ConnectionSummary,
   exposure: DatabaseExposure,
+  /** The pre-logged-in client the shell runs: psql, mysql, mongosh, redis-cli, valkey-cli, clickhouse-client, ... */
+  shellClient: Type.String(),
   webUi: Type.Object({
-    /** Tool picked by engine: pgweb, Adminer, mongo-express, Redis Commander. */
+    /** Tool picked by engine: pgweb, phpMyAdmin, mongo-express, Redis Commander, ClickHouse Play. */
     tool: Type.String(),
     /** Stops after this many idle minutes. */
     idleMinutes: Type.Integer({ minimum: 1 }),
@@ -92,6 +119,8 @@ export const DatabaseConnection = Type.Object({
     database: Type.String(),
     user: Type.String(),
     password: Type.String(),
+    /** ClickHouse only: the HTTP interface's URL (port 8123), with the password. */
+    httpUrl: Type.Optional(Type.String()),
   }),
   /** Null while exposure is off. */
   exposed: Type.Union([
@@ -117,22 +146,62 @@ export const EdgeTicket = Type.Object({
 
 const serviceScope = (action: `${string}.${string}`) => permission.service(action, (input: { serviceId: string }) => input.serviceId);
 
+/** One engine of the catalog: what databases.create accepts for it. */
+export const EngineInfo = Type.Object({
+  engine: DatabaseEngine,
+  label: Type.String(),
+  /** Main port inside the project network (ClickHouse: the native protocol). */
+  port: Type.Integer(),
+  /** Major versions, newest (the default) first. */
+  versions: Type.Array(Type.Object({ version: Type.String(), image: Type.String() })),
+  /** Images with extensions on some of the majors, for example pgvector for Postgres. */
+  variants: Type.Array(
+    Type.Object({
+      id: DatabaseVariant,
+      label: Type.String(),
+      versions: Type.Array(Type.Object({ version: Type.String(), image: Type.String() })),
+    }),
+  ),
+  /** The admin user when none is given; null means one is generated. */
+  defaultUser: Type.Union([Type.String(), Type.Null()]),
+  /** False for the Redis-like engines: one user, no database to name. */
+  hasDatabase: Type.Boolean(),
+  shellClient: Type.String(),
+  webUiTool: Type.String(),
+});
+
+export const engines = defineOp({
+  id: "databases.engines",
+  kind: "query",
+  summary: "List database engines",
+  description:
+    "Lists the engines databases.create accepts, with their major versions, image variants (pgvector), default users and tools. Images are pinned to exact versions.",
+  input: Type.Object({}),
+  output: Type.Object({ engines: Type.Array(EngineInfo) }),
+  // A fixed catalog that holds nothing of the panel's: anyone signed in may read it.
+  permission: permission.signedIn(),
+  mcp: true,
+  audit: false,
+});
+
 export const create = defineOp({
   id: "databases.create",
   kind: "mutation",
   summary: "Create a database",
   description:
-    "Creates a Postgres, MySQL, MariaDB, Mongo or Redis service in a project on one node, with generated credentials (or the ones given) and a data volume. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure.",
+    "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions and variants. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure.",
   input: Type.Object({
     projectId: Id,
     name: DatabaseName,
     engine: DatabaseEngine,
     /** Defaults to the newest supported major version. */
     version: Type.Optional(Type.String({ maxLength: 20, pattern: "^[0-9A-Za-z._-]+$" })),
+    /** An image variant of the engine, for example "pgvector" for Postgres; left out for the plain image. */
+    variant: Type.Optional(DatabaseVariant),
     nodeId: Id,
-    /** Default database to create; defaults to the service name. Ignored for Redis. */
+    /** Default database to create; defaults to the service name. Ignored for the Redis-like engines. */
     database: Type.Optional(Identifier),
-    /** Defaults to the engine's usual admin user (postgres, root, ...). */
+    /** Defaults to the engine's usual admin user (postgres, root, ...); ClickHouse gets a generated one. */
     user: Type.Optional(Identifier),
     /** Generated (32 random characters) when left out. */
     password: Type.Optional(Type.String({ minLength: 12, maxLength: 128, pattern: "^[A-Za-z0-9._~-]+$" })),
@@ -175,7 +244,7 @@ export const resetPassword = defineOp({
   kind: "destructive",
   summary: "Reset a database password",
   description:
-    "Sets a new password for the admin user (internal) or the exposed user. Services that reference the password get it on their next deploy or restart; anything else using the old password stops connecting.",
+    "Sets a new password for the admin user (internal) or the exposed user. Services that reference the password get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
   input: Type.Object({
     serviceId: Id,
     user: Type.Union([Type.Literal("internal"), Type.Literal("exposed")]),
@@ -198,7 +267,7 @@ export const openWebUi = defineOp({
   kind: "mutation",
   summary: "Open the database web UI",
   description:
-    "Returns a one-time link to the database's web UI (pgweb, Adminer, mongo-express or Redis Commander), already signed in. The tool starts on first use and stops when idle.",
+    "Returns a one-time link to the database's web UI (pgweb, phpMyAdmin, mongo-express, Redis Commander or ClickHouse's Play page), already signed in. The tool starts on first use and stops when idle.",
   input: Type.Object({ serviceId: Id }),
   output: EdgeTicket,
   sensitive: { output: ["url"] },
@@ -212,7 +281,7 @@ export const openShell = defineOp({
   kind: "mutation",
   summary: "Open a database shell",
   description:
-    "Returns a ticket for a terminal already signed in to the database (psql, mysql, mongosh, redis-cli). The web app passes it to the terminal socket; it works once and expires in a minute.",
+    "Returns a ticket for a terminal already signed in to the database (psql, mysql, mongosh, redis-cli, valkey-cli, keydb-cli, clickhouse-client). The web app passes it to the terminal socket; it works once and expires in a minute.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     /** Opaque, single use; given to the terminal socket. */

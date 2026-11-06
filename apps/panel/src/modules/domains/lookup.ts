@@ -3,7 +3,7 @@
 // helper. Kept here so domains, env, databases, exposures, tunnels, boxes
 // and maintenance read services the same way.
 
-import { OpError } from "@seylo/ops";
+import { databases as dbOps, OpError } from "@seylo/ops";
 import { asc, eq } from "drizzle-orm";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
@@ -13,7 +13,7 @@ import type { Deps } from "../../deps";
 export type ServiceRow = typeof services.$inferSelect;
 export type NodeRow = typeof nodes.$inferSelect;
 
-export const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis"]);
+export const databaseKinds: ReadonlySet<string> = new Set(dbOps.databaseEngineIds);
 
 export function getService(db: PanelDb, serviceId: string): ServiceRow {
   const row = db.select().from(services).where(eq(services.id, serviceId)).get();

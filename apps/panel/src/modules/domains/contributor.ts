@@ -49,7 +49,7 @@ export const networkingContributor: DesiredContributor = {
       : undefined;
     const env = deploymentEnv(deps, target?.envSealed ?? null) ?? resolveServiceEnv(deps, service.id);
     spec.env = env.map((v) => create(EnvVarSchema, v));
-    const database = databaseRuntime(deps, service.id);
+    const database = databaseRuntime(deps, service.id, nodeId);
     if (database) spec.kindSpec = { case: "database", value: create(DatabaseSpecSchema, database.database) };
     const box = boxRuntime(deps, service.id);
     if (box) spec.kindSpec = { case: "box", value: create(BoxSpecSchema, box.box) };

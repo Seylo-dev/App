@@ -18,6 +18,7 @@
 
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
+import { databases as dbOps } from "@seylo/ops";
 import { CronConcurrency, DeployMode, PortProtocol, ServiceKind, type ServiceSpec, ServiceSpecSchema } from "@seylo/proto";
 import { and, eq, inArray } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
@@ -33,16 +34,12 @@ export type ServiceSpecInit = MessageInitShape<typeof ServiceSpecSchema>;
 const kinds: Record<string, ServiceKind> = {
   app: ServiceKind.APP,
   cron: ServiceKind.CRON,
-  postgres: ServiceKind.DATABASE,
-  mysql: ServiceKind.DATABASE,
-  mariadb: ServiceKind.DATABASE,
-  mongo: ServiceKind.DATABASE,
-  redis: ServiceKind.DATABASE,
   box: ServiceKind.BOX,
+  ...Object.fromEntries(dbOps.databaseEngineIds.map((engine) => [engine, ServiceKind.DATABASE])),
 };
 
 /** Kinds whose image and settings come from their own module (databases, boxes), not from deployments. */
-const runtimeKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis", "box"]);
+const runtimeKinds: ReadonlySet<string> = new Set([...dbOps.databaseEngineIds, "box"]);
 
 const seconds = (n: number) => durationFromMs(n * 1000);
 
