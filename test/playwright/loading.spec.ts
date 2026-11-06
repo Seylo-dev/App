@@ -1,6 +1,7 @@
 // Loading placeholders take the room of what they stand for: with the demo
 // API held back, the parts of a screen that are already drawn keep their
-// place and size when the data arrives.
+// place and size when the data arrives. Also: a checkbox that is already
+// checked when a screen opens does not animate.
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { installDemo } from "./demo/routes";
@@ -103,5 +104,16 @@ test.describe("loading placeholders", () => {
     await loaded(page);
     // Layout is exact here: the old rows were a quarter pixel short each.
     expectClose((await box(card)).height, before.height, "project card height", 0.2);
+  });
+
+  test("a checkbox that is checked when the screen opens does not animate", async ({ page }) => {
+    await installDemo(page);
+    await page.goto("/nodes");
+    await expect(page.getByRole("checkbox", { name: /Auto-update/ })).toBeChecked();
+    const animations = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-slot="checkbox"][data-state="checked"] > span')].map((el) => getComputedStyle(el).animationName),
+    );
+    expect(animations.length).toBeGreaterThan(0);
+    for (const name of animations) expect(name).toBe("none");
   });
 });

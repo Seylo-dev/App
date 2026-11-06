@@ -16,7 +16,7 @@ export function RadioGroupItem({ className, ...props }: React.ComponentProps<typ
       )}
       {...props}
     >
-      <RadioPrimitive.Indicator className="size-2 rounded-full bg-primary duration-200 ease-out data-[state=checked]:animate-in data-[state=checked]:zoom-in-50" />
+      <RadioPrimitive.Indicator className="size-2 rounded-full bg-primary" />
     </RadioPrimitive.Item>
   );
 }

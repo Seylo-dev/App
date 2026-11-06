@@ -15,7 +15,7 @@ export function Checkbox({ className, ...props }: React.ComponentProps<typeof Ch
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator className="flex duration-200 ease-out data-[state=checked]:animate-in data-[state=checked]:zoom-in-75 data-[state=indeterminate]:animate-in data-[state=indeterminate]:zoom-in-75">
+      <CheckboxPrimitive.Indicator className="flex">
         {props.checked === "indeterminate" ? <IconMinus size={12} stroke={3} /> : <IconCheck size={12} stroke={3} />}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
