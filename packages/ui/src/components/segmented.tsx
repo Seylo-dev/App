@@ -1,6 +1,7 @@
 import { ToggleGroup } from "radix-ui";
-import type * as React from "react";
+import * as React from "react";
 import { cn } from "../lib/utils";
+import { ActiveIndicator } from "./motion";
 
 export interface SegmentedProps {
   value: string;
@@ -13,37 +14,58 @@ export interface SegmentedProps {
   children: React.ReactNode;
 }
 
+const SegmentedContext = React.createContext<{ value: string; layoutId: string } | null>(null);
+
 /**
  * A segmented control: a quiet track with the selected option raised as a
- * small white pill. Single choice; use for ranges and view switches.
+ * small white pill that slides to the option you pick. Single choice; use
+ * for ranges and view switches.
  */
 export function Segmented({ value, onValueChange, tone = "muted", className, children, ...rest }: SegmentedProps) {
+  // Each control slides its own pill, never one from another control.
+  const layoutId = `segmented-${React.useId()}`;
   return (
-    <ToggleGroup.Root
-      data-slot="segmented"
-      type="single"
-      value={value}
-      // Radix reports "" when the active item is clicked again; a segmented
-      // control always keeps one option selected.
-      onValueChange={(next) => next && onValueChange(next)}
-      aria-label={rest["aria-label"]}
-      className={cn("inline-flex gap-0.5 rounded-control p-[3px]", tone === "muted" ? "bg-muted" : "bg-track", className)}
-    >
-      {children}
-    </ToggleGroup.Root>
+    <SegmentedContext.Provider value={{ value, layoutId }}>
+      <ToggleGroup.Root
+        data-slot="segmented"
+        type="single"
+        value={value}
+        // Radix reports "" when the active item is clicked again; a segmented
+        // control always keeps one option selected.
+        onValueChange={(next) => next && onValueChange(next)}
+        aria-label={rest["aria-label"]}
+        className={cn("inline-flex gap-0.5 rounded-control p-[3px]", tone === "muted" ? "bg-muted" : "bg-track", className)}
+      >
+        {children}
+      </ToggleGroup.Root>
+    </SegmentedContext.Provider>
   );
 }
 
-export function SegmentedItem({ className, ...props }: React.ComponentProps<typeof ToggleGroup.Item>) {
+export function SegmentedItem({ className, children, ...props }: React.ComponentProps<typeof ToggleGroup.Item>) {
+  const group = React.useContext(SegmentedContext);
   return (
     <ToggleGroup.Item
       data-slot="segmented-item"
       className={cn(
-        "cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px] text-muted-foreground",
-        "data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-segment",
+        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px] text-muted-foreground transition-colors",
+        "hover:text-foreground data-[state=on]:text-foreground",
         className,
       )}
       {...props}
-    />
+    >
+      {group?.value === props.value && <SegmentPill layoutId={group.layoutId} />}
+      {children}
+    </ToggleGroup.Item>
   );
+}
+
+/**
+ * The raised pill behind the selected option of a segmented track. Also for
+ * hand-made tracks (a radio group or a row of filter buttons that looks like
+ * Segmented): render it inside the selected button, which needs `relative
+ * isolate`, with one `layoutId` per track.
+ */
+export function SegmentPill({ layoutId, className }: { layoutId: string; className?: string }) {
+  return <ActiveIndicator layoutId={layoutId} className={cn("rounded-chip bg-card shadow-segment", className)} />;
 }

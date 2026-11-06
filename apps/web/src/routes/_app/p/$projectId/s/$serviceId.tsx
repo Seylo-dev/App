@@ -5,9 +5,10 @@
 
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
+import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Skeleton } from "@seylo/ui/components/skeleton";
-import { TabList, tabClassName } from "@seylo/ui/components/tabs";
-import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
+import { createFileRoute, Link, Outlet, useChildMatches, useRouterState } from "@tanstack/react-router";
 import { OpErrorNote, retryOp } from "../../../../../components/service/op-state";
 import { ServiceHeader } from "../../../../../components/service/service-header";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
@@ -29,6 +30,7 @@ function ServiceLayout() {
     select: (s) => (s.location.pathname.split(`/s/${serviceId}`)[1] ?? "").replace(/^\//, "").split("/")[0] as TabPath,
   });
   const tabs = tabsFor(service.data?.kind);
+  const tabMatch = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   const parent = service.data?.parentId;
 
   return (
@@ -58,11 +60,19 @@ function ServiceLayout() {
             activeOptions={{ exact: true }}
             className={`${tabClassName} shrink-0 whitespace-nowrap`}
           >
-            {t(tab.label)}
+            {({ isActive }) => (
+              <>
+                {isActive && <TabIndicator layoutId="service-tabs" />}
+                {t(tab.label)}
+              </>
+            )}
           </Link>
         ))}
       </TabList>
-      <Outlet />
+      {/* A tab's screen fades in when you switch tabs; the header and tabs above stay put. */}
+      <EnterOnChange motionKey={tabMatch} subtle className="flex min-w-0 flex-1 flex-col gap-5">
+        <Outlet />
+      </EnterOnChange>
     </>
   );
 }

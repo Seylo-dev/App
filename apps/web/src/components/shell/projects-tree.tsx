@@ -6,6 +6,7 @@
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { StatusDot } from "@seylo/ui/components/chip";
+import { ActiveIndicator } from "@seylo/ui/components/motion";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
@@ -117,14 +118,20 @@ function ProjectServices({ projectId }: { projectId: string }) {
             <Link
               to="/p/$projectId/s/$serviceId"
               params={{ projectId, serviceId: service.id }}
-              className="flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:bg-accent data-[status=active]:text-accent-foreground"
+              className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
             >
-              <StatusDot status={status.dot} />
-              <span className="truncate">{service.name}</span>
-              {isBusy(service.status) && (
-                <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
-                  {status.label.toLowerCase()}
-                </span>
+              {({ isActive }) => (
+                <>
+                  {/* The same sliding background as the main navigation (sidebar.tsx). */}
+                  {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                  <StatusDot status={status.dot} />
+                  <span className="truncate">{service.name}</span>
+                  {isBusy(service.status) && (
+                    <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
+                      {status.label.toLowerCase()}
+                    </span>
+                  )}
+                </>
               )}
             </Link>
           </li>

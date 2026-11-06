@@ -5,6 +5,7 @@
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { SegmentPill } from "@seylo/ui/components/segmented";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconFolder } from "@tabler/icons-react";
@@ -162,10 +163,11 @@ function TrackButton({ active, onClick, children }: { active: boolean; onClick: 
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "cursor-pointer rounded-chip border-0 px-[11px] py-[5px] text-[12.5px]",
-        active ? "bg-card text-foreground shadow-segment" : "bg-transparent text-ink-strong hover:text-foreground",
+        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px]",
+        active ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >
+      {active && <SegmentPill layoutId="dashboard-expand" />}
       {children}
     </button>
   );

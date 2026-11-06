@@ -6,8 +6,9 @@ import { projects } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
+import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Skeleton } from "@seylo/ui/components/skeleton";
-import { tabClassName } from "@seylo/ui/components/tabs";
+import { TabIndicator, tabClassName } from "@seylo/ui/components/tabs";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { NewServiceMenu } from "../../../../components/new-service/new-service-menu";
@@ -94,18 +95,19 @@ function ProjectPage() {
             onClick={() => goTo(item)}
             className={`cursor-pointer border-x-0 border-t-0 bg-transparent ${tabClassName}`}
           >
+            {tab === item && <TabIndicator layoutId="project-tabs" />}
             {t(tabLabels[item])}
           </button>
         ))}
       </div>
 
-      <div role="tabpanel" aria-label={t(tabLabels[tab])}>
+      <EnterOnChange motionKey={tab} subtle role="tabpanel" aria-label={t(tabLabels[tab])}>
         {tab === "services" && <ServicesGrid projectId={data.id} canCreate={!data.protected} />}
         {tab === "env" && <SharedEnv projectId={data.id} />}
         {tab === "people" && <ProjectPeople projectId={data.id} onShare={() => setShareOpen(true)} />}
         {tab === "activity" && <ProjectActivity projectId={data.id} />}
         {tab === "settings" && <ProjectSettings key={data.updatedAt} project={data} />}
-      </div>
+      </EnterOnChange>
       <ShareDialog projectId={data.id} open={shareOpen} onOpenChange={setShareOpen} />
     </>
   );

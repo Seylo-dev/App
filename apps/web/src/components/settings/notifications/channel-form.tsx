@@ -8,6 +8,7 @@ import { Card } from "@seylo/ui/components/card";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input } from "@seylo/ui/components/input";
+import { SegmentPill } from "@seylo/ui/components/segmented";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
@@ -144,10 +145,11 @@ export function ChannelForm({ editing, onDone }: { editing: Channel | null; onDo
               setErrors([]);
             }}
             className={cn(
-              "h-[30px] cursor-pointer truncate rounded-chip border-0 bg-transparent px-1 text-[12.5px] text-ink-strong disabled:cursor-default disabled:opacity-40",
-              kind === k && "bg-card font-medium text-foreground shadow-segment",
+              "relative isolate h-[30px] cursor-pointer truncate rounded-chip border-0 bg-transparent px-1 text-[12.5px] text-ink-strong not-disabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40",
+              kind === k && "text-foreground",
             )}
           >
+            {kind === k && <SegmentPill layoutId="channel-kinds" />}
             {t(`settingsNotifications.kinds.${k}`)}
           </button>
         ))}

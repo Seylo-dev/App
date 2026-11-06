@@ -6,6 +6,7 @@
 import { templates } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { SegmentPill } from "@seylo/ui/components/segmented";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
@@ -132,10 +133,11 @@ function CategoryButton({ pressed, onClick, children }: { pressed: boolean; onCl
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "h-7 cursor-pointer rounded-chip border-0 px-3 text-[12.5px]",
-        pressed ? "bg-card font-medium text-foreground shadow-segment" : "bg-transparent text-ink-strong hover:text-foreground",
+        "relative isolate h-7 cursor-pointer rounded-chip border-0 bg-transparent px-3 text-[12.5px]",
+        pressed ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >
+      {pressed && <SegmentPill layoutId="template-categories" />}
       {children}
     </button>
   );

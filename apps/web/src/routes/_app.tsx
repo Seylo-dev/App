@@ -1,8 +1,10 @@
 // Every signed-in screen: the sidebar plus the page. Signed-out visitors
 // are sent to /login and come back afterwards. The live socket lives as
-// long as this layout does.
+// long as this layout does. A new page fades in with a small rise; the
+// sidebar stays as it is.
 
-import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
+import { EnterOnChange } from "@seylo/ui/components/motion";
+import { createFileRoute, Outlet, redirect, useChildMatches, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ErrorPage, NotFound } from "../components/not-found";
 import { ShellProvider } from "../components/shell/shell-context";
@@ -26,6 +28,8 @@ export const Route = createFileRoute("/_app")({
 
 function AppLayout() {
   const navigate = useNavigate();
+  // The page's own route (a project, a service, settings): its tabs and sections animate themselves.
+  const page = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
 
   useEffect(() => {
     live.connect(() => void navigate({ to: "/login" }));
@@ -37,8 +41,10 @@ function AppLayout() {
       <PanelTopic />
       <div className="flex min-h-dvh flex-col md:flex-row">
         <Sidebar />
-        <main className="box-border flex min-w-0 flex-1 flex-col gap-5 px-4 pt-[26px] pb-10 md:px-[30px]">
-          <Outlet />
+        <main className="box-border flex min-w-0 flex-1 flex-col px-4 pt-[26px] pb-10 md:px-[30px]">
+          <EnterOnChange motionKey={page} className="flex min-w-0 flex-1 flex-col gap-5">
+            <Outlet />
+          </EnterOnChange>
         </main>
       </div>
     </ShellProvider>
