@@ -81,9 +81,12 @@ panel-image: build-ts ## Build the panel image for this machine as <image>:$(VER
 release-check: ## Validate .goreleaser.yaml
 	$(BRAND_ENV) goreleaser check
 
+# The before hooks are skipped, so build/install.sh is rendered first:
+# checksums.txt lists it (.goreleaser.yaml checksum.extra_files).
 release-snapshot: ## Build the release binaries and install.sh into dist/ (no publish, sign or image)
+	scripts/render-installer.sh latest build/install.sh
 	$(BRAND_ENV) goreleaser release --snapshot --clean --skip=sign,docker,before
-	scripts/render-installer.sh latest dist/install.sh
+	cp build/install.sh dist/install.sh
 
 release-dry-run: ## goreleaser as in `make release`, publishing nothing: snapshot, signed, one panel image per platform loaded locally (MINISIGN_SECRET_KEY, MINISIGN_PASSWORD)
 	$(BRAND_ENV) goreleaser release --snapshot --clean

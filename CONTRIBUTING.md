@@ -186,16 +186,20 @@ Each release:
    exactly that tag, which makes the draft and pushes the image tags
    (`<version>`, and `latest` unless it is a pre-release) to
    `ghcr.io/seylo-dev/seylo`. One release runs at a time, and a running
-   release is never cancelled by another tag. A `vX.Y.Z-<pre>` tag
-   (`v0.1.0-rc.1`) makes a pre-release that installs and updates do not
-   follow; to promote it, tag the same commit `vX.Y.Z`.
+   release is never cancelled by another tag. Re-running the job replaces
+   the draft an earlier run made. A `vX.Y.Z-<pre>` tag (`v0.1.0-rc.1`)
+   makes a pre-release that installs and updates do not follow; to promote
+   it, tag the same commit `vX.Y.Z`.
 3. The Publish job (`scripts/release-publish.sh`) then checks the draft
    without trusting the job that made it, and publishes it only when every
    check passes:
    - `checksums.txt` and `manifest.json` are signed by `brand.json`'s
      `minisignPublicKey`, with this version in their trusted comments;
-   - every release file is attached, and each file `checksums.txt` lists
-     matches its signed sha256;
+   - exactly one release carries the tag (GitHub lets several drafts share
+     one), and Publish downloads and publishes that release by its id;
+   - every release file is attached and covered by a signature:
+     `checksums.txt` lists the binaries, `install.sh` and `openapi.json`,
+     and each matches its signed sha256;
    - `manifest.json` names this version, this release's linux binaries,
      `install.sh` and panel image, and `install.sh` is this version's
      release build (not a test build);
@@ -204,11 +208,15 @@ Each release:
      pull anonymously (as installs and updates pull them), with linux/amd64
      and linux/arm64.
 
-   A stable version becomes the latest release, which installs and updates
-   follow, unless a newer version already is; a pre-release never does. The
-   run summary lists every check. When one fails, the draft stays a draft
-   and the summary says what to do. Running Publish again on a release that
-   is already published checks it and changes nothing.
+   Right before publishing, Publish reads the release again and stops if
+   its files or flags changed, or another release with the tag appeared,
+   while it checked. A stable version becomes the latest release, which
+   installs and updates follow, unless a newer version already is; a
+   pre-release never does. The run summary lists every check. When one
+   fails, the draft stays a draft and the summary says what to do (for two
+   drafts with one tag: delete the stale one, then re-run Publish). Running
+   Publish again on a release that is already published checks it and
+   changes nothing.
 4. On the first release only, the new package is private, so Publish stops
    with "The ghcr.io/seylo-dev/seylo package is private". Open it
    (github.com/orgs/Seylo-dev/packages > seylo), check that it is connected
@@ -222,10 +230,11 @@ To keep a release from going out on its own:
   as a pre-release that installs and updates do not follow; tag the same
   commit `vX.Y.Z` when it is ready.
 - Or cancel the workflow run (Actions > the run > Cancel workflow run)
-  before the Publish job finishes. If the Draft release job had finished,
-  the draft is complete and stays a draft: publish it later by re-running
-  the Publish job. If it was still running, the draft may be half made:
-  delete it and the tag as below.
+  while the Draft release job is still running or before the Publish job
+  starts; once Publish is running it may already have published. If the
+  Draft release job had finished, the draft is complete and stays a draft:
+  publish it later by re-running the Publish job. If it was still running,
+  the draft may be half made: delete it and the tag as below.
 
 If the Draft release job fails, or Publish refuses the draft's content (not
 the private package), do not publish the draft by hand. Fix the cause on

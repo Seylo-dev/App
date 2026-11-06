@@ -192,7 +192,15 @@ jobs:
             dist/artifacts.json | while IFS=$'\t' read -r name path; do cp "$path" "$files/$name"; done
           cp dist/checksums.txt dist/checksums.txt.minisig dist/manifest.json dist/manifest.json.minisig \
             build/install.sh openapi.json "$files/"
+          # checksums.txt covers every file but the signed ones, as the
+          # Publish job requires: the binaries, install.sh and openapi.json.
           (cd "$files" && sha256sum --strict -c checksums.txt)
+          for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
+            "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
+            install.sh openapi.json; do
+            awk -v n="$f" '$2 == n { found = 1 } END { exit !found }' "$files/checksums.txt" ||
+              { echo "::error::checksums.txt does not list $f"; exit 1; }
+          done
           for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
             "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
             checksums.txt checksums.txt.minisig install.sh openapi.json manifest.json manifest.json.minisig; do

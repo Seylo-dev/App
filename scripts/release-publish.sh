@@ -6,8 +6,12 @@
 #   - checksums.txt and manifest.json carry minisign signatures by brand.json's
 #     minisignPublicKey (from installer/brand.env, never from the release),
 #     with trusted comments naming this version;
-#   - every file a release needs, and every file checksums.txt lists, is
-#     attached, and each listed file matches its signed sha256;
+#   - exactly one release carries the tag (GitHub lets several drafts share
+#     one); every download and the publish go to that release by its id,
+#     never by the tag;
+#   - every file a release needs is attached; checksums.txt lists the
+#     binaries, install.sh and openapi.json, and every file it lists matches
+#     its signed sha256;
 #   - the signed manifest is for this version and names this release's linux
 #     binaries, install.sh and panel image; install.sh is this version's
 #     release build (brand.json's key, not a test build);
@@ -16,12 +20,13 @@
 #     pull anonymously from ghcr.io (as installs and updates pull them), and
 #     the image index has linux/amd64 and linux/arm64.
 #
-# Then `gh release edit --draft=false`, keeping the pre-release flag
+# Then, if the release still has the files and flags that were checked, it
+# is published by id (PATCH draft=false), keeping the pre-release flag
 # goreleaser set: a stable version becomes the latest release unless a newer
-# one already is; a pre-release never does. On a release that is already
-# published it runs the same checks and changes nothing. When a check fails
-# the draft stays, and the output (and GITHUB_STEP_SUMMARY in Actions) says
-# what to do.
+# one already is; a pre-release is never made the latest. On a release that
+# is already published it runs the same checks and changes nothing. When a
+# check fails the draft stays, and the output (and GITHUB_STEP_SUMMARY in
+# Actions) says what to do.
 #
 # Usage: scripts/release-publish.sh vX.Y.Z[-PRE]
 #        scripts/release-publish.sh --check-image <image>:<tag>[@<digest>]
@@ -231,27 +236,57 @@ esac
 
 verify_todo="The draft stays unpublished; do not publish it by hand. Fix the cause shown above on main, delete the draft release and the tag, then tag again (CONTRIBUTING.md, Releases)."
 
-# ---- the release
+# ---- the release, resolved once to its id
+#
+# GitHub lets several drafts carry the same tag_name, and releases/tags/<tag>
+# never answers with a draft, so gh looks a draft up by tag as "the first
+# draft in the list with that tag". The tag is only used to find the release
+# here; every download and the publish go to its id, and it is published only
+# if it still matches what was checked.
 
-if ! gh release view "$tag" --repo "$repo" --json isDraft,isPrerelease,assets >"$tmp/release.json" 2>"$tmp/gh.err"; then
-  if grep -qi 'not found' "$tmp/gh.err"; then
-    fail "$repo has a release $tag"
-    stop "There is no release $tag in $repo. The Draft release job makes it: re-run all jobs of this workflow run."
-  fi
-  stop "gh could not read release $tag of $repo: $(tr '\n' ' ' <"$tmp/gh.err" | head -c 300). Re-run the Publish job."
+gh_err() { tr '\n' ' ' <"$tmp/gh.err" | head -c 300; }
+
+# releases_for_tag <out>: every release of $repo, drafts too, whose tag is
+# $tag, as a JSON array.
+releases_for_tag() {
+  gh api --paginate "repos/$repo/releases?per_page=100" >"$tmp/releases.json" 2>"$tmp/gh.err" ||
+    stop "gh could not list the releases of $repo: $(gh_err). Re-run the Publish job."
+  jq -s --arg tag "$tag" '[(add // [])[] | select(.tag_name == $tag)]' "$tmp/releases.json" >"$1" 2>/dev/null ||
+    stop "gh listed the releases of $repo as something that is not a list of releases. Re-run the Publish job."
+}
+# describe <releases json>: one line naming each release.
+describe() {
+  jq -r '[.[] | "release \(.id) (\(if .draft then "draft" else "published" end), made \(.created_at), \(.assets | length) files)"] | join(", ")' "$1"
+}
+stale_todo="Delete the stale draft under Releases (the one an earlier Draft release run left, usually the older), then re-run the Publish job: it checks the one that is left."
+
+releases_for_tag "$tmp/matching.json"
+count=$(jq length "$tmp/matching.json")
+if [ "$count" -eq 0 ]; then
+  fail "$repo has a release $tag"
+  stop "There is no release $tag in $repo. The Draft release job makes it: re-run all jobs of this workflow run."
 fi
-draft=$(jq -r .isDraft "$tmp/release.json")
-prerelease=$(jq -r .isPrerelease "$tmp/release.json")
+if [ "$count" -gt 1 ]; then
+  fail "one release carries tag $tag ($count do: $(describe "$tmp/matching.json"))"
+  stop "$count releases carry tag $tag, so none is published. $stale_todo"
+fi
+jq '.[0]' "$tmp/matching.json" >"$tmp/release.json"
+id=$(jq -r .id "$tmp/release.json")
+[[ "$id" =~ ^[0-9]+$ ]] || stop "gh listed release $tag without a numeric id ($id). Re-run the Publish job."
+draft=$(jq -r .draft "$tmp/release.json")
+prerelease=$(jq -r .prerelease "$tmp/release.json")
 state=published
 [ "$draft" != true ] || state=draft
-ok "$repo has release $tag ($state)"
+ok "$repo has one release with tag $tag: $id ($state)"
 
-attached=$(jq -r '.assets[] | select((.state // "uploaded") == "uploaded") | .name' "$tmp/release.json")
+attached=$(jq -r '.assets[] | select(.state == "uploaded") | .name' "$tmp/release.json")
 is_attached() { grep -qxF "$1" <<<"$attached"; }
+asset_id() { jq -r --arg n "$1" '[.assets[] | select(.name == $n and .state == "uploaded") | .id][0] // empty' "$tmp/release.json"; }
 
+binaries=("${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" "${BRAND_SLUG}_darwin_arm64"
+  "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe")
 signed=(checksums.txt checksums.txt.minisig manifest.json manifest.json.minisig install.sh)
-required=("${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" "${BRAND_SLUG}_darwin_arm64"
-  "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" openapi.json "${signed[@]}")
+required=("${binaries[@]}" openapi.json "${signed[@]}")
 missing=()
 for f in "${required[@]}"; do is_attached "$f" || missing+=("$f"); done
 if [ ${#missing[@]} -gt 0 ]; then
@@ -262,11 +297,15 @@ ok "the release has every file a release needs (${#required[@]} files)"
 
 dl=$tmp/files
 mkdir "$dl"
-download() { # <name>...: from the release into $dl
-  gh release download "$tag" --repo "$repo" --dir "$dl" --clobber "${@/#/--pattern=}" >/dev/null 2>"$tmp/gh.err" ||
-    stop "gh could not download $* from release $tag: $(tr '\n' ' ' <"$tmp/gh.err" | head -c 300). Re-run the Publish job."
-  local f
-  for f; do [ -s "$dl/$f" ] || stop "gh downloaded no $f from release $tag. Re-run the Publish job."; done
+download() { # <name>...: those files of release $id into $dl, by asset id
+  local f aid
+  for f; do
+    aid=$(asset_id "$f")
+    [[ "$aid" =~ ^[0-9]+$ ]] || stop "release $tag lists $f without a numeric asset id ($aid). Re-run the Publish job."
+    gh api "repos/$repo/releases/assets/$aid" -H "Accept: application/octet-stream" >"$dl/$f" 2>"$tmp/gh.err" ||
+      stop "gh could not download $f (asset $aid) from release $tag: $(gh_err). Re-run the Publish job."
+    [ -s "$dl/$f" ] || stop "gh downloaded an empty $f (asset $aid) from release $tag. Re-run the Publish job."
+  done
 }
 download "${signed[@]}"
 
@@ -306,8 +345,9 @@ for f in "${listed[@]}"; do
   elif [ ! -e "$dl/$f" ]; then fetch+=("$f")
   fi
 done
-for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" "${BRAND_SLUG}_darwin_arm64" \
-  "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe"; do
+# goreleaser's checksum.extra_files adds install.sh and openapi.json, so
+# every attached file is covered by a signature.
+for f in "${binaries[@]}" install.sh openapi.json; do
   [ -n "$(listed_sum "$f")" ] || fail "checksums.txt lists $f"
 done
 if [ ${#missing[@]} -gt 0 ]; then
@@ -357,9 +397,13 @@ pre_todo=
 if [ "$prerelease" = "$want_prerelease" ]; then
   if [ "$want_prerelease" = true ]; then ok "the release is a pre-release, like the tag"; else ok "the release is not a pre-release, like the tag"; fi
 else
-  fail "the release has isPrerelease=$prerelease, the tag $tag needs $want_prerelease"
+  fail "the release has prerelease=$prerelease, the tag $tag needs $want_prerelease"
   if [ "$want_prerelease" = true ]; then pre_todo="Tick"; else pre_todo="Untick"; fi
-  pre_todo="$pre_todo \"Set as a pre-release\" on the draft (Releases -> Edit, then Save draft), then re-run the Publish job."
+  if [ "$draft" = true ]; then
+    pre_todo="$pre_todo \"Set as a pre-release\" on the draft (Releases -> Edit, then Save draft), then re-run the Publish job."
+  else
+    pre_todo="$pre_todo \"Set as a pre-release\" on release $tag (Releases -> Edit, then Update release), then re-run the Publish job."
+  fi
 fi
 if [ "$failed" -gt 0 ]; then
   # A wrong pre-release flag alone has its own fix; anything else is the
@@ -390,21 +434,54 @@ fi
 
 # version_ge <a> <b>: a >= b, both MAJOR.MINOR.PATCH.
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$1" ]; }
-latest=--latest=false
+# A pre-release gets no make_latest: GitHub never makes one the latest.
+make_latest=
 note="a pre-release, so not the latest release: installs and updates do not follow it"
 if [ "$want_prerelease" = false ]; then
-  current=$(gh release view --repo "$repo" --json tagName --jq .tagName 2>/dev/null || true)
+  current=
+  if gh api "repos/$repo/releases/latest" >"$tmp/latest.json" 2>"$tmp/gh.err"; then
+    current=$(jq -r '.tag_name // empty' "$tmp/latest.json" 2>/dev/null || true)
+  elif ! grep -qF "(HTTP 404)" "$tmp/gh.err"; then
+    stop "gh could not read the latest release of $repo: $(gh_err). Re-run the Publish job."
+  fi
   current=${current#v}
   if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version_ge "$version" "$current"; then
-    latest=--latest
+    make_latest=true
     note="the latest release: installs and updates follow it"
   else
+    make_latest=false
     note="not made the latest release: v$current is newer and stays the latest"
   fi
 fi
-if ! gh release edit "$tag" --repo "$repo" --draft=false "$latest" >/dev/null 2>"$tmp/gh.err"; then
-  stop "gh could not publish release $tag: $(tr '\n' ' ' <"$tmp/gh.err" | head -c 300). Re-run the Publish job."
+
+# The release must still be the only one with this tag, with the files and
+# flags that were checked: a re-run Draft release job or an edit while this
+# ran would otherwise publish files nobody checked.
+fingerprint() { # <release json>
+  jq -cS '{id, tag_name, draft, prerelease, assets: ([.assets[] | {id, name, size, state, digest, updated_at}] | sort_by(.id))}' "$1"
+}
+releases_for_tag "$tmp/now.json"
+count=$(jq length "$tmp/now.json")
+if [ "$count" -eq 0 ]; then
+  fail "release $tag ($id) still exists"
+  stop "Release $tag was deleted while it was being checked, so nothing was published."
 fi
-draft=$(gh release view "$tag" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null || true)
-[ "$draft" = false ] || stop "gh published release $tag, but it still reads as a draft. Check it under Releases, then re-run the Publish job."
+if [ "$count" -gt 1 ]; then
+  fail "one release carries tag $tag ($count do now: $(describe "$tmp/now.json"))"
+  stop "Another release with tag $tag appeared while this one was being checked, so none is published. $stale_todo"
+fi
+jq '.[0]' "$tmp/now.json" >"$tmp/release-now.json"
+if [ "$(fingerprint "$tmp/release.json")" != "$(fingerprint "$tmp/release-now.json")" ]; then
+  fail "release $tag ($id) still has the files and flags that were checked"
+  stop "Release $tag changed while it was being checked (its files, tag or flags), so it was not published. Re-run the Publish job to check it again."
+fi
+ok "release $tag ($id) still has the files and flags that were checked"
+
+publish=(-X PATCH "repos/$repo/releases/$id" -F draft=false)
+[ -z "$make_latest" ] || publish+=(-f "make_latest=$make_latest")
+if ! gh api "${publish[@]}" >"$tmp/published.json" 2>"$tmp/gh.err"; then
+  stop "gh could not publish release $tag ($id): $(gh_err). Re-run the Publish job."
+fi
+[ "$(jq -r .draft "$tmp/published.json" 2>/dev/null || true)" = false ] ||
+  stop "gh published release $tag ($id), but it still reads as a draft. Check it under Releases, then re-run the Publish job."
 finish "published, $note"
