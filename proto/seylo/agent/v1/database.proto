@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+
+// DatabaseSpec is set on SERVICE_KIND_DATABASE services. The image, env and
+// volumes in ServiceSpec are already filled for the engine; this message
+// adds what the agent needs for tools, backups and exposure.
+message DatabaseSpec {
+  DatabaseEngine engine = 1;
+  // Engine version, for example "17" for Postgres. Display and backup
+  // tooling only; the image decides what runs.
+  string version = 2;
+  DatabaseCredentials credentials = 3;
+  DatabaseTools tools = 4;
+  DatabaseExposure exposure = 5;
+}
+
+enum DatabaseEngine {
+  DATABASE_ENGINE_UNSPECIFIED = 0;
+  DATABASE_ENGINE_POSTGRES = 1;
+  DATABASE_ENGINE_MYSQL = 2;
+  DATABASE_ENGINE_MARIADB = 3;
+  DATABASE_ENGINE_MONGO = 4;
+  DATABASE_ENGINE_REDIS = 5;
+}
+
+// DatabaseCredentials let the agent open pre-logged-in shells, run dumps
+// for backups and sign in the web UI.
+message DatabaseCredentials {
+  string admin_user = 1;
+  string admin_password = 2;
+  // Default database for shells and the web UI.
+  string database = 3;
+}
+
+message DatabaseTools {
+  // Allow the on-demand web UI (picked by engine). It starts on the first
+  // ticket-authenticated request through the edge and stops when idle.
+  bool web_ui = 1;
+  // Default 15m.
+  google.protobuf.Duration web_ui_idle_timeout = 2;
+}
+
+// DatabaseExposure publishes the database port through the portgate using
+// the database's own TLS (MySQL and friends cannot be routed by host name
+// through Traefik).
+message DatabaseExposure {
+  bool enabled = 1;
+  uint32 host_port = 2;
+  // Empty means anyone may connect; the UI warns about it.
+  repeated string allowed_source_cidrs = 3;
+  // Host name for the ACME certificate the edge obtains for the database.
+  // Empty means a self-signed certificate.
+  string tls_hostname = 4;
+  // User for connections through the exposed port; the agent creates it
+  // (or updates its password) when exposure is on, requiring TLS for it
+  // where the engine can (Postgres hostssl, MySQL REQUIRE SSL). Empty for
+  // Redis, which keeps its one default user.
+  string user = 5;
+  string password = 6;
+}

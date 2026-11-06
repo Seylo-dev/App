@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+
+// Routing is everything that decides how HTTP traffic reaches a service.
+// The agent renders it into a seylo-<service>.yml Traefik file and swaps the
+// file atomically during deploys.
+message Routing {
+  repeated Route routes = 1;
+  // Per-service maintenance page. NodeSettings has the global one.
+  Maintenance maintenance = 2;
+  // Page shown while no instance is healthy (stopped, crashed, deploying
+  // for the first time).
+  StatusPage status_page = 3;
+}
+
+// Route maps hosts (and optionally a path) to a container port.
+message Route {
+  // Stable id from the panel, used in Traefik router names.
+  string id = 1;
+  // One or more host names, for example "app.example.com" or the auto
+  // domain "<svc>.<node wildcard>".
+  repeated string hosts = 2;
+  // Only requests under this prefix match. Empty means the whole host.
+  string path_prefix = 3;
+  // Remove path_prefix before forwarding.
+  bool strip_prefix = 4;
+  uint32 target_port = 5;
+  HttpsMode https = 6;
+  // Required with HTTPS_MODE_CUSTOM_CERTIFICATE.
+  Certificate certificate = 7;
+  // Redirect plain HTTP to HTTPS. Ignored with HTTPS_MODE_OFF.
+  bool redirect_to_https = 8;
+  repeated Redirect redirects = 9;
+  BasicAuth basic_auth = 10;
+  // Empty means every source address is allowed.
+  repeated string allowed_source_cidrs = 11;
+  RateLimit rate_limit = 12;
+}
+
+enum HttpsMode {
+  HTTPS_MODE_UNSPECIFIED = 0;
+  HTTPS_MODE_OFF = 1;
+  // Let's Encrypt certificate per host via HTTP-01. The default.
+  HTTPS_MODE_ACME = 2;
+  HTTPS_MODE_CUSTOM_CERTIFICATE = 3;
+}
+
+message Certificate {
+  string cert_pem = 1;
+  string key_pem = 2;
+}
+
+// Redirect rewrites matching request URLs, for example www to apex.
+message Redirect {
+  // RE2 regular expression matched against the full request URL.
+  string from = 1;
+  // Replacement, may use $1-style groups.
+  string to = 2;
+  // 308 when true, 307 otherwise.
+  bool permanent = 3;
+}
+
+message BasicAuth {
+  repeated BasicAuthUser users = 1;
+}
+
+message BasicAuthUser {
+  string username = 1;
+  // bcrypt hash; plaintext passwords never reach the agent.
+  string password_hash = 2;
+}
+
+message RateLimit {
+  // Average allowed requests per period, per source IP.
+  uint32 average = 1;
+  uint32 burst = 2;
+  // Default 1s.
+  google.protobuf.Duration period = 3;
+}
+
+message Maintenance {
+  bool enabled = 1;
+  // Custom page. Empty uses the default page.
+  string html = 2;
+}
+
+message StatusPage {
+  bool enabled = 1;
+  // Custom page. Empty uses the default page.
+  string html = 2;
+}

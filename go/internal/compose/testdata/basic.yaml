@@ -1,0 +1,37 @@
+# A plain web + database stack: everything here is supported.
+services:
+  web:
+    image: ghcr.io/acme/web:${WEB_TAG:-1.4}
+    environment:
+      DATABASE_URL: postgres://app:${DB_PASSWORD}@db:5432/app
+      NODE_ENV: production
+    expose:
+      - "3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+    configs:
+      - source: web_conf
+        target: /etc/web.conf
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+volumes:
+  db-data: {}
+configs:
+  web_conf:
+    content: |
+      listen 3000

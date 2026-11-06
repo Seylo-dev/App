@@ -1,0 +1,388 @@
+// The Deployments tab (Deployments.dc.html): how this service is built and
+// shipped, the history with step chips, rollback and redeploy, the running
+// deploy's log on the side, and full logs in a modal.
+
+import { builds, deployments, type OpOutput, services } from "@seylo/ops";
+import { useOp, useOpMutation } from "@seylo/ops/react";
+import { Button } from "@seylo/ui/components/button";
+import { Card } from "@seylo/ui/components/card";
+import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
+import { EmptyState } from "@seylo/ui/components/empty-state";
+import { LogViewer, useLogBuffer } from "@seylo/ui/components/log-viewer";
+import { Skeleton } from "@seylo/ui/components/skeleton";
+import { toast } from "@seylo/ui/components/toast";
+import { cn } from "@seylo/ui/lib/utils";
+import {
+  type Icon,
+  IconArrowBackUp,
+  IconDots,
+  IconGitBranch,
+  IconLoader2,
+  IconPackage,
+  IconRefresh,
+  IconServer2,
+  IconShieldCheck,
+  IconTerminal2,
+} from "@tabler/icons-react";
+import { type ReactNode, useState } from "react";
+import { t } from "../../i18n/t";
+import { errorMessage } from "../../lib/api";
+import { useLiveUp } from "../../lib/live";
+import { useDeploymentLog } from "./deploy-log";
+import { DeployLogModal } from "./deploy-log-modal";
+import { type Deployment, StepChips } from "./deploy-steps";
+import { DeploymentChips, deploymentDurationMs, deploymentTitle, deploymentVersion, healthFailed } from "./deployment-meta";
+import { formatClock, formatRelative, formatTimeOfDay } from "./format";
+import { useInvalidate } from "./invalidate";
+import { isNotBuilt, OpErrorNote, retryOp } from "./op-state";
+import { isActiveDeployment } from "./status";
+import { DeploymentStatusChip } from "./status-chip";
+import { useNow } from "./use-now";
+import type { ServiceDetail } from "./use-service";
+
+const pageSize = 20;
+
+export function DeploymentsPage({ service }: { service: ServiceDetail }) {
+  const [pages, setPages] = useState<string[]>([]);
+  const liveUp = useLiveUp();
+  const first = useOp(
+    deployments.list,
+    { serviceId: service.id, limit: pageSize },
+    {
+      retry: retryOp,
+      // service:<id> invalidates this list when a deployment moves; poll fast only while the socket is down.
+      refetchInterval: (q) => (q.state.data?.deployments.some((d) => isActiveDeployment(d.status)) ? (liveUp ? 15_000 : 2000) : false),
+    },
+  );
+  const [open, setOpen] = useState<Deployment | null>(null);
+  const rows = first.data?.deployments ?? [];
+  const active = rows.find((d) => isActiveDeployment(d.status)) ?? null;
+  const side = active ?? rows[0] ?? null;
+
+  return (
+    <>
+      <BuildFacts service={service} />
+      <div className="flex flex-wrap items-start gap-4">
+        <Card aria-label={t("serviceDeploys.history")} className="min-w-0 flex-[999_1_520px] gap-0 overflow-hidden p-0">
+          <div className="flex flex-wrap items-center gap-2.5 px-5 pt-4 pb-3.5">
+            <h2 className="m-0 text-[15px] font-semibold">{t("serviceDeploys.history")}</h2>
+            {first.data && first.data.keptImages > 0 && (
+              <span className="ml-auto text-[12.5px] text-muted-foreground">
+                {t("serviceDeploys.keptImages", { count: first.data.keptImages })}
+              </span>
+            )}
+          </div>
+          {first.isPending ? (
+            <div className="flex flex-col gap-2 border-t border-divider px-5 py-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ) : first.isError ? (
+            <div className="border-t border-divider px-5 py-4">
+              <OpErrorNote error={first.error} />
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="border-t border-divider">
+              <EmptyState compact title={t("serviceDeploys.empty")} description={t("serviceDeploys.emptyHint")} />
+            </div>
+          ) : (
+            <>
+              {rows.map((d) => (
+                <DeploymentRow key={d.id} service={service} d={d} onLogs={() => setOpen(d)} />
+              ))}
+              {pages.map((cursor) => (
+                <OlderPage key={cursor} service={service} cursor={cursor} onLogs={setOpen} />
+              ))}
+              <LoadMore
+                service={service}
+                cursor={pages.length ? null : first.data.nextCursor}
+                pages={pages}
+                onMore={(c) => setPages((p) => [...p, c])}
+              />
+            </>
+          )}
+        </Card>
+        {side && <SideLog service={service} d={side} />}
+      </div>
+      <DeployLogModal serviceId={service.id} deployment={open} onClose={() => setOpen(null)} />
+    </>
+  );
+}
+
+/** One page of older deployments, loaded with the cursor of the page before. */
+function OlderPage({ service, cursor, onLogs }: { service: ServiceDetail; cursor: string; onLogs: (d: Deployment) => void }) {
+  const page = useOp(deployments.list, { serviceId: service.id, limit: pageSize, cursor }, { retry: retryOp });
+  if (page.isPending) return <Skeleton className="mx-5 my-3 h-12" />;
+  if (page.isError) return <OpErrorNote error={page.error} className="mx-5 my-3" />;
+  return (
+    <>
+      {page.data.deployments.map((d) => (
+        <DeploymentRow key={d.id} service={service} d={d} onLogs={() => onLogs(d)} />
+      ))}
+    </>
+  );
+}
+
+function LoadMore({
+  service,
+  cursor,
+  pages,
+  onMore,
+}: {
+  service: ServiceDetail;
+  cursor: string | null;
+  pages: string[];
+  onMore: (cursor: string) => void;
+}) {
+  // The cursor of the newest loaded page decides whether there is more.
+  const last = pages[pages.length - 1];
+  const lastPage = useOp(
+    deployments.list,
+    { serviceId: service.id, limit: pageSize, cursor: last ?? "" },
+    { enabled: !!last, retry: retryOp },
+  );
+  const next = last ? (lastPage.data?.nextCursor ?? null) : cursor;
+  if (!next) return null;
+  return (
+    <div className="flex justify-center border-t border-divider px-5 py-3">
+      <Button size="sm" onClick={() => onMore(next)}>
+        {t("serviceDeploys.loadMore")}
+      </Button>
+    </div>
+  );
+}
+
+function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Deployment; onLogs: () => void }) {
+  const now = useNow(isActiveDeployment(d.status) ? 1000 : 30_000);
+  const invalidate = useInvalidate();
+  const [confirmRollback, setConfirmRollback] = useState(false);
+  const fail = (error: unknown) =>
+    toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));
+  const done = () => invalidate(deployments.list, services.get);
+  const rollback = useOpMutation(deployments.rollback, {
+    onSuccess: () => {
+      done();
+      toast.success(t("serviceDeploys.rollbackStarted"));
+    },
+    onError: fail,
+  });
+  const redeploy = useOpMutation(deployments.deploy, {
+    onSuccess: () => {
+      done();
+      toast.success(t("service.header.deployStarted"));
+    },
+    onError: fail,
+  });
+  const cancel = useOpMutation(deployments.cancel, { onSuccess: done, onError: fail });
+  const running = isActiveDeployment(d.status);
+  const failed = d.status === "failed";
+  const version = deploymentVersion(d);
+
+  return (
+    <div className={cn("flex flex-wrap items-start gap-3 border-t border-divider px-5 py-3.5", running && "bg-chip-amber-bg/40")}>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-full",
+          running ? "bg-chip-amber-bg" : failed ? "bg-chip-red-bg" : d.status === "cancelled" ? "bg-muted" : "bg-chip-green-bg",
+        )}
+      >
+        {running ? (
+          <IconLoader2 size={16} stroke={2.6} className="animate-spin text-status-busy" />
+        ) : (
+          <span
+            className={cn("size-2 rounded-full", failed ? "bg-status-error" : d.status === "cancelled" ? "bg-status-off" : "bg-status-ok")}
+          />
+        )}
+      </span>
+      <div className="flex min-w-0 flex-[1_1_200px] flex-col gap-[7px]">
+        <div className="flex min-h-[22px] flex-wrap items-center gap-2">
+          <b className="text-[13.5px] font-semibold">{deploymentTitle(d)}</b>
+          {version && <span className="font-mono text-xs text-muted-foreground">{version}</span>}
+          {d.live ? (
+            <DeploymentStatusChip status="live" />
+          ) : healthFailed(d) ? (
+            <span className="rounded-chip bg-chip-red-bg px-[7px] py-0.5 text-[11.5px] font-medium text-chip-red-fg">
+              {t("serviceDeploys.healthFailed")}
+            </span>
+          ) : (
+            d.status !== "superseded" && <DeploymentStatusChip status={d.status} />
+          )}
+          <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
+            {running && d.startedAt ? formatClock(now - Date.parse(d.startedAt)) : formatRelative(d.createdAt, now)}
+          </span>
+        </div>
+        {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
+        {running ? <StepChips steps={d.steps} /> : <DeploymentChips d={d} now={now} />}
+      </div>
+      <div className="ml-auto flex shrink-0 gap-1.5">
+        <RowButton icon={IconTerminal2} onClick={onLogs} haspopup>
+          {t("serviceDeploys.logs")}
+        </RowButton>
+        {d.canRollback && (
+          <RowButton icon={IconArrowBackUp} onClick={() => setConfirmRollback(true)} disabled={rollback.isPending}>
+            {t("serviceDeploys.rollback")}
+          </RowButton>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" className="size-8 rounded-control bg-muted shadow-none" aria-label={t("serviceDeploys.more")}>
+              <IconDots size={15} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {d.commit && (
+              <DropdownMenuItem onSelect={() => redeploy.mutate({ serviceId: service.id, commitSha: d.commit?.sha })}>
+                <IconRefresh size={15} />
+                {t("serviceDeploys.redeployCommit")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => redeploy.mutate({ serviceId: service.id, noCache: true })}>
+              <IconRefresh size={15} />
+              {t("serviceDeploys.redeployNoCache")}
+            </DropdownMenuItem>
+            {running && (
+              <DropdownMenuItem destructive onSelect={() => cancel.mutate({ serviceId: service.id, deploymentId: d.id })}>
+                {t("service.header.cancelDeploy")}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <ConfirmDialog
+        open={confirmRollback}
+        onOpenChange={setConfirmRollback}
+        title={t("serviceDeploys.rollbackTitle", { version: version || deploymentTitle(d) })}
+        description={t("serviceDeploys.rollbackBody")}
+        confirmLabel={t("serviceDeploys.rollback")}
+        onConfirm={() => rollback.mutateAsync({ serviceId: service.id, deploymentId: d.id }).then(() => undefined)}
+      />
+    </div>
+  );
+}
+
+function RowButton({
+  icon: Icon,
+  children,
+  onClick,
+  disabled,
+  haspopup,
+}: {
+  icon: Icon;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  haspopup?: boolean;
+}) {
+  return (
+    <Button
+      size="sm"
+      className="h-8 bg-muted px-[11px] shadow-none hover:bg-track"
+      onClick={onClick}
+      disabled={disabled}
+      aria-haspopup={haspopup ? "dialog" : undefined}
+    >
+      <Icon size={13} stroke={2} />
+      {children}
+    </Button>
+  );
+}
+
+/** The dark log panel next to the history: the running deploy, or the latest one. */
+function SideLog({ service, d }: { service: ServiceDetail; d: Deployment }) {
+  const buffer = useLogBuffer(100_000);
+  const log = useDeploymentLog(service.id, d.id, buffer);
+  const now = useNow(isActiveDeployment(d.status) ? 1000 : 0);
+  const running = isActiveDeployment(d.status);
+  const took = deploymentDurationMs(d, now);
+  return (
+    <section aria-label={t("serviceDeploys.buildLog")} className="min-w-0 flex-[1_1_420px]">
+      {log.error && log.lines === 0 && !isNotBuilt(log.error) ? (
+        <OpErrorNote error={log.error} />
+      ) : (
+        <LogViewer
+          buffer={buffer}
+          aria-label={t("serviceDeploys.buildLog")}
+          title={
+            <span className="flex items-center gap-2.5">
+              {running ? t("serviceDeploys.buildLog") : t("serviceDeploys.modal.deployLog")}
+              <span className="font-mono text-xs font-normal text-terminal-muted">{deploymentVersion(d)}</span>
+            </span>
+          }
+          actions={
+            running ? (
+              <span className="flex items-center gap-1.5 rounded-chip bg-status-busy/12 px-2 py-0.5 text-xs font-medium text-ansi-yellow">
+                <span className="size-1.5 animate-pulse rounded-full bg-status-busy" />
+                {t(`serviceDeploys.status.${d.status}`)} · {formatClock(took ?? 0)}
+              </span>
+            ) : (
+              <span className="text-xs text-terminal-muted">{t(`serviceDeploys.status.${d.status}`)}</span>
+            )
+          }
+          showSource
+          formatTime={(ts) => formatTimeOfDay(ts)}
+          height={420}
+          empty={
+            <span className="text-terminal-muted">
+              {isNotBuilt(log.error)
+                ? t("service.notBuilt.title")
+                : log.done
+                  ? t("serviceDeploys.modal.emptyLog")
+                  : t("serviceDeploys.modal.waiting")}
+            </span>
+          }
+        />
+      )}
+    </section>
+  );
+}
+
+/** The chips above the history: source, builder, push, strategy, build node. */
+function BuildFacts({ service }: { service: ServiceDetail }) {
+  const settings = useOp(builds.getSettings, { serviceId: service.id }, { retry: retryOp });
+  const src = service.sourceConfig;
+  const facts: { icon: Icon; text: string }[] = [];
+  if (service.source.type !== "none") {
+    const where = [t(`serviceDeploys.source.${service.source.type}`), service.source.label, service.source.branch]
+      .filter(Boolean)
+      .join(" · ");
+    facts.push({ icon: IconGitBranch, text: where });
+  }
+  if (service.source.builder)
+    facts.push({
+      icon: IconPackage,
+      text: t("serviceDeploys.facts.builder", { builder: t(`serviceSource.builders.${service.source.builder}.name`) }),
+    });
+  if (src.type === "github" || src.type === "git")
+    facts.push({ icon: IconRefresh, text: src.deployOnPush ? t("serviceDeploys.facts.pushOn") : t("serviceDeploys.facts.pushOff") });
+  facts.push({
+    icon: IconShieldCheck,
+    text: service.deploy.mode === "rolling" ? t("serviceDeploys.facts.rolling") : t("serviceDeploys.facts.recreate"),
+  });
+  const buildsOn = buildNodeText(settings.data, service);
+  if (buildsOn) facts.push({ icon: IconServer2, text: buildsOn });
+
+  return (
+    <div className="flex flex-wrap gap-2 text-[12.5px] text-ink-strong">
+      {facts.map((f) => (
+        <span key={f.text} className="flex items-center gap-[7px] rounded-control bg-card px-[11px] py-1.5 shadow-control">
+          <f.icon size={13} stroke={2} className="text-muted-foreground" aria-hidden="true" />
+          {f.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function buildNodeText(data: OpOutput<typeof builds.getSettings> | undefined, service: ServiceDetail): string | null {
+  if (!data || service.source.type === "image" || service.source.type === "none") return null;
+  const chosen = data.settings.buildNodeId ? data.nodes.find((n) => n.id === data.settings.buildNodeId) : null;
+  const target = service.placements[0];
+  const targetNode = target ? data.nodes.find((n) => n.id === target.nodeId) : undefined;
+  const builder = chosen ?? (targetNode?.canBuild ? targetNode : data.nodes.find((n) => n.canBuild && n.online));
+  if (!builder) return t("serviceDeploys.facts.noBuilder");
+  if (targetNode && !targetNode.canBuild && builder.id !== targetNode.id)
+    return t("serviceDeploys.facts.buildsOnInstead", { node: builder.name, target: targetNode.name });
+  return t("serviceDeploys.facts.buildsOn", { node: builder.name });
+}

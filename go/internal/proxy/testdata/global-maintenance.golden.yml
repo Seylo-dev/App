@@ -1,0 +1,32 @@
+# Written by the Seylo agent for service svc6. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc6-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`app.example.com`)
+      middlewares:
+        - seylo-svc6-maintenance
+      service: seylo-svc6-edge
+      tls:
+        certResolver: le
+    seylo-svc6-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`app.example.com`)
+      middlewares:
+        - seylo-svc6-https
+      service: seylo-svc6-edge
+  middlewares:
+    seylo-svc6-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc6-maintenance:
+      replacePath:
+        path: /_seylo/page/maintenance/svc6
+  services:
+    seylo-svc6-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756

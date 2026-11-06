@@ -1,0 +1,10 @@
+{
+  "name": "seylo-playwright-smoke",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "Browser smoke tests for the web app against a real panel. Not a workspace: it has its own lockfile so the browser tooling stays out of the app's dependencies.",
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

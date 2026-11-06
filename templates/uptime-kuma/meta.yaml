@@ -1,0 +1,19 @@
+name: "Uptime Kuma"
+description: "Self-hosted uptime monitoring with status pages and many notification options."
+category: "Monitoring"
+tags: ["monitoring", "status-page"]
+creates: "App"
+links:
+  - label: "Repository"
+    url: "https://github.com/louislam/uptime-kuma"
+body: |
+  Uptime Kuma checks websites, ports and services and shows status pages. Create the admin account on first open.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "louislam/uptime-kuma:1.23.16"

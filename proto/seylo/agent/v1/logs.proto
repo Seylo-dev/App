@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Logs stay on the node (logs/<service id>/ in the data dir) and survive
+// deploys, so one service's history spans every generation.
+
+message LogEntry {
+  google.protobuf.Timestamp time = 1;
+  LogStream stream = 2;
+  string container_id = 3;
+  uint64 generation = 4;
+  // One line without the trailing newline. ANSI escapes are kept.
+  string line = 5;
+}
+
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
+  // Lines written by Seylo itself, for example "deploy 12 started".
+  LOG_STREAM_SYSTEM = 3;
+}
+
+message LogsFollowRequest {
+  oneof target {
+    string service_id = 1;
+    string build_id = 2;
+  }
+  // History lines to send before following, default 200.
+  uint32 tail = 3;
+  // Only lines after this time. Overrides tail when set.
+  google.protobuf.Timestamp since = 4;
+}
+
+// LogsFollowResponse batches lines so a chatty service costs one message
+// per flush, not one per line.
+message LogsFollowResponse {
+  repeated LogEntry entries = 1;
+}
+
+message LogsSearchRequest {
+  string service_id = 1;
+  // Case-insensitive substring, or an RE2 expression when regex is set.
+  string query = 2;
+  bool regex = 3;
+  google.protobuf.Timestamp since = 4;
+  google.protobuf.Timestamp until = 5;
+  // Default 500, maximum 5000.
+  uint32 limit = 6;
+  // Opaque value from a previous response to get older matches.
+  string cursor = 7;
+}
+
+message LogsSearchResponse {
+  // Newest first.
+  repeated LogEntry entries = 1;
+  // Empty when there is nothing older.
+  string next_cursor = 2;
+}

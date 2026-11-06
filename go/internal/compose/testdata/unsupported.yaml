@@ -1,0 +1,44 @@
+# Everything Seylo warns about.
+services:
+  proxy:
+    image: traefik:v3
+    network_mode: host
+    privileged: true
+    cap_add: [NET_ADMIN]
+    restart: always
+    container_name: my-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      traefik.enable: "true"
+  app:
+    build: ./app
+    ports:
+      - "8080:80"
+      - "53:53/udp"
+    volumes:
+      - ./data:/data
+      - shared:/shared
+    env_file: .env.app
+    logging:
+      driver: syslog
+    environment:
+      API_KEY: ${MISSING_KEY}
+    secrets:
+      - token
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.role == manager]
+    networks: [back]
+  debug:
+    image: busybox
+    profiles: [debug]
+networks:
+  back: {}
+volumes:
+  shared:
+    external: true
+secrets:
+  token:
+    file: ./token.txt

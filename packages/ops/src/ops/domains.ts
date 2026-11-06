@@ -1,0 +1,322 @@
+// Domains route HTTP traffic to a service: automatic domains from a node's
+// wildcard A record, custom domains with a DNS check, paths, HTTPS and
+// per-domain middlewares (basic auth, IP allowlist, rate limit, redirects).
+// Every op that takes a domainId also takes its serviceId, so the scoped
+// permission check runs on the service; the handler checks they match.
+
+import { Type } from "@sinclair/typebox";
+import { defineOp } from "../define";
+import { permission } from "../permission";
+import { Empty, Id, Timestamp } from "../schemas";
+
+/** Lower-case host name, no scheme, no port. Wildcards are not allowed on services. */
+export const Hostname = Type.String({
+  minLength: 3,
+  maxLength: 253,
+  pattern: "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+  description: "Lower-case host name without scheme or port, for example shop.example.com.",
+});
+
+/** Path prefix starting with "/"; "/" means the whole host. */
+export const PathPrefix = Type.String({
+  minLength: 1,
+  maxLength: 200,
+  pattern: "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$",
+  description: 'Only requests under this path match. "/" is the whole host.',
+});
+
+export const ContainerPort = Type.Integer({ minimum: 1, maximum: 65535, description: "Port the container listens on." });
+
+/**
+ * IPv4 or IPv6 address or CIDR, for example 198.51.100.24 or 10.0.0.0/8.
+ * The pattern only rejects obvious garbage; handlers parse it properly.
+ */
+export const Cidr = Type.String({ minLength: 2, maxLength: 64, pattern: "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$" });
+
+/** acme: Let's Encrypt (default). custom: an uploaded certificate. off: plain HTTP only. */
+export const HttpsMode = Type.Union([Type.Literal("acme"), Type.Literal("custom"), Type.Literal("off")]);
+
+/**
+ * ok: the record points at the service's node. missing: no record yet.
+ * wrongTarget: the record points somewhere else. proxied: only Cloudflare
+ * proxy addresses answer, which works once the origin is reachable but hides
+ * the target from the check. unknown: never checked or the lookup failed.
+ */
+export const DnsStatus = Type.Union([
+  Type.Literal("unknown"),
+  Type.Literal("ok"),
+  Type.Literal("missing"),
+  Type.Literal("wrongTarget"),
+  Type.Literal("proxied"),
+]);
+
+export const CertificateStatus = Type.Union([Type.Literal("none"), Type.Literal("pending"), Type.Literal("valid"), Type.Literal("failed")]);
+
+export const DomainRedirect = Type.Object({
+  /** RE2 regular expression matched against the full request URL. */
+  from: Type.String({ minLength: 1, maxLength: 500 }),
+  /** Replacement; may use $1-style groups. */
+  to: Type.String({ minLength: 1, maxLength: 1000 }),
+  /** 308 when true, 307 otherwise. */
+  permanent: Type.Boolean(),
+});
+
+export const DomainRateLimit = Type.Object({
+  /** Average requests allowed per period, per source IP. */
+  average: Type.Integer({ minimum: 1, maximum: 1_000_000 }),
+  burst: Type.Integer({ minimum: 1, maximum: 1_000_000 }),
+  periodSeconds: Type.Integer({ minimum: 1, maximum: 3600, default: 1 }),
+});
+
+/** Middlewares as shown; basic auth passwords are hashed and never returned. */
+export const DomainMiddlewares = Type.Object({
+  basicAuth: Type.Union([Type.Object({ usernames: Type.Array(Type.String()) }), Type.Null()]),
+  ipAllowList: Type.Array(Cidr),
+  rateLimit: Type.Union([DomainRateLimit, Type.Null()]),
+  redirects: Type.Array(DomainRedirect),
+});
+
+/** A domain that sends every request to another URL instead of the service. */
+export const DomainForward = Type.Object({
+  url: Type.String({ minLength: 8, maxLength: 1000, pattern: "^https?://" }),
+  /** 308 (true) or 307 (false). */
+  permanent: Type.Boolean(),
+  /** Keep the request path and query on the target URL. */
+  keepPath: Type.Boolean(),
+});
+
+export const Domain = Type.Object({
+  id: Id,
+  serviceId: Id,
+  host: Hostname,
+  pathPrefix: PathPrefix,
+  stripPrefix: Type.Boolean(),
+  targetPort: ContainerPort,
+  https: HttpsMode,
+  redirectToHttps: Type.Boolean(),
+  /** Generated from a node's wildcard domain. */
+  auto: Type.Boolean(),
+  /** The domain other addresses (IP:port, redirects, ${{svc.URL}}) point to. One per service. */
+  primary: Type.Boolean(),
+  /** Set when this domain only redirects (for example www to the apex). */
+  forward: Type.Union([DomainForward, Type.Null()]),
+  middlewares: DomainMiddlewares,
+  dnsStatus: DnsStatus,
+  dnsCheckedAt: Type.Union([Timestamp, Type.Null()]),
+  certificate: Type.Object({
+    status: CertificateStatus,
+    expiresAt: Type.Union([Timestamp, Type.Null()]),
+    /** "Let's Encrypt", "Cloudflare" (seen through the proxy) or the custom certificate's issuer. */
+    issuer: Type.Union([Type.String(), Type.Null()]),
+    /** Why the last issue or renewal failed (status "failed"), as the node reported it. */
+    error: Type.Union([Type.String(), Type.Null()]),
+  }),
+  /** First time the route served with a valid certificate. */
+  liveAt: Type.Union([Timestamp, Type.Null()]),
+  /** Full URL, for example https://shop.example.com/admin. */
+  url: Type.String(),
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+});
+
+export const DnsRecord = Type.Object({
+  type: Type.Union([Type.Literal("A"), Type.Literal("AAAA"), Type.Literal("CNAME")]),
+  /** Record name relative to the zone ("admin", "@" for the apex) as typed in a DNS panel. */
+  name: Type.String(),
+  value: Type.String(),
+});
+
+export const DnsCheck = Type.Object({
+  domainId: Id,
+  host: Hostname,
+  status: DnsStatus,
+  /** Plain sentence for the UI, for example "No A record for admin.example.com yet". */
+  message: Type.String(),
+  /** Records to create; one A (and AAAA when the node has IPv6) pointing at the node. */
+  expected: Type.Array(DnsRecord),
+  /** What public resolvers answered. */
+  found: Type.Array(DnsRecord),
+  /** Registrable zone the record belongs in, for example example.com. Null when it could not be found. */
+  zone: Type.Union([Type.String(), Type.Null()]),
+  /** The zone's name servers are Cloudflare's. */
+  cloudflareManaged: Type.Boolean(),
+  /**
+   * Link to the zone's DNS page on the Cloudflare dashboard (opens the
+   * account picker), for the "Open Cloudflare DNS" button. Null when the
+   * zone is not on Cloudflare.
+   */
+  cloudflareDnsUrl: Type.Union([Type.String(), Type.Null()]),
+  checkedAt: Timestamp,
+});
+
+const byService = <Input extends { serviceId: string }>(action: `${string}.${string}`) =>
+  permission.service(action, (input: Input) => input.serviceId);
+
+const DomainRef = { serviceId: Id, domainId: Id };
+
+export const list = defineOp({
+  id: "domains.list",
+  kind: "query",
+  summary: "List a service's domains",
+  description:
+    "Lists the domains of a service, primary first, with DNS and certificate status. Also says which automatic domain can be added from the node's wildcard record, if any.",
+  input: Type.Object({ serviceId: Id }),
+  output: Type.Object({
+    domains: Type.Array(Domain),
+    /** Host domains.addAuto would create, for example web.de1.example.com. Null when the service's node has no wildcard domain. */
+    autoDomainSuggestion: Type.Union([Hostname, Type.Null()]),
+  }),
+  permission: byService("domains.view"),
+  mcp: true,
+  audit: false,
+});
+
+export const addAuto = defineOp({
+  id: "domains.addAuto",
+  kind: "mutation",
+  summary: "Add an automatic domain",
+  description:
+    "Adds <name>.<wildcard> from the wildcard A record of the node the service runs on. Works right away with no DNS change. Fails when the node has no wildcard domain set.",
+  input: Type.Object({
+    serviceId: Id,
+    /** Left-most label; defaults to the service name. */
+    subdomain: Type.Optional(Type.String({ minLength: 1, maxLength: 63, pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" })),
+    /** Defaults to the service's main port. */
+    targetPort: Type.Optional(ContainerPort),
+  }),
+  output: Domain,
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const add = defineOp({
+  id: "domains.add",
+  kind: "mutation",
+  summary: "Add a custom domain",
+  description:
+    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Set forward to make it a redirect-only domain, for example www to the apex.",
+  input: Type.Object({
+    serviceId: Id,
+    host: Hostname,
+    pathPrefix: Type.Optional(PathPrefix),
+    stripPrefix: Type.Optional(Type.Boolean()),
+    /** Defaults to the service's main port. */
+    targetPort: Type.Optional(ContainerPort),
+    https: Type.Optional(HttpsMode),
+    forward: Type.Optional(DomainForward),
+    /** Make it the primary domain right away. */
+    primary: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({ domain: Domain, dns: DnsCheck }),
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const checkDns = defineOp({
+  id: "domains.checkDns",
+  kind: "query",
+  summary: "Check a domain's DNS",
+  description:
+    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. Also refreshes the stored status.",
+  input: Type.Object(DomainRef),
+  output: DnsCheck,
+  permission: byService("domains.view"),
+  mcp: true,
+  audit: false,
+});
+
+export const update = defineOp({
+  id: "domains.update",
+  kind: "mutation",
+  summary: "Change a domain's routing",
+  description:
+    "Changes path prefix, strip prefix, target port, HTTPS mode, the HTTP to HTTPS redirect or the forward target of a domain. Fields left out keep their value; forward null turns a redirect-only domain back into a normal one.",
+  input: Type.Object({
+    ...DomainRef,
+    pathPrefix: Type.Optional(PathPrefix),
+    stripPrefix: Type.Optional(Type.Boolean()),
+    targetPort: Type.Optional(ContainerPort),
+    https: Type.Optional(HttpsMode),
+    redirectToHttps: Type.Optional(Type.Boolean()),
+    forward: Type.Optional(Type.Union([DomainForward, Type.Null()])),
+  }),
+  output: Domain,
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const BasicAuthUserInput = Type.Object({
+  username: Type.String({ minLength: 1, maxLength: 64, pattern: "^[^:\\s]+$" }),
+  /** Plain text in, bcrypt hash stored. Leave out to keep an existing user's password. */
+  password: Type.Optional(Type.String({ minLength: 8, maxLength: 200 })),
+});
+
+export const setMiddlewares = defineOp({
+  id: "domains.setMiddlewares",
+  kind: "mutation",
+  summary: "Set a domain's access rules",
+  description:
+    "Sets basic auth, the IP allowlist, the rate limit and URL redirects of one domain. Each field left out keeps its value; null (or an empty list) turns it off. Basic auth users replace the whole list; a user without a password keeps the stored one.",
+  input: Type.Object({
+    ...DomainRef,
+    basicAuth: Type.Optional(
+      Type.Union([Type.Object({ users: Type.Array(BasicAuthUserInput, { minItems: 1, maxItems: 50 }) }), Type.Null()]),
+    ),
+    ipAllowList: Type.Optional(Type.Array(Cidr, { maxItems: 200 })),
+    rateLimit: Type.Optional(Type.Union([DomainRateLimit, Type.Null()])),
+    redirects: Type.Optional(Type.Array(DomainRedirect, { maxItems: 50 })),
+  }),
+  output: Domain,
+  sensitive: { input: ["basicAuth.users.*.password"] },
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const setCertificate = defineOp({
+  id: "domains.setCertificate",
+  kind: "mutation",
+  summary: "Upload a custom certificate",
+  description:
+    "Stores a PEM certificate chain and private key for a domain and switches it to HTTPS mode custom. Fails when the key does not match the certificate or the certificate does not cover the host.",
+  input: Type.Object({
+    ...DomainRef,
+    certPem: Type.String({ minLength: 100, maxLength: 65536 }),
+    privateKey: Type.String({ minLength: 100, maxLength: 65536, description: "PEM private key." }),
+  }),
+  output: Domain,
+  sensitive: { input: ["privateKey"] },
+  permission: byService("domains.edit"),
+  mcp: false,
+  audit: true,
+});
+
+export const setPrimary = defineOp({
+  id: "domains.setPrimary",
+  kind: "mutation",
+  summary: "Make a domain primary",
+  description:
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
+    "Makes this the service's primary domain: IP:port access redirects here once it is live, and ${{svc.URL}} references resolve to it. The previous primary stays as a normal domain.",
+  input: Type.Object(DomainRef),
+  output: Domain,
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});
+
+export const remove = defineOp({
+  id: "domains.remove",
+  kind: "destructive",
+  summary: "Remove a domain",
+  description:
+    "Removes a domain from the service; requests to it stop reaching the service right away. When it was primary, the oldest remaining domain becomes primary.",
+  input: Type.Object(DomainRef),
+  output: Empty,
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});

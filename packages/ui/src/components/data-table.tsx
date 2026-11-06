@@ -1,0 +1,237 @@
+// The panel's table: a white card with quiet column headers, divider rows,
+// click-to-sort columns, an empty state and a row-actions menu. Rows come
+// in already loaded (screens page with ops); sorting is client-side.
+
+import { IconArrowDown, IconArrowUp, IconDots, IconSelector } from "@tabler/icons-react";
+import { type ReactNode, useMemo, useState } from "react";
+import { nextSort, type SortState, type SortValue, sortRows } from "../lib/sort";
+import { cn } from "../lib/utils";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./dropdown-menu";
+import { EmptyState } from "./empty-state";
+import { useUiLabels } from "./labels";
+import { Skeleton } from "./skeleton";
+
+export type { SortState } from "../lib/sort";
+
+export interface DataTableColumn<T> {
+  id: string;
+  header: ReactNode;
+  cell: (row: T) => ReactNode;
+  /** Makes the column sortable by this value. */
+  sortValue?: (row: T) => SortValue;
+  align?: "left" | "right";
+  /** Width like "120px" or "30%"; omit to share the rest. */
+  width?: string;
+  className?: string;
+  /** Hide the column under the md breakpoint. */
+  hideOnMobile?: boolean;
+}
+
+export interface RowAction {
+  label: string;
+  icon?: ReactNode;
+  onSelect: () => void;
+  destructive?: boolean;
+  disabled?: boolean;
+  /** Draw a separator above this action. */
+  separated?: boolean;
+}
+
+export interface DataTableProps<T> {
+  columns: readonly DataTableColumn<T>[];
+  rows: readonly T[];
+  getRowId: (row: T) => string;
+  /** Accessible name of the table, for example "Node list". */
+  "aria-label": string;
+  /** Uncontrolled initial sort. */
+  initialSort?: SortState | null;
+  /** Controlled sort. */
+  sort?: SortState | null;
+  onSortChange?: (sort: SortState | null) => void;
+  /** Items for the "..." menu at the end of each row. */
+  rowActions?: (row: T) => RowAction[];
+  onRowClick?: (row: T) => void;
+  /** Shown instead of rows when there are none (an EmptyState). */
+  empty?: ReactNode;
+  /** Skeleton rows while the first page loads. */
+  loading?: boolean;
+  /** Below this width the table scrolls sideways instead of squeezing. */
+  minWidth?: number;
+  /** No card around it (when it sits inside a SectionCard). */
+  bare?: boolean;
+  className?: string;
+}
+
+export function DataTable<T>({
+  columns,
+  rows,
+  getRowId,
+  initialSort = null,
+  sort: sortProp,
+  onSortChange,
+  rowActions,
+  onRowClick,
+  empty,
+  loading = false,
+  minWidth,
+  bare = false,
+  className,
+  ...rest
+}: DataTableProps<T>) {
+  const labels = useUiLabels();
+  const [sortState, setSortState] = useState<SortState | null>(initialSort);
+  const sort = sortProp === undefined ? sortState : sortProp;
+
+  const sorted = useMemo(() => {
+    const col = sort && columns.find((c) => c.id === sort.id);
+    return col?.sortValue && sort ? sortRows(rows, col.sortValue, sort.desc) : rows;
+  }, [rows, columns, sort]);
+
+  function toggleSort(id: string) {
+    const next = nextSort(sort, id);
+    if (sortProp === undefined) setSortState(next);
+    onSortChange?.(next);
+  }
+
+  const colCount = columns.length + (rowActions ? 1 : 0);
+  const pad = (i: number, last: boolean) => cn(i === 0 ? "pl-[18px]" : "pl-2.5", last ? "pr-[18px]" : "pr-2.5");
+
+  return (
+    <div data-slot="data-table" className={cn("relative min-w-0 overflow-x-auto", !bare && "rounded-card bg-card shadow-card", className)}>
+      <table
+        className="w-full border-collapse text-[13px]"
+        style={minWidth ? { minWidth } : undefined}
+        aria-label={rest["aria-label"]}
+        aria-busy={loading}
+      >
+        <thead>
+          <tr className="text-left text-[12px] text-muted-foreground">
+            {columns.map((col, i) => {
+              const active = sort?.id === col.id;
+              const ariaSort = active ? (sort?.desc ? "descending" : "ascending") : col.sortValue ? "none" : undefined;
+              return (
+                <th
+                  key={col.id}
+                  scope="col"
+                  aria-sort={ariaSort}
+                  style={col.width ? { width: col.width } : undefined}
+                  className={cn(
+                    "border-b border-divider pt-3.5 pb-3 font-medium whitespace-nowrap",
+                    pad(i, i === colCount - 1),
+                    col.align === "right" && "text-right",
+                    col.hideOnMobile && "max-md:hidden",
+                  )}
+                >
+                  {col.sortValue ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(col.id)}
+                      title={active && !sort?.desc ? labels.sortDescending : labels.sortAscending}
+                      className={cn(
+                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-medium text-inherit hover:text-foreground",
+                        active && "text-foreground",
+                        col.align === "right" && "flex-row-reverse",
+                      )}
+                    >
+                      {col.header}
+                      {active ? (
+                        sort?.desc ? (
+                          <IconArrowDown size={13} stroke={2} />
+                        ) : (
+                          <IconArrowUp size={13} stroke={2} />
+                        )
+                      ) : (
+                        <IconSelector size={13} className="text-ink-ghost" />
+                      )}
+                    </button>
+                  ) : (
+                    col.header
+                  )}
+                </th>
+              );
+            })}
+            {rowActions && (
+              <th scope="col" className="w-12 border-b border-divider pr-[18px]">
+                <span className="sr-only">{labels.actions}</span>
+              </th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {loading &&
+            rows.length === 0 &&
+            [0, 1, 2].map((n) => (
+              <tr key={`skeleton-${n}`}>
+                {columns.map((col, i) => (
+                  <td
+                    key={col.id}
+                    className={cn(
+                      "border-t border-divider py-4 first:border-t-0",
+                      pad(i, i === colCount - 1),
+                      col.hideOnMobile && "max-md:hidden",
+                    )}
+                  >
+                    <Skeleton className="h-3.5 w-3/4" />
+                  </td>
+                ))}
+                {rowActions && <td className="border-t border-divider" />}
+              </tr>
+            ))}
+          {!loading && rows.length === 0 && (
+            <tr>
+              <td colSpan={colCount}>{empty ?? <EmptyState compact title={labels.noRows} />}</td>
+            </tr>
+          )}
+          {sorted.map((row) => {
+            const actions = rowActions?.(row);
+            return (
+              <tr
+                key={getRowId(row)}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={cn("align-middle", onRowClick && "cursor-pointer hover:bg-raised")}
+              >
+                {columns.map((col, i) => (
+                  <td
+                    key={col.id}
+                    className={cn(
+                      "border-t border-divider py-3.5",
+                      pad(i, i === colCount - 1),
+                      col.align === "right" && "text-right tabular-nums",
+                      col.hideOnMobile && "max-md:hidden",
+                      col.className,
+                    )}
+                  >
+                    {col.cell(row)}
+                  </td>
+                ))}
+                {actions && actions.length === 0 && <td className="border-t border-divider" />}
+                {actions && actions.length > 0 && (
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: only stops the row click; the menu button handles keys.
+                  <td className="border-t border-divider py-2 pr-[18px] text-right" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        aria-label={labels.rowActions}
+                        className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
+                      >
+                        <IconDots size={16} />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent>
+                        {actions.map((a) => [
+                          a.separated ? <DropdownMenuSeparator key={`${a.label}-sep`} /> : null,
+                          <DropdownMenuItem key={a.label} destructive={a.destructive} disabled={a.disabled} onSelect={a.onSelect}>
+                            {a.icon}
+                            {a.label}
+                          </DropdownMenuItem>,
+                        ])}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}

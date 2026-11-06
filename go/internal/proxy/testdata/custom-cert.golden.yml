@@ -1,0 +1,33 @@
+# Written by the Seylo agent for service svc4. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc4-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`corp.example.com`)
+      service: seylo-svc4
+      tls: {}
+    seylo-svc4-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`corp.example.com`)
+      service: seylo-svc4
+  services:
+    seylo-svc4:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc4-2:80
+    seylo-svc4-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc4-2:80
+tls:
+  certificates:
+    - certFile: |
+        -----BEGIN CERTIFICATE-----
+        AAA
+        -----END CERTIFICATE-----
+      keyFile: |
+        -----BEGIN PRIVATE KEY-----
+        BBB
+        -----END PRIVATE KEY-----

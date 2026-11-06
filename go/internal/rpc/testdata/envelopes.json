@@ -1,0 +1,47 @@
+[
+  {
+    "name": "join signature bytes",
+    "kind": "hello",
+    "hex": "7365796c6f2d6167656e742d68656c6c6f2d76310070616e656c3100005a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+  },
+  {
+    "name": "resume signature bytes",
+    "kind": "hello",
+    "hex": "7365796c6f2d6167656e742d68656c6c6f2d76310070616e656c31006e6f646531005a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+  },
+  {
+    "name": "call with deadline and metadata",
+    "kind": "call",
+    "hex": "0a2b2f7365796c6f2e6167656e742e76312e4167656e74536572766963652f526573746172745365727669636512050a037765621a060880a4a7da06220d0a07757365725f696412027531"
+  },
+  {
+    "name": "ok result",
+    "kind": "result",
+    "hex": "0a02080112020801"
+  },
+  {
+    "name": "not found result",
+    "kind": "result",
+    "hex": "0a130806120f6e6f20737563682073657276696365"
+  },
+  {
+    "name": "open with window",
+    "kind": "open",
+    "hex": "0a272f7365796c6f2e6167656e742e76312e4167656e74536572766963652f4c6f6773466f6c6c6f7718808010"
+  },
+  {
+    "name": "half close",
+    "kind": "close",
+    "hex": "0a020801"
+  },
+  {
+    "name": "cancel",
+    "kind": "close",
+    "hex": "0a1b0802121763616e63656c6c6564206279207468652063616c6c6572"
+  },
+  {
+    "name": "two delimited stream messages",
+    "kind": "delimited",
+    "hex": "0b0a0920032a056669727374110a0f20032a0b7365636f6e64206c696e65"
+  }
+]

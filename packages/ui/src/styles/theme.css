@@ -1,0 +1,291 @@
+/*
+ * Design tokens. Values come from the approved design
+ * (design/project/Main.dc.html and Sidebar.dc.html, outside this repo).
+ *
+ * Every color, radius and shadow the UI uses is a CSS variable here, so a
+ * theme preset (or the owner's custom CSS) restyles the whole panel by
+ * overriding variables, never by editing components. The shadcn/ui names
+ * (--background, --primary, ...) are kept so upstream components drop in;
+ * the rest are additions the design needs.
+ *
+ * Presets: the default ("seylo") on :root, the others selected with
+ * <html data-theme="...">. Keep the preset list in sync with
+ * apps/web/src/lib/theme.ts.
+ */
+
+:root {
+  /* Page ground: a tinted gray with a soft blue wash in the top right. */
+  --background: #f3f5f9;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, #e2eafe 0%, rgb(226 234 254 / 0) 70%);
+  --foreground: #0f172a;
+
+  /* Surfaces: white cards with soft shadows and no borders. */
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-shadow: 1px 0 0 #eef0f4, 4px 0 24px rgb(15 23 42 / 0.03);
+
+  /* Text shades, darkest to lightest. */
+  --ink-strong: #3b4556; /* nav items, secondary labels */
+  --muted-foreground: #556072; /* descriptions, meta text */
+  --ink-faint: #6b7586; /* chevrons, inactive icons */
+  --ink-ghost: #8b94a7; /* placeholders, disabled */
+
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --link: #1f4fd1;
+  --link-hover: #163c9f;
+
+  /* Quiet fills: search box, segmented tracks, neutral chips. */
+  --muted: #f1f3f7;
+  --secondary: #ffffff;
+  --secondary-foreground: #0f172a;
+  --accent: #e6ecfc; /* selected nav item */
+  --accent-foreground: #1f4fd1;
+  --field: #f3f5f9;
+  --track: #e9edf3;
+  --raised: #f6f8fb; /* user row */
+
+  --border: #e3e7ee; /* tab underline track */
+  --divider: #f0f2f5; /* rows inside a card */
+  --grid-line: #eef0f4; /* chart grid */
+  --input: #e3e7ee;
+  --ring: #2563eb;
+
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+
+  /* Chip tints: background and text pairs. */
+  --chip-blue-bg: #eef3ff;
+  --chip-blue-fg: #1f4fd1;
+  --chip-sky-bg: #e8f2fb;
+  --chip-sky-fg: #1d5e8c;
+  --chip-red-bg: #fdecec;
+  --chip-red-fg: #b42318;
+  --chip-violet-bg: #f1eefd;
+  --chip-violet-fg: #5b3fc4;
+  --chip-gray-bg: #f1f3f7;
+  --chip-gray-fg: #3b4556;
+  --chip-green-bg: #e7f6ee;
+  --chip-green-fg: #0e6b3b;
+  --chip-amber-bg: #fff1e2;
+  --chip-amber-fg: #8a4300;
+
+  /* Status dots. */
+  --status-ok: #16a34a;
+  --status-busy: #f59e0b;
+  --status-error: #e5484d;
+  --status-off: #cbd2dc;
+
+  /* Chart series, in node order. */
+  --chart-1: #2563eb;
+  --chart-2: #f59e0b;
+  --chart-3: #475467;
+  --chart-4: #16a34a;
+  --chart-5: #5b3fc4;
+
+  /* The sidebar's node card. */
+  --highlight: linear-gradient(160deg, #e7eeff 0%, #f3f7ff 100%);
+
+  /* Radii: cards 12, controls 8, chips 6. */
+  --radius: 12px;
+  --radius-control: 8px;
+  --radius-chip: 6px;
+
+  /* Shadows replace borders. */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.05);
+  --shadow-control: 0 1px 2px rgb(15 23 42 / 0.06), 0 2px 8px rgb(15 23 42 / 0.04);
+  --shadow-primary: 0 1px 2px rgb(37 99 235 / 0.3), 0 4px 12px rgb(37 99 235 / 0.18);
+  --shadow-segment: 0 1px 2px rgb(15 23 42 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(15 23 42 / 0.06), 0 12px 32px rgb(15 23 42 / 0.12);
+
+  /* Terminal and log surfaces stay dark in every preset. */
+  --terminal: #0b1020;
+  --terminal-bar: #11172a;
+  --terminal-foreground: #d6dce8;
+  --terminal-muted: #8b94a7; /* timestamps, toolbar icons */
+  --terminal-prompt: #8aa4ff;
+  --terminal-field: #1a2238; /* search box on the terminal bar */
+  --terminal-match: rgb(245 184 90 / 0.35); /* search hits */
+  --terminal-match-current: rgb(245 184 90 / 0.7);
+
+  /* The 16 ANSI colors for logs (0-7 normal, 8-15 bright), tuned for the dark terminal. */
+  --ansi-0: #3b4252;
+  --ansi-1: #ff7b72;
+  --ansi-2: #5fd394;
+  --ansi-3: #f5b85a;
+  --ansi-4: #7aa2ff;
+  --ansi-5: #c3a6ff;
+  --ansi-6: #5ccfe6;
+  --ansi-7: #d6dce8;
+  --ansi-8: #6b7586;
+  --ansi-9: #ffa198;
+  --ansi-10: #8ee6b3;
+  --ansi-11: #ffd38a;
+  --ansi-12: #a5c0ff;
+  --ansi-13: #dcc8ff;
+  --ansi-14: #9ae8f5;
+  --ansi-15: #ffffff;
+
+  color-scheme: light;
+}
+
+/* Seylo Night: dark with ink blues. */
+:root[data-theme="seylo-night"] {
+  --background: #0b1020;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, rgb(111 139 255 / 0.12) 0%, rgb(111 139 255 / 0) 70%);
+  --foreground: #d6dce8;
+  --card: #151c30;
+  --card-foreground: #d6dce8;
+  --popover: #151c30;
+  --popover-foreground: #d6dce8;
+  --sidebar: #11172a;
+  --sidebar-foreground: #d6dce8;
+  --sidebar-shadow: 1px 0 0 #222b42;
+  --ink-strong: #b4bdd0;
+  --muted-foreground: #8d97ad;
+  --ink-faint: #6f7a92;
+  --ink-ghost: #56607a;
+  --primary: #6f8bff;
+  --primary-foreground: #0b1020;
+  --link: #8ea3ff;
+  --link-hover: #b2c0ff;
+  --muted: #1c2440;
+  --secondary: #1c2440;
+  --secondary-foreground: #d6dce8;
+  --accent: #222b4a;
+  --accent-foreground: #b2c0ff;
+  --field: #1c2440;
+  --track: #1c2440;
+  --raised: #1a2138;
+  --border: #2a3350;
+  --divider: #222b42;
+  --grid-line: #222b42;
+  --input: #2a3350;
+  --ring: #6f8bff;
+  --chip-blue-bg: #1e2a52;
+  --chip-blue-fg: #a9b9ff;
+  --chip-sky-bg: #16304a;
+  --chip-sky-fg: #8cc4ee;
+  --chip-red-bg: #3a1c24;
+  --chip-red-fg: #ff9b95;
+  --chip-violet-bg: #2a2150;
+  --chip-violet-fg: #c3b4ff;
+  --chip-gray-bg: #222b42;
+  --chip-gray-fg: #b4bdd0;
+  --chip-green-bg: #13352a;
+  --chip-green-fg: #7dd3a8;
+  --chip-amber-bg: #3a2a14;
+  --chip-amber-fg: #f2bd63;
+  --status-off: #4b5570;
+  /* The terminal sits a step darker than the page so its card still reads as one. */
+  --terminal: #060914;
+  --terminal-bar: #0e1324;
+  --terminal-field: #182039;
+  --chart-1: #6f8bff;
+  --chart-3: #8b94a7;
+  --highlight: linear-gradient(160deg, #1e2a52 0%, #151c30 100%);
+  --shadow-card: inset 0 0 0 1px #222b42;
+  --shadow-control: inset 0 0 0 1px #2a3350;
+  --shadow-primary: none;
+  --shadow-segment: inset 0 0 0 1px #2a3350;
+  --shadow-popover: 0 0 0 1px #2a3350, 0 12px 32px rgb(0 0 0 / 0.4);
+  color-scheme: dark;
+}
+
+/* Classic: soft gray cards, green accent, hairline borders. */
+:root[data-theme="classic"] {
+  --background: #f2f3f5;
+  --ground-wash: none;
+  --foreground: #2a2b31;
+  --card-foreground: #2a2b31;
+  --popover-foreground: #2a2b31;
+  --sidebar: #f7f8fa;
+  --sidebar-foreground: #2a2b31;
+  --sidebar-shadow: 1px 0 0 #e1e3e8;
+  --primary: #0f8a6a;
+  --link: #0b6e55;
+  --link-hover: #075240;
+  --accent: #e3f2ed;
+  --accent-foreground: #0b6e55;
+  --muted: #eceef1;
+  --track: #dadde3;
+  --ring: #0f8a6a;
+  --chart-1: #0f8a6a;
+  --highlight: linear-gradient(160deg, #e3f2ed 0%, #f7f8fa 100%);
+  --radius: 6px;
+  --radius-control: 6px;
+  --shadow-card: inset 0 0 0 1px #e1e3e8;
+  --shadow-control: inset 0 0 0 1px #dadde3;
+  --shadow-primary: none;
+}
+
+/* Midnight: dense, purple accent, nearly square corners. */
+:root[data-theme="midnight"] {
+  --background: #101014;
+  --ground-wash: none;
+  --foreground: #ececf1;
+  --card: #1a1a20;
+  --card-foreground: #ececf1;
+  --popover: #1a1a20;
+  --popover-foreground: #ececf1;
+  --sidebar: #141418;
+  --sidebar-foreground: #ececf1;
+  --sidebar-shadow: 1px 0 0 #2a2a33;
+  --ink-strong: #c4c4ce;
+  --muted-foreground: #9a9aa6;
+  --ink-faint: #74747f;
+  --ink-ghost: #5a5a64;
+  --primary: #8b6cf6;
+  --primary-foreground: #101014;
+  --link: #a891fa;
+  --link-hover: #c4b5fd;
+  --muted: #22222a;
+  --secondary: #22222a;
+  --secondary-foreground: #ececf1;
+  --accent: #2a2440;
+  --accent-foreground: #c4b5fd;
+  --field: #22222a;
+  --track: #22222a;
+  --raised: #1f1f26;
+  --border: #2e2e38;
+  --divider: #2a2a33;
+  --grid-line: #2a2a33;
+  --input: #2e2e38;
+  --ring: #8b6cf6;
+  --chip-blue-bg: #1f2547;
+  --chip-blue-fg: #a9b6ff;
+  --chip-sky-bg: #142c3d;
+  --chip-sky-fg: #8cc4ee;
+  --chip-red-bg: #3a1b22;
+  --chip-red-fg: #ff9b95;
+  --chip-violet-bg: #2c2348;
+  --chip-violet-fg: #c4b5fd;
+  --chip-gray-bg: #26262f;
+  --chip-gray-fg: #c4c4ce;
+  --chip-green-bg: #14322a;
+  --chip-green-fg: #7dd3a8;
+  --chip-amber-bg: #372914;
+  --chip-amber-fg: #f2bd63;
+  --status-off: #4a4a55;
+  /* Neutral terminal to match the preset (the default one is ink blue). */
+  --terminal: #0b0b0e;
+  --terminal-bar: #17171c;
+  --terminal-field: #24242c;
+  --terminal-prompt: #b4a0fb;
+  --chart-1: #8b6cf6;
+  --chart-3: #9a9aa6;
+  --highlight: linear-gradient(160deg, #2a2440 0%, #1a1a20 100%);
+  --radius: 2px;
+  --radius-control: 2px;
+  --radius-chip: 2px;
+  --shadow-card: inset 0 0 0 1px #2a2a33;
+  --shadow-control: inset 0 0 0 1px #2e2e38;
+  --shadow-primary: none;
+  --shadow-segment: inset 0 0 0 1px #2e2e38;
+  --shadow-popover: 0 0 0 1px #2e2e38, 0 12px 32px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}

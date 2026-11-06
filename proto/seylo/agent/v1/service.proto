@@ -1,0 +1,327 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "seylo/agent/v1/access.proto";
+import "seylo/agent/v1/database.proto";
+import "seylo/agent/v1/routing.proto";
+
+// ServiceSpec is the desired state of one service on one node. The panel
+// resolves everything (env references, secrets, image digests, routes)
+// before sending it, so the agent never needs the panel to keep a service
+// running, restarting and routing.
+message ServiceSpec {
+  // Stable id assigned by the panel. Used in container names, labels and
+  // the data dir (services/<id>/).
+  string id = 1;
+  string project_id = 2;
+  // DNS-safe name, unique within the project. It is the service's alias on
+  // the project network.
+  string name = 3;
+  ServiceKind kind = 4;
+  // Bumped by the panel on every change. A deploy is "make generation N
+  // run"; containers carry it as seylo-<svc>-<generation>.
+  uint64 generation = 5;
+  // Desired run state. Stopped services keep their containers removed but
+  // their volumes, routes (serving the status page) and history.
+  bool stopped = 6;
+  // Services of the Panel project. Cleanup, the UI and the CLI refuse to
+  // remove them by accident. Reserved ids: project "panelproject0000",
+  // panel service "panel00000000000" (name "panel"). The installer starts
+  // that service's generation 1 itself (labels from docker.InstanceLabels,
+  // no spec hash); the agent adopts a protected instance without a spec
+  // hash at the desired generation as is instead of rolling it, so the
+  // first panel keeps running while the panel describes itself.
+  bool protected = 7;
+  ImageRef image = 8;
+  ContainerConfig container = 9;
+  repeated EnvVar env = 10;
+  repeated VolumeMount volumes = 11;
+  repeated FileMount files = 12;
+  repeated PortSpec ports = 13;
+  // Unset means a TCP check on the first port, or "running" when the
+  // service has no ports.
+  HealthCheck health_check = 14;
+  CrashPolicy crash_policy = 15;
+  Resources resources = 16;
+  // Copies on this node. 0 is treated as 1; use `stopped` to run none.
+  uint32 replicas = 17;
+  // Extra aliases on the project network besides `name`.
+  repeated string network_aliases = 18;
+  Routing routing = 19;
+  LoadBalancer load_balancer = 20;
+  DevAccess dev_access = 21;
+  DeployStrategy deploy = 22;
+  // Scheduled commands that run next to this service in one-off containers
+  // (same image, env, volumes and network as the service). A
+  // SERVICE_KIND_CRON service is the standalone form with its own image.
+  repeated CronJob cron_jobs = 23;
+
+  // Kind specific settings. Exactly the one matching `kind` is set
+  // (none for SERVICE_KIND_APP).
+  oneof kind_spec {
+    ComposeMemberSpec compose_member = 30;
+    DatabaseSpec database = 31;
+    BoxSpec box = 32;
+    CronSpec cron = 33;
+  }
+}
+
+enum ServiceKind {
+  SERVICE_KIND_UNSPECIFIED = 0;
+  // Long running container built from source or an image.
+  SERVICE_KIND_APP = 1;
+  // One service of a compose stack. The panel splits stacks with
+  // compose-go into one spec per compose service.
+  SERVICE_KIND_COMPOSE_MEMBER = 2;
+  SERVICE_KIND_DATABASE = 3;
+  // code-server workspace that sleeps when idle.
+  SERVICE_KIND_BOX = 4;
+  // Container started on a schedule that runs to completion.
+  SERVICE_KIND_CRON = 5;
+}
+
+message ImageRef {
+  // Reference used for display and as the pull fallback, for example
+  // "docker.io/library/nginx:1.27" or "127.0.0.1:5755/<svc>:<generation>"
+  // for images built by Seylo (served by the panel registry through the
+  // agent's registry tunnel).
+  string reference = 1;
+  // "sha256:..." When set the agent pulls and runs exactly this digest,
+  // which is what makes rollbacks exact.
+  string digest = 2;
+  // Credentials for a private registry. Unset for public images and the
+  // panel registry.
+  RegistryAuth auth = 3;
+}
+
+message RegistryAuth {
+  string server = 1;
+  string username = 2;
+  string password = 3;
+}
+
+message ContainerConfig {
+  // Overrides the image CMD when not empty.
+  repeated string command = 1;
+  // Overrides the image ENTRYPOINT when not empty.
+  repeated string entrypoint = 2;
+  string working_dir = 3;
+  string user = 4;
+  // Signal sent on stop, default SIGTERM.
+  string stop_signal = 5;
+  // Time between the stop signal and SIGKILL, default 10s.
+  google.protobuf.Duration stop_grace_period = 6;
+}
+
+message EnvVar {
+  string name = 1;
+  // Fully resolved value (references like ${{db.URL}} already replaced).
+  string value = 2;
+  // Redacted from troubleshoot reports and agent logs.
+  bool secret = 3;
+}
+
+// VolumeMount is a bind-backed named volume under
+// /var/lib/seylo/services/<owner service id>/volumes/<name>.
+message VolumeMount {
+  string name = 1;
+  string container_path = 2;
+  bool read_only = 3;
+  // Service whose folder holds the volume. Empty means this service. Set
+  // for compose stacks where several members mount one named volume; the
+  // owner must be on the same node.
+  string owner_service_id = 4;
+}
+
+// FileMount writes a file from the panel into the container (mounted read
+// only from /var/lib/seylo/services/<service id>/files).
+message FileMount {
+  string container_path = 1;
+  bytes content = 2;
+  // Unix permission bits, default 0644.
+  uint32 mode = 3;
+}
+
+message PortSpec {
+  uint32 container_port = 1;
+  PortProtocol protocol = 2;
+  // Optional direct IP:port access through the agent's portgate (never a
+  // Docker published port, which would bypass the firewall).
+  PublicPort public = 3;
+}
+
+enum PortProtocol {
+  PORT_PROTOCOL_UNSPECIFIED = 0;
+  PORT_PROTOCOL_TCP = 1;
+  PORT_PROTOCOL_UDP = 2;
+}
+
+// PublicPort is the "IP:port first" access of a new service. Once a domain
+// is live the panel switches it to redirect mode, which sends browsers to
+// the domain.
+message PublicPort {
+  uint32 host_port = 1;
+  PublicPortMode mode = 2;
+  // Target for PUBLIC_PORT_MODE_REDIRECT, for example "https://app.example.com".
+  string redirect_url = 3;
+  // Empty means anyone may connect.
+  repeated string allowed_source_cidrs = 4;
+  // When set the agent closes the port at this time, even while the panel
+  // is unreachable. Used after a domain goes live: the port redirects for a
+  // grace period, then closes.
+  google.protobuf.Timestamp close_at = 5;
+}
+
+enum PublicPortMode {
+  PUBLIC_PORT_MODE_UNSPECIFIED = 0;
+  PUBLIC_PORT_MODE_FORWARD = 1;
+  PUBLIC_PORT_MODE_REDIRECT = 2;
+}
+
+message HealthCheck {
+  oneof probe {
+    TcpProbe tcp = 1;
+    HttpProbe http = 2;
+    CommandProbe command = 3;
+  }
+  // Defaults: interval 10s, timeout 5s, start period 0, threshold 3.
+  google.protobuf.Duration interval = 4;
+  google.protobuf.Duration timeout = 5;
+  // Failures during this period after start do not count.
+  google.protobuf.Duration start_period = 6;
+  // Consecutive failures before the instance is unhealthy.
+  uint32 failure_threshold = 7;
+}
+
+message TcpProbe {
+  uint32 port = 1;
+}
+
+message HttpProbe {
+  uint32 port = 1;
+  // Default "/".
+  string path = 2;
+  // Host header to send, useful for apps that check it.
+  string host = 3;
+  // Expected status. 0 means any 2xx or 3xx.
+  uint32 expected_status = 4;
+}
+
+message CommandProbe {
+  // Run inside the container; exit code 0 is healthy.
+  repeated string command = 1;
+}
+
+// CrashPolicy is enforced by the agent (the Docker restart policy is always
+// "no"), so crashes are seen, counted and reported.
+message CrashPolicy {
+  // Restart the container after it exits unexpectedly. When false the
+  // container stays stopped after the first crash.
+  bool restart = 1;
+  // With restart on: give up after this many crashes in a row and leave the
+  // service stopped. 0 means never give up.
+  uint32 stop_after_crashes = 2;
+  // Fixed wait before each restart, default 5s. Fixed (not exponential) so
+  // users can predict when the app comes back.
+  google.protobuf.Duration restart_delay = 3;
+}
+
+// Resources are all optional and off by default. There is deliberately no
+// hard CPU cap: CPU is shared by weight.
+message Resources {
+  optional uint64 memory_limit_bytes = 1;
+  optional uint64 memory_reservation_bytes = 2;
+  // cgroup v2 cpu.weight, 1-10000, default 100.
+  optional uint32 cpu_weight = 3;
+  optional uint32 pids_limit = 4;
+}
+
+// LoadBalancer spreads this service's routes over its local replicas and
+// copies of the same service on other nodes.
+message LoadBalancer {
+  repeated RemoteUpstream remote_upstreams = 1;
+  bool sticky_sessions = 2;
+}
+
+// RemoteUpstream is a copy of the service on another node. There is no
+// cross-node private network, so it is reached through that node's edge.
+message RemoteUpstream {
+  string node_id = 1;
+  // Base URL of the copy on the other node, filled by the panel.
+  string url = 2;
+}
+
+message DeployStrategy {
+  DeployMode mode = 1;
+  // How long a new generation may take to become healthy before the deploy
+  // fails and the old generation keeps serving. Default 5m.
+  google.protobuf.Duration health_timeout = 2;
+}
+
+enum DeployMode {
+  DEPLOY_MODE_UNSPECIFIED = 0;
+  // Start new, wait healthy, switch route, stop old. The default.
+  DEPLOY_MODE_ROLLING = 1;
+  // Stop old, then start new. For services that must never run twice at
+  // once, such as databases sharing one data volume.
+  DEPLOY_MODE_RECREATE = 2;
+}
+
+message ComposeMemberSpec {
+  // Panel id of the stack this service came from.
+  string stack_id = 1;
+  // Service name inside the compose file.
+  string compose_service = 2;
+  // Service ids that must be running (and healthy, when they have a health
+  // check) before this one starts.
+  repeated string depends_on = 3;
+}
+
+message BoxSpec {
+  // Volume (from ServiceSpec.volumes) holding the workspace.
+  string workspace_volume = 1;
+  // The box stops after this long without traffic and wakes on the next
+  // request through the edge. Default 30m.
+  google.protobuf.Duration idle_timeout = 2;
+}
+
+message CronSpec {
+  // Standard 5-field cron expression.
+  string schedule = 1;
+  // IANA time zone for the schedule, default UTC.
+  string time_zone = 2;
+  // Runs longer than this are killed. Default 1h.
+  google.protobuf.Duration timeout = 3;
+  CronConcurrency concurrency = 4;
+}
+
+// CronJob is one scheduled command of a service (ServiceSpec.cron_jobs).
+message CronJob {
+  // Stable id from the panel; reported back in CronRun.cron_job_id.
+  string id = 1;
+  // Standard 5-field cron expression.
+  string schedule = 2;
+  // IANA time zone for the schedule, default UTC.
+  string time_zone = 3;
+  // Run as the container command (exec form). Use ["sh", "-c", "..."] for
+  // shell syntax.
+  repeated string command = 4;
+  // Runs longer than this are killed. Default 1h.
+  google.protobuf.Duration timeout = 5;
+  CronConcurrency concurrency = 6;
+  // Disabled jobs stay listed but never fire on schedule; RunCronNow still
+  // runs them.
+  bool disabled = 7;
+}
+
+enum CronConcurrency {
+  CRON_CONCURRENCY_UNSPECIFIED = 0;
+  // Skip a run while the previous one is still going. The default.
+  CRON_CONCURRENCY_FORBID = 1;
+  CRON_CONCURRENCY_ALLOW = 2;
+  // Stop the running one and start the new one.
+  CRON_CONCURRENCY_REPLACE = 3;
+}

@@ -1,0 +1,20 @@
+app: build sections are not built for compose stacks; give the service an image
+app: port 80 is published on the host as 8080; instead add a domain for container port 80, or open it on IP:port from the service's networking
+app: UDP port 53 is not supported
+app: bind mount ./data:/data is not supported; use a named volume (files outside the stack are not on the node)
+app: env_file is not read; put those variables in the stack's environment
+app: deploy mode global is not supported; choose nodes and replicas in the service's settings
+app: placement constraints are ignored; choose nodes in the service's settings
+app: logging driver syslog is ignored; logs are kept on the node
+proxy: network_mode host is not supported; the service joins the stack's private network
+proxy: privileged mode is not supported and is ignored
+proxy: cap_add (NET_ADMIN) is ignored
+proxy: mounting the Docker socket gives full control of the node and is not supported
+proxy: container_name is ignored; containers get their own names
+proxy: restart always is replaced by the service's crash policy
+proxy: Traefik labels are ignored; add domains to the service instead
+debug: skipped, its profile is not active
+network back: custom networks are replaced by the stack's private network
+volume shared: external volumes are not supported; a new empty volume is created
+secret token: reading ./token.txt from a file is not supported; use content or environment
+variable MISSING_KEY is not set; it was replaced with an empty value

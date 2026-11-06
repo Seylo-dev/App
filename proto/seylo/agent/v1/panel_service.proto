@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "seylo/agent/v1/desired.proto";
+import "seylo/agent/v1/events.proto";
+import "seylo/agent/v1/options.proto";
+import "seylo/agent/v1/tunnel.proto";
+
+// PanelService is implemented by the panel and called by agents.
+service PanelService {
+  // Durable reports from the agent's on-disk outbox. The agent retries
+  // until it gets a result; the panel dedupes on (node id, outbox_id), so a
+  // retry after a lost RESULT is harmless.
+  rpc ReportCrash(ReportCrashRequest) returns (ReportCrashResponse) {
+    option (capability) = "panel.report.v1";
+  }
+  rpc ReportEvent(ReportEventRequest) returns (ReportEventResponse) {
+    option (capability) = "panel.report.v1";
+  }
+
+  // Lets an agent that restarted with an unreadable or old desired state
+  // catch up without waiting for the panel's next SyncDesired.
+  rpc GetDesiredState(GetDesiredStateRequest) returns (GetDesiredStateResponse) {
+    option (capability) = "panel.desired.v1";
+  }
+
+  // Relays a local Docker pull or push to the panel registry.
+  rpc RegistryTunnel(RegistryTunnelRequest) returns (RegistryTunnelResponse) {
+    option (capability) = "panel.registry-tunnel.v1";
+    option (stream_mode) = STREAM_MODE_RAW_BIDI;
+  }
+}
+
+message ReportCrashRequest {
+  // Agent-local, strictly increasing outbox id.
+  uint64 outbox_id = 1;
+  CrashReport report = 2;
+}
+
+message ReportCrashResponse {}
+
+message ReportEventRequest {
+  uint64 outbox_id = 1;
+  Event event = 2;
+}
+
+message ReportEventResponse {}
+
+message GetDesiredStateRequest {
+  // Revision the agent has. The response omits the state when it is current.
+  uint64 known_revision = 1;
+}
+
+message GetDesiredStateResponse {
+  // Unset when known_revision is already the latest.
+  DesiredState state = 1;
+}

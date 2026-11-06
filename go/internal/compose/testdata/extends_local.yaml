@@ -1,0 +1,8 @@
+services:
+  base:
+    image: node:22
+    environment:
+      LOG_LEVEL: info
+  worker:
+    extends: base
+    command: ["node", "worker.js"]

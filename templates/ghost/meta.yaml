@@ -1,0 +1,22 @@
+name: "Ghost"
+description: "Publishing platform for blogs, newsletters and paid memberships."
+category: "CMS"
+tags: ["blog", "cms", "newsletter"]
+creates: "App + MySQL"
+links:
+  - label: "Website"
+    url: "https://ghost.org"
+  - label: "Docs"
+    url: "https://ghost.org/docs"
+body: |
+  Ghost runs on MySQL 8. Open `/ghost` on the domain after the first deploy to create the owner account.
+  Email (for newsletters and sign-in links) needs SMTP settings in the environment (`mail__transport` and friends).
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "ghost:5.105.0"

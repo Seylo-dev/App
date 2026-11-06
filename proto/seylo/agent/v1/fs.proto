@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// File operations on service volumes (the Files button). Every path is
+// relative to the volume root and resolved with openat2(RESOLVE_IN_ROOT),
+// so symlinks and ".." can never escape the volume.
+
+message FsRoot {
+  string service_id = 1;
+  // Volume name from ServiceSpec.volumes.
+  string volume = 2;
+}
+
+message FileInfo {
+  string name = 1;
+  // Relative to the root.
+  string path = 2;
+  bool is_dir = 3;
+  uint64 size = 4;
+  // Unix permission bits.
+  uint32 mode = 5;
+  google.protobuf.Timestamp modified_at = 6;
+  // Set for symlinks. The target is shown, never followed out of the root.
+  string symlink_target = 7;
+  uint32 uid = 8;
+  uint32 gid = 9;
+}
+
+message FsListRequest {
+  FsRoot root = 1;
+  string path = 2;
+}
+
+message FsListResponse {
+  repeated FileInfo entries = 1;
+}
+
+message FsStatRequest {
+  FsRoot root = 1;
+  string path = 2;
+}
+
+message FsStatResponse {
+  FileInfo info = 1;
+}
+
+// FsReadRequest opens a raw download of a file (or part of it).
+message FsReadRequest {
+  FsRoot root = 1;
+  string path = 2;
+  uint64 offset = 3;
+  // 0 means to the end.
+  uint64 length = 4;
+}
+
+message FsReadResponse {
+  FileInfo info = 1;
+}
+
+// FsWriteRequest opens a raw upload into a file.
+message FsWriteRequest {
+  FsRoot root = 1;
+  string path = 2;
+  // Default 0644 for new files; existing files keep their mode.
+  uint32 mode = 3;
+  bool append = 4;
+  // Expected size for progress and early "disk full" errors; 0 if unknown.
+  uint64 size_bytes = 5;
+  bool create_parents = 6;
+}
+
+message FsWriteResponse {
+  FileInfo info = 1;
+}
+
+message FsMkdirRequest {
+  FsRoot root = 1;
+  string path = 2;
+  bool parents = 3;
+}
+
+message FsMkdirResponse {}
+
+message FsRenameRequest {
+  FsRoot root = 1;
+  string from = 2;
+  string to = 3;
+}
+
+message FsRenameResponse {}
+
+message FsDeleteRequest {
+  FsRoot root = 1;
+  // Directories are deleted recursively.
+  repeated string paths = 2;
+}
+
+message FsDeleteResponse {}
+
+message FsChmodRequest {
+  FsRoot root = 1;
+  string path = 2;
+  uint32 mode = 3;
+}
+
+message FsChmodResponse {}
+
+message FsArchiveRequest {
+  FsRoot root = 1;
+  repeated string paths = 2;
+  // Path of the archive to create, inside the same root.
+  string destination = 3;
+  ArchiveFormat format = 4;
+}
+
+message FsArchiveResponse {
+  FileInfo archive = 1;
+}
+
+message FsExtractRequest {
+  FsRoot root = 1;
+  string archive_path = 2;
+  // Folder to extract into, created if missing.
+  string destination = 3;
+}
+
+message FsExtractResponse {}
+
+enum ArchiveFormat {
+  ARCHIVE_FORMAT_UNSPECIFIED = 0;
+  ARCHIVE_FORMAT_TAR_GZ = 1;
+  ARCHIVE_FORMAT_ZIP = 2;
+}

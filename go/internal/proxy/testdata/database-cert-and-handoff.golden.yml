@@ -1,0 +1,60 @@
+# Written by the Seylo agent for service svc8. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc8-dbcert:
+      entryPoints:
+        - websecure
+      rule: Host(`db.example.com`)
+      priority: 1000000022
+      service: noop@internal
+      tls:
+        certResolver: le
+    seylo-svc8-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`app.example.com`)
+      middlewares:
+        - seylo-svc8-unreachable
+      service: seylo-svc8
+      tls:
+        certResolver: le
+    seylo-svc8-r-r1-handoff:
+      entryPoints:
+        - websecure
+      rule: Host(`app.example.com`) && Path(`/_seylo/handoff`)
+      priority: 1999999000
+      service: seylo-svc8-edge
+      tls:
+        certResolver: le
+    seylo-svc8-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`app.example.com`)
+      middlewares:
+        - seylo-svc8-https
+      service: seylo-svc8
+  middlewares:
+    seylo-svc8-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc8-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc8-edge
+        query: /_seylo/page/status/svc8
+  services:
+    seylo-svc8:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc8-2:3000
+    seylo-svc8-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc8-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc8-2:3000

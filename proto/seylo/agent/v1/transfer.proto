@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+// Volume transfer moves a service's data between nodes. There is no
+// cross-node network, so the panel relays the bytes: it opens ExportVolume
+// on the source node and pipes the stream into ImportVolume on the target.
+// The panel stops the service on the source first so the copy is
+// consistent.
+
+// ExportVolumeRequest opens a raw download of one volume as a .tar.gz
+// stream (paths relative to the volume root, owners and modes kept).
+message ExportVolumeRequest {
+  string service_id = 1;
+  // Volume name from ServiceSpec.volumes.
+  string volume = 2;
+}
+
+message ExportVolumeResponse {
+  // Uncompressed bytes archived.
+  uint64 size_bytes = 1;
+}
+
+// ImportVolumeRequest opens a raw upload of a .tar.gz stream produced by
+// ExportVolume into a volume of a service on this node. The service must
+// not be running on this node yet.
+message ImportVolumeRequest {
+  string service_id = 1;
+  string volume = 2;
+  // Delete what is in the volume first. Without it, importing into a
+  // non-empty volume fails.
+  bool replace = 3;
+  // Expected compressed size for progress; 0 if unknown.
+  uint64 size_bytes = 4;
+}
+
+message ImportVolumeResponse {
+  uint64 size_bytes = 1;
+}

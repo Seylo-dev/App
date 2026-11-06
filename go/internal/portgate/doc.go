@@ -1,0 +1,21 @@
+// Package portgate owns direct IP:port access. Instead of Docker published
+// ports (which bypass UFW and similar firewalls), the agent listens itself
+// and relays TCP to the container: first-run access before a domain
+// exists, timed exposes locked to source addresses, and database exposure
+// (the database speaks its own TLS through the relay). Once a domain is
+// live a public port becomes an HTTP redirector (308) to it, handing
+// cookies over through the edge, until its close_at. Expiries run on local
+// timers, so they hold while the panel is unreachable, and a listener past
+// its expiry is never reopened after an agent restart.
+//
+// Anyone on the internet may reach a first-run port, so every listener
+// caps its connections (Config.MaxConns, MaxConnsPerSource), cuts
+// connections idle both ways (IdleTimeout; longer for databases), and
+// shares one Resolve (Docker lookups) per container port for ResolveTTL
+// instead of resolving per connection.
+//
+// Interfaces used by other packages:
+//
+//   - Gate: the agent syncs it from the desired state (SyncAll), and
+//     ServiceStatus.open_ports comes from Ports.
+package portgate

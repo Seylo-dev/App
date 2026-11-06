@@ -1,0 +1,184 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "seylo/agent/v1/backup.proto";
+import "seylo/agent/v1/build.proto";
+import "seylo/agent/v1/compose.proto";
+import "seylo/agent/v1/cron.proto";
+import "seylo/agent/v1/desired.proto";
+import "seylo/agent/v1/exec.proto";
+import "seylo/agent/v1/fs.proto";
+import "seylo/agent/v1/logs.proto";
+import "seylo/agent/v1/metrics.proto";
+import "seylo/agent/v1/node_ops.proto";
+import "seylo/agent/v1/options.proto";
+import "seylo/agent/v1/state.proto";
+import "seylo/agent/v1/terminal.proto";
+import "seylo/agent/v1/transfer.proto";
+import "seylo/agent/v1/tunnel.proto";
+
+// AgentService is implemented by the agent and called by the panel over the
+// agent's WebSocket. This is not gRPC: the RPC layers in go/internal/rpc and
+// apps/panel map methods onto frames (see envelope.proto and StreamMode).
+service AgentService {
+  // Node facts and actual state.
+  rpc GetNodeFacts(GetNodeFactsRequest) returns (GetNodeFactsResponse) {
+    option (capability) = "state.sync.v1";
+  }
+  rpc GetStateSnapshot(GetStateSnapshotRequest) returns (GetStateSnapshotResponse) {
+    option (capability) = "state.sync.v1";
+  }
+
+  // Desired state. Long-lived things are declarative: the agent reconciles
+  // toward what these set and keeps doing so while the panel is away.
+  rpc SyncDesired(SyncDesiredRequest) returns (SyncDesiredResponse) {
+    option (capability) = "state.sync.v1";
+  }
+  rpc ApplyService(ApplyServiceRequest) returns (ApplyServiceResponse) {
+    option (capability) = "state.sync.v1";
+  }
+  rpc RemoveService(RemoveServiceRequest) returns (RemoveServiceResponse) {
+    option (capability) = "state.sync.v1";
+  }
+  rpc RestartService(RestartServiceRequest) returns (RestartServiceResponse) {
+    option (capability) = "state.sync.v1";
+  }
+
+  // Builds.
+  rpc Build(BuildRequest) returns (stream BuildResponse) {
+    option (capability) = "build.run.v1";
+  }
+  rpc CancelBuild(CancelBuildRequest) returns (CancelBuildResponse) {
+    option (capability) = "build.run.v1";
+  }
+  rpc UploadBuildContext(UploadBuildContextRequest) returns (UploadBuildContextResponse) {
+    option (capability) = "build.run.v1";
+    option (stream_mode) = STREAM_MODE_RAW_UPLOAD;
+  }
+
+  // Commands and terminals.
+  rpc Exec(ExecRequest) returns (ExecResponse) {
+    option (capability) = "exec.run.v1";
+  }
+  rpc Console(stream ConsoleRequest) returns (stream ConsoleResponse) {
+    option (capability) = "terminal.console.v1";
+  }
+  rpc Shell(stream ShellRequest) returns (stream ShellResponse) {
+    option (capability) = "terminal.shell.v1";
+  }
+
+  // Files on service volumes.
+  rpc FsList(FsListRequest) returns (FsListResponse) {
+    option (capability) = "fs.basic.v1";
+  }
+  rpc FsStat(FsStatRequest) returns (FsStatResponse) {
+    option (capability) = "fs.basic.v1";
+  }
+  rpc FsRead(FsReadRequest) returns (FsReadResponse) {
+    option (capability) = "fs.basic.v1";
+    option (stream_mode) = STREAM_MODE_RAW_DOWNLOAD;
+  }
+  rpc FsWrite(FsWriteRequest) returns (FsWriteResponse) {
+    option (capability) = "fs.basic.v1";
+    option (stream_mode) = STREAM_MODE_RAW_UPLOAD;
+  }
+  rpc FsMkdir(FsMkdirRequest) returns (FsMkdirResponse) {
+    option (capability) = "fs.basic.v1";
+  }
+  rpc FsRename(FsRenameRequest) returns (FsRenameResponse) {
+    option (capability) = "fs.basic.v1";
+  }
+  rpc FsDelete(FsDeleteRequest) returns (FsDeleteResponse) {
+    option (capability) = "fs.basic.v1";
+  }
+  rpc FsChmod(FsChmodRequest) returns (FsChmodResponse) {
+    option (capability) = "fs.basic.v1";
+  }
+  rpc FsArchive(FsArchiveRequest) returns (FsArchiveResponse) {
+    option (capability) = "fs.archive.v1";
+  }
+  rpc FsExtract(FsExtractRequest) returns (FsExtractResponse) {
+    option (capability) = "fs.archive.v1";
+  }
+
+  // Logs and metrics.
+  rpc LogsFollow(LogsFollowRequest) returns (stream LogsFollowResponse) {
+    option (capability) = "logs.follow.v1";
+  }
+  rpc LogsSearch(LogsSearchRequest) returns (LogsSearchResponse) {
+    option (capability) = "logs.search.v1";
+  }
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
+    option (capability) = "metrics.read.v1";
+  }
+  rpc WatchMetrics(WatchMetricsRequest) returns (stream WatchMetricsResponse) {
+    option (capability) = "metrics.read.v1";
+  }
+
+  // TCP tunnels into the node.
+  rpc Tunnel(TunnelRequest) returns (TunnelResponse) {
+    option (capability) = "tunnel.tcp.v1";
+    option (stream_mode) = STREAM_MODE_RAW_BIDI;
+  }
+
+  // Backups.
+  rpc RunBackup(RunBackupRequest) returns (RunBackupResponse) {
+    option (capability) = "backup.run.v1";
+  }
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse) {
+    option (capability) = "backup.run.v1";
+  }
+
+  // Node maintenance.
+  rpc Prune(PruneRequest) returns (PruneResponse) {
+    option (capability) = "node.prune.v1";
+  }
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse) {
+    option (capability) = "node.update.v1";
+  }
+  rpc RunHealthCheck(RunHealthCheckRequest) returns (RunHealthCheckResponse) {
+    option (capability) = "node.healthcheck.v1";
+  }
+  rpc Troubleshoot(TroubleshootRequest) returns (TroubleshootResponse) {
+    option (capability) = "node.troubleshoot.v1";
+  }
+  rpc Reboot(RebootRequest) returns (RebootResponse) {
+    option (capability) = "node.reboot.v1";
+  }
+  rpc UpdateDocker(UpdateDockerRequest) returns (UpdateDockerResponse) {
+    option (capability) = "node.docker-update.v1";
+  }
+  rpc UpdatePanel(UpdatePanelRequest) returns (UpdatePanelResponse) {
+    option (capability) = "node.panel-update.v1";
+  }
+  // The agent's own log (its systemd journal), redacted like troubleshoot.
+  rpc AgentLogs(AgentLogsRequest) returns (AgentLogsResponse) {
+    option (capability) = "node.agent-logs.v1";
+  }
+
+  // One file from a git repository (compose files from any git host).
+  rpc FetchGitFile(FetchGitFileRequest) returns (FetchGitFileResponse) {
+    option (capability) = "build.git-file.v1";
+  }
+
+  // Compose files, parsed with compose-go.
+  rpc ParseCompose(ParseComposeRequest) returns (ParseComposeResponse) {
+    option (capability) = "compose.parse.v1";
+  }
+
+  // Cron "Run now".
+  rpc RunCronNow(RunCronNowRequest) returns (RunCronNowResponse) {
+    option (capability) = "cron.run.v1";
+  }
+
+  // Moving a service's volumes to another node (relayed by the panel).
+  rpc ExportVolume(ExportVolumeRequest) returns (ExportVolumeResponse) {
+    option (capability) = "volume.transfer.v1";
+    option (stream_mode) = STREAM_MODE_RAW_DOWNLOAD;
+  }
+  rpc ImportVolume(ImportVolumeRequest) returns (ImportVolumeResponse) {
+    option (capability) = "volume.transfer.v1";
+    option (stream_mode) = STREAM_MODE_RAW_UPLOAD;
+  }
+}

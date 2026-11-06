@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Wire format
+//
+// The agent dials the panel and keeps ONE WebSocket open. Every binary
+// WebSocket message is one frame:
+//
+//   [kind: 1 byte][stream: uint32 big endian][payload: rest of the message]
+//
+// kind is a FrameKind value. stream identifies a call or stream: the side
+// that dialed (the agent) allocates odd ids, the side that accepted (the
+// panel) allocates even ids, and 0 is the connection itself (handshake and
+// events). Ids are never reused within one connection.
+//
+// Flow control: DATA payload bytes count against a per-stream credit window
+// granted by the receiver (Open.initial_window, then WINDOW frames). Control
+// frames (everything except DATA) are not flow controlled and are always
+// written before queued DATA, so a large upload never delays a deploy.
+//
+// The Go implementation lives in go/internal/conn; keep the two in sync.
+enum FrameKind {
+  FRAME_KIND_UNSPECIFIED = 0;
+  // Starts a unary call. Payload: Call.
+  FRAME_KIND_CALL = 1;
+  // Ends a unary call. Payload: Result.
+  FRAME_KIND_RESULT = 2;
+  // One-way message on stream 0. Payload: Handshake until the session is
+  // accepted, then Event.
+  FRAME_KIND_EVENT = 3;
+  // Starts a streaming or raw call. Payload: Open.
+  FRAME_KIND_OPEN = 4;
+  // Stream bytes. Payload: raw bytes, see StreamMode.
+  FRAME_KIND_DATA = 5;
+  // Grants send credit to the peer. Payload: uint32 big endian increment.
+  FRAME_KIND_WINDOW = 6;
+  // Half-closes (opener) or ends (responder) a stream, or cancels a call.
+  // Payload: Close.
+  FRAME_KIND_CLOSE = 7;
+}
+
+// Call is the payload of a CALL frame.
+message Call {
+  // Full method name, for example "/seylo.agent.v1.AgentService/ApplyService".
+  string method = 1;
+  // Serialized request message.
+  bytes request = 2;
+  // The callee abandons the call after this time. Unset means no deadline.
+  google.protobuf.Timestamp deadline = 3;
+  // Cross-cutting values such as a trace id or the acting user for audit.
+  // Keys are lower case; values must not hold secrets.
+  map<string, string> metadata = 4;
+  // Time the callee has from receiving the call. Unlike deadline it does
+  // not depend on both clocks agreeing, so the callee uses it when set and
+  // falls back to deadline only for senders that leave it out. Senders set
+  // both (deadline for older callees). The difference between deadline -
+  // timeout and the receive time is the sender's clock offset (plus
+  // transit), which the callee may use to warn about a wrong clock.
+  google.protobuf.Duration timeout = 5;
+}
+
+// Result is the payload of a RESULT frame.
+message Result {
+  Status status = 1;
+  // Serialized response message, empty unless status is OK.
+  bytes response = 2;
+}
+
+// Open is the payload of an OPEN frame.
+message Open {
+  // Full method name, as in Call.method.
+  string method = 1;
+  // First (or only) serialized request message.
+  bytes request = 2;
+  // Bytes the opener may receive before the responder must wait for a
+  // WINDOW frame. The responder's window toward the opener starts at the
+  // same size.
+  uint32 initial_window = 3;
+  // As in Call.deadline.
+  google.protobuf.Timestamp deadline = 4;
+  // As in Call.metadata.
+  map<string, string> metadata = 5;
+  // As in Call.timeout.
+  google.protobuf.Duration timeout = 6;
+}
+
+// Close is the payload of a CLOSE frame.
+//
+// From the opener it means "I will send no more DATA" with status OK, or
+// cancels the call with STATUS_CODE_CANCELLED. From the responder it ends
+// the stream with the final status. A CLOSE on a unary call's stream
+// cancels that call.
+message Close {
+  Status status = 1;
+  // Serialized response message for raw methods (see StreamMode). Empty
+  // for every other method.
+  bytes response = 2;
+}
+
+// Status reports how a call ended.
+message Status {
+  StatusCode code = 1;
+  // Human readable, safe to show to the user.
+  string message = 2;
+  // Machine readable extras, for example {"field": "env[3].name"}.
+  map<string, string> details = 3;
+}
+
+// StatusCode follows the gRPC code set so both sides can reuse well known
+// semantics. Zero is not a valid code on the wire.
+enum StatusCode {
+  STATUS_CODE_UNSPECIFIED = 0;
+  STATUS_CODE_OK = 1;
+  STATUS_CODE_CANCELLED = 2;
+  STATUS_CODE_UNKNOWN = 3;
+  STATUS_CODE_INVALID_ARGUMENT = 4;
+  STATUS_CODE_DEADLINE_EXCEEDED = 5;
+  STATUS_CODE_NOT_FOUND = 6;
+  STATUS_CODE_ALREADY_EXISTS = 7;
+  STATUS_CODE_PERMISSION_DENIED = 8;
+  STATUS_CODE_RESOURCE_EXHAUSTED = 9;
+  STATUS_CODE_FAILED_PRECONDITION = 10;
+  STATUS_CODE_ABORTED = 11;
+  STATUS_CODE_UNIMPLEMENTED = 12;
+  STATUS_CODE_INTERNAL = 13;
+  STATUS_CODE_UNAVAILABLE = 14;
+}

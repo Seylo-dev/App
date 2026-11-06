@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "seylo/agent/v1/events.proto";
+import "seylo/agent/v1/service.proto";
+
+// Builds run on any node with can_build and push to the panel registry, so
+// an image is built once and runs anywhere (pulled by digest).
+
+message BuildRequest {
+  // Panel id of the build; also names the build log.
+  string build_id = 1;
+  string service_id = 2;
+  BuildSource source = 3;
+  Builder builder = 4;
+  // Folder inside the source to build, default the root.
+  string context_path = 5;
+  // Dockerfile path relative to context_path, for BUILDER_DOCKERFILE.
+  // Default "Dockerfile".
+  string dockerfile_path = 6;
+  // Build-time variables. Secret ones are passed as BuildKit secrets, not
+  // build args, so they never end up in image layers.
+  repeated EnvVar env = 7;
+  // Push target, for example "127.0.0.1:5755/<service id>:<generation>".
+  string image_reference = 8;
+  // Stage of a multi-stage Dockerfile to build. Empty means the last one.
+  string target_stage = 9;
+  // Also fetch git submodules (recursive, shallow, same credentials). Off
+  // by default.
+  bool git_submodules = 10;
+  // Local images of this service (same repository as image_reference) the
+  // node keeps after a successful build, newest first, as cache and for
+  // fast rollbacks on this node. 0 means 3. The panel registry keeps its
+  // own history; the panel deletes manifests there.
+  uint32 keep_images = 11;
+  // A build that runs longer is stopped and fails. 0 means 45 minutes.
+  google.protobuf.Duration timeout = 12;
+  // Overrides for Railpack and Nixpacks; empty keeps what they detect.
+  // Ignored by BUILDER_DOCKERFILE.
+  string install_command = 13;
+  string build_command = 14;
+  string start_command = 15;
+  // Dockerfile typed in the panel for a git or uploaded source, used
+  // instead of dockerfile_path (BUILDER_DOCKERFILE). Without a source use
+  // BuildSource.inline_dockerfile.
+  string dockerfile_content = 16;
+  // Project of the service. Builds of different projects run in separate
+  // BuildKit builders, so cache mounts (RUN --mount=type=cache) and the
+  // layer cache never cross projects. Empty (older panels): the service id
+  // is used, which isolates per service.
+  string project_id = 17;
+}
+
+message BuildSource {
+  oneof source {
+    GitSource git = 1;
+    // Id of an archive sent earlier with UploadBuildContext.
+    string upload_id = 2;
+    // Dockerfile typed in the panel, built with an empty context.
+    string inline_dockerfile = 3;
+    // An existing image: pulled (with auth for private registries) and
+    // pushed unchanged to image_reference, so every node pulls it from the
+    // panel registry by digest and only the building node needs the
+    // registry credentials. builder and the Dockerfile fields are ignored.
+    ImageSource image = 4;
+  }
+}
+
+message ImageSource {
+  // For example "ghcr.io/acme/api:1.4".
+  string reference = 1;
+  // Credentials for a private registry; unset for public images.
+  RegistryAuth auth = 2;
+}
+
+message GitSource {
+  string url = 1;
+  // Branch or tag, for display.
+  string ref = 2;
+  // Exact commit to build.
+  string commit = 3;
+  // Access token for private repositories over HTTPS. Handed to git
+  // through a credential helper and never written into the checkout.
+  string token = 4;
+  // OpenSSH private key for ssh:// and git@ URLs, used instead of token.
+  // Written to a 0600 temp file for the clone and deleted afterwards.
+  string ssh_private_key = 5;
+  // known_hosts lines for the SSH host. Empty means the agent's built-in
+  // keys for github.com, gitlab.com and bitbucket.org; other hosts fail
+  // without it (no trust on first use).
+  string ssh_known_hosts = 6;
+}
+
+enum Builder {
+  BUILDER_UNSPECIFIED = 0;
+  // The default.
+  BUILDER_RAILPACK = 1;
+  // In maintenance mode upstream; kept as an option.
+  BUILDER_NIXPACKS = 2;
+  BUILDER_DOCKERFILE = 3;
+}
+
+// BuildResponse is one message of the build stream. The stream ends with a
+// BuildProgress in a final stage (SUCCEEDED carries the image digest), then
+// CLOSE. The same final result is also reported durably through
+// PanelService.ReportEvent in case this stream is lost.
+message BuildResponse {
+  oneof output {
+    // Raw builder output, may contain ANSI escapes and partial lines.
+    bytes log = 1;
+    BuildProgress progress = 2;
+    // Sent once the source is fetched (git sources only).
+    BuildSourceInfo source_info = 3;
+  }
+}
+
+// BuildSourceInfo describes the fetched commit, for the deploy log and
+// history when the panel asked for a branch rather than a commit.
+message BuildSourceInfo {
+  string commit = 1;
+  // First line of the commit message.
+  string subject = 2;
+  string author = 3;
+}
+
+message CancelBuildRequest {
+  string build_id = 1;
+}
+
+message CancelBuildResponse {}
+
+// UploadBuildContextRequest opens a raw upload of a .tar.gz build context.
+message UploadBuildContextRequest {
+  string upload_id = 1;
+  uint64 size_bytes = 2;
+  // Hex SHA-256 of the archive; the agent rejects a mismatch.
+  string sha256 = 3;
+}
+
+message UploadBuildContextResponse {}
+
+// FetchGitFileRequest reads one file from a git repository with the same
+// clone code and credentials as builds (shallow, sparse, no build), so the
+// panel can load a compose file or Dockerfile from any git host. Any agent
+// with build.git-file.v1 can answer; nothing stays on the node.
+message FetchGitFileRequest {
+  // Repository, ref and credentials. commit wins over ref when set; both
+  // empty means the default branch.
+  GitSource source = 1;
+  // Path inside the repository, for example "docker-compose.yml" or
+  // "deploy/compose.yaml". No leading slash, no "..".
+  string path = 2;
+  // Larger files fail with INVALID_ARGUMENT. 0 means 1 MiB; the agent caps
+  // it at 8 MiB.
+  uint64 max_bytes = 3;
+}
+
+message FetchGitFileResponse {
+  bytes content = 1;
+  // Commit the file was read at.
+  string commit = 2;
+  uint64 size_bytes = 3;
+}

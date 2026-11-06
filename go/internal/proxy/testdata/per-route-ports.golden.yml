@@ -1,0 +1,66 @@
+# Written by the Seylo agent for service svc9. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc9-r-admin:
+      entryPoints:
+        - web
+      rule: Host(`admin.x.example.com`)
+      middlewares:
+        - seylo-svc9-unreachable
+      service: seylo-svc9-p9000
+    seylo-svc9-r-admin-lb:
+      entryPoints:
+        - seylo-lb
+      rule: Host(`admin.x.example.com`)
+      middlewares:
+        - seylo-svc9-unreachable
+      service: seylo-svc9-local-p9000
+      tls: {}
+    seylo-svc9-r-web:
+      entryPoints:
+        - web
+      rule: Host(`x.example.com`)
+      middlewares:
+        - seylo-svc9-unreachable
+      service: seylo-svc9
+    seylo-svc9-r-web-lb:
+      entryPoints:
+        - seylo-lb
+      rule: Host(`x.example.com`)
+      middlewares:
+        - seylo-svc9-unreachable
+      service: seylo-svc9-local
+      tls: {}
+  middlewares:
+    seylo-svc9-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc9-edge
+        query: /_seylo/page/status/svc9
+  services:
+    seylo-svc9:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc9-1:3000
+          - url: http://seylo-svc9-1-1:3000
+    seylo-svc9-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc9-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc9-1:3000
+          - url: http://seylo-svc9-1-1:3000
+    seylo-svc9-local-p9000:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc9-1:9000
+          - url: http://seylo-svc9-1-1:9000
+    seylo-svc9-p9000:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc9-1:9000
+          - url: http://seylo-svc9-1-1:9000

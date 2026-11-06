@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// DevAccess is temporary access that bypasses domains: a port opened for
+// one IP for a limited time, or a Cloudflare tunnel.
+message DevAccess {
+  repeated TimedExpose timed_exposes = 1;
+  CloudflareTunnel cloudflare_tunnel = 2;
+}
+
+// TimedExpose opens a container port on the node through the agent's
+// portgate, locked to source addresses, until it expires. The agent closes
+// it on time even when the panel is unreachable.
+message TimedExpose {
+  // Stable id from the panel.
+  string id = 1;
+  uint32 container_port = 2;
+  // 0 lets the agent pick a free port; the chosen port is reported in
+  // ServiceStatus.
+  uint32 host_port = 3;
+  // Usually the requester's IP as a /32 or /128. Must not be empty.
+  repeated string allowed_source_cidrs = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message CloudflareTunnel {
+  bool enabled = 1;
+  // Scoped tunnel token for a permanent hostname. Empty starts a temporary
+  // trycloudflare.com tunnel whose URL is reported in ServiceStatus.
+  string token = 2;
+  uint32 target_port = 3;
+}

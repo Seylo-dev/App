@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+/dist/
+/bin/
+apps/*/dist/
+packages/*/dist/
+
+# TypeScript incremental build info goes stale and breaks builds
+*.tsbuildinfo
+
+# Go
+go/coverage.out
+*.test
+
+# Local data and secrets: a panel data dir kept in the checkout
+# (SEYLO_DATA_DIR=.seylo-dev or .data), its databases, keys and tokens
+.seylo-dev/
+.data/
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+master.key
+setup-token
+join-token
+*.log
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# test binaries built for the Linux VM (scripts/dev/vm-gotest.sh)
+/.vmbin/
+
+# TanStack Router code-splitting temp files
+apps/web/.tanstack/

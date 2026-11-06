@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Browser tests in one command: starts a panel on a fresh data dir and the
+# Vite dev server in front of it, runs the Playwright specs, stops both.
+#
+#   test/playwright/run.sh                     everything: smoke (setup, sign-in, real
+#                                              panel), flows (settings and CLI sign-in
+#                                              on the real panel) and screens (every
+#                                              screen with demo data, four presets)
+#   PRESETS=seylo test/playwright/run.sh       screens in one preset only
+#   test/playwright/run.sh --project smoke     extra arguments go to `playwright test`
+#
+# Environment: PANEL_PORT (3151), WEB_PORT (5251), DATA_DIR (a new temp dir,
+# deleted afterwards unless set), SHOTS_DIR (test/playwright/shots).
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$here/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$root/installer/brand.env"
+prefix="$(printf '%s' "$BRAND_SLUG" | tr '[:lower:]-' '[:upper:]_')_"
+
+panel_port="${PANEL_PORT:-3151}"
+web_port="${WEB_PORT:-5251}"
+keep_data=1
+if [ -z "${DATA_DIR:-}" ]; then
+  DATA_DIR="$(mktemp -d)"
+  keep_data=0
+fi
+shots="${SHOTS_DIR:-$here/shots}"
+mkdir -p "$shots"
+# The setup step needs a panel that never had an owner.
+rm -rf "${DATA_DIR:?}"/panel.db* "$DATA_DIR"/metrics.db* "$DATA_DIR"/master.key "$DATA_DIR"/setup-token
+
+pids=()
+cleanup() {
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait 2>/dev/null || true
+  if [ "$keep_data" = 0 ]; then rm -rf "$DATA_DIR"; fi
+}
+trap cleanup EXIT
+
+wait_for() {
+  local url="$1" name="$2"
+  for _ in $(seq 1 60); do
+    if curl -fsS -o /dev/null "$url" 2>/dev/null; then return 0; fi
+    sleep 0.5
+  done
+  echo "run.sh: $name did not come up at $url" >&2
+  exit 1
+}
+
+(cd "$here" && bun install --frozen-lockfile >/dev/null)
+"$here/node_modules/.bin/playwright" install chromium >/dev/null
+
+env "${prefix}DATA_DIR=$DATA_DIR" "${prefix}PORT=$panel_port" "${prefix}HOST=127.0.0.1" "${prefix}SECURE_COOKIES=false" \
+  bun "$root/apps/panel/src/main.ts" >"$shots/panel.log" 2>&1 &
+pids+=($!)
+wait_for "http://127.0.0.1:$panel_port/api/v1/settings.boot" "the panel"
+
+(cd "$root/apps/web" && PANEL_URL="http://127.0.0.1:$panel_port" exec ./node_modules/.bin/vite --port "$web_port" --strictPort --host 127.0.0.1 \
+  >"$shots/vite.log" 2>&1) &
+pids+=($!)
+wait_for "http://127.0.0.1:$web_port/" "Vite"
+
+cd "$here"
+BASE_URL="http://127.0.0.1:$web_port" PANEL_DATA_DIR="$DATA_DIR" SHOTS_DIR="$shots" RESULTS_DIR="$shots/results" \
+  ./node_modules/.bin/playwright test "$@"

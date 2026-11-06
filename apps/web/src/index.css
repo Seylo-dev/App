@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@seylo/ui/styles/tailwind.css";
+
+/* Tailwind only scans this package by default; the UI kit lives in packages/ui. */
+@source "../../../packages/ui/src";

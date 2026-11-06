@@ -1,0 +1,21 @@
+name: "Excalidraw"
+description: "Virtual whiteboard for hand-drawn style sketches and diagrams."
+category: "Productivity"
+tags: ["whiteboard", "diagrams", "drawing"]
+creates: "App"
+links:
+  - label: "Website"
+    url: "https://excalidraw.com"
+  - label: "Repository"
+    url: "https://github.com/excalidraw/excalidraw"
+body: |
+  A static Excalidraw app. Drawings stay in each browser unless you export or share them. The project only publishes the `latest` tag.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "excalidraw/excalidraw:latest"

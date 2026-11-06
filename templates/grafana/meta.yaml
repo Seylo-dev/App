@@ -1,0 +1,26 @@
+name: "Grafana"
+description: "Dashboards and alerts for metrics, logs and traces from many data sources."
+category: "Monitoring"
+tags: ["dashboards", "monitoring", "observability"]
+creates: "App"
+links:
+  - label: "Website"
+    url: "https://grafana.com/oss/grafana"
+  - label: "Docs"
+    url: "https://grafana.com/docs/grafana/latest"
+body: |
+  Sign in as `admin` with the password below. Add Prometheus or other data sources under Connections.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "grafana/grafana:11.4.0"
+    adminPassword:
+      type: "string"
+      format: "password"
+      title: "Admin password"
+      description: "Generated when left empty."

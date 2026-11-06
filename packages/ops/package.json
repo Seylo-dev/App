@@ -1,0 +1,45 @@
+{
+  "name": "@seylo/ops",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "The operation registry: every panel action defined once, plus the generators that turn it into routes, OpenAPI, MCP tools, AI tools and the web client.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/client.ts",
+    "./react": "./src/client/react.ts",
+    "./elysia": "./src/server/elysia.ts",
+    "./generators": "./src/generators/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@seylo/brand": "workspace:*",
+    "@sinclair/typebox": "0.34.52"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.106.1",
+    "elysia": "^1.4.31",
+    "react": "^19.3.1"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "elysia": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "5.106.1",
+    "@types/react": "19.3.0",
+    "elysia": "1.4.31",
+    "react": "19.3.1"
+  }
+}

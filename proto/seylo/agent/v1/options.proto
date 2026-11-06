@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// StreamMode tells the RPC layer how a method uses the wire beyond its
+// declared request and response. Both the Go and TypeScript RPC layers read
+// it from the method descriptor, so it is the single source of truth.
+//
+// Methods without the option follow their proto signature:
+//   - unary methods use one CALL frame and one RESULT frame;
+//   - streaming methods use OPEN (carrying the first request), then DATA
+//     frames holding size-delimited messages (varint length + message, the
+//     standard protobuf delimited format; a message may span frames), then
+//     CLOSE from each side.
+//
+// Raw methods are declared unary, but between OPEN (carrying the request)
+// and the responder's CLOSE (carrying status and the response) the stream
+// moves plain bytes in DATA frames, with no protobuf wrapping. They exist
+// for bulk bytes - files, tunnels - where per-chunk messages buy nothing.
+enum StreamMode {
+  // Normal method, see above.
+  STREAM_MODE_UNSPECIFIED = 0;
+  // Only the responder sends DATA (for example FsRead).
+  STREAM_MODE_RAW_DOWNLOAD = 1;
+  // Only the opener sends DATA (for example FsWrite).
+  STREAM_MODE_RAW_UPLOAD = 2;
+  // Both sides send DATA (for example Tunnel).
+  STREAM_MODE_RAW_BIDI = 3;
+}
+
+extend google.protobuf.MethodOptions {
+  // Field numbers from the range reserved for private extensions.
+  StreamMode stream_mode = 51000;
+  // Capability the callee must have advertised before the caller may use
+  // this method (NodeFacts.capabilities for AgentService methods,
+  // ServerHello.capabilities for PanelService methods). Every method sets
+  // it; that is how new methods roll out across mixed versions. Names are
+  // "<area>.<feature>.v<n>".
+  string capability = 51001;
+}

@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+// Console attaches to the main process of a container (its stdin and
+// output). Shell starts a new process with a PTY. Both are bidirectional
+// streams whose first request (sent in OPEN) must be the `open` variant.
+
+message ConsoleRequest {
+  oneof message {
+    ConsoleOpen open = 1;
+    bytes stdin = 2;
+    // Only for containers started with a TTY; ignored otherwise.
+    TerminalSize resize = 3;
+  }
+}
+
+message ConsoleOpen {
+  string service_id = 1;
+  // Empty means the first running replica.
+  string container_id = 2;
+  // Recent output lines to replay first, default 100.
+  uint32 tail = 3;
+}
+
+message ConsoleResponse {
+  oneof message {
+    bytes output = 1;
+    // The container stopped; the stream closes right after.
+    int32 exit_code = 2;
+    // Always the first message: what the console attached to.
+    ConsoleInfo info = 3;
+  }
+}
+
+message ConsoleInfo {
+  string container_id = 1;
+  uint64 generation = 2;
+  // False when the container runs without an open stdin: input is dropped
+  // and the UI shows the console as read-only.
+  bool stdin_open = 3;
+  bool tty = 4;
+  // User the main process runs as (the image's USER or ContainerConfig.user,
+  // "root" when neither sets one) and its working directory ("/" when the
+  // image sets none). Empty from agents older than this field.
+  string user = 5;
+  string working_dir = 6;
+}
+
+message ShellRequest {
+  oneof message {
+    ShellOpen open = 1;
+    bytes input = 2;
+    TerminalSize resize = 3;
+  }
+}
+
+message ShellOpen {
+  string service_id = 1;
+  // Empty means the first running replica.
+  string container_id = 2;
+  // Empty tries bash, then sh.
+  repeated string command = 3;
+  TerminalSize size = 4;
+  // Open the database engine's client, already logged in. Only for
+  // SERVICE_KIND_DATABASE.
+  bool database_client = 5;
+  string user = 6;
+}
+
+message TerminalSize {
+  uint32 columns = 1;
+  uint32 rows = 2;
+}
+
+message ShellResponse {
+  oneof message {
+    bytes output = 1;
+    // The shell process exited; the stream closes right after.
+    int32 exit_code = 2;
+    // The first message from agents that send it: where the shell runs.
+    // Older agents start with output.
+    ShellInfo info = 3;
+  }
+}
+
+// ShellInfo describes the process a Shell stream started.
+message ShellInfo {
+  string container_id = 1;
+  uint64 generation = 2;
+  // User the shell runs as: ShellOpen.user, else the container's user,
+  // else "root".
+  string user = 3;
+  // Working directory of the shell: the container's working directory, or
+  // "/" when it sets none.
+  string working_dir = 4;
+  // The command that runs, for example ["bash"] or the database client.
+  // Secrets in it (passwords) are never sent; database clients get them
+  // from the environment.
+  repeated string command = 5;
+}

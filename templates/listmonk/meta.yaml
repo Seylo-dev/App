@@ -1,0 +1,30 @@
+name: "listmonk"
+description: "Newsletter and mailing list manager with a fast, single binary."
+category: "Marketing"
+tags: ["newsletter", "email", "mailing-list"]
+creates: "App + Postgres"
+links:
+  - label: "Website"
+    url: "https://listmonk.app"
+  - label: "Docs"
+    url: "https://listmonk.app/docs"
+body: |
+  listmonk installs its tables on the first start and upgrades them on later ones. Sign in with the admin user below; add an SMTP server under Settings.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "listmonk/listmonk:v4.1.0"
+    adminUser:
+      type: "string"
+      title: "Admin user"
+      default: "admin"
+    adminPassword:
+      type: "string"
+      format: "password"
+      title: "Admin password"
+      description: "Generated when left empty."

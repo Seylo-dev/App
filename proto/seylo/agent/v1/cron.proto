@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+// Cron jobs fire on the agent (ServiceSpec.cron_jobs and SERVICE_KIND_CRON
+// services) so they keep running while the panel is unreachable. These
+// messages cover the one-off "Run now" button.
+
+// RunCronNowRequest starts one run immediately, ignoring the schedule and
+// the disabled flag but honouring the concurrency policy. It returns once
+// the run started; the result arrives as a durable CronRun event.
+message RunCronNowRequest {
+  string service_id = 1;
+  // CronJob.id; empty for a SERVICE_KIND_CRON service.
+  string cron_job_id = 2;
+  // Panel id for the run, echoed in CronRun.run_id.
+  string run_id = 3;
+}
+
+message RunCronNowResponse {
+  // False when the concurrency policy skipped the run (a CronRun with
+  // CRON_RUN_RESULT_SKIPPED is still reported).
+  bool started = 1;
+}

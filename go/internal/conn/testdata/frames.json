@@ -1,0 +1,51 @@
+[
+  {
+    "name": "event on connection stream",
+    "kind": 3,
+    "stream": 0,
+    "payloadHex": "0a00",
+    "encodedHex": "03000000000a00"
+  },
+  {
+    "name": "call from dialer",
+    "kind": 1,
+    "stream": 1,
+    "payloadHex": "68656c6c6f",
+    "encodedHex": "010000000168656c6c6f"
+  },
+  {
+    "name": "result to dialer",
+    "kind": 2,
+    "stream": 1,
+    "payloadHex": "",
+    "encodedHex": "0200000001"
+  },
+  {
+    "name": "open from acceptor",
+    "kind": 4,
+    "stream": 2,
+    "payloadHex": "0801",
+    "encodedHex": "04000000020801"
+  },
+  {
+    "name": "data max stream id",
+    "kind": 5,
+    "stream": 4294967295,
+    "payloadHex": "00ff",
+    "encodedHex": "05ffffffff00ff"
+  },
+  {
+    "name": "window grant",
+    "kind": 6,
+    "stream": 258,
+    "payloadHex": "00040000",
+    "encodedHex": "060000010200040000"
+  },
+  {
+    "name": "close",
+    "kind": 7,
+    "stream": 16909060,
+    "payloadHex": "0a020801",
+    "encodedHex": "07010203040a020801"
+  }
+]

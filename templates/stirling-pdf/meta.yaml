@@ -1,0 +1,19 @@
+name: "Stirling PDF"
+description: "Merge, split, convert, OCR and edit PDFs in the browser; files never leave your server."
+category: "Productivity"
+tags: ["pdf", "documents", "tools"]
+creates: "App"
+links:
+  - label: "Repository"
+    url: "https://github.com/Stirling-Tools/Stirling-PDF"
+body: |
+  Stirling PDF processes documents locally. Settings are kept in the `configs` volume.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "stirlingtools/stirling-pdf:0.46.2"

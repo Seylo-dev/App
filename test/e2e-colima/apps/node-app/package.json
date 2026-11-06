@@ -1,0 +1,14 @@
+{
+  "name": "e2e-node-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny HTTP app for the Seylo e2e Railpack build (no dependencies).",
+  "license": "AGPL-3.0-only",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": "22"
+  }
+}

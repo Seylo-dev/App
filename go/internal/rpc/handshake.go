@@ -1,0 +1,153 @@
+package rpc
+
+import (
+	"context"
+	"crypto/ed25519"
+	"errors"
+	"fmt"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/seylo-dev/app/go/gen/brand"
+	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/conn"
+)
+
+// HelloContext prefixes every handshake signature (handshake.proto,
+// ClientHello). The panel builds the same bytes in
+// apps/panel/src/agent-hub/signature.ts.
+const HelloContext = brand.Slug + "-agent-hello-v1"
+
+// HelloSignedBytes returns what the agent signs:
+//
+//	HelloContext 0x00 panel_id 0x00 node_id 0x00 nonce
+//
+// node_id is empty when joining.
+func HelloSignedBytes(panelID, nodeID string, nonce []byte) []byte {
+	out := make([]byte, 0, len(HelloContext)+len(panelID)+len(nodeID)+3+len(nonce))
+	out = append(out, HelloContext...)
+	out = append(out, 0)
+	out = append(out, panelID...)
+	out = append(out, 0)
+	out = append(out, nodeID...)
+	out = append(out, 0)
+	return append(out, nonce...)
+}
+
+// SignHello signs the ServerHello's nonce for nodeID ("" when joining).
+func SignHello(key ed25519.PrivateKey, server *agentv1.ServerHello, nodeID string) []byte {
+	return ed25519.Sign(key, HelloSignedBytes(server.GetPanelId(), nodeID, server.GetNonce()))
+}
+
+// VerifyHello checks a ClientHello signature against pub.
+func VerifyHello(pub ed25519.PublicKey, panelID, nodeID string, nonce, signature []byte) bool {
+	return len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, HelloSignedBytes(panelID, nodeID, nonce), signature)
+}
+
+// HandshakeResult is what the agent learns from a successful handshake.
+type HandshakeResult struct {
+	Server   *agentv1.ServerHello
+	Accepted *agentv1.HelloAccepted
+}
+
+// RejectedError is returned by AgentHandshake when the panel refused the
+// agent (bad token, unknown node, agent too old, ...).
+type RejectedError struct {
+	Rejected *agentv1.HelloRejected
+}
+
+func (e *RejectedError) Error() string {
+	return "panel rejected the agent: " + e.Rejected.GetReason().String() + ": " + e.Rejected.GetMessage()
+}
+
+// ErrHandshake wraps every handshake failure that is not a rejection: the
+// peer sent something other than the expected step, or the connection
+// dropped.
+var ErrHandshake = errors.New("rpc: handshake failed")
+
+// AgentHandshake runs the agent side of the stream 0 handshake: read
+// ServerHello, send the ClientHello that hello builds from it (hello signs
+// the nonce), then wait for HelloAccepted or HelloRejected (*RejectedError).
+// ctx bounds the whole exchange.
+func AgentHandshake(ctx context.Context, t conn.Transport, hello func(*agentv1.ServerHello) (*agentv1.ClientHello, error)) (*HandshakeResult, error) {
+	step, err := readHandshake(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	server := step.GetServerHello()
+	if server == nil {
+		return nil, fmt.Errorf("%w: expected ServerHello, got %T", ErrHandshake, step.GetStep())
+	}
+	client, err := hello(server)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeHandshake(ctx, t, &agentv1.Handshake{Step: &agentv1.Handshake_ClientHello{ClientHello: client}}); err != nil {
+		return nil, err
+	}
+	step, err = readHandshake(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	switch s := step.GetStep().(type) {
+	case *agentv1.Handshake_Accepted:
+		return &HandshakeResult{Server: server, Accepted: s.Accepted}, nil
+	case *agentv1.Handshake_Rejected:
+		return nil, &RejectedError{Rejected: s.Rejected}
+	default:
+		return nil, fmt.Errorf("%w: expected HelloAccepted or HelloRejected, got %T", ErrHandshake, s)
+	}
+}
+
+// PanelHandshake runs the panel side (fake panels in tests; the real panel
+// is TypeScript): send server, read the ClientHello, ask decide, and send
+// its answer. It returns the ClientHello and the acceptance, or a
+// *RejectedError after sending the rejection.
+func PanelHandshake(ctx context.Context, t conn.Transport, server *agentv1.ServerHello, decide func(*agentv1.ClientHello) (*agentv1.HelloAccepted, *agentv1.HelloRejected)) (*agentv1.ClientHello, *agentv1.HelloAccepted, error) {
+	if err := writeHandshake(ctx, t, &agentv1.Handshake{Step: &agentv1.Handshake_ServerHello{ServerHello: server}}); err != nil {
+		return nil, nil, err
+	}
+	step, err := readHandshake(ctx, t)
+	if err != nil {
+		return nil, nil, err
+	}
+	client := step.GetClientHello()
+	if client == nil {
+		return nil, nil, fmt.Errorf("%w: expected ClientHello, got %T", ErrHandshake, step.GetStep())
+	}
+	accepted, rejected := decide(client)
+	if rejected != nil {
+		_ = writeHandshake(ctx, t, &agentv1.Handshake{Step: &agentv1.Handshake_Rejected{Rejected: rejected}})
+		return client, nil, &RejectedError{Rejected: rejected}
+	}
+	if err := writeHandshake(ctx, t, &agentv1.Handshake{Step: &agentv1.Handshake_Accepted{Accepted: accepted}}); err != nil {
+		return nil, nil, err
+	}
+	return client, accepted, nil
+}
+
+func readHandshake(ctx context.Context, t conn.Transport) (*agentv1.Handshake, error) {
+	f, err := t.ReadFrame(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: reading: %w", ErrHandshake, err)
+	}
+	if f.Kind != conn.KindEvent || f.Stream != conn.ConnectionStream {
+		return nil, fmt.Errorf("%w: expected EVENT on stream 0, got %s on stream %d", ErrHandshake, f.Kind, f.Stream)
+	}
+	h := &agentv1.Handshake{}
+	if err := proto.Unmarshal(f.Payload, h); err != nil {
+		return nil, fmt.Errorf("%w: undecodable handshake: %w", ErrHandshake, err)
+	}
+	return h, nil
+}
+
+func writeHandshake(ctx context.Context, t conn.Transport, h *agentv1.Handshake) error {
+	payload, err := proto.Marshal(h)
+	if err != nil {
+		return fmt.Errorf("%w: encoding: %w", ErrHandshake, err)
+	}
+	if err := t.WriteFrame(ctx, conn.Frame{Kind: conn.KindEvent, Stream: conn.ConnectionStream, Payload: payload}.Encode()); err != nil {
+		return fmt.Errorf("%w: writing: %w", ErrHandshake, err)
+	}
+	return nil
+}

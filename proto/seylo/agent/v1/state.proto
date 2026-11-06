@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Actual state sync
+//
+// The panel keeps an in-memory copy of each node's actual state so reads
+// need no round trip. After connecting it calls GetStateSnapshot; from then
+// on the agent pushes StateDelta events. `epoch` changes whenever the
+// agent's state numbering restarts (agent restart, state store reset) and
+// `seq` increases by exactly one per delta within an epoch. A delta with a
+// different epoch or a gap in seq makes the panel fetch a new snapshot.
+
+message GetStateSnapshotRequest {}
+
+message GetStateSnapshotResponse {
+  StateSnapshot snapshot = 1;
+}
+
+message StateSnapshot {
+  uint64 epoch = 1;
+  // Seq of the last delta included in this snapshot; the next delta has
+  // seq + 1.
+  uint64 seq = 2;
+  // Desired state revision the agent has fully applied.
+  uint64 applied_revision = 3;
+  repeated ServiceStatus services = 4;
+}
+
+message StateDelta {
+  uint64 epoch = 1;
+  uint64 seq = 2;
+  oneof change {
+    ServiceStatus service_updated = 3;
+    // Id of a service that no longer exists on the node.
+    string service_removed = 4;
+    uint64 applied_revision = 5;
+  }
+}
+
+message ServiceStatus {
+  string service_id = 1;
+  // Generation currently serving traffic (or last run, when stopped).
+  uint64 generation = 2;
+  ServicePhase phase = 3;
+  repeated Instance instances = 4;
+  // Short explanation of the phase, for example the deploy error.
+  string message = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  // Crashes in the current streak.
+  uint32 crash_streak = 7;
+  repeated RouteStatus routes = 8;
+  // Ports opened by TimedExpose, PublicPort or DatabaseExposure.
+  repeated OpenPort open_ports = 9;
+  // URL of a running temporary Cloudflare tunnel.
+  string tunnel_url = 10;
+  // Database web UI (SERVICE_KIND_DATABASE with tools.web_ui). Unset when
+  // the service has no web UI or the agent is older than this field.
+  ToolStatus web_ui = 11;
+}
+
+// ToolStatus is the actual state of an on-demand helper (database web UI):
+// it starts on the first ticket-authenticated request and stops when idle.
+message ToolStatus {
+  bool running = 1;
+  // Set while running.
+  google.protobuf.Timestamp started_at = 2;
+  // Last request through the edge; the idle timeout counts from here.
+  google.protobuf.Timestamp last_active_at = 3;
+}
+
+enum ServicePhase {
+  SERVICE_PHASE_UNSPECIFIED = 0;
+  SERVICE_PHASE_PENDING = 1;
+  SERVICE_PHASE_PULLING = 2;
+  SERVICE_PHASE_STARTING = 3;
+  SERVICE_PHASE_RUNNING = 4;
+  // A new generation is rolling out while the old one serves.
+  SERVICE_PHASE_DEPLOYING = 5;
+  // Some replicas are unhealthy.
+  SERVICE_PHASE_DEGRADED = 6;
+  SERVICE_PHASE_CRASH_LOOPING = 7;
+  SERVICE_PHASE_STOPPED = 8;
+  // Gave up: stop_after_crashes reached or restart is off.
+  SERVICE_PHASE_FAILED = 9;
+  // Box or database web UI asleep, waiting for a request.
+  SERVICE_PHASE_SLEEPING = 10;
+}
+
+message Instance {
+  string container_id = 1;
+  string container_name = 2;
+  uint64 generation = 3;
+  uint32 replica = 4;
+  InstanceState state = 5;
+  HealthState health = 6;
+  string image_digest = 7;
+  google.protobuf.Timestamp started_at = 8;
+  uint32 restart_count = 9;
+}
+
+enum InstanceState {
+  INSTANCE_STATE_UNSPECIFIED = 0;
+  INSTANCE_STATE_CREATED = 1;
+  INSTANCE_STATE_RUNNING = 2;
+  INSTANCE_STATE_RESTARTING = 3;
+  INSTANCE_STATE_EXITED = 4;
+  INSTANCE_STATE_DEAD = 5;
+}
+
+enum HealthState {
+  // No health check configured.
+  HEALTH_STATE_UNSPECIFIED = 0;
+  HEALTH_STATE_STARTING = 1;
+  HEALTH_STATE_HEALTHY = 2;
+  HEALTH_STATE_UNHEALTHY = 3;
+}
+
+message RouteStatus {
+  string route_id = 1;
+  RouteState state = 2;
+  // Short explanation of the state. With ROUTE_STATE_CERTIFICATE_FAILED it
+  // is the ACME error (for example the CA's rate-limit or challenge
+  // message), with ROUTE_STATE_DNS_MISMATCH the addresses the host resolves
+  // to.
+  string message = 3;
+  // Certificate that serves the route's hosts (ACME or custom). Unset
+  // without HTTPS, while pending, or from agents older than these fields.
+  // Issuer is the certificate's issuer common name (for example "R11"),
+  // falling back to its organization.
+  string certificate_issuer = 4;
+  google.protobuf.Timestamp certificate_expires_at = 5;
+}
+
+enum RouteState {
+  ROUTE_STATE_UNSPECIFIED = 0;
+  ROUTE_STATE_ACTIVE = 1;
+  ROUTE_STATE_CERTIFICATE_PENDING = 2;
+  ROUTE_STATE_CERTIFICATE_FAILED = 3;
+  // The host does not resolve to this node.
+  ROUTE_STATE_DNS_MISMATCH = 4;
+}
+
+message OpenPort {
+  uint32 host_port = 1;
+  uint32 container_port = 2;
+  // Set for timed exposes.
+  google.protobuf.Timestamp expires_at = 3;
+  // The agent terminates TLS on this port itself and relays plain TCP to
+  // the container. Set for exposed Mongo and Redis, which speak TLS from
+  // the first byte (clients use tls=true / rediss://). Postgres, MySQL and
+  // MariaDB negotiate TLS inside their protocol, so their exposed ports
+  // relay raw TCP and the database's own TLS applies (false).
+  bool tls = 4;
+  // Certificate the port serves when tls is set: same rules as
+  // RouteStatus.certificate_*.
+  string certificate_issuer = 5;
+  google.protobuf.Timestamp certificate_expires_at = 6;
+}

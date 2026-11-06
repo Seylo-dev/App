@@ -1,0 +1,21 @@
+name: "Appsmith"
+description: "Build internal tools, admin panels and dashboards on your APIs and databases."
+category: "Developer tools"
+tags: ["low-code", "internal-tools"]
+creates: "App"
+links:
+  - label: "Website"
+    url: "https://www.appsmith.com"
+  - label: "Docs"
+    url: "https://docs.appsmith.com"
+body: |
+  Appsmith runs everything it needs in one container and keeps its data in the `stacks` volume. It needs about 2 GB of memory.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "appsmith/appsmith-ce:v1.55"

@@ -1,0 +1,38 @@
+# gitleaks configuration: the default rules, plus the known fake secrets in
+# tests and demo data. gitleaks loads this file from the scanned directory
+# (`gitleaks dir .`, `gitleaks git`). The fake values are matched exactly, so
+# a real secret anywhere, test files included, is still reported. (Exact
+# values rather than .gitleaksignore fingerprints, which carry the scan path
+# and line numbers.)
+#
+# The TEST-ONLY minisign key in test/e2e-colima/keys is encrypted-format
+# minisign text that the default rules do not flag; its README says why no
+# release can trust it.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Build output and dependencies (ignored by git, never committed)"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)(apps|packages)/[^/]+/dist/''',
+]
+
+[[allowlists]]
+description = "Fake secrets in tests and demo data"
+regexes = [
+  # apps/panel/test/fix-build-env-secrets.test.ts, go/internal/troubleshoot/troubleshoot_test.go
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJyb2xlIjoiYW5vbiJ9\.Zx81kLq0Pw2mNv7Bc4Rt9Ys6$''',
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.abcdefghijklmnop$''',
+  # apps/panel/test (env references, mcp), packages/env-analyzer/test/secrets.test.ts, test/playwright/demo/service.ts
+  '''^sk_live_(hunter2|51Hx9Yb2eZvKYlo2C0aBcDeFgH|51HxQ2mAbCdEf)$''',
+  # go/internal/troubleshoot/troubleshoot_test.go
+  '''^AKIAABCDEFGHIJKLMNOP$''',
+  '''^abcdefghijkl1234$''',
+  '''^-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----''',
+  # go/internal/build/git_test.go, go/internal/proxy/routes_test.go
+  '''^-----BEGIN (OPENSSH )?PRIVATE KEY-----\\n(abc|BBB)\\n-----END (OPENSSH )?PRIVATE KEY-----''',
+  # apps/web/src/routes/dev.kit.tsx, test/playwright/demo/{routes,service}.ts
+  '''^(v7Hq2mZ8pLw4sXc1|Zq8vN3pXr7Lm2Kd9|Ht5wQ9bLc2Vn8Rx4|seylo_join_8Kq2fT9xLw4mZp)$''',
+]

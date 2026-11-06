@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+// Tunnels carry raw TCP bytes over the agent connection (raw bidi streams,
+// see StreamMode).
+
+// TunnelRequest asks the agent to connect to a TCP port and relay it.
+message TunnelRequest {
+  oneof target {
+    // A port of a service container, reached on its project network.
+    ServicePortTarget service_port = 1;
+    // The image registry of the Panel project, on the node that runs it.
+    RegistryTarget registry = 2;
+  }
+}
+
+message ServicePortTarget {
+  string service_id = 1;
+  uint32 port = 2;
+}
+
+message RegistryTarget {
+  // Set when the panel relays a node's connection (PanelService.RegistryTunnel):
+  // the panel node's agent then reads the HTTP requests itself and lets through
+  // only what the scope allows (never DELETE or /v2/_catalog). Unset: the panel
+  // itself is the client (its registry GC) and every request passes.
+  RegistryScope scope = 1;
+}
+
+// RegistryScope is what one node may do in the panel registry. Repository
+// names are service ids (images are 127.0.0.1:5755/<service id>).
+message RegistryScope {
+  // The node the connection comes from, for the agent's log.
+  string node_id = 1;
+  // Repositories the node may read (GET/HEAD of manifests, blobs, tags).
+  repeated string pull = 2;
+  // Repositories the node may write (blob uploads, manifest PUT). Push
+  // implies pull.
+  repeated string push = 3;
+}
+
+message TunnelResponse {}
+
+// RegistryTunnelRequest is sent by an agent to the panel when the local
+// Docker daemon connects to 127.0.0.1:5755. The panel relays the stream to
+// the registry (through the panel node's agent with a RegistryTarget
+// tunnel). Docker trusts 127.0.0.1 without TLS, and the registry is never
+// published on the network.
+message RegistryTunnelRequest {}
+
+message RegistryTunnelResponse {}

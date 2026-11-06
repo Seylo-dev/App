@@ -1,0 +1,62 @@
+# Written by the Seylo agent for service svc1. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc1-probe:
+      entryPoints:
+        - web
+      rule: PathPrefix(`/_seylo/probe/svc1/00f2f2730a40e048`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
+      priority: 2000000000
+      middlewares:
+        - seylo-svc1-probe-mark
+        - seylo-svc1-probe-path
+      service: seylo-svc1-local
+    seylo-svc1-r-r1:
+      entryPoints:
+        - websecure
+      rule: (Host(`app.example.com`) || Host(`www.example.com`))
+      middlewares:
+        - seylo-svc1-unreachable
+      service: seylo-svc1
+      tls:
+        certResolver: le
+    seylo-svc1-r-r1-http:
+      entryPoints:
+        - web
+      rule: (Host(`app.example.com`) || Host(`www.example.com`))
+      middlewares:
+        - seylo-svc1-https
+      service: seylo-svc1
+  middlewares:
+    seylo-svc1-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc1-probe-mark:
+      headers:
+        customResponseHeaders:
+          X-Seylo-Route: 00f2f2730a40e048
+    seylo-svc1-probe-path:
+      replacePath:
+        path: /
+    seylo-svc1-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc1-edge
+        query: /_seylo/page/status/svc1
+  services:
+    seylo-svc1:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc1-7:3000
+          - url: http://seylo-svc1-7-1:3000
+    seylo-svc1-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc1-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc1-7:3000
+          - url: http://seylo-svc1-7-1:3000

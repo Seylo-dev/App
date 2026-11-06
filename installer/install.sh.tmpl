@@ -1,0 +1,907 @@
+#!/bin/sh
+# Installer for the panel and node agent. Rendered from
+# installer/install.sh.tmpl with installer/brand.env (scripts/render-installer.sh);
+# edit the template, not the rendered install.sh.
+#
+#   curl -fsSL https://<install host> | sh                                  panel + node on this server
+#   curl -fsSL https://<install host> | sh -s -- join --panel <url> --token <t>   add this server to a panel
+#   curl -fsSL https://<install host> | sh -s -- uninstall [--purge]
+#
+# Re-running it is safe: it updates the binary and the systemd units and
+# keeps the node's data and identity. Run with --help for every flag.
+set -eu
+
+# ---- brand (generated, do not edit here) ----
+@@BRAND_ENV@@
+# ---- end brand ----
+
+# Release this installer belongs to ("latest" when rendered outside a release).
+INSTALLER_VERSION='@@VERSION@@'
+# Test builds only (scripts/render-installer.sh with INSTALLER_TEST_PUBLIC_KEY):
+# the minisign key of test releases. Empty in real releases, which trust
+# BRAND_MINISIGN_PUBLIC_KEY.
+TEST_RELEASE_PUBLIC_KEY='@@TEST_RELEASE_PUBLIC_KEY@@'
+# Docker versions the agent needs and recommends: the node health check's
+# minDockerMajor and recommendedDockerMajor (go/internal/nodecheck).
+MIN_DOCKER_MAJOR=@@MIN_DOCKER_MAJOR@@
+RECOMMENDED_DOCKER_MAJOR=@@RECOMMENDED_DOCKER_MAJOR@@
+
+SLUG=$BRAND_SLUG
+NAME=$BRAND_DISPLAY_NAME
+ENV_PREFIX=$(printf '%s' "$SLUG" | tr '[:lower:]-' '[:upper:]_')
+
+MODE=panel
+PANEL_URL=
+TOKEN=
+PIN=
+NODE_NAME=
+CAN_BUILD=
+VERSION=$INSTALLER_VERSION
+BINARY=
+IMAGE=
+PORT=3000
+# The agents' TLS port on the panel node (empty: 3443, or 3444 when --port is 3443).
+AGENT_TLS_PORT=
+INSECURE=
+INSTALL_DOCKER=
+NO_DOCKER=
+ROOT=
+DRY_RUN=
+PURGE=
+FORCE=
+ALLOW_UNSIGNED=
+DATA_DIR=$BRAND_DATA_DIR
+# Set by fetch_release from the signed release manifest.
+AGENT_SHA256=
+PANEL_REF=
+WORK=
+# Release download base (a mirror of GitHub's /<org>/<repo>/releases layout);
+# --release-url or <PREFIX>_RELEASE_URL override it.
+eval "RELEASE_URL=\${${ENV_PREFIX}_RELEASE_URL:-}"
+
+say() { printf '%s\n' "$*"; }
+step() { printf '\n==> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+die() {
+	printf 'error: %s\n' "$*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<EOF
+$NAME installer
+
+Usage:
+  install.sh [panel] [flags]                     install the panel and a node on this server
+  install.sh join --panel <url> --token <t> [flags]  add this server to an existing panel
+                                                 (the URL may also follow "join" directly)
+  install.sh uninstall [--purge]                 remove the agent (and with --purge every
+                                                 $NAME container, network, volume and $BRAND_DATA_DIR)
+
+Flags:
+  --version <v>        release to install (default: $INSTALLER_VERSION)
+  --release-url <url>  download releases from this mirror of
+                       https://github.com/$BRAND_GITHUB_ORG/$BRAND_GITHUB_REPO/releases
+                       (also ${ENV_PREFIX}_RELEASE_URL)
+  --binary <path>      install this agent binary instead of downloading one
+  --image <ref>        panel image (default: the release's image, pinned by the
+                       digest in its signed manifest)
+  --allow-unsigned     install a release without checking its signature
+                       (development builds without a release key)
+  --port <n>           port for the panel until it has a domain (default: 3000)
+  --agent-tls-port <n> port where other nodes' agents reach the panel over TLS with a
+                       pinned key until it has a domain (default: 3443; 0 turns it off,
+                       and joins then need --insecure)
+  --token <t>          join token (join)
+  --pin <sha256:...>   panel certificate pin (join, panels without a public certificate)
+  --insecure           join a panel at a plain http:// URL on another server: the
+                       agent's traffic (environment values, registry logins, shells)
+                       is then unencrypted
+  --name <name>        node name (default: the hostname)
+  --can-build          allow builds on this node (join; the panel node always can)
+  --force              join again although this node already belongs to a panel;
+                       install the panel although another program holds 80/443
+  --install-docker     install Docker with the official script from get.docker.com if missing
+  --no-docker-install  never install Docker; fail if it is missing
+  --yes                answer yes to questions (implies --install-docker)
+  --data-dir <dir>     data folder (default: $BRAND_DATA_DIR)
+  --root <dir>         write files under <dir> instead of / and run no system commands (testing)
+  --dry-run            print what would be done and change nothing
+  -h, --help           this help
+
+Docs: $BRAND_DOCS_URL
+EOF
+}
+
+need_value() {
+	[ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
+}
+
+parse_args() {
+	if [ $# -gt 0 ]; then
+		case $1 in
+		panel) shift ;;
+		join)
+			MODE=join
+			shift
+			# The panel URL comes as the next word or as --panel <url>.
+			if [ $# -gt 0 ]; then
+				case $1 in
+				-*) ;;
+				*)
+					PANEL_URL=$1
+					shift
+					;;
+				esac
+			fi
+			;;
+		uninstall)
+			MODE=uninstall
+			shift
+			;;
+		esac
+	fi
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--version) need_value "$@"; VERSION=$2; shift ;;
+		--release-url) need_value "$@"; RELEASE_URL=$2; shift ;;
+		--binary) need_value "$@"; BINARY=$2; shift ;;
+		--image) need_value "$@"; IMAGE=$2; shift ;;
+		--port) need_value "$@"; PORT=$2; shift ;;
+		--agent-tls-port) need_value "$@"; AGENT_TLS_PORT=$2; shift ;;
+		--insecure) INSECURE=1 ;;
+		--panel) need_value "$@"; PANEL_URL=$2; shift ;;
+		--token) need_value "$@"; TOKEN=$2; shift ;;
+		--pin) need_value "$@"; PIN=$2; shift ;;
+		--name) need_value "$@"; NODE_NAME=$2; shift ;;
+		--can-build) CAN_BUILD=1 ;;
+		--install-docker) INSTALL_DOCKER=1 ;;
+		--no-docker-install) NO_DOCKER=1 ;;
+		--yes | -y) INSTALL_DOCKER=1 ;;
+		--data-dir) need_value "$@"; DATA_DIR=$2; shift ;;
+		--root) need_value "$@"; ROOT=${2%/}; shift ;;
+		--dry-run) DRY_RUN=1 ;;
+		--purge) PURGE=1 ;;
+		--force) FORCE=1 ;;
+		--allow-unsigned) ALLOW_UNSIGNED=1 ;;
+		-h | --help) usage; exit 0 ;;
+		*) die "unknown argument: $1 (see --help)" ;;
+		esac
+		shift
+	done
+	case $PORT in
+	'' | *[!0-9]*) die "--port must be a number" ;;
+	esac
+	if [ -z "$AGENT_TLS_PORT" ]; then
+		AGENT_TLS_PORT=3443
+		[ "$PORT" != 3443 ] || AGENT_TLS_PORT=3444
+	fi
+	case $AGENT_TLS_PORT in
+	'' | *[!0-9]*) die "--agent-tls-port must be a number" ;;
+	esac
+	[ "$AGENT_TLS_PORT" -le 65535 ] || die "--agent-tls-port must be a port (1-65535, or 0 for off)"
+	[ "$AGENT_TLS_PORT" != "$PORT" ] || die "--agent-tls-port must differ from --port"
+	[ "$AGENT_TLS_PORT" != 3000 ] || die "--agent-tls-port 3000 is the panel's own port inside its container; choose another"
+	if [ "$MODE" = join ] && [ -z "$INSECURE" ] && plain_remote "$PANEL_URL"; then
+		die "$PANEL_URL is plain HTTP to another server: the agent's traffic (environment values, registry logins, shells) would be unencrypted. Copy the join command from the panel's Add node dialog (https:// with --pin), set a panel domain, or add --insecure to join over plain HTTP anyway"
+	fi
+	if [ "$MODE" = join ] && [ -z "$PANEL_URL" ]; then
+		die "join needs the panel URL: install.sh join --panel <panel-url> --token <token>"
+	fi
+	if [ "$MODE" = join ] && [ -z "$TOKEN" ]; then
+		die "join needs --token (copy the command from the panel's Add node dialog)"
+	fi
+	VERSION=${VERSION#v}
+	RELEASE_URL=${RELEASE_URL%/}
+	case $RELEASE_URL in
+	'' | https://* | http://*) ;;
+	*) die "--release-url must be an http(s) URL" ;;
+	esac
+}
+
+# plain_remote <url>: the URL is plain http:// (or ws://) to a host other than
+# this machine. The panel node's own agent joins over loopback, which is fine.
+plain_remote() {
+	case $1 in
+	http://* | ws://*) ;;
+	*) return 1 ;;
+	esac
+	h=${1#*://}
+	h=${h%%/*}
+	case $h in
+	\[*\]*) h=${h#\[}; h=${h%%\]*} ;;
+	*:*) h=${h%:*} ;;
+	esac
+	case $h in
+	localhost | *.localhost | 127.* | ::1) return 1 ;;
+	esac
+	return 0
+}
+
+# run executes a command that changes the system. --dry-run prints it;
+# --root prints it too, because only files under the root may change.
+run() {
+	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ]; then
+		say "+ $*"
+		return 0
+	fi
+	"$@"
+}
+
+# can_write: files may change (with --root they land under it).
+can_write() { [ -z "$DRY_RUN" ]; }
+
+download() { # url dest
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL --retry 3 -o "$2" "$1"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q -O "$2" "$1"
+	else
+		die "curl or wget is required"
+	fi
+}
+
+detect_platform() {
+	os=$(uname -s)
+	# --root and --dry-run change nothing on this machine, so tests may run them anywhere.
+	[ "$os" = Linux ] || [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || die "$NAME runs on Linux; this is $os"
+	case $(uname -m) in
+	x86_64 | amd64) ARCH=amd64 ;;
+	aarch64 | arm64) ARCH=arm64 ;;
+	*) die "unsupported CPU architecture $(uname -m); $NAME needs x86-64 or ARM64" ;;
+	esac
+	OS_NAME=unknown
+	if [ -r /etc/os-release ]; then
+		# shellcheck disable=SC1091
+		OS_NAME=$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-$ID}")
+	fi
+}
+
+preflight() {
+	step "Checking this server"
+	detect_platform
+	say "$OS_NAME, $ARCH"
+	if [ -z "$ROOT" ] && [ -z "$DRY_RUN" ]; then
+		[ "$(id -u)" = 0 ] || die "run the installer as root (for example: curl -fsSL ... | sudo sh)"
+		[ -d /run/systemd/system ] || die "systemd is required to run the agent"
+	fi
+	BIN_DIR=$ROOT/usr/local/bin
+	BIN=$BIN_DIR/$SLUG
+	UNIT_DIR=$ROOT/etc/systemd/system
+	DATA=$ROOT$DATA_DIR
+}
+
+docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+
+snap_docker() {
+	die "Docker from snap is not supported: its confinement refuses the bind mounts under $BRAND_DATA_DIR and it has no docker.service unit. Remove it (snap remove docker) and install Docker from https://docs.docker.com/engine/install/, or run this installer again with --install-docker after removing it"
+}
+
+# check_docker refuses a Docker the agent cannot run on: the snap package,
+# one without a docker.service unit (the agent's unit requires it), and
+# versions below the minimum the node health check enforces
+# (go/internal/nodecheck, pasted in by scripts/render-installer.sh).
+check_docker() {
+	case $(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true) in
+	/var/snap/*) snap_docker ;;
+	esac
+	if command -v systemctl >/dev/null 2>&1 && ! systemctl cat docker.service >/dev/null 2>&1; then
+		die "Docker runs without a docker.service systemd unit, which the $SLUG service needs. Install Docker from https://docs.docker.com/engine/install/"
+	fi
+	docker_version=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
+	major=${docker_version%%.*}
+	case $major in
+	'' | *[!0-9]*)
+		warn "could not read the Docker version (\"$docker_version\"); $NAME needs Docker $MIN_DOCKER_MAJOR or newer"
+		;;
+	*)
+		[ "$major" -ge "$MIN_DOCKER_MAJOR" ] ||
+			die "Docker $docker_version is too old: $NAME needs Docker $MIN_DOCKER_MAJOR or newer ($RECOMMENDED_DOCKER_MAJOR recommended). Distribution packages such as Debian's docker.io lag behind; install Docker from https://docs.docker.com/engine/install/"
+		[ "$major" -ge "$RECOMMENDED_DOCKER_MAJOR" ] ||
+			warn "Docker $docker_version works, but $RECOMMENDED_DOCKER_MAJOR or newer is recommended"
+		;;
+	esac
+	say "Docker $docker_version is running"
+}
+
+wings_node() {
+	for f in etc/pelican/config.yml etc/pterodactyl/config.yml etc/systemd/system/wings.service \
+		lib/systemd/system/wings.service usr/lib/systemd/system/wings.service; do
+		[ ! -e "$ROOT/$f" ] || return 0
+	done
+	return 1
+}
+
+# merge_live_restore <daemon.json> <out>: the file with "live-restore": true.
+merge_live_restore() {
+	if command -v jq >/dev/null 2>&1; then
+		jq '. + {"live-restore": true}' "$1" >"$2" 2>/dev/null
+	elif command -v python3 >/dev/null 2>&1; then
+		python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+if not isinstance(d, dict):
+    sys.exit(1)
+d["live-restore"] = True
+print(json.dumps(d, indent=2))' "$1" >"$2" 2>/dev/null
+	else
+		return 1
+	fi
+}
+
+# ensure_live_restore turns on Docker's live-restore, so restarting dockerd
+# (Update Docker from the panel, unattended-upgrades) leaves containers
+# running. The agent starts every container with Docker's restart policy
+# off (it owns the crash policy), so without it each dockerd restart stops
+# every service and the panel until the agent notices. Applied with a
+# reload, which restarts nothing. An explicit "live-restore": false, swarm
+# mode and Wings nodes (whose game servers Wings manages) are left alone.
+ensure_live_restore() {
+	[ "$(docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null || true)" != true ] || return 0
+	manual="add \"live-restore\": true to /etc/docker/daemon.json and run systemctl reload docker, so services keep running while Docker restarts"
+	if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)" = active ]; then
+		warn "Docker is in swarm mode, which does not allow live-restore: services stop while Docker restarts"
+		return 0
+	fi
+	if wings_node; then
+		warn "Wings runs on this server, so its Docker settings are left alone. Consider live-restore: $manual"
+		return 0
+	fi
+	conf=$ROOT/etc/docker/daemon.json
+	work_dir
+	new=$WORK/daemon.json
+	if [ -s "$conf" ]; then
+		if grep -q '"live-restore"[[:space:]]*:[[:space:]]*false' "$conf"; then
+			warn "$conf sets \"live-restore\": false, left as is: services stop while Docker restarts"
+			return 0
+		fi
+		if grep -q '"live-restore"[[:space:]]*:[[:space:]]*true' "$conf"; then
+			cp "$conf" "$new"
+		elif ! merge_live_restore "$conf" "$new"; then
+			warn "could not update $conf (no jq or python3, or not a JSON object); $manual"
+			return 0
+		fi
+	else
+		printf '{\n  "live-restore": true\n}\n' >"$new"
+	fi
+	if command -v dockerd >/dev/null 2>&1 && ! dockerd --validate --config-file "$new" >/dev/null 2>&1; then
+		warn "Docker refuses $conf with live-restore added, so it was not changed; $manual"
+		return 0
+	fi
+	say "Turning on Docker live-restore: containers keep running while Docker restarts"
+	if can_write; then
+		mkdir -p "${conf%/*}"
+		if [ -f "$conf" ] && [ ! -e "$conf.before-$SLUG" ]; then cp -p "$conf" "$conf.before-$SLUG"; fi
+		# cat keeps the owner and mode of an existing file.
+		cat "$new" >"$conf"
+	else
+		say "+ write $conf with \"live-restore\": true"
+	fi
+	run systemctl reload docker || {
+		warn "systemctl reload docker failed; live-restore applies at Docker's next restart"
+		return 0
+	}
+	[ -z "$DRY_RUN" ] && [ -z "$ROOT" ] || return 0
+	for _ in 1 2 3 4 5; do
+		[ "$(docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null || true)" != true ] || return 0
+		sleep 1
+	done
+	warn "Docker did not report live-restore after the reload; check journalctl -u docker"
+}
+
+ensure_docker() {
+	step "Docker"
+	case $(command -v docker 2>/dev/null || true) in
+	/snap/*) snap_docker ;;
+	esac
+	if docker_ok; then
+		check_docker
+		ensure_live_restore
+		return
+	fi
+	if command -v docker >/dev/null 2>&1 && [ -z "$ROOT" ] && [ -z "$DRY_RUN" ]; then
+		run systemctl start docker || true
+		if docker_ok; then
+			check_docker
+			ensure_live_restore
+			return
+		fi
+	fi
+	[ -z "$NO_DOCKER" ] || die "Docker is not installed or not running (--no-docker-install was given)"
+	if [ -z "$INSTALL_DOCKER" ]; then
+		if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+			printf 'Docker is missing. Install it with the official script from get.docker.com? [y/N] ' >/dev/tty
+			read -r answer </dev/tty || answer=
+			case $answer in [yY]*) INSTALL_DOCKER=1 ;; esac
+		fi
+	fi
+	[ -n "$INSTALL_DOCKER" ] || [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] ||
+		die "Docker is missing. Install it (https://docs.docker.com/engine/install/) or re-run with --install-docker"
+	say "Installing Docker with get.docker.com"
+	tmp=$(mktemp)
+	if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ]; then
+		download https://get.docker.com "$tmp"
+	fi
+	run sh "$tmp"
+	rm -f "$tmp"
+	run systemctl enable --now docker
+	[ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || check_docker
+	ensure_live_restore
+}
+
+release_url() { # file
+	base=${RELEASE_URL:-https://github.com/$BRAND_GITHUB_ORG/$BRAND_GITHUB_REPO/releases}
+	if [ "$VERSION" = latest ]; then
+		printf '%s/latest/download/%s' "$base" "$1"
+	else
+		printf '%s/download/v%s/%s' "$base" "$VERSION" "$1"
+	fi
+}
+
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		shasum -a 256 "$1" | cut -d' ' -f1
+	fi
+}
+
+# work_dir makes $WORK, a temporary folder removed on exit. Call it directly,
+# not in $(...), so WORK stays set.
+work_dir() {
+	if [ -z "$WORK" ]; then
+		WORK=$(mktemp -d)
+		trap 'rm -rf "$WORK"' EXIT
+	fi
+}
+
+# release_key prints the minisign public key this installer trusts, or
+# nothing when the build has none (the brand placeholder).
+release_key() {
+	if [ -n "$TEST_RELEASE_PUBLIC_KEY" ]; then
+		printf '%s' "$TEST_RELEASE_PUBLIC_KEY"
+		return
+	fi
+	case $BRAND_MINISIGN_PUBLIC_KEY in
+	"$BRAND_PLACEHOLDER_PREFIX"*) ;;
+	*) printf '%s' "$BRAND_MINISIGN_PUBLIC_KEY" ;;
+	esac
+}
+
+b64d() { base64 -d 2>/dev/null; }
+# bytes <file> <offset> <count> prints a byte range of a file.
+bytes() { dd if="$1" bs=1 skip="$2" count="$3" 2>/dev/null; }
+hex_of() { od -An -v -tx1 | tr -d ' \n'; }
+size_of() { wc -c <"$1" | tr -d ' '; }
+
+# openssl_ed25519: this openssl can check minisign signatures (Ed25519 over
+# raw input and BLAKE2b-512 need OpenSSL 3; 1.1.1 has no -rawin).
+openssl_ed25519() {
+	command -v openssl >/dev/null 2>&1 &&
+		openssl pkeyutl -help 2>&1 | grep -q -- -rawin &&
+		openssl dgst -blake2b512 </dev/null >/dev/null 2>&1
+}
+
+# minisig_openssl <file> <file.minisig> <public key> checks a minisign
+# signature with openssl. Key: base64("Ed" + key id(8) + Ed25519 key(32)).
+# Signature file: an untrusted comment, base64(algorithm(2) + key id(8) +
+# signature(64)), "trusted comment: <text>", and base64 of the global
+# signature over signature + text. Algorithm "ED" signs BLAKE2b-512 of the
+# file, the legacy "Ed" the file itself.
+minisig_openssl() {
+	d=$WORK/minisig
+	rm -rf "$d"
+	mkdir -p "$d"
+	printf '%s' "$3" | b64d >"$d/key" || return 1
+	sed -n 2p "$2" | b64d >"$d/sig" || return 1
+	sed -n 4p "$2" | b64d >"$d/global" || return 1
+	[ "$(size_of "$d/key")" = 42 ] && [ "$(bytes "$d/key" 0 2)" = Ed ] || return 1
+	[ "$(size_of "$d/sig")" = 74 ] && [ "$(size_of "$d/global")" = 64 ] || return 1
+	[ "$(bytes "$d/key" 2 8 | hex_of)" = "$(bytes "$d/sig" 2 8 | hex_of)" ] || return 1
+	# DER SubjectPublicKeyInfo for a raw Ed25519 key: a fixed 12-byte header.
+	{
+		printf '\060\052\060\005\006\003\053\145\160\003\041\000'
+		bytes "$d/key" 10 32
+	} >"$d/key.der"
+	bytes "$d/sig" 10 64 >"$d/signature"
+	case $(bytes "$d/sig" 0 2) in
+	ED) openssl dgst -blake2b512 -binary "$1" >"$d/signed" || return 1 ;;
+	Ed) cp "$1" "$d/signed" ;;
+	*) return 1 ;;
+	esac
+	comment=$(sed -n 3p "$2")
+	case $comment in
+	"trusted comment: "*) comment=${comment#trusted comment: } ;;
+	*) return 1 ;;
+	esac
+	{
+		cat "$d/signature"
+		printf '%s' "$comment"
+	} >"$d/global-signed"
+	openssl pkeyutl -verify -pubin -keyform DER -inkey "$d/key.der" -rawin \
+		-in "$d/signed" -sigfile "$d/signature" >/dev/null 2>&1 &&
+		openssl pkeyutl -verify -pubin -keyform DER -inkey "$d/key.der" -rawin \
+			-in "$d/global-signed" -sigfile "$d/global" >/dev/null 2>&1
+}
+
+# verify_signature <file> <file.minisig> checks a minisign signature with
+# the release key: minisign when installed, otherwise openssl 3. It never
+# skips: without a way to check, the install stops.
+verify_signature() {
+	key=$(release_key)
+	if command -v minisign >/dev/null 2>&1; then
+		minisign -Vqm "$1" -x "$2" -P "$key" >/dev/null 2>&1
+		return
+	fi
+	openssl_ed25519 ||
+		die "cannot check the release signature: install OpenSSL 3 or minisign (for example apt-get install openssl, or dnf install openssl) and run the installer again"
+	minisig_openssl "$1" "$2" "$key"
+}
+
+# Readers for manifest.json as releasetool writes it (Go's json.MarshalIndent
+# with a two-space indent; installer/test checks the layout). They only run
+# after the signature check, so the content is trusted and only its layout
+# matters.
+manifest_top() { # key file: a top-level string
+	sed -n "s/^  \"$1\": \"\([^\"]*\)\",\{0,1\}\$/\1/p" "$2" | head -1
+}
+manifest_obj() { # object key file: a field of a top-level object
+	awk -v obj="  \"$1\": {" -v key="    \"$2\": " '
+		$0 == obj { in_obj = 1; next }
+		in_obj && /^  [}]/ { exit }
+		in_obj && index($0, key) == 1 { v = substr($0, length(key) + 1); sub(/,$/, "", v); gsub(/"/, "", v); print v; exit }
+	' "$3"
+}
+manifest_agent() { # platform key file: a field of agents["<platform>"]
+	awk -v plat="    \"$1\": {" -v key="      \"$2\": " '
+		$0 == "  \"agents\": {" { in_agents = 1; next }
+		in_agents && /^  [}]/ { exit }
+		in_agents && $0 == plat { in_plat = 1; next }
+		in_plat && /^    [}]/ { exit }
+		in_plat && index($0, key) == 1 { v = substr($0, length(key) + 1); sub(/,$/, "", v); gsub(/"/, "", v); print v; exit }
+	' "$3"
+}
+
+is_sha256_hex() {
+	[ ${#1} -eq 64 ] || return 1
+	case $1 in *[!0-9a-f]*) return 1 ;; esac
+}
+
+# fetch_release downloads the release manifest (manifest.json, the file
+# panels and agents update from) and checks its minisign signature with the
+# release key. Everything else is checked against it: the binary must match
+# its sha256 and the panel image is pulled by its digest, so a replaced
+# binary, checksum file or image tag is refused. Sets VERSION (for
+# "latest"), AGENT_SHA256 and PANEL_REF.
+fetch_release() {
+	need_binary=
+	need_image=
+	[ -n "$BINARY" ] || need_binary=1
+	if [ "$MODE" = panel ] && [ -z "$IMAGE" ] && ! joined; then need_image=1; fi
+	[ -n "$need_binary$need_image" ] || return 0
+	step "Checking the release"
+	if [ -n "$DRY_RUN" ]; then
+		say "+ download $(release_url manifest.json) and check its signature"
+		return
+	fi
+	if [ -z "$(release_key)" ] && [ -z "$ALLOW_UNSIGNED" ]; then
+		die "this installer has no release signing key, so it cannot check what it downloads; give --binary and --image, or re-run with --allow-unsigned"
+	fi
+	work_dir
+	manifest=$WORK/manifest.json
+	download "$(release_url manifest.json)" "$manifest" || die "could not download $(release_url manifest.json)"
+	if [ -n "$ALLOW_UNSIGNED" ]; then
+		warn "--allow-unsigned: the release signature is NOT checked"
+	else
+		download "$(release_url manifest.json.minisig)" "$manifest.minisig" ||
+			die "could not download the release signature $(release_url manifest.json.minisig)"
+		verify_signature "$manifest" "$manifest.minisig" ||
+			die "the release manifest is not signed by the $NAME release key; refusing to install it"
+		say "Release signature verified"
+	fi
+	v=$(manifest_top version "$manifest")
+	case $v in
+	[0-9]*.[0-9]*.[0-9]*) ;;
+	*) die "the release manifest names no version" ;;
+	esac
+	if [ "$VERSION" = latest ]; then
+		VERSION=$v
+	elif [ "$v" != "$VERSION" ]; then
+		die "asked for $VERSION but the release manifest is for $v"
+	fi
+	say "$NAME $VERSION"
+	if [ -n "$need_binary" ]; then
+		AGENT_SHA256=$(manifest_agent "linux-$ARCH" sha256 "$manifest")
+		is_sha256_hex "$AGENT_SHA256" || die "release $VERSION has no $SLUG binary for linux/$ARCH"
+	fi
+	if [ -n "$need_image" ]; then
+		image=$(manifest_obj panel image "$manifest")
+		digest=$(manifest_obj panel digest "$manifest")
+		[ -n "$image" ] && is_sha256_hex "${digest#sha256:}" && [ "${digest%%:*}" = sha256 ] ||
+			die "release $VERSION does not pin its panel image by digest"
+		PANEL_REF=${image%%@*}@$digest
+	fi
+}
+
+install_binary() {
+	step "Installing the $SLUG binary"
+	work_dir
+	asset=${SLUG}_linux_${ARCH}
+	if [ -n "$BINARY" ]; then
+		[ -f "$BINARY" ] || die "--binary $BINARY does not exist"
+		cp "$BINARY" "$WORK/$asset"
+	elif [ -n "$DRY_RUN" ]; then
+		say "+ download $(release_url "$asset") and check it against the signed release manifest"
+		return
+	else
+		download "$(release_url "$asset")" "$WORK/$asset" || die "could not download $(release_url "$asset")"
+		[ "$(sha256_of "$WORK/$asset")" = "$AGENT_SHA256" ] ||
+			die "$asset does not match the sha256 in the signed release manifest; try again"
+	fi
+	chmod 0755 "$WORK/$asset"
+	if [ -z "$ROOT" ] || [ "$ARCH" = "$(go_arch_of_host)" ]; then
+		"$WORK/$asset" version >/dev/null 2>&1 || die "the downloaded binary does not run on this machine"
+	fi
+	if can_write; then
+		mkdir -p "$BIN_DIR"
+		cp "$WORK/$asset" "$BIN.new"
+		mv -f "$BIN.new" "$BIN"
+	fi
+	say "$("$BIN" version 2>/dev/null || echo "$SLUG (dry run)") -> /usr/local/bin/$SLUG"
+}
+
+go_arch_of_host() {
+	case $(uname -m) in
+	x86_64 | amd64) echo amd64 ;;
+	aarch64 | arm64) echo arm64 ;;
+	*) echo unknown ;;
+	esac
+}
+
+# seylo runs the installed binary (or the given one in a dry run).
+seylo() {
+	if [ -x "$BIN" ]; then
+		"$BIN" --data-dir "$DATA" "$@"
+	elif [ -n "$BINARY" ]; then
+		"$BINARY" --data-dir "$DATA" "$@"
+	else
+		say "+ $SLUG $*"
+	fi
+}
+
+install_units() {
+	step "Writing the systemd units"
+	if can_write; then
+		mkdir -p "$DATA"
+		chmod 0711 "$DATA"
+		if [ -n "$ROOT" ]; then
+			seylo install-units --dir "$UNIT_DIR" --binary "/usr/local/bin/$SLUG" --agent-data-dir "$DATA_DIR" --no-reload
+		else
+			seylo install-units --dir "$UNIT_DIR" --binary "/usr/local/bin/$SLUG" --agent-data-dir "$DATA_DIR"
+		fi
+	else
+		say "+ $SLUG install-units --dir $UNIT_DIR"
+	fi
+	run systemctl enable "$SLUG.service"
+}
+
+joined() { [ -f "$DATA/config.yml" ] && grep -q '^node_id:' "$DATA/config.yml"; }
+
+# port_holder <port> prints the program listening on a TCP port, nothing
+# when it is free (or ss is missing).
+port_holder() {
+	command -v ss >/dev/null 2>&1 || return 0
+	line=$(ss -Hltnp "sport = :$1" 2>/dev/null | head -1)
+	[ -n "$line" ] || return 0
+	name=$(printf '%s' "$line" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p')
+	printf '%s' "${name:-another program}"
+}
+
+# ours <port>: one of our containers publishes the port (Traefik or the panel
+# left running by an earlier install).
+ours() {
+	command -v docker >/dev/null 2>&1 &&
+		[ -n "$(docker ps -q --filter "label=$SLUG.managed=true" --filter "publish=$1" 2>/dev/null)" ]
+}
+
+# check_ports stops a new panel install when another program holds 80 or
+# 443 (Traefik could never bind them, so no domain would ever work) or the
+# panel's port, before anything is changed. Our own containers, Wings'
+# Traefik (which the agent shares) and --force pass; joins only warn.
+check_ports() {
+	joined && return 0
+	for p in 80 443; do
+		holder=$(port_holder "$p")
+		[ -n "$holder" ] || continue
+		if [ "$holder" = docker-proxy ] && ours "$p"; then continue; fi
+		if wings_node; then
+			say "Port $p is held by $holder; on a Wings server $NAME shares Wings' Traefik"
+			continue
+		fi
+		msg="port $p is used by $holder, but $NAME's Traefik needs 80 and 443 for domains. Stop and disable it (for example systemctl disable --now $holder)"
+		[ "$MODE" != panel ] || [ -n "$FORCE" ] || die "$msg, or re-run with --force to install anyway"
+		warn "$msg; domains do not work until both are free"
+	done
+	[ "$MODE" = panel ] || return 0
+	holder=$(port_holder "$PORT")
+	[ -z "$holder" ] || { [ "$holder" = docker-proxy ] && ours "$PORT"; } ||
+		die "port $PORT (the panel's address until it has a domain) is used by $holder; free it or choose another with --port"
+	[ "$AGENT_TLS_PORT" != 0 ] || return 0
+	holder=$(port_holder "$AGENT_TLS_PORT")
+	[ -z "$holder" ] || { [ "$holder" = docker-proxy ] && ours "$AGENT_TLS_PORT"; } ||
+		die "port $AGENT_TLS_PORT (where other nodes' agents reach the panel over TLS) is used by $holder; free it or choose another with --agent-tls-port"
+}
+
+# panel_ip prints the panel URL's host when it is an IP address (IPv6
+# without brackets), nothing for a domain name.
+panel_ip() {
+	h=${PANEL_URL#*://}
+	h=${h%%/*}
+	case $h in
+	\[*\]*) h=${h#\[}; h=${h%%\]*} ;;
+	*:*) h=${h%:*} ;;
+	esac
+	case $h in
+	'' | *[!0-9a-fA-F.:]*) return 0 ;;
+	*.*.*.* | *:*) printf '%s\n' "$h" ;;
+	esac
+}
+
+# open_firewall adds the rules a node needs when ufw or firewalld is
+# active: 80 and 443 for domains, the agent's edge listener (5756) for
+# Traefik on the seylo-edge bridge, and the panel's port and the agents'
+# TLS port on the panel node.
+# Port 5757 (load balancing between nodes, mutual TLS once the panel
+# issues LB certificates) should be open between nodes only: a joining
+# node allows it from the panel's address when that is an IP, the other
+# nodes are left to the owner. The IP:port addresses the panel hands out
+# (first-run access, timed expose, exposed databases) are served by the
+# agent itself, so the firewall applies to them as well.
+open_firewall() {
+	ip=
+	[ "$MODE" != join ] || ip=$(panel_ip)
+	if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+		step "Opening ports in ufw"
+		run ufw allow 80/tcp comment "$SLUG http"
+		run ufw allow 443/tcp comment "$SLUG https"
+		run ufw allow in on "$SLUG-edge" to any port 5756 proto tcp comment "$SLUG edge"
+		[ "$MODE" != panel ] || run ufw allow "$PORT/tcp" comment "$SLUG panel"
+		[ "$MODE" != panel ] || [ "$AGENT_TLS_PORT" = 0 ] || run ufw allow "$AGENT_TLS_PORT/tcp" comment "$SLUG agents"
+		[ -z "$ip" ] || run ufw allow from "$ip" to any port 5757 proto tcp comment "$SLUG load balancing"
+		say "Load balancing between nodes uses port 5757: allow it from your other nodes only."
+		say "The IP:port addresses the panel shows (new services, timed expose, exposed databases) are served by the agent, so ufw applies: open each with ufw allow <port>/tcp (the panel shows the command)."
+	elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
+		step "Opening ports in firewalld"
+		run firewall-cmd --permanent --add-service=http --add-service=https
+		[ "$MODE" != panel ] || run firewall-cmd --permanent --add-port="$PORT/tcp"
+		[ "$MODE" != panel ] || [ "$AGENT_TLS_PORT" = 0 ] || run firewall-cmd --permanent --add-port="$AGENT_TLS_PORT/tcp"
+		case $ip in
+		'') ;;
+		*:*) run firewall-cmd --permanent --add-rich-rule="rule family=ipv6 source address=$ip port port=5757 protocol=tcp accept" ;;
+		*) run firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$ip port port=5757 protocol=tcp accept" ;;
+		esac
+		run firewall-cmd --reload
+		say "Load balancing between nodes uses port 5757: allow it from your other nodes only."
+		say "The IP:port addresses the panel shows (new services, timed expose, exposed databases) are served by the agent, so firewalld applies: open each with firewall-cmd --permanent --add-port=<port>/tcp (the panel shows the command)."
+	fi
+}
+
+install_panel() {
+	if joined; then
+		step "Already installed"
+		run systemctl restart "$SLUG.service"
+		say "The agent was updated and restarted. The panel keeps its data."
+		say "Status: $SLUG status    Panel: $SLUG panel status"
+		return
+	fi
+	# The release's image pinned by the digest in its signed manifest
+	# (fetch_release), so a re-pushed tag never reaches a new install.
+	image=${IMAGE:-$PANEL_REF}
+	if [ -z "$image" ]; then
+		[ -n "$DRY_RUN" ] || die "no panel image: the release manifest was not read"
+		image="$BRAND_IMAGE:$VERSION@<digest from the release manifest>"
+	fi
+	step "Starting the panel"
+	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || ! docker image inspect "$image" >/dev/null 2>&1; then
+		run docker pull "$image"
+	fi
+	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ]; then
+		say "+ $SLUG panel bootstrap --image $image --port $PORT --agent-tls-port $AGENT_TLS_PORT"
+	else
+		seylo panel bootstrap --image "$image" --port "$PORT" --agent-tls-port "$AGENT_TLS_PORT"
+	fi
+	run systemctl restart "$SLUG.service"
+}
+
+install_join() {
+	if joined && [ -z "$FORCE" ]; then
+		current=$(sed -n 's/^panel_url: *//p' "$DATA/config.yml" | head -1)
+		if [ "$current" != "$PANEL_URL" ]; then
+			die "this node already belongs to the panel at $current; re-run with --force to move it to $PANEL_URL"
+		fi
+		step "Already joined to $PANEL_URL"
+		run systemctl restart "$SLUG.service"
+		say "The agent was updated and restarted; the join token was not needed."
+		return
+	fi
+	step "Joining $PANEL_URL"
+	set -- join "$PANEL_URL" --token "$TOKEN" --no-start
+	[ -z "$PIN" ] || set -- "$@" --pin "$PIN"
+	[ -z "$NODE_NAME" ] || set -- "$@" --name "$NODE_NAME"
+	[ -z "$CAN_BUILD" ] || set -- "$@" --can-build
+	[ -z "$FORCE" ] || set -- "$@" --force
+	[ -z "$INSECURE" ] || set -- "$@" --insecure
+	if can_write; then
+		seylo "$@"
+	else
+		say "+ $SLUG join $PANEL_URL --token <token> --no-start"
+	fi
+	run systemctl restart "$SLUG.service"
+	say "The agent is starting and joins the panel; the node shows up there in a few seconds."
+	say "Check it here with: $SLUG status"
+}
+
+uninstall() {
+	preflight
+	step "Removing the agent"
+	run systemctl disable --now "$SLUG.service" || true
+	run systemctl stop "$SLUG-update-guard.timer" || true
+	if can_write; then
+		rm -f "$UNIT_DIR/$SLUG.service" "$UNIT_DIR/$SLUG.slice"
+	else
+		say "+ rm $UNIT_DIR/$SLUG.service $UNIT_DIR/$SLUG.slice"
+	fi
+	run systemctl daemon-reload
+	if [ -n "$PURGE" ]; then
+		step "Removing every $NAME container, network and volume, and $DATA_DIR"
+		if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ] && command -v docker >/dev/null 2>&1; then
+			ids=$(docker ps -aq --filter "label=$SLUG.managed=true")
+			[ -z "$ids" ] || docker rm -f $ids >/dev/null
+			ids=$(docker network ls -q --filter "label=$SLUG.managed=true")
+			[ -z "$ids" ] || docker network rm $ids >/dev/null
+			ids=$(docker volume ls -q --filter "label=$SLUG.managed=true")
+			[ -z "$ids" ] || docker volume rm $ids >/dev/null
+			# The slice stays loaded until stopped, even with its unit file gone.
+			systemctl stop "$SLUG.slice" 2>/dev/null || true
+		else
+			say "+ docker rm/network rm/volume rm everything labeled $SLUG.managed=true"
+		fi
+		if can_write; then rm -rf "$DATA"; else say "+ rm -rf $DATA"; fi
+		# Drop-ins for our units (for example an environment override) go too.
+		if can_write; then
+			rm -rf "$UNIT_DIR/$SLUG.service.d" "$UNIT_DIR/$SLUG.slice.d"
+		else
+			say "+ rm -rf $UNIT_DIR/$SLUG.service.d $UNIT_DIR/$SLUG.slice.d"
+		fi
+		run systemctl daemon-reload
+	else
+		say "Your services keep running until they stop or the server reboots, and $DATA_DIR is kept."
+		say "Run again with --purge to remove them and every file."
+	fi
+	if can_write; then rm -f "$BIN"; else say "+ rm $BIN"; fi
+	say "Done."
+}
+
+main() {
+	parse_args "$@"
+	if [ "$MODE" = uninstall ]; then
+		uninstall
+		return
+	fi
+	[ -z "$TEST_RELEASE_PUBLIC_KEY" ] || warn "TEST BUILD: this installer trusts a test release key, not the $NAME release key"
+	preflight
+	# Checks first, so a refused port or release changes nothing on the server.
+	check_ports
+	fetch_release
+	ensure_docker
+	install_binary
+	install_units
+	open_firewall
+	case $MODE in
+	panel) install_panel ;;
+	join) install_join ;;
+	esac
+	step "Done"
+	say "Docs: $BRAND_DOCS_URL"
+}
+
+main "$@"

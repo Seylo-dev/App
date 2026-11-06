@@ -1,0 +1,153 @@
+/*
+ * Maps the design tokens (theme.css) to Tailwind utilities, so components
+ * write `bg-card shadow-card rounded-card` and never a literal color. An
+ * app imports this after `@import "tailwindcss"`.
+ */
+
+@import "./theme.css";
+
+@custom-variant dark (&:is([data-theme="seylo-night"] *, [data-theme="midnight"] *));
+
+@theme inline {
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-ink-strong: var(--ink-strong);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-ink-faint: var(--ink-faint);
+  --color-ink-ghost: var(--ink-ghost);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
+  --color-muted: var(--muted);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-field: var(--field);
+  --color-track: var(--track);
+  --color-raised: var(--raised);
+  --color-border: var(--border);
+  --color-divider: var(--divider);
+  --color-grid-line: var(--grid-line);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-terminal: var(--terminal);
+  --color-terminal-bar: var(--terminal-bar);
+  --color-terminal-foreground: var(--terminal-foreground);
+  --color-terminal-muted: var(--terminal-muted);
+  --color-terminal-prompt: var(--terminal-prompt);
+  --color-terminal-field: var(--terminal-field);
+  --color-terminal-match: var(--terminal-match);
+  --color-terminal-match-current: var(--terminal-match-current);
+  --color-ansi-red: var(--ansi-1);
+  --color-ansi-yellow: var(--ansi-3);
+  --color-ansi-green: var(--ansi-2);
+
+  --color-chip-blue-bg: var(--chip-blue-bg);
+  --color-chip-blue-fg: var(--chip-blue-fg);
+  --color-chip-sky-bg: var(--chip-sky-bg);
+  --color-chip-sky-fg: var(--chip-sky-fg);
+  --color-chip-red-bg: var(--chip-red-bg);
+  --color-chip-red-fg: var(--chip-red-fg);
+  --color-chip-violet-bg: var(--chip-violet-bg);
+  --color-chip-violet-fg: var(--chip-violet-fg);
+  --color-chip-gray-bg: var(--chip-gray-bg);
+  --color-chip-gray-fg: var(--chip-gray-fg);
+  --color-chip-green-bg: var(--chip-green-bg);
+  --color-chip-green-fg: var(--chip-green-fg);
+  --color-chip-amber-bg: var(--chip-amber-bg);
+  --color-chip-amber-fg: var(--chip-amber-fg);
+
+  --color-status-ok: var(--status-ok);
+  --color-status-busy: var(--status-busy);
+  --color-status-error: var(--status-error);
+  --color-status-off: var(--status-off);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-card: var(--radius);
+  --radius-control: var(--radius-control);
+  --radius-chip: var(--radius-chip);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-control: var(--shadow-control);
+  --shadow-primary: var(--shadow-primary);
+  --shadow-segment: var(--shadow-segment);
+  --shadow-popover: var(--shadow-popover);
+  --shadow-sidebar: var(--sidebar-shadow);
+}
+
+/* Chart lines draw in once (a growing clip), fills fade in after. */
+@theme {
+  --animate-chart-reveal: chart-reveal 1.6s ease-out both;
+  --animate-chart-fade: chart-fade 1.2s 0.4s ease-out both;
+
+  @keyframes chart-reveal {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes chart-fade {
+    from {
+      fill-opacity: 0;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chart-reveal,
+  .animate-chart-fade {
+    animation: none;
+  }
+}
+
+@layer base {
+  html {
+    background: var(--ground-wash), var(--background);
+    background-attachment: fixed;
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 14px body text; the root stays 16px so rem-based spacing matches the design's pixels. */
+  body {
+    min-height: 100dvh;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  a {
+    color: var(--link);
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--link-hover);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}

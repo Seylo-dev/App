@@ -1,0 +1,13 @@
+{
+  "displayName": "Seylo",
+  "slug": "seylo",
+  "dataDir": "/var/lib/seylo",
+  "installUrl": "install.seylo.dev",
+  "docsUrl": "https://docs.seylo.dev",
+  "siteUrl": "https://seylo.dev",
+  "githubOrg": "Seylo-dev",
+  "githubRepo": "App",
+  "image": "ghcr.io/seylo-dev/seylo",
+  "oauthClientId": "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID",
+  "minisignPublicKey": "PLACEHOLDER_MINISIGN_PUBLIC_KEY"
+}

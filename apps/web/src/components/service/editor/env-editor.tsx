@@ -1,0 +1,275 @@
+// The Monaco .env editor (Environment.dc.html): the env tokenizer, violet
+// reference pills, red squiggles and line backgrounds from env-analyzer,
+// hovers with a reference's resolved value, ${{ completions, quick fixes
+// for edit fixes, and secret values as dots until "Show values" is on (the
+// line being edited shows its value).
+
+import {
+  type AnalyzeContext,
+  type AnalyzeResult,
+  describeReference,
+  LineIndex,
+  referenceAt,
+  referenceCompletions,
+} from "@seylo/env-analyzer";
+import type * as MonacoApi from "monaco-editor/editor/editor.api";
+import { useEffect, useRef } from "react";
+import { t } from "../../../i18n/t";
+import { CodeEditor, type CodeEditorInstance } from "./code-editor";
+import "./env-editor.css";
+import { envLanguageId } from "./env-language";
+import { errorLines, fixTitle, problemMessage, referenceRanges, secretRanges, toMarkers } from "./env-model";
+import type { Monaco } from "./monaco";
+
+export interface EnvEditorHandle {
+  /** Inserts text at the cursor (or over the selection) and focuses the editor. */
+  insert(text: string): void;
+  /** Moves the cursor to a line and scrolls it into view. */
+  revealLine(line: number): void;
+  /** Applies text edits given as offsets into the current text. */
+  applyEdits(edits: { start: number; end: number; text: string }[]): void;
+}
+
+export function EnvEditor({
+  text,
+  onChange,
+  analysis,
+  context,
+  selfName,
+  reveal,
+  onSave,
+  onCursor,
+  onHandle,
+  height = 420,
+  readOnly = false,
+}: {
+  text: string;
+  onChange: (text: string) => void;
+  analysis: AnalyzeResult;
+  context: AnalyzeContext | null;
+  selfName: string;
+  reveal: boolean;
+  onSave: () => void;
+  onCursor?: (line: number, column: number) => void;
+  onHandle?: (handle: EnvEditorHandle | null) => void;
+  height?: number | string;
+  readOnly?: boolean;
+}) {
+  const editorRef = useRef<CodeEditorInstance | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+  const decorations = useRef<MonacoApi.editor.IEditorDecorationsCollection | null>(null);
+  // The line whose secret is shown because the cursor is on it (0: none).
+  const editingLine = useRef(0);
+  // Providers are registered once per editor and read the latest state from here.
+  const state = useRef({ analysis, context, reveal, selfName });
+  state.current = { analysis, context, reveal, selfName };
+
+  const draw = () => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    const model = editor?.getModel();
+    if (!editor || !monaco || !model) return;
+    const { analysis: a, reveal: show, selfName: self } = state.current;
+    monaco.editor.setModelMarkers(model, "env-analyzer", toMarkers(a.diagnostics, self));
+    const range = (r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) =>
+      new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
+    const items: MonacoApi.editor.IModelDeltaDecoration[] = [
+      ...referenceRanges(a.parsed).map((r) => ({ range: range(r), options: { inlineClassName: "seylo-env-ref" } })),
+      ...errorLines(a.diagnostics).map((line) => ({
+        range: new monaco.Range(line, 1, line, 1),
+        options: { isWholeLine: true, className: "seylo-env-error-line", lineNumberClassName: "seylo-env-error-number" },
+      })),
+      ...(show
+        ? []
+        : secretRanges(a.parsed)
+            .filter((r) => r.startLineNumber !== editingLine.current)
+            .map((r) => ({ range: range(r), options: { inlineClassName: "seylo-env-secret" } }))),
+    ];
+    decorations.current ??= editor.createDecorationsCollection();
+    decorations.current.set(items);
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draw reads the latest state from the ref.
+  useEffect(draw, [analysis, reveal]);
+
+  const onReady = (editor: CodeEditorInstance, monaco: Monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    const disposables: MonacoApi.IDisposable[] = [];
+    const offsetAt = (pos: MonacoApi.IPosition) => editor.getModel()?.getOffsetAt(pos) ?? 0;
+
+    disposables.push(
+      editor.onDidChangeCursorPosition((e) => {
+        onCursor?.(e.position.lineNumber, e.position.column);
+        const line = editor.hasTextFocus() ? e.position.lineNumber : 0;
+        if (line !== editingLine.current) {
+          editingLine.current = line;
+          draw();
+        }
+      }),
+      editor.onDidFocusEditorText(() => {
+        editingLine.current = editor.getPosition()?.lineNumber ?? 0;
+        draw();
+      }),
+      editor.onDidBlurEditorText(() => {
+        editingLine.current = 0;
+        draw();
+      }),
+      monaco.languages.registerHoverProvider(envLanguageId, {
+        provideHover(model, position) {
+          if (model !== editor.getModel()) return null;
+          const { analysis: a, context: ctx, reveal: show } = state.current;
+          const hit = referenceAt(a.parsed, offsetAt(position));
+          if (!hit || !ctx) return null;
+          const info = describeReference(hit.reference, ctx);
+          const r = hit.reference.range;
+          const contents: MonacoApi.IMarkdownString[] = [];
+          if (!info.target || !info.variable) {
+            contents.push({ value: `**${hit.reference.target}.${hit.reference.variable}**` });
+          } else {
+            const where = info.target.kind === "shared" ? t("serviceEnv.refs.shared") : info.variable.description || info.variable.name;
+            contents.push({ value: `**${info.target.name} · ${where}**` });
+            const value =
+              info.variable.value == null
+                ? t("serviceEnv.hover.unknown")
+                : info.variable.sensitive && !show
+                  ? t("serviceEnv.hover.hidden")
+                  : info.variable.value || t("serviceEnv.hover.empty");
+            contents.push({ value: `${t("serviceEnv.hover.becomes")}\n\n\`\`\`text\n${value}\n\`\`\`` });
+            if (!info.reachable)
+              contents.push({ value: t("serviceEnv.hover.unreachable", { nodes: info.target.nodes.map((n) => n.name).join(", ") }) });
+            else if (info.variable.scope === "public")
+              contents.push({ value: `_${t("serviceEnv.hover.followsDomain", { target: info.target.name })}_` });
+          }
+          return { range: new monaco.Range(r.startLine, r.startColumn, r.endLine, r.endColumn), contents };
+        },
+      }),
+      monaco.languages.registerCompletionItemProvider(envLanguageId, {
+        triggerCharacters: ["{", "."],
+        provideCompletionItems(model, position) {
+          if (model !== editor.getModel()) return { suggestions: [] };
+          const ctx = state.current.context;
+          if (!ctx) return { suggestions: [] };
+          const line = model.getLineContent(position.lineNumber);
+          const before = line.slice(0, position.column - 1);
+          const open = before.lastIndexOf("${{");
+          if (open === -1 || before.slice(open).includes("}}")) return { suggestions: [] };
+          const after = line.slice(position.column - 1);
+          const closing = after.match(/^[\w.-]*\s*\}\}/)?.[0].length ?? after.match(/^[\w.-]*/)?.[0].length ?? 0;
+          const range = new monaco.Range(position.lineNumber, open + 1, position.lineNumber, position.column + closing);
+          return {
+            suggestions: referenceCompletions(ctx).map((c, i) => ({
+              label: c.label,
+              kind: monaco.languages.CompletionItemKind.Variable,
+              detail: c.reachable
+                ? c.variable.description
+                : t("serviceEnv.refs.unreachable", { nodes: c.target.nodes.map((n) => n.name).join(", ") }),
+              insertText: c.insertText,
+              filterText: `\${{${c.label}`,
+              sortText: String(i).padStart(4, "0"),
+              range,
+              tags: c.reachable ? [] : [monaco.languages.CompletionItemTag.Deprecated],
+            })),
+          };
+        },
+      }),
+      monaco.languages.registerCodeActionProvider(envLanguageId, {
+        provideCodeActions(model, range) {
+          if (model !== editor.getModel()) return { actions: [], dispose() {} };
+          const { analysis: a, selfName: self } = state.current;
+          const index = new LineIndex(a.parsed.text);
+          const from = model.getOffsetAt(range.getStartPosition());
+          const to = model.getOffsetAt(range.getEndPosition());
+          const actions: MonacoApi.languages.CodeAction[] = [];
+          for (const d of a.diagnostics) {
+            if (d.range.end < from || d.range.start > to) continue;
+            for (const fix of d.fixes) {
+              if (fix.kind !== "edit") continue;
+              actions.push({
+                title: fixTitle(fix, self),
+                kind: "quickfix",
+                isPreferred: actions.length === 0,
+                diagnostics: [
+                  {
+                    severity: monaco.MarkerSeverity.Error,
+                    message: problemMessage(d),
+                    startLineNumber: d.range.startLine,
+                    startColumn: d.range.startColumn,
+                    endLineNumber: d.range.endLine,
+                    endColumn: d.range.endColumn,
+                  },
+                ],
+                edit: {
+                  edits: fix.edits.map((e) => {
+                    const r = index.range(e.range.start, e.range.end);
+                    return {
+                      resource: model.uri,
+                      versionId: model.getVersionId(),
+                      textEdit: { range: new monaco.Range(r.startLine, r.startColumn, r.endLine, r.endColumn), text: e.text },
+                    };
+                  }),
+                },
+              });
+            }
+          }
+          return { actions, dispose() {} };
+        },
+      }),
+    );
+
+    onHandle?.({
+      insert(value) {
+        const selection = editor.getSelection();
+        if (!selection) return;
+        editor.executeEdits("references", [{ range: selection, text: value, forceMoveMarkers: true }]);
+        editor.focus();
+      },
+      revealLine(line) {
+        editor.revealLineInCenter(line);
+        editor.setPosition({ lineNumber: line, column: 1 });
+        editor.focus();
+      },
+      applyEdits(edits) {
+        const model = editor.getModel();
+        if (!model) return;
+        editor.executeEdits(
+          "fix",
+          edits.map((e) => {
+            const start = model.getPositionAt(e.start);
+            const end = model.getPositionAt(e.end);
+            return { range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column), text: e.text };
+          }),
+        );
+        editor.focus();
+      },
+    });
+    draw();
+    return () => {
+      for (const d of disposables) d.dispose();
+      decorations.current = null;
+      onHandle?.(null);
+    };
+  };
+
+  return (
+    <CodeEditor
+      value={text}
+      language={envLanguageId}
+      onChange={onChange}
+      onReady={onReady}
+      onSave={onSave}
+      readOnly={readOnly}
+      height={height}
+      aria-label={t("serviceEnv.editorLabel")}
+      options={{
+        wordWrap: "off",
+        quickSuggestions: false,
+        glyphMargin: false,
+        folding: false,
+        lineDecorationsWidth: 12,
+        links: false,
+        renderLineHighlight: "none",
+      }}
+    />
+  );
+}

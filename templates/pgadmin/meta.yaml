@@ -1,0 +1,29 @@
+name: "pgAdmin"
+description: "The classic administration and query tool for PostgreSQL."
+category: "Databases"
+tags: ["postgres", "database", "gui"]
+creates: "App"
+links:
+  - label: "Website"
+    url: "https://www.pgadmin.org"
+  - label: "Docs"
+    url: "https://www.pgadmin.org/docs"
+body: |
+  Sign in with the email and password below, then register your Postgres services with the values from their Connection tab.
+schema:
+  type: object
+  required: ["image", "email"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "dpage/pgadmin4:8.14"
+    email:
+      type: "string"
+      title: "Admin email"
+    password:
+      type: "string"
+      format: "password"
+      title: "Admin password"
+      description: "Generated when left empty."

@@ -1,0 +1,136 @@
+// The signed release manifest. Every release on GitHub
+// (<githubOrg>/<githubRepo>) carries two assets:
+//
+//   manifest.json         { version, minAgent, changelogUrl, panel: { image, digest },
+//                           agents: { "linux-amd64": { url, sha256 }, "linux-arm64": {...} } }
+//   manifest.json.minisig minisign signature by the release key (brand.minisignPublicKey)
+//
+// The panel verifies the signature before trusting anything in it, and
+// passes the exact bytes and signature on to agents (UpdateAgentRequest),
+// which verify them again before installing a binary.
+
+import { createHash, createPublicKey, verify } from "node:crypto";
+import { githubOrg, githubRepo, isPlaceholder, minisignPublicKey, slug } from "@seylo/brand";
+import { parseVersion } from "../../agent-hub/version";
+
+export interface ReleaseManifest {
+  version: string;
+  minAgent: string | null;
+  changelogUrl: string | null;
+  panel: { image: string; digest: string };
+  agents: Record<string, { url: string; sha256: string }>;
+}
+
+export interface FetchedRelease {
+  manifest: ReleaseManifest;
+  bytes: Uint8Array;
+  signature: string;
+}
+
+// Test builds only (the two-VM e2e): a release mirror and a throwaway signing
+// key compiled in with `bun build --define __TEST_RELEASE_API_URL__='"<url>"'
+// --define __TEST_RELEASE_PUBLIC_KEY__='"<RW... key>"'`. They are build-time
+// constants on purpose: no environment variable can point a shipped panel
+// at another release source or key. Without the defines both are undefined.
+declare const __TEST_RELEASE_API_URL__: string | undefined;
+declare const __TEST_RELEASE_PUBLIC_KEY__: string | undefined;
+
+/** The compiled-in test overrides, or null in a normal build. */
+export function testReleaseOverrides(): { latestUrl: string | null; publicKey: string | null } | null {
+  const latestUrl = typeof __TEST_RELEASE_API_URL__ === "string" && __TEST_RELEASE_API_URL__ ? __TEST_RELEASE_API_URL__ : null;
+  const publicKey = typeof __TEST_RELEASE_PUBLIC_KEY__ === "string" && __TEST_RELEASE_PUBLIC_KEY__ ? __TEST_RELEASE_PUBLIC_KEY__ : null;
+  return latestUrl || publicKey ? { latestUrl, publicKey } : null;
+}
+
+const overrides = testReleaseOverrides();
+
+/** Where releases come from; tests replace it. */
+export const releaseSource = {
+  fetch: (url: string, init?: RequestInit): Promise<Response> => fetch(url, init),
+  publicKey: overrides?.publicKey ?? minisignPublicKey,
+  latestUrl: overrides?.latestUrl ?? `https://api.github.com/repos/${githubOrg}/${githubRepo}/releases/latest`,
+};
+
+export class ReleaseError extends Error {
+  override name = "ReleaseError";
+}
+
+/**
+ * Verifies a minisign signature (legacy "Ed" or prehashed "ED") and its
+ * trusted comment. Returns the trusted comment.
+ */
+export function verifyMinisign(publicKeyBase64: string, message: Uint8Array, signatureFile: string): string {
+  const pk = Buffer.from(publicKeyBase64.trim(), "base64");
+  if (pk.length !== 42 || pk.subarray(0, 2).toString() !== "Ed") throw new ReleaseError("The release signing key is malformed.");
+  const lines = signatureFile.trim().split(/\r?\n/);
+  const sigLine = lines[1];
+  const trustedLine = lines[2];
+  const globalLine = lines[3];
+  if (!sigLine || !trustedLine?.startsWith("trusted comment: ") || !globalLine)
+    throw new ReleaseError("The release signature is malformed.");
+  const sig = Buffer.from(sigLine, "base64");
+  if (sig.length !== 74) throw new ReleaseError("The release signature is malformed.");
+  const algorithm = sig.subarray(0, 2).toString();
+  if (!sig.subarray(2, 10).equals(pk.subarray(2, 10))) throw new ReleaseError("The release was signed with a different key.");
+  const key = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: pk.subarray(10).toString("base64url") }, format: "jwk" });
+  const signed = algorithm === "ED" ? createHash("blake2b512").update(message).digest() : algorithm === "Ed" ? Buffer.from(message) : null;
+  if (!signed) throw new ReleaseError("The release signature uses an unknown algorithm.");
+  if (!verify(null, signed, key, sig.subarray(10))) throw new ReleaseError("The release signature does not match.");
+  const trusted = trustedLine.slice("trusted comment: ".length);
+  const global = Buffer.from(globalLine, "base64");
+  if (!verify(null, Buffer.concat([sig.subarray(10), Buffer.from(trusted)]), key, global)) {
+    throw new ReleaseError("The release signature's trusted comment does not match.");
+  }
+  return trusted;
+}
+
+export function parseManifest(bytes: Uint8Array): ReleaseManifest {
+  let value: Record<string, unknown>;
+  try {
+    value = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+  } catch {
+    throw new ReleaseError("The release manifest is not valid JSON.");
+  }
+  const panel = (value.panel ?? {}) as Record<string, unknown>;
+  if (typeof value.version !== "string" || !parseVersion(value.version))
+    throw new ReleaseError("The release manifest has no valid version.");
+  if (typeof panel.image !== "string" || typeof panel.digest !== "string" || !panel.digest.startsWith("sha256:")) {
+    throw new ReleaseError("The release manifest has no pinned panel image.");
+  }
+  return {
+    version: value.version.replace(/^v/, ""),
+    minAgent: typeof value.minAgent === "string" ? value.minAgent : null,
+    changelogUrl: typeof value.changelogUrl === "string" ? value.changelogUrl : null,
+    panel: { image: panel.image, digest: panel.digest },
+    agents: (value.agents ?? {}) as ReleaseManifest["agents"],
+  };
+}
+
+/** Fetches the latest release's manifest and checks its signature. Throws ReleaseError with a message safe to show. */
+export async function fetchLatestRelease(): Promise<FetchedRelease> {
+  if (isPlaceholder(releaseSource.publicKey)) {
+    throw new ReleaseError("The release signing key is not configured in this build, so updates are turned off.");
+  }
+  const headers = { accept: "application/vnd.github+json", "user-agent": `${slug}-panel` };
+  const release = await get(releaseSource.latestUrl, headers);
+  const info = (await release.json()) as { assets?: { name: string; browser_download_url: string }[] };
+  const asset = (name: string) => info.assets?.find((a) => a.name === name)?.browser_download_url;
+  const manifestUrl = asset("manifest.json");
+  const signatureUrl = asset("manifest.json.minisig");
+  if (!manifestUrl || !signatureUrl) throw new ReleaseError("The latest release has no signed manifest.");
+  const bytes = new Uint8Array(await (await get(manifestUrl, { "user-agent": headers["user-agent"] })).arrayBuffer());
+  const signature = await (await get(signatureUrl, { "user-agent": headers["user-agent"] })).text();
+  verifyMinisign(releaseSource.publicKey, bytes, signature);
+  return { manifest: parseManifest(bytes), bytes, signature };
+}
+
+async function get(url: string, headers: Record<string, string>): Promise<Response> {
+  let response: Response;
+  try {
+    response = await releaseSource.fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  } catch {
+    throw new ReleaseError("Could not reach GitHub to check for updates.");
+  }
+  if (!response.ok) throw new ReleaseError(`GitHub answered ${response.status} while checking for updates.`);
+  return response;
+}

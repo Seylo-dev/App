@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+// Compose stacks are parsed with compose-go, which only exists in Go, so
+// the panel asks an agent to load and normalize a compose file. The panel
+// then turns each compose service into its own ServiceSpec
+// (SERVICE_KIND_COMPOSE_MEMBER) and keeps the stack's source text. Any
+// connected agent can answer; the call reads nothing from the node.
+
+message ParseComposeRequest {
+  // The compose file (YAML) as typed or fetched from git.
+  string compose_yaml = 1;
+  // Values for ${VAR} interpolation, usually the stack's .env.
+  map<string, string> env = 2;
+  // Compose project name, used for default names. Default "stack".
+  string project_name = 3;
+}
+
+message ParseComposeResponse {
+  // compose-go's normalized types.Project marshalled as JSON (compose
+  // specification field names), with interpolation, extends and defaults
+  // applied. Kept as JSON instead of mirrored messages so new compose
+  // fields reach the panel without a protocol change.
+  bytes project_json = 1;
+  // Features Seylo does not support and ignores (host networking, bind
+  // mounts outside the stack, privileged mode, ...), one line each, shown
+  // to the person before the stack is created.
+  repeated string warnings = 2;
+}

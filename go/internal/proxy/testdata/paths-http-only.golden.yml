@@ -1,0 +1,52 @@
+# Written by the Seylo agent for service svc2. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc2-r-api:
+      entryPoints:
+        - web
+      rule: Host(`example.com`) && PathPrefix(`/api`)
+      middlewares:
+        - seylo-svc2-unreachable
+        - seylo-svc2-r-api-strip
+      service: seylo-svc2
+    seylo-svc2-r-docs:
+      entryPoints:
+        - websecure
+      rule: Host(`example.com`) && PathPrefix(`/docs`)
+      middlewares:
+        - seylo-svc2-unreachable
+      service: seylo-svc2
+      tls:
+        certResolver: le
+    seylo-svc2-r-docs-http:
+      entryPoints:
+        - web
+      rule: Host(`example.com`) && PathPrefix(`/docs`)
+      middlewares:
+        - seylo-svc2-unreachable
+      service: seylo-svc2
+  middlewares:
+    seylo-svc2-r-api-strip:
+      stripPrefix:
+        prefixes:
+          - /api
+    seylo-svc2-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc2-edge
+        query: /_seylo/page/status/svc2
+  services:
+    seylo-svc2:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc2-3:8080
+    seylo-svc2-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc2-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc2-3:8080

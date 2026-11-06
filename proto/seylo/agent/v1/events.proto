@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "seylo/agent/v1/backup.proto";
+import "seylo/agent/v1/metrics.proto";
+import "seylo/agent/v1/node.proto";
+import "seylo/agent/v1/state.proto";
+
+// Event is the payload of EVENT frames after the handshake. Delivery
+// depends on the payload:
+//
+//   - best effort (EVENT frame, no reply): state deltas, progress, metrics.
+//     Losing one is harmless because snapshots and final results cover it.
+//   - durable (PanelService.ReportEvent, retried from an on-disk outbox):
+//     final deploy and build results, cron runs, backup results, node
+//     alerts, update results. Crash reports use PanelService.ReportCrash
+//     the same way.
+message Event {
+  google.protobuf.Timestamp time = 1;
+  oneof payload {
+    StateDelta state_delta = 10;
+    DeployProgress deploy_progress = 11;
+    BuildProgress build_progress = 12;
+    HealthChanged health_changed = 13;
+    CronRun cron_run = 14;
+    BackupResult backup_result = 15;
+    NodeAlert node_alert = 16;
+    MetricsReport metrics = 17;
+    // Best effort: the node's facts changed (disk, Docker version, Wings
+    // appeared). The panel also refreshes them on every connect.
+    NodeFacts node_facts = 18;
+    UpdateResult update_result = 19;
+    // Best effort: bytes uploaded by a running backup.
+    BackupProgress backup_progress = 20;
+  }
+}
+
+// CrashReport is sent once per crash. The panel alerts once per streak.
+message CrashReport {
+  string service_id = 1;
+  uint64 generation = 2;
+  string container_id = 3;
+  int32 exit_code = 4;
+  bool oom_killed = 5;
+  // Crashes in a row including this one.
+  uint32 streak = 6;
+  CrashAction action = 7;
+  // Last 100 lines of output before the exit, secrets redacted.
+  repeated string last_lines = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp exited_at = 10;
+}
+
+enum CrashAction {
+  CRASH_ACTION_UNSPECIFIED = 0;
+  // Restarting after CrashPolicy.restart_delay.
+  CRASH_ACTION_RESTARTING = 1;
+  // Restart is off: the service stays stopped.
+  CRASH_ACTION_LEFT_STOPPED = 2;
+  // stop_after_crashes reached: the service stays stopped.
+  CRASH_ACTION_GAVE_UP = 3;
+}
+
+message DeployProgress {
+  string service_id = 1;
+  uint64 generation = 2;
+  DeployStage stage = 3;
+  string message = 4;
+}
+
+enum DeployStage {
+  DEPLOY_STAGE_UNSPECIFIED = 0;
+  DEPLOY_STAGE_PULLING = 1;
+  DEPLOY_STAGE_STARTING = 2;
+  DEPLOY_STAGE_HEALTH_CHECKING = 3;
+  DEPLOY_STAGE_SWITCHING_ROUTE = 4;
+  // Checking the new generation through Traefik before stopping the old.
+  DEPLOY_STAGE_VERIFYING = 5;
+  DEPLOY_STAGE_STOPPING_OLD = 6;
+  // Final: the new generation serves.
+  DEPLOY_STAGE_SUCCEEDED = 7;
+  // Final: the new generation was removed and the old one still serves.
+  DEPLOY_STAGE_FAILED = 8;
+}
+
+message BuildProgress {
+  string build_id = 1;
+  BuildStage stage = 2;
+  string message = 3;
+  // Set with BUILD_STAGE_SUCCEEDED.
+  string image_digest = 4;
+  // Set on final stages.
+  google.protobuf.Duration duration = 5;
+}
+
+enum BuildStage {
+  BUILD_STAGE_UNSPECIFIED = 0;
+  BUILD_STAGE_QUEUED = 1;
+  BUILD_STAGE_FETCHING_SOURCE = 2;
+  BUILD_STAGE_BUILDING = 3;
+  BUILD_STAGE_PUSHING = 4;
+  BUILD_STAGE_SUCCEEDED = 5;
+  BUILD_STAGE_FAILED = 6;
+  BUILD_STAGE_CANCELLED = 7;
+}
+
+message HealthChanged {
+  string service_id = 1;
+  string container_id = 2;
+  HealthState previous = 3;
+  HealthState current = 4;
+  // Output of the failing probe, truncated to 4 KiB.
+  string probe_output = 5;
+}
+
+message CronRun {
+  string service_id = 1;
+  string run_id = 2;
+  google.protobuf.Timestamp started_at = 3;
+  google.protobuf.Timestamp finished_at = 4;
+  CronRunResult result = 5;
+  int32 exit_code = 6;
+  // Last 100 lines of output, secrets redacted.
+  repeated string last_lines = 7;
+  // CronJob.id for jobs of a service; empty for SERVICE_KIND_CRON services.
+  string cron_job_id = 8;
+  // Started by RunCronNow rather than the schedule.
+  bool manual = 9;
+}
+
+enum CronRunResult {
+  CRON_RUN_RESULT_UNSPECIFIED = 0;
+  CRON_RUN_RESULT_SUCCEEDED = 1;
+  CRON_RUN_RESULT_FAILED = 2;
+  CRON_RUN_RESULT_TIMED_OUT = 3;
+  // Skipped because the previous run was still going.
+  CRON_RUN_RESULT_SKIPPED = 4;
+}
+
+message BackupResult {
+  string backup_id = 1;
+  string run_id = 2;
+  bool success = 3;
+  string error = 4;
+  uint64 size_bytes = 5;
+  // Object key in the destination bucket.
+  string object_key = 6;
+  google.protobuf.Timestamp started_at = 7;
+  google.protobuf.Timestamp finished_at = 8;
+  // Objects deleted by retention (keep_last) after this run succeeded.
+  repeated string pruned_object_keys = 9;
+}
+
+message NodeAlert {
+  NodeAlertKind kind = 1;
+  AlertSeverity severity = 2;
+  string message = 3;
+  // True when the condition cleared; pairs with an earlier alert of the
+  // same kind.
+  bool resolved = 4;
+}
+
+enum NodeAlertKind {
+  NODE_ALERT_KIND_UNSPECIFIED = 0;
+  // The file system holding the data dir or Docker's root dir is more than
+  // 85% full. Agents check every 10 minutes, raise once per streak and
+  // resolve when it is back under the line.
+  NODE_ALERT_KIND_DISK_LOW = 1;
+  NODE_ALERT_KIND_MEMORY_LOW = 2;
+  NODE_ALERT_KIND_DOCKER_DOWN = 3;
+  NODE_ALERT_KIND_TRAEFIK_DOWN = 4;
+  NODE_ALERT_KIND_CLOCK_SKEW = 5;
+  NODE_ALERT_KIND_CERTIFICATE_EXPIRING = 6;
+  NODE_ALERT_KIND_UPDATE_FAILED = 7;
+  // A node health check (RunHealthCheck) that passed before now fails.
+  NODE_ALERT_KIND_HEALTH_CHECK_FAILED = 8;
+  // The agent could not move to the address HelloAccepted.panel_url names
+  // and keeps dialing its current one; the message says why. Resolved once
+  // a later move succeeds.
+  NODE_ALERT_KIND_PANEL_MOVE_FAILED = 9;
+}
+
+// UpdateResult is the durable outcome of UpdateAgent, UpdatePanel or
+// UpdateDocker. An agent update reports after the new binary reconnects
+// (or after the rollback), so the panel learns the result even though the
+// connection that asked for it is gone.
+message UpdateResult {
+  UpdateTarget target = 1;
+  // Correlates with the request; see UpdateAgentRequest.update_id.
+  string update_id = 2;
+  string from_version = 3;
+  string to_version = 4;
+  bool success = 5;
+  // The previous version was restored after a failed update.
+  bool rolled_back = 6;
+  string error = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+}
+
+enum UpdateTarget {
+  UPDATE_TARGET_UNSPECIFIED = 0;
+  UPDATE_TARGET_AGENT = 1;
+  UPDATE_TARGET_PANEL = 2;
+  UPDATE_TARGET_DOCKER = 3;
+}
+
+enum AlertSeverity {
+  ALERT_SEVERITY_UNSPECIFIED = 0;
+  ALERT_SEVERITY_INFO = 1;
+  ALERT_SEVERITY_WARNING = 2;
+  ALERT_SEVERITY_CRITICAL = 3;
+}

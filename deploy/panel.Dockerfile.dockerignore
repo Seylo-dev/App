@@ -1,0 +1,7 @@
+# Only the built artifacts and the template catalog go into the image.
+*
+!apps/panel/package.json
+!apps/panel/dist/**
+!apps/panel/drizzle/**
+!apps/web/dist/**
+!templates/**

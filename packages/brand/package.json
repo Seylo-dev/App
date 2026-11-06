@@ -1,0 +1,14 @@
+{
+  "name": "@seylo/brand",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "Product identity generated from brand/brand.json by tools/brandgen.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

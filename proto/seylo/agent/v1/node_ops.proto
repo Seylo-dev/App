@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "seylo/agent/v1/node.proto";
+import "seylo/agent/v1/service.proto";
+
+// Node level operations: facts, cleanup, updates, health checks.
+
+message GetNodeFactsRequest {}
+
+message GetNodeFactsResponse {
+  NodeFacts facts = 1;
+}
+
+// PruneRequest cleans up Docker resources. Only resources labeled seylo.*
+// are ever touched; whole-machine cleanup is deliberately not offered.
+message PruneRequest {
+  // Images no service generation references any more (keeping the ones
+  // needed for instant rollback).
+  bool images = 1;
+  bool build_cache = 2;
+  bool stopped_containers = 3;
+  // Data dirs of services removed without delete_data.
+  bool orphaned_service_data = 4;
+  // Report what would be removed without removing it.
+  bool dry_run = 5;
+}
+
+message PruneResponse {
+  uint64 reclaimed_bytes = 1;
+  // Human readable descriptions of what was (or would be) removed.
+  repeated string removed = 2;
+}
+
+// UpdateAgentRequest installs a new agent binary from a signed release
+// manifest. The agent verifies the minisign signature, swaps the binary,
+// restarts and rolls back if the new binary fails to reconnect.
+message UpdateAgentRequest {
+  bytes manifest = 1;
+  bytes manifest_signature = 2;
+  string target_version = 3;
+  // Panel id of this update; echoed in the UpdateResult event.
+  string update_id = 4;
+}
+
+message UpdateAgentResponse {}
+
+// UpdatePanelRequest replaces the panel container on the node that runs it.
+// The panel cannot do this itself (two panels must never open one SQLite
+// file), so the agent runs the whole swap and keeps going after the panel
+// connection drops: stop the old panel, snapshot panel.db and metrics.db,
+// start the new image, health check it, and on failure restore the
+// snapshot and start the old image again. The outcome is a durable
+// UpdateResult event, delivered once a panel is back.
+message UpdatePanelRequest {
+  string update_id = 1;
+  // The protected panel service in the Panel project.
+  string service_id = 2;
+  // New image, pinned by digest.
+  ImageRef image = 3;
+  string target_version = 4;
+  // Default 2m.
+  google.protobuf.Duration health_timeout = 5;
+}
+
+// UpdatePanelResponse is sent once the swap is accepted, before the old
+// panel stops.
+message UpdatePanelResponse {}
+
+// RunHealthCheckRequest runs the node health checks (shown with the heart
+// icon; formerly "Doctor"): Docker, disk, clock, ports 80/443, DNS,
+// Traefik, Wings coexistence and so on.
+message RunHealthCheckRequest {}
+
+message RunHealthCheckResponse {
+  repeated NodeCheckResult results = 1;
+}
+
+message NodeCheckResult {
+  // Stable id, for example "docker.reachable".
+  string id = 1;
+  string title = 2;
+  NodeCheckStatus status = 3;
+  string detail = 4;
+  // What the owner can do about a warning or failure.
+  string fix_hint = 5;
+}
+
+enum NodeCheckStatus {
+  NODE_CHECK_STATUS_UNSPECIFIED = 0;
+  NODE_CHECK_STATUS_PASS = 1;
+  NODE_CHECK_STATUS_WARN = 2;
+  NODE_CHECK_STATUS_FAIL = 3;
+  NODE_CHECK_STATUS_SKIPPED = 4;
+}
+
+// TroubleshootRequest builds the redacted Markdown report that
+// `seylo troubleshoot` uploads.
+message TroubleshootRequest {
+  bool include_service_logs = 1;
+}
+
+message TroubleshootResponse {
+  string report_markdown = 1;
+}
+
+message RebootRequest {
+  // Wait before rebooting so the response can be delivered. Default 5s.
+  google.protobuf.Duration delay = 1;
+}
+
+message RebootResponse {}
+
+// UpdateDockerRequest upgrades Docker Engine with the distribution's
+// package manager. Running containers restart with the daemon.
+message UpdateDockerRequest {
+  bool dry_run = 1;
+  // Panel id of this update; echoed in the UpdateResult event.
+  string update_id = 2;
+}
+
+message UpdateDockerResponse {
+  string from_version = 1;
+  string to_version = 2;
+  // Set when the update will interrupt the node, for example "Docker's
+  // live-restore is off: every service and the panel on this node stop
+  // while Docker restarts". The panel shows it before the owner confirms.
+  string warning = 3;
+}
+
+// AgentLogsRequest reads the agent's own log (its systemd journal), oldest
+// first, for the node sheet's "Agent logs".
+message AgentLogsRequest {
+  // Lines to return, default 500, maximum 5000.
+  uint32 tail = 1;
+  // Only lines at or after this time. Overrides tail when set.
+  google.protobuf.Timestamp since = 2;
+}
+
+message AgentLogsResponse {
+  repeated AgentLogLine lines = 1;
+}
+
+message AgentLogLine {
+  google.protobuf.Timestamp time = 1;
+  // "debug", "info", "warn" or "error".
+  string level = 2;
+  // The message with its key=value attributes, secrets already redacted.
+  string line = 3;
+}

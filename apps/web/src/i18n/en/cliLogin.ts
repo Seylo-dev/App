@@ -1,0 +1,55 @@
+// English strings: cliLogin. See ../t.ts for keys, placeholders and plurals.
+// The page the laptop CLI opens to be approved (/cli/approve?code=...).
+
+export default {
+  title: "Sign in the command line",
+  hint: "A computer asks for an API key that acts as you. Approve only if you started this sign-in yourself.",
+  codeLabel: "Sign-in code",
+  codeCheck: "Check that your terminal shows the same code.",
+  enterCode: "Enter the code your terminal shows",
+  enterCodeHint: "Eight letters and digits, for example ABCD-EFGH.",
+  typeCode: "Type the code from your own terminal. Never enter a code someone sent you: it signs their computer in as you.",
+  typeCodeFromLink:
+    "Type the code from your own terminal, even though you opened a link: the link alone cannot sign anyone in. Never enter a code someone sent you.",
+  lookUp: "Continue",
+  computer: "Computer",
+  computerNote: "The computer picks its own name, so anyone can claim any name. Trust the code in your terminal, not the name.",
+  requestedFrom: "Requested from",
+  yourAddress: "Your address",
+  otherAddress:
+    "This sign-in was started from a different address than this browser. Approve only if you started it on another computer of yours.",
+  unknownAddress: "unknown address",
+  expires: "Request expires",
+  access: {
+    label: "What the key can do",
+    full: "Everything you can do",
+    fullHint: "Deploy, change settings and delete, wherever you have access.",
+    readOnly: "Read only",
+    readOnlyHint: "See projects, services, logs and settings. No changes.",
+  },
+  projects: {
+    label: "Projects",
+    all: "All projects",
+    allHint: "Including projects you get access to later.",
+    some: "Some projects",
+    someHint: "Only the projects picked below.",
+    none: "You have no projects yet.",
+  },
+  expiry: "Key expires after",
+  days: { one: "{count} day", other: "{count} days" },
+  keyNote: 'The key is named "CLI on {client}". It shows in Settings > API keys, where you can revoke it at any time.',
+  chooseFirst: "Choose what the key can do and which projects it reaches.",
+  approve: "Approve",
+  approving: "Approving",
+  deny: "Deny",
+  done: {
+    approved: "Approved. Go back to your terminal; it signs in by itself.",
+    approvedHint: "The key is valid for {days}.",
+    denied: "Denied. The command line was not signed in.",
+    expired: "This sign-in request expired. Run the login command again.",
+    used: "This request was approved and its key handed out already.",
+  },
+  notFound: "No sign-in request has this code. It may have expired; run the login command again.",
+  otherCode: "Enter the code again",
+  openDashboard: "Open the dashboard",
+} as const;

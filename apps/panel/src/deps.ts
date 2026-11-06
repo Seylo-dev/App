@@ -1,0 +1,45 @@
+// The long-lived services every op, job and endpoint can use. Built once
+// in panel.ts (and by test/helpers.ts for tests); nothing reads globals.
+
+import type { AgentHub } from "./agent-hub/hub";
+import type { Config } from "./config";
+import type { MetricsDb, PanelDb } from "./db/client";
+import type { ProxyTrust } from "./http/proxy-trust";
+import type { JobQueue } from "./jobs/queue";
+import type { Schedules } from "./jobs/schedules";
+import type { LiveHub } from "./live/hub";
+import type { Logger } from "./logger";
+import type { AlertSink } from "./modules/alerts/sink";
+import type { Notifier } from "./modules/notifications/email";
+import type { ExecuteOp } from "./ops/pipeline";
+import type { SecretBox } from "./security/secret-box";
+
+/** The op pipeline, for code that runs ops on someone's behalf (MCP, AI assistant, approvals). */
+export interface OpRunner {
+  execute: ExecuteOp;
+}
+
+export interface Deps {
+  config: Config;
+  db: PanelDb;
+  metrics: MetricsDb;
+  secrets: SecretBox;
+  logger: Logger;
+  live: LiveHub;
+  jobs: JobQueue;
+  /** Recurring schedules on the job queue (jobs/schedules.ts). */
+  schedules: Schedules;
+  agents: AgentHub;
+  /** Records alerts and notifies channels (modules/alerts/sink.ts). */
+  alerts: AlertSink;
+  /** Plain emails through the panel's SMTP channel (modules/notifications/email.ts). */
+  notify: Notifier;
+  /** Set once the op handlers are collected; calls before that fail. */
+  ops: OpRunner;
+  panelId: string;
+  startedAt: Date;
+  /** Which socket peers' X-Forwarded-* headers are believed (http/proxy-trust.ts). */
+  proxy: ProxyTrust;
+  /** The agents' TLS listener (security/agent-tls.ts), or null when it is off. */
+  agentTls: { port: number; pin: string } | null;
+}

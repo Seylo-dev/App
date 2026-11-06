@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// MetricsReport is one sample of the node and its services. The agent
+// pushes one every 10 seconds as an Event; the panel rolls them up into
+// metrics.db. Counters (network, block IO) are cumulative so a lost sample
+// only lowers resolution.
+message MetricsReport {
+  google.protobuf.Timestamp time = 1;
+  NodeUsage node = 2;
+  repeated ServiceUsage services = 3;
+}
+
+message NodeUsage {
+  // 0-100, share of all cores.
+  double cpu_percent = 1;
+  uint64 memory_used_bytes = 2;
+  uint64 memory_total_bytes = 3;
+  uint64 disk_used_bytes = 4;
+  uint64 disk_total_bytes = 5;
+  uint64 network_rx_bytes = 6;
+  uint64 network_tx_bytes = 7;
+  double load1 = 8;
+  // Every real filesystem (no tmpfs, overlay or Docker internals). The
+  // disk_* fields above are the filesystem that holds the data dir.
+  repeated DiskUsage disks = 9;
+  double load5 = 10;
+  double load15 = 11;
+  uint64 swap_used_bytes = 12;
+  uint64 swap_total_bytes = 13;
+  // Logical CPUs, so cpu_percent can be shown as cores.
+  uint32 cpu_count = 14;
+}
+
+message DiskUsage {
+  string mount_point = 1;
+  // For example "/dev/sda1".
+  string device = 2;
+  string fs_type = 3;
+  uint64 used_bytes = 4;
+  uint64 total_bytes = 5;
+}
+
+message ServiceUsage {
+  string service_id = 1;
+  // Summed over replicas. 0-100 per core, like `docker stats`.
+  double cpu_percent = 2;
+  // usage - inactive_file, which matches what the kernel would reclaim
+  // last. Plain usage counts page cache and looks like a leak.
+  uint64 memory_used_bytes = 3;
+  uint64 network_rx_bytes = 4;
+  uint64 network_tx_bytes = 5;
+  uint64 block_read_bytes = 6;
+  uint64 block_write_bytes = 7;
+  // Summed over replicas; 0 when no replica has a memory limit.
+  uint64 memory_limit_bytes = 8;
+  // Running containers counted in this sample.
+  uint32 instances = 9;
+}
+
+// GetMetricsRequest reads the agent's short high resolution history (the
+// last hour). Longer ranges come from the panel's rollups.
+message GetMetricsRequest {
+  // Empty means node usage only.
+  repeated string service_ids = 1;
+  google.protobuf.Timestamp since = 2;
+}
+
+message GetMetricsResponse {
+  repeated MetricsReport samples = 1;
+}
+
+// WatchMetricsRequest streams live samples for an open metrics view.
+message WatchMetricsRequest {
+  repeated string service_ids = 1;
+  // Minimum 1s, default 2s.
+  google.protobuf.Duration interval = 2;
+}
+
+message WatchMetricsResponse {
+  MetricsReport sample = 1;
+}

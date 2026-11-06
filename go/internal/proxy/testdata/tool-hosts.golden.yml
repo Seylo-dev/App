@@ -1,0 +1,35 @@
+# Written by the Seylo agent for service db1. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-db1-r-edge-tool:
+      entryPoints:
+        - websecure
+      rule: Host(`seylo-db-db1.n1.example.com`)
+      priority: 1000000035
+      middlewares:
+        - seylo-db1-tool
+      service: seylo-db1-edge
+      tls:
+        certResolver: le
+    seylo-db1-r-edge-tool-http:
+      entryPoints:
+        - web
+      rule: Host(`seylo-db-db1.n1.example.com`)
+      priority: 1000000035
+      middlewares:
+        - seylo-db1-https
+      service: seylo-db1-edge
+  middlewares:
+    seylo-db1-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-db1-tool:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Tool: db-ui:db1
+  services:
+    seylo-db1-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756

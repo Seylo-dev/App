@@ -1,0 +1,745 @@
+package build
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"google.golang.org/protobuf/types/known/durationpb"
+
+	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/docker"
+)
+
+// Defaults for BuildRequest fields left at zero.
+const (
+	DefaultKeepImages = 3
+	DefaultTimeout    = 45 * time.Minute
+	// DefaultRegistry is where every build pushes: the agent's relay to the
+	// panel registry (registry.LocalAddress).
+	DefaultRegistry = "127.0.0.1:5755"
+	// finishedTTL keeps finished jobs so a panel that reconnects can still
+	// read the result and the log.
+	finishedTTL = 15 * time.Minute
+	// cachePruneEvery and cacheMaxAge bound the BuildKit cache.
+	cachePruneEvery = time.Hour
+	cacheMaxAge     = 7 * 24 * time.Hour
+	// builderIdle removes a project's builder (and its cache) after this
+	// long without a build: deleted projects leave none behind.
+	builderIdle = 14 * 24 * time.Hour
+)
+
+// ErrNotFound means no build with that id is queued or running.
+var ErrNotFound = errors.New("no such build")
+
+// Options configures a Service.
+type Options struct {
+	// Dir holds workspaces, uploads and the docker CLI config
+	// (datadir.Layout.BuildsDir).
+	Dir string
+	// ToolsDir holds the pinned Railpack and Nixpacks binaries.
+	ToolsDir string
+	Runner   Runner
+	Logger   *slog.Logger
+	// Emit sends best-effort progress (rpc.Emitter.Emit). May be nil.
+	Emit func(*agentv1.Event)
+	// Report queues the final result durably (state.Reporter.Event).
+	// May be nil in tests.
+	Report func(context.Context, *agentv1.Event) error
+	// Registry is the push target prefix; default DefaultRegistry.
+	Registry string
+	// Parallel is the initial number of builds at once (default 1).
+	Parallel int
+	// Sizing caps the buildx builder; default MachineSize().
+	Sizing *Sizing
+	// Tools installs builder binaries; default one under ToolsDir.
+	Tools *Tools
+}
+
+// Service is the node's Builder: a queue of detached build jobs.
+type Service struct {
+	opts    Options
+	log     *slog.Logger
+	cli     dockerCLI
+	buildx  *buildxEnv
+	queue   *Queue
+	uploads uploads
+	tools   *Tools
+
+	life   context.Context
+	stop   context.CancelFunc
+	mu     sync.Mutex
+	jobs   map[string]*Job
+	closed bool
+}
+
+var _ Builder = (*Service)(nil)
+
+// New returns a Service. Call Run to start its maintenance and Close (or
+// cancel Run's ctx) to stop every build.
+func New(opts Options) *Service {
+	if opts.Runner == nil {
+		opts.Runner = ExecRunner{}
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.Registry == "" {
+		opts.Registry = DefaultRegistry
+	}
+	size := MachineSize()
+	if opts.Sizing != nil {
+		size = *opts.Sizing
+	}
+	tools := opts.Tools
+	if tools == nil {
+		tools = &Tools{Dir: opts.ToolsDir}
+	}
+	cli := dockerCLI{run: opts.Runner, configDir: filepath.Join(opts.Dir, "docker")}
+	// The service owns the lifetime of its builds: they outlive the RPC
+	// that started them and end with Close.
+	life, stop := context.WithCancel(context.Background())
+	return &Service{
+		opts:    opts,
+		log:     opts.Logger,
+		cli:     cli,
+		buildx:  &buildxEnv{cli: cli, size: size},
+		queue:   NewQueue(opts.Parallel),
+		uploads: uploads{dir: filepath.Join(opts.Dir, "uploads")},
+		tools:   tools,
+		life:    life,
+		stop:    stop,
+		jobs:    map[string]*Job{},
+	}
+}
+
+// SetParallel follows NodeSettings.max_parallel_builds (0 means 1).
+func (s *Service) SetParallel(n int) { s.queue.SetLimit(n) }
+
+// Queue exposes running and waiting counts.
+func (s *Service) Queue() *Queue { return s.queue }
+
+// Close cancels every build and refuses new ones.
+func (s *Service) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.stop()
+}
+
+// Run cleans what a previous agent left behind, then expires uploads and
+// prunes the build cache now and then. It returns when ctx ends, after
+// cancelling every build.
+func (s *Service) Run(ctx context.Context) error {
+	defer s.Close()
+	// Workspaces of builds that were running when the agent stopped.
+	_ = os.RemoveAll(s.workRoot())
+	s.uploads.expire(time.Now())
+	t := time.NewTicker(cachePruneEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			s.uploads.expire(time.Now())
+			s.forgetFinished()
+			s.pruneCache(ctx)
+		}
+	}
+}
+
+func (s *Service) workRoot() string { return filepath.Join(s.opts.Dir, "work") }
+
+// pruneCache drops BuildKit cache nobody used for a week and removes the
+// builders of projects that built nothing for builderIdle, while no build
+// runs (pruning under a running build only slows it down).
+func (s *Service) pruneCache(ctx context.Context) {
+	if running, waiting := s.queue.Stats(); running+waiting > 0 {
+		return
+	}
+	for _, name := range s.buildx.reapIdle(ctx, builderIdle) {
+		s.log.Info("removed an idle build worker and its cache", "builder", name)
+	}
+	s.buildx.mu.Lock()
+	var ready []string
+	for name := range s.buildx.ready {
+		ready = append(ready, name)
+	}
+	s.buildx.mu.Unlock()
+	until := fmt.Sprintf("until=%dh", int(cacheMaxAge.Hours()))
+	for _, name := range ready {
+		if _, err := s.cli.out(ctx, "buildx", "prune", "--builder", name, "--force", "--filter", until); err != nil {
+			s.log.Warn("pruning the build cache", "builder", name, "err", err)
+		}
+	}
+}
+
+func (s *Service) forgetFinished() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, j := range s.jobs {
+		if f := j.Final(); f != nil && time.Since(j.finishedAt) > finishedTTL {
+			delete(s.jobs, id)
+		}
+	}
+}
+
+// Start implements Builder.
+func (s *Service) Start(req *agentv1.BuildRequest) (*Job, error) {
+	if err := validateRequest(req, s.opts.Registry); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errors.New("the builder is shutting down")
+	}
+	if j, ok := s.jobs[req.GetBuildId()]; ok {
+		if j.ServiceID != req.GetServiceId() {
+			return nil, invalid("build id %s is already used by another service", req.GetBuildId())
+		}
+		return j, nil
+	}
+	ctx, cancel := context.WithCancel(s.life)
+	j := newJob(req.GetBuildId(), req.GetServiceId(), cancel)
+	s.jobs[j.ID] = j
+	go s.run(ctx, j, req)
+	return j, nil
+}
+
+// Cancel implements Builder.
+func (s *Service) Cancel(buildID string) error {
+	s.mu.Lock()
+	j, ok := s.jobs[buildID]
+	s.mu.Unlock()
+	if !ok {
+		return ErrNotFound
+	}
+	j.cancel()
+	return nil
+}
+
+// Job returns a known build.
+func (s *Service) Job(buildID string) (*Job, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[buildID]
+	return j, ok
+}
+
+// StoreContext implements Builder.
+func (s *Service) StoreContext(ctx context.Context, req *agentv1.UploadBuildContextRequest, archive io.Reader) error {
+	return s.uploads.store(ctx, req, archive)
+}
+
+// run is one build from queue to result. It always ends with finish.
+func (s *Service) run(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
+	defer j.cancel()
+	started := time.Now()
+	log := s.log.With("build_id", j.ID, "service_id", j.ServiceID)
+	step := func(stage agentv1.BuildStage, msg string) {
+		p := &agentv1.BuildProgress{BuildId: j.ID, Stage: stage, Message: msg}
+		j.progress(p)
+		if s.opts.Emit != nil {
+			s.opts.Emit(&agentv1.Event{Payload: &agentv1.Event_BuildProgress{BuildProgress: p}})
+		}
+	}
+
+	digest, err := s.execute(ctx, j, req, step)
+
+	final := &agentv1.BuildProgress{BuildId: j.ID, Duration: durationpb.New(time.Since(started).Round(time.Millisecond))}
+	switch {
+	case err == nil:
+		final.Stage = agentv1.BuildStage_BUILD_STAGE_SUCCEEDED
+		final.ImageDigest = digest
+		final.Message = "Pushed " + req.GetImageReference() + "@" + digest
+	case errors.Is(err, context.Canceled):
+		final.Stage = agentv1.BuildStage_BUILD_STAGE_CANCELLED
+		final.Message = "The build was cancelled"
+	default:
+		final.Stage = agentv1.BuildStage_BUILD_STAGE_FAILED
+		final.Message = failureMessage(err)
+	}
+	fmt.Fprintf(j, "\n--> %s\n", final.Message)
+	log.Info("build finished", "stage", final.Stage.String(), "duration", final.Duration.AsDuration(), "err", err)
+
+	j.finishedAt = time.Now()
+	j.finish(final)
+	if s.opts.Report != nil {
+		// Durable: reaches the panel even if the stream was lost. Use the
+		// service lifetime, not the build's (cancelled) context.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := s.opts.Report(rctx, &agentv1.Event{Payload: &agentv1.Event_BuildProgress{BuildProgress: final}}); err != nil {
+			log.Error("queueing the build result", "err", err)
+		}
+	}
+}
+
+// failureMessage is the reason shown for a failed build.
+func failureMessage(err error) string {
+	var inv *InvalidError
+	var exit *ExitError
+	switch {
+	case errors.As(err, &inv):
+		return inv.Msg
+	case errors.Is(err, context.DeadlineExceeded):
+		return "The build took too long and was stopped"
+	case errors.Is(err, ErrFetch), errors.Is(err, ErrToolUnavailable), errors.Is(err, ErrUploadNotFound):
+		return err.Error()
+	case errors.As(err, &exit):
+		return "The build failed - the lines above say why"
+	default:
+		return "The build failed: " + err.Error()
+	}
+}
+
+// execute fetches, builds and pushes, returning the pushed digest.
+func (s *Service) execute(ctx context.Context, j *Job, req *agentv1.BuildRequest, step func(agentv1.BuildStage, string)) (string, error) {
+	release, err := s.queue.Acquire(ctx, func(ahead int) {
+		msg := "Starting"
+		if ahead > 0 {
+			msg = fmt.Sprintf("Waiting for %d build(s) on this node", ahead)
+			fmt.Fprintf(j, "--> %s\n", msg)
+		}
+		step(agentv1.BuildStage_BUILD_STAGE_QUEUED, msg)
+	})
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	timeout := DefaultTimeout
+	if d := req.GetTimeout().AsDuration(); req.GetTimeout() != nil && d > 0 {
+		timeout = d
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	work := filepath.Join(s.workRoot(), j.ID)
+	_ = os.RemoveAll(work)
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(work)
+
+	ref := req.GetImageReference()
+	if img := req.GetSource().GetImage(); img != nil {
+		step(agentv1.BuildStage_BUILD_STAGE_FETCHING_SOURCE, "Pulling "+img.GetReference())
+		if err := s.mirror(ctx, j, img, ref, work); err != nil {
+			return "", err
+		}
+	} else {
+		step(agentv1.BuildStage_BUILD_STAGE_FETCHING_SOURCE, "Fetching the source")
+		src := filepath.Join(work, "src")
+		if err := s.fetch(ctx, j, req, src, work); err != nil {
+			return "", err
+		}
+		step(agentv1.BuildStage_BUILD_STAGE_BUILDING, "Building with "+builderName(req))
+		if err := s.build(ctx, j, req, src, work); err != nil {
+			return "", err
+		}
+	}
+
+	step(agentv1.BuildStage_BUILD_STAGE_PUSHING, "Pushing "+ref)
+	fmt.Fprintf(j, "--> Pushing %s\n", ref)
+	digest, err := s.cli.push(ctx, j, ref)
+	if err != nil {
+		return "", fmt.Errorf("pushing the image to the panel registry: %w", err)
+	}
+	s.retain(ctx, j, req)
+	return digest, nil
+}
+
+func builderName(req *agentv1.BuildRequest) string {
+	if req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != "" {
+		return "your Dockerfile"
+	}
+	switch req.GetBuilder() {
+	case agentv1.Builder_BUILDER_NIXPACKS:
+		return "Nixpacks " + Nixpacks.Version
+	case agentv1.Builder_BUILDER_DOCKERFILE:
+		return "the Dockerfile"
+	default:
+		return "Railpack " + Railpack.Version
+	}
+}
+
+// fetch puts the source in src.
+func (s *Service) fetch(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work string) error {
+	switch source := req.GetSource().GetSource().(type) {
+	case *agentv1.BuildSource_Git:
+		info, err := fetchGit(ctx, s.opts.Runner, j, source.Git, src, work, req.GetGitSubmodules())
+		if err != nil {
+			return err
+		}
+		j.sourceInfo(info)
+	case *agentv1.BuildSource_UploadId:
+		archive := s.uploads.path(source.UploadId)
+		if _, err := os.Stat(archive); err != nil {
+			return fmt.Errorf("%w: %s", ErrUploadNotFound, source.UploadId)
+		}
+		fmt.Fprintln(j, "--> Unpacking the uploaded source")
+		if err := os.MkdirAll(src, 0o755); err != nil {
+			return err
+		}
+		if err := extractArchive(ctx, archive, src); err != nil {
+			return err
+		}
+		// Single use: the archive is not needed after a successful unpack.
+		_ = os.Remove(archive)
+	case *agentv1.BuildSource_InlineDockerfile:
+		if err := os.MkdirAll(src, 0o755); err != nil {
+			return err
+		}
+		fmt.Fprintln(j, "--> Building the Dockerfile written in the panel")
+		return os.WriteFile(filepath.Join(src, "Dockerfile"), []byte(source.InlineDockerfile), 0o644)
+	}
+	return checkTree(ctx, src)
+}
+
+// build runs the chosen builder and leaves the image tagged as the
+// request's image reference in the local Docker.
+func (s *Service) build(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work string) error {
+	contextDir, err := insideRoot(src, req.GetContextPath(), "The build path")
+	if err != nil {
+		return err
+	}
+	name, err := s.buildx.builder(ctx, j, buildScope(req))
+	if err != nil {
+		return err
+	}
+	spec := buildSpec{Builder: name, ContextDir: contextDir, Tag: req.GetImageReference(), Target: req.GetTargetStage(), Labels: imageLabels(req)}
+
+	inline := req.GetSource().GetInlineDockerfile() != "" || req.GetDockerfileContent() != ""
+	switch {
+	case inline || req.GetBuilder() == agentv1.Builder_BUILDER_DOCKERFILE:
+		if err := s.dockerfileSpec(req, &spec, src, contextDir, work); err != nil {
+			return err
+		}
+	case req.GetBuilder() == agentv1.Builder_BUILDER_NIXPACKS:
+		if err := s.nixpacksSpec(ctx, j, req, &spec, contextDir); err != nil {
+			return err
+		}
+	default:
+		if err := s.railpackSpec(ctx, j, req, &spec, contextDir, work); err != nil {
+			return err
+		}
+	}
+
+	args, env := spec.args()
+	fmt.Fprintf(j, "--> Building %s\n", req.GetImageReference())
+	err = s.cli.stream(ctx, j, env, args...)
+	if err != nil && ctx.Err() == nil && name != "" {
+		// A removed or broken builder container: check again next time.
+		s.buildx.forget(name)
+	}
+	return err
+}
+
+func (s *Service) dockerfileSpec(req *agentv1.BuildRequest, spec *buildSpec, src, contextDir, work string) error {
+	switch {
+	case req.GetSource().GetInlineDockerfile() != "":
+		spec.Dockerfile = filepath.Join(src, "Dockerfile")
+	case req.GetDockerfileContent() != "":
+		// Outside the source, so it never shadows or joins the context.
+		f := filepath.Join(work, "Dockerfile.panel")
+		if err := os.WriteFile(f, []byte(req.GetDockerfileContent()), 0o644); err != nil {
+			return err
+		}
+		spec.Dockerfile = f
+	default:
+		p := req.GetDockerfilePath()
+		if p == "" {
+			p = "Dockerfile"
+		}
+		f, err := insideRoot(contextDir, p, "The Dockerfile")
+		if err != nil {
+			return err
+		}
+		spec.Dockerfile = f
+	}
+	secrets, args, err := splitEnv(req.GetEnv(), filepath.Join(work, "secrets"))
+	if err != nil {
+		return err
+	}
+	spec.Secrets, spec.BuildArgs = secrets, args
+	return nil
+}
+
+func (s *Service) railpackSpec(ctx context.Context, j *Job, req *agentv1.BuildRequest, spec *buildSpec, contextDir, work string) error {
+	bin, err := s.tools.Path(ctx, Railpack, j)
+	if err != nil {
+		return err
+	}
+	plan := filepath.Join(work, "railpack-plan.json")
+	args := []string{"prepare", contextDir, "--plan-out", plan, "--info-out", filepath.Join(work, "railpack-info.json")}
+	var env []string
+	for _, e := range req.GetEnv() {
+		arg, v := passVar(e.GetName(), e.GetValue())
+		args = append(args, "--env", arg)
+		if v != "" {
+			env = append(env, v)
+		}
+	}
+	if c := req.GetInstallCommand(); c != "" {
+		args = append(args, "--env", "RAILPACK_INSTALL_CMD="+c)
+	}
+	if c := req.GetBuildCommand(); c != "" {
+		args = append(args, "--build-cmd", c)
+	}
+	if c := req.GetStartCommand(); c != "" {
+		args = append(args, "--start-cmd", c)
+	}
+	fmt.Fprintln(j, "--> Planning the build with Railpack")
+	if err := s.opts.Runner.Run(ctx, Cmd{Name: bin, Args: args, Env: env, Stdout: j, Stderr: j}); err != nil {
+		return err
+	}
+	// Railpack hands every variable to the build as a BuildKit secret.
+	secrets, err := writeSecrets(req.GetEnv(), filepath.Join(work, "secrets"))
+	if err != nil {
+		return err
+	}
+	spec.Dockerfile = plan
+	spec.Secrets = secrets
+	spec.BuildArgs = []KV{
+		{"BUILDKIT_SYNTAX", RailpackFrontend},
+		// Changes when a value changes, so cached layers that used the old
+		// value are rebuilt.
+		{"secrets-hash", envHash(req.GetEnv())},
+	}
+	return nil
+}
+
+// buildScope picks the builder a build runs in: its project's, or for
+// panels that send no project, its service's.
+func buildScope(req *agentv1.BuildRequest) string {
+	if p := req.GetProjectId(); p != "" {
+		return p
+	}
+	return req.GetServiceId()
+}
+
+func (s *Service) nixpacksSpec(ctx context.Context, j *Job, req *agentv1.BuildRequest, spec *buildSpec, contextDir string) error {
+	bin, err := s.tools.Path(ctx, Nixpacks, j)
+	if err != nil {
+		return err
+	}
+	common := []string{contextDir}
+	var env []string
+	// Nixpacks has no build secrets: every variable it knows becomes an
+	// ARG/ENV of the image, readable in its config and history. Secret
+	// variables are left out of the build; the container still gets them
+	// at runtime from the service's env.
+	vars := nixpacksVars(req.GetEnv())
+	if n := len(req.GetEnv()) - len(vars); n > 0 {
+		fmt.Fprintf(j, "--> %d secret variable(s) are not available during a Nixpacks build (they would be stored in the image); "+
+			"they are set when the service runs. Use Railpack or a Dockerfile with RUN --mount=type=secret if the build needs them\n", n)
+	}
+	for _, e := range vars {
+		arg, v := passVar(e.GetName(), e.GetValue())
+		common = append(common, "--env", arg)
+		if v != "" {
+			env = append(env, v)
+		}
+	}
+	if c := req.GetInstallCommand(); c != "" {
+		common = append(common, "--install-cmd", c)
+	}
+	if c := req.GetBuildCommand(); c != "" {
+		common = append(common, "--build-cmd", c)
+	}
+	if c := req.GetStartCommand(); c != "" {
+		common = append(common, "--start-cmd", c)
+	}
+	// The plan lists the variables (ours plus Nixpacks defaults such as
+	// NODE_ENV) that the generated Dockerfile declares as build args.
+	var planOut strings.Builder
+	if err := s.opts.Runner.Run(ctx, Cmd{Name: bin, Args: append([]string{"plan"}, append(common, "--format", "json")...), Env: env, Stdout: &planOut, Stderr: j}); err != nil {
+		return err
+	}
+	var plan struct {
+		Variables map[string]string `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(planOut.String()), &plan); err != nil {
+		return fmt.Errorf("reading the Nixpacks plan: %w", err)
+	}
+	fmt.Fprintln(j, "--> Generating the Dockerfile with Nixpacks")
+	if err := s.opts.Runner.Run(ctx, Cmd{Name: bin, Args: append([]string{"build"}, append(common, "--out", contextDir)...), Env: env, Stdout: j, Stderr: j}); err != nil {
+		return err
+	}
+	args := plan.Variables
+	if args == nil {
+		args = map[string]string{}
+	}
+	for _, e := range vars {
+		args[e.GetName()] = e.GetValue()
+	}
+	for _, e := range req.GetEnv() {
+		if e.GetSecret() {
+			delete(args, e.GetName()) // never a build arg, even under a Nixpacks default's name
+		}
+	}
+	names := make([]string, 0, len(args))
+	for k := range args {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	for _, k := range names {
+		if envNameRe.MatchString(k) {
+			spec.BuildArgs = append(spec.BuildArgs, KV{k, args[k]})
+		}
+	}
+	spec.Dockerfile = filepath.Join(contextDir, ".nixpacks", "Dockerfile")
+	return nil
+}
+
+// nixpacksVars are the variables a Nixpacks build may see: all but the
+// secret ones.
+func nixpacksVars(env []*agentv1.EnvVar) []*agentv1.EnvVar {
+	out := make([]*agentv1.EnvVar, 0, len(env))
+	for _, e := range env {
+		if !e.GetSecret() {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// splitEnv makes every variable a BuildKit secret file (RUN
+// --mount=type=secret,id=NAME works for all of them, as with Railpack) and
+// the variables that are not secret also build args (ARG NAME), which can
+// end up in the image's history, so secret ones never are.
+func splitEnv(env []*agentv1.EnvVar, dir string) ([]Secret, []KV, error) {
+	var args []KV
+	for _, e := range env {
+		if !e.GetSecret() {
+			args = append(args, KV{e.GetName(), e.GetValue()})
+		}
+	}
+	files, err := writeSecrets(env, dir)
+	return files, args, err
+}
+
+// writeSecrets writes one 0600 file per variable for --secret src=.
+func writeSecrets(env []*agentv1.EnvVar, dir string) ([]Secret, error) {
+	if len(env) == 0 {
+		return nil, nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	out := make([]Secret, 0, len(env))
+	for _, e := range env {
+		f := filepath.Join(dir, e.GetName())
+		if err := os.WriteFile(f, []byte(e.GetValue()), 0o600); err != nil {
+			return nil, err
+		}
+		out = append(out, Secret{ID: e.GetName(), File: f})
+	}
+	return out, nil
+}
+
+func envHash(env []*agentv1.EnvVar) string {
+	pairs := make([]string, 0, len(env))
+	for _, e := range env {
+		pairs = append(pairs, e.GetName()+"="+e.GetValue())
+	}
+	slices.Sort(pairs)
+	h := sha256.Sum256([]byte(strings.Join(pairs, "\x00")))
+	return hex.EncodeToString(h[:])
+}
+
+// mirror pulls an existing image (logged in for this pull only) and tags
+// it as ref for the push.
+func (s *Service) mirror(ctx context.Context, j *Job, img *agentv1.ImageSource, ref, work string) error {
+	pull := s.cli
+	if auth := img.GetAuth(); auth.GetUsername() != "" {
+		// A throwaway Docker config: the login never outlives the build.
+		pull.configDir = filepath.Join(work, "docker-config")
+		if err := os.MkdirAll(pull.configDir, 0o700); err != nil {
+			return err
+		}
+		server := auth.GetServer()
+		if server == "" {
+			server = registryOf(img.GetReference())
+		}
+		fmt.Fprintf(j, "--> Logging in to %s as %s\n", server, auth.GetUsername())
+		c := pull.cmd(nil, "login", server, "--username", auth.GetUsername(), "--password-stdin")
+		c.Stdin = strings.NewReader(auth.GetPassword())
+		c.Stdout, c.Stderr = j, j
+		if err := s.opts.Runner.Run(ctx, c); err != nil {
+			return fmt.Errorf("%w: could not log in to %s", ErrFetch, server)
+		}
+	}
+	// Untag the source afterwards only if this build brought it: a tag the
+	// node already had may be used by something else.
+	_, inspectErr := s.cli.out(ctx, "image", "inspect", "--format", "{{.Id}}", img.GetReference())
+	hadImage := inspectErr == nil
+	fmt.Fprintf(j, "--> Pulling %s\n", img.GetReference())
+	if err := pull.stream(ctx, j, nil, "pull", img.GetReference()); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: could not pull %s - check the name and the registry login", ErrFetch, img.GetReference())
+	}
+	if _, err := s.cli.out(ctx, "tag", img.GetReference(), ref); err != nil {
+		return fmt.Errorf("tagging %s: %w", img.GetReference(), err)
+	}
+	if !hadImage {
+		// Only the name goes; the layers stay under ref.
+		_, _ = s.cli.out(ctx, "image", "rm", "--no-prune", img.GetReference())
+	}
+	return nil
+}
+
+// registryOf: "ghcr.io/o/a:1" -> "ghcr.io"; "nginx", "o/a" -> Docker Hub.
+func registryOf(image string) string {
+	first, _, ok := strings.Cut(image, "/")
+	if ok && (strings.ContainsAny(first, ".:") || first == "localhost") {
+		return first
+	}
+	return "docker.io"
+}
+
+// retain removes this service's older local images. Failures only log.
+func (s *Service) retain(ctx context.Context, j *Job, req *agentv1.BuildRequest) {
+	keep := int(req.GetKeepImages())
+	if keep == 0 {
+		keep = DefaultKeepImages
+	}
+	removed, err := s.cli.pruneImages(ctx, repository(req.GetImageReference()), keep)
+	if err != nil {
+		s.log.Warn("pruning old images", "service_id", req.GetServiceId(), "err", err)
+		return
+	}
+	for _, tag := range removed {
+		fmt.Fprintf(j, "--> Removed the old local image %s\n", tag)
+	}
+}
+
+// imageLabels mark a built image as Seylo's, for cleanup: managed, the
+// service and, when the tag is "<repo>:<generation>", the generation.
+func imageLabels(req *agentv1.BuildRequest) []KV {
+	labels := []KV{{docker.LabelManaged, "true"}, {docker.LabelService, req.GetServiceId()}}
+	ref := req.GetImageReference()
+	if i := strings.LastIndexByte(ref, ':'); i > strings.LastIndexByte(ref, '/') {
+		if _, err := strconv.ParseUint(ref[i+1:], 10, 64); err == nil {
+			labels = append(labels, KV{docker.LabelGeneration, ref[i+1:]})
+		}
+	}
+	return labels
+}

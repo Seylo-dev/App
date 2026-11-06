@@ -1,0 +1,19 @@
+# `make gen` runs this. Plugins are pinned through the repo itself:
+# protoc-gen-go by the `tool` directive in go/go.mod, protoc-gen-es by the
+# root package.json, so no globally installed plugin can drift the output.
+# protoc-gen-es runs under Bun: its `#!/usr/bin/env node` line would need
+# Node, which the repo does not require.
+version: v2
+clean: true
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/seylo-dev/app/go/gen/pb
+plugins:
+  - local: ["go", "-C", "go", "tool", "protoc-gen-go"]
+    out: go/gen/pb
+    opt: paths=source_relative
+  - local: ["bun", "node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es"]
+    out: packages/proto/src/gen
+    opt: target=ts

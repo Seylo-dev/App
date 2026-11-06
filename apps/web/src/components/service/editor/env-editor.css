@@ -1,0 +1,34 @@
+/* Decorations the env editor puts on Monaco's text (Environment.dc.html). */
+
+.seylo-env-ref {
+  background: var(--chip-violet-bg);
+  /* biome-ignore lint/complexity/noImportantStyles: Monaco colors tokens with its own class; the pill must win. */
+  color: var(--chip-violet-fg) !important;
+  border-radius: 4px;
+}
+
+.seylo-env-error-line {
+  background: color-mix(in srgb, var(--chip-red-bg) 70%, transparent);
+}
+
+.monaco-editor .margin .seylo-env-error-number {
+  /* biome-ignore lint/complexity/noImportantStyles: Monaco sets the line number color inline-specific. */
+  color: var(--status-error) !important;
+  font-weight: 500;
+}
+
+/*
+ * Secret values show as dots (Environment.dc.html). Every glyph becomes a disc
+ * of the same monospace width, so the cursor still lines up; the cursor's line
+ * is left out of the decoration while editing it. Browsers without
+ * text-security blur the value instead.
+ */
+.seylo-env-secret {
+  -webkit-text-security: disc;
+}
+
+@supports not (-webkit-text-security: disc) {
+  .seylo-env-secret {
+    filter: blur(4px);
+  }
+}

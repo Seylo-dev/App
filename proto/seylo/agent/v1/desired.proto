@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "seylo/agent/v1/routing.proto";
+import "seylo/agent/v1/service.proto";
+
+// DesiredState is everything the panel wants on one node. The agent stores
+// the last one on disk and keeps reconciling toward it while the panel is
+// unreachable.
+message DesiredState {
+  // Increases with every change on the panel. The agent ignores anything
+  // older than what it already applied.
+  uint64 revision = 1;
+  repeated ServiceSpec services = 2;
+  // Project networks (seylo-p-<project id>) this node needs. Networks of
+  // projects with no service here are removed.
+  repeated ProjectNetwork networks = 3;
+  NodeSettings settings = 4;
+}
+
+message ProjectNetwork {
+  string project_id = 1;
+}
+
+// NodeSettings are node-wide knobs the panel controls.
+message NodeSettings {
+  // Global maintenance page; overrides every service on the node.
+  Maintenance maintenance = 1;
+  // Next to Wings: give game servers CPU priority over Seylo services by
+  // lowering the CPUWeight of seylo.slice.
+  bool games_first_cpu = 2;
+  // Contact address for Let's Encrypt.
+  string acme_email = 3;
+  // Wildcard base for auto domains, for example "n1.example.com" with a
+  // *.n1.example.com A record pointing at this node.
+  string wildcard_domain = 4;
+  LogRetention log_retention = 5;
+  // Builds this node runs at the same time when it can build. 0 means 1;
+  // more wait in the agent's queue.
+  uint32 max_parallel_builds = 6;
+  // The panel's auto-update switch. When on, an agent older than the
+  // panel updates itself to the panel's release after it connects.
+  bool auto_update = 7;
+  // Mutual TLS for node-to-node load balancing (the LB entry point). Unset
+  // (older panels): the entry point accepts any client, as before.
+  LoadBalancerTls lb_tls = 8;
+}
+
+// LoadBalancerTls is this node's identity on the LB entry point, issued by
+// the panel's LB certificate authority.
+message LoadBalancerTls {
+  // PEM of the panel's LB CA. Peers and clients are verified against it.
+  string ca_pem = 1;
+  // This node's certificate (PEM, may include intermediates) and its private
+  // key (PEM). Valid for server_name, with both serverAuth and clientAuth
+  // extended key usages.
+  string cert_pem = 2;
+  string key_pem = 3;
+  // The DNS name every node's LB certificate carries; balancing nodes send it
+  // as SNI and verify it, for example "lb.seylo.internal".
+  string server_name = 4;
+}
+
+// LogRetention bounds the per-service log store (logs/<service id>/). The
+// oldest segments go first when either limit is reached.
+message LogRetention {
+  // 0 means 100 MiB per service.
+  uint64 max_bytes_per_service = 1;
+  // 0 means 14 days.
+  google.protobuf.Duration max_age = 2;
+}
+
+// SyncDesiredRequest replaces the whole desired state. The panel sends it
+// after every connect, then switches to ApplyService/RemoveService.
+message SyncDesiredRequest {
+  DesiredState state = 1;
+}
+
+message SyncDesiredResponse {
+  // Revision the agent now reconciles toward.
+  uint64 accepted_revision = 1;
+  // Services whose spec the agent could not use. The rest of the state was
+  // taken: a refused service keeps running its last valid spec, or is left
+  // out when it had none. Empty when every spec was taken. Agents from
+  // before this field refused the whole state with INVALID_ARGUMENT
+  // instead (ApplyService still does that for its one spec).
+  repeated RefusedService refused = 2;
+}
+
+// RefusedService is one spec of a SyncDesired the agent refused.
+message RefusedService {
+  string service_id = 1;
+  // Generation of the refused spec.
+  uint64 generation = 2;
+  // Why, in words for people (the validation error).
+  string message = 3;
+}
+
+// ApplyServiceRequest creates or updates one service. Deploys, rollbacks
+// (an older image digest) and setting changes are all applies.
+message ApplyServiceRequest {
+  // Desired state revision this change belongs to.
+  uint64 revision = 1;
+  ServiceSpec service = 2;
+}
+
+message ApplyServiceResponse {
+  uint64 accepted_revision = 1;
+}
+
+message RemoveServiceRequest {
+  uint64 revision = 1;
+  string service_id = 2;
+  // Also delete volumes and files. Without it they stay under
+  // services/<id>/ until cleanup removes orphans.
+  bool delete_data = 3;
+}
+
+message RemoveServiceResponse {
+  uint64 accepted_revision = 1;
+}
+
+// RestartServiceRequest restarts running instances without changing the
+// desired state (a restart is not a deploy).
+message RestartServiceRequest {
+  string service_id = 1;
+}
+
+message RestartServiceResponse {}

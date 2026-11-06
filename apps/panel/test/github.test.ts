@@ -1,0 +1,286 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHmac, generateKeyPairSync } from "node:crypto";
+import { deployments as deploymentOps, github, previews as previewOps, projects, services as serviceOps, webhooks } from "@seylo/ops";
+import { eq } from "drizzle-orm";
+import { deployments, githubApps, githubInstallations, previews, services, webhookDeliveries } from "../src/db/schema";
+import { pollBranches } from "../src/modules/github/poll";
+import { FakeFleet } from "./fake-fleet";
+import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+
+let panel: TestPanel;
+let fleet: FakeFleet;
+let cookie: string;
+let projectId: string;
+let nodeA: string;
+let installationRowId: string;
+const realFetch = globalThis.fetch;
+const secret = "whsec-test";
+let heads: Record<string, string>;
+let apiCalls: string[];
+
+function fakeGithub() {
+  apiCalls = [];
+  heads = { main: "1111111111111111111111111111111111111111" };
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const method = init?.method ?? "GET";
+    apiCalls.push(`${method} ${url.pathname}`);
+    const ok = (body: unknown, headers: Record<string, string> = {}) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", ...headers } });
+    if (url.host !== "api.github.com") return realFetch(input, init);
+    if (method === "POST" && /\/app\/installations\/\d+\/access_tokens$/.test(url.pathname)) {
+      return ok({ token: "ghs_installation", expires_at: new Date(Date.now() + 3600_000).toISOString() });
+    }
+    const commit = /^\/repos\/acme\/shop\/commits\/(.+)$/.exec(url.pathname);
+    if (commit) {
+      const ref = decodeURIComponent(commit[1] as string);
+      const sha = heads[ref] ?? ref;
+      if (init?.headers && (init.headers as Record<string, string>)["if-none-match"] === `"${sha}"`)
+        return new Response(null, { status: 304 });
+      return ok(
+        { sha, commit: { message: `commit ${sha.slice(0, 7)}\n\nbody`, author: { name: "Dev" } }, author: { login: "dev" } },
+        { etag: `"${sha}"` },
+      );
+    }
+    if (/^\/repos\/acme\/shop\/branches\//.test(url.pathname)) return ok({ name: "main" });
+    return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+  }) as typeof fetch;
+}
+
+beforeEach(async () => {
+  panel = testPanel();
+  fleet = new FakeFleet(panel);
+  nodeA = fleet.addNode("node-a", { canBuild: true, panelNode: true });
+  ({ cookie } = await createUser(panel, "owner"));
+  projectId = (await callOp(panel, projects.create, { name: "shop" }, { cookie })).body.id;
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const app = panel.deps.db
+    .insert(githubApps)
+    .values({
+      appId: 42,
+      slug: "seylo-test",
+      name: "Seylo test",
+      htmlUrl: "https://github.com/apps/seylo-test",
+      ownerLogin: "acme",
+      clientId: "Iv1.test",
+      clientSecretSealed: panel.deps.secrets.seal("cs", "github.app"),
+      privateKeySealed: panel.deps.secrets.seal(privateKey.export({ type: "pkcs1", format: "pem" }).toString(), "github.app"),
+      webhookSecretSealed: panel.deps.secrets.seal(secret, "github.app"),
+    })
+    .returning()
+    .get();
+  installationRowId = panel.deps.db
+    .insert(githubInstallations)
+    .values({ githubAppId: app.id, installationId: 7, accountLogin: "acme", accountType: "Organization" })
+    .returning()
+    .get().id;
+  fakeGithub();
+});
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  panel.close();
+});
+
+async function githubService(name = "web") {
+  const id = (
+    await callOp(
+      panel,
+      serviceOps.create,
+      { projectId, name, kind: "app", nodeId: nodeA, ports: [{ containerPort: 3000, protocol: "tcp" }] },
+      { cookie },
+    )
+  ).body.id;
+  const connected = await callOp(
+    panel,
+    github.connectRepo,
+    { serviceId: id, installationId: installationRowId, repo: "acme/shop", branch: "main", deployOnPush: true },
+    { cookie },
+  );
+  expect(connected.status).toBe(200);
+  expect(connected.body.sourceConfig).toMatchObject({ type: "github", repo: "acme/shop", branch: "main" });
+  return id as string;
+}
+
+async function post(event: string, payload: unknown, options: { sign?: string; delivery?: string } = {}) {
+  const body = JSON.stringify(payload);
+  const signature = `sha256=${createHmac("sha256", options.sign ?? secret)
+    .update(body)
+    .digest("hex")}`;
+  const res = await panel.app.handle(
+    new Request("http://panel.test/api/hooks/github", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": event,
+        "x-github-delivery": options.delivery ?? crypto.randomUUID(),
+        "x-hub-signature-256": signature,
+      },
+      body,
+    }),
+  );
+  await fleet.settle();
+  return { status: res.status, body: (await res.json()) as any };
+}
+
+const push = (branch: string, sha: string) => ({
+  ref: `refs/heads/${branch}`,
+  after: sha,
+  repository: { full_name: "acme/shop" },
+  head_commit: { id: sha, message: "Fix checkout\n\nmore", author: { username: "dev" } },
+  sender: { login: "dev" },
+});
+
+describe("GitHub webhooks", () => {
+  test("a signed push to the followed branch deploys that commit; other branches are ignored", async () => {
+    const id = await githubService();
+    const sha = "2222222222222222222222222222222222222222";
+    const res = await post("push", push("main", sha));
+    expect(res.body).toMatchObject({ ok: true, deployed: 1 });
+    const d = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).get();
+    expect(d).toMatchObject({ trigger: "push", actor: "dev", commitSha: sha, commitMessage: "Fix checkout" });
+    expect(fleet.builds[0]?.request).toMatchObject({
+      source: { source: { case: "git", value: { url: "https://github.com/acme/shop.git", commit: sha, token: "ghs_installation" } } },
+    });
+
+    await post("push", push("dev", "3333333333333333333333333333333333333333"));
+    const deliveries = (await callOp(panel, webhooks.listDeliveries, { serviceId: id }, { cookie })).body.deliveries;
+    expect(deliveries.map((d: { outcome: string }) => d.outcome)).toEqual(["ignored", "deployed"]);
+    expect(deliveries[0].detail).toContain("dev");
+  });
+
+  test("a bad signature is rejected and logged; a repeated delivery deploys once", async () => {
+    const id = await githubService();
+    const bad = await post("push", push("main", "4444444444444444444444444444444444444444"), { sign: "wrong" });
+    expect(bad.status).toBe(401);
+    expect(panel.deps.db.select().from(webhookDeliveries).where(eq(webhookDeliveries.outcome, "rejected")).all()).toHaveLength(1);
+
+    await post("push", push("main", "5555555555555555555555555555555555555555"), { delivery: "same" });
+    await post("push", push("main", "5555555555555555555555555555555555555555"), { delivery: "same" });
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).all()).toHaveLength(1);
+  });
+
+  test("pull requests open, update and close a preview service with the same env", async () => {
+    const id = await githubService();
+    const refused = await callOp(panel, previewOps.updateSettings, { serviceId: id, enabled: true }, { cookie });
+    expect(refused.body.error).toMatchObject({ code: "BAD_REQUEST", details: { field: "acknowledgeSharedEnv" } });
+    const on = await callOp(panel, previewOps.updateSettings, { serviceId: id, enabled: true, acknowledgeSharedEnv: true }, { cookie });
+    expect(on.body.enabled).toBe(true);
+
+    const pr = (action: string, sha: string) => ({
+      action,
+      number: 12,
+      pull_request: {
+        title: "New checkout",
+        head: { ref: "feat/checkout", sha, repo: { full_name: "acme/shop" } },
+        base: { ref: "main", repo: { full_name: "acme/shop" } },
+      },
+      repository: { full_name: "acme/shop" },
+      sender: { login: "dev" },
+    });
+    await post("pull_request", pr("opened", "6666666666666666666666666666666666666666"));
+    let list = (await callOp(panel, previewOps.list, { serviceId: id }, { cookie })).body.previews;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ prNumber: 12, branch: "feat/checkout", prTitle: "New checkout" });
+    const previewId = list[0].previewServiceId as string;
+    const previewSvc = panel.deps.db.select().from(services).where(eq(services.id, previewId)).get();
+    expect(previewSvc?.name).toBe("web-pr-12");
+    const pd = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, previewId)).all();
+    expect(pd.map((d) => d.trigger)).toEqual(["preview"]);
+
+    await post("pull_request", pr("synchronize", "7777777777777777777777777777777777777777"));
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, previewId)).all()).toHaveLength(2);
+
+    await post("pull_request", pr("closed", "7777777777777777777777777777777777777777"));
+    expect(panel.deps.db.select().from(services).where(eq(services.id, previewId)).get()).toBeUndefined();
+    list = (await callOp(panel, previewOps.list, { serviceId: id }, { cookie })).body.previews;
+    expect(list[0].closedAt).not.toBeNull();
+    expect(panel.deps.db.select().from(previews).all()).toHaveLength(1);
+  });
+
+  test("forks are not previewed", async () => {
+    const id = await githubService();
+    await callOp(panel, previewOps.updateSettings, { serviceId: id, enabled: true, acknowledgeSharedEnv: true }, { cookie });
+    await post("pull_request", {
+      action: "opened",
+      number: 3,
+      pull_request: {
+        title: "x",
+        head: { ref: "main", sha: "8888888888888888888888888888888888888888", repo: { full_name: "evil/shop" } },
+        base: { ref: "main", repo: { full_name: "acme/shop" } },
+      },
+      repository: { full_name: "acme/shop" },
+    });
+    expect((await callOp(panel, previewOps.list, { serviceId: id }, { cookie })).body.previews).toHaveLength(0);
+  });
+
+  test("polling deploys a commit the webhook missed", async () => {
+    const id = await githubService();
+    expect(await pollBranches(panel.deps)).toBe(0);
+    expect(await pollBranches(panel.deps)).toBe(0);
+    heads.main = "9999999999999999999999999999999999999999";
+    expect(await pollBranches(panel.deps)).toBe(1);
+    await fleet.settle();
+    const d = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).get();
+    expect(d?.commitSha).toBe(heads.main);
+  });
+});
+
+describe("deploy trigger URLs", () => {
+  test("rotate, call, and delete", async () => {
+    const id = (
+      await callOp(
+        panel,
+        serviceOps.create,
+        { projectId, name: "api", kind: "app", nodeId: nodeA, source: { type: "image", image: "nginx:1", registryId: null } },
+        { cookie },
+      )
+    ).body.id;
+    const rotated = await callOp(panel, webhooks.rotateTrigger, { serviceId: id }, { cookie });
+    expect(rotated.body.url).toStartWith("/api/hooks/deploy/");
+    const got = await callOp(panel, webhooks.getTrigger, { serviceId: id }, { cookie });
+    expect(got.body).toMatchObject({ configured: true, hint: rotated.body.hint });
+
+    const call = await panel.app.handle(new Request(`http://panel.test${rotated.body.url}`, { method: "POST" }));
+    expect(call.status).toBe(200);
+    const { deploymentId } = (await call.json()) as { deploymentId: string };
+    await fleet.settle();
+    const d = await callOp(panel, deploymentOps.get, { serviceId: id, deploymentId }, { cookie });
+    expect(d.body.deployment).toMatchObject({ trigger: "webhook", status: "deploying" });
+
+    const wrong = await panel.app.handle(new Request("http://panel.test/api/hooks/deploy/nope", { method: "POST" }));
+    expect(wrong.status).toBe(404);
+    await callOp(panel, webhooks.deleteTrigger, { serviceId: id }, { cookie });
+    const after = await panel.app.handle(new Request(`http://panel.test${rotated.body.url}`, { method: "POST" }));
+    expect(after.status).toBe(404);
+  });
+
+  test("distinct commits join one queued deploy, and a looping caller is rate limited", async () => {
+    const id = (
+      await callOp(
+        panel,
+        serviceOps.create,
+        { projectId, name: "worker", kind: "app", nodeId: nodeA, source: { type: "image", image: "nginx:1", registryId: null } },
+        { cookie },
+      )
+    ).body.id;
+    const { url } = (await callOp(panel, webhooks.rotateTrigger, { serviceId: id }, { cookie })).body;
+    // A deploy is waiting in the queue (another one of the service is running).
+    panel.deps.db
+      .insert(deployments)
+      .values({ serviceId: id, trigger: "webhook", status: "queued", generation: 99, actor: "test" } as never)
+      .run();
+    const statuses: number[] = [];
+    for (let i = 0; i < 14; i++) {
+      const commit = `${i.toString(16).padStart(2, "0")}${"a".repeat(38)}`;
+      statuses.push((await panel.app.handle(new Request(`http://panel.test${url}?commit=${commit}`, { method: "POST" }))).status);
+    }
+    expect(statuses).toContain(429);
+    const queued = panel.deps.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.serviceId, id))
+      .all()
+      .filter((d) => d.status === "queued");
+    expect(queued).toHaveLength(1);
+  });
+});

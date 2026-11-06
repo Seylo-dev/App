@@ -1,0 +1,25 @@
+{
+  "name": "seylo",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter @seylo/web build && bun run --filter @seylo/panel build",
+    "test": "bun run --filter './packages/*' --filter './apps/*' test",
+    "typecheck": "bun run --filter './packages/*' --filter './apps/*' typecheck",
+    "gen": "make gen",
+    "lint": "biome check .",
+    "format": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.5",
+    "@bufbuild/protoc-gen-es": "2.17.0",
+    "@seylo/brand": "workspace:*",
+    "@seylo/ops": "workspace:*",
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}

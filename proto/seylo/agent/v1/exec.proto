@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+
+// ExecRequest runs a short command in a service container and returns its
+// output. Interactive sessions use Shell instead.
+message ExecRequest {
+  string service_id = 1;
+  // Empty means the first running replica.
+  string container_id = 2;
+  repeated string command = 3;
+  bytes stdin = 4;
+  // Default 60s, maximum 10m.
+  google.protobuf.Duration timeout = 5;
+}
+
+message ExecResponse {
+  int32 exit_code = 1;
+  // Each capped at 1 MiB.
+  bytes stdout = 2;
+  bytes stderr = 3;
+  bool truncated = 4;
+}

@@ -1,0 +1,48 @@
+# Written by the Seylo agent for service svc5. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc5-probe:
+      entryPoints:
+        - web
+      rule: PathPrefix(`/_seylo/probe/svc5/189bcd05e4b1d6ab`) && Header(`X-Seylo-Probe`, `s3cret`)
+      priority: 2000000000
+      middlewares:
+        - seylo-svc5-probe-mark
+        - seylo-svc5-probe-path
+      service: seylo-svc5-edge
+    seylo-svc5-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`down.example.com`)
+      middlewares:
+        - seylo-svc5-down
+      service: seylo-svc5-edge
+      tls:
+        certResolver: le
+    seylo-svc5-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`down.example.com`)
+      middlewares:
+        - seylo-svc5-https
+      service: seylo-svc5-edge
+  middlewares:
+    seylo-svc5-down:
+      replacePath:
+        path: /_seylo/page/status/svc5
+    seylo-svc5-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc5-probe-mark:
+      headers:
+        customResponseHeaders:
+          X-Seylo-Route: 189bcd05e4b1d6ab
+    seylo-svc5-probe-path:
+      replacePath:
+        path: /_seylo/probe
+  services:
+    seylo-svc5-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756

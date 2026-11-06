@@ -1,0 +1,15 @@
+{
+  "name": "@seylo/env-analyzer",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "Parses .env text and ${{service.VAR}} references with source ranges, resolves them and reports diagnostics (for example an internal address of a service on another node). Shared by the web editor, the panel and MCP; no dependencies.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  }
+}

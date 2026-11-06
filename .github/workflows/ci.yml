@@ -1,0 +1,56 @@
+name: CI
+
+# Checks only; nothing here publishes. Tests that need Docker or VMs
+# (scripts/dev/vm-gotest.sh, test/playwright, make e2e) run locally; Go
+# integration tests sit behind build tags, so `go test ./...` stays hermetic.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # buf breaking compares against the base branch
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1.7.0
+        with:
+          version: 1.75.0
+          setup_only: true
+
+      # minisign signs the fake release the installer tests install from
+      # (they skip without it); dash is the /bin/sh they run the installer under.
+      - name: Installer test tools
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
+
+      - run: make install
+      - run: make check-gen
+      - run: make lint
+      - run: make test
+      - run: make build
+
+      - name: Proto breaking changes
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=origin/${{ github.base_ref }}"

@@ -1,0 +1,21 @@
+name: "Metabase"
+description: "Business intelligence: questions, dashboards and alerts on your data."
+category: "Analytics"
+tags: ["bi", "dashboards", "sql"]
+creates: "App + Postgres"
+links:
+  - label: "Website"
+    url: "https://www.metabase.com"
+  - label: "Docs"
+    url: "https://www.metabase.com/docs/latest"
+body: |
+  Metabase keeps its own settings in Postgres. The first start takes a minute or two; then create the admin account.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "metabase/metabase:v0.52.6"

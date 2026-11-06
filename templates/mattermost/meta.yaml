@@ -1,0 +1,21 @@
+name: "Mattermost"
+description: "Team chat with channels, threads, calls and integrations."
+category: "Communication"
+tags: ["chat", "team", "slack"]
+creates: "App + Postgres"
+links:
+  - label: "Website"
+    url: "https://mattermost.com"
+  - label: "Docs"
+    url: "https://docs.mattermost.com"
+body: |
+  Mattermost Team Edition on Postgres. The first account becomes the system admin. Email needs SMTP settings in the System Console.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "mattermost/mattermost-team-edition:10.4.1"

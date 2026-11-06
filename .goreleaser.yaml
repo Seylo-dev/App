@@ -1,0 +1,132 @@
+# Release build: static agent binaries for linux/amd64 and linux/arm64, the
+# laptop CLI for macOS and Windows (amd64, arm64), checksums signed with minisign, the multi-arch panel image, and the
+# rendered install.sh. The signed release manifest (manifest.json + .minisig,
+# read by the panel and the agents to update) needs the pushed image's
+# digest, so `make release` writes and uploads it after this run
+# (scripts/release-manifest.sh).
+#
+# Brand values come from installer/brand.env as BRAND_* environment
+# variables, and GO_MODULE from go/go.mod; run through the Makefile
+# (`make release` or `make release-snapshot`), which exports them.
+version: 2
+project_name: "{{ .Env.BRAND_SLUG }}"
+
+before:
+  hooks:
+    - bun install --frozen-lockfile
+    - bun run build
+    - scripts/render-installer.sh {{ .Version }} dist/install.sh
+
+builds:
+  - id: agent
+    dir: go
+    main: ./cmd/seylo
+    binary: "{{ .Env.BRAND_SLUG }}"
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X {{ .Env.GO_MODULE }}/internal/version.Version={{ .Version }}
+      - -X {{ .Env.GO_MODULE }}/internal/version.Commit={{ .ShortCommit }}
+      - -X {{ .Env.GO_MODULE }}/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  # The laptop CLI for macOS and Windows (same binary; node commands answer
+  # that they run on a Linux server). Only the linux builds go into the
+  # update manifest.
+  - id: cli
+    dir: go
+    main: ./cmd/seylo
+    binary: "{{ .Env.BRAND_SLUG }}"
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X {{ .Env.GO_MODULE }}/internal/version.Version={{ .Version }}
+      - -X {{ .Env.GO_MODULE }}/internal/version.Commit={{ .ShortCommit }}
+      - -X {{ .Env.GO_MODULE }}/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  # Plain binaries: the installer and the agent updater download them as is
+  # (<slug>_linux_arm64, <slug>_darwin_arm64, <slug>_windows_amd64.exe).
+  - id: binaries
+    ids: [agent, cli]
+    formats: [binary]
+    name_template: "{{ .Env.BRAND_SLUG }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+signs:
+  # minisign -S with the release key; MINISIGN_SECRET_KEY is the key file,
+  # MINISIGN_PASSWORD its password. Its public half is brand.json
+  # minisignPublicKey.
+  - id: checksums
+    artifacts: checksum
+    cmd: minisign
+    stdin: "{{ .Env.MINISIGN_PASSWORD }}"
+    args:
+      - -S
+      - -s
+      - "{{ .Env.MINISIGN_SECRET_KEY }}"
+      - -m
+      - "${artifact}"
+      - -x
+      - "${signature}"
+      - -t
+      - "{{ .ProjectName }} {{ .Version }} checksums.txt"
+    signature: "${artifact}.minisig"
+
+dockers_v2:
+  - id: panel
+    ids: [agent]
+    dockerfile: deploy/panel.Dockerfile
+    images:
+      - "{{ .Env.BRAND_IMAGE }}"
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    extra_files:
+      - apps/panel/package.json
+      - apps/panel/dist
+      - apps/panel/drizzle
+      - apps/web/dist
+      - templates
+    build_args:
+      VERSION: "{{ .Version }}"
+      REVISION: "{{ .FullCommit }}"
+      ENV_PREFIX: "{{ .Env.BRAND_ENV_PREFIX }}"
+      DATA_DIR: "{{ .Env.BRAND_DATA_DIR }}"
+    labels:
+      org.opencontainers.image.source: "https://github.com/{{ .Env.BRAND_GITHUB_ORG }}/{{ .Env.BRAND_GITHUB_REPO }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+
+release:
+  github:
+    owner: "{{ .Env.BRAND_GITHUB_ORG }}"
+    name: "{{ .Env.BRAND_GITHUB_REPO }}"
+  draft: true
+  # install.sh is what the install host serves; openapi.json is the API
+  # reference the docs sync from releases/latest/download/openapi.json.
+  extra_files:
+    - glob: dist/install.sh
+    - glob: openapi.json
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge "

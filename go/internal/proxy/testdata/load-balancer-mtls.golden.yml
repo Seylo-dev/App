@@ -1,0 +1,91 @@
+# Written by the Seylo agent for service svc7. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-svc7-r-r1:
+      entryPoints:
+        - websecure
+      rule: (Host(`lb.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 22
+      middlewares:
+        - seylo-svc7-unreachable
+      service: seylo-svc7
+      tls:
+        certResolver: le
+    seylo-svc7-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`lb.example.com`)
+      middlewares:
+        - seylo-svc7-https
+      service: seylo-svc7
+    seylo-svc7-r-r1-lb:
+      entryPoints:
+        - seylo-lb
+      rule: Host(`lb.example.com`)
+      middlewares:
+        - seylo-svc7-unreachable
+      service: seylo-svc7-local
+      tls:
+        options: seylo-lb
+    seylo-svc7-r-r1-retry:
+      entryPoints:
+        - websecure
+      rule: (Host(`lb.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 22
+      middlewares:
+        - seylo-svc7-unreachable
+      service: seylo-svc7-retry
+      tls:
+        certResolver: le
+  middlewares:
+    seylo-svc7-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-svc7-unreachable:
+      errors:
+        status:
+          - "502"
+          - "504"
+        service: seylo-svc7-edge
+        query: /_seylo/page/status/svc7
+  services:
+    seylo-svc7:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc7-4:3000
+          - url: https://198.51.100.2:5757
+        serversTransport: seylo-svc7-remote
+    seylo-svc7-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756
+    seylo-svc7-local:
+      loadBalancer:
+        servers:
+          - url: http://seylo-svc7-4:3000
+    seylo-svc7-retry:
+      failover:
+        service: seylo-svc7
+        fallback: seylo-svc7-local
+        errors:
+          status:
+            - 502-504
+          maxRequestBodyBytes: 1048576
+  serversTransports:
+    seylo-svc7-remote:
+      serverName: lb.seylo.internal
+      rootCAs:
+        - |
+          -----BEGIN CERTIFICATE-----
+          CA
+          -----END CERTIFICATE-----
+      certificates:
+        - certFile: |
+            -----BEGIN CERTIFICATE-----
+            NODE
+            -----END CERTIFICATE-----
+          keyFile: |
+            -----BEGIN PRIVATE KEY-----
+            KEY
+            -----END PRIVATE KEY-----

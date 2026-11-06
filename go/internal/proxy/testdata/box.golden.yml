@@ -1,0 +1,33 @@
+# Written by the Seylo agent for service box1. Rewritten on every change; do not edit.
+http:
+  routers:
+    seylo-box1-r-r1:
+      entryPoints:
+        - websecure
+      rule: Host(`box.n1.example.com`)
+      middlewares:
+        - seylo-box1-tool
+      service: seylo-box1-edge
+      tls:
+        certResolver: le
+    seylo-box1-r-r1-http:
+      entryPoints:
+        - web
+      rule: Host(`box.n1.example.com`)
+      middlewares:
+        - seylo-box1-https
+      service: seylo-box1-edge
+  middlewares:
+    seylo-box1-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    seylo-box1-tool:
+      headers:
+        customRequestHeaders:
+          X-Seylo-Tool: box:box1
+  services:
+    seylo-box1-edge:
+      loadBalancer:
+        servers:
+          - url: http://172.30.0.1:5756

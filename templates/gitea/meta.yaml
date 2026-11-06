@@ -1,0 +1,22 @@
+name: "Gitea"
+description: "Painless self-hosted Git service: repositories, issues, pull requests and CI."
+category: "Developer tools"
+tags: ["git", "devops"]
+creates: "App + Postgres"
+links:
+  - label: "Website"
+    url: "https://about.gitea.com"
+  - label: "Docs"
+    url: "https://docs.gitea.com"
+body: |
+  Gitea hosts Git repositories over HTTPS. The first account you register becomes the administrator.
+  SSH access needs a timed or exposed port to 22; HTTPS works through the domain.
+schema:
+  type: object
+  required: ["image"]
+  properties:
+    image:
+      type: "string"
+      title: "Image"
+      description: "Docker image and tag to run."
+      default: "gitea/gitea:1.23.1"

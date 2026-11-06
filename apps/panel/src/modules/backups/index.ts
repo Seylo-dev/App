@@ -1,0 +1,71 @@
+// Backups: S3/R2 destinations (sealed keys, connection test), schedules per
+// database or volume, run now, the run list, restores (a job, optionally
+// after a safety backup) and deleting backups. Results come back from the
+// agents as durable BackupResult events.
+
+import { defineJob } from "../../jobs/queue";
+import { defineModule } from "../module";
+import {
+  createDestination,
+  createPolicy,
+  deleteDestination,
+  deletePolicy,
+  deleteRun,
+  listDestinations,
+  listPolicies,
+  listRuns,
+  restore,
+  restoreJobType,
+  runNow,
+  testDestination,
+  updateDestination,
+  updatePolicy,
+} from "./ops";
+import { type RestorePayload, recordBackupResult, runRestore, sweepStaleBackups } from "./runs";
+import { runDueBackups } from "./schedule";
+
+const scheduleType = "backups.schedule";
+
+const scheduleJob = defineJob({
+  type: scheduleType,
+  maxAttempts: 1,
+  run: async (_payload, ctx) => {
+    sweepStaleBackups(ctx);
+    await runDueBackups(ctx);
+  },
+});
+
+const restoreJob = defineJob<RestorePayload>({
+  type: restoreJobType,
+  // Never repeat a restore on its own: a second one would overwrite newer data.
+  maxAttempts: 1,
+  // Waits for a safety backup and the restore itself, up to hours.
+  lane: "slow",
+  run: (payload, ctx) => runRestore(ctx, payload),
+});
+
+export default defineModule({
+  name: "backups",
+  ops: [
+    listDestinations,
+    createDestination,
+    updateDestination,
+    deleteDestination,
+    testDestination,
+    listPolicies,
+    createPolicy,
+    updatePolicy,
+    deletePolicy,
+    runNow,
+    listRuns,
+    restore,
+    deleteRun,
+  ],
+  jobs: [scheduleJob, restoreJob],
+  start(deps) {
+    deps.agents.onEvent("backupResult", (nodeId, result) => {
+      recordBackupResult(deps, nodeId, result);
+    });
+    deps.schedules.ensure({ key: scheduleType, jobType: scheduleType, intervalSeconds: 60 });
+  },
+});

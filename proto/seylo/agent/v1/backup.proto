@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+// Backups go straight from the node to S3-compatible storage (S3, R2, ...);
+// the panel only schedules them and records results.
+
+message BackupDestination {
+  // For example "https://<account>.r2.cloudflarestorage.com".
+  string endpoint = 1;
+  string region = 2;
+  string bucket = 3;
+  // Key prefix inside the bucket.
+  string prefix = 4;
+  string access_key_id = 5;
+  string secret_access_key = 6;
+  bool path_style = 7;
+}
+
+message BackupSubject {
+  string service_id = 1;
+  oneof what {
+    // A volume of the service, archived as .tar.gz.
+    string volume = 2;
+    // A logical dump of the service's database (engine from DatabaseSpec).
+    DatabaseDump database = 3;
+  }
+}
+
+message DatabaseDump {
+  // Empty means every database.
+  string database = 1;
+}
+
+// RunBackupRequest starts a backup and returns once it is accepted. The
+// result arrives as a durable BackupResult event, so it survives a dropped
+// connection.
+message RunBackupRequest {
+  string backup_id = 1;
+  string run_id = 2;
+  BackupSubject subject = 3;
+  BackupDestination destination = 4;
+  // Volume backups only: stop the service for the copy and start it again
+  // afterwards, for apps (SQLite and friends) whose files are not safe to
+  // copy while they run. Database dumps never need it.
+  bool stop_service = 5;
+  // Retention: after a successful upload keep only the newest keep_last
+  // objects of this backup_id (same service, same prefix) and delete the
+  // older ones. 0 keeps everything.
+  uint32 keep_last = 6;
+}
+
+message RunBackupResponse {}
+
+// Object keys written by RunBackup:
+//
+//   <prefix>/<service_id>/<backup_id>/<UTC 20060102T150405Z>-<run_id><ext>
+//
+// where ext is ".tar.gz" for volumes, ".dump" for a Postgres custom-format
+// dump of one database, ".sql.gz" for pg_dumpall, mysqldump and
+// mariadb-dump, ".archive.gz" for mongodump and ".rdb.gz" for Redis. Keys
+// sort by time, which is what retention relies on. Restores read the
+// format from the extension.
+
+// BackupProgress is best-effort progress of a running backup.
+message BackupProgress {
+  string backup_id = 1;
+  string run_id = 2;
+  BackupPhase phase = 3;
+  // Bytes uploaded so far (after compression).
+  uint64 bytes_done = 4;
+}
+
+enum BackupPhase {
+  BACKUP_PHASE_UNSPECIFIED = 0;
+  // Stopping the service for a consistent volume copy (stop_service).
+  BACKUP_PHASE_STOPPING_SERVICE = 1;
+  // Archiving or dumping and uploading at the same time.
+  BACKUP_PHASE_UPLOADING = 2;
+  BACKUP_PHASE_STARTING_SERVICE = 3;
+  // Deleting objects past keep_last.
+  BACKUP_PHASE_PRUNING = 4;
+}
+
+// RestoreBackupRequest restores an object into the subject and returns when
+// done. The service is stopped during a volume restore.
+message RestoreBackupRequest {
+  BackupSubject subject = 1;
+  BackupDestination destination = 2;
+  string object_key = 3;
+}
+
+message RestoreBackupResponse {
+  uint64 restored_bytes = 1;
+}

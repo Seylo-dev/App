@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// NodeFacts describes a node. The agent sends it in ClientHello and
+// whenever it changes (GetNodeFacts returns the current value).
+message NodeFacts {
+  string hostname = 1;
+  // For example "ubuntu 24.04".
+  string os = 2;
+  string kernel = 3;
+  // GOARCH spelling: "amd64", "arm64".
+  string arch = 4;
+  uint32 cpu_cores = 5;
+  uint64 memory_total_bytes = 6;
+  // Size and free space of the file system holding the data dir.
+  uint64 disk_total_bytes = 7;
+  uint64 disk_free_bytes = 8;
+  string docker_version = 9;
+  string docker_api_version = 10;
+  // 1 or 2.
+  uint32 cgroup_version = 11;
+  string public_ipv4 = 12;
+  string public_ipv6 = 13;
+  google.protobuf.Timestamp boot_time = 14;
+  string agent_version = 15;
+  // Capability strings this agent supports, named "<area>.<feature>.v<n>",
+  // for example "fs.archive.v1". The panel only calls methods whose
+  // capability (the `capability` method option in options.proto) the agent
+  // advertised, which is how new RPCs roll out to a fleet of mixed versions.
+  repeated string capabilities = 16;
+  // Present when Pelican Wings runs on this node.
+  WingsInfo wings = 17;
+  // The owner allowed builds on this node (node config "can_build").
+  bool can_build = 18;
+  // The node's private IPv4: the local address it reaches the panel from,
+  // or its default-route address when the panel is on the same host. Empty
+  // when that address is public (then it is public_ipv4) or unknown. The
+  // panel falls back to it for node addresses when public_ipv4 is empty
+  // (nodes that share one private network).
+  string private_ipv4 = 19;
+}
+
+// WingsInfo describes a Pelican Wings installation found next to the agent.
+message WingsInfo {
+  string version = 1;
+  // Dynamic configuration folder of the Wings fork's Traefik. When set the
+  // agent writes its seylo-*.yml route files there instead of running its
+  // own Traefik.
+  string traefik_dynamic_dir = 2;
+  // The fork advertises that it leaves foreign (seylo-*) route files alone.
+  bool foreign_routes_supported = 3;
+  // Name of the fork's Traefik container (the proxy in front of services
+  // and the panel on this node). The panel trusts X-Forwarded-* only from
+  // its proxy containers; without Wings that is the agent's own Traefik.
+  string proxy_container = 4;
+}
