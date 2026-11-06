@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -58,6 +59,9 @@ type FakePanel struct {
 	hosts []string
 	// linger keeps an ended session registered this long.
 	linger time.Duration
+	// drops counts DropConnections calls. A connection accepted before the
+	// latest one ends instead of registering its session.
+	drops uint64
 }
 
 // Report is one delivered outbox report.
@@ -245,7 +249,10 @@ func (p *FakePanel) WaitConnected(nodeID string) string {
 	return got
 }
 
-// WaitDisconnected waits until nodeID has no live session.
+// WaitDisconnected waits until nodeID has no live session, after the agent
+// stopped. Not after DropConnections: that returns once its sessions are
+// gone, and an agent that reconnects at once may leave no moment without
+// a session to see.
 func (p *FakePanel) WaitDisconnected(nodeID string) {
 	p.tb.Helper()
 	p.waitFor("the agent to disconnect", func() bool { return p.sessions[nodeID] == nil })
@@ -259,18 +266,32 @@ func (p *FakePanel) Session(nodeID string) *rpc.Session {
 	return p.sessions[nodeID]
 }
 
-// DropConnections closes every agent session, like a panel restart.
+// DropConnections closes every agent session, like a panel restart, and
+// returns once the panel no longer holds them (HoldClosedSessions' time
+// included): a resume after it is not refused as already connected, and
+// the session of an agent that reconnected at once may already be live.
+// A connection whose hello was already accepted (it is in AcceptedHosts and
+// Hellos) but whose session is not registered yet ends instead of
+// registering, so a test that waited for the accept and then drops never
+// leaves that session up.
 func (p *FakePanel) DropConnections() {
+	p.tb.Helper()
 	p.mu.Lock()
-	sessions := make([]*rpc.Session, 0, len(p.sessions))
-	for _, s := range p.sessions {
-		sessions = append(sessions, s)
-	}
+	p.drops++
+	dropped := maps.Clone(p.sessions)
 	p.mu.Unlock()
-	for _, s := range sessions {
+	for _, s := range dropped {
 		s.Close(nil)
 		<-s.Done()
 	}
+	p.waitFor("the dropped sessions to end", func() bool {
+		for id, s := range dropped {
+			if p.sessions[id] == s {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 // Hellos returns every ClientHello received, in order.
@@ -339,6 +360,8 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 	server := &agentv1.ServerHello{PanelId: p.PanelID, PanelVersion: "test", Nonce: nonce, Capabilities: caps}
 
 	var nodeID string
+	// drops is p.drops when the hello was accepted.
+	var drops uint64
 	hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	hello, _, err := rpc.PanelHandshake(hctx, t, server, func(h *agentv1.ClientHello) (*agentv1.HelloAccepted, *agentv1.HelloRejected) {
 		p.mu.Lock()
@@ -350,7 +373,7 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 			p.notify()
 			return nil, rej
 		}
-		nodeID = id
+		nodeID, drops = id, p.drops
 		p.hosts = append(p.hosts, r.Host)
 		return &agentv1.HelloAccepted{NodeId: id, SessionId: fmt.Sprintf("s%d", len(p.hellos)), EdgeTicketPublicKey: p.EdgeKey,
 			PanelUrl: p.moveURL, PanelPin: p.movePin}, nil
@@ -374,6 +397,12 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	p.mu.Lock()
+	if p.drops != drops {
+		// DropConnections ran between the accept and here.
+		p.mu.Unlock()
+		_ = session.Close(nil)
+		return
+	}
 	p.sessions[nodeID] = session
 	p.notify()
 	p.mu.Unlock()

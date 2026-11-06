@@ -59,8 +59,9 @@ func TestJoinWithUnwritableConfigResumes(t *testing.T) {
 	if cfg, _ := LoadConfig(layout.ConfigFile()); cfg == nil || cfg.NodeID != "" {
 		t.Fatalf("config.yml = %+v, expected the write to fail", cfg)
 	}
+	// DropConnections returns once the old session is gone: the live one is
+	// the reconnect.
 	panel.DropConnections()
-	panel.WaitDisconnected(nodeID)
 	panel.WaitConnected(nodeID)
 	hellos := panel.Hellos()
 	if len(hellos) < 2 || hellos[1].GetResume().GetNodeId() != nodeID {

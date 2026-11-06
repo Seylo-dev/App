@@ -189,9 +189,9 @@ func TestJoinResumeAndCallsBothWays(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 
-	// A dropped connection comes back with a resume.
+	// A dropped connection comes back with a resume. DropConnections returns
+	// once the old session is gone, so the live one is the reconnect.
 	panel.DropConnections()
-	panel.WaitDisconnected(nodeID)
 	panel.WaitConnected(nodeID)
 	hellos := panel.Hellos()
 	if last := hellos[len(hellos)-1]; last.GetResume().GetNodeId() != nodeID {
