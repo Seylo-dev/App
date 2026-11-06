@@ -28,7 +28,7 @@ dir="$root/.vmbin/it-gitea"
 rm -rf "$dir" && mkdir -p "$dir"
 
 cleanup() {
-  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker rm -fv "$name" >/dev/null 2>&1 || true
   rm -rf "$dir"
 }
 trap cleanup EXIT
@@ -36,7 +36,7 @@ trap cleanup EXIT
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=gitproviders-it" \
   -addext "subjectAltName=IP:$vm_ip" -keyout "$dir/key.pem" -out "$dir/cert.pem" 2>/dev/null
 
-docker rm -f "$name" >/dev/null 2>&1 || true
+docker rm -fv "$name" >/dev/null 2>&1 || true
 docker create --name "$name" -p "$gitea_port:3000" \
   -e USER_UID=1000 -e USER_GID=1000 \
   -e GITEA__security__INSTALL_LOCK=true \
