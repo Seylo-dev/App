@@ -1,9 +1,12 @@
 // The repository webhook of a service with a provider source: created when
 // the repository is connected (with its own secret, sealed), removed from
-// the provider when the service is deleted or its source changes, and
-// pointed at the panel domain once one is set. The webhook's row id is in
-// its URL (POST /api/hooks/<kind>/<id>), so a delivery names the service
-// and the secret to check before anything in it is read.
+// the provider when the service is deleted or its source changes, pointed
+// at the panel domain once one is set, and created again when the provider
+// refused it. The webhook's row id is in its URL (POST
+// /api/hooks/<kind>/<id>), so a delivery names the service and the secret
+// to check before anything in it is read. GitLab sends the secret itself
+// with every delivery (nothing is signed), so its hooks need an https://
+// address; Gitea and Bitbucket sign the body and may use http://.
 
 import { randomBytes } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
@@ -35,6 +38,10 @@ export function hookBase(deps: Pick<Deps, "db">, origin?: string | null): string
   if (origin && /^https?:\/\/[^/\s]+$/.test(origin.replace(/\/$/, ""))) return origin.replace(/\/$/, "");
   return null;
 }
+
+/** Why a GitLab webhook was not created at a plain http:// address. */
+export const gitlabNeedsHttps =
+  "GitLab sends the webhook's secret token in clear with every delivery, so the webhook needs an https:// address: set the panel domain (Settings > General), then create the webhook again. Pushes are polled until then.";
 
 export function webhookOf(deps: Pick<Deps, "db">, serviceId: string): WebhookRow | undefined {
   return deps.db.select().from(gitProviderWebhooks).where(eq(gitProviderWebhooks.serviceId, serviceId)).get();
@@ -74,6 +81,9 @@ export async function ensureHook(
       .where(eq(gitProviderWebhooks.id, row.id))
       .returning()
       .get();
+  }
+  if (input.provider.kind === "gitlab" && !base.startsWith("https://")) {
+    return deps.db.update(gitProviderWebhooks).set({ error: gitlabNeedsHttps }).where(eq(gitProviderWebhooks.id, row.id)).returning().get();
   }
   const url = `${base}${hookPath(input.provider.kind, row.id)}`;
   try {
@@ -139,30 +149,34 @@ const lastRepair = new WeakMap<object, Map<string, number>>();
 const repairEveryMs = 60 * 60_000;
 
 /**
- * Points webhooks at the panel domain once it is set (or changes): each
- * hook whose URL is not on the current domain is created again, at most
- * once an hour per service. Runs with the poll schedule.
+ * Repairs webhooks, at most once an hour per service; runs with the poll
+ * schedule. A hook that is not on the current panel domain is created
+ * there (the domain was set or changed), and one the provider refused to
+ * create (an outage, a token without the scope) is tried again at the
+ * panel domain, else at the address it was meant for.
  */
-export async function moveHooksToDomain(deps: Deps): Promise<number> {
-  const base = panelBaseUrl(deps.db);
-  if (!base) return 0;
+export async function repairHooks(deps: Deps, now = Date.now()): Promise<number> {
+  const domain = panelBaseUrl(deps.db);
   let tries = lastRepair.get(deps.db);
   if (!tries) {
     tries = new Map();
     lastRepair.set(deps.db, tries);
   }
-  let moved = 0;
+  let repaired = 0;
   for (const row of deps.db.select().from(gitProviderWebhooks).all()) {
-    if (row.url?.startsWith(`${base}/`)) continue;
-    if (Date.now() - (tries.get(row.serviceId) ?? 0) < repairEveryMs) continue;
-    tries.set(row.serviceId, Date.now());
+    const base = domain ?? (row.url ? new URL(row.url).origin : null);
+    // Nowhere to point it yet: the row already says to set the panel domain.
+    if (!base) continue;
+    if (row.remoteId && row.url?.startsWith(`${base}/`)) continue;
+    if (now - (tries.get(row.serviceId) ?? 0) < repairEveryMs) continue;
+    tries.set(row.serviceId, now);
     try {
       const provider = loadProvider(deps.db, row.providerId);
       const next = await ensureHook(deps, { serviceId: row.serviceId, provider, repo: row.repo, force: true });
-      if (next.remoteId) moved++;
+      if (next.remoteId) repaired++;
     } catch (error) {
-      deps.logger.warn({ err: error, serviceId: row.serviceId }, "moving a repository webhook to the panel domain failed");
+      deps.logger.warn({ err: error, serviceId: row.serviceId }, "repairing a repository webhook failed");
     }
   }
-  return moved;
+  return repaired;
 }

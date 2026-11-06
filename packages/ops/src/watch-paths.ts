@@ -13,12 +13,19 @@
 // So "*.md" is a file in the root only; "**/*.md" is one anywhere.
 //
 // The panel runs this on every push and the web app runs it in the watch
-// paths tester, so both always agree.
+// paths tester, so both always agree. Matching never backtracks: a glob is
+// a small automaton run over the path once (time grows with the path
+// times the pattern, never with combinations of "**"), so a pattern like
+// "**/**/**/*.md" cannot stall the panel on a deep path. Changed paths
+// longer than maxChangedPathLength are not matched at all: they make the
+// list incomplete, which deploys.
 
 /** Most patterns a service may have. */
 export const maxWatchPaths = 50;
 /** Longest pattern. */
 export const maxWatchPathLength = 300;
+/** Longest changed path that is matched; git allows longer, no real repository has them. */
+export const maxChangedPathLength = 4096;
 
 /** Trims a pattern and drops a leading "./" or "/"; a trailing "/" means everything below. */
 export function normalizeWatchPattern(raw: string): string {
@@ -50,39 +57,140 @@ export function watchPatternProblem(pattern: string): string | null {
   return null;
 }
 
+/** One step of a compiled glob. */
+type GlobStep =
+  | { kind: "char"; char: string }
+  /** "?": one character except "/". */
+  | { kind: "one" }
+  /** "*": any run of characters except "/". */
+  | { kind: "star" }
+  /** "**" (not a whole segment): any run of characters. */
+  | { kind: "any" }
+  /** "**\/" at the start of a segment: nothing, or any run that ends in "/". */
+  | { kind: "dirs" };
+
+const compiledSteps = new Map<string, GlobStep[]>();
+
+/**
+ * The steps of a glob (without the "!"). Repeats collapse: "**\/**\/" is
+ * one "**\/", and "**\/" followed by "**" is one "**".
+ */
+function globSteps(glob: string): GlobStep[] {
+  const hit = compiledSteps.get(glob);
+  if (hit) return hit;
+  const steps: GlobStep[] = [];
+  const push = (step: GlobStep) => {
+    const last = steps.at(-1);
+    if (last?.kind === "dirs" && step.kind === "dirs") return;
+    if (last?.kind === "dirs" && step.kind === "any") steps.pop();
+    steps.push(step);
+  };
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i] as string;
+    if (c !== "*") {
+      push(c === "?" ? { kind: "one" } : { kind: "char", char: c });
+      continue;
+    }
+    let run = 1;
+    while (glob[i + run] === "*") run++;
+    const atSegmentStart = i === 0 || glob[i - 1] === "/";
+    if (run === 1) {
+      push({ kind: "star" });
+    } else if (run === 2 && atSegmentStart && glob[i + 2] === "/") {
+      // "**/": zero or more folders.
+      push({ kind: "dirs" });
+      run++;
+    } else {
+      push({ kind: "any" });
+    }
+    i += run - 1;
+  }
+  if (compiledSteps.size > 2000) compiledSteps.clear();
+  compiledSteps.set(glob, steps);
+  return steps;
+}
+
 const compiled = new Map<string, RegExp>();
 
-/** The regular expression for one glob (without the "!"). */
+/**
+ * The regular expression for one glob (without the "!"), with repeats
+ * collapsed. For showing and testing a pattern: matching uses
+ * globMatches, which never backtracks.
+ */
 export function globToRegExp(glob: string): RegExp {
   const hit = compiled.get(glob);
   if (hit) return hit;
   let out = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i] as string;
-    if (c === "*") {
-      if (glob[i + 1] === "*") {
-        const atSegmentStart = i === 0 || glob[i - 1] === "/";
-        i++;
-        if (atSegmentStart && glob[i + 1] === "/") {
-          // "**/": zero or more folders.
-          i++;
-          out += "(?:.*/)?";
-        } else {
-          out += ".*";
-        }
-      } else {
-        out += "[^/]*";
-      }
-    } else if (c === "?") {
-      out += "[^/]";
-    } else {
-      out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
+  for (const step of globSteps(glob)) {
+    if (step.kind === "char") out += step.char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    else if (step.kind === "one") out += "[^/]";
+    else if (step.kind === "star") out += "[^/]*";
+    else if (step.kind === "any") out += ".*";
+    else out += "(?:.*/)?";
   }
   const re = new RegExp(`^${out}$`);
   if (compiled.size > 2000) compiled.clear();
   compiled.set(glob, re);
   return re;
+}
+
+/**
+ * Whether a glob (without the "!") matches a whole path. Runs the glob as
+ * a set of positions over the path's characters once: no backtracking.
+ */
+export function globMatches(glob: string, path: string): boolean {
+  const steps = globSteps(glob);
+  const n = steps.length;
+  // States 0..n: before step i (n: the whole glob matched); n + 1 + i: inside the run of the "**/" at step i.
+  const seenAt = new Int32Array(2 * n + 2).fill(-1);
+  const stack: number[] = [];
+  let current: number[] = [];
+  let next: number[] = [];
+  let round = 0;
+  // Adds a state and every state reachable from it without reading a character.
+  const add = (into: number[], state: number) => {
+    stack.push(state);
+    while (stack.length > 0) {
+      const s = stack.pop() as number;
+      if (seenAt[s] === round) continue;
+      seenAt[s] = round;
+      into.push(s);
+      if (s >= n) continue;
+      const kind = (steps[s] as GlobStep).kind;
+      if (kind === "star" || kind === "any") stack.push(s + 1);
+      else if (kind === "dirs") stack.push(s + 1, n + 1 + s);
+    }
+  };
+  add(current, 0);
+  for (let p = 0; p < path.length; p++) {
+    const c = path[p] as string;
+    round++;
+    next.length = 0;
+    for (const s of current) {
+      if (s > n) {
+        // Inside "**/": any character stays inside, and a "/" may also end the run.
+        add(next, s);
+        if (c === "/") add(next, s - n);
+        continue;
+      }
+      if (s === n) continue;
+      const step = steps[s] as GlobStep;
+      if (step.kind === "char") {
+        if (c === step.char) add(next, s + 1);
+      } else if (step.kind === "one") {
+        if (c !== "/") add(next, s + 1);
+      } else if (step.kind === "star") {
+        if (c !== "/") add(next, s);
+      } else if (step.kind === "any") {
+        add(next, s);
+      }
+    }
+    if (next.length === 0) return false;
+    const done = current;
+    current = next;
+    next = done;
+  }
+  return current.includes(n);
 }
 
 /** A changed file as the repository names it, without a leading "./" or "/". */
@@ -108,7 +216,7 @@ export function decideWatchFile(patterns: readonly string[], file: string): Watc
     const negated = pattern.startsWith("!");
     const body = negated ? pattern.slice(1) : pattern;
     if (body === "") continue;
-    if (globToRegExp(body).test(path)) {
+    if (globMatches(body, path)) {
       included = !negated;
       decidedBy = pattern;
     }
@@ -137,6 +245,11 @@ export function matchWatchPaths(patterns: readonly string[], files: readonly str
   if (patterns.length === 0) return { deploy: true, reason: "off" };
   if (files === null) return { deploy: true, reason: "unknown" };
   for (const file of files) {
+    // Not matched: the list counts as incomplete, so it never skips a push.
+    if (file.length > maxChangedPathLength) {
+      complete = false;
+      continue;
+    }
     const decision = decideWatchFile(patterns, file);
     if (decision.included) return { deploy: true, reason: "matched", file: decision.file, pattern: decision.pattern };
   }

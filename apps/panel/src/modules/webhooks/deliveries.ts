@@ -50,13 +50,21 @@ export function recordDelivery(db: PanelDb, record: DeliveryRecord): void {
 /**
  * True when this delivery was already handled successfully (providers'
  * retries and redeliveries reuse their delivery id). Failed ones are
- * handled again.
+ * handled again. With a service, only that service's rows count: a
+ * provider hook belongs to one service, and sibling hooks of one push may
+ * share an id (GitLab before 17.4 sends only its per-push event UUID).
  */
-export function alreadyHandled(db: PanelDb, deliveryId: string, source: WebhookSource = "github"): boolean {
+export function alreadyHandled(db: PanelDb, deliveryId: string, source: WebhookSource = "github", serviceId?: string): boolean {
   const rows = db
     .select({ outcome: webhookDeliveries.outcome })
     .from(webhookDeliveries)
-    .where(and(eq(webhookDeliveries.source, source), eq(webhookDeliveries.deliveryId, deliveryId)))
+    .where(
+      and(
+        eq(webhookDeliveries.source, source),
+        eq(webhookDeliveries.deliveryId, deliveryId),
+        serviceId === undefined ? undefined : eq(webhookDeliveries.serviceId, serviceId),
+      ),
+    )
     .all();
   return rows.length > 0 && rows.every((r) => r.outcome !== "failed");
 }

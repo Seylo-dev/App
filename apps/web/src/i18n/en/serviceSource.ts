@@ -63,7 +63,8 @@ export default {
     lastDelivery: "Last delivery {when}.",
     noDelivery: "No delivery yet.",
     webhookFailed: "The webhook could not be created",
-    webhookFailedHint: "Pushes are picked up by polling the branch every minute (every 5 minutes once the panel has a domain).",
+    webhookFailedHint:
+      "Until it exists, pushes are picked up by polling the branch every minute, and the panel tries to create it again every hour.",
     insecure:
       "The panel has no domain yet, so the provider sends deliveries over plain http. Set the panel's domain, then create the webhook again.",
     repair: "Create webhook again",

@@ -3,8 +3,11 @@
 // pass the signature check and deploy that old commit again. Bodies are
 // remembered by hash for a few days (in memory, per panel); the same body
 // under another delivery id is a replay. A provider's own retries keep
-// their delivery id and pass. Rejected deliveries are logged, but at most
-// a few an hour, so a stream of bad requests cannot fill the database.
+// their delivery id and pass. GitLab, Gitea and Bitbucket post one body to
+// every hook of a repository, each under its own delivery id, so their
+// bodies are remembered per hook: two services of one repository both get
+// the push. Rejected deliveries are logged, but at most a few an hour, so a
+// stream of bad requests cannot fill the database.
 
 import { createHash, randomUUID } from "node:crypto";
 import type { PanelDb } from "../../db/client";
@@ -20,8 +23,12 @@ const rejectedPerHour = 20;
 const seenBodies = new WeakMap<object, Map<string, { deliveryId: string; at: number }>>();
 const rejectedCount = new WeakMap<object, { hour: number; n: number }>();
 
-/** Whether this body was already handled under another delivery id of the same source. */
-export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string): boolean {
+/**
+ * Whether this body was already handled under another delivery id of the
+ * same source (and hook: provider hooks are one per service, GitHub's App
+ * has one for the whole panel and passes none).
+ */
+export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string, hookId?: string): boolean {
   let seen = seenBodies.get(db);
   if (!seen) {
     seen = new Map();
@@ -33,7 +40,8 @@ export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: str
     if (now - entry.at <= replayWindowMs && seen.size <= maxRemembered) break;
     seen.delete(hash);
   }
-  const hash = `${source}:${createHash("sha256").update(raw).digest("hex")}`;
+  const digest = createHash("sha256").update(raw).digest("hex");
+  const hash = hookId ? `${source}:${hookId}:${digest}` : `${source}:${digest}`;
   const before = seen.get(hash);
   if (before && before.deliveryId !== deliveryId) return true;
   seen.set(hash, { deliveryId, at: now });

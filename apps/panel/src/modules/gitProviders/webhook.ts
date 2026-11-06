@@ -2,7 +2,9 @@
 // the repository webhooks the panel created. The id names the service and
 // the hook's own secret; the delivery is checked against it (constant time)
 // before anything is parsed, needs the provider's delivery id, and a signed
-// body seen before under another delivery id is a replay. Each delivery is
+// body seen before by this hook under another delivery id is a replay.
+// Checked deliveries are rate limited per hook (a leaked GitLab token signs
+// nothing, so it could otherwise post pushes in a loop). Each delivery is
 // logged in the service's delivery list.
 
 import { readBodyText } from "@seylo/ops/elysia";
@@ -10,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { type GitProviderKind, gitProviderWebhooks, services } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { readSpec } from "../services/spec";
 import { alreadyHandled, recordDelivery } from "../webhooks/deliveries";
 import { recordRejected, replayedBody } from "../webhooks/replay";
@@ -22,6 +25,24 @@ import { deliveryIdOf, eventNameOf, signsBody, verifyDelivery } from "./signatur
 
 const maxBody = 5 * 1024 * 1024;
 const kinds: GitProviderKind[] = ["gitlab", "gitea", "bitbucket"];
+
+/**
+ * Checked deliveries per hook: a burst of merge request events passes, a
+ * loop does not (each push asks the provider for the head and may queue a
+ * deploy). Like the deploy trigger URL's limit, a little roomier because
+ * merge request edits and approvals each send an event.
+ */
+const hookRules = { standard: { burst: 20, refillPerSecond: 1 / 3 }, strict: { burst: 20, refillPerSecond: 1 / 3 } };
+const limiters = new WeakMap<object, RateLimiter>();
+
+function limiterFor(deps: Pick<Deps, "db">): RateLimiter {
+  let limiter = limiters.get(deps.db);
+  if (!limiter) {
+    limiter = createRateLimiter(hookRules);
+    limiters.set(deps.db, limiter);
+  }
+  return limiter;
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -57,8 +78,26 @@ export async function handleProviderDelivery(deps: Deps, kind: GitProviderKind, 
   }
   const deliveryId = deliveryIdOf(kind, request.headers);
   if (!deliveryId) return json(400, { error: { code: "BAD_REQUEST", message: "The delivery id header is missing." } });
+  // Only checked deliveries count: someone who knows the address but not the secret cannot use up the hook's budget.
+  const wait = limiterFor(deps).take(`hook:${hook.id}`, "standard");
+  if (wait > 0) {
+    recordRejected(deps.db, {
+      source: kind,
+      event,
+      serviceId: hook.serviceId,
+      detail: "Too many deliveries to this webhook (rate limited).",
+    });
+    return new Response(
+      JSON.stringify({ error: { code: "RATE_LIMITED", message: `Too many deliveries. Try again in ${wait} seconds.` } }),
+      {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": String(wait) },
+      },
+    );
+  }
   // A signed body under a new id is a replay; GitLab's token signs nothing, but a repeated body is still one.
-  if (replayedBody(deps.db, kind, deliveryId, raw)) {
+  // Per hook: the provider posts the same body to the hook of every service of the repository.
+  if (replayedBody(deps.db, kind, deliveryId, raw, hook.id)) {
     recordRejected(deps.db, {
       source: kind,
       event,
@@ -67,7 +106,7 @@ export async function handleProviderDelivery(deps: Deps, kind: GitProviderKind, 
     });
     return json(200, { ok: true, duplicate: true });
   }
-  if (alreadyHandled(deps.db, deliveryId, kind)) return json(200, { ok: true, duplicate: true });
+  if (alreadyHandled(deps.db, deliveryId, kind, hook.serviceId)) return json(200, { ok: true, duplicate: true });
   let payload: unknown;
   try {
     payload = JSON.parse(raw);

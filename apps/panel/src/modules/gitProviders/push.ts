@@ -6,14 +6,18 @@
 // The commit that gets built is never taken from the payload alone: it is
 // the branch head the provider's API reports (a GitLab secret token says
 // nothing about the body, and a leaked one must not be able to make the
-// panel build any commit of the repository). Merge requests are read from
-// the API too, so a payload cannot claim a fork is not one.
+// panel build any commit of the repository). A push while an earlier push
+// deploy still waits joins that one (it builds the newer head), so pushes
+// never pile up deploys behind the running one. Merge requests are read
+// from the API too, so a payload cannot claim a fork is not one.
 
 import { skipMarkerOf } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
-import { type GitProviderKind, previews, sourcePolls } from "../../db/schema";
+import { deployments, type GitProviderKind, previews, sourcePolls } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { appendLog } from "../deployments/logs";
 import { queueDeploy } from "../deployments/queue";
+import { publishDeploymentChange } from "../deployments/store";
 import { closePreview, openOrUpdatePreview } from "../previews/preview";
 import type { ServiceRow } from "../services/rows";
 import { readSpec } from "../services/spec";
@@ -103,23 +107,50 @@ export async function deployProviderPush(
       sha = null;
       if (lookup) notes.push(`${label} did not say the branch head (${lookup.slice(0, 200)}); the build fetches it.`);
     }
-    const d = queueDeploy(deps, {
-      serviceId: svc.id,
-      trigger: "push",
-      actor: push.sender,
-      commitSha: sha,
-      commitMessage: firstLine(head?.message ?? push.changes.headMessage),
-      commitAuthor: head?.author ?? push.author,
-      branch: source.branch,
-      notes,
-    });
-    if (sha) {
+    const remember = () => {
+      if (!sha) return;
       deps.db
         .insert(sourcePolls)
         .values({ serviceId: svc.id, branch: source.branch, lastSha: sha, checkedAt: new Date() })
         .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { branch: source.branch, lastSha: sha, checkedAt: new Date() } })
         .run();
+    };
+    const commitMessage = firstLine(head?.message ?? push.changes.headMessage);
+    const commitAuthor = head?.author ?? push.author;
+    // A push deploy that has not started yet takes this push over: it builds the newer head.
+    const waiting = deps.db
+      .select()
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.serviceId, svc.id),
+          eq(deployments.status, "queued"),
+          eq(deployments.trigger, "push"),
+          eq(deployments.branch, source.branch),
+        ),
+      )
+      .get();
+    if (waiting) {
+      remember();
+      if (waiting.commitSha === sha) return record("ignored", "A deploy of this commit was already queued.", waiting.id);
+      const what = sha ? sha.slice(0, 7) : `the head of ${source.branch}`;
+      deps.db.update(deployments).set({ commitSha: sha, commitMessage, commitAuthor }).where(eq(deployments.id, waiting.id)).run();
+      appendLog(deps, svc.id, waiting.id, "clone", [`A newer push arrived before this deploy started: it builds ${what} now.`, ...notes]);
+      // Also queues the commit statuses: the old commit's "queued" becomes "superseded" (status.ts).
+      publishDeploymentChange(deps, svc.id, waiting.id);
+      return record("ignored", `A deploy was already queued; it builds ${what} now.`, waiting.id);
     }
+    const d = queueDeploy(deps, {
+      serviceId: svc.id,
+      trigger: "push",
+      actor: push.sender,
+      commitSha: sha,
+      commitMessage,
+      commitAuthor,
+      branch: source.branch,
+      notes,
+    });
+    remember();
     return record(
       "deployed",
       sha ? `Deploying ${sha.slice(0, 7)} from ${source.branch}.` : `Deploying the head of ${source.branch}.`,

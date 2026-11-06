@@ -604,7 +604,9 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   session when a browser session runs them, while API keys pass
   (`requireFreshIfSession`; every key was made under a fresh sign-in):
   `invites.create` with role admin, `users.updateRole` to a higher role
-  (admin or owner), `nodes.createJoinToken`. Member invites, grants and
+  (admin or owner), `nodes.createJoinToken`, `gitProviders.create` and
+  `gitProviders.update` with a new token or user name (a token with write
+  access to repositories and webhooks). Member invites, grants and
   demotions are not gated.
 - Model callers (transport `mcp` or `ai`, or any `mcp` token on any
   transport) only reach ops with `mcp: true`; everything else is FORBIDDEN.
@@ -813,7 +815,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (gitlab.com or self-managed, also under a path), Gitea/Forgejo (any
   https:// URL) and Bitbucket Cloud (one workspace) hold one token sealed
   with purpose `git.provider`; `gitProviders.manage` (global, admins)
-  creates, changes and deletes them, and the token is checked with the
+  creates, changes and deletes them (a new token from a browser session
+  needs a fresh sign-in, see Re-auth), and the token is checked with the
   provider before it is saved. Every API request goes to the connection's
   own API base only (`http.ts`): the address is vetted with
   `checkTarget` (cloud metadata and names that do not resolve are refused;
@@ -827,36 +830,64 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (`git_provider_webhooks`, one per service, secret per hook sealed with
   purpose `git.webhook`) at `POST /api/hooks/<kind>/<hook id>` on the panel
   domain, else the address the caller reached the panel at; without either
-  the row keeps the reason. `updateSpec` drops the hook (row now, the
-  provider's hook in the `gitProviders.removeHook` job) when the source
-  leaves that repository, `deleteServiceTree` when the service goes, and
-  the poll schedule re-creates hooks that are not on the current panel
-  domain (once an hour per service). Deliveries: GitLab `X-Gitlab-Token`
+  the row keeps the reason. GitLab hooks need an https:// address (its
+  token is the secret itself, sent with every delivery), so a GitLab hook
+  waits for the panel domain with that reason instead of using a plain
+  http:// address; Gitea and Bitbucket sign the body and may (the Source
+  tab warns). `updateSpec` drops the hook (row now, the provider's hook in
+  the `gitProviders.removeHook` job) when the source leaves that
+  repository, `deleteServiceTree` when the service goes, and the poll
+  schedule (`repairHooks`, once an hour per service) re-creates hooks that
+  are not on the current panel domain and hooks the provider refused to
+  create (at the domain, else at the address they were meant for).
+  Deliveries: GitLab `X-Gitlab-Token`
   (the secret itself), Gitea/Forgejo `X-Gitea-Signature` /
   `X-Forgejo-Signature` (hex HMAC-SHA256 of the body), Bitbucket
   `X-Hub-Signature` (`sha256=` + hex HMAC-SHA256), compared in constant
   time; a delivery id is required (`Idempotency-Key` or
   `X-Gitlab-Event-UUID`, `X-Forgejo-Delivery` or `X-Gitea-Delivery`,
-  `X-Request-UUID`), a body seen under another id within 3 days is a replay
-  (`webhooks/replay.ts`, also used by GitHub), rejected deliveries go to the
-  service's delivery list with their own row id (20 an hour at most). A
-  push never builds a sha from the payload alone: the branch head the
-  provider's API reports is deployed (a payload sha is used only when the
-  API cannot say and the body is signed, never for GitLab's token).
+  `X-Request-UUID`), a body seen by the same hook under another id within
+  3 days is a replay (`webhooks/replay.ts`, also used by GitHub, keyed per
+  hook because providers post one body to the hook of every service of a
+  repository), a delivery id already handled for the hook's service is a
+  duplicate (scoped to the service: GitLab before 17.4 sends sibling hooks
+  of one push the same event UUID), rejected deliveries go to the
+  service's delivery list with their own row id (20 an hour at most).
+  Checked deliveries are rate limited per hook (20, then one every 3
+  seconds; 429 with `Retry-After`, logged as rejected); unchecked ones do
+  not use the budget. A push never builds a sha from the payload alone:
+  the branch head the provider's API reports is deployed (a payload sha
+  is used only when the API cannot say and the body is signed, never for
+  GitLab's token). A push while a push deploy of the service is still
+  queued joins it: that deploy builds the newer head (its log says so) and
+  the delivery is recorded as "A deploy was already queued", so at most
+  one push deploy waits behind the running one.
   Merge/pull requests are read from the API (state, head, fork check);
   previews follow GitHub's rules (shared-env acknowledgement, forks
   refused, `[skip ci]` in the title). Branch polling (`gitProviders.poll`,
-  every minute, every 5 minutes with a panel domain) catches missed
-  pushes. Commit statuses (`statusNotes`, per connection) are posted by
-  the `gitProviders.commitStatus` job from `onDeploymentChange`
-  (`deployments/store.ts`): pending, running, success, failed, cancelled;
+  a schedule every minute) catches missed pushes at a cadence per service
+  set by its webhook: every minute while it has none that was created,
+  every 5 minutes as a safety net while it has one, and not at all while
+  that hook delivered within the last 5 minutes (`source_polls.checked_at`
+  holds the last look, failed looks included). Commit statuses
+  (`statusNotes`, per connection) are posted by the
+  `gitProviders.commitStatus` job from `onDeploymentChange`
+  (`deployments/store.ts`): pending, running, success, failed, cancelled,
+  with fixed descriptions (never the deploy's error: repository
+  collaborators need not be panel members; the link leads to the
+  deployments page); a commit shown as queued whose deploy a newer push
+  took over is posted as cancelled "Superseded by a newer push";
   Bitbucket only with a public panel address (it requires a link).
 - Watch paths (`@seylo/ops` `watch-paths.ts`, `services.setWatchPaths`,
   `spec.watchPaths`): ordered globs (`*` not across `/`, `**` across
   folders and `**/` also none, `?`, `!` excludes; anchored at the root; a
   trailing `/` means everything below); for each changed file the last
   matching pattern decides, with only `!` patterns everything else
-  counts; a push deploys when one file counts. `webhooks/gate.ts`
+  counts; a push deploys when one file counts. Matching never backtracks
+  (`globMatches` runs the glob as a set of positions over the path once;
+  repeats such as `**/**/` collapse), so a pattern cannot stall the panel
+  on a deep path; a changed path longer than 4096 characters is not
+  matched and makes the list incomplete (which deploys). `webhooks/gate.ts`
   `pushGate` runs on every push path (GitHub webhook and polling, provider
   webhooks and polling, the deploy trigger URL; stacks too): `[skip ci]`,
   `[ci skip]`, `[skip cd]`, `[cd skip]` in the head commit message skip;
@@ -994,7 +1025,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Re-auth scope: member invites, project and service grants and demotions are not gated (scoped access only), and API keys never are (admin keys may invite admins, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it. The alert text says "Settings > Cleanup" while the screen is called "Docker cleanup" (`agent/disk_alert.go` `diskMessage`) | Fixed threshold; a slightly different screen name in the alert |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
-| Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks) | GitLab/Bitbucket: fixture tests only; the rest as described |
+| Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (only provider pushes join a queued deploy) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
 
@@ -1543,8 +1574,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `flows.spec.ts` (CLI sign-in approval, keys, invites, 2FA, appearance,
   channels on the real panel), `reauth.spec.ts` (the re-auth dialog on the
   real panel: it ages the owner's sessions in `panel.db`, then API key,
-  authenticator setup, CLI approval, GitHub link, passkey and a node join
-  command each ask first and go through; `/reauth`; sign in again) and
+  a git provider connection, authenticator setup, CLI approval, GitHub
+  link, passkey and a node join command each ask first and go through;
+  `/reauth`; sign in again) and
   `git-providers.spec.ts` (Settings > Git providers, a provider repository
   in the Source tab and the watch paths tester, on the demo data) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all

@@ -104,7 +104,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Connect a git provider",
   description:
-    "Stores a GitLab, Gitea/Forgejo or Bitbucket connection after checking the token with the provider. GitLab: a personal, group or project access token with the api scope (url defaults to https://gitlab.com). Gitea/Forgejo: an access token with repository read and write (webhooks) for the instance at url. Bitbucket Cloud: a workspace access token (authKind token) or a user name and app password (authKind appPassword) with repository and webhook scopes, for one workspace. The token is sealed and never returned.",
+    'Stores a GitLab, Gitea/Forgejo or Bitbucket connection after checking the token with the provider. GitLab: a personal, group or project access token with the api scope (url defaults to https://gitlab.com). Gitea/Forgejo: an access token with repository read and write (webhooks) for the instance at url. Bitbucket Cloud: a workspace access token (authKind token) or a user name and app password (authKind appPassword) with repository and webhook scopes, for one workspace. The token is sealed and never returned. From a browser session it needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise); API keys need none.',
   input: Type.Object({
     kind: GitProviderKind,
     name: ProviderName,
@@ -130,7 +130,7 @@ export const update = defineOp({
   kind: "mutation",
   summary: "Change a git provider connection",
   description:
-    "Renames a connection, replaces its token (checked with the provider first) or turns commit statuses on or off. Omitted fields keep their value; the kind, address and workspace cannot change.",
+    'Renames a connection, replaces its token (checked with the provider first) or turns commit statuses on or off. Omitted fields keep their value; the kind, address and workspace cannot change. A new token or user name from a browser session needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise); API keys need none.',
   input: Type.Object({
     providerId: Id,
     name: Type.Optional(ProviderName),

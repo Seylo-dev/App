@@ -5,6 +5,7 @@
 import { gitProviders as contracts, OpError, type gitProviders as providerOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { eq } from "drizzle-orm";
+import { requireFreshIfSession } from "../../auth/fresh";
 import { userOf } from "../../auth/principal";
 import { gitProviders, sourcePolls } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
@@ -59,6 +60,8 @@ const list = implement(contracts.list, (_input, ctx) => {
 });
 
 const create = implement(contracts.create, async (input, ctx) => {
+  // A token with write access to repositories and their webhooks: a session left open may not add one.
+  requireFreshIfSession(ctx);
   let url: string;
   let workspace: string | null = null;
   let authKind: ProviderRow["authKind"] = "token";
@@ -127,6 +130,8 @@ const update = implement(contracts.update, async (input, ctx) => {
     changes.username = input.username;
   }
   if (input.token !== undefined || changes.username !== undefined) {
+    // Swapping the credential is as sensitive as adding a connection.
+    requireFreshIfSession(ctx);
     const tokenSealed = input.token !== undefined ? ctx.secrets.seal(input.token.trim(), "git.provider") : row.tokenSealed;
     changes.tokenSealed = tokenSealed;
     changes.account = await verifyToken(ctx, { ...row, ...changes, tokenSealed } as ProviderRow);

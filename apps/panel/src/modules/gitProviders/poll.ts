@@ -1,27 +1,42 @@
 // Polling fallback for provider sources, like GitHub's: when the provider
 // cannot reach the panel (no public address, a missed delivery, a hook it
-// refused to create) the panel reads the head of each followed branch once
-// a minute, or every 5 minutes as a safety net once the panel has a
-// domain. A new head is a push it missed: its files come from the compare
-// API between the last head and the new one. The same schedule moves
-// webhooks to the panel domain when it is set.
+// refused to create) the panel reads the head of each followed branch. How
+// often depends on the service's webhook, not on the panel: once a minute
+// while it has none that works, every 5 minutes as a safety net while it
+// does, and not at all while it delivered within that window. Providers
+// count API calls per token (Bitbucket Cloud about 1000 an hour), so
+// services with working webhooks must not spend them every minute. A new
+// head is a push the panel missed: its files come from the compare API
+// between the last head and the new one. The same schedule repairs
+// webhooks (hooks.ts repairHooks).
 
 import { eq, sql } from "drizzle-orm";
 import { services, sourcePolls } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { hasActiveDeploy } from "../deployments/queue";
-import { panelBaseUrl } from "../github/app";
 import { readSpec } from "../services/spec";
 import { clientFor } from "./client";
-import { moveHooksToDomain } from "./hooks";
+import { repairHooks, webhookOf } from "./hooks";
 import { deployProviderPush } from "./push";
 import { loadProvider } from "./rows";
 
 export const pollJobType = "gitProviders.poll";
 const everyMs = 60_000;
+/** With a working webhook polling is only a safety net. */
+const safetyNetMs = 5 * everyMs;
+/** The schedule fires about every minute; a check a little early still counts as due. */
+const slackMs = 5_000;
 
-export async function pollProviderBranches(deps: Deps): Promise<number> {
+/** How often this service's branch is read, or null when its webhook just proved it works. */
+function cadenceFor(deps: Pick<Deps, "db">, serviceId: string, now: number): number | null {
+  const hook = webhookOf(deps, serviceId);
+  if (!hook?.remoteId || hook.error) return everyMs;
+  if (hook.lastDeliveryAt && now - hook.lastDeliveryAt.getTime() < safetyNetMs) return null;
+  return safetyNetMs;
+}
+
+export async function pollProviderBranches(deps: Deps, now = Date.now()): Promise<number> {
   const followed = deps.db
     .select()
     .from(services)
@@ -35,20 +50,30 @@ export async function pollProviderBranches(deps: Deps): Promise<number> {
     const source = spec.source;
     if (source.type !== "provider" || spec.preview) continue;
     const poll = deps.db.select().from(sourcePolls).where(eq(sourcePolls.serviceId, svc.id)).get();
+    const cadence = cadenceFor(deps, svc.id, now);
+    if (cadence === null) continue;
+    if (poll?.checkedAt && now - poll.checkedAt.getTime() < cadence - slackMs) continue;
     const sameBranch = poll?.branch === source.branch;
+    const checkedAt = new Date(now);
+    // Failed looks count too: a provider that refuses is not asked again before the next turn.
+    const touch = () =>
+      deps.db
+        .insert(sourcePolls)
+        .values({ serviceId: svc.id, branch: source.branch, lastSha: null, checkedAt })
+        .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { checkedAt } })
+        .run();
     try {
       const provider = loadProvider(deps.db, source.providerId);
       const client = clientFor(deps, provider);
       const head = await client.branchHead(source.repo, source.branch);
-      const now = new Date();
       if (!head) {
-        deps.db.update(sourcePolls).set({ checkedAt: now }).where(eq(sourcePolls.serviceId, svc.id)).run();
+        touch();
         continue;
       }
       deps.db
         .insert(sourcePolls)
-        .values({ serviceId: svc.id, branch: source.branch, lastSha: head.sha, checkedAt: now })
-        .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { branch: source.branch, lastSha: head.sha, checkedAt: now } })
+        .values({ serviceId: svc.id, branch: source.branch, lastSha: head.sha, checkedAt })
+        .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { branch: source.branch, lastSha: head.sha, checkedAt } })
         .run();
       // The first look only records the head; a change after that is a push the webhook missed.
       if (!sameBranch || !poll?.lastSha || poll.lastSha === head.sha || hasActiveDeploy(deps, svc.id)) continue;
@@ -68,23 +93,19 @@ export async function pollProviderBranches(deps: Deps): Promise<number> {
       );
       if (outcome === "deployed") deployed++;
     } catch (error) {
+      touch();
       deps.logger.warn({ err: error, serviceId: svc.id }, "polling the provider branch failed");
     }
   }
   return deployed;
 }
 
-const lastPoll = new WeakMap<object, number>();
-
-/** Every minute from a schedule (gitProviders/index.ts); every 5 minutes once the panel has a domain. */
+/** Every minute from a schedule (gitProviders/index.ts); each service is read at its own cadence. */
 export const pollJob = defineJob<Record<string, never>>({
   type: pollJobType,
   maxAttempts: 1,
   async run(_payload, deps) {
-    await moveHooksToDomain(deps);
-    const last = lastPoll.get(deps.db) ?? 0;
-    if (panelBaseUrl(deps.db) && Date.now() - last < everyMs * 5 - 5_000) return;
-    lastPoll.set(deps.db, Date.now());
+    await repairHooks(deps);
     await pollProviderBranches(deps);
   },
 });

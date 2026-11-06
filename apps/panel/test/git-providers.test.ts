@@ -18,12 +18,14 @@ import {
 } from "@seylo/ops";
 import { DeployStage } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
-import { deploymentLogs, deployments, gitProviderWebhooks, services, webhookDeliveries } from "../src/db/schema";
+import { freshSignInMs } from "../src/auth/fresh";
+import { deploymentLogs, deployments, gitProviderWebhooks, services, sessions, webhookDeliveries } from "../src/db/schema";
+import { gitlabNeedsHttps, repairHooks } from "../src/modules/gitProviders/hooks";
 import { pollProviderBranches } from "../src/modules/gitProviders/poll";
 import { setSetting } from "../src/settings";
 import { FakeFleet } from "./fake-fleet";
 import { FakeProviders, payloadFixture, recorded } from "./git-provider-fakes";
-import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
+import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
 let fleet: FakeFleet;
@@ -67,8 +69,8 @@ async function connection(kind: "gitlab" | "gitea" | "bitbucket") {
   return res.body.id as string;
 }
 
-async function connectedService(kind: "gitlab" | "gitea" | "bitbucket", name = "web") {
-  const providerId = await connection(kind);
+async function connectedService(kind: "gitlab" | "gitea" | "bitbucket", name = "web", existingProvider?: string) {
+  const providerId = existingProvider ?? (await connection(kind));
   const repo = kind === "gitea" ? "acme/shop" : kind === "gitlab" ? "acme/platform/shop" : "acme-ws/shop";
   const id = (
     await callOp(
@@ -189,6 +191,33 @@ describe("connections", () => {
     );
     expect(renamed.body).toMatchObject({ name: "Codeberg", statusNotes: false });
     expect(fake.sent.at(-1)?.headers.authorization).toBe("token next");
+  });
+});
+
+describe("fresh sign-in for connection tokens", () => {
+  const stale = (userId: string) =>
+    panel.deps.db
+      .update(sessions)
+      .set({ createdAt: new Date(Date.now() - freshSignInMs - 60_000), reauthAt: null })
+      .where(eq(sessions.userId, userId))
+      .run();
+
+  test("a session left open cannot add a connection or swap its token; renaming and API keys need none", async () => {
+    const id = await connection("gitea");
+    const owner = panel.deps.db.select().from(sessions).all()[0];
+    stale(owner?.userId as string);
+    const created = await callOp(panel, providerOps.create, { kind: "gitlab", name: "Other", token: "glpat-x" }, { cookie });
+    expect(created).toMatchObject({ status: 403, body: { error: { details: { reason: "reauth" } } } });
+    const swapped = await callOp(panel, providerOps.update, { providerId: id, token: "attacker" }, { cookie });
+    expect(swapped.body.error.details.reason).toBe("reauth");
+    // Nothing was checked with the provider or stored by the refused calls.
+    expect(fake.sent.some((r) => r.headers.authorization === "token attacker" || r.headers["private-token"] === "glpat-x")).toBe(false);
+    expect((await callOp(panel, providerOps.update, { providerId: id, name: "Renamed" }, { cookie })).body.name).toBe("Renamed");
+
+    const key = createApiKey(panel, owner?.userId as string);
+    const viaKey = await callOp(panel, providerOps.update, { providerId: id, token: "rotated" }, { bearer: key });
+    expect(viaKey.status).toBe(200);
+    expect(fake.sent.at(-1)?.headers.authorization).toBe("token rotated");
   });
 });
 
@@ -317,6 +346,22 @@ describe("connecting a repository", () => {
     });
     expect(waiting).toMatchObject({ remoteId: null, url: null });
     expect(waiting.error).toContain("no public address");
+  });
+});
+
+describe("GitLab webhook address", () => {
+  test("GitLab's hook is never created at a plain http:// address: its token travels with every delivery", async () => {
+    setSetting(panel.deps.db, "panelDomain", null);
+    const { id } = await connectedService("gitlab");
+    const status = await callOp(panel, providerOps.webhook, { serviceId: id }, { cookie });
+    expect(status.body).toMatchObject({ created: false, url: null, error: gitlabNeedsHttps });
+    expect(fake.sent.some((r) => r.method === "POST" && r.path.endsWith("/hooks"))).toBe(false);
+    // Once the panel has a domain, the repair creates it there.
+    setSetting(panel.deps.db, "panelDomain", "panel.example.com");
+    expect(await repairHooks(panel.deps)).toBe(1);
+    const created = await callOp(panel, providerOps.webhook, { serviceId: id }, { cookie });
+    expect(created.body).toMatchObject({ created: true, error: null, insecure: false });
+    expect(created.body.url).toStartWith("https://panel.example.com/api/hooks/gitlab/");
   });
 });
 
@@ -487,6 +532,98 @@ describe("Gitea pushes", () => {
   });
 });
 
+describe("one repository, several services", () => {
+  test("the same signed body to each service's hook deploys each service; no replay is recorded", async () => {
+    const first = await connectedService("gitea", "web");
+    const second = await connectedService("gitea", "worker", first.providerId);
+    expect(second.hook.id).not.toBe(first.hook.id);
+    const body = payloadFixture("gitea-push");
+    const a = await deliver("gitea", first.hook, first.secret, "push", body, { delivery: "gitea-delivery-1" });
+    const b = await deliver("gitea", second.hook, second.secret, "push", body, { delivery: "gitea-delivery-2" });
+    expect(a.body).toMatchObject({ ok: true, deployed: 1 });
+    expect(b.body).toMatchObject({ ok: true, deployed: 1 });
+    expect(deploymentsOf(first.id)).toHaveLength(1);
+    expect(deploymentsOf(second.id)).toHaveLength(1);
+    for (const id of [first.id, second.id]) {
+      const list = await deliveriesOf(id);
+      expect(list.some((d) => d.outcome === "rejected")).toBe(false);
+      expect(list[0]).toMatchObject({ outcome: "deployed" });
+    }
+    // A real replay to one hook is still one.
+    const again = await deliver("gitea", second.hook, second.secret, "push", body, { delivery: "gitea-delivery-3" });
+    expect(again.body).toMatchObject({ duplicate: true });
+    expect(deploymentsOf(second.id)).toHaveLength(1);
+  });
+
+  test("GitLab hooks of one push that share an event UUID (before 17.4) each deploy their service", async () => {
+    const first = await connectedService("gitlab", "web");
+    const second = await connectedService("gitlab", "worker", first.providerId);
+    const body = payloadFixture("gitlab-push");
+    await deliver("gitlab", first.hook, first.secret, "Push Hook", body, { delivery: "event-uuid-1" });
+    await deliver("gitlab", second.hook, second.secret, "Push Hook", body, { delivery: "event-uuid-1" });
+    expect(deploymentsOf(first.id)).toHaveLength(1);
+    expect(deploymentsOf(second.id)).toHaveLength(1);
+    // GitLab's own retry of the first hook's delivery is still a duplicate.
+    const retry = await deliver("gitlab", first.hook, first.secret, "Push Hook", body, { delivery: "event-uuid-1" });
+    expect(retry.body).toMatchObject({ duplicate: true });
+  });
+});
+
+describe("pushes that come faster than deploys", () => {
+  test("a push while a push deploy waits joins it: it builds the newest head, and nothing piles up", async () => {
+    const { id, hook, secret } = await connectedService("gitlab");
+    let head = gitlabHead;
+    fake.override((r) =>
+      r.path.endsWith("/repository/branches/main")
+        ? { body: { name: "main", commit: { id: head, message: `Commit ${head.slice(0, 4)}\n`, author_name: "jdev" } } }
+        : undefined,
+    );
+    const push = (sha: string) => {
+      head = sha;
+      return deliver("gitlab", hook, secret, "Push Hook", { ...payloadFixture("gitlab-push"), after: sha, checkout_sha: sha });
+    };
+    await push(gitlabHead);
+    const [running] = deploymentsOf(id);
+    expect(running?.status).not.toBe("queued");
+    for (let i = 1; i <= 6; i++) await push(String(i).repeat(40));
+    const all = deploymentsOf(id);
+    expect(all).toHaveLength(2);
+    const waiting = all.find((d) => d.id !== running?.id);
+    expect(waiting).toMatchObject({ status: "queued", commitSha: "6".repeat(40), commitMessage: "Commit 6666" });
+    expect(logOf(waiting?.id as string)).toContain(`A newer push arrived before this deploy started: it builds ${"6".repeat(7)} now.`);
+    const details = (await deliveriesOf(id)).map((d) => d.detail);
+    expect(details).toContain(`A deploy was already queued; it builds ${"6".repeat(7)} now.`);
+  });
+
+  test("checked deliveries are rate limited per hook; unchecked ones do not use the budget", async () => {
+    const { id, hook, secret } = await connectedService("gitlab");
+    const other = await connectedService("gitlab", "worker");
+    for (let i = 0; i < 30; i++) {
+      await deliver("gitlab", hook, secret, "Push Hook", payloadFixture("gitlab-push"), { badSecret: true });
+    }
+    const statuses: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      const res = await deliver("gitlab", hook, secret, "Push Hook", { ...payloadFixture("gitlab-push"), event_n: i });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
+    expect(statuses.slice(20)).toEqual([429, 429, 429, 429]);
+    const limited = await panel.app.handle(
+      new Request(`http://panel.test/api/hooks/gitlab/${hook.id}`, {
+        method: "POST",
+        headers: { "x-gitlab-token": secret, "x-gitlab-event": "Push Hook", "x-gitlab-event-uuid": "late" },
+        body: "{}",
+      }),
+    );
+    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    // Each push asked for the head, but at most one deploy runs and one waits.
+    expect(deploymentsOf(id).length).toBeLessThanOrEqual(2);
+    // Another service's hook has its own budget.
+    const fresh = await deliver("gitlab", other.hook, other.secret, "Push Hook", payloadFixture("gitlab-push"));
+    expect(fresh.status).toBe(200);
+  });
+});
+
 function recordedPull() {
   return recorded("gitea").find((e) => e.request === "GET /api/v1/repos/acme/shop/pulls/3")?.body as Record<string, unknown>;
 }
@@ -603,6 +740,57 @@ describe("webhook lifecycle", () => {
     expect(del.body.error).toMatchObject({ code: "CONFLICT" });
   });
 
+  test("a webhook the provider refused at connect time is created by the next repair, then left alone for an hour", async () => {
+    let refuse = true;
+    fake.override((r) =>
+      refuse && r.method === "POST" && r.path.endsWith("/hooks")
+        ? { status: 403, body: { message: "token lacks write:repository" } }
+        : undefined,
+    );
+    const { id } = await connectedService("gitea");
+    expect((await callOp(panel, providerOps.webhook, { serviceId: id }, { cookie })).body).toMatchObject({ created: false });
+    // Still refused: the try is spent, the next one waits an hour.
+    const now = Date.now();
+    expect(await repairHooks(panel.deps, now)).toBe(0);
+    refuse = false;
+    expect(await repairHooks(panel.deps, now + 60_000)).toBe(0);
+    expect(await repairHooks(panel.deps, now + 61 * 60_000)).toBe(1);
+    const status = await callOp(panel, providerOps.webhook, { serviceId: id }, { cookie });
+    expect(status.body).toMatchObject({ created: true, error: null });
+    expect(status.body.url).toStartWith("https://panel.example.com/api/hooks/gitea/");
+    // A working hook on the domain is not touched again.
+    const posts = fake.calls().filter((c) => c === "POST /api/v1/repos/acme/shop/hooks").length;
+    expect(await repairHooks(panel.deps, now + 200 * 60_000)).toBe(0);
+    expect(fake.calls().filter((c) => c === "POST /api/v1/repos/acme/shop/hooks")).toHaveLength(posts);
+  });
+
+  test("a working webhook is polled every 5 minutes as a safety net and not at all right after a delivery; a broken one every minute", async () => {
+    const working = await connectedService("gitea", "web");
+    const branchReads = () => fake.calls().filter((c) => c === "GET /api/v1/repos/acme/shop/branches/main").length;
+    const start = Date.now();
+    const before = branchReads();
+    await pollProviderBranches(panel.deps, start);
+    expect(branchReads()).toBe(before + 1);
+    await pollProviderBranches(panel.deps, start + 60_000);
+    expect(branchReads()).toBe(before + 1);
+    await pollProviderBranches(panel.deps, start + 5 * 60_000);
+    expect(branchReads()).toBe(before + 2);
+    // A delivery proves the hook works: no poll inside the window after it.
+    panel.deps.db
+      .update(gitProviderWebhooks)
+      .set({ lastDeliveryAt: new Date(start + 9 * 60_000) })
+      .where(eq(gitProviderWebhooks.id, working.hook.id))
+      .run();
+    await pollProviderBranches(panel.deps, start + 11 * 60_000);
+    expect(branchReads()).toBe(before + 2);
+
+    // Without a created hook the branch is read every minute.
+    panel.deps.db.update(gitProviderWebhooks).set({ remoteId: null }).where(eq(gitProviderWebhooks.id, working.hook.id)).run();
+    await pollProviderBranches(panel.deps, start + 12 * 60_000);
+    await pollProviderBranches(panel.deps, start + 13 * 60_000);
+    expect(branchReads()).toBe(before + 4);
+  });
+
   test("a provider that refuses the webhook leaves the reason; polling deploys missed pushes with watch paths", async () => {
     fake.override((r) =>
       r.method === "POST" && r.path.endsWith("/hooks") ? { status: 403, body: { message: "token lacks write:repository" } } : undefined,
@@ -627,7 +815,7 @@ describe("webhook lifecycle", () => {
         ? { body: { total_commits: 1, commits: [{ sha: head, files: [{ filename: "apps/web/a.ts", status: "modified" }] }] } }
         : undefined,
     );
-    expect(await pollProviderBranches(panel.deps)).toBe(1);
+    expect(await pollProviderBranches(panel.deps, Date.now() + 61_000)).toBe(1);
     await fleet.settle();
     expect(fake.calls()).toContain(`GET /api/v1/repos/acme/shop/compare/${giteaHead}...${head}`);
     expect(deploymentsOf(id)[0]).toMatchObject({ commitSha: head, trigger: "push" });
@@ -655,6 +843,52 @@ describe("commit statuses", () => {
       target_url: `https://panel.example.com/p/${projectId}/s/${id}/deployments`,
     });
     expect(posted.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("a failed deploy posts a fixed description, never the deploy's error", async () => {
+    fleet.buildScript = () => ({ result: "failed", message: "node node-a: secret builder output" });
+    const { id, hook, secret } = await connectedService("gitea");
+    await deliver("gitea", hook, secret, "push", payloadFixture("gitea-push"));
+    await panel.runner.runDue(panel.deps);
+    const [d] = deploymentsOf(id);
+    expect(d?.status).toBe("failed");
+    const posted = fake.sent
+      .filter((r) => r.method === "POST" && r.path === `/api/v1/repos/acme/shop/statuses/${giteaHead}`)
+      .map((r) => r.body);
+    expect(posted.at(-1)).toMatchObject({ state: "failure", description: "Deploy failed" });
+    expect(JSON.stringify(posted)).not.toContain("secret builder output");
+  });
+
+  test("a queued deploy that a newer push took over marks its old commit superseded", async () => {
+    const { id, hook, secret } = await connectedService("gitea");
+    let head = giteaHead;
+    fake.override((r) =>
+      r.path === "/api/v1/repos/acme/shop/branches/main" ? { body: { name: "main", commit: { id: head, message: "x\n" } } } : undefined,
+    );
+    // Gitea answers a status on any commit.
+    fake.override((r) => (r.method === "POST" && r.path.includes("/statuses/") ? { status: 201, body: { id: 1 } } : undefined));
+    const push = (sha: string) => {
+      head = sha;
+      return deliver("gitea", hook, secret, "push", { ...payloadFixture("gitea-push"), after: sha });
+    };
+    await push(giteaHead);
+    await push("7".repeat(40));
+    const statusesOf = (sha: string) =>
+      fake.sent.filter((r) => r.method === "POST" && r.path === `/api/v1/repos/acme/shop/statuses/${sha}`).map((r) => r.body);
+    for (let i = 0; i < 50 && statusesOf("7".repeat(40)).length === 0; i++) {
+      await panel.runner.runDue(panel.deps);
+      await Bun.sleep(5);
+    }
+    expect(statusesOf("7".repeat(40)).at(-1)).toMatchObject({ state: "pending", description: "Deploy queued" });
+    await push("8".repeat(40));
+    // The status job may still be posting the first state; it picks the change up when it looks again.
+    for (let i = 0; i < 50 && statusesOf("8".repeat(40)).length === 0; i++) {
+      await panel.runner.runDue(panel.deps);
+      await Bun.sleep(5);
+    }
+    expect(statusesOf("7".repeat(40)).at(-1)).toMatchObject({ state: "error", description: "Superseded by a newer push" });
+    expect(statusesOf("8".repeat(40)).at(-1)).toMatchObject({ state: "pending" });
+    expect(deploymentsOf(id)).toHaveLength(2);
   });
 
   test("a connection with statuses off posts none", async () => {
