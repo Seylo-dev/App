@@ -13,8 +13,13 @@ import (
 	"github.com/seylo-dev/app/go/internal/systemd"
 )
 
+// testReleaseKey is a valid minisign public key (the real release key; public
+// halves are safe to commit). Tests set it through updatePublicKeyEnv so they
+// never depend on what brand.json holds.
+const testReleaseKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip"
+
 func TestNodeWiring(t *testing.T) {
-	t.Setenv(updatePublicKeyEnv, "")
+	t.Setenv(updatePublicKeyEnv, testReleaseKey)
 	d, rec := newTestDeps(t)
 	reg, err := Wire(d)
 	if err != nil {
@@ -37,10 +42,10 @@ func TestNodeWiring(t *testing.T) {
 		t.Fatalf("results = %v", health.GetResults())
 	}
 
-	// This build carries the placeholder release key: updates are refused
-	// with a clear status, and the refusal is reported durably.
+	// A manifest whose signature does not match the release key is refused,
+	// and the refusal is reported durably.
 	err = panel.Call(ctx, "UpdateAgent", &agentv1.UpdateAgentRequest{Manifest: []byte("{}"), ManifestSignature: []byte("x"), UpdateId: "u1"}, &agentv1.UpdateAgentResponse{})
-	if s := rpc.StatusOf(err); s.GetCode() != agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION {
+	if s := rpc.StatusOf(err); s.GetCode() != agentv1.StatusCode_STATUS_CODE_PERMISSION_DENIED {
 		t.Fatalf("UpdateAgent = %v", s)
 	}
 	rec.WaitDurable(t, func(e *agentv1.Event) bool {
@@ -61,6 +66,26 @@ func TestNodeWiring(t *testing.T) {
 	if len(report.GetReportMarkdown()) < 100 {
 		t.Fatalf("report = %q", report.GetReportMarkdown())
 	}
+}
+
+func TestNodeUpdateWithoutReleaseKey(t *testing.T) {
+	// A build whose release key is still the brand placeholder refuses every
+	// update with a clear status, and reports the refusal durably.
+	t.Setenv(updatePublicKeyEnv, "PLACEHOLDER_MINISIGN_PUBLIC_KEY")
+	d, rec := newTestDeps(t)
+	reg, err := Wire(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	panel := rpctest.NewPeer(t, reg)
+	err = panel.Call(context.Background(), "UpdateAgent", &agentv1.UpdateAgentRequest{Manifest: []byte("{}"), ManifestSignature: []byte("x"), UpdateId: "u2"}, &agentv1.UpdateAgentResponse{})
+	if s := rpc.StatusOf(err); s.GetCode() != agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION {
+		t.Fatalf("UpdateAgent = %v", s)
+	}
+	rec.WaitDurable(t, func(e *agentv1.Event) bool {
+		r := e.GetUpdateResult()
+		return r != nil && r.GetUpdateId() == "u2" && !r.GetSuccess()
+	})
 }
 
 func TestHealthAlertsOnTransitions(t *testing.T) {
