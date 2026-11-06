@@ -2,6 +2,7 @@ import { IconX } from "@tabler/icons-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type * as React from "react";
+import { overlayMotion } from "../lib/overlay-motion";
 import { cn } from "../lib/utils";
 import { useUiLabels } from "./labels";
 
@@ -10,13 +11,15 @@ export const SheetTrigger = DialogPrimitive.Trigger;
 export const SheetClose = DialogPrimitive.Close;
 
 const sheetVariants = cva(
-  "fixed z-50 flex flex-col gap-4 bg-popover text-popover-foreground shadow-popover outline-none data-[state=open]:animate-in data-[state=open]:duration-200",
+  "fixed z-50 flex flex-col gap-4 bg-popover text-popover-foreground shadow-popover outline-none duration-200 ease-out data-[state=open]:animate-in data-[state=closed]:animate-out",
   {
     variants: {
       side: {
-        right: "inset-y-0 right-0 h-full w-[calc(100%-32px)] max-w-md data-[state=open]:slide-in-from-right",
-        left: "inset-y-0 left-0 h-full w-[calc(100%-32px)] max-w-md data-[state=open]:slide-in-from-left",
-        bottom: "inset-x-0 bottom-0 max-h-[85dvh] rounded-t-card data-[state=open]:slide-in-from-bottom",
+        right:
+          "inset-y-0 right-0 h-full w-[calc(100%-32px)] max-w-md data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
+        left: "inset-y-0 left-0 h-full w-[calc(100%-32px)] max-w-md data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left",
+        bottom:
+          "inset-x-0 bottom-0 max-h-[85dvh] rounded-t-card data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom",
       },
     },
     defaultVariants: { side: "right" },
@@ -34,13 +37,13 @@ export function SheetContent({
   const labels = useUiLabels();
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/20 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+      <DialogPrimitive.Overlay className={cn("fixed inset-0 z-50 bg-foreground/20", overlayMotion)} />
       <DialogPrimitive.Content data-slot="sheet" className={cn(sheetVariants({ side }), className)} {...props}>
         {children}
         {!hideClose && (
           <DialogPrimitive.Close
             aria-label={labels.close}
-            className="absolute top-4 right-4 flex size-8 cursor-pointer items-center justify-center rounded-control border-0 bg-muted text-ink-strong hover:text-foreground"
+            className="absolute top-4 right-4 flex size-8 cursor-pointer items-center justify-center rounded-control border-0 bg-muted text-ink-strong transition-interactive hover:text-foreground"
           >
             <IconX size={14} stroke={2.2} />
           </DialogPrimitive.Close>

@@ -1,5 +1,6 @@
 import { Popover as PopoverPrimitive } from "radix-ui";
 import type * as React from "react";
+import { popperMotion } from "../lib/overlay-motion";
 import { cn } from "../lib/utils";
 
 export const Popover = PopoverPrimitive.Root;
@@ -21,7 +22,8 @@ export function PopoverContent({
         align={align}
         className={cn(
           "z-50 w-72 rounded-card bg-popover p-4 text-[13px] text-popover-foreground shadow-popover outline-none",
-          "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+          "origin-(--radix-popover-content-transform-origin)",
+          popperMotion,
           className,
         )}
         {...props}

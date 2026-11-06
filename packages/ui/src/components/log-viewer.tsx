@@ -244,7 +244,7 @@ export function LogViewer({
         <button
           type="button"
           onClick={() => setFollow(true)}
-          className="absolute right-4 bottom-4 flex h-8 cursor-pointer items-center gap-1.5 rounded-control border-0 bg-primary px-3 text-[12.5px] font-medium text-primary-foreground shadow-primary"
+          className="absolute right-4 bottom-4 flex h-8 cursor-pointer items-center gap-1.5 rounded-control border-0 bg-primary px-3 text-[12.5px] font-medium text-primary-foreground shadow-primary transition-interactive animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out hover:brightness-110"
         >
           <IconArrowBarToDown size={14} />
           {labels.jumpToLatest}
@@ -276,7 +276,7 @@ function BarButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-terminal-muted hover:text-terminal-foreground disabled:opacity-40",
+        "flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-terminal-muted transition-interactive hover:text-terminal-foreground disabled:opacity-40",
         pressed && "bg-terminal-field text-terminal-foreground",
       )}
     >

@@ -128,7 +128,7 @@ export function DataTable<T>({
                       onClick={() => toggleSort(col.id)}
                       title={active && !sort?.desc ? labels.sortDescending : labels.sortAscending}
                       className={cn(
-                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-medium text-inherit hover:text-foreground",
+                        "inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-medium text-inherit transition-interactive hover:text-foreground",
                         active && "text-foreground",
                         col.align === "right" && "flex-row-reverse",
                       )}
@@ -188,7 +188,7 @@ export function DataTable<T>({
               <tr
                 key={getRowId(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={cn("align-middle", onRowClick && "cursor-pointer hover:bg-raised")}
+                className={cn("align-middle", onRowClick && "cursor-pointer transition-colors hover:bg-raised")}
               >
                 {columns.map((col, i) => (
                   <td
@@ -211,7 +211,7 @@ export function DataTable<T>({
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         aria-label={labels.rowActions}
-                        className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
+                        className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground data-[state=open]:bg-muted"
                       >
                         <IconDots size={16} />
                       </DropdownMenuTrigger>

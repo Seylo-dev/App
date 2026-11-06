@@ -1,5 +1,6 @@
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import type * as React from "react";
+import { tooltipMotion } from "../lib/overlay-motion";
 import { cn } from "../lib/utils";
 
 /** Mount once near the root; tooltips share its open delay. */
@@ -18,7 +19,8 @@ export function TooltipContent({ className, sideOffset = 6, ...props }: React.Co
         sideOffset={sideOffset}
         className={cn(
           "z-50 max-w-72 rounded-chip bg-foreground px-2.5 py-1.5 text-[12px] leading-snug text-background shadow-popover",
-          "data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0",
+          "origin-(--radix-tooltip-content-transform-origin)",
+          tooltipMotion,
           className,
         )}
         {...props}

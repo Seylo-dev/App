@@ -3,9 +3,9 @@
 // paused while the pointer is over the stack.
 
 import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconInfoCircle, IconX } from "@tabler/icons-react";
+import { AnimatePresence, m, useReducedMotionConfig } from "motion/react";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import { type ToastItem, type ToastStore, type ToastTone, toastStore } from "../lib/toast-store";
-import { cn } from "../lib/utils";
 import { useUiLabels } from "./labels";
 
 export { type ToastOptions, type ToastTone, toast, toastStore } from "../lib/toast-store";
@@ -30,9 +30,11 @@ export function Toaster({ store = toastStore }: { store?: ToastStore }) {
       onPointerEnter={() => setPaused(true)}
       onPointerLeave={() => setPaused(false)}
     >
-      {items.map((item) => (
-        <ToastCard key={item.id} item={item} paused={paused} onDismiss={() => store.dismiss(item.id)} dismissLabel={labels.dismiss} />
-      ))}
+      <AnimatePresence initial={false}>
+        {items.map((item) => (
+          <ToastCard key={item.id} item={item} paused={paused} onDismiss={() => store.dismiss(item.id)} dismissLabel={labels.dismiss} />
+        ))}
+      </AnimatePresence>
     </section>
   );
 }
@@ -61,14 +63,18 @@ function ToastCard({
       setRemaining((r) => Math.max(0, r - (Date.now() - started)));
     };
   }, [paused, remaining, item.duration, onDismiss]);
+  const reduced = useReducedMotionConfig();
 
+  // Rises in from the bottom, fades and shrinks away; the rest of the stack slides into place (layout).
   return (
-    <div
+    <m.div
+      layout={!reduced}
+      initial={reduced ? false : { opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={reduced ? undefined : { opacity: 0, scale: 0.96, transition: { duration: 0.15, ease: "easeIn" } }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       role={item.tone === "error" ? "alert" : "status"}
-      className={cn(
-        "pointer-events-auto flex items-start gap-2.5 rounded-card bg-popover px-4 py-3 text-popover-foreground shadow-popover",
-        "animate-in fade-in-0 slide-in-from-bottom-2",
-      )}
+      className="pointer-events-auto flex items-start gap-2.5 rounded-card bg-popover px-4 py-3 text-popover-foreground shadow-popover"
     >
       {icons[item.tone] && <span className="mt-px flex">{icons[item.tone]}</span>}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -82,7 +88,7 @@ function ToastCard({
             item.action?.onClick();
             onDismiss();
           }}
-          className="h-7 shrink-0 cursor-pointer rounded-chip border-0 bg-muted px-2.5 text-[12.5px] font-medium text-foreground hover:bg-track"
+          className="h-7 shrink-0 cursor-pointer rounded-chip border-0 bg-muted px-2.5 text-[12.5px] font-medium text-foreground transition-interactive hover:bg-track"
         >
           {item.action.label}
         </button>
@@ -91,10 +97,10 @@ function ToastCard({
         type="button"
         aria-label={dismissLabel}
         onClick={onDismiss}
-        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint hover:bg-muted hover:text-foreground"
+        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground"
       >
         <IconX size={13} stroke={2.2} />
       </button>
-    </div>
+    </m.div>
   );
 }

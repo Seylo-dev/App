@@ -103,7 +103,7 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
           aria-pressed={revealed}
           onClick={() => setRevealed((r) => !r)}
           className={cn(
-            "flex size-[30px] shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent",
+            "flex size-[30px] shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent transition-interactive",
             dark ? "text-terminal-muted hover:bg-terminal-bar" : "text-ink-faint hover:bg-muted hover:text-foreground",
           )}
         >
