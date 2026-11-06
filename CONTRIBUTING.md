@@ -107,8 +107,8 @@ Nixpacks build test pulls a large image (`SEYLO_IT_NIXPACKS=1`).
 its own dependencies and Chromium) starts a panel on a fresh data dir and
 Vite in front of it, then runs the Playwright suites: smoke (setup, sign-in, real panel),
 flows (CLI sign-in approval, keys, invites, 2FA, appearance, channels),
-re-auth, and screens (every screen with demo data in all four theme
-presets). `test/playwright/run.sh --project smoke` runs one suite;
+re-auth, screens (every screen with demo data in all four theme
+presets) and dockerhub (Docker Hub search and the prefilled image form, demo data). `test/playwright/run.sh --project smoke` runs one suite;
 `PRESETS=seylo` and `SCREENS=` narrow the screens suite. Screenshots land in
 `test/playwright/shots/`.
 

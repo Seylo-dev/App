@@ -922,6 +922,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Re-auth scope: member invites, project and service grants and demotions are not gated (scoped access only), and API keys never are (admin keys may invite admins, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it. The alert text says "Settings > Cleanup" while the screen is called "Docker cleanup" (`agent/disk_alert.go` `diskMessage`) | Fixed threshold; a slightly different screen name in the alert |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
+| Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
 
@@ -1317,7 +1318,7 @@ unless noted.
 |---|---|---|---|
 | Agent hub and nodes: PanelService handlers, calls and streams to agents, in-memory node state, the desired-state compiler (DB rows to `DesiredState`/`ServiceSpec`), nodes (join tokens, can-build, wildcard, games-first, health checks, reboot, Docker updates), fleet updates, cleanup runs, relays for logs, metrics (rollups into metrics.db), console, shell and files | `nodes`, `updates`, `cleanup`, `logs`, `metrics`, `terminals`, `files` | `src/agent-hub/`, `src/desired/`, `src/db/metrics/`, `drizzle.metrics.config.ts`, `drizzle/metrics/` | `infra.ts`, `runtime.ts` |
 | People and access: setup link, email and password, GitHub device flow, sessions, TOTP and recovery codes, passkeys, API keys; users, invites and grants; the audit log; the op pipeline, permission checks and the op framework | `auth`, `setup`, `users`, `invites`, `grants`, `apiKeys`, `audit` | `src/auth/`, `src/security/`, `src/ops/`, `scripts/create-owner.ts`, `scripts/setup-link.ts` | `identity.ts`, `audit.ts` |
-| Services and deploys: projects, services (all kinds, compose stacks split into members), deploys, builds, releases and rollback, PR previews, push-to-deploy webhooks and deploy triggers, the per-panel GitHub App, git and registry credentials, templates (QuickJS runner) and the template catalog | `projects`, `services`, `compose`, `deployments`, `builds`, `previews`, `webhooks`, `github`, `git`, `registries`, `templates` | `src/template-runner/`, `templates/` (repository root) | `projects.ts`, `deploys.ts`, `git.ts`, `templates.ts` |
+| Services and deploys: projects, services (all kinds, compose stacks split into members), deploys, builds, releases and rollback, PR previews, push-to-deploy webhooks and deploy triggers, the per-panel GitHub App, git and registry credentials, templates (QuickJS runner) and the template catalog, Docker Hub as a template source | `projects`, `services`, `compose`, `deployments`, `builds`, `previews`, `webhooks`, `github`, `git`, `registries`, `templates`, `dockerHub` | `src/template-runner/`, `templates/` (repository root) | `projects.ts`, `deploys.ts`, `git.ts`, `templates.ts` |
 | Networking, env and data: domains, DNS checks and the Cloudflare DNS link, middlewares, first-run IP:port access and redirect-then-close, the env editor backend and `${{svc.VAR}}` references, databases (engines, credentials, web UIs, exposure with TLS), backups and restores, dev access (timed expose, Cloudflare tunnels), Boxes, maintenance pages, signing edge tickets (with the key from `security/edge-ticket-key.ts`) | `domains`, `env`, `databases`, `backups`, `exposures`, `tunnels`, `boxes`, `maintenance` | `packages/env-analyzer/` | `env.ts`, `networking.ts`, `backups.ts` |
 | System and automation: notification channels, alert rules and delivery, uptime checks, the job runner and recurring schedules, cron jobs (panel side), approvals, the MCP server and its OAuth, the AI assistant (routing, budget, usage), settings (branding, white label, themes, custom CSS, telemetry), and the panel core around them | `system`, `settings`, `notifications`, `alerts`, `uptime`, `cron`, `approvals`, `mcp`, `ai`, `telemetry` | `src/{jobs,live,http}/`, `src/{main,panel,deps,config,settings,logger,ids}.ts`, `src/modules/module.ts`, `src/db/client.ts`, `packages/ops/src/generators/{mcp,ai-tools}.ts` | `automation.ts`, `ops.ts`, `mcp.ts`, `settings.ts`, `columns.ts` |
 
@@ -1358,6 +1359,46 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (`deployments.recent`, `builds.queue`).
 - Templates run only in `apps/panel/src/template-runner` (QuickJS-wasm,
   32 MiB, 1 s); the catalog format is `templates/README.md`.
+- Docker Hub (`modules/dockerHub/`): `dockerHub.search`, `dockerHub.tags`
+  and `dockerHub.inspect` are `signedIn` queries like the template catalog
+  (MCP too, not audited); `dockerHub.create` needs `services.create` on the
+  project and audits with `env` redacted. Search ranks images named exactly
+  like the query first (the official one, then by pulls), then official
+  images and verified publishers, then the rest in Docker Hub's order
+  (website search `api/search/v4`, images only; `v2/search/repositories`
+  when v4 fails); a query of several words is also looked up hyphenated.
+  Tags come newest first, 100 a page, with `suggested`: the most specific
+  version tag with latest's digest (looking one page further when needed),
+  else latest. Inspect reads the config for linux/amd64 or linux/arm64
+  (the caller's `arch` first): anonymous token from auth.docker.io, a free
+  HEAD for the digest, the manifest list, the platform manifest and the
+  config blob, each checked against its sha256. `client.ts` contacts only
+  `http.ts` `dockerHubHosts` (hub.docker.com, auth.docker.io,
+  registry-1.docker.io and Docker's blob CDNs production.cloudflare /
+  production.cloudfront.docker.com and its R2 bucket) over HTTPS, follows
+  redirects by hand only among them and never carries the Authorization
+  header to another host; bodies are capped while read. Caches are in
+  memory per panel: search 10 min, tags 30 min, configs by digest 7 days,
+  tokens until they expire. A 429 answers `RATE_LIMITED` (`details.reason:
+  dockerHubRateLimit`, `retryAfterSeconds`) and the client asks nothing
+  more of that limit (Hub API, HEADs, anonymous pulls, login pulls) until
+  it lifts. The oldest registry login for Docker Hub (`registries`, server
+  docker.io or an alias) is the panel's Docker Hub login: public images
+  (proven by the anonymous HEAD) are pulled with its token so inspecting
+  spends its limit; its private repositories are read (tags through a Hub
+  API token from `/v2/auth/token`) only for callers with
+  `registries.manage`, and those answers are cached apart. A refused login
+  is not retried for 5 minutes. `dockerHub.create` makes one app like a
+  template app (`templates/install.ts`): image `<repository>:<tag>`
+  (official images without `library/`), optional `registryId` (a Docker
+  Hub login, `assertSourceAllowed`), main TCP port, volumes named from
+  their paths (`volumeNameFor`), optional `command` (replaces CMD), the
+  .env (syntax checked, `checkEnvReferences`), the node's automatic domain
+  or first-run IP:port when `public` (default), then `queueDeploy`
+  (trigger `manual`) unless `deployNow` is false; the row is deleted again
+  when a later step fails. Tests replay recorded answers
+  (`test/fixtures/dockerhub`, `record.ts` re-records); `DOCKERHUB_LIVE=1`
+  runs one live search, tag list and inspect.
 
 ### Networking, env and data
 
@@ -1414,7 +1455,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 `apps/web`, with the UI kit in `packages/ui`.
 
 - Screens: the shell (sidebar, command palette, layouts), dashboard,
-  project page, nodes, templates, setup and login are
+  project page, nodes, templates (with its Docker Hub tab, `?tab=docker-hub`,
+  the image form and the popular images in `src/components/docker-hub/`),
+  setup and login are
   `src/routes/{__root,_app,login,setup}.tsx`, `src/routes/_app/` and
   `src/components/`. Every service and database page with all its tabs
   (overview, deployments, source, environment with Monaco, domains, logs,
@@ -1469,7 +1512,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   authenticator setup, CLI approval, GitHub link, passkey and a node join
   command each ask first and go through; `/reauth`; sign in again) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
-  four theme presets, plus the phone width and the accent check);
+  four theme presets, plus the phone width and the accent check) and
+  `dockerhub.spec.ts` (Docker Hub search, tag picker, prefilled form and
+  create, popular images, with `demo/dockerhub.ts`);
   screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`
   narrow it.
 
