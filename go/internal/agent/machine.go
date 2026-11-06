@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"errors"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
 	"runtime"
+	"strings"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/version"
@@ -28,7 +31,41 @@ func collectMachineFacts(f *agentv1.NodeFacts, dataDir string) {
 	if bt := bootTime(); bt != nil {
 		f.BootTime = bt
 	}
+	tz, tzSet := os.LookupEnv("TZ")
+	f.TimeZone = timeZoneName(tz, tzSet, "/etc/localtime", "/etc/timezone")
 	refreshVolatileFacts(f, dataDir)
+}
+
+// timeZoneName names the zone time.Local uses (scheduled cleanup runs in
+// it), following Go's rules: $TZ when set (empty means UTC), else the
+// zoneinfo path /etc/localtime links to, else /etc/timezone next to a
+// copied /etc/localtime. No /etc/localtime means UTC. A copied file
+// without /etc/timezone has no name: "".
+func timeZoneName(tz string, tzSet bool, localtime, timezoneFile string) string {
+	if tzSet {
+		tz = strings.TrimPrefix(tz, ":")
+		switch {
+		case tz == "":
+			return "UTC"
+		case !strings.HasPrefix(tz, "/"):
+			return tz
+		}
+		localtime = tz // a zoneinfo file path
+	}
+	if target, err := os.Readlink(localtime); err == nil {
+		if _, name, ok := strings.Cut(target, "zoneinfo/"); ok && name != "" {
+			return strings.TrimPrefix(name, "posix/")
+		}
+	} else if _, err := os.Stat(localtime); errors.Is(err, fs.ErrNotExist) {
+		return "UTC"
+	}
+	if _, name, ok := strings.Cut(localtime, "zoneinfo/"); ok && name != "" {
+		return name
+	}
+	if b, err := os.ReadFile(timezoneFile); err == nil {
+		return strings.TrimSpace(string(b))
+	}
+	return ""
 }
 
 // refreshVolatileFacts updates what changes while the agent runs: free

@@ -54,6 +54,9 @@ type diskWatch struct {
 	stat    func(path string) (fsUse, error)
 	reports func() state.Reporter
 	logger  *slog.Logger
+	// onUse, when set, gets the fullest file system's use in percent after
+	// every check (the scheduled cleanup's disk trigger).
+	onUse func(percent float64)
 
 	// Owned by the run goroutine.
 	checked bool
@@ -97,6 +100,13 @@ func (w *diskWatch) check(ctx context.Context) {
 	if len(all) == 0 {
 		return
 	}
+	if w.onUse != nil {
+		fullest := 0.0
+		for _, f := range all {
+			fullest = max(fullest, f.use.percent())
+		}
+		w.onUse(fullest)
+	}
 	full := slices.DeleteFunc(all, func(f *diskFS) bool { return f.use.percent() <= diskAlertPercent })
 	first := !w.checked
 	w.checked = true
@@ -138,7 +148,7 @@ func diskMessage(full []*diskFS) string {
 		parts = append(parts, fmt.Sprintf("%.0f%% full on %s (%s)", f.use.percent(), strings.Join(f.paths, ", "), strings.Join(f.names, " and ")))
 		free = append(free, fmt.Sprintf("%s free of %s", sizeText(f.use.avail), sizeText(f.use.used+f.use.avail)))
 	}
-	return fmt.Sprintf("Disk %s\n%s. Free space: remove unused images and build cache from Settings > Cleanup, or grow the disk. "+
+	return fmt.Sprintf("Disk %s\n%s. Free space: remove unused images and build cache from the node's Cleanup tab (it can also run on a schedule or when a disk fills up), or grow the disk. "+
 		"Checked every %d minutes; the alert clears under %d%%.", strings.Join(parts, "; "), strings.Join(free, "; "), int(diskCheckEvery/time.Minute), diskAlertPercent)
 }
 

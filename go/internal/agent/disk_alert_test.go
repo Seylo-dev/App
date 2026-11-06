@@ -155,3 +155,19 @@ func TestDiskPaths(t *testing.T) {
 		t.Fatalf("with Docker down = %v", got)
 	}
 }
+
+// The scheduled cleanup's disk trigger gets the fullest disk after every
+// check, whether or not the alert changed.
+func TestDiskChecksFeedTheCleanupTrigger(t *testing.T) {
+	w, use, _ := fakeDisks(false)
+	var seen []float64
+	w.onUse = func(percent float64) { seen = append(seen, percent) }
+	use["/data"] = 42
+	use["/docker"] = 81.5
+	w.check(context.Background())
+	use["/docker"] = 12
+	w.check(context.Background())
+	if len(seen) != 2 || seen[0] < 81.4 || seen[0] > 81.6 || seen[1] < 41.9 || seen[1] > 42.1 {
+		t.Fatalf("readings = %v, want the fullest disk each time (81.5, then 42)", seen)
+	}
+}

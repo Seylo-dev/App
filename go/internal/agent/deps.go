@@ -125,6 +125,9 @@ type Deps struct {
 	Backups    backup.Runner
 	Cloudflare tunnel.Cloudflare
 	Pruner     cleanup.Pruner
+	// CleanupScheduler runs NodeSettings.cleanup; the node area feeds it
+	// the disk checks' readings.
+	CleanupScheduler cleanup.Scheduler
 
 	// Node (wire_node.go).
 

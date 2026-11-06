@@ -207,6 +207,9 @@ func wireNode(reg *Registry, d *Deps) error {
 		reports: func() state.Reporter { return d.Reports },
 		logger:  d.Logger.With("component", "disk-alert"),
 	}
+	if d.CleanupScheduler != nil {
+		disks.onUse = d.CleanupScheduler.DiskUse
+	}
 	d.Components.Add("disk-alert", disks.run)
 	d.Components.Add("health-checks", func(ctx context.Context) error {
 		for {
