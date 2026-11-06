@@ -34,7 +34,7 @@ export const image = "ghcr.io/seylo-dev/seylo";
 export const oauthClientId = "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID";
 
 /** MinisignPublicKey verifies signed release manifests. */
-export const minisignPublicKey = "PLACEHOLDER_MINISIGN_PUBLIC_KEY";
+export const minisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip";
 
 export const brand = {
   displayName,

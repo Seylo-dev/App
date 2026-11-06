@@ -29,5 +29,5 @@ const (
 	// OAuthClientID is the public client id of the GitHub OAuth App used for device-flow sign-in.
 	OAuthClientID = "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID"
 	// MinisignPublicKey verifies signed release manifests.
-	MinisignPublicKey = "PLACEHOLDER_MINISIGN_PUBLIC_KEY"
+	MinisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip"
 )

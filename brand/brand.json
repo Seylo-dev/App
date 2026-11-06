@@ -9,5 +9,5 @@
   "githubRepo": "App",
   "image": "ghcr.io/seylo-dev/seylo",
   "oauthClientId": "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID",
-  "minisignPublicKey": "PLACEHOLDER_MINISIGN_PUBLIC_KEY"
+  "minisignPublicKey": "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip"
 }

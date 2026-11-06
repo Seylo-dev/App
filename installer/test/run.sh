@@ -193,7 +193,13 @@ fresh_release() {
 INSTALLER=$T/install.sh
 PLACEHOLDER_INSTALLER=$T/install-release.sh
 INSTALLER_TEST_PUBLIC_KEY=$KEY "$root/scripts/render-installer.sh" latest "$INSTALLER" >/dev/null
-"$root/scripts/render-installer.sh" latest "$PLACEHOLDER_INSTALLER" >/dev/null
+# A release installer from a build that has no signing key yet: the real
+# render with brand.json's key swapped for the placeholder, so these cases do
+# not depend on whether brand.json has a key.
+"$root/scripts/render-installer.sh" latest "$T/install-release-keyed.sh" >/dev/null
+sed "s|^BRAND_MINISIGN_PUBLIC_KEY=.*|BRAND_MINISIGN_PUBLIC_KEY='${BRAND_PLACEHOLDER_PREFIX}MINISIGN_PUBLIC_KEY'|" \
+  "$T/install-release-keyed.sh" >"$PLACEHOLDER_INSTALLER"
+grep -q "^BRAND_MINISIGN_PUBLIC_KEY='${BRAND_PLACEHOLDER_PREFIX}" "$PLACEHOLDER_INSTALLER" || { echo "installer tests: could not make the keyless installer" >&2; exit 1; }
 
 # run_installer <verifier> <installer> [join|uninstall] <args...>: sets OUT, RC,
 # R (the --root dir). PRESEED=<dir> is copied into the root first;
