@@ -302,6 +302,10 @@ const (
 	imageKeyDB      = "eqalpha/keydb@sha256:6537505c42355ca1f571276bddf83f5b750f760f07b2a185a676481791e388ac"
 	imageDragonfly  = "ghcr.io/dragonflydb/dragonfly:v2.0.2"
 	imageClickHouse = "clickhouse/clickhouse-server:26.8.36.3"
+	// The older majors the panel offers.
+	imageValkey81     = "valkey/valkey:8.1.11-alpine"
+	imageClickHouse26 = "clickhouse/clickhouse-server:26.3.62.3"
+	imagePostgres15pv = "pgvector/pgvector:0.8.7-pg15-trixie"
 )
 
 // newEngine is a database the way the panel runs it: the same command,
@@ -318,22 +322,27 @@ type newEngine struct {
 
 func newEngines() map[string]newEngine {
 	pgEnv := []*agentv1.EnvVar{{Name: "POSTGRES_USER", Value: "admin"}, {Name: "POSTGRES_PASSWORD", Value: pw}, {Name: "POSTGRES_DB", Value: "app"}}
+	valkey := []string{"sh", "-c", `exec docker-entrypoint.sh valkey-server --requirepass "$VALKEY_PASSWORD" --appendonly yes`}
+	clickhouse := []*agentv1.EnvVar{{Name: "CLICKHOUSE_USER", Value: "admin"}, {Name: "CLICKHOUSE_PASSWORD", Value: pw}, {Name: "CLICKHOUSE_DB", Value: "app"},
+		{Name: "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", Value: "1"}}
 	return map[string]newEngine{
 		// Postgres 18 images keep data in /var/lib/postgresql/18/docker.
 		"postgres18": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres18, "admin", pgEnv, nil, "/var/lib/postgresql", []uint32{5432}},
 		"pgvector":   {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePgvector, "admin", pgEnv, nil, "/var/lib/postgresql", []uint32{5432}},
+		// pgvector before 18 keeps the old data path.
+		"pgvector15": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres15pv, "admin", pgEnv, nil, "/var/lib/postgresql/data", []uint32{5432}},
 		"valkey": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey, "default",
-			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}},
-			[]string{"sh", "-c", `exec docker-entrypoint.sh valkey-server --requirepass "$VALKEY_PASSWORD" --appendonly yes`}, "/data", []uint32{6379}},
+			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}}, valkey, "/data", []uint32{6379}},
+		"valkey81": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey81, "default",
+			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}}, valkey, "/data", []uint32{6379}},
 		"keydb": {agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, imageKeyDB, "default",
 			[]*agentv1.EnvVar{{Name: "KEYDB_PASSWORD", Value: pw}},
 			[]string{"sh", "-c", `exec docker-entrypoint.sh keydb-server /etc/keydb/keydb.conf --requirepass "$KEYDB_PASSWORD" --appendonly yes`}, "/data", []uint32{6379}},
 		"dragonfly": {agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY, imageDragonfly, "default",
 			[]*agentv1.EnvVar{{Name: "DFLY_requirepass", Value: pw}},
 			[]string{"dragonfly", "--logtostderr", "--dir", "/data", "--dbfilename", "dump", "--df_snapshot_format=false", "--snapshot_cron", "*/5 * * * *"}, "/data", []uint32{6379}},
-		"clickhouse": {agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, imageClickHouse, "admin",
-			[]*agentv1.EnvVar{{Name: "CLICKHOUSE_USER", Value: "admin"}, {Name: "CLICKHOUSE_PASSWORD", Value: pw}, {Name: "CLICKHOUSE_DB", Value: "app"},
-				{Name: "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", Value: "1"}}, nil, "/var/lib/clickhouse", []uint32{9000, 8123}},
+		"clickhouse":   {agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, imageClickHouse, "admin", clickhouse, nil, "/var/lib/clickhouse", []uint32{9000, 8123}},
+		"clickhouse26": {agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, imageClickHouse26, "admin", clickhouse, nil, "/var/lib/clickhouse", []uint32{9000, 8123}},
 	}
 }
 
@@ -378,14 +387,18 @@ func TestNewEnginesDumpRestoreRoundTrip(t *testing.T) {
 					_, code := run("create table if not exists t (v varchar(20))")
 					return code == 0
 				})
-				if name == "pgvector" {
+				if strings.HasPrefix(name, "pgvector") {
 					out, code := run("create extension if not exists vector; create table if not exists items (id int, e vector(3)); delete from items; insert into items values (1, '[1,2,3]'), (2, '[3,2,1]'); select id from items order by e <-> '[3,1,1]' limit 1")
 					if lines := strings.Split(out, "\n"); code != 0 || lines[len(lines)-1] != "2" {
 						t.Fatalf("pgvector query = %q (%d)", out, code)
 					}
 				}
-				if out, _ := run("show server_version_num"); !strings.HasPrefix(out, "18") {
-					t.Fatalf("server version %q", out)
+				major := "18"
+				if name == "pgvector15" {
+					major = "15"
+				}
+				if out, _ := run("show server_version_num"); !strings.HasPrefix(out, major) {
+					t.Fatalf("server version %q, want %s", out, major)
 				}
 				write = func(v string) {
 					if out, code := run("delete from t; insert into t values ('" + v + "')"); code != 0 {
