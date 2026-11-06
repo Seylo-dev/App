@@ -7,10 +7,11 @@ import { areaLabel, humanize } from "./actions";
 
 const summaries = new Map(allOps.map((op) => [op.id, op.summary]));
 
-/** Audit entries the panel writes outside the op registry (the MCP OAuth endpoints). */
+/** Audit entries the panel writes outside the op registry (the MCP OAuth endpoints, host shells closing). */
 const notOps: Record<string, () => string> = {
   "mcp.registerClient": () => t("activity.events.mcpRegisterClient"),
   "mcp.authorizeClient": () => t("activity.events.mcpAuthorizeClient"),
+  "hostShell.close": () => t("activity.events.hostShellClose"),
 };
 
 /**

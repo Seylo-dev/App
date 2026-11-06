@@ -27,8 +27,9 @@ const readyWaitMs = 1500;
 
 const clientMessage = TypeCompiler.Compile(terminals.TerminalClientMessage);
 
-interface TerminalTicket {
-  mode: "console" | "shell";
+export interface TerminalTicket {
+  /** "host" is a root shell on the node itself (modules/hostShell). */
+  mode: "console" | "shell" | "host";
   serviceId: string;
   nodeId: string;
   containerId: string;
@@ -39,6 +40,11 @@ interface TerminalTicket {
   databaseClient: boolean;
   columns: number;
   rows: number;
+  /** Host shells: who opened it and the panel's session id, for the agent's own log. */
+  openedBy?: string;
+  sessionId?: string;
+  /** Closes the session after this long without input or output; default idleTimeoutSeconds. */
+  idleSeconds?: number;
 }
 
 /** The running replica to attach to: the one asked for, else the first running one the node reports. */
@@ -127,24 +133,41 @@ interface Session {
   stop(): void;
 }
 
+export interface TerminalHooks {
+  /** Called once when the session ends, with why ("exited", "idle", "ended", "closed", "left"). */
+  onEnd?(reason: string): void;
+}
+
 /** Starts the agent stream for a redeemed ticket and pumps it to the socket. */
-export function startTerminal(deps: Pick<Deps, "agents">, ticket: TerminalTicket, socket: TerminalSocket): Session {
+export function startTerminal(
+  deps: Pick<Deps, "agents">,
+  ticket: TerminalTicket,
+  socket: TerminalSocket,
+  hooks: TerminalHooks = {},
+): Session {
   let idle: ReturnType<typeof setTimeout> | undefined;
   let ended = false;
+  const finish = (reason: string) => {
+    ended = true;
+    clearTimeout(idle);
+    hooks.onEnd?.(reason);
+  };
   const end = (code: number, reason: string, message?: terminals.TerminalServerMessage) => {
     if (ended) return;
     ready();
-    ended = true;
-    clearTimeout(idle);
+    finish(reason);
     if (message) socket.sendControl(message);
     socket.close(code, reason);
   };
   const touch = () => {
     clearTimeout(idle);
-    idle = setTimeout(() => {
-      stream.cancel("idle");
-      end(1000, "idle", { type: "closed", reason: "The session was idle for too long." });
-    }, idleTimeoutSeconds * 1000);
+    idle = setTimeout(
+      () => {
+        stream.cancel("idle");
+        end(1000, "idle", { type: "closed", reason: "The session was idle for too long." });
+      },
+      (ticket.idleSeconds ?? idleTimeoutSeconds) * 1000,
+    );
   };
 
   const stream =
@@ -152,7 +175,18 @@ export function startTerminal(deps: Pick<Deps, "agents">, ticket: TerminalTicket
       ? deps.agents.open(ticket.nodeId, "console", {
           message: { case: "open", value: { serviceId: ticket.serviceId, containerId: ticket.containerId, tail: ticket.tail } },
         })
-      : deps.agents.open(ticket.nodeId, "shell", {
+      : ticket.mode === "host"
+        ? deps.agents.open(ticket.nodeId, "hostShell", {
+            message: {
+              case: "open",
+              value: {
+                size: { columns: ticket.columns, rows: ticket.rows },
+                openedBy: ticket.openedBy ?? "",
+                sessionId: ticket.sessionId ?? "",
+              },
+            },
+          })
+        : deps.agents.open(ticket.nodeId, "shell", {
           message: {
             case: "open",
             value: {
@@ -191,7 +225,13 @@ export function startTerminal(deps: Pick<Deps, "agents">, ticket: TerminalTicket
       for await (const res of stream) {
         touch();
         if (res.message.case === "info") {
-          ready(res.message.value);
+          const info = res.message.value;
+          ready({
+            containerId: "containerId" in info ? info.containerId : "",
+            generation: "generation" in info ? info.generation : 0n,
+            user: info.user,
+            workingDir: info.workingDir,
+          });
           continue;
         }
         ready();
@@ -228,16 +268,16 @@ export function startTerminal(deps: Pick<Deps, "agents">, ticket: TerminalTicket
         return;
       }
       if (!clientMessage.Check(parsed)) return;
-      if (parsed.type === "resize" && ticket.mode === "shell") {
+      if (parsed.type === "resize" && ticket.mode !== "console") {
         void (stream.send as (m: unknown) => Promise<void>)({
           message: { case: "resize", value: { columns: parsed.columns, rows: parsed.rows } },
         }).catch(() => {});
       }
     },
     stop() {
-      if (!ended) stream.cancel("the viewer left");
-      ended = true;
-      clearTimeout(idle);
+      if (ended) return;
+      stream.cancel("the viewer left");
+      finish("left");
     },
   };
 }

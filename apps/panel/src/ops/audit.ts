@@ -59,7 +59,8 @@ export function writeAudit(db: PanelDb, entry: AuditEntry): void {
 /**
  * Audit entries for things that are not ops but change who can act on the
  * panel, such as MCP OAuth client registration and consent (HTTP endpoints
- * whose shape the OAuth spec defines). `eventId` reads like an op id
+ * whose shape the OAuth spec defines), or that end outside an op, such as a
+ * host shell closing ("hostShell.close"). `eventId` reads like an op id
  * ("mcp.registerClient") and never collides with one. `input` must hold no
  * secrets: it is stored as given.
  */
@@ -75,6 +76,8 @@ export function writeAuditEvent(
     ip: string | null;
     userAgent: string | null;
     at?: Date;
+    /** How long the thing took (a host shell's open time). */
+    durationMs?: number;
   },
 ): void {
   const { principal } = entry;
@@ -94,7 +97,7 @@ export function writeAuditEvent(
       input: entry.input,
       outcome: entry.errorCode ? "error" : "ok",
       errorCode: entry.errorCode ?? null,
-      durationMs: 0,
+      durationMs: Math.round(entry.durationMs ?? 0),
       ip: entry.ip,
       userAgent: entry.userAgent,
       approvalId: null,

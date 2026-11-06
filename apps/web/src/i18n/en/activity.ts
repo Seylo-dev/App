@@ -34,6 +34,7 @@ export default {
   events: {
     mcpRegisterClient: "Register an MCP client",
     mcpAuthorizeClient: "Allow or deny an MCP client",
+    hostShellClose: "Close a root shell on a node",
   },
   export: {
     button: "Export",
