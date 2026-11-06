@@ -48,7 +48,7 @@ A real node agent needs Linux and Docker; see "Tests in a VM" below.
 | `make gen` | Regenerates brand constants, protocol code, op and module indexes, `openapi.json`, the web route tree and `installer/install.sh` |
 | `make check-gen` | Fails when committed generated code is stale or the Drizzle schema changed without a migration |
 | `make build` | Static `bin/seylo` (`CGO_ENABLED=0`), then the web app and the panel |
-| `make test` | Go tests with `-race`, `bun test` in every workspace, the installer tests |
+| `make test` | Go tests with `-race`, `bun test` in every workspace, the installer and release script tests |
 | `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` |
 | `make breaking` | `buf breaking` against `main` |
 | `make release-snapshot` | Release binaries and `install.sh` into `dist/` (no signing, image or publish) |
@@ -156,8 +156,9 @@ ported from other projects keeps its original notice and is listed in
 ## Releases
 
 Maintainers only. Releases are built by GitHub Actions
-(`.github/workflows/release.yml`) from a pushed `v*` tag and land as a
-draft that a maintainer publishes by hand.
+(`.github/workflows/release.yml`) from a pushed `v*` tag: the Draft release
+job builds a draft release, then the Publish job checks the draft on its own
+and publishes it.
 
 Once, before the first release:
 
@@ -180,32 +181,63 @@ Each release:
    throwaway key made inside the job, and publishes nothing. A run started
    by hand with `dry_run` off is refused: real releases only come from tags.
 2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
-   The workflow checks that the tag is on the commit, runs `make install`,
-   `make check-gen` and `make test`, then `make release` for exactly that
-   tag. One release runs at a time, and a running release is never
-   cancelled. A `vX.Y.Z-<pre>` tag (`v0.1.0-rc.1`) makes a pre-release that
-   installs and updates do not follow; to promote it, tag the same commit
-   `vX.Y.Z`.
-3. The image tags (`<version>`, and `latest` unless it is a pre-release) are
-   pushed to `ghcr.io/seylo-dev/seylo` when the draft is made. On the first
-   release only, the new package is private: before publishing the draft,
-   open it in the org's Packages, check that it is connected to the `App`
-   repository and change its visibility to public (Package settings), or
-   installs cannot pull the panel image.
-4. Review the draft under Releases (files, notes) and publish it. Installs
-   and updates follow the latest published release, so nothing reaches
-   users before that.
+   The Draft release job checks that the tag is on the commit, runs
+   `make install`, `make check-gen` and `make test`, then `make release` for
+   exactly that tag, which makes the draft and pushes the image tags
+   (`<version>`, and `latest` unless it is a pre-release) to
+   `ghcr.io/seylo-dev/seylo`. One release runs at a time, and a running
+   release is never cancelled by another tag. A `vX.Y.Z-<pre>` tag
+   (`v0.1.0-rc.1`) makes a pre-release that installs and updates do not
+   follow; to promote it, tag the same commit `vX.Y.Z`.
+3. The Publish job (`scripts/release-publish.sh`) then checks the draft
+   without trusting the job that made it, and publishes it only when every
+   check passes:
+   - `checksums.txt` and `manifest.json` are signed by `brand.json`'s
+     `minisignPublicKey`, with this version in their trusted comments;
+   - every release file is attached, and each file `checksums.txt` lists
+     matches its signed sha256;
+   - `manifest.json` names this version, this release's linux binaries,
+     `install.sh` and panel image, and `install.sh` is this version's
+     release build (not a test build);
+   - the release is a pre-release exactly when the tag is;
+   - `ghcr.io/seylo-dev/seylo:<version>`, and the digest the manifest pins,
+     pull anonymously (as installs and updates pull them), with linux/amd64
+     and linux/arm64.
 
-If a tag release fails, fix the cause on `main`, delete the draft release
-if one was made, delete the tag (`git push origin :refs/tags/v0.1.0` and
-`git tag -d v0.1.0`) and tag again.
+   A stable version becomes the latest release, which installs and updates
+   follow, unless a newer version already is; a pre-release never does. The
+   run summary lists every check. When one fails, the draft stays a draft
+   and the summary says what to do. Running Publish again on a release that
+   is already published checks it and changes nothing.
+4. On the first release only, the new package is private, so Publish stops
+   with "The ghcr.io/seylo-dev/seylo package is private". Open it
+   (github.com/orgs/Seylo-dev/packages > seylo), check that it is connected
+   to the `App` repository, change its visibility to public (Package
+   settings > Change visibility), then re-run the Publish job (the run's
+   page > Publish > Re-run this job). It stays public for later releases.
 
-`make release` is the local fallback and the step the workflow runs. It
-needs the `v*` tag checked out, `GITHUB_TOKEN`, `MINISIGN_SECRET_KEY` (the
-path of the key file), `MINISIGN_PASSWORD`, a `docker login ghcr.io` and a
-buildx builder that builds linux/amd64 and linux/arm64.
-`scripts/release-preflight.sh` first refuses a placeholder or test signing
-key in `brand/brand.json`, a secret key that does not match it,
+To keep a release from going out on its own:
+
+- Push the tag as a pre-release (`v0.1.0-rc.1`). Publish still publishes it,
+  as a pre-release that installs and updates do not follow; tag the same
+  commit `vX.Y.Z` when it is ready.
+- Or cancel the workflow run (Actions > the run > Cancel workflow run)
+  before the Publish job finishes. If the Draft release job had finished,
+  the draft is complete and stays a draft: publish it later by re-running
+  the Publish job. If it was still running, the draft may be half made:
+  delete it and the tag as below.
+
+If the Draft release job fails, or Publish refuses the draft's content (not
+the private package), do not publish the draft by hand. Fix the cause on
+`main`, delete the draft release if one was made, delete the tag
+(`git push origin :refs/tags/v0.1.0` and `git tag -d v0.1.0`) and tag again.
+
+`make release` is the local fallback for the Draft release job and the step
+it runs. It needs the `v*` tag checked out, `GITHUB_TOKEN`,
+`MINISIGN_SECRET_KEY` (the path of the key file), `MINISIGN_PASSWORD`, a
+`docker login ghcr.io` and a buildx builder that builds linux/amd64 and
+linux/arm64. `scripts/release-preflight.sh` first refuses a placeholder or
+test signing key in `brand/brand.json`, a secret key that does not match it,
 `INSTALLER_TEST_PUBLIC_KEY` in the environment and a repository the token
 cannot push to (in Actions: a workflow running in another repository than
 `brand.json`'s `githubOrg`/`githubRepo`). goreleaser then makes a draft
@@ -213,3 +245,10 @@ release with the binaries, signed checksums, `install.sh`, `openapi.json`
 and the multi-arch panel image, and `scripts/release-manifest.sh` adds the
 signed update manifest. `make release-dry-run` is the goreleaser half of the
 dry run (it needs `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` too).
+
+`scripts/release-publish.sh v0.1.0` is the local fallback for the Publish
+job: the same checks, then the publish, with `gh` logged in to an account
+that can write to the repository, `minisign`, `jq` and `curl`.
+`scripts/release-publish.sh --check-image ghcr.io/seylo-dev/seylo:0.1.0`
+runs only the anonymous pull check. `make test-release` tests the script
+against a fake draft release and registry.

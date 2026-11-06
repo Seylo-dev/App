@@ -2,9 +2,11 @@ name: Release
 
 # A pushed v* tag makes a DRAFT GitHub release with `make release`: the
 # binaries, checksums signed with the release key, install.sh, openapi.json,
-# the multi-arch panel image on ghcr.io and the signed update manifest. A
-# maintainer reviews the draft and publishes it by hand (CONTRIBUTING.md,
-# Releases).
+# the multi-arch panel image on ghcr.io and the signed update manifest. The
+# Publish job then checks the draft on its own (signatures against brand.json's
+# key, files, versions, an anonymous pull of the panel image) and publishes it
+# only when every check passes; otherwise the draft stays and the run summary
+# says what to do (CONTRIBUTING.md, Releases).
 #
 # Run by hand (workflow_dispatch) it is a dry run that publishes nothing: the
 # same checks and goreleaser config in snapshot mode, signed with a throwaway
@@ -362,7 +364,7 @@ jobs:
           {
             echo "### Draft release $TAG"
             echo
-            echo "Review it and publish it by hand: https://github.com/$GITHUB_REPOSITORY/releases"
+            echo "The Publish job checks it again and publishes it: https://github.com/$GITHUB_REPOSITORY/releases"
             echo
             echo '```'
             echo "$assets"
@@ -373,3 +375,37 @@ jobs:
       - name: Remove the signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.key"
+
+  publish:
+    name: Publish
+    needs: release
+    # After the draft job of a pushed v* tag succeeded. Re-running only this
+    # job (Actions > the run > Publish > Re-run, say after making the package
+    # public) checks the draft again and publishes it; it needs nothing from
+    # the draft job but the release itself.
+    if: success() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # read the draft release and publish it; the image check is anonymous
+    concurrency:
+      group: release-publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # minisign verifies the signatures; gh and curl come with the runner.
+      - name: Release tools
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign jq
+
+      # Signatures against brand.json's key, every file and its signed
+      # sha256, the manifest and install.sh versions, the pre-release flag,
+      # an anonymous pull of the panel image; then publish. The step summary
+      # lists each check, or says what to do when one fails.
+      - name: Check the draft and publish it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: scripts/release-publish.sh "$TAG"
