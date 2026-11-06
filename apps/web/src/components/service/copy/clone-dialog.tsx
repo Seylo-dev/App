@@ -39,6 +39,8 @@ function blockedText(reason: Blocked): string | null {
       return t("serviceCopy.clone.blocked.offline");
     case "agentTooOld":
       return t("serviceCopy.clone.blocked.agentTooOld");
+    case "control":
+      return t("serviceCopy.clone.blocked.control");
   }
 }
 

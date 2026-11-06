@@ -22,12 +22,13 @@ import { join } from "node:path";
 import { parseEnv } from "@seylo/env-analyzer";
 import { OpError, services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import {
   type DomainMiddlewares,
   domains,
   nodes,
+  projects,
   serviceBoxes,
   serviceCopies,
   serviceDatabases,
@@ -50,7 +51,7 @@ import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { toDataCopy } from "./copies";
-import { ownReferenceEffects, projectEnvOf, type ReferenceEffect } from "./impact";
+import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect } from "./impact";
 import { assertNode, insertService, writeSpec } from "./insert";
 import { relayVolume, waitStopped } from "./move";
 import { requireTargetProject } from "./move-project";
@@ -115,6 +116,8 @@ interface ClonePlan {
   autoDomainBlock: AutoDomainBlock | null;
   middlewares: DomainMiddlewares | null;
   references: ReferenceEffect[];
+  /** References in the target project already waiting for the clone's name (they would read its values). */
+  planted: ReturnType<typeof plantedReferences>;
 }
 
 function hasMiddlewares(m: DomainMiddlewares | null | undefined): m is DomainMiddlewares {
@@ -136,10 +139,14 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
   const nodeId = input.nodeId ?? fromNodeId;
   if (!nodeId) throw new OpError("BAD_REQUEST", "Pick a node for the clone.", { field: "nodeId" });
   assertNode(ctx.db, nodeId);
-  const name = input.name ?? cloneName((n) => nameTaken(ctx, projectId, n), svc.name);
+  const isDatabase = findDatabase(ctx.db, svc.id) !== undefined;
+  const to = projectEnvOf(buildEnvGraph(ctx, projectId));
+  // A suggested name never lands on references someone left waiting for it.
+  const name =
+    input.name ?? cloneName((n) => nameTaken(ctx, projectId, n) || plantedReferences(to, n, isDatabase, svc.id).length > 0, svc.name);
+  const planted = plantedReferences(to, name, isDatabase, svc.id);
 
   const spec = readSpec(svc.spec);
-  const isDatabase = findDatabase(ctx.db, svc.id) !== undefined;
   const envReadable = can("env.view", "service", svc.id);
   const envText = readServiceEnv(ctx.db, ctx.secrets, svc.id).text;
   const all = ctx.db.select().from(volumes).where(eq(volumes.serviceId, svc.id)).orderBy(asc(volumes.name)).all();
@@ -153,6 +160,8 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
   else if (!isDatabase && !can("files.read", "service", svc.id)) dataBlock = "files";
   else if (!fromNodeId || !ctx.agents.isOnline(fromNodeId) || !ctx.agents.isOnline(nodeId)) dataBlock = "offline";
   else if (!ctx.agents.supports(fromNodeId, "exportVolume") || !ctx.agents.supports(nodeId, "importVolume")) dataBlock = "agentTooOld";
+  // A database stops for its copy, which is services.control on it.
+  else if (isDatabase && !svc.stopped && !can("services.control", "service", svc.id)) dataBlock = "control";
 
   const node = ctx.db.select({ wildcard: nodes.wildcardDomain }).from(nodes).where(eq(nodes.id, nodeId)).get();
   const host = node?.wildcard ? `${name}.${node.wildcard}` : null;
@@ -166,7 +175,6 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
   let references: ReferenceEffect[] = [];
   if (projectId !== svc.projectId && envReadable) {
     const from = projectEnvOf(buildEnvGraph(ctx, svc.projectId));
-    const to = projectEnvOf(buildEnvGraph(ctx, projectId));
     const self = from.services.find((s) => s.id === svc.id);
     if (self) references = ownReferenceEffects(self, from, to);
   }
@@ -190,6 +198,7 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
     autoDomainBlock,
     middlewares: hasMiddlewares(primary?.middlewares) ? (primary?.middlewares ?? null) : null,
     references,
+    planted,
   };
 }
 
@@ -215,6 +224,7 @@ const dataBlockErrors: Record<CloneDataBlock, [code: "FORBIDDEN" | "CONFLICT" | 
   files: ["FORBIDDEN", "Copying volume data needs the files.read permission on the service."],
   offline: ["UNAVAILABLE", "Both nodes must be online to copy data."],
   agentTooOld: ["NOT_IMPLEMENTED", "A node's agent is too old to copy volumes. Update the node."],
+  control: ["FORBIDDEN", "A database stops while its data is copied, which needs the services.control permission on it."],
 };
 
 const autoDomainErrors: Record<AutoDomainBlock, [code: "CONFLICT" | "FORBIDDEN" | "BAD_REQUEST", message: string]> = {
@@ -285,6 +295,31 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   if (input.autoDomain && plan.autoDomainBlock) {
     const [code, message] = autoDomainErrors[plan.autoDomainBlock];
     throw new OpError(code, message, { reason: plan.autoDomainBlock, field: "autoDomain" });
+  }
+  if (plan.planted.length > 0) {
+    const project = ctx.db.select({ name: projects.name }).from(projects).where(eq(projects.id, plan.projectId)).get()?.name ?? "";
+    throw new OpError("CONFLICT", plantedMessage(ctx, plan.planted, project, "Pick another name."), {
+      reason: "references",
+      field: "name",
+    });
+  }
+  const stopsSource = data === "copy" && (plan.isDatabase || input.stopSource !== false);
+  if (stopsSource && !svc.stopped && !ctx.access.can("services.control", { type: "service", id: svc.id })) {
+    throw new OpError(
+      "FORBIDDEN",
+      `Copying while ${svc.name} is stopped needs the services.control permission on it. Copy without stopping it, or ask someone who can.`,
+      { action: "services.control", field: "stopSource" },
+    );
+  }
+  if (data === "copy") {
+    // Two copies from one source would start it again under each other.
+    const busy = ctx.db
+      .select({ id: serviceCopies.id })
+      .from(serviceCopies)
+      .where(and(eq(serviceCopies.sourceServiceId, svc.id), inArray(serviceCopies.status, ["queued", "copying"])))
+      .get();
+    if (busy)
+      throw new OpError("CONFLICT", `${svc.name}'s data is already being copied. Wait until that copy ends.`, { reason: "copying" });
   }
   const spec = cloneSpecOf(plan.spec);
   assertSourceAllowed(ctx, plan.projectId, spec.source);
@@ -363,7 +398,7 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
               sourceName: svc.name,
               fromNodeId: plan.fromNodeId,
               toNodeId: plan.nodeId,
-              stopSource: plan.isDatabase || input.stopSource !== false,
+              stopSource: stopsSource,
               volumes: plan.dataVolumes.map((v) => v.name),
               createdBy: user?.id ?? null,
             })
@@ -373,7 +408,8 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
     return { id, domain, copy };
   });
 
-  if (plan.spec.source.type === "upload") {
+  // The archive is the source's code (and whatever files came with it): reading files of the source.
+  if (plan.spec.source.type === "upload" && ctx.access.can("files.read", { type: "service", id: svc.id })) {
     const fileName = await copyNewestUpload(ctx, svc.id, created.id, user?.id ?? null);
     if (fileName)
       writeSpec(ctx.db, created.id, { ...readSpec(loadService(ctx.db, created.id).spec), source: { type: "upload", fileName } });
@@ -412,7 +448,7 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
     const load = () => deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, payload.copyId)).get();
     const row = load();
     if (!row || (row.status !== "queued" && row.status !== "copying")) return;
-    const clone = deps.db.select().from(services).where(eq(services.id, row.serviceId)).get();
+    const clone = row.serviceId ? deps.db.select().from(services).where(eq(services.id, row.serviceId)).get() : undefined;
     const source = row.sourceServiceId ? deps.db.select().from(services).where(eq(services.id, row.sourceServiceId)).get() : undefined;
     const save = (set: Partial<typeof serviceCopies.$inferInsert>) => {
       deps.db.update(serviceCopies).set(set).where(eq(serviceCopies.id, row.id)).run();

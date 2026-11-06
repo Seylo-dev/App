@@ -110,7 +110,12 @@ describe("services.clone", () => {
     await callOp(
       panel,
       domainOps.setMiddlewares,
-      { serviceId: id, domainId: added.body.domain.id, ipAllowList: ["10.0.0.0/8"], rateLimit: { average: 50, burst: 100, periodSeconds: 1 } },
+      {
+        serviceId: id,
+        domainId: added.body.domain.id,
+        ipAllowList: ["10.0.0.0/8"],
+        rateLimit: { average: 50, burst: 100, periodSeconds: 1 },
+      },
       { cookie },
     );
     await deployLive(id);
@@ -562,5 +567,76 @@ describe("services.moveProject", () => {
     panel.deps.db.update(services).set({ protected: true }).where(eq(services.id, id)).run();
     const res = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { cookie });
     expect(res.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "protected" } });
+  });
+});
+
+describe("references waiting for a name", () => {
+  test("a move is blocked when the new project already reads the service's values; addresses are fine", async () => {
+    const id = await app(shop, "api", { env: "SECRET=s3cret\n" });
+    const front = await app(blog, "front", { env: "API=${{api.INTERNAL_URL}}\n" });
+    const ok = await callOp(panel, serviceOps.moveProjectImpact, { serviceId: id, projectId: blog }, { cookie });
+    expect(ok.body.blockers).toEqual([]);
+    await callOp(panel, env.set, { serviceId: front, text: "API=${{api.INTERNAL_URL}}\nLEAK=${{api.SECRET}}\n" }, { cookie });
+    const blocked = await callOp(panel, serviceOps.moveProjectImpact, { serviceId: id, projectId: blog }, { cookie });
+    expect(blocked.body.blockers).toEqual([
+      {
+        reason: "references",
+        message:
+          "front (LEAK) in blog already references api.SECRET, which would start reading this service's values. Remove that reference first.",
+      },
+    ]);
+    const move = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { cookie });
+    expect(move.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "references" } });
+  });
+
+  test("a clone's suggested name avoids them, a chosen one is refused", async () => {
+    const id = await app(shop, "api");
+    await app(blog, "front", { env: "TOKEN=${{api-copy.TOKEN}}\n" });
+    const preview = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie });
+    expect(preview.body.name).toBe("api-copy-2");
+    const named = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA, name: "api-copy" }, { cookie });
+    expect(named.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "references", field: "name" } });
+  });
+});
+
+describe("data copy guards", () => {
+  test("stopping the source needs services.control; copying without a stop does not", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", id, ["services.view", "files.read"]);
+    grant(panel, member.user.id, "project", blog, ["services.create", "services.view"]);
+    const stopping = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" },
+      { cookie: member.cookie },
+    );
+    expect(stopping.body.error).toMatchObject({ code: "FORBIDDEN", details: { action: "services.control" } });
+    const live = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy", stopSource: false },
+      { cookie: member.cookie },
+    );
+    expect(live.status).toBe(200);
+    expect(live.body.dataCopy).toMatchObject({ status: "queued" });
+    // One copy from a source at a time.
+    const second = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    expect(second.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "copying" } });
+  });
+
+  test("a clone deleted while its copy waits still gets its source started again", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    const cloneId = res.body.service.id as string;
+    // The copy stopped the source (as after a panel restart mid-copy), then the clone goes.
+    panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, id)).run();
+    panel.deps.db.update(serviceCopies).set({ status: "copying", sourceStopped: true }).where(eq(serviceCopies.serviceId, cloneId)).run();
+    expect((await callOp(panel, serviceOps.remove, { serviceId: cloneId, confirmName: "files-copy" }, { cookie })).status).toBe(200);
+    await panel.runner.runDue(panel.deps);
+    await fleet.settle();
+    expect(row(id)?.stopped).toBe(false);
   });
 });

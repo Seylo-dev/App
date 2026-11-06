@@ -5,12 +5,13 @@
 // on plain shapes are pure (tested directly); moveImpact reads the rows,
 // filters by what the caller may see and adds what blocks a move.
 
-import { hostMentions, type ParsedEnv, sharedTarget } from "@seylo/env-analyzer";
+import { appVariables, databaseVariables, hostMentions, type ParsedEnv, sharedTarget } from "@seylo/env-analyzer";
 import { allOps, grantableActions, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { grants, invites, previews, projects, services, users } from "../../db/schema";
 import type { OpContext } from "../../ops/implement";
+import { findDatabase } from "../databases/info";
 import { hasActiveDeploy } from "../deployments/queue";
 import { receivesShared } from "../env/desired";
 import { buildEnvGraph, type EnvGraph } from "../env/graph";
@@ -116,6 +117,60 @@ export function referrersOf(name: string, project: ProjectEnv, selfId: string): 
   return out;
 }
 
+/** Database variables that carry the password (env/graph.ts credentialVariables). */
+const credentialVariables = new Set(["PASSWORD", "INTERNAL_URL", "EXPOSED_URL"]);
+
+/**
+ * Whether ${{svc.VAR}} only reads an address of the service (a built-in
+ * like URL or INTERNAL_HOST), which anyone in its project may use.
+ * Its own variables and database credentials are not open.
+ */
+export function isOpenVariable(isDatabase: boolean, variable: string): boolean {
+  const def = (isDatabase ? databaseVariables : appVariables).find((d) => d.name === variable);
+  if (!def || def.sensitive) return false;
+  return !(isDatabase && credentialVariables.has(variable));
+}
+
+/**
+ * References in `project` to `name` that read more than an address. They
+ * were written while nothing there had that name, so nobody checked that
+ * their writer may read them; a service arriving under that name would
+ * hand its values to whoever can run code next to them.
+ */
+export function plantedReferences(
+  project: ProjectEnv,
+  name: string,
+  isDatabase: boolean,
+  selfId: string,
+): { service: EnvService; key: string; reference: string }[] {
+  const wanted = name.toLowerCase();
+  const out: { service: EnvService; key: string; reference: string }[] = [];
+  for (const service of project.services) {
+    if (service.id === selfId) continue;
+    for (const entry of service.parsed.entries) {
+      for (const ref of entry.references) {
+        if (ref.target.toLowerCase() !== wanted || isOpenVariable(isDatabase, ref.variable)) continue;
+        out.push({ service, key: entry.key, reference: `${ref.target}.${ref.variable}` });
+      }
+    }
+  }
+  return out;
+}
+
+/** The message for planted references, naming the service only when the caller may see it. */
+export function plantedMessage(
+  ctx: Pick<OpContext, "access">,
+  planted: { service: EnvService; key: string; reference: string }[],
+  projectName: string,
+  advice: string,
+): string {
+  const first = planted[0] as (typeof planted)[number];
+  const who = ctx.access.can("services.view", { type: "service", id: first.service.id })
+    ? `${first.service.name} (${first.key})`
+    : "A service you cannot see";
+  return `${who} in ${projectName} already references ${first.reference}, which would start reading this service's values. ${advice}`;
+}
+
 /** Shared variables of `from` the service receives (not overridden by its own keys) that `to` does not have. */
 export function sharedVariablesLost(self: EnvService, from: ProjectEnv, to: ProjectEnv): string[] {
   if (!receivesShared(self.kind)) return [];
@@ -162,7 +217,7 @@ export function invitesNaming(ctx: Pick<OpContext, "db">, serviceId: string, now
     .filter((row) => inviteStatus(row, now) === "pending" && row.grants.some((g) => g.scopeType === "service" && g.scopeId === serviceId));
 }
 
-function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string): MoveBlock[] {
+function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string, to: ProjectEnv): MoveBlock[] {
   const out: MoveBlock[] = [];
   const block = (reason: MoveBlock["reason"], message: string) => out.push({ reason, message });
   const projectRows = ctx.db
@@ -195,6 +250,11 @@ function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string): 
     block("nameTaken", `${target?.name ?? "That project"} already has a service named ${svc.name}. Rename one of them first.`);
   if (hasActiveDeploy(ctx, svc.id)) block("deploying", "Wait for the running deploy to finish.");
   if (activeCopy(ctx.db, svc.id)) block("copying", "Wait for its data copy to finish.");
+  if (targetProjectId !== svc.projectId) {
+    const planted = plantedReferences(to, svc.name, findDatabase(ctx.db, svc.id) !== undefined, svc.id);
+    if (planted.length > 0)
+      block("references", plantedMessage(ctx, planted, target?.name ?? "that project", "Remove that reference first."));
+  }
   const missing = missingServiceAction(ctx, svc.id);
   if (missing)
     block("access", `Moving a service needs full access to it, and you do not have ${missing} here. Ask an admin or the project's owner.`);
@@ -203,10 +263,10 @@ function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string): 
 
 /** Everything services.moveProjectImpact returns, for this caller. */
 export function moveImpact(ctx: OpContext, svc: ServiceRow, targetProjectId: string): MoveImpact {
-  const blockers = blockersFor(ctx, svc, targetProjectId);
   const fromGraph = buildEnvGraph(ctx, svc.projectId);
   const from = projectEnvOf(fromGraph);
   const to = targetProjectId === svc.projectId ? from : projectEnvOf(buildEnvGraph(ctx, targetProjectId));
+  const blockers = blockersFor(ctx, svc, targetProjectId, to);
   const self = from.services.find((s) => s.id === svc.id) ?? {
     id: svc.id,
     name: svc.name,

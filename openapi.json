@@ -45731,6 +45731,10 @@
                                 {
                                   "const": "agentTooOld",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "control",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -49355,6 +49359,10 @@
                                   {
                                     "const": "access",
                                     "type": "string"
+                                  },
+                                  {
+                                    "const": "references",
+                                    "type": "string"
                                   }
                                 ]
                               },
@@ -49642,6 +49650,10 @@
                               },
                               {
                                 "const": "access",
+                                "type": "string"
+                              },
+                              {
+                                "const": "references",
                                 "type": "string"
                               }
                             ]

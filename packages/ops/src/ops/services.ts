@@ -594,6 +594,8 @@ export const CloneDataBlock = Type.Union([
   Type.Literal("files"),
   Type.Literal("offline"),
   Type.Literal("agentTooOld"),
+  /** A running database stops for its copy, which needs services.control on it. */
+  Type.Literal("control"),
 ]);
 
 export const clonePreview = defineOp({
@@ -681,6 +683,8 @@ export const MoveBlock = Type.Union([
   Type.Literal("copying"),
   /** Moving needs every service action on it: the new project may give you more than you hold now. */
   Type.Literal("access"),
+  /** A service of the new project already references its name for more than an address. */
+  Type.Literal("references"),
 ]);
 
 /** What moving a service to another project changes. */

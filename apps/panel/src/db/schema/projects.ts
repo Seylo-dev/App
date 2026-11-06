@@ -151,10 +151,8 @@ export const serviceCopies = sqliteTable(
   "service_copies",
   {
     id: id(),
-    /** The clone. */
-    serviceId: text("service_id")
-      .notNull()
-      .references(() => services.id, { onDelete: "cascade" }),
+    /** The clone; null once it was deleted (a copy that stopped its source still starts it again). */
+    serviceId: text("service_id").references(() => services.id, { onDelete: "set null" }),
     sourceServiceId: text("source_service_id").references((): AnySQLiteColumn => services.id, { onDelete: "set null" }),
     /** Kept for display once the source is gone. */
     sourceName: text("source_name").notNull(),

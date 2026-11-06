@@ -30,6 +30,7 @@ export default {
       files: "Copying data needs permission to read its files.",
       offline: "Both nodes must be online to copy data.",
       agentTooOld: "A node's agent is too old to copy data. Update the node first.",
+      control: "The database stops while its data is copied, and you cannot stop it.",
     },
     autoDomain: "Add the automatic domain {host}",
     autoDomainRules: "with the main domain's access rules",

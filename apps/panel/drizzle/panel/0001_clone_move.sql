@@ -1,6 +1,6 @@
 CREATE TABLE `service_copies` (
 	`id` text PRIMARY KEY NOT NULL,
-	`service_id` text NOT NULL,
+	`service_id` text,
 	`source_service_id` text,
 	`source_name` text NOT NULL,
 	`from_node_id` text NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE `service_copies` (
 	`created_at` integer NOT NULL,
 	`started_at` integer,
 	`finished_at` integer,
-	FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`source_service_id`) REFERENCES `services`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
 );
