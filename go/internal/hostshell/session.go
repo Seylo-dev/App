@@ -186,6 +186,7 @@ func (s *Session) start(_ context.Context, l login, size *agentv1.TerminalSize) 
 	// The shell holds its own copy; ours would keep the PTY open after it
 	// exits.
 	_ = tty.Close()
+	resetOOM(cmd.Process.Pid)
 	s.master, s.cmd, s.started = master, cmd, time.Now()
 	s.touch()
 	hostname, _ := os.Hostname()

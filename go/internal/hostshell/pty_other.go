@@ -18,3 +18,5 @@ func sessionAttr() *syscall.SysProcAttr { return nil }
 func hangUp(int) {}
 
 func kill(int) {}
+
+func resetOOM(int) {}

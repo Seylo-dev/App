@@ -77,3 +77,10 @@ func hangUp(pid int) {
 }
 
 func kill(pid int) { _ = syscall.Kill(-pid, syscall.SIGKILL) }
+
+// resetOOM gives the shell the kernel's default OOM score: it inherits the
+// agent's protection (OOMScoreAdjust=-500 in the unit) otherwise, and so
+// would everything started from it.
+func resetOOM(pid int) {
+	_ = os.WriteFile("/proc/"+strconv.Itoa(pid)+"/oom_score_adj", []byte("0"), 0)
+}

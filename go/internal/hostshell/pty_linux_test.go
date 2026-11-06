@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -152,4 +153,36 @@ func waitFor(t *testing.T, ok func() bool) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("condition not reached")
+}
+
+func TestShellDoesNotKeepTheAgentsOOMProtection(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("needs root to lower the agent's own OOM score")
+	}
+	if err := os.WriteFile("/proc/self/oom_score_adj", []byte("-500"), 0); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { _ = os.WriteFile("/proc/self/oom_score_adj", []byte("0"), 0) })
+	m := New(Options{Allowed: on})
+	s, err := m.Open(context.Background(), &agentv1.HostShellOpen{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := readAll(s)
+	if _, err := s.Write([]byte("cat /proc/self/oom_score_adj; exit\n")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := s.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	text := <-out
+	if strings.Contains(text, "-500") {
+		t.Fatalf("the shell kept the agent's OOM score: %q", text)
+	}
+	// The value follows the shell's own escape codes on the line.
+	if !regexp.MustCompile(`[\r\nl]0\r?\n`).MatchString(text) {
+		t.Fatalf("output %q has no oom_score_adj of 0", text)
+	}
 }
