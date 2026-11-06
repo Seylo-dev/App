@@ -8,8 +8,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpError } from "@seylo/ops";
 import { type CallerAccess, DockerHubClient, retryAfterSeconds } from "../src/modules/dockerHub/client";
-import { HostNotAllowedError, hubFetch } from "../src/modules/dockerHub/http";
+import { type Fetch, HostNotAllowedError, hubFetch } from "../src/modules/dockerHub/http";
 import {
+  configBudget,
   parseConfig,
   parsePullCount,
   parseSearchV2,
@@ -26,12 +27,20 @@ const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dir, 
 const anonymous: CallerAccess = { login: null, privateAccess: false };
 const login = { id: "reg0000000000001", username: "acme", password: "dckr_pat_test" };
 
-function setup(options: ConstructorParameters<typeof FakeDockerHub>[0] = {}) {
+function setup(options: ConstructorParameters<typeof FakeDockerHub>[0] = {}, wrap?: (hub: FakeDockerHub) => Fetch) {
   const hub = new FakeDockerHub(options);
   let now = Date.now();
   const warnings: string[] = [];
-  const client = new DockerHubClient({ fetch: hub.fetch, now: () => now, warn: (message) => warnings.push(message) });
-  return { hub, client, warnings, advance: (ms: number) => (now += ms) };
+  const logged: Record<string, unknown>[] = [];
+  const client = new DockerHubClient({
+    fetch: wrap ? wrap(hub) : hub.fetch,
+    now: () => now,
+    warn: (message, fields) => {
+      warnings.push(message);
+      logged.push(fields ?? {});
+    },
+  });
+  return { hub, client, warnings, logged, advance: (ms: number) => (now += ms) };
 }
 
 async function opError(promise: Promise<unknown>): Promise<OpError> {
@@ -149,6 +158,51 @@ describe("parsing Docker Hub answers", () => {
     expect(parseConfig("nope")).toBeNull();
   });
 
+  test("image config: long strings are cut, a long ENV value is left out, and one config holds at most the budget", () => {
+    const long = "x".repeat(10_000);
+    const parsed = parseConfig({
+      architecture: "amd64",
+      os: "linux",
+      config: {
+        Env: [`HUGE=${long}`, "KEEP=1", `${"N".repeat(300)}=1`],
+        Entrypoint: [long],
+        Cmd: ["run", long],
+        WorkingDir: long,
+        User: long,
+        Volumes: { "/data": {}, [`/${long}`]: {} },
+        Labels: { title: long, [long]: "x" },
+        Healthcheck: { Test: ["CMD-SHELL", long] },
+      },
+    });
+    // A cut value would replace the image's own default with a wrong one.
+    expect(parsed?.env).toEqual([{ name: "KEEP", value: "1" }]);
+    expect(parsed?.entrypoint[0]).toHaveLength(4000);
+    expect(parsed?.cmd).toEqual(["run", "x".repeat(4000)]);
+    expect(parsed?.workingDir).toHaveLength(4000);
+    expect(parsed?.user).toHaveLength(256);
+    expect(parsed?.volumes).toEqual(["/data"]);
+    expect(parsed?.labels).toEqual([{ name: "title", value: "x".repeat(2000) }]);
+    expect(parsed?.healthcheck?.test).toEqual(["CMD-SHELL", "x".repeat(4000)]);
+
+    // Hundreds of long values: what is kept stops at the budget, whatever the caps per string.
+    const many = parseConfig({
+      config: {
+        Entrypoint: Array.from({ length: 200 }, () => long),
+        Env: Array.from({ length: 200 }, (_, i) => `VAR_${i}=${"v".repeat(3000)}`),
+        Labels: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`label.${i}`, long])),
+      },
+    });
+    const chars = (many?.entrypoint.join("").length ?? 0) + (many?.env ?? []).reduce((n, e) => n + e.name.length + e.value.length, 0);
+    expect(chars).toBeLessThanOrEqual(configBudget);
+    // The env the form fills in comes first: 21 whole entries of about 3000 characters fit, none cut.
+    expect(many?.env).toHaveLength(21);
+    expect(many?.env.every((e) => e.value.length === 3000)).toBe(true);
+    // The rest of the budget goes to the entrypoint, cut; nothing is left for labels.
+    expect(many?.entrypoint).toHaveLength(1);
+    expect(chars).toBe(configBudget);
+    expect(many?.labels).toEqual([]);
+  });
+
   test("platform choice prefers the node's CPU, then the other one", () => {
     const entries = [
       { digest: "a", platform: "linux/arm/v7" },
@@ -203,6 +257,12 @@ describe("search and tags", () => {
     expect(queries).toEqual(["my app", "my-app", "gitea", "my app"]);
   });
 
+  test("page 20 is the last: hasMore is false there however many results Docker Hub has", async () => {
+    const { client } = setup();
+    expect((await client.search("gitea", 19)).hasMore).toBe(true);
+    expect((await client.search("gitea", 20)).hasMore).toBe(false);
+  });
+
   test("falls back to the older search when v4 is gone", async () => {
     const { hub, client, warnings } = setup({ searchV4Gone: true });
     const page = await client.search("nginx", 1);
@@ -224,6 +284,26 @@ describe("search and tags", () => {
     hub.options.limited = undefined;
     advance(wait * 1000 + 1);
     expect((await client.search("gitea", 1)).results.length).toBeGreaterThan(0);
+  });
+
+  test("a 429 from the token server blocks tokens only, and a Hub API 429 does not block tokens", async () => {
+    const { hub, client, advance } = setup({ limited: new Set(["auth.docker.io"]) });
+    const error = await opError(client.inspect("gitea/gitea", meta.tag, "amd64", anonymous));
+    expect(error.code).toBe("RATE_LIMITED");
+    expect(error.details?.retryAfterSeconds).toBe("600");
+    // Search and tags (hub.docker.com) are not held back by the token server's limit.
+    expect((await client.search("gitea", 1)).results.length).toBeGreaterThan(0);
+    // No more token requests until the limit lifts.
+    expect((await opError(client.inspect("gitea/gitea", meta.tag, "amd64", anonymous))).code).toBe("RATE_LIMITED");
+    expect(hub.count("auth.docker.io")).toBe(1);
+    hub.options.limited = undefined;
+    advance(601_000);
+    expect((await client.inspect("gitea/gitea", meta.tag, "amd64", anonymous)).ports).toHaveLength(2);
+
+    // The other way round: a limited Hub API leaves inspect working.
+    const other = setup({ limited: new Set(["hub.docker.com"]) });
+    expect((await opError(other.client.search("gitea", 1))).code).toBe("RATE_LIMITED");
+    expect((await other.client.inspect("gitea/gitea", meta.tag, "amd64", anonymous)).ports).toHaveLength(2);
   });
 
   test("tags are cached for 30 minutes and suggest the version latest points at", async () => {
@@ -287,6 +367,7 @@ describe("inspect", () => {
       ],
       volumes: ["/data"],
       private: false,
+      registryId: null,
     });
     expect(config.platforms).toEqual(expect.arrayContaining(["linux/amd64", "linux/arm64"]));
     expect(hub.seen.map((s) => `${s.method} ${s.url.hostname}`)).toEqual([
@@ -317,7 +398,8 @@ describe("inspect", () => {
 
   test("public images pull with the saved login's token; the free HEAD stays anonymous", async () => {
     const { hub, client } = setup({ login });
-    await client.inspect("gitea/gitea", meta.tag, "amd64", { login, privateAccess: false });
+    // Public: the form pulls anonymously unless the person picks the login.
+    expect((await client.inspect("gitea/gitea", meta.tag, "amd64", { login, privateAccess: true })).registryId).toBeNull();
     const head = hub.seen.find((s) => s.method === "HEAD");
     expect(head?.headers.get("authorization")).toBe("Bearer anon-token:gitea/gitea");
     const gets = hub.seen.filter((s) => s.method === "GET" && s.url.hostname === "registry-1.docker.io");
@@ -342,7 +424,13 @@ describe("inspect", () => {
     expect((await opError(client.inspect("acme/private", "1", "amd64", { login, privateAccess: false }))).code).toBe("NOT_FOUND");
     expect(hub.seen.some((s) => s.headers.get("authorization")?.startsWith("Basic"))).toBe(false);
     const config = await client.inspect("acme/private", "1", "amd64", { login, privateAccess: true });
-    expect(config).toMatchObject({ private: true, digest: privateImage.digest, platform: "linux/amd64", platforms: ["linux/amd64"] });
+    expect(config).toMatchObject({
+      private: true,
+      registryId: login.id,
+      digest: privateImage.digest,
+      platform: "linux/amd64",
+      platforms: ["linux/amd64"],
+    });
     expect(config.healthcheck?.retries).toBe(3);
     // Cached digests do not open the image to members either.
     expect((await opError(client.inspect("acme/private", "1", "amd64", { login, privateAccess: false }))).code).toBe("NOT_FOUND");
@@ -429,6 +517,42 @@ describe("transport", () => {
     const big = new Uint8Array(5000);
     const fetchImpl = async () => new Response(big, { status: 200 });
     await expect(hubFetch(fetchImpl, "https://hub.docker.com/v2/", { maxBytes: 1000, timeoutMs: 1000 })).rejects.toThrow("larger than");
+  });
+
+  test("a config blob over 2 MiB is refused while read, not parsed or cached", async () => {
+    const { client, logged } = setup(
+      {},
+      (hub) => async (url, init) =>
+        url.includes("production.cloudflare.docker.com")
+          ? new Response(new Uint8Array(3 * 1024 * 1024), { status: 200 })
+          : hub.fetch(url, init),
+    );
+    const error = await opError(client.inspect("gitea/gitea", meta.tag, "amd64", anonymous));
+    expect(error.code).toBe("UNAVAILABLE");
+    expect(error.message).toContain("larger than this panel reads");
+    expect(logged).toContainEqual(
+      expect.objectContaining({ error: "BodyTooLargeError", detail: `answer larger than ${2 * 1024 * 1024} bytes` }),
+    );
+  });
+
+  test("a redirect to a host the panel does not contact names that host, in the answer and the log", async () => {
+    const { hub, client, logged } = setup(
+      {},
+      (hub) => async (url, init) =>
+        url.includes("/blobs/")
+          ? new Response(null, { status: 307, headers: { location: "https://production.newcdn.docker.com/blob/data?signature=secret" } })
+          : hub.fetch(url, init),
+    );
+    const error = await opError(client.inspect("gitea/gitea", meta.tag, "amd64", anonymous));
+    expect(error.code).toBe("UNAVAILABLE");
+    expect(error.message).toBe("Docker Hub sent this panel to production.newcdn.docker.com, which it does not contact.");
+    expect(logged).toContainEqual({
+      host: "registry-1.docker.io",
+      error: "HostNotAllowedError",
+      detail: "refusing to contact https://production.newcdn.docker.com",
+    });
+    expect(JSON.stringify(logged)).not.toContain("secret");
+    expect(hub.count("production.newcdn.docker.com")).toBe(0);
   });
 
   test("Retry-After wins, then X-RateLimit-Reset, then a minute", () => {

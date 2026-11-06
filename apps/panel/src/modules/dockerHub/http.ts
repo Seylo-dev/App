@@ -29,6 +29,14 @@ export interface HubResponse {
 
 export class HostNotAllowedError extends Error {
   override name = "HostNotAllowedError";
+
+  /** The host that was refused ("new-cdn.docker.com"); null for too many redirects. */
+  constructor(
+    readonly host: string | null,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 export class BodyTooLargeError extends Error {
@@ -40,7 +48,7 @@ const maxRedirects = 3;
 function allowedUrl(raw: string, base?: string): URL {
   const url = new URL(raw, base);
   if (url.protocol !== "https:" || !dockerHubHosts.has(url.hostname) || url.port !== "" || url.username || url.password) {
-    throw new HostNotAllowedError(`refusing to contact ${url.protocol}//${url.host}`);
+    throw new HostNotAllowedError(url.host, `refusing to contact ${url.protocol}//${url.host}`);
   }
   return url;
 }
@@ -96,7 +104,7 @@ export async function hubFetch(
     const location = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && location) {
       await response.body?.cancel();
-      if (hop >= maxRedirects) throw new HostNotAllowedError("too many redirects");
+      if (hop >= maxRedirects) throw new HostNotAllowedError(null, "too many redirects");
       url = allowedUrl(location, url.toString());
       continue;
     }

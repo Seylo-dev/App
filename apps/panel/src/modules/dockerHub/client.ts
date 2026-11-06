@@ -14,9 +14,9 @@
 //   may manage registries (`privateAccess`), never for others, and those
 //   answers are cached apart from the public ones.
 
-import { OpError } from "@seylo/ops";
+import { dockerHub as hubOps, OpError } from "@seylo/ops";
 import { TtlCache } from "./cache";
-import { type Fetch, type HubResponse, hubFetch, jsonOf, sha256Digest } from "./http";
+import { BodyTooLargeError, type Fetch, HostNotAllowedError, type HubResponse, hubFetch, jsonOf, sha256Digest } from "./http";
 import {
   displayRepository,
   hasVersionTag,
@@ -71,6 +71,8 @@ export interface InspectResult extends ParsedConfig {
   digest: string;
   platforms: string[];
   private: boolean;
+  /** The login a private image was read with; null for public images. */
+  registryId: string | null;
 }
 
 export interface ClientOptions {
@@ -86,13 +88,14 @@ const searchPageSize = 25;
 const tagsPageSize = 100;
 const maxJsonBytes = 4 * 1024 * 1024;
 const maxManifestBytes = 1024 * 1024;
-const maxConfigBytes = 8 * 1024 * 1024;
+// Real image configs are tens of KB; parseConfig keeps at most configBudget characters of one.
+const maxConfigBytes = 2 * 1024 * 1024;
 const hubBase = "https://hub.docker.com";
 const registryBase = "https://registry-1.docker.io";
 const authBase = "https://auth.docker.io";
 
-/** What a 429 blocks: the Hub API and token server, registry HEADs (free, but limited too), or pulls by whose limit. */
-type Limited = "hub" | "head" | "pulls" | "loginPulls";
+/** What a 429 blocks: the Hub API, the registry token server, registry HEADs (free, but limited too), or pulls by whose limit. */
+type Limited = "hub" | "auth" | "head" | "pulls" | "loginPulls";
 
 export class DockerHubClient {
   private readonly fetch: Fetch;
@@ -147,7 +150,7 @@ export class DockerHubClient {
       const seen = new Set(exact.map((r) => r.repository));
       results = rankResults([...exact, ...results.filter((r) => !seen.has(r.repository))], q);
     }
-    const result: SearchPage = { results, page, hasMore: found.hasMore };
+    const result: SearchPage = { results, page, hasMore: found.hasMore && page < hubOps.searchMaxPage };
     this.searches.set(key, result);
     return result;
   }
@@ -234,6 +237,7 @@ export class DockerHubClient {
     // An anonymous HEAD costs nothing and proves the image is public.
     let isPrivate = false;
     let usingLogin = false;
+    let privateLogin: string | null = null;
     let token = await this.registryToken(path, null);
     let head = await this.registry("HEAD", `/v2/${path}/manifests/${tag}`, token, "head");
     if (head.status === 401 || head.status === 404) {
@@ -245,6 +249,7 @@ export class DockerHubClient {
       token = own;
       isPrivate = true;
       usingLogin = true;
+      privateLogin = login?.id ?? null;
     } else if (head.status === 200 && access.login) {
       // Public: pull with the login's token so its limit is spent, not the address's.
       const own = await this.registryToken(path, access.login);
@@ -296,7 +301,7 @@ export class DockerHubClient {
       this.configs.set(resolved.configDigest, config);
     }
     const platforms = resolved.platforms.length > 0 ? resolved.platforms : [config.platform];
-    return { ...config, repository: displayRepository(path), tag, digest, platforms, private: isPrivate };
+    return { ...config, repository: displayRepository(path), tag, digest, platforms, private: isPrivate, registryId: privateLogin };
   }
 
   private async manifest(path: string, digest: string, token: string | null, limit: Limited): Promise<ReturnType<typeof parseManifest>> {
@@ -341,6 +346,7 @@ export class DockerHubClient {
     const cached = this.tokens.get(key);
     if (cached) return cached;
     if (login && this.refusedLogins.get(login.id)) return null;
+    this.assertNotBlocked("auth");
     const url = `${authBase}/token?service=registry.docker.io&scope=${encodeURIComponent(`repository:${path}:pull`)}`;
     const response = await this.send(url, {
       headers: login ? { authorization: `Basic ${Buffer.from(`${login.username}:${login.password}`).toString("base64")}` } : {},
@@ -351,7 +357,7 @@ export class DockerHubClient {
       this.warn("docker hub refused the saved registry login; continuing without it", { registryId: login.id });
       return null;
     }
-    if (response.status === 429) this.block("hub", response);
+    if (response.status === 429) this.block("auth", response);
     const body = jsonOf(response) as { token?: unknown; access_token?: unknown; expires_in?: unknown } | null;
     const token = typeof body?.token === "string" ? body.token : typeof body?.access_token === "string" ? body.access_token : null;
     if (response.status !== 200 || !token) throw unavailable(`Docker Hub's login server answered ${response.status}.`);
@@ -391,8 +397,19 @@ export class DockerHubClient {
       return await hubFetch(this.fetch, url, { ...options, timeoutMs: this.timeoutMs });
     } catch (error) {
       const name = error instanceof Error ? error.name : "Error";
-      if (name !== "TimeoutError") this.warn("docker hub request failed", { host: new URL(url).host, error: name });
-      throw unavailable(`Could not reach Docker Hub: ${name === "TimeoutError" ? "it did not answer in time" : "the request failed"}.`);
+      if (name === "TimeoutError") throw unavailable("Could not reach Docker Hub: it did not answer in time.");
+      const host = new URL(url).host;
+      // The refused host goes to the log: when Docker moves its blob CDN, it is the one to add to dockerHubHosts.
+      this.warn("docker hub request failed", { host, error: name, detail: logDetail(error) });
+      if (error instanceof HostNotAllowedError) {
+        throw unavailable(
+          error.host
+            ? `Docker Hub sent this panel to ${error.host}, which it does not contact.`
+            : "Docker Hub redirected this panel too many times.",
+        );
+      }
+      if (error instanceof BodyTooLargeError) throw unavailable("Docker Hub sent an answer larger than this panel reads.");
+      throw unavailable("Could not reach Docker Hub: the request failed.");
     }
   }
 
@@ -427,6 +444,12 @@ function rateLimited(limit: Limited, seconds: number): OpError {
         ? `The Docker Hub login's pull limit is used up. Try again in ${wait}.`
         : `Docker Hub is limiting requests from this panel. Try again in ${wait}.`;
   return new OpError("RATE_LIMITED", message, { reason: "dockerHubRateLimit", retryAfterSeconds: String(seconds) });
+}
+
+/** An error's message for the log, without query strings (signed CDN URLs carry their signature there). */
+function logDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/(https?:\/\/[^\s?#]*)[?#]\S*/g, "$1").slice(0, 300);
 }
 
 function unavailable(message: string): OpError {

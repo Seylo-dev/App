@@ -25,6 +25,17 @@ export const Repository = Type.String({
 
 export const Tag = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$" });
 
+/** dockerHub.search pages go up to this one (25 results a page, 500 in all). */
+export const searchMaxPage = 20;
+
+/**
+ * What dockerHub.inspect keeps of an image config. Real configs are tens of
+ * KB; these caps keep a crafted one from filling the panel's cache or an
+ * answer. An ENV entry whose value is longer than `text` is left out (the
+ * image's own default then applies, not a cut one); other strings are cut.
+ */
+export const configLimits = { list: 200, name: 256, text: 4000, label: 2000, path: 500 } as const;
+
 /** official = Docker Official Image; verified = Verified Publisher; openSource = Docker-Sponsored Open Source. */
 export const Badge = Type.Union([Type.Literal("official"), Type.Literal("verified"), Type.Literal("openSource"), Type.Literal("none")]);
 
@@ -61,9 +72,11 @@ export const ImagePort = Type.Object({
   protocol: Type.Union([Type.Literal("tcp"), Type.Literal("udp"), Type.Literal("sctp")]),
 });
 
+const ConfigText = Type.String({ maxLength: configLimits.text });
+
 export const ImageHealthcheck = Type.Object({
   /** As in the image: ["CMD-SHELL", "curl -f http://localhost/"], ["CMD", ...] or ["NONE"]. */
-  test: Type.Array(Type.String()),
+  test: Type.Array(ConfigText, { maxItems: configLimits.list }),
   intervalSeconds: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
   timeoutSeconds: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
   startPeriodSeconds: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
@@ -77,24 +90,31 @@ export const ImageConfig = Type.Object({
   /** What the tag resolves to now (manifest list or single manifest): `docker pull <repository>:<tag>` gets this. */
   digest: Type.String(),
   /** The platform the config was read for, for example "linux/amd64". */
-  platform: Type.String(),
+  platform: Type.String({ maxLength: configLimits.name }),
   /** Every Linux platform the tag ships. */
   platforms: Type.Array(Type.String()),
   /** EXPOSE lines. */
-  ports: Type.Array(ImagePort),
+  ports: Type.Array(ImagePort, { maxItems: configLimits.list }),
   /** VOLUME paths. */
-  volumes: Type.Array(Type.String()),
-  /** ENV defaults, in image order. */
-  env: Type.Array(Type.Object({ name: Type.String(), value: Type.String() })),
-  entrypoint: Type.Array(Type.String()),
-  cmd: Type.Array(Type.String()),
-  user: Type.String(),
-  workingDir: Type.String(),
+  volumes: Type.Array(Type.String({ maxLength: configLimits.path }), { maxItems: configLimits.list }),
+  /** ENV defaults, in image order. Values longer than 4000 characters are left out. */
+  env: Type.Array(Type.Object({ name: Type.String({ maxLength: configLimits.name }), value: ConfigText }), {
+    maxItems: configLimits.list,
+  }),
+  entrypoint: Type.Array(ConfigText, { maxItems: configLimits.list }),
+  cmd: Type.Array(ConfigText, { maxItems: configLimits.list }),
+  user: Type.String({ maxLength: configLimits.name }),
+  workingDir: Type.String({ maxLength: configLimits.text }),
   healthcheck: Type.Union([ImageHealthcheck, Type.Null()]),
-  labels: Type.Array(Type.Object({ name: Type.String(), value: Type.String() })),
+  labels: Type.Array(
+    Type.Object({ name: Type.String({ maxLength: configLimits.name }), value: Type.String({ maxLength: configLimits.label }) }),
+    { maxItems: configLimits.list },
+  ),
   createdAt: Type.Union([Timestamp, Type.Null()]),
   /** Only readable with the panel's Docker Hub login (people who manage registries see these). */
   private: Type.Boolean(),
+  /** The Docker Hub login (registries.list) the panel read a private image with, to pull it with in dockerHub.create; null for public images. */
+  registryId: Type.Union([Id, Type.Null()]),
 });
 
 const projectScope = (input: { projectId: string }) => input.projectId;
@@ -108,11 +128,12 @@ export const search = defineOp({
   input: Type.Object({
     query: Type.String({ minLength: 1, maxLength: 100 }),
     /** 1-based; 25 results a page. */
-    page: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+    page: Type.Optional(Type.Integer({ minimum: 1, maximum: searchMaxPage })),
   }),
   output: Type.Object({
     results: Type.Array(SearchResult),
     page: Type.Integer({ minimum: 1 }),
+    /** False on the last page Docker Hub has and on page searchMaxPage. */
     hasMore: Type.Boolean(),
   }),
   // Public data, like the template catalog.

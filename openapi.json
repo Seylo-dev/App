@@ -22196,7 +22196,8 @@
                     "healthcheck",
                     "labels",
                     "createdAt",
-                    "private"
+                    "private",
+                    "registryId"
                   ],
                   "properties": {
                     "repository": {
@@ -22216,6 +22217,7 @@
                       "type": "string"
                     },
                     "platform": {
+                      "maxLength": 256,
                       "type": "string"
                     },
                     "platforms": {
@@ -22225,6 +22227,7 @@
                       }
                     },
                     "ports": {
+                      "maxItems": 200,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -22258,12 +22261,15 @@
                       }
                     },
                     "volumes": {
+                      "maxItems": 200,
                       "type": "array",
                       "items": {
+                        "maxLength": 500,
                         "type": "string"
                       }
                     },
                     "env": {
+                      "maxItems": 200,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -22273,30 +22279,38 @@
                         ],
                         "properties": {
                           "name": {
+                            "maxLength": 256,
                             "type": "string"
                           },
                           "value": {
+                            "maxLength": 4000,
                             "type": "string"
                           }
                         }
                       }
                     },
                     "entrypoint": {
+                      "maxItems": 200,
                       "type": "array",
                       "items": {
+                        "maxLength": 4000,
                         "type": "string"
                       }
                     },
                     "cmd": {
+                      "maxItems": 200,
                       "type": "array",
                       "items": {
+                        "maxLength": 4000,
                         "type": "string"
                       }
                     },
                     "user": {
+                      "maxLength": 256,
                       "type": "string"
                     },
                     "workingDir": {
+                      "maxLength": 4000,
                       "type": "string"
                     },
                     "healthcheck": {
@@ -22312,8 +22326,10 @@
                           ],
                           "properties": {
                             "test": {
+                              "maxItems": 200,
                               "type": "array",
                               "items": {
+                                "maxLength": 4000,
                                 "type": "string"
                               }
                             },
@@ -22369,6 +22385,7 @@
                       ]
                     },
                     "labels": {
+                      "maxItems": 200,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -22378,9 +22395,11 @@
                         ],
                         "properties": {
                           "name": {
+                            "maxLength": 256,
                             "type": "string"
                           },
                           "value": {
+                            "maxLength": 2000,
                             "type": "string"
                           }
                         }
@@ -22399,6 +22418,18 @@
                     },
                     "private": {
                       "type": "boolean"
+                    },
+                    "registryId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }

@@ -4,7 +4,7 @@
 // then a deploy. On any failure after the row exists it is deleted again.
 
 import { parseEnv } from "@seylo/env-analyzer";
-import { type dockerHub as hubOps, OpError, type OpInput, services as serviceOps } from "@seylo/ops";
+import { dockerHub as hubOps, OpError, type OpInput, services as serviceOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { nodes, services } from "../../db/schema";
@@ -91,9 +91,7 @@ function envText(ctx: OpContext, input: CreateInput): string {
 export async function createFromDockerHub(ctx: OpContext, input: CreateInput) {
   // The contract's pattern says so too; this keeps the image a Docker Hub one whatever calls it.
   if (!isRepository(input.repository)) throw new OpError("BAD_REQUEST", "Name a Docker Hub repository.", { field: "repository" });
-  const repository = input.repository.replace(/^library\//, "");
-  const image = `${repository}:${input.tag}`;
-  const source = { type: "image" as const, image, registryId: input.registryId ?? null };
+  const source = { type: "image" as const, image: hubOps.imageRef(input.repository, input.tag), registryId: input.registryId ?? null };
   assertSourceAllowed(ctx, input.projectId, source);
   const volumes = plannedVolumes(input);
   const env = envText(ctx, input);

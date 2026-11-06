@@ -2,7 +2,7 @@
 // unknown JSON: anything missing or malformed is skipped or left empty, so
 // an answer that changes shape degrades to fewer details, never a crash.
 
-import type { dockerHub as hubOps } from "@seylo/ops";
+import { dockerHub as hubOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 
 export type SearchResult = Static<typeof hubOps.SearchResult>;
@@ -225,7 +225,13 @@ export interface ParsedConfig {
   createdAt: string | null;
 }
 
-const maxListed = 200;
+const { list: maxListed, name: maxName, text: maxText, label: maxLabel, path: maxPath } = hubOps.configLimits;
+
+/**
+ * Characters one parsed config may hold, all its strings together. Configs
+ * are cached for a week (500 of them); real ones use a few thousand.
+ */
+export const configBudget = 64 * 1024;
 
 function seconds(ns: unknown): number | null {
   return typeof ns === "number" && Number.isFinite(ns) && ns > 0 ? ns / 1e9 : null;
@@ -244,31 +250,75 @@ export function parsePorts(exposed: unknown): ImagePort[] {
   return out.sort((a, b) => a.port - b.port || a.protocol.localeCompare(b.protocol)).slice(0, maxListed);
 }
 
+/** Hands out the config's character budget: a string cut to max, or null once the budget is spent. */
+function spender(total: number) {
+  let left = total;
+  return {
+    cut(s: string, max: number): string | null {
+      if (left <= 0) return null;
+      const out = s.slice(0, Math.min(max, left));
+      left -= out.length;
+      return out;
+    },
+    /** Room for chars characters, all or nothing: for values that must not be cut. */
+    take(chars: number): boolean {
+      if (chars > left) return false;
+      left -= chars;
+      return true;
+    },
+  };
+}
+
 export function parseConfig(body: unknown): ParsedConfig | null {
   const root = obj(body);
   if (!root) return null;
   const config = obj(root.config) ?? obj(root.container_config) ?? {};
   const health = obj(config.Healthcheck);
-  const test = strings(health?.Test);
-  const architecture = str(root.architecture);
-  const variant = str(root.variant);
-  return {
-    platform: `${str(root.os) || "linux"}/${architecture || "unknown"}${variant ? `/${variant}` : ""}`,
-    ports: parsePorts(config.ExposedPorts),
-    volumes: Object.keys(obj(config.Volumes) ?? {})
-      .filter((p) => p.startsWith("/"))
-      .slice(0, maxListed),
-    env: strings(config.Env)
+  const budget = spender(configBudget);
+  const texts = (v: unknown) =>
+    strings(v)
       .slice(0, maxListed)
-      .map((line) => {
-        const at = line.indexOf("=");
-        return at < 0 ? { name: line, value: "" } : { name: line.slice(0, at), value: line.slice(at + 1) };
-      })
-      .filter((e) => /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(e.name)),
-    entrypoint: strings(config.Entrypoint),
-    cmd: strings(config.Cmd),
-    user: str(config.User),
-    workingDir: str(config.WorkingDir),
+      .flatMap((s) => {
+        const out = budget.cut(s, maxText);
+        return out === null ? [] : [out];
+      });
+  const short = (v: unknown, max: number = maxName) => str(v).slice(0, max);
+  const architecture = short(root.architecture, 64);
+  const variant = short(root.variant, 64);
+  // What the form fills in (volumes, env) gets the budget first, then what it only shows.
+  const ports = parsePorts(config.ExposedPorts);
+  const volumes = Object.keys(obj(config.Volumes) ?? {})
+    .filter((p) => p.startsWith("/") && p.length <= maxPath)
+    .slice(0, maxListed)
+    .filter((p) => budget.take(p.length));
+  const env = strings(config.Env)
+    .slice(0, maxListed)
+    .map((line) => {
+      const at = line.indexOf("=");
+      return at < 0 ? { name: line, value: "" } : { name: line.slice(0, at), value: line.slice(at + 1) };
+    })
+    // A cut value would override the image's own default with a wrong one: too long, it is left out.
+    .filter((e) => e.name.length <= maxName && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(e.name) && e.value.length <= maxText)
+    .filter((e) => budget.take(e.name.length + e.value.length));
+  const entrypoint = texts(config.Entrypoint);
+  const cmd = texts(config.Cmd);
+  const test = texts(health?.Test);
+  const labels = Object.entries(obj(config.Labels) ?? {})
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[0].length <= maxName)
+    .slice(0, maxListed)
+    .flatMap(([name, value]) => {
+      const cut = budget.take(name.length) ? budget.cut(value, maxLabel) : null;
+      return cut === null ? [] : [{ name, value: cut }];
+    });
+  return {
+    platform: `${short(root.os, 64) || "linux"}/${architecture || "unknown"}${variant ? `/${variant}` : ""}`,
+    ports,
+    volumes,
+    env,
+    entrypoint,
+    cmd,
+    user: short(config.User),
+    workingDir: short(config.WorkingDir, maxText),
     healthcheck:
       test.length > 0
         ? {
@@ -279,10 +329,7 @@ export function parseConfig(body: unknown): ParsedConfig | null {
             retries: typeof health?.Retries === "number" && health.Retries >= 0 ? Math.floor(health.Retries) : null,
           }
         : null,
-    labels: Object.entries(obj(config.Labels) ?? {})
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .slice(0, maxListed)
-      .map(([name, value]) => ({ name, value: value.slice(0, 2000) })),
+    labels,
     createdAt: timestamp(root.created),
   };
 }

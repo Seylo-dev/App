@@ -72,15 +72,18 @@ describe("reading Docker Hub", () => {
   });
 
   test("the saved Docker Hub login: public pulls use it, private repositories only for registries.manage", async () => {
-    saveDockerHubLogin();
+    const loginId = saveDockerHubLogin();
     const { cookie: member } = await createUser(panel, "member");
-    await callOp(panel, dockerHub.inspect, { repository: "gitea/gitea", tag: meta.tag }, { cookie: member });
+    const open = await callOp(panel, dockerHub.inspect, { repository: "gitea/gitea", tag: meta.tag }, { cookie: member });
+    expect(open.body.registryId).toBeNull();
     expect(hub.seen.some((s) => s.headers.get("authorization") === "Bearer login-token:gitea/gitea")).toBe(true);
     expect((await callOp(panel, dockerHub.inspect, { repository: "acme/private", tag: "1" }, { cookie: member })).status).toBe(404);
     expect((await callOp(panel, dockerHub.tags, { repository: "acme/private" }, { cookie: member })).status).toBe(404);
     const own = await callOp(panel, dockerHub.inspect, { repository: "acme/private", tag: "1" }, { cookie: owner });
     expect(own.status).toBe(200);
     expect(own.body.private).toBe(true);
+    // The form preselects the login that read the image, so the node can pull it too.
+    expect(own.body.registryId).toBe(loginId);
     expect((await callOp(panel, dockerHub.tags, { repository: "acme/private" }, { cookie: owner })).body.tags).toHaveLength(1);
   });
 
