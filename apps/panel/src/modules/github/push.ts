@@ -1,13 +1,15 @@
 // What a push or pull request does: deploy the services that follow the
 // branch, open/update/close PR previews. Used by the webhook route and by
-// the polling fallback.
+// the polling fallback. Pushes go through queuePushDeploy: a push while a
+// deploy runs queues behind it, and a push deploy that has not started yet
+// takes a newer push over (newest head wins).
 
 import { skipMarkerOf } from "@seylo/ops";
 import { sql } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { services, sourcePolls } from "../../db/schema";
 import type { Deps } from "../../deps";
-import { queueDeploy } from "../deployments/queue";
+import { queuePushDeploy } from "../deployments/queue";
 import { closePreview, openOrUpdatePreview, type PullRequestInfo } from "../previews/preview";
 import type { ServiceRow } from "../services/rows";
 import { readSpec, type ServiceSpecJson } from "../services/spec";
@@ -141,9 +143,9 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
         record("ignored", gate.detail);
         continue;
       }
-      const d = queueDeploy(deps, {
+      // Newest head wins: a push deploy that has not started yet builds this push instead.
+      const queued = queuePushDeploy(deps, {
         serviceId: svc.id,
-        trigger: "push",
         actor: push.sender,
         commitSha: push.sha,
         commitMessage: push.message,
@@ -156,8 +158,14 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
         .values({ serviceId: svc.id, branch: push.branch, lastSha: push.sha, checkedAt: new Date() })
         .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { branch: push.branch, lastSha: push.sha, checkedAt: new Date() } })
         .run();
-      record("deployed", `Deploying ${push.sha.slice(0, 7)} from ${push.branch}.`, d.id);
-      deployed++;
+      if (queued.kind === "same") {
+        record("ignored", "A deploy of this commit was already queued.", queued.deployment.id);
+      } else if (queued.kind === "joined") {
+        record("ignored", `A deploy was already queued; it builds ${push.sha.slice(0, 7)} now.`, queued.deployment.id);
+      } else {
+        record("deployed", `Deploying ${push.sha.slice(0, 7)} from ${push.branch}.`, queued.deployment.id);
+        deployed++;
+      }
     } catch (error) {
       record("failed", error instanceof Error ? error.message : String(error));
     }

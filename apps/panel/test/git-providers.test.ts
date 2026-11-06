@@ -595,6 +595,37 @@ describe("pushes that come faster than deploys", () => {
     expect(details).toContain(`A deploy was already queued; it builds ${"6".repeat(7)} now.`);
   });
 
+  test("a head polling finds while a deploy runs queues behind it, and a newer one takes the waiting deploy over", async () => {
+    // No webhook: polling every minute is the only way pushes arrive.
+    fake.override((r) => (r.method === "POST" && r.path.endsWith("/hooks") ? { status: 403, body: { message: "no" } } : undefined));
+    const { id } = await connectedService("gitea");
+    let head = giteaHead;
+    fake.override((r) =>
+      r.path === "/api/v1/repos/acme/shop/branches/main"
+        ? { body: { name: "main", commit: { id: head, message: "Polled\n" } } }
+        : undefined,
+    );
+    const start = Date.now();
+    expect(await pollProviderBranches(panel.deps, start)).toBe(0);
+    head = "5".repeat(40);
+    expect(await pollProviderBranches(panel.deps, start + 61_000)).toBe(1);
+    await fleet.settle();
+    const [running] = deploymentsOf(id);
+    expect(running).toMatchObject({ commitSha: head, trigger: "push" });
+    expect(running?.status).not.toBe("queued");
+
+    // The deploy of 5555555 still runs: the next head waits for it instead of being dropped.
+    head = "6".repeat(40);
+    expect(await pollProviderBranches(panel.deps, start + 122_000)).toBe(1);
+    expect(deploymentsOf(id).find((d) => d.id !== running?.id)).toMatchObject({ status: "queued", commitSha: head });
+    head = "7".repeat(40);
+    expect(await pollProviderBranches(panel.deps, start + 183_000)).toBe(0);
+    const all = deploymentsOf(id);
+    expect(all).toHaveLength(2);
+    expect(all.find((d) => d.id !== running?.id)).toMatchObject({ status: "queued", commitSha: head });
+    expect((await deliveriesOf(id))[0]?.detail).toBe(`A deploy was already queued; it builds ${"7".repeat(7)} now.`);
+  });
+
   test("checked deliveries are rate limited per hook; unchecked ones do not use the budget", async () => {
     const { id, hook, secret } = await connectedService("gitlab");
     const other = await connectedService("gitlab", "worker");

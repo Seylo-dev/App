@@ -14,7 +14,6 @@ import { eq, sql } from "drizzle-orm";
 import { services, sourcePolls } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
-import { hasActiveDeploy } from "../deployments/queue";
 import { readSpec } from "../services/spec";
 import { clientFor } from "./client";
 import { repairHooks, webhookOf } from "./hooks";
@@ -75,8 +74,10 @@ export async function pollProviderBranches(deps: Deps, now = Date.now()): Promis
         .values({ serviceId: svc.id, branch: source.branch, lastSha: head.sha, checkedAt })
         .onConflictDoUpdate({ target: sourcePolls.serviceId, set: { branch: source.branch, lastSha: head.sha, checkedAt } })
         .run();
-      // The first look only records the head; a change after that is a push the webhook missed.
-      if (!sameBranch || !poll?.lastSha || poll.lastSha === head.sha || hasActiveDeploy(deps, svc.id)) continue;
+      // The first look only records the head; a change after that is a push the webhook missed. It
+      // deploys even while a deploy runs (after it, newest head wins): the head is recorded now, so a
+      // push skipped here would never deploy.
+      if (!sameBranch || !poll?.lastSha || poll.lastSha === head.sha) continue;
       const outcome = await deployProviderPush(
         deps,
         svc,

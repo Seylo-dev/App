@@ -8,16 +8,15 @@
 // nothing about the body, and a leaked one must not be able to make the
 // panel build any commit of the repository). A push while an earlier push
 // deploy still waits joins that one (it builds the newer head), so pushes
-// never pile up deploys behind the running one. Merge requests are read
+// never pile up deploys behind the running one; a push while a deploy runs
+// queues behind it (deployments/queue.ts queuePushDeploy). Merge requests are read
 // from the API too, so a payload cannot claim a fork is not one.
 
 import { skipMarkerOf } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
-import { deployments, type GitProviderKind, previews, sourcePolls } from "../../db/schema";
+import { type GitProviderKind, previews, sourcePolls } from "../../db/schema";
 import type { Deps } from "../../deps";
-import { appendLog } from "../deployments/logs";
-import { queueDeploy } from "../deployments/queue";
-import { publishDeploymentChange } from "../deployments/store";
+import { queuePushDeploy } from "../deployments/queue";
 import { closePreview, openOrUpdatePreview } from "../previews/preview";
 import type { ServiceRow } from "../services/rows";
 import { readSpec } from "../services/spec";
@@ -117,32 +116,9 @@ export async function deployProviderPush(
     };
     const commitMessage = firstLine(head?.message ?? push.changes.headMessage);
     const commitAuthor = head?.author ?? push.author;
-    // A push deploy that has not started yet takes this push over: it builds the newer head.
-    const waiting = deps.db
-      .select()
-      .from(deployments)
-      .where(
-        and(
-          eq(deployments.serviceId, svc.id),
-          eq(deployments.status, "queued"),
-          eq(deployments.trigger, "push"),
-          eq(deployments.branch, source.branch),
-        ),
-      )
-      .get();
-    if (waiting) {
-      remember();
-      if (waiting.commitSha === sha) return record("ignored", "A deploy of this commit was already queued.", waiting.id);
-      const what = sha ? sha.slice(0, 7) : `the head of ${source.branch}`;
-      deps.db.update(deployments).set({ commitSha: sha, commitMessage, commitAuthor }).where(eq(deployments.id, waiting.id)).run();
-      appendLog(deps, svc.id, waiting.id, "clone", [`A newer push arrived before this deploy started: it builds ${what} now.`, ...notes]);
-      // Also queues the commit statuses: the old commit's "queued" becomes "superseded" (status.ts).
-      publishDeploymentChange(deps, svc.id, waiting.id);
-      return record("ignored", `A deploy was already queued; it builds ${what} now.`, waiting.id);
-    }
-    const d = queueDeploy(deps, {
+    // Newest head wins: a push deploy that has not started yet builds this push instead.
+    const queued = queuePushDeploy(deps, {
       serviceId: svc.id,
-      trigger: "push",
       actor: push.sender,
       commitSha: sha,
       commitMessage,
@@ -151,11 +127,19 @@ export async function deployProviderPush(
       notes,
     });
     remember();
-    return record(
-      "deployed",
-      sha ? `Deploying ${sha.slice(0, 7)} from ${source.branch}.` : `Deploying the head of ${source.branch}.`,
-      d.id,
-    );
+    const what = sha ? sha.slice(0, 7) : `the head of ${source.branch}`;
+    switch (queued.kind) {
+      case "same":
+        return record("ignored", "A deploy of this commit was already queued.", queued.deployment.id);
+      case "joined":
+        return record("ignored", `A deploy was already queued; it builds ${what} now.`, queued.deployment.id);
+      case "queued":
+        return record(
+          "deployed",
+          sha ? `Deploying ${sha.slice(0, 7)} from ${source.branch}.` : `Deploying the head of ${source.branch}.`,
+          queued.deployment.id,
+        );
+    }
   } catch (error) {
     return record("failed", error instanceof Error ? error.message : String(error));
   }

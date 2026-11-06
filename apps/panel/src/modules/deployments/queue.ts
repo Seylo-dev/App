@@ -100,3 +100,53 @@ export function hasActiveDeploy(deps: Pick<Deps, "db">, serviceId: string): bool
       .get() !== undefined
   );
 }
+
+export type PushDeploy =
+  /** A new deployment, which starts once the running one (if any) is done. */
+  | { kind: "queued"; deployment: DeploymentRow }
+  /** A push deploy of the branch that had not started yet builds this commit now. */
+  | { kind: "joined"; deployment: DeploymentRow }
+  /** A push deploy of this very commit is waiting already. */
+  | { kind: "same"; deployment: DeploymentRow };
+
+/**
+ * Deploys a push to the branch a service follows (webhooks and branch
+ * polling), newest head wins: a push deploy of the branch that has not
+ * started yet takes the push over and builds the newer commit, so pushes
+ * never pile up deploys behind the running one; otherwise the push queues
+ * its own deploy, which starts after the running one. A push is never
+ * dropped because a deploy is running.
+ */
+export function queuePushDeploy(deps: Deps, input: Omit<QueueDeployInput, "trigger"> & { branch: string }): PushDeploy {
+  const sha = input.commitSha ?? null;
+  const waiting = deps.db
+    .select()
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.serviceId, input.serviceId),
+        eq(deployments.status, "queued"),
+        eq(deployments.trigger, "push"),
+        eq(deployments.branch, input.branch),
+      ),
+    )
+    .get();
+  if (waiting) {
+    if (waiting.commitSha === sha) return { kind: "same", deployment: waiting };
+    const joined = deps.db
+      .update(deployments)
+      .set({ commitSha: sha, commitMessage: input.commitMessage ?? null, commitAuthor: input.commitAuthor ?? null })
+      .where(eq(deployments.id, waiting.id))
+      .returning()
+      .get();
+    const what = sha ? sha.slice(0, 7) : `the head of ${input.branch}`;
+    appendLog(deps, input.serviceId, waiting.id, "clone", [
+      `A newer push arrived before this deploy started: it builds ${what} now.`,
+      ...(input.notes ?? []),
+    ]);
+    // Commit statuses follow: the old commit's "queued" becomes "superseded" (gitProviders/status.ts).
+    publishDeploymentChange(deps, input.serviceId, waiting.id);
+    return { kind: "joined", deployment: joined };
+  }
+  return { kind: "queued", deployment: queueDeploy(deps, { ...input, trigger: "push" }) };
+}

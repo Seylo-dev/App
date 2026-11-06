@@ -3,6 +3,7 @@ import { createHmac, generateKeyPairSync } from "node:crypto";
 import { deployments as deploymentOps, github, previews as previewOps, projects, services as serviceOps, webhooks } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { deploymentLogs, deployments, githubApps, githubInstallations, previews, services, webhookDeliveries } from "../src/db/schema";
+import { engineFor } from "../src/modules/deployments/engine";
 import { pollBranches } from "../src/modules/github/poll";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
@@ -224,6 +225,69 @@ describe("GitHub webhooks", () => {
     await fleet.settle();
     const d = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).get();
     expect(d?.commitSha).toBe(heads.main);
+  });
+
+  test("a head polling finds while a deploy runs deploys after it, and the newest head wins", async () => {
+    const id = await githubService();
+    expect(await pollBranches(panel.deps)).toBe(0);
+    // A deploy of the service is running.
+    const running = panel.deps.db
+      .insert(deployments)
+      .values({ serviceId: id, trigger: "manual", status: "building", generation: 50, actor: "test", startedAt: new Date() } as never)
+      .returning()
+      .get();
+    heads.main = "2222222222222222222222222222222222222222";
+    expect(await pollBranches(panel.deps)).toBe(1);
+    const pushDeploys = () =>
+      panel.deps.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.serviceId, id))
+        .all()
+        .filter((d) => d.trigger === "push");
+    expect(pushDeploys()).toMatchObject([{ status: "queued", commitSha: heads.main }]);
+
+    // Another push before the running deploy is done: the waiting deploy builds the newer head.
+    heads.main = "3333333333333333333333333333333333333333";
+    expect(await pollBranches(panel.deps)).toBe(0);
+    const [waiting] = pushDeploys();
+    expect(pushDeploys()).toHaveLength(1);
+    expect(waiting).toMatchObject({ status: "queued", commitSha: heads.main });
+    const log = panel.deps.db
+      .select()
+      .from(deploymentLogs)
+      .where(eq(deploymentLogs.deploymentId, waiting?.id as string))
+      .all()
+      .map((l) => l.text);
+    expect(log).toContain("A newer push arrived before this deploy started: it builds 3333333 now.");
+    const deliveries = (await callOp(panel, webhooks.listDeliveries, { serviceId: id }, { cookie })).body.deliveries;
+    expect(deliveries[0]).toMatchObject({ outcome: "ignored", detail: "A deploy was already queued; it builds 3333333 now." });
+
+    // The running deploy ends; the waiting one builds the newest head.
+    panel.deps.db.update(deployments).set({ status: "failed", finishedAt: new Date() }).where(eq(deployments.id, running.id)).run();
+    engineFor(panel.deps).kick(waiting?.id as string);
+    await fleet.settle();
+    expect(fleet.builds.at(-1)?.request).toMatchObject({
+      source: { source: { case: "git", value: { commit: "3333333333333333333333333333333333333333" } } },
+    });
+    expect(pushDeploys()).toMatchObject([{ status: "deploying", commitSha: "3333333333333333333333333333333333333333" }]);
+  });
+
+  test("a webhook push while a deploy runs queues behind it; a second one takes the waiting deploy over", async () => {
+    const id = await githubService();
+    panel.deps.db
+      .insert(deployments)
+      .values({ serviceId: id, trigger: "manual", status: "deploying", generation: 50, actor: "test", startedAt: new Date() } as never)
+      .run();
+    expect((await post("push", push("main", "6666666666666666666666666666666666666666"))).body).toMatchObject({ deployed: 1 });
+    expect((await post("push", push("main", "7777777777777777777777777777777777777777"))).body).toMatchObject({ deployed: 0 });
+    const queued = panel.deps.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.serviceId, id))
+      .all()
+      .filter((d) => d.status === "queued");
+    expect(queued).toMatchObject([{ trigger: "push", commitSha: "7777777777777777777777777777777777777777" }]);
   });
 });
 
