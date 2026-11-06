@@ -19,6 +19,7 @@ import {
   apiKeys,
   deployments,
   domains,
+  gitCredentials,
   grants,
   invites,
   nodes,
@@ -800,6 +801,50 @@ describe("services.moveProject", () => {
     const moved = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { cookie: member.cookie });
     expect(moved.status).toBe(200);
     expect((await callOp(panel, serviceOps.get, { serviceId: id }, { cookie: member.cookie })).status).toBe(200);
+    expect(row(id)?.projectId).toBe(blog);
+  });
+
+  test("a source's credential goes along only for someone who could attach it in the target", async () => {
+    // Once a service of blog uses the credential, every service there may (source-guard.ts).
+    const pat = panel.deps.db
+      .insert(gitCredentials)
+      .values({
+        name: "pat",
+        kind: "token",
+        host: "git.example.com",
+        username: "owner",
+        secretSealed: panel.deps.secrets.seal("ghp_SECRET", "git.credential"),
+      })
+      .returning()
+      .get();
+    const id = await app(shop, "api");
+    const spec = row(id)?.spec as Record<string, unknown>;
+    panel.deps.db
+      .update(services)
+      .set({
+        spec: {
+          ...spec,
+          source: { type: "git", url: "https://git.example.com/a/b.git", branch: "main", credentialId: pat.id, deployOnPush: false },
+        },
+      })
+      .where(eq(services.id, id))
+      .run();
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", id, ["*"]);
+    grant(panel, member.user.id, "project", blog, ["*"]);
+    const impact = await callOp(panel, serviceOps.moveProjectImpact, { serviceId: id, projectId: blog }, { cookie: member.cookie });
+    expect(impact.body.blockers).toEqual([{ reason: "access", message: expect.stringContaining("git credential") }]);
+    const refused = await callOp(
+      panel,
+      serviceOps.moveProject,
+      { serviceId: id, projectId: blog, confirm: true },
+      { cookie: member.cookie },
+    );
+    expect(refused.body.error).toMatchObject({ code: "FORBIDDEN", details: { reason: "access" } });
+    expect(row(id)?.projectId).toBe(shop);
+    // An admin may attach it anywhere.
+    const moved = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { cookie });
+    expect(moved.status).toBe(200);
     expect(row(id)?.projectId).toBe(blog);
   });
 

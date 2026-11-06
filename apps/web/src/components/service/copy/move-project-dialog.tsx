@@ -107,7 +107,7 @@ export function MoveProjectDialog({
                 <Alert tone="danger" title={t("serviceCopy.move.blocked")}>
                   <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
                     {i.blockers.map((b) => (
-                      <li key={b.reason}>{b.message}</li>
+                      <li key={`${b.reason}:${b.message}`}>{b.message}</li>
                     ))}
                   </ul>
                 </Alert>

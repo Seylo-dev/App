@@ -6,7 +6,7 @@
 // filters by what the caller may see and adds what blocks a move.
 
 import { appVariables, databaseVariables, hostMentions, type ParsedEnv, parseEnv, sharedTarget } from "@seylo/env-analyzer";
-import { allOps, grantableActions, type services as serviceOps } from "@seylo/ops";
+import { allOps, grantableActions, OpError, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { grants, invites, previews, projects, services, users } from "../../db/schema";
@@ -18,6 +18,7 @@ import { buildEnvGraph, type EnvGraph } from "../env/graph";
 import { inviteStatus } from "../invites/rows";
 import { activeCopy } from "./copies";
 import { nameKey, type ServiceRow } from "./rows";
+import { assertSourceAllowed } from "./source-guard";
 import { readSpec } from "./spec";
 
 export type ReferenceEffect = Static<typeof serviceOps.ReferenceEffect>;
@@ -322,7 +323,26 @@ function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string, t
   const missing = missingServiceAction(ctx, svc.id);
   if (missing)
     block("access", `Moving a service needs full access to it, and you do not have ${missing} here. Ask an admin or the project's owner.`);
+  const attach = targetProjectId !== svc.projectId ? sourceAttachBlock(ctx, svc, targetProjectId) : null;
+  if (attach) block("access", attach);
   return out;
+}
+
+/**
+ * The source's git credential, registry login, GitHub installation or git
+ * provider connection becomes usable in the new project once the service is
+ * there (source-guard.ts: a project's services share what one of them uses),
+ * so the move needs the same right as attaching it there.
+ */
+function sourceAttachBlock(ctx: OpContext, svc: ServiceRow, targetProjectId: string): string | null {
+  try {
+    assertSourceAllowed(ctx, targetProjectId, readSpec(svc.spec).source);
+    return null;
+  } catch (error) {
+    // Only the permission matters here: the stored source passed its other checks when it was saved.
+    if (error instanceof OpError && error.code === "FORBIDDEN") return error.message;
+    return null;
+  }
 }
 
 /** Everything services.moveProjectImpact returns, for this caller. */

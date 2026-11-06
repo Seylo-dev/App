@@ -1606,7 +1606,10 @@ receiving, grants on the service and pending invites naming it; names and
 keys only where the caller may see them. Blockers (CONFLICT, FORBIDDEN for
 `access`): `sameProject`, `protected`, `compose` (stacks and members),
 `preview` (a preview service), `previews` (open previews), `nameTaken`,
-`deploying`, `copying`, `access`, and `references`: a service of the new
+`deploying`, `copying`, `access` (also when the caller could not attach
+the source's git credential, registry login, GitHub installation or git
+provider connection in the new project, `source-guard.ts`: once a service
+there uses it, every service there may), and `references`: a service of the new
 project references the name for more than an address (an own variable or
 a database credential, `isOpenVariable`), written while nothing had that
 name, so its writer was never checked; the same rule makes a clone skip or
