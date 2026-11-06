@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { jobs, schedules } from "../src/db/schema";
-import { cronProblem, nextCronRun } from "../src/jobs/cron-expr";
+import { agentCronProblem, cronProblem, nextCronRun, nodeCronProblem } from "../src/jobs/cron-expr";
 import { defineJob } from "../src/jobs/queue";
 import { createSchedules, missedAfterMs, scheduleDedupeKey } from "../src/jobs/schedules";
 import { silentLogger } from "../src/logger";
@@ -27,6 +27,31 @@ test("cron expressions: next run in UTC and in a zone, and readable problems", (
   expect(cronProblem("*/5 * * * *")).toBeNull();
   expect(cronProblem("61 * * * *")).toContain("minute");
   expect(cronProblem("* * * * * *")).not.toBeNull();
+});
+
+test("cron expressions croner reads but the agent's parser (day of week 0-6, no L, W or #) does not", () => {
+  // Checked against robfig/cron: these fail there with "above maximum (6)" or a range that ends before it starts.
+  for (const expr of ["0 4 * * 7", "0 4 * * 1-7", "0 4 * * 0-7", "0 4 * * 1,7", "0 4 * * 1-7/2", "0 4 * * MON-SUN"]) {
+    expect(cronProblem(expr)).toBeNull();
+    expect(agentCronProblem(expr)).toContain("Sunday is 0");
+    expect(nodeCronProblem(expr)).toContain("Sunday is 0");
+  }
+  for (const expr of ["0 4 L * *", "0 4 15W * *", "0 4 * * 5L", "0 4 * * 1#2"]) expect(agentCronProblem(expr)).toContain("L, W and #");
+  // Both read these.
+  for (const expr of [
+    "0 4 * * 0",
+    "0 4 * * SUN",
+    "0 4 * * sun-sat",
+    "0 4 * * 1-6,0",
+    "0 4 * * */7",
+    "0 4 * * ?",
+    "0 4 * * mon-fri",
+    "@weekly",
+  ]) {
+    expect(nodeCronProblem(expr)).toBeNull();
+  }
+  // The shape is cronProblem's to name.
+  expect(nodeCronProblem("61 * * * *")).toContain("minute");
 });
 
 test("an interval schedule enqueues one job per period, deduped while one is pending", () => {

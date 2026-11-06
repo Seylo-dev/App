@@ -29,13 +29,6 @@ type Schedule interface {
 // ParseSchedule parses a 5-field expression in an IANA time zone (empty
 // means UTC). "@every <duration>" is refused: jobs follow the wall clock.
 func ParseSchedule(expr, timeZone string) (Schedule, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return nil, fmt.Errorf("%w: empty expression", ErrBadSchedule)
-	}
-	if strings.HasPrefix(expr, "@every") || strings.Contains(expr, "TZ=") {
-		return nil, fmt.Errorf("%w: %q is not supported", ErrBadSchedule, expr)
-	}
 	loc := time.UTC
 	if timeZone != "" {
 		l, err := time.LoadLocation(timeZone)
@@ -43,6 +36,19 @@ func ParseSchedule(expr, timeZone string) (Schedule, error) {
 			return nil, fmt.Errorf("%w: time zone %q: %v", ErrBadSchedule, timeZone, err)
 		}
 		loc = l
+	}
+	return ParseScheduleIn(expr, loc)
+}
+
+// ParseScheduleIn is ParseSchedule in a given location, for schedules that
+// follow the machine's own clock (time.Local), such as scheduled cleanup.
+func ParseScheduleIn(expr string, loc *time.Location) (Schedule, error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil, fmt.Errorf("%w: empty expression", ErrBadSchedule)
+	}
+	if strings.HasPrefix(expr, "@every") || strings.Contains(expr, "TZ=") {
+		return nil, fmt.Errorf("%w: %q is not supported", ErrBadSchedule, expr)
 	}
 	s, err := parser.Parse(expr)
 	if err != nil {

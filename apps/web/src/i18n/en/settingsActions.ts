@@ -59,7 +59,7 @@ export default {
   logs: { view: "Read logs" },
   mcp: { manage: "Manage the MCP server" },
   metrics: { view: "View metrics" },
-  nodes: { manage: "Manage nodes", view: "View nodes" },
+  nodes: { hostShell: "Open a root shell on a node (browser sign-in only)", manage: "Manage nodes", view: "View nodes" },
   notifications: { manage: "Manage channels and rules" },
   projects: { create: "Create projects", delete: "Delete the project", update: "Edit the project", view: "View the project" },
   registries: { manage: "Manage registries" },

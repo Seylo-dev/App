@@ -66,10 +66,11 @@ const crashActions: Record<CrashAction, StoredCrashAction> = {
 
 /**
  * Kinds an agent sends through its durable outbox (state.Reporter): final
- * deploy and build results, cron runs, backup results, node alerts and
- * update results. Progress, state, metrics and facts are best-effort EVENTs.
+ * deploy and build results, cron runs, backup results, node alerts, update
+ * results and scheduled cleanup runs. Progress, state, metrics and facts
+ * are best-effort EVENTs.
  */
-const durableKinds = new Set(["deployProgress", "buildProgress", "cronRun", "backupResult", "nodeAlert", "updateResult"]);
+const durableKinds = new Set(["deployProgress", "buildProgress", "cronRun", "backupResult", "nodeAlert", "updateResult", "cleanupRun"]);
 /** The agent's own cap on one outbox entry (state.MaxOutboxEntryBytes). */
 export const maxReportBytes = 1 << 20;
 const maxCrashLines = 100;

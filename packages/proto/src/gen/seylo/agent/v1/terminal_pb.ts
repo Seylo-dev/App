@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/terminal.proto.
  */
 export const file_seylo_agent_v1_terminal: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zZXlsby9hZ2VudC92MS90ZXJtaW5hbC5wcm90bxIOc2V5bG8uYWdlbnQudjEiiQEKDkNvbnNvbGVSZXF1ZXN0EisKBG9wZW4YASABKAsyGy5zZXlsby5hZ2VudC52MS5Db25zb2xlT3BlbkgAEg8KBXN0ZGluGAIgASgMSAASLgoGcmVzaXplGAMgASgLMhwuc2V5bG8uYWdlbnQudjEuVGVybWluYWxTaXplSABCCQoHbWVzc2FnZSJFCgtDb25zb2xlT3BlbhISCgpzZXJ2aWNlX2lkGAEgASgJEhQKDGNvbnRhaW5lcl9pZBgCIAEoCRIMCgR0YWlsGAMgASgNInAKD0NvbnNvbGVSZXNwb25zZRIQCgZvdXRwdXQYASABKAxIABITCglleGl0X2NvZGUYAiABKAVIABIrCgRpbmZvGAMgASgLMhsuc2V5bG8uYWdlbnQudjEuQ29uc29sZUluZm9IAEIJCgdtZXNzYWdlInsKC0NvbnNvbGVJbmZvEhQKDGNvbnRhaW5lcl9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEhIKCnN0ZGluX29wZW4YAyABKAgSCwoDdHR5GAQgASgIEgwKBHVzZXIYBSABKAkSEwoLd29ya2luZ19kaXIYBiABKAkihQEKDFNoZWxsUmVxdWVzdBIpCgRvcGVuGAEgASgLMhkuc2V5bG8uYWdlbnQudjEuU2hlbGxPcGVuSAASDwoFaW5wdXQYAiABKAxIABIuCgZyZXNpemUYAyABKAsyHC5zZXlsby5hZ2VudC52MS5UZXJtaW5hbFNpemVIAEIJCgdtZXNzYWdlIpkBCglTaGVsbE9wZW4SEgoKc2VydmljZV9pZBgBIAEoCRIUCgxjb250YWluZXJfaWQYAiABKAkSDwoHY29tbWFuZBgDIAMoCRIqCgRzaXplGAQgASgLMhwuc2V5bG8uYWdlbnQudjEuVGVybWluYWxTaXplEhcKD2RhdGFiYXNlX2NsaWVudBgFIAEoCBIMCgR1c2VyGAYgASgJIi0KDFRlcm1pbmFsU2l6ZRIPCgdjb2x1bW5zGAEgASgNEgwKBHJvd3MYAiABKA0ibAoNU2hlbGxSZXNwb25zZRIQCgZvdXRwdXQYASABKAxIABITCglleGl0X2NvZGUYAiABKAVIABIpCgRpbmZvGAMgASgLMhkuc2V5bG8uYWdlbnQudjEuU2hlbGxJbmZvSABCCQoHbWVzc2FnZSJpCglTaGVsbEluZm8SFAoMY29udGFpbmVyX2lkGAEgASgJEhIKCmdlbmVyYXRpb24YAiABKAQSDAoEdXNlchgDIAEoCRITCgt3b3JraW5nX2RpchgEIAEoCRIPCgdjb21tYW5kGAUgAygJQrgBChJjb20uc2V5bG8uYWdlbnQudjFCDVRlcm1pbmFsUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z");
+  fileDesc("Ch1zZXlsby9hZ2VudC92MS90ZXJtaW5hbC5wcm90bxIOc2V5bG8uYWdlbnQudjEiiQEKDkNvbnNvbGVSZXF1ZXN0EisKBG9wZW4YASABKAsyGy5zZXlsby5hZ2VudC52MS5Db25zb2xlT3BlbkgAEg8KBXN0ZGluGAIgASgMSAASLgoGcmVzaXplGAMgASgLMhwuc2V5bG8uYWdlbnQudjEuVGVybWluYWxTaXplSABCCQoHbWVzc2FnZSJFCgtDb25zb2xlT3BlbhISCgpzZXJ2aWNlX2lkGAEgASgJEhQKDGNvbnRhaW5lcl9pZBgCIAEoCRIMCgR0YWlsGAMgASgNInAKD0NvbnNvbGVSZXNwb25zZRIQCgZvdXRwdXQYASABKAxIABITCglleGl0X2NvZGUYAiABKAVIABIrCgRpbmZvGAMgASgLMhsuc2V5bG8uYWdlbnQudjEuQ29uc29sZUluZm9IAEIJCgdtZXNzYWdlInsKC0NvbnNvbGVJbmZvEhQKDGNvbnRhaW5lcl9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEhIKCnN0ZGluX29wZW4YAyABKAgSCwoDdHR5GAQgASgIEgwKBHVzZXIYBSABKAkSEwoLd29ya2luZ19kaXIYBiABKAkihQEKDFNoZWxsUmVxdWVzdBIpCgRvcGVuGAEgASgLMhkuc2V5bG8uYWdlbnQudjEuU2hlbGxPcGVuSAASDwoFaW5wdXQYAiABKAxIABIuCgZyZXNpemUYAyABKAsyHC5zZXlsby5hZ2VudC52MS5UZXJtaW5hbFNpemVIAEIJCgdtZXNzYWdlIpkBCglTaGVsbE9wZW4SEgoKc2VydmljZV9pZBgBIAEoCRIUCgxjb250YWluZXJfaWQYAiABKAkSDwoHY29tbWFuZBgDIAMoCRIqCgRzaXplGAQgASgLMhwuc2V5bG8uYWdlbnQudjEuVGVybWluYWxTaXplEhcKD2RhdGFiYXNlX2NsaWVudBgFIAEoCBIMCgR1c2VyGAYgASgJIi0KDFRlcm1pbmFsU2l6ZRIPCgdjb2x1bW5zGAEgASgNEgwKBHJvd3MYAiABKA0ibAoNU2hlbGxSZXNwb25zZRIQCgZvdXRwdXQYASABKAxIABITCglleGl0X2NvZGUYAiABKAVIABIpCgRpbmZvGAMgASgLMhkuc2V5bG8uYWdlbnQudjEuU2hlbGxJbmZvSABCCQoHbWVzc2FnZSJpCglTaGVsbEluZm8SFAoMY29udGFpbmVyX2lkGAEgASgJEhIKCmdlbmVyYXRpb24YAiABKAQSDAoEdXNlchgDIAEoCRITCgt3b3JraW5nX2RpchgEIAEoCRIPCgdjb21tYW5kGAUgAygJIo0BChBIb3N0U2hlbGxSZXF1ZXN0Ei0KBG9wZW4YASABKAsyHS5zZXlsby5hZ2VudC52MS5Ib3N0U2hlbGxPcGVuSAASDwoFaW5wdXQYAiABKAxIABIuCgZyZXNpemUYAyABKAsyHC5zZXlsby5hZ2VudC52MS5UZXJtaW5hbFNpemVIAEIJCgdtZXNzYWdlImIKDUhvc3RTaGVsbE9wZW4SKgoEc2l6ZRgBIAEoCzIcLnNleWxvLmFnZW50LnYxLlRlcm1pbmFsU2l6ZRIRCglvcGVuZWRfYnkYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCSJ0ChFIb3N0U2hlbGxSZXNwb25zZRIQCgZvdXRwdXQYASABKAxIABITCglleGl0X2NvZGUYAiABKAVIABItCgRpbmZvGAMgASgLMh0uc2V5bG8uYWdlbnQudjEuSG9zdFNoZWxsSW5mb0gAQgkKB21lc3NhZ2UicwoNSG9zdFNoZWxsSW5mbxIMCgR1c2VyGAEgASgJEhMKC3dvcmtpbmdfZGlyGAIgASgJEhAKCGhvc3RuYW1lGAMgASgJEg8KB2NvbW1hbmQYBCADKAkSHAoUaWRsZV90aW1lb3V0X3NlY29uZHMYBSABKA1CuAEKEmNvbS5zZXlsby5hZ2VudC52MUINVGVybWluYWxQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM");
 
 /**
  * @generated from message seylo.agent.v1.ConsoleRequest
@@ -362,4 +362,159 @@ export type ShellInfo = Message<"seylo.agent.v1.ShellInfo"> & {
  */
 export const ShellInfoSchema: GenMessage<ShellInfo> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_terminal, 8);
+
+/**
+ * HostShell is a root login shell on the node itself, with a PTY. The first
+ * request (sent in OPEN) must be `open`. added in 0.2 (nodeops)
+ *
+ * @generated from message seylo.agent.v1.HostShellRequest
+ */
+export type HostShellRequest = Message<"seylo.agent.v1.HostShellRequest"> & {
+  /**
+   * @generated from oneof seylo.agent.v1.HostShellRequest.message
+   */
+  message: {
+    /**
+     * @generated from field: seylo.agent.v1.HostShellOpen open = 1;
+     */
+    value: HostShellOpen;
+    case: "open";
+  } | {
+    /**
+     * @generated from field: bytes input = 2;
+     */
+    value: Uint8Array;
+    case: "input";
+  } | {
+    /**
+     * @generated from field: seylo.agent.v1.TerminalSize resize = 3;
+     */
+    value: TerminalSize;
+    case: "resize";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message seylo.agent.v1.HostShellRequest.
+ * Use `create(HostShellRequestSchema)` to create a new message.
+ */
+export const HostShellRequestSchema: GenMessage<HostShellRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_terminal, 9);
+
+/**
+ * @generated from message seylo.agent.v1.HostShellOpen
+ */
+export type HostShellOpen = Message<"seylo.agent.v1.HostShellOpen"> & {
+  /**
+   * @generated from field: seylo.agent.v1.TerminalSize size = 1;
+   */
+  size?: TerminalSize | undefined;
+
+  /**
+   * Who opened it ("name <email>"), for the agent's own log; the panel's
+   * audit log is the record that counts.
+   *
+   * @generated from field: string opened_by = 2;
+   */
+  openedBy: string;
+
+  /**
+   * Panel id of the session, echoed in the agent's log lines.
+   *
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.HostShellOpen.
+ * Use `create(HostShellOpenSchema)` to create a new message.
+ */
+export const HostShellOpenSchema: GenMessage<HostShellOpen> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_terminal, 10);
+
+/**
+ * @generated from message seylo.agent.v1.HostShellResponse
+ */
+export type HostShellResponse = Message<"seylo.agent.v1.HostShellResponse"> & {
+  /**
+   * @generated from oneof seylo.agent.v1.HostShellResponse.message
+   */
+  message: {
+    /**
+     * @generated from field: bytes output = 1;
+     */
+    value: Uint8Array;
+    case: "output";
+  } | {
+    /**
+     * The shell exited; the stream closes right after.
+     *
+     * @generated from field: int32 exit_code = 2;
+     */
+    value: number;
+    case: "exitCode";
+  } | {
+    /**
+     * Always the first message: where the shell runs.
+     *
+     * @generated from field: seylo.agent.v1.HostShellInfo info = 3;
+     */
+    value: HostShellInfo;
+    case: "info";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message seylo.agent.v1.HostShellResponse.
+ * Use `create(HostShellResponseSchema)` to create a new message.
+ */
+export const HostShellResponseSchema: GenMessage<HostShellResponse> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_terminal, 11);
+
+/**
+ * @generated from message seylo.agent.v1.HostShellInfo
+ */
+export type HostShellInfo = Message<"seylo.agent.v1.HostShellInfo"> & {
+  /**
+   * The agent's user, whose login shell this is (root on an installed
+   * node).
+   *
+   * @generated from field: string user = 1;
+   */
+  user: string;
+
+  /**
+   * The shell's home folder, for example "/root".
+   *
+   * @generated from field: string working_dir = 2;
+   */
+  workingDir: string;
+
+  /**
+   * @generated from field: string hostname = 3;
+   */
+  hostname: string;
+
+  /**
+   * The login shell, for example ["-bash"].
+   *
+   * @generated from field: repeated string command = 4;
+   */
+  command: string[];
+
+  /**
+   * The agent hangs up after this long without input or output.
+   *
+   * @generated from field: uint32 idle_timeout_seconds = 5;
+   */
+  idleTimeoutSeconds: number;
+};
+
+/**
+ * Describes the message seylo.agent.v1.HostShellInfo.
+ * Use `create(HostShellInfoSchema)` to create a new message.
+ */
+export const HostShellInfoSchema: GenMessage<HostShellInfo> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_terminal, 12);
 

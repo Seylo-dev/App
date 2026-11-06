@@ -65,6 +65,10 @@ test("create validates the schedule and zone and marks the service dirty", async
   const { service } = seed();
   const bad = await callOp(panel, cron.create, { serviceId: service.id, name: "x", schedule: "61 * * * *", command: "true" }, { cookie });
   expect(bad.status).toBe(400);
+  // croner reads 7 as Sunday, the agent's parser does not.
+  const sunday = await callOp(panel, cron.create, { serviceId: service.id, name: "x", schedule: "0 4 * * 7", command: "true" }, { cookie });
+  expect(sunday.status).toBe(400);
+  expect(sunday.body.error.message).toContain("Sunday is 0");
   const zone = await callOp(
     panel,
     cron.create,

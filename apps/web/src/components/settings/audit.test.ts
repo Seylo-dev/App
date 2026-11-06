@@ -4,6 +4,7 @@ import { emptyFilters, filtersToInput, opModules, opSentence } from "./audit";
 test("MCP OAuth entries that are not ops get their own sentence", () => {
   expect(opSentence("mcp.registerClient")).toBe("Register an MCP client");
   expect(opSentence("mcp.authorizeClient")).toBe("Allow or deny an MCP client");
+  expect(opSentence("hostShell.close")).toBe("Close a root shell on a node");
 });
 
 test("opSentence uses the contract summary, with a readable fallback", () => {

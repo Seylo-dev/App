@@ -46,6 +46,35 @@ message NodeSettings {
   // Mutual TLS for node-to-node load balancing (the LB entry point). Unset
   // (older panels): the entry point accepts any client, as before.
   LoadBalancerTls lb_tls = 8;
+  // Docker cleanup the agent runs by itself on a schedule or when a disk
+  // fills up, also while the panel is down. Unset (older panels) or not
+  // enabled: no scheduled cleanup.
+  CleanupSchedule cleanup = 9; // added in 0.2 (nodeops)
+  // The owner allowed root shells on this host from the panel (HostShell).
+  // The agent refuses HostShell while this is false and closes open ones
+  // when it turns false.
+  bool host_shell = 10; // added in 0.2 (nodeops)
+}
+
+// CleanupSchedule is when and what the agent cleans up by itself. It only
+// ever touches resources labeled seylo.managed, like Prune. Each run is a
+// durable CleanupRun event. added in 0.2 (nodeops)
+message CleanupSchedule {
+  bool enabled = 1;
+  // Five-field cron expression evaluated in the node's own time zone
+  // (/etc/localtime, NodeFacts.time_zone). Empty: only the disk trigger.
+  string cron = 2;
+  // Also run when the file system holding the data dir or Docker's root is
+  // more than this percent full (read by the disk checks every 10 minutes).
+  // At most once an hour, and every 6 hours while it stays above. 0 = off.
+  uint32 disk_percent = 3;
+  // What to clean, as in PruneRequest.
+  bool images = 4;
+  bool build_cache = 5;
+  bool stopped_containers = 6;
+  // Docker volumes and data folders of services removed from this node
+  // (PruneRequest.orphaned_service_data).
+  bool unused_volumes = 7;
 }
 
 // LoadBalancerTls is this node's identity on the LB entry point, issued by

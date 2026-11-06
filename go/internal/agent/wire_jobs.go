@@ -82,7 +82,35 @@ func provideJobs(d *Deps) error {
 	d.Backups = p.backups
 	d.Cloudflare = p.cf
 	d.Pruner = cleanup.NewLocal(cleanup.Options{Docker: dk, Layout: d.Layout, Desired: d.Feed.Current, Cache: cache, Logger: log})
+	d.CleanupScheduler = newCleanupScheduler(d)
 	return nil
+}
+
+// newCleanupScheduler runs NodeSettings.cleanup with d.Pruner and reports
+// every run through the outbox.
+func newCleanupScheduler(d *Deps) *cleanup.LocalScheduler {
+	return cleanup.NewScheduler(cleanup.SchedulerOptions{
+		Pruner: d.Pruner,
+		// The node's own clock and time zone (/etc/localtime), which
+		// NodeFacts.time_zone names for the panel.
+		Parse: func(expr string) (cleanup.Schedule, error) { return cron.ParseScheduleIn(expr, time.Local) },
+		Report: func(ctx context.Context, run *agentv1.CleanupRun) error {
+			return d.Reports.Event(ctx, &agentv1.Event{Payload: &agentv1.Event_CleanupRun{CleanupRun: run}})
+		},
+		Logger: d.Logger.With("component", "cleanup-schedule"),
+	})
+}
+
+// wireCleanupSchedule follows the desired state's cleanup settings, which
+// the agent keeps on disk, so the schedule also runs while the panel is
+// down, and starts the scheduler's loop.
+func wireCleanupSchedule(d *Deps) {
+	d.Feed.Subscribe(func(st *agentv1.DesiredState) {
+		if err := d.CleanupScheduler.Sync(st.GetRevision(), st.GetSettings().GetCleanup()); err != nil {
+			d.Logger.Error("syncing the cleanup schedule", "err", err)
+		}
+	})
+	d.Components.Add("cleanup-schedule", d.CleanupScheduler.Run)
 }
 
 func findService(st *agentv1.DesiredState, id string) *agentv1.ServiceSpec {
@@ -101,8 +129,9 @@ type sleeper interface {
 }
 
 // wireJobs: register RunBackup, RestoreBackup (backup.run.v1), RunCronNow
-// (cron.run.v1) and Prune (node.prune.v1); add the cron, backup, tunnel and
-// tool loops; follow the desired state through d.Feed.
+// (cron.run.v1) and Prune (node.prune.v1); add the cron, backup, tunnel,
+// tool and scheduled cleanup loops; follow the desired state through
+// d.Feed.
 func wireJobs(reg *Registry, d *Deps) error {
 	p, ok := d.Cron.(*jobsParts)
 	if !ok {
@@ -177,6 +206,7 @@ func wireJobs(reg *Registry, d *Deps) error {
 		})
 	})
 	d.Components.Add("backups", p.backups.Run)
+	wireCleanupSchedule(d)
 	d.Components.Add("db-exposed-users", p.exposed.Run)
 	d.Components.Add("cloudflared", func(ctx context.Context) error { return p.cf.Supervise(ctx, 15*time.Second) })
 	d.Components.Add("db-ui-idle", func(ctx context.Context) error {

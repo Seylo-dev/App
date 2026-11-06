@@ -15,7 +15,7 @@ export interface Rule {
 }
 
 /** Off until someone turns them on: good news and things people rarely want pushed. */
-const offByDefault = new Set<alertOps.AlertRuleEventName>(["deploy_succeeded", "update_available"]);
+const offByDefault = new Set<alertOps.AlertRuleEventName>(["deploy_succeeded", "update_available", "cleanup_ran"]);
 
 const serviceEvents = new Set<string>(alertOps.serviceAlertEvents);
 

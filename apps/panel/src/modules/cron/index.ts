@@ -8,7 +8,7 @@ import { and, desc, eq, lt, or } from "drizzle-orm";
 import { cronJobs, cronRuns, servicePlacements, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { newId } from "../../ids";
-import { cronProblem, isTimeZone, nextCronRun } from "../../jobs/cron-expr";
+import { isTimeZone, nextCronRun, nodeCronProblem } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
 import { defineModule } from "../module";
 import { flusherFor } from "../nodes";
@@ -18,7 +18,7 @@ type JobRow = typeof cronJobs.$inferSelect;
 
 function checkSchedule(schedule: string, timeZone: string) {
   if (!isTimeZone(timeZone)) throw new OpError("BAD_REQUEST", `${timeZone} is not a time zone this panel knows.`, { field: "timeZone" });
-  const problem = cronProblem(schedule, timeZone);
+  const problem = nodeCronProblem(schedule, timeZone);
   if (problem) throw new OpError("BAD_REQUEST", `The schedule is not valid: ${problem}.`, { field: "schedule" });
   if (!nextCronRun(schedule, timeZone, new Date())) throw new OpError("BAD_REQUEST", "The schedule never fires.", { field: "schedule" });
 }

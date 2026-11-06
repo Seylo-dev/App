@@ -26,6 +26,8 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["nodes", "/nodes"],
   ["node-overview", `/nodes?node=${ids.de}`, "dialog"],
   ["node-health", `/nodes?node=${ids.us}&view=health`, "dialog"],
+  ["node-cleanup", `/nodes?node=${ids.de}&view=cleanup`, "dialog"],
+  ["node-shell", `/nodes?node=${ids.de}&view=shell`, "dialog"],
   ["project", `/p/${ids.acme}`],
   ["templates", "/templates"],
   ["templates-docker-hub", "/templates?tab=docker-hub&q=gitea"],
@@ -206,8 +208,10 @@ test.describe("screens", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installDemo(page);
     mkdirSync(`${shots}/phone`, { recursive: true });
+    // Of the node sheet views, Cleanup and Shell are checked too (inside the sheet, below).
+    const sheetViews = new Set(["node-cleanup", "node-shell"]);
     for (const [name, path] of screens) {
-      if (path.includes("node=") || name === "kit") continue;
+      if ((path.includes("node=") && !sheetViews.has(name)) || name === "kit") continue;
       if (only && !only.some((part) => name.includes(part))) continue;
       await page.goto(path);
       await settle(page);
@@ -215,6 +219,19 @@ test.describe("screens", () => {
       // Wide tables scroll inside their card; the page itself never does.
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect.soft(overflow, `${name} scrolls sideways`).toBeLessThanOrEqual(0);
+      if (sheetViews.has(name)) {
+        // A sheet is fixed to the viewport, so its overflow never reaches the
+        // page: it must not scroll sideways itself, and the view switcher
+        // (five views) stays inside it, scrolling within its own track.
+        const sheet = await page.getByRole("dialog").evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const views = el.querySelector('[data-slot="segmented"]')?.getBoundingClientRect();
+          return { overflow: el.scrollWidth - el.clientWidth, right: box.right, viewsRight: views?.right ?? 0 };
+        });
+        expect.soft(sheet.overflow, `${name}: the sheet scrolls sideways`).toBeLessThanOrEqual(0);
+        expect.soft(sheet.viewsRight, `${name}: the view switcher sticks out of the sheet`).toBeLessThanOrEqual(sheet.right);
+        expect.soft(sheet.right, `${name}: the sheet is wider than the phone`).toBeLessThanOrEqual(390);
+      }
     }
   });
 });

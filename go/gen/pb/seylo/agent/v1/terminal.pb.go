@@ -794,6 +794,350 @@ func (x *ShellInfo) GetCommand() []string {
 	return nil
 }
 
+// HostShell is a root login shell on the node itself, with a PTY. The first
+// request (sent in OPEN) must be `open`. added in 0.2 (nodeops)
+type HostShellRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Message:
+	//
+	//	*HostShellRequest_Open
+	//	*HostShellRequest_Input
+	//	*HostShellRequest_Resize
+	Message       isHostShellRequest_Message `protobuf_oneof:"message"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostShellRequest) Reset() {
+	*x = HostShellRequest{}
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostShellRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostShellRequest) ProtoMessage() {}
+
+func (x *HostShellRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostShellRequest.ProtoReflect.Descriptor instead.
+func (*HostShellRequest) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_terminal_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *HostShellRequest) GetMessage() isHostShellRequest_Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *HostShellRequest) GetOpen() *HostShellOpen {
+	if x != nil {
+		if x, ok := x.Message.(*HostShellRequest_Open); ok {
+			return x.Open
+		}
+	}
+	return nil
+}
+
+func (x *HostShellRequest) GetInput() []byte {
+	if x != nil {
+		if x, ok := x.Message.(*HostShellRequest_Input); ok {
+			return x.Input
+		}
+	}
+	return nil
+}
+
+func (x *HostShellRequest) GetResize() *TerminalSize {
+	if x != nil {
+		if x, ok := x.Message.(*HostShellRequest_Resize); ok {
+			return x.Resize
+		}
+	}
+	return nil
+}
+
+type isHostShellRequest_Message interface {
+	isHostShellRequest_Message()
+}
+
+type HostShellRequest_Open struct {
+	Open *HostShellOpen `protobuf:"bytes,1,opt,name=open,proto3,oneof"`
+}
+
+type HostShellRequest_Input struct {
+	Input []byte `protobuf:"bytes,2,opt,name=input,proto3,oneof"`
+}
+
+type HostShellRequest_Resize struct {
+	Resize *TerminalSize `protobuf:"bytes,3,opt,name=resize,proto3,oneof"`
+}
+
+func (*HostShellRequest_Open) isHostShellRequest_Message() {}
+
+func (*HostShellRequest_Input) isHostShellRequest_Message() {}
+
+func (*HostShellRequest_Resize) isHostShellRequest_Message() {}
+
+type HostShellOpen struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Size  *TerminalSize          `protobuf:"bytes,1,opt,name=size,proto3" json:"size,omitempty"`
+	// Who opened it ("name <email>"), for the agent's own log; the panel's
+	// audit log is the record that counts.
+	OpenedBy string `protobuf:"bytes,2,opt,name=opened_by,json=openedBy,proto3" json:"opened_by,omitempty"`
+	// Panel id of the session, echoed in the agent's log lines.
+	SessionId     string `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostShellOpen) Reset() {
+	*x = HostShellOpen{}
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostShellOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostShellOpen) ProtoMessage() {}
+
+func (x *HostShellOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostShellOpen.ProtoReflect.Descriptor instead.
+func (*HostShellOpen) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_terminal_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *HostShellOpen) GetSize() *TerminalSize {
+	if x != nil {
+		return x.Size
+	}
+	return nil
+}
+
+func (x *HostShellOpen) GetOpenedBy() string {
+	if x != nil {
+		return x.OpenedBy
+	}
+	return ""
+}
+
+func (x *HostShellOpen) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type HostShellResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Message:
+	//
+	//	*HostShellResponse_Output
+	//	*HostShellResponse_ExitCode
+	//	*HostShellResponse_Info
+	Message       isHostShellResponse_Message `protobuf_oneof:"message"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostShellResponse) Reset() {
+	*x = HostShellResponse{}
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostShellResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostShellResponse) ProtoMessage() {}
+
+func (x *HostShellResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostShellResponse.ProtoReflect.Descriptor instead.
+func (*HostShellResponse) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_terminal_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *HostShellResponse) GetMessage() isHostShellResponse_Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *HostShellResponse) GetOutput() []byte {
+	if x != nil {
+		if x, ok := x.Message.(*HostShellResponse_Output); ok {
+			return x.Output
+		}
+	}
+	return nil
+}
+
+func (x *HostShellResponse) GetExitCode() int32 {
+	if x != nil {
+		if x, ok := x.Message.(*HostShellResponse_ExitCode); ok {
+			return x.ExitCode
+		}
+	}
+	return 0
+}
+
+func (x *HostShellResponse) GetInfo() *HostShellInfo {
+	if x != nil {
+		if x, ok := x.Message.(*HostShellResponse_Info); ok {
+			return x.Info
+		}
+	}
+	return nil
+}
+
+type isHostShellResponse_Message interface {
+	isHostShellResponse_Message()
+}
+
+type HostShellResponse_Output struct {
+	Output []byte `protobuf:"bytes,1,opt,name=output,proto3,oneof"`
+}
+
+type HostShellResponse_ExitCode struct {
+	// The shell exited; the stream closes right after.
+	ExitCode int32 `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3,oneof"`
+}
+
+type HostShellResponse_Info struct {
+	// Always the first message: where the shell runs.
+	Info *HostShellInfo `protobuf:"bytes,3,opt,name=info,proto3,oneof"`
+}
+
+func (*HostShellResponse_Output) isHostShellResponse_Message() {}
+
+func (*HostShellResponse_ExitCode) isHostShellResponse_Message() {}
+
+func (*HostShellResponse_Info) isHostShellResponse_Message() {}
+
+type HostShellInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent's user, whose login shell this is (root on an installed
+	// node).
+	User string `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	// The shell's home folder, for example "/root".
+	WorkingDir string `protobuf:"bytes,2,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`
+	Hostname   string `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	// The login shell, for example ["-bash"].
+	Command []string `protobuf:"bytes,4,rep,name=command,proto3" json:"command,omitempty"`
+	// The agent hangs up after this long without input or output.
+	IdleTimeoutSeconds uint32 `protobuf:"varint,5,opt,name=idle_timeout_seconds,json=idleTimeoutSeconds,proto3" json:"idle_timeout_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *HostShellInfo) Reset() {
+	*x = HostShellInfo{}
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostShellInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostShellInfo) ProtoMessage() {}
+
+func (x *HostShellInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_terminal_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostShellInfo.ProtoReflect.Descriptor instead.
+func (*HostShellInfo) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_terminal_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *HostShellInfo) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+func (x *HostShellInfo) GetWorkingDir() string {
+	if x != nil {
+		return x.WorkingDir
+	}
+	return ""
+}
+
+func (x *HostShellInfo) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *HostShellInfo) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *HostShellInfo) GetIdleTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.IdleTimeoutSeconds
+	}
+	return 0
+}
+
 var File_seylo_agent_v1_terminal_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_terminal_proto_rawDesc = "" +
@@ -854,7 +1198,29 @@ const file_seylo_agent_v1_terminal_proto_rawDesc = "" +
 	"\x04user\x18\x03 \x01(\tR\x04user\x12\x1f\n" +
 	"\vworking_dir\x18\x04 \x01(\tR\n" +
 	"workingDir\x12\x18\n" +
-	"\acommand\x18\x05 \x03(\tR\acommandB\xb8\x01\n" +
+	"\acommand\x18\x05 \x03(\tR\acommand\"\xa2\x01\n" +
+	"\x10HostShellRequest\x123\n" +
+	"\x04open\x18\x01 \x01(\v2\x1d.seylo.agent.v1.HostShellOpenH\x00R\x04open\x12\x16\n" +
+	"\x05input\x18\x02 \x01(\fH\x00R\x05input\x126\n" +
+	"\x06resize\x18\x03 \x01(\v2\x1c.seylo.agent.v1.TerminalSizeH\x00R\x06resizeB\t\n" +
+	"\amessage\"}\n" +
+	"\rHostShellOpen\x120\n" +
+	"\x04size\x18\x01 \x01(\v2\x1c.seylo.agent.v1.TerminalSizeR\x04size\x12\x1b\n" +
+	"\topened_by\x18\x02 \x01(\tR\bopenedBy\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\x8c\x01\n" +
+	"\x11HostShellResponse\x12\x18\n" +
+	"\x06output\x18\x01 \x01(\fH\x00R\x06output\x12\x1d\n" +
+	"\texit_code\x18\x02 \x01(\x05H\x00R\bexitCode\x123\n" +
+	"\x04info\x18\x03 \x01(\v2\x1d.seylo.agent.v1.HostShellInfoH\x00R\x04infoB\t\n" +
+	"\amessage\"\xac\x01\n" +
+	"\rHostShellInfo\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12\x1f\n" +
+	"\vworking_dir\x18\x02 \x01(\tR\n" +
+	"workingDir\x12\x1a\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\x12\x18\n" +
+	"\acommand\x18\x04 \x03(\tR\acommand\x120\n" +
+	"\x14idle_timeout_seconds\x18\x05 \x01(\rR\x12idleTimeoutSecondsB\xb8\x01\n" +
 	"\x12com.seylo.agent.v1B\rTerminalProtoP\x01Z9github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1;agentv1\xa2\x02\x03SAX\xaa\x02\x0eSeylo.Agent.V1\xca\x02\x0eSeylo\\Agent\\V1\xe2\x02\x1aSeylo\\Agent\\V1\\GPBMetadata\xea\x02\x10Seylo::Agent::V1b\x06proto3"
 
 var (
@@ -869,31 +1235,39 @@ func file_seylo_agent_v1_terminal_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_terminal_proto_rawDescData
 }
 
-var file_seylo_agent_v1_terminal_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_seylo_agent_v1_terminal_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_seylo_agent_v1_terminal_proto_goTypes = []any{
-	(*ConsoleRequest)(nil),  // 0: seylo.agent.v1.ConsoleRequest
-	(*ConsoleOpen)(nil),     // 1: seylo.agent.v1.ConsoleOpen
-	(*ConsoleResponse)(nil), // 2: seylo.agent.v1.ConsoleResponse
-	(*ConsoleInfo)(nil),     // 3: seylo.agent.v1.ConsoleInfo
-	(*ShellRequest)(nil),    // 4: seylo.agent.v1.ShellRequest
-	(*ShellOpen)(nil),       // 5: seylo.agent.v1.ShellOpen
-	(*TerminalSize)(nil),    // 6: seylo.agent.v1.TerminalSize
-	(*ShellResponse)(nil),   // 7: seylo.agent.v1.ShellResponse
-	(*ShellInfo)(nil),       // 8: seylo.agent.v1.ShellInfo
+	(*ConsoleRequest)(nil),    // 0: seylo.agent.v1.ConsoleRequest
+	(*ConsoleOpen)(nil),       // 1: seylo.agent.v1.ConsoleOpen
+	(*ConsoleResponse)(nil),   // 2: seylo.agent.v1.ConsoleResponse
+	(*ConsoleInfo)(nil),       // 3: seylo.agent.v1.ConsoleInfo
+	(*ShellRequest)(nil),      // 4: seylo.agent.v1.ShellRequest
+	(*ShellOpen)(nil),         // 5: seylo.agent.v1.ShellOpen
+	(*TerminalSize)(nil),      // 6: seylo.agent.v1.TerminalSize
+	(*ShellResponse)(nil),     // 7: seylo.agent.v1.ShellResponse
+	(*ShellInfo)(nil),         // 8: seylo.agent.v1.ShellInfo
+	(*HostShellRequest)(nil),  // 9: seylo.agent.v1.HostShellRequest
+	(*HostShellOpen)(nil),     // 10: seylo.agent.v1.HostShellOpen
+	(*HostShellResponse)(nil), // 11: seylo.agent.v1.HostShellResponse
+	(*HostShellInfo)(nil),     // 12: seylo.agent.v1.HostShellInfo
 }
 var file_seylo_agent_v1_terminal_proto_depIdxs = []int32{
-	1, // 0: seylo.agent.v1.ConsoleRequest.open:type_name -> seylo.agent.v1.ConsoleOpen
-	6, // 1: seylo.agent.v1.ConsoleRequest.resize:type_name -> seylo.agent.v1.TerminalSize
-	3, // 2: seylo.agent.v1.ConsoleResponse.info:type_name -> seylo.agent.v1.ConsoleInfo
-	5, // 3: seylo.agent.v1.ShellRequest.open:type_name -> seylo.agent.v1.ShellOpen
-	6, // 4: seylo.agent.v1.ShellRequest.resize:type_name -> seylo.agent.v1.TerminalSize
-	6, // 5: seylo.agent.v1.ShellOpen.size:type_name -> seylo.agent.v1.TerminalSize
-	8, // 6: seylo.agent.v1.ShellResponse.info:type_name -> seylo.agent.v1.ShellInfo
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	1,  // 0: seylo.agent.v1.ConsoleRequest.open:type_name -> seylo.agent.v1.ConsoleOpen
+	6,  // 1: seylo.agent.v1.ConsoleRequest.resize:type_name -> seylo.agent.v1.TerminalSize
+	3,  // 2: seylo.agent.v1.ConsoleResponse.info:type_name -> seylo.agent.v1.ConsoleInfo
+	5,  // 3: seylo.agent.v1.ShellRequest.open:type_name -> seylo.agent.v1.ShellOpen
+	6,  // 4: seylo.agent.v1.ShellRequest.resize:type_name -> seylo.agent.v1.TerminalSize
+	6,  // 5: seylo.agent.v1.ShellOpen.size:type_name -> seylo.agent.v1.TerminalSize
+	8,  // 6: seylo.agent.v1.ShellResponse.info:type_name -> seylo.agent.v1.ShellInfo
+	10, // 7: seylo.agent.v1.HostShellRequest.open:type_name -> seylo.agent.v1.HostShellOpen
+	6,  // 8: seylo.agent.v1.HostShellRequest.resize:type_name -> seylo.agent.v1.TerminalSize
+	6,  // 9: seylo.agent.v1.HostShellOpen.size:type_name -> seylo.agent.v1.TerminalSize
+	12, // 10: seylo.agent.v1.HostShellResponse.info:type_name -> seylo.agent.v1.HostShellInfo
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_terminal_proto_init() }
@@ -921,13 +1295,23 @@ func file_seylo_agent_v1_terminal_proto_init() {
 		(*ShellResponse_ExitCode)(nil),
 		(*ShellResponse_Info)(nil),
 	}
+	file_seylo_agent_v1_terminal_proto_msgTypes[9].OneofWrappers = []any{
+		(*HostShellRequest_Open)(nil),
+		(*HostShellRequest_Input)(nil),
+		(*HostShellRequest_Resize)(nil),
+	}
+	file_seylo_agent_v1_terminal_proto_msgTypes[11].OneofWrappers = []any{
+		(*HostShellResponse_Output)(nil),
+		(*HostShellResponse_ExitCode)(nil),
+		(*HostShellResponse_Info)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_terminal_proto_rawDesc), len(file_seylo_agent_v1_terminal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -35,7 +35,43 @@ message Event {
     UpdateResult update_result = 19;
     // Best effort: bytes uploaded by a running backup.
     BackupProgress backup_progress = 20;
+    // Durable: a cleanup the agent ran by itself (CleanupSchedule).
+    CleanupRun cleanup_run = 21; // added in 0.2 (nodeops)
   }
+}
+
+// CleanupRun is one scheduled or disk-triggered cleanup, reported through
+// the outbox, so runs while the panel is down arrive later. added in 0.2
+// (nodeops)
+message CleanupRun {
+  // Unique per run; the panel dedupes on it.
+  string run_id = 1;
+  CleanupTrigger trigger = 2;
+  google.protobuf.Timestamp started_at = 3;
+  google.protobuf.Timestamp finished_at = 4;
+  uint64 reclaimed_bytes = 5;
+  // What was removed, one line each as in PruneResponse.removed (lines that
+  // start with "not removed:" are removals that failed). At most 200 lines;
+  // removed_count is the full count.
+  repeated string removed = 6;
+  uint32 removed_count = 7;
+  // Why the run failed (Docker unreachable); empty when it ran. A failed
+  // run may have removed some things first. A cron expression the node
+  // cannot read is reported as one failed SCHEDULE run that removed
+  // nothing, run_id "cleanup-schedule-r<desired revision>", once per
+  // changed schedule.
+  string error = 8;
+  // Use of the fullest disk when the run started, in percent; 0 when not
+  // read (schedule runs do not read it).
+  uint32 disk_percent = 9;
+}
+
+enum CleanupTrigger {
+  CLEANUP_TRIGGER_UNSPECIFIED = 0;
+  // The cron expression of CleanupSchedule.
+  CLEANUP_TRIGGER_SCHEDULE = 1;
+  // A disk passed CleanupSchedule.disk_percent.
+  CLEANUP_TRIGGER_DISK = 2;
 }
 
 // CrashReport is sent once per crash. The panel alerts once per streak.

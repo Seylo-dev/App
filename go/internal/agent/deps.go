@@ -44,6 +44,9 @@ type Config struct {
 	AcmeCACertificates string
 	// AcmeCAServerName is config.yml's acme_ca_server_name.
 	AcmeCAServerName string
+	// NoHostShell is config.yml's no_host_shell: HostShell is refused
+	// whatever the panel says.
+	NoHostShell bool
 }
 
 // Deps is everything the wiring functions share. The agent fills the
@@ -125,6 +128,9 @@ type Deps struct {
 	Backups    backup.Runner
 	Cloudflare tunnel.Cloudflare
 	Pruner     cleanup.Pruner
+	// CleanupScheduler runs NodeSettings.cleanup; the node area feeds it
+	// the disk checks' readings.
+	CleanupScheduler cleanup.Scheduler
 
 	// Node (wire_node.go).
 

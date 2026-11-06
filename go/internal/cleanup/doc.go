@@ -14,8 +14,17 @@
 // volumes and services/<id> folders; build_cache -> the builder's own
 // cache through CachePruner (never Docker's machine-wide cache).
 //
+// Scheduled cleanup (NodeSettings.cleanup) runs on the node by itself, so
+// it keeps going while the panel is down: on a cron expression in the
+// node's time zone and when a disk passes a line (the agent's disk checks
+// every 10 minutes hand over the fullest disk's use; at most once an hour,
+// every 6 hours while it stays above). Each run is a durable CleanupRun.
+//
 // Interfaces used by other packages:
 //
 //   - Pruner: the Prune RPC handler and the scheduled cleanup call it.
 //     Local is the implementation; Plan holds the selection rules.
+//   - Scheduler: the agent syncs it from the desired-state feed, runs its
+//     loop and feeds it disk readings. LocalScheduler is the
+//     implementation.
 package cleanup

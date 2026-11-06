@@ -13,6 +13,8 @@ import invite from "./invite";
 import kit from "./kit";
 import nav from "./nav";
 import newService from "./newService";
+import nodeCleanup from "./nodeCleanup";
+import nodeShell from "./nodeShell";
 import nodes from "./nodes";
 import palette from "./palette";
 import pickers from "./pickers";
@@ -52,4 +54,4 @@ import sidebar from "./sidebar";
 import templates from "./templates";
 
 /** The English catalog: one section per file in this folder, keyed by file name. */
-export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, invite, kit, nav, newService, nodes, palette, pickers, placeholder, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsSecurity, setup, sidebar, templates } as const;
+export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsSecurity, setup, sidebar, templates } as const;

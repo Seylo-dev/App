@@ -49,6 +49,7 @@ export type AgentReportKind =
   | "nodeFacts"
   | "updateResult"
   | "backupProgress"
+  | "cleanupRun"
   | "unknown";
 
 /**

@@ -41,6 +41,10 @@ message NodeFacts {
   // panel falls back to it for node addresses when public_ipv4 is empty
   // (nodes that share one private network).
   string private_ipv4 = 19;
+  // IANA name of the node's own time zone (/etc/localtime, else TZ), for
+  // example "Europe/Berlin"; "UTC" when the machine names none. Scheduled
+  // cleanup runs in it. added in 0.2 (nodeops)
+  string time_zone = 20;
 }
 
 // WingsInfo describes a Pelican Wings installation found next to the agent.

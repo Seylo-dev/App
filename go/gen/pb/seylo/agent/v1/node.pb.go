@@ -59,7 +59,11 @@ type NodeFacts struct {
 	// when that address is public (then it is public_ipv4) or unknown. The
 	// panel falls back to it for node addresses when public_ipv4 is empty
 	// (nodes that share one private network).
-	PrivateIpv4   string `protobuf:"bytes,19,opt,name=private_ipv4,json=privateIpv4,proto3" json:"private_ipv4,omitempty"`
+	PrivateIpv4 string `protobuf:"bytes,19,opt,name=private_ipv4,json=privateIpv4,proto3" json:"private_ipv4,omitempty"`
+	// IANA name of the node's own time zone (/etc/localtime, else TZ), for
+	// example "Europe/Berlin"; "UTC" when the machine names none. Scheduled
+	// cleanup runs in it. added in 0.2 (nodeops)
+	TimeZone      string `protobuf:"bytes,20,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,6 +231,13 @@ func (x *NodeFacts) GetPrivateIpv4() string {
 	return ""
 }
 
+func (x *NodeFacts) GetTimeZone() string {
+	if x != nil {
+		return x.TimeZone
+	}
+	return ""
+}
+
 // WingsInfo describes a Pelican Wings installation found next to the agent.
 type WingsInfo struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
@@ -307,7 +318,7 @@ var File_seylo_agent_v1_node_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb1\x05\n" +
+	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x05\n" +
 	"\tNodeFacts\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x16\n" +
@@ -330,7 +341,8 @@ const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\fcapabilities\x18\x10 \x03(\tR\fcapabilities\x12/\n" +
 	"\x05wings\x18\x11 \x01(\v2\x19.seylo.agent.v1.WingsInfoR\x05wings\x12\x1b\n" +
 	"\tcan_build\x18\x12 \x01(\bR\bcanBuild\x12!\n" +
-	"\fprivate_ipv4\x18\x13 \x01(\tR\vprivateIpv4\"\xb8\x01\n" +
+	"\fprivate_ipv4\x18\x13 \x01(\tR\vprivateIpv4\x12\x1b\n" +
+	"\ttime_zone\x18\x14 \x01(\tR\btimeZone\"\xb8\x01\n" +
 	"\tWingsInfo\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12.\n" +
 	"\x13traefik_dynamic_dir\x18\x02 \x01(\tR\x11traefikDynamicDir\x128\n" +
