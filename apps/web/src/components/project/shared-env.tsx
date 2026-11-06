@@ -5,8 +5,8 @@
 import { env } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
-import { SectionCard } from "@seylo/ui/components/section-card";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
+import { ButtonSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 // The text box holds local edits only; with no edits it shows the saved text, so a save elsewhere shows up.
@@ -31,7 +31,7 @@ export function SharedEnv({ projectId }: { projectId: string }) {
   });
 
   if (current.isError) return <QueryError error={current.error} onRetry={() => void current.refetch()} />;
-  if (current.isPending) return <Skeleton className="h-64 rounded-card" />;
+  if (current.isPending) return <SharedEnvSkeleton />;
   const value = text ?? current.data.text;
   const dirty = text !== null && text !== current.data.text;
   const diagnostics = save.data?.diagnostics ?? [];
@@ -78,5 +78,25 @@ export function SharedEnv({ projectId }: { projectId: string }) {
         </ul>
       )}
     </SectionCard>
+  );
+}
+
+/** The shared environment card while it loads: title, description, an eight-line editor and the save bar. */
+export function SharedEnvSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")}>
+      <SectionCardSkeleton
+        titleWidth="w-40"
+        description="w-[min(560px,100%)]"
+        footer={
+          <>
+            <ButtonSkeleton className="ml-auto w-20" />
+            <ButtonSkeleton className="w-16" />
+          </>
+        }
+      >
+        <Skeleton className="h-[184px]" />
+      </SectionCardSkeleton>
+    </LoadingRegion>
   );
 }

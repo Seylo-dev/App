@@ -6,13 +6,13 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { Skeleton } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconPlus, IconWorld } from "@tabler/icons-react";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
+import { RowsSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
 import { DevAccessCard, FirstRunCard, MaintenanceCard } from "./access-cards";
 import { AccessRulesSheet, AddDomainDialog, CertificateDialog, RoutingDialog } from "./domain-dialogs";
@@ -46,9 +46,7 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
           </Button>
         </div>
         {list.isPending ? (
-          <div className="border-t border-divider px-5 py-4">
-            <Skeleton className="h-10" />
-          </div>
+          <RowsSkeleton rows={3} lead="dot" lines={1} width="w-72" />
         ) : list.isError ? (
           <div className="border-t border-divider px-5 py-4">
             <OpErrorNote error={list.error} />

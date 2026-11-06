@@ -6,7 +6,7 @@
 import { nodes, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
@@ -26,8 +26,8 @@ export function ServicesGrid({ projectId, canCreate }: { projectId: string; canC
   const rows = list.data?.services.filter((service) => service.parentId === null) ?? [];
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {list.isPending && [0, 1, 2].map((key) => <Skeleton key={key} className="h-[190px] rounded-card" />)}
+    <div aria-busy={list.isPending} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {list.isPending && [0, 1, 2].map((key) => <ServiceCardSkeleton key={key} />)}
       {rows.map((service) => (
         <ServiceCard key={service.id} service={service} memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0} />
       ))}
@@ -47,6 +47,49 @@ export function ServicesGrid({ projectId, canCreate }: { projectId: string; canC
           }
         />
       )}
+    </div>
+  );
+}
+
+/** The project's services before they load (also while the project itself loads). */
+export function ServicesGridSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {[0, 1, 2].map((key) => (
+        <ServiceCardSkeleton key={key} />
+      ))}
+    </LoadingRegion>
+  );
+}
+
+/** ServiceCard's rows at their real heights. */
+function ServiceCardSkeleton() {
+  return (
+    <div aria-hidden="true" className="flex min-w-0 flex-col gap-3.5 overflow-hidden rounded-card bg-card p-[18px] shadow-card">
+      <div className="flex items-center gap-2.5">
+        <Skeleton className="h-[26px] w-[34px] shrink-0 rounded-chip" />
+        <SkeletonText className="w-20 text-[15px]" />
+        <Skeleton className="ml-auto h-[23px] w-[74px] rounded-chip" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <SkeletonText className="w-48 text-[12.5px]" />
+        <SkeletonText className="w-36 text-xs leading-4" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {[t("dashboard.cpu"), t("dashboard.memory")].map((label) => (
+          <div key={label} className="flex flex-col gap-1.5">
+            <span className="flex justify-between text-[11.5px] text-muted-foreground">
+              <span>{label}</span>
+              <SkeletonText className="w-10" />
+            </span>
+            <Skeleton className="h-[5px] rounded-[3px]" />
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 border-t border-divider pt-3 text-xs">
+        <Skeleton className="h-5 w-16 rounded-chip" />
+        <SkeletonText className="ml-auto w-20 leading-4" />
+      </div>
     </div>
   );
 }

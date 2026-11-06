@@ -7,7 +7,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { Input } from "@seylo/ui/components/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, FieldSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
@@ -37,7 +37,29 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
     },
   });
 
-  if (installs.isPending) return <Skeleton className="h-24 w-full" />;
+  if (installs.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <FieldSkeleton labelWidth="w-16" />
+          <FieldSkeleton labelWidth="w-14" />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <SkeletonText className="w-20 text-[13px]" />
+          <Skeleton className="h-[38px]" />
+          <RepoRowsSkeleton />
+        </div>
+        <FieldSkeleton labelWidth="w-24" hint />
+        <div className="flex items-start gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <SkeletonText className="w-28 text-[13.5px]" />
+            <SkeletonText className="w-60 text-[12.5px] leading-normal" />
+          </div>
+          <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
+        </div>
+        <ButtonSkeleton className="w-[140px] self-start" />
+      </LoadingRegion>
+    );
   if (installs.isError) return <OpErrorNote error={installs.error} />;
   const list = installs.data.installations.filter((i) => !i.suspended);
   if (list.length === 0) {
@@ -165,7 +187,7 @@ function RepoPicker({
         className="flex max-h-64 flex-col overflow-y-auto rounded-control bg-raised p-1"
       >
         {repos.isPending ? (
-          <Skeleton className="m-1 h-8" />
+          <RepoRowsSkeleton bare />
         ) : repos.isError ? (
           <OpErrorNote error={repos.error} compact />
         ) : repos.data.repos.length === 0 ? (
@@ -228,4 +250,15 @@ function BranchSelect({
       </SelectContent>
     </Select>
   );
+}
+
+/** Repository rows while the list loads: name and when it was pushed. */
+function RepoRowsSkeleton({ bare = false }: { bare?: boolean }) {
+  const rows = [0, 1, 2].map((i) => (
+    <div key={i} className="flex items-center gap-2 px-2.5 py-2 text-[13px]">
+      <SkeletonText ground className="w-36" />
+      <SkeletonText ground className="ml-auto w-16 text-xs" />
+    </div>
+  ));
+  return bare ? rows : <div className="flex flex-col rounded-control bg-raised p-1">{rows}</div>;
 }

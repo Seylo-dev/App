@@ -26,6 +26,7 @@ export function ProjectActivity({ projectId }: { projectId: string }) {
       <DataTable
         aria-label={t("project.tabs.activity")}
         loading={list.isPending}
+        skeletonRows={5}
         rows={list.data?.entries ?? []}
         getRowId={(entry) => entry.id}
         empty={<EmptyState compact icon={<IconActivity />} title={t("project.activity.empty")} />}

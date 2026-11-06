@@ -7,14 +7,16 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { Input } from "@seylo/ui/components/input";
-import { SectionCard } from "@seylo/ui/components/section-card";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { QueryView } from "../../../components/settings/op-state";
 import { Field, FormActions, FormGrid, SettingRow, SettingsPage } from "../../../components/settings/page";
+import { FieldSkeleton, FormActionsSkeleton, SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/general")({
@@ -30,7 +32,9 @@ function GeneralPage() {
   const query = useOp(settings.general, {});
   return (
     <SettingsPage title={t("settings.general.title")} subtitle={t("settings.general.subtitle")}>
-      <QueryView query={query}>{(data) => <GeneralForm key={`${data.name}|${data.domain}|${data.defaultNodeId}`} data={data} />}</QueryView>
+      <QueryView query={query} skeleton={<GeneralSkeleton />} className="flex flex-col gap-4">
+        {(data) => <GeneralForm key={`${data.name}|${data.domain}|${data.defaultNodeId}`} data={data} />}
+      </QueryView>
     </SettingsPage>
   );
 }
@@ -117,6 +121,29 @@ function GeneralForm({ data }: { data: General }) {
         </p>
       </SectionCard>
     </form>
+  );
+}
+
+function GeneralSkeleton() {
+  return (
+    <>
+      <SectionCardSkeleton titleWidth="w-14" description="w-64">
+        <FormGrid>
+          <FieldSkeleton span labelWidth="w-20" />
+          <FieldSkeleton labelWidth="w-24" />
+          <FieldSkeleton labelWidth="w-24" />
+        </FormGrid>
+        <FormActionsSkeleton />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-28" description="w-96">
+        <SettingRowSkeleton titleWidth="w-56" />
+      </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-20" description="w-80">
+        <SkeletonText className="w-28 text-[13px]" />
+        <Skeleton className="h-[38px]" />
+        <SkeletonText className="w-64 text-[12.5px]" />
+      </SectionCardSkeleton>
+    </>
   );
 }
 

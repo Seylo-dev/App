@@ -8,7 +8,7 @@ import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { SectionCard } from "@seylo/ui/components/section-card";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
@@ -66,7 +66,10 @@ export function DeployTriggerCard({ service }: { service: ServiceDetail }) {
       }
     >
       {trigger.isPending ? (
-        <Skeleton className="h-10 w-full" />
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-1.5">
+          <Skeleton className="h-[38px]" />
+          <SkeletonText className="w-64 text-xs" />
+        </LoadingRegion>
       ) : trigger.isError ? (
         <OpErrorNote error={trigger.error} />
       ) : freshUrl ? (

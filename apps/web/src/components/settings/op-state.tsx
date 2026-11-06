@@ -6,7 +6,7 @@
 import { OpError } from "@seylo/ops";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconHammer, IconLock } from "@tabler/icons-react";
@@ -66,20 +66,30 @@ export function OpErrorCallout({ error, onRetry, className }: { error: unknown; 
 }
 
 /**
- * Renders a query: skeleton lines while loading, the error callout on
- * failure, else the children with the data.
+ * Renders a query: a skeleton while loading (`skeleton`, shaped like the
+ * content, or plain lines), the error callout on failure, else the
+ * children with the data.
  */
 export function QueryView<T>({
   query,
   skeletonRows = 3,
+  skeleton,
   className,
   children,
 }: {
   query: Pick<UseQueryResult<T, unknown>, "data" | "error" | "isPending" | "refetch">;
   skeletonRows?: number;
+  /** Placeholders in the content's own layout; they render inside a LoadingRegion with `className`. */
+  skeleton?: React.ReactNode;
   className?: string;
   children: (data: T) => React.ReactNode;
 }) {
+  if (query.isPending && skeleton)
+    return (
+      <LoadingRegion label={t("common.loading")} className={className}>
+        {skeleton}
+      </LoadingRegion>
+    );
   if (query.isPending) return <LoadingLines rows={skeletonRows} className={className} />;
   if (query.error || query.data === undefined)
     return <OpErrorCallout error={query.error} onRetry={() => void query.refetch()} className={className} />;

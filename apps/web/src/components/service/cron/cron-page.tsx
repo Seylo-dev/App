@@ -27,6 +27,7 @@ import { Field, parseIntOrNull } from "../field";
 import { formatDateTime, formatDuration, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { RowsSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
 
 type Job = OpOutput<typeof cron.list>["jobs"][number];
@@ -50,7 +51,7 @@ export function CronJobsPage({ service }: { service: ServiceDetail }) {
           </Button>
         </div>
         {jobs.isPending ? (
-          <Skeleton className="mx-5 mb-4 h-10" />
+          <RowsSkeleton rows={1} lead="switch" width="w-28" />
         ) : jobs.isError ? (
           <OpErrorNote error={jobs.error} className="mx-5 mb-4" />
         ) : jobs.data.jobs.length === 0 ? (
@@ -265,7 +266,7 @@ export function CronRuns({ service }: { service: ServiceDetail }) {
         )}
       </div>
       {runs.isPending ? (
-        <Skeleton className="mx-5 mb-4 h-10" />
+        <RowsSkeleton rows={3} lead="none" lines={1} width="w-64" action={false} />
       ) : runs.isError ? (
         <OpErrorNote error={runs.error} className="mx-5 mb-4" />
       ) : (

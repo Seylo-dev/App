@@ -9,7 +9,7 @@ import { cn } from "../lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./dropdown-menu";
 import { EmptyState } from "./empty-state";
 import { useUiLabels } from "./labels";
-import { Skeleton } from "./skeleton";
+import { SkeletonText } from "./skeleton";
 
 export type { SortState } from "../lib/sort";
 
@@ -55,6 +55,8 @@ export interface DataTableProps<T> {
   empty?: ReactNode;
   /** Skeleton rows while the first page loads. */
   loading?: boolean;
+  /** How many skeleton rows: about as many as the first page usually has. Default 3. */
+  skeletonRows?: number;
   /** Below this width the table scrolls sideways instead of squeezing. */
   minWidth?: number;
   /** No card around it (when it sits inside a SectionCard). */
@@ -73,6 +75,7 @@ export function DataTable<T>({
   onRowClick,
   empty,
   loading = false,
+  skeletonRows = 3,
   minWidth,
   bare = false,
   className,
@@ -160,18 +163,21 @@ export function DataTable<T>({
         <tbody>
           {loading &&
             rows.length === 0 &&
-            [0, 1, 2].map((n) => (
+            Array.from({ length: skeletonRows }, (_, n) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder rows.
               <tr key={`skeleton-${n}`}>
                 {columns.map((col, i) => (
                   <td
                     key={col.id}
                     className={cn(
-                      "border-t border-divider py-4 first:border-t-0",
+                      "border-t border-divider py-3.5",
                       pad(i, i === colCount - 1),
                       col.hideOnMobile && "max-md:hidden",
+                      col.className,
                     )}
                   >
-                    <Skeleton className="h-3.5 w-3/4" />
+                    {/* One line of the row's 13px text, so the row is as tall as a loaded one. */}
+                    <SkeletonText className={cn("w-3/4", col.align === "right" && "ml-auto")} />
                   </td>
                 ))}
                 {rowActions && <td className="border-t border-divider" />}

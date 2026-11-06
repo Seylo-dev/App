@@ -6,11 +6,12 @@
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EnterOnChange } from "@seylo/ui/components/motion";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { SkeletonText } from "@seylo/ui/components/skeleton";
 import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
 import { createFileRoute, Link, Outlet, useChildMatches, useRouterState } from "@tanstack/react-router";
 import { OpErrorNote, retryOp } from "../../../../../components/service/op-state";
 import { ServiceHeader } from "../../../../../components/service/service-header";
+import { ServiceHeaderSkeleton, UsageStripSkeleton } from "../../../../../components/service/service-skeletons";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
 import { useService } from "../../../../../components/service/use-service";
 import { type TabPath, tabsFor, usageStripTabs } from "../../../../../components/service-tabs";
@@ -37,19 +38,22 @@ function ServiceLayout() {
     <>
       <nav aria-label={t("nav.breadcrumb")} className="flex flex-wrap gap-1.5 text-[13px] text-muted-foreground">
         <Link to="/p/$projectId" params={{ projectId }} className="text-muted-foreground">
-          {project.data?.name ?? projectId}
+          {project.data?.name ?? (project.isPending ? <SkeletonText ground className="w-16" /> : projectId)}
         </Link>
         {parent && <ParentCrumb projectId={projectId} parentId={parent} />}
         <span aria-hidden="true">/</span>
-        <span className="font-medium text-foreground">{service.data?.name ?? serviceId}</span>
+        <span className="font-medium text-foreground">
+          {service.data?.name ?? (service.isPending ? <SkeletonText ground className="w-14" /> : serviceId)}
+        </span>
       </nav>
       {service.isPending ? (
-        <Skeleton className="h-10 w-80" />
+        <ServiceHeaderSkeleton />
       ) : service.data ? (
         <ServiceHeader service={service.data} />
       ) : (
         <OpErrorNote error={service.error} />
       )}
+      {service.isPending && usageStripTabs.has(tabPath) && <UsageStripSkeleton />}
       {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
       <TabList aria-label={t("service.sections")} className="flex-nowrap overflow-x-auto [scrollbar-width:none]">
         {tabs.map((tab) => (

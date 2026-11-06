@@ -13,13 +13,14 @@ import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { PageHeader } from "@seylo/ui/components/page-header";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { IconChevronDown, IconChevronUp, IconRobot, IconShieldCheck } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { formatDateTime, formatRelative } from "../../components/settings/format";
 import { useSettingsMutation } from "../../components/settings/mutation";
-import { LoadingLines, OpErrorCallout } from "../../components/settings/op-state";
+import { OpErrorCallout } from "../../components/settings/op-state";
 import { useOpPages } from "../../components/settings/paging";
 import { t } from "../../i18n/t";
 
@@ -65,7 +66,10 @@ function ApprovalsPage() {
       {pages.error ? (
         <OpErrorCallout error={pages.error} onRetry={() => void pages.refetch()} />
       ) : pages.isPending ? (
-        <LoadingLines rows={4} />
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3">
+          <ApprovalCardSkeleton />
+          <ApprovalCardSkeleton />
+        </LoadingRegion>
       ) : list.length === 0 ? (
         <Card>
           <EmptyState
@@ -87,6 +91,37 @@ function ApprovalsPage() {
         </div>
       )}
     </>
+  );
+}
+
+/** An approval card while the list loads: source and title, the details line, the reason, the input and the two actions. */
+function ApprovalCardSkeleton() {
+  return (
+    <Card aria-hidden="true" className="gap-3 px-5 py-4">
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-[22px] w-14 rounded-chip" />
+        <SkeletonText className="w-36 text-[14.5px]" />
+        <Skeleton className="ml-auto h-[22px] w-16 rounded-chip" />
+      </div>
+      <div className="flex flex-wrap gap-x-5 text-[12.5px]">
+        <SkeletonText className="w-44" />
+        <SkeletonText className="w-28" />
+        <SkeletonText className="w-24" />
+        <SkeletonText className="w-28" />
+      </div>
+      <div className="flex flex-col rounded-control bg-raised px-3.5 py-2.5">
+        <SkeletonText className="mb-0.5 w-10 text-xs" />
+        <SkeletonText className="w-2/3 text-[13px]" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-8 w-28" />
+        <Skeleton className="h-[104px]" />
+      </div>
+      <div className="flex justify-end gap-2 border-t border-divider pt-3">
+        <ButtonSkeleton className="w-16" />
+        <ButtonSkeleton className="w-[120px]" />
+      </div>
+    </Card>
   );
 }
 

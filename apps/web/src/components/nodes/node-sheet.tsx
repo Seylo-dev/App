@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconFileText, IconPower, IconRefresh, IconSparkles } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
@@ -72,10 +72,19 @@ function NodeSheetBody({
       <SheetHeader>
         <SheetTitle className="flex items-center gap-2">
           {node.data && <StatusDot status={node.data.status === "online" ? "ok" : node.data.status === "offline" ? "error" : "off"} />}
-          {node.data?.name ?? t("common.loading")}
+          {node.data?.name ?? (
+            <>
+              <span className="sr-only">{t("common.loading")}</span>
+              <SkeletonText className="w-28" />
+            </>
+          )}
         </SheetTitle>
         <SheetDescription>
-          {node.data ? [t(`nodes.status.${node.data.status}`), node.data.location].filter(Boolean).join(t("format.separator")) : ""}
+          {node.data ? (
+            [t(`nodes.status.${node.data.status}`), node.data.location].filter(Boolean).join(t("format.separator"))
+          ) : (
+            <SkeletonText className="w-44" />
+          )}
         </SheetDescription>
         <Segmented
           aria-label={t("nodes.sheet.views")}
@@ -92,7 +101,14 @@ function NodeSheetBody({
         {node.isError ? (
           <QueryError error={node.error} onRetry={() => void node.refetch()} />
         ) : node.isPending ? (
-          <Skeleton className="h-48" />
+          // The health checks only need the node's id; the other views wait for the node.
+          view === "health" ? (
+            <NodeHealth nodeId={nodeId} />
+          ) : (
+            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+              {view === "overview" ? <OverviewSkeleton /> : <SettingsSkeleton />}
+            </LoadingRegion>
+          )
         ) : view === "overview" ? (
           <Overview node={node.data} onClose={onClose} />
         ) : view === "health" ? (
@@ -256,6 +272,80 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
         }}
       />
       <AgentLogsDialog node={node} open={logsOpen} onOpenChange={setLogsOpen} />
+    </>
+  );
+}
+
+/** The overview's layout while the node loads: actions, graphs, machine facts, services. */
+function OverviewSkeleton() {
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {["w-[132px]", "w-[136px]", "w-[84px]", "w-[112px]"].map((width) => (
+          <Skeleton key={width} className={`h-8 ${width}`} />
+        ))}
+      </div>
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <h3 className="m-0 text-sm font-semibold">{t("nodes.sheet.usage")}</h3>
+          <Skeleton className="ml-auto h-[30px] w-[220px]" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {[t("dashboard.cpu"), t("dashboard.memory"), t("nodes.disk"), t("dashboard.network")].map((title) => (
+            <div key={title} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-raised p-3">
+              <span className="text-xs font-medium text-ink-strong">{title}</span>
+              <Skeleton className="h-20 bg-track" />
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="flex flex-col gap-3">
+        <h3 className="m-0 text-sm font-semibold">{t("nodes.sheet.machine")}</h3>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-6 gap-y-4">
+          {Array.from({ length: 12 }, (_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+            <div key={i} className="flex min-w-0 flex-col gap-1">
+              <SkeletonText className="w-14 text-[12px]" />
+              <SkeletonText className="w-24 text-[13.5px]" />
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="flex flex-col gap-2">
+        <h3 className="m-0 text-sm font-semibold">{t("nodes.sheet.services")}</h3>
+        <div className="flex flex-col">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-2 border-t border-divider py-2 text-[13px]">
+              <SkeletonText className="w-16" />
+              <SkeletonText className="w-20" />
+              <Skeleton className="ml-auto h-[22px] w-16 rounded-chip" />
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** The settings form's fields while the node loads. */
+function SettingsSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex flex-col gap-1.5">
+          <SkeletonText className="w-28 text-[12.5px]" />
+          <Skeleton className="h-[38px]" />
+          <SkeletonText className="w-56 text-xs" />
+        </div>
+      ))}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex flex-col gap-1.5">
+            <SkeletonText className="w-24 text-[12.5px]" />
+            <Skeleton className="h-[38px]" />
+          </div>
+        ))}
+      </div>
     </>
   );
 }

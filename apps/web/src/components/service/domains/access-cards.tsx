@@ -10,7 +10,7 @@ import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
@@ -63,7 +63,13 @@ export function FirstRunCard({ service }: { service: ServiceDetail }) {
       badge={access.data && <Chip tone={tone}>{t(`serviceDomains.firstRun.status.${status}`)}</Chip>}
     >
       {access.isPending ? (
-        <Skeleton className="h-20" />
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-2.5">
+          <SkeletonText className="w-full text-[13px] leading-[1.55]" />
+          <SkeletonText className="w-3/4 text-[13px] leading-[1.55]" />
+          <SkeletonText className="w-52 text-[13px]" />
+          <SkeletonText className="w-60 text-[13px]" />
+          <ButtonSkeleton size="sm" className="w-24" />
+        </LoadingRegion>
       ) : access.isError ? (
         <OpErrorNote error={access.error} compact />
       ) : (
@@ -443,7 +449,9 @@ function TunnelCard({ service }: { service: ServiceDetail }) {
       {tunnel.isError ? (
         <OpErrorNote error={tunnel.error} compact />
       ) : !data ? (
-        <Skeleton className="h-12" />
+        <LoadingRegion label={t("common.loading")}>
+          <Skeleton className="h-[38px]" />
+        </LoadingRegion>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2 text-[12.5px]">

@@ -4,14 +4,14 @@
 // live topic "panel" invalidates metrics.nodes on every sample, so the
 // graphs move by themselves.
 
-import { metrics } from "@seylo/ops";
+import { metrics, system } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card, CardHeader, CardTitle } from "@seylo/ui/components/card";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { type ChartSeries, SmoothChart, seriesColor, toggleHidden } from "@seylo/ui/components/smooth-chart";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconServer2 } from "@tabler/icons-react";
@@ -30,6 +30,8 @@ export function NodeUsage() {
   const [range, setRange] = useState<MetricsRange>("1h");
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const usage = useOp(metrics.nodes, { range }, { placeholderData: (previous) => previous });
+  // The sidebar already has the node count: placeholders show as many node chips and values as will arrive.
+  const nodeCount = useOp(system.info, {}).data?.nodes.total ?? 3;
   const series = usage.data?.nodes ?? [];
   // Members without nodes.view see the dashboard without the fleet graphs.
   if (usage.error?.code === "FORBIDDEN") return null;
@@ -43,6 +45,11 @@ export function NodeUsage() {
           {t("dashboard.live")}
         </Chip>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {usage.isPending &&
+            Array.from({ length: nodeCount }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+              <Skeleton key={i} className="h-[31px] w-[84px] rounded-[7px]" />
+            ))}
           {series.map((node, index) => {
             const off = hidden.has(node.nodeId);
             return (
@@ -83,11 +90,11 @@ export function NodeUsage() {
       {usage.isError && !usage.data ? (
         <QueryError error={usage.error} onRetry={() => void usage.refetch()} />
       ) : usage.isPending ? (
-        <div className="grid grid-cols-1 gap-[22px] lg:grid-cols-3">
-          <Skeleton className="h-[170px]" />
-          <Skeleton className="h-[170px]" />
-          <Skeleton className="h-[170px]" />
-        </div>
+        <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 gap-[22px] lg:grid-cols-3">
+          <MetricChartSkeleton metric="cpu" nodes={nodeCount} />
+          <MetricChartSkeleton metric="memory" nodes={nodeCount} />
+          <MetricChartSkeleton metric="network" nodes={nodeCount} />
+        </LoadingRegion>
       ) : series.length === 0 ? (
         <EmptyState
           compact
@@ -132,6 +139,29 @@ function latestText(metric: Metric, node: NodeSeries): ReactNode {
   if (metric === "cpu") return formatPercent(latest.cpuPercent);
   if (metric === "memory") return formatUsedOfTotal(latest.memoryUsedBytes, latest.memoryTotalBytes);
   return formatRate(latest.networkRxBytesPerSec + latest.networkTxBytesPerSec);
+}
+
+/** About as wide as a node's value line ("de-fsn-1 6.2 / 16 GB"), so the values wrap as they will. */
+const valueWidth: Record<Metric, string> = { cpu: "w-[84px]", memory: "w-[124px]", network: "w-[108px]" };
+
+/** A graph while the samples load: its real title, the plot's height, a value per node. */
+function MetricChartSkeleton({ metric, nodes }: { metric: Metric; nodes: number }) {
+  const text = metricText[metric];
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[13px] font-medium text-ink-strong">{t(text.title)}</span>
+        <span className="text-xs text-muted-foreground">{t(text.unit)}</span>
+      </div>
+      <Skeleton className="h-[120px]" />
+      <div className="flex flex-wrap gap-x-3.5 gap-y-1">
+        {Array.from({ length: nodes }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+          <SkeletonText key={i} className={cn("text-[12.5px]", valueWidth[metric])} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**

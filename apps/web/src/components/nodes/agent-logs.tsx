@@ -5,6 +5,7 @@ import { nodes } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { LogViewer, useLogBuffer } from "@seylo/ui/components/log-viewer";
+import { LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { useEffect } from "react";
 import { t } from "../../i18n/t";
 import type { NodeDetail } from "../../lib/types";
@@ -49,7 +50,17 @@ function AgentLogsBody({ nodeId }: { nodeId: string }) {
         showTimestamps
         showSource
         height={420}
-        empty={<span className="text-terminal-muted">{logs.isLoading ? t("nodes.agentLogsLoading") : t("nodes.agentLogsEmpty")}</span>}
+        empty={
+          logs.isLoading ? (
+            <LoadingRegion label={t("nodes.agentLogsLoading")} className="flex flex-col gap-[9px]">
+              {["w-72", "w-96", "w-64", "w-80", "w-56"].map((width) => (
+                <Skeleton key={width} className={`h-3 max-w-full rounded-chip bg-terminal-field ${width}`} />
+              ))}
+            </LoadingRegion>
+          ) : (
+            <span className="text-terminal-muted">{t("nodes.agentLogsEmpty")}</span>
+          )
+        }
       />
     </div>
   );

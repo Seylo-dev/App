@@ -14,6 +14,7 @@ import { DataTable } from "@seylo/ui/components/data-table";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { IconPlugConnected, IconPlus } from "@tabler/icons-react";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -24,6 +25,7 @@ import { KeyTable } from "../../../components/settings/keys/key-table";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { OpErrorCallout, QueryView } from "../../../components/settings/op-state";
 import { SettingRow, SettingsPage } from "../../../components/settings/page";
+import { SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/api-keys")({
@@ -103,7 +105,9 @@ function McpSection({ isAdmin }: { isAdmin: boolean }) {
   return (
     <>
       <SectionCard title={t("settingsKeys.mcp.title")} description={t("settingsKeys.mcp.description")}>
-        <QueryView query={info}>{(data) => <McpServer data={data} isAdmin={isAdmin} />}</QueryView>
+        <QueryView query={info} skeleton={<McpSkeleton />} className="flex flex-col gap-4">
+          {(data) => <McpServer data={data} isAdmin={isAdmin} />}
+        </QueryView>
       </SectionCard>
       <McpTokens isAdmin={isAdmin} />
       {isAdmin && <McpClients />}
@@ -116,6 +120,29 @@ type SnippetHost = (typeof snippetHosts)[number];
 
 function hostLabel(host: string): string {
   return (snippetHosts as readonly string[]).includes(host) ? t(`settingsKeys.mcp.hosts.${host as SnippetHost}`) : host;
+}
+
+/** The MCP card's switch, safety note, the two addresses and the setup snippet while the info loads. */
+function McpSkeleton() {
+  return (
+    <>
+      <SettingRowSkeleton titleWidth="w-24" />
+      <Skeleton className="h-[67px] bg-chip-blue-bg" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="flex min-w-0 flex-col gap-1.5">
+            <SkeletonText className="w-20 text-[12.5px]" />
+            <Skeleton className="h-[38px]" />
+          </div>
+        ))}
+      </div>
+      <SkeletonText className="w-72 text-[12.5px]" />
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-[35px] w-64" />
+        <Skeleton className="h-[86px] bg-terminal" />
+      </div>
+    </>
+  );
 }
 
 function McpServer({ data, isAdmin }: { data: McpInfo; isAdmin: boolean }) {

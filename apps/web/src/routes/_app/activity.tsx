@@ -119,6 +119,7 @@ function ActivityPage() {
             bare
             aria-label={t("activity.title")}
             loading={pages.isPending}
+            skeletonRows={5}
             rows={entries}
             getRowId={(e) => e.id}
             onRowClick={setOpen}

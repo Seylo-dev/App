@@ -4,7 +4,7 @@
 import { metrics } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { useState } from "react";
 import { t } from "../../i18n/t";
@@ -42,7 +42,14 @@ export function NodeGraphs({ nodeId }: { nodeId: string }) {
       {usage.isError && !usage.data ? (
         <QueryError error={usage.error} onRetry={() => void usage.refetch()} />
       ) : usage.isPending ? (
-        <Skeleton className="h-40" />
+        <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {[t("dashboard.cpu"), t("dashboard.memory"), t("nodes.disk"), t("dashboard.network")].map((title) => (
+            <div key={title} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-raised p-3">
+              <span className="text-xs font-medium text-ink-strong">{title}</span>
+              <Skeleton className="h-20 bg-track" />
+            </div>
+          ))}
+        </LoadingRegion>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Graph

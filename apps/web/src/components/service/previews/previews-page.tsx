@@ -10,8 +10,8 @@ import { Card } from "@seylo/ui/components/card";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Input } from "@seylo/ui/components/input";
-import { SectionCard } from "@seylo/ui/components/section-card";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
+import { ButtonSkeleton, FieldSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { IconGitPullRequest, IconTrash } from "@tabler/icons-react";
@@ -23,6 +23,7 @@ import { CheckLabel, Field, parseIntOrNull, ToggleRow } from "../field";
 import { formatRelative, shortSha } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { RowsSkeleton } from "../service-skeletons";
 import { DeploymentStatusChip } from "../status-chip";
 import type { ServiceDetail } from "../use-service";
 
@@ -34,7 +35,23 @@ export function PreviewsPage({ service }: { service: ServiceDetail }) {
   return (
     <div className="flex flex-col gap-4">
       {settings.isPending ? (
-        <Skeleton className="h-40 rounded-card" />
+        <LoadingRegion label={t("common.loading")}>
+          <SectionCardSkeleton titleWidth="w-40" description="w-[min(520px,100%)]">
+            <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <SkeletonText className="w-20 text-[13.5px]" />
+                <SkeletonText className="w-60 text-[12.5px]" />
+              </div>
+              <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
+            </div>
+            <Skeleton className="h-[67px] bg-chip-amber-bg" />
+            <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <FieldSkeleton hint />
+              <FieldSkeleton labelWidth="w-20" hint />
+            </div>
+            <ButtonSkeleton className="w-[61px]" />
+          </SectionCardSkeleton>
+        </LoadingRegion>
       ) : settings.isError ? (
         <OpErrorNote error={settings.error} />
       ) : (
@@ -148,7 +165,7 @@ function PreviewList({ service }: { service: ServiceDetail }) {
         <h2 className="m-0 text-[15px] font-semibold">{t("servicePreviews.list")}</h2>
       </div>
       {list.isPending ? (
-        <Skeleton className="mx-5 mb-4 h-10" />
+        <RowsSkeleton rows={2} lead="icon" lines={1} width="w-72" className="py-2.5" />
       ) : list.isError ? (
         <OpErrorNote error={list.error} className="mx-5 mb-4" />
       ) : list.data.previews.length === 0 ? (

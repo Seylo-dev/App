@@ -9,12 +9,14 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { Input } from "@seylo/ui/components/input";
 import { SectionCard } from "@seylo/ui/components/section-card";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { formatRelative } from "../../../components/settings/format";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { QueryView } from "../../../components/settings/op-state";
 import { Field, FormActions, SettingsPage } from "../../../components/settings/page";
+import { FieldSkeleton, FormActionsSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/cloudflare")({
@@ -34,7 +36,20 @@ function CloudflarePage() {
   return (
     <SettingsPage title={t("settings.cloudflare.title")} subtitle={t("settings.cloudflare.subtitle")}>
       <SectionCard title={t("settings.cloudflare.tunnelTitle")} description={t("settings.cloudflare.tunnelDescription")}>
-        <QueryView query={query} skeletonRows={2}>
+        <QueryView
+          query={query}
+          className="flex flex-col gap-3"
+          skeleton={
+            <>
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-[22px] w-24 rounded-chip" />
+                <SkeletonText className="w-28 text-[13px]" />
+              </div>
+              <FieldSkeleton labelWidth="w-24" />
+              <FormActionsSkeleton />
+            </>
+          }
+        >
           {(data) => (
             <form
               className="flex flex-col gap-3"

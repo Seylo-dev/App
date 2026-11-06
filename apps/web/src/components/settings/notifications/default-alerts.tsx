@@ -13,6 +13,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@seylo/ui/components/dropdown-menu";
+import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { IconChevronDown } from "@tabler/icons-react";
 import { t } from "../../../i18n/t";
 import { useSettingsMutation } from "../mutation";
@@ -27,10 +28,28 @@ export function DefaultAlerts({ channels, canEdit }: { channels: notifications.C
     <Card className="min-w-0 flex-[1_1_380px] gap-1 px-5 pt-[18px] pb-2">
       <h2 className="m-0 text-[15px] font-semibold">{t("settingsNotifications.defaults.title")}</h2>
       <p className="m-0 mb-2 text-[12.5px] text-muted-foreground">{t("settingsNotifications.defaults.description")}</p>
-      <QueryView query={query} skeletonRows={6} className="pb-3">
+      <QueryView query={query} skeleton={<RuleRowsSkeleton />}>
         {(data) => <RuleRows rules={data.rules} channels={channels} canEdit={canEdit} />}
       </QueryView>
     </Card>
+  );
+}
+
+/** Every event with its real name and hint; only the checkbox and the channels wait for the data. */
+function RuleRowsSkeleton() {
+  return (
+    <div className="flex flex-col">
+      {alerts.alertRuleEvents.map((event) => (
+        <div key={event} className="flex items-center gap-3 border-t border-divider py-2.5">
+          <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[13px] font-medium">{t(`settingsNotifications.events.${event}.name`)}</span>
+            <span className="text-xs text-muted-foreground">{t(`settingsNotifications.events.${event}.hint`)}</span>
+          </span>
+          <SkeletonText className="ml-auto w-16 px-1.5 py-1 text-xs" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -67,7 +86,7 @@ function RuleRows({ rules, channels, canEdit }: { rules: Rule[]; channels: notif
             <DropdownMenu>
               <DropdownMenuTrigger
                 disabled={!canEdit || !rule.enabled}
-                className="ml-auto flex max-w-[45%] shrink-0 cursor-pointer items-center gap-1 rounded-chip border-0 bg-transparent px-1.5 py-1 text-xs text-ink-strong hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
+                className="ml-auto flex max-w-[45%] shrink-0 cursor-pointer items-center gap-1 rounded-chip border-0 bg-transparent px-1.5 py-1 text-xs text-ink-strong hover:bg-muted disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
                 <span className="truncate">
                   {!rule.enabled ? "-" : to.length > 0 ? to.join(", ") : t("settingsNotifications.defaults.feedOnly")}

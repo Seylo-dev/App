@@ -10,7 +10,7 @@ import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { KeyValue } from "@seylo/ui/components/key-value";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { toast } from "@seylo/ui/components/toast";
 import { IconLock, IconTerminal2, IconWorld } from "@tabler/icons-react";
@@ -134,7 +134,20 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
       }
     >
       {list.isPending ? (
-        <Skeleton className="h-16" />
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <SkeletonText className="w-44 text-[13.5px]" />
+            <SkeletonText className="w-14 text-xs" />
+            <Skeleton className="h-[22px] w-14 rounded-chip" />
+            <SkeletonText className="ml-auto w-16 text-xs" />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {["w-16", "w-28", "w-28", "w-24", "w-[104px]"].map((width, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+              <Skeleton key={i} className={`h-[22px] rounded-chip ${width}`} />
+            ))}
+          </div>
+        </LoadingRegion>
       ) : list.isError ? (
         <OpErrorNote error={list.error} compact />
       ) : !latest ? (
@@ -181,6 +194,17 @@ function UsagePanel({ service }: { service: ServiceDetail }) {
     >
       {data.isError ? (
         <OpErrorNote error={data.error} compact />
+      ) : data.isPending ? (
+        <LoadingRegion label={t("common.loading")} className="grid gap-4 sm:grid-cols-2">
+          {[t("service.usage.cpu"), t("service.usage.memory")].map((label) => (
+            <div key={label} className="flex flex-col gap-1">
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                {label} · <SkeletonText className="w-10" />
+              </span>
+              <Skeleton className="h-[90px]" />
+            </div>
+          ))}
+        </LoadingRegion>
       ) : points.length < 2 ? (
         <p className="m-0 text-[12.5px] text-muted-foreground">{data.isPending ? t("service.loading") : t("serviceMetrics.noData")}</p>
       ) : (
@@ -315,7 +339,26 @@ function BoxOverview({ service }: { service: ServiceDetail }) {
     onSuccess: (res) => window.open(res.url, "_blank", "noopener"),
     onError: (error) => toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed"))),
   });
-  if (box.isPending) return <Skeleton className="h-40 rounded-card" />;
+  if (box.isPending)
+    return (
+      <LoadingRegion label={t("common.loading")}>
+        <Card>
+          <div className="flex items-center gap-2">
+            <SkeletonText className="w-24 text-[15px]" />
+            <ButtonSkeleton size="sm" className="ml-auto w-24" />
+          </div>
+          <SkeletonText className="w-96 max-w-full text-[13px]" />
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-6 gap-y-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex flex-col gap-1">
+                <SkeletonText className="w-14 text-[12px]" />
+                <SkeletonText className="w-24 text-[13.5px]" />
+              </div>
+            ))}
+          </div>
+        </Card>
+      </LoadingRegion>
+    );
   if (box.isError) return <OpErrorNote error={box.error} />;
   const b = box.data;
   const tone = b.state === "running" ? "green" : b.state === "starting" ? "amber" : "gray";
@@ -348,5 +391,55 @@ function BoxOverview({ service }: { service: ServiceDetail }) {
         ]}
       />
     </Panel>
+  );
+}
+
+/** The app overview's two columns while the service loads: deploys and usage on the left, facts, domains and actions on the right. */
+export function OverviewSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")} className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col gap-4">
+        <Card>
+          <SkeletonText className="w-20 text-[15px]" />
+          <div className="flex items-center gap-2">
+            <SkeletonText className="w-44 text-[13.5px]" />
+            <Skeleton className="h-[22px] w-14 rounded-chip" />
+            <SkeletonText className="ml-auto w-16 text-xs" />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {["w-16", "w-28", "w-28", "w-24", "w-[104px]"].map((width, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
+              <Skeleton key={i} className={`h-[22px] rounded-chip ${width}`} />
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <SkeletonText className="w-20 text-[15px]" />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Skeleton className="h-[106px]" />
+            <Skeleton className="h-[106px]" />
+          </div>
+        </Card>
+      </div>
+      <div className="flex min-w-0 flex-col gap-4">
+        <Card>
+          <SkeletonText className="w-16 text-[15px]" />
+          <div className="flex flex-col">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex min-h-10 items-center gap-4 border-t border-divider py-2 first:border-t-0">
+                <SkeletonText className="w-28 shrink-0 text-[13px] sm:w-36" />
+                <SkeletonText className="w-28 text-[13.5px]" />
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <SkeletonText className="w-20 text-[15px]" />
+          {[0, 1, 2].map((i) => (
+            <SkeletonText key={i} className="w-44 text-[12.5px]" />
+          ))}
+        </Card>
+      </div>
+    </LoadingRegion>
   );
 }

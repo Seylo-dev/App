@@ -7,6 +7,7 @@ import { env, OpError } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
+import { ButtonSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { useEffect, useMemo, useState } from "react";
 import { t } from "../../../i18n/t";
@@ -33,7 +34,18 @@ export function SharedVariablesSheet({
           <SheetTitle>{t("serviceEnv.shared.title")}</SheetTitle>
           <SheetDescription>{t("serviceEnv.shared.body")}</SheetDescription>
         </SheetHeader>
-        <OpView query={shared} className="mx-5 my-4">
+        <OpView
+          query={shared}
+          className="mx-5 my-4"
+          skeleton={
+            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3 px-5 py-4">
+              <Skeleton className="h-[320px]" />
+              <div className="flex justify-end gap-2">
+                <ButtonSkeleton size="sm" className="w-16" />
+              </div>
+            </LoadingRegion>
+          }
+        >
           {(data) => (
             <SharedEditor projectId={projectId} initialText={data.text} updatedAt={data.updatedAt} onDone={() => onOpenChange(false)} />
           )}
