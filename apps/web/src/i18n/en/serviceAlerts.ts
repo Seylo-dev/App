@@ -23,6 +23,8 @@ export default {
     node_offline: "A node went offline",
     node_health_check_failed: "A node health check failed",
     disk_low: "A node is low on disk",
+    cleanup_ran: "A node cleaned up by itself",
+    cleanup_failed: "A node's cleanup failed",
     update_available: "An update is available",
     update_failed: "An update failed",
     approval_requested: "An action waits for approval",

@@ -93,9 +93,11 @@ export default {
     node_offline: { name: "Node offline", hint: "No connection for 60 seconds" },
     node_health_check_failed: { name: "Node health check failed", hint: "A node check found a problem" },
     disk_low: { name: "Disk above 85%", hint: "The data or Docker disk of a node, checked every 10 min" },
+    cleanup_ran: { name: "Cleanup ran", hint: "A node cleaned up by itself, on its schedule or a full disk" },
+    cleanup_failed: { name: "Cleanup failed", hint: "A node's scheduled or disk-triggered cleanup did not finish" },
     update_available: { name: "Update available", hint: "A new release when auto-update is off" },
     update_failed: { name: "Update failed", hint: "The panel or a node could not update" },
     approval_requested: { name: "Approval requested", hint: "An AI tool asks to change something" },
-    security_change: { name: "Security change", hint: "A sign-in method, API key or CLI login was added" },
+    security_change: { name: "Security change", hint: "A sign-in method, API key or CLI login was added, or a host shell opened" },
   },
 } as const;

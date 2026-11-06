@@ -1665,6 +1665,14 @@
                                 "type": "string"
                               },
                               {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
+                                "type": "string"
+                              },
+                              {
                                 "const": "update_available",
                                 "type": "string"
                               },
@@ -1921,6 +1929,14 @@
                         "type": "string"
                       },
                       {
+                        "const": "cleanup_ran",
+                        "type": "string"
+                      },
+                      {
+                        "const": "cleanup_failed",
+                        "type": "string"
+                      },
+                      {
                         "const": "update_available",
                         "type": "string"
                       },
@@ -2076,6 +2092,14 @@
                             },
                             {
                               "const": "disk_low",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cleanup_ran",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cleanup_failed",
                               "type": "string"
                             },
                             {
@@ -2295,6 +2319,14 @@
                                   },
                                   {
                                     "const": "disk_low",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "cleanup_ran",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "cleanup_failed",
                                     "type": "string"
                                   },
                                   {
@@ -10923,6 +10955,159 @@
         "x-mcp": true
       }
     },
+    "/api/v1/cleanup.getSchedule": {
+      "get": {
+        "operationId": "cleanup.getSchedule",
+        "summary": "Get a node's cleanup schedule",
+        "description": "Returns when and what a node cleans up by itself, the time zone the schedule runs in and when it runs next. The node runs it even while the panel is down.",
+        "tags": [
+          "cleanup"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "nodeId",
+                    "schedule",
+                    "timeZone",
+                    "nextRunAt",
+                    "supported"
+                  ],
+                  "properties": {
+                    "nodeId": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "schedule": {
+                      "type": "object",
+                      "required": [
+                        "enabled",
+                        "cron",
+                        "diskPercent",
+                        "kinds"
+                      ],
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cron": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^(@(hourly|daily|weekly|monthly|yearly)|(\\S+\\s+){4}\\S+)$",
+                              "description": "Five-field cron expression or @hourly, @daily, @weekly, @monthly, @yearly.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "diskPercent": {
+                          "anyOf": [
+                            {
+                              "minimum": 50,
+                              "maximum": 99,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kinds": {
+                          "type": "object",
+                          "required": [
+                            "images",
+                            "buildCache",
+                            "stoppedContainers",
+                            "unusedVolumes"
+                          ],
+                          "properties": {
+                            "images": {
+                              "description": "Images past the newest 3 per service (the ones in use and the deployed one always stay).",
+                              "type": "boolean"
+                            },
+                            "buildCache": {
+                              "description": "The build cache of this panel's own builders.",
+                              "type": "boolean"
+                            },
+                            "stoppedContainers": {
+                              "description": "Finished job containers, old generations and containers of removed services.",
+                              "type": "boolean"
+                            },
+                            "unusedVolumes": {
+                              "description": "Docker volumes and data folders of services removed from this node. Their data is gone for good, so it has its own switch.",
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "timeZone": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "nextRunAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "supported": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "nodes.view",
+        "x-mcp": true
+      }
+    },
     "/api/v1/cleanup.preview": {
       "get": {
         "operationId": "cleanup.preview",
@@ -11108,6 +11293,403 @@
                       "items": {
                         "type": "string"
                       }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "nodes.manage",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/cleanup.runs": {
+      "get": {
+        "operationId": "cleanup.runs",
+        "summary": "List a node's cleanup runs",
+        "description": "Lists a node's recent cleanups, newest first: scheduled, disk-triggered and manual runs with what they removed and how much space they freed.",
+        "tags": [
+          "cleanup"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "runs",
+                    "bytesFreed30d"
+                  ],
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "nodeId",
+                          "trigger",
+                          "status",
+                          "error",
+                          "bytesFreed",
+                          "removedCount",
+                          "lines",
+                          "diskPercent",
+                          "startedBy",
+                          "startedAt",
+                          "finishedAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "trigger": {
+                            "anyOf": [
+                              {
+                                "const": "schedule",
+                                "type": "string"
+                              },
+                              {
+                                "const": "disk",
+                                "type": "string"
+                              },
+                              {
+                                "const": "manual",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "const": "succeeded",
+                                "type": "string"
+                              },
+                              {
+                                "const": "failed",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "bytesFreed": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "removedCount": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "lines": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "diskPercent": {
+                            "anyOf": [
+                              {
+                                "minimum": 0,
+                                "maximum": 100,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "startedBy": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "startedAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "bytesFreed30d": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "nodes.view",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/cleanup.setSchedule": {
+      "post": {
+        "operationId": "cleanup.setSchedule",
+        "summary": "Change a node's cleanup schedule",
+        "description": "Sets when (a cron expression in the node's time zone, a disk line, or both) and what (images, build cache, stopped containers, unused volumes) a node cleans up by itself. Only resources this panel created are ever removed. Each run shows in cleanup.runs.",
+        "tags": [
+          "cleanup"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nodeId",
+                  "schedule"
+                ],
+                "properties": {
+                  "nodeId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": "object",
+                    "required": [
+                      "enabled",
+                      "cron",
+                      "diskPercent",
+                      "kinds"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "cron": {
+                        "anyOf": [
+                          {
+                            "minLength": 1,
+                            "maxLength": 120,
+                            "pattern": "^(@(hourly|daily|weekly|monthly|yearly)|(\\S+\\s+){4}\\S+)$",
+                            "description": "Five-field cron expression or @hourly, @daily, @weekly, @monthly, @yearly.",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "diskPercent": {
+                        "anyOf": [
+                          {
+                            "minimum": 50,
+                            "maximum": 99,
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "kinds": {
+                        "type": "object",
+                        "required": [
+                          "images",
+                          "buildCache",
+                          "stoppedContainers",
+                          "unusedVolumes"
+                        ],
+                        "properties": {
+                          "images": {
+                            "description": "Images past the newest 3 per service (the ones in use and the deployed one always stay).",
+                            "type": "boolean"
+                          },
+                          "buildCache": {
+                            "description": "The build cache of this panel's own builders.",
+                            "type": "boolean"
+                          },
+                          "stoppedContainers": {
+                            "description": "Finished job containers, old generations and containers of removed services.",
+                            "type": "boolean"
+                          },
+                          "unusedVolumes": {
+                            "description": "Docker volumes and data folders of services removed from this node. Their data is gone for good, so it has its own switch.",
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "nodeId",
+                    "schedule",
+                    "nextRunAt"
+                  ],
+                  "properties": {
+                    "nodeId": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "schedule": {
+                      "type": "object",
+                      "required": [
+                        "enabled",
+                        "cron",
+                        "diskPercent",
+                        "kinds"
+                      ],
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cron": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^(@(hourly|daily|weekly|monthly|yearly)|(\\S+\\s+){4}\\S+)$",
+                              "description": "Five-field cron expression or @hourly, @daily, @weekly, @monthly, @yearly.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "diskPercent": {
+                          "anyOf": [
+                            {
+                              "minimum": 50,
+                              "maximum": 99,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kinds": {
+                          "type": "object",
+                          "required": [
+                            "images",
+                            "buildCache",
+                            "stoppedContainers",
+                            "unusedVolumes"
+                          ],
+                          "properties": {
+                            "images": {
+                              "description": "Images past the newest 3 per service (the ones in use and the deployed one always stay).",
+                              "type": "boolean"
+                            },
+                            "buildCache": {
+                              "description": "The build cache of this panel's own builders.",
+                              "type": "boolean"
+                            },
+                            "stoppedContainers": {
+                              "description": "Finished job containers, old generations and containers of removed services.",
+                              "type": "boolean"
+                            },
+                            "unusedVolumes": {
+                              "description": "Docker volumes and data folders of services removed from this node. Their data is gone for good, so it has its own switch.",
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "nextRunAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -40385,7 +40967,7 @@
                   ],
                   "properties": {
                     "rules": {
-                      "maxItems": 17,
+                      "maxItems": 19,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -40447,6 +41029,14 @@
                               },
                               {
                                 "const": "disk_low",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
                                 "type": "string"
                               },
                               {
@@ -40598,7 +41188,7 @@
                       "type": "boolean"
                     },
                     "rules": {
-                      "maxItems": 17,
+                      "maxItems": 19,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -40660,6 +41250,14 @@
                               },
                               {
                                 "const": "disk_low",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
                                 "type": "string"
                               },
                               {
@@ -40696,7 +41294,7 @@
                       }
                     },
                     "defaults": {
-                      "maxItems": 17,
+                      "maxItems": 19,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -40758,6 +41356,14 @@
                               },
                               {
                                 "const": "disk_low",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
                                 "type": "string"
                               },
                               {
@@ -41718,7 +42324,7 @@
                 ],
                 "properties": {
                   "rules": {
-                    "maxItems": 17,
+                    "maxItems": 19,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -41783,6 +42389,14 @@
                               "type": "string"
                             },
                             {
+                              "const": "cleanup_ran",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cleanup_failed",
+                              "type": "string"
+                            },
+                            {
                               "const": "update_available",
                               "type": "string"
                             },
@@ -41832,7 +42446,7 @@
                   ],
                   "properties": {
                     "rules": {
-                      "maxItems": 17,
+                      "maxItems": 19,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -41894,6 +42508,14 @@
                               },
                               {
                                 "const": "disk_low",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
                                 "type": "string"
                               },
                               {
@@ -41979,7 +42601,7 @@
                     "type": "boolean"
                   },
                   "rules": {
-                    "maxItems": 17,
+                    "maxItems": 19,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -42044,6 +42666,14 @@
                               "type": "string"
                             },
                             {
+                              "const": "cleanup_ran",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cleanup_failed",
+                              "type": "string"
+                            },
+                            {
                               "const": "update_available",
                               "type": "string"
                             },
@@ -42098,7 +42728,7 @@
                       "type": "boolean"
                     },
                     "rules": {
-                      "maxItems": 17,
+                      "maxItems": 19,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -42160,6 +42790,14 @@
                               },
                               {
                                 "const": "disk_low",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
                                 "type": "string"
                               },
                               {
@@ -42196,7 +42834,7 @@
                       }
                     },
                     "defaults": {
-                      "maxItems": 17,
+                      "maxItems": 19,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -42258,6 +42896,14 @@
                               },
                               {
                                 "const": "disk_low",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_ran",
+                                "type": "string"
+                              },
+                              {
+                                "const": "cleanup_failed",
                                 "type": "string"
                               },
                               {

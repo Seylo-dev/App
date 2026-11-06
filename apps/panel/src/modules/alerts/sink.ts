@@ -72,6 +72,8 @@ export const defaultSeverity: Record<AlertEventName, AlertSeverity> = {
   node_offline: "error",
   node_health_check_failed: "warning",
   disk_low: "warning",
+  cleanup_ran: "info",
+  cleanup_failed: "warning",
   update_available: "info",
   update_failed: "error",
   approval_requested: "info",

@@ -5,6 +5,23 @@ import { blob, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-or
 import { createdAt, id, json, timestamp, updatedAt } from "./columns";
 import { users } from "./identity";
 
+/**
+ * When and what a node cleans up by itself (NodeSettings.cleanup). Null on
+ * the node row means never set: off, with the defaults below.
+ */
+export interface CleanupScheduleJson {
+  enabled: boolean;
+  /** Five-field cron in the node's own time zone; null runs only on the disk line. */
+  cron: string | null;
+  /** Also run when a disk is more than this percent full; null turns that off. */
+  diskPercent: number | null;
+  images: boolean;
+  buildCache: boolean;
+  stoppedContainers: boolean;
+  /** Volumes and data of services removed from the node; its own switch on purpose. */
+  unusedVolumes: boolean;
+}
+
 /** Latest node health check (RunHealthCheck) as shown under the heart icon. */
 export interface NodeHealthReport {
   results: { id: string; title: string; status: "pass" | "warn" | "fail" | "skipped"; detail: string; fixHint: string }[];
@@ -59,6 +76,13 @@ export const nodes = sqliteTable(
     gamesFirstCpu: integer("games_first_cpu", { mode: "boolean" }).notNull().default(false),
     healthReport: json<NodeHealthReport>("health_report"),
     healthCheckedAt: timestamp("health_checked_at"),
+    /** Scheduled cleanup; null = never set (off). Added in 0.2 (nodeops). */
+    cleanupSchedule: json<CleanupScheduleJson>("cleanup_schedule"),
+    /**
+     * The owner allowed root shells on this host from the panel. The agent
+     * refuses them while this is off. Added in 0.2 (nodeops).
+     */
+    hostShell: integer("host_shell", { mode: "boolean" }).notNull().default(false),
     disabledAt: timestamp("disabled_at"),
     lastSeenAt: timestamp("last_seen_at"),
     createdAt: createdAt(),
@@ -129,4 +153,38 @@ export const updateSteps = sqliteTable(
     finishedAt: timestamp("finished_at"),
   },
   (t) => [index("update_steps_run_idx").on(t.runId, t.position)],
+);
+
+export type CleanupRunTrigger = "schedule" | "disk" | "manual";
+
+/**
+ * One Docker cleanup of a node: scheduled and disk-triggered runs the agent
+ * reported (CleanupRun events through its outbox) and manual cleanup.run
+ * calls. The newest 100 per node are kept. Added in 0.2 (nodeops).
+ */
+export const cleanupRuns = sqliteTable(
+  "cleanup_runs",
+  {
+    id: id(),
+    nodeId: text("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    /** The agent's run id (deduped per node); null for manual runs. */
+    runId: text("run_id"),
+    trigger: text("trigger").$type<CleanupRunTrigger>().notNull(),
+    /** Set when the run failed; it may have removed some things first. */
+    error: text("error"),
+    bytesFreed: integer("bytes_freed").notNull().default(0),
+    /** Lines removed (or tried); `lines` holds at most 200 of them. */
+    removedCount: integer("removed_count").notNull().default(0),
+    lines: json<string[]>("lines").notNull().default([]),
+    /** Fullest disk's use when a disk-triggered run started. */
+    diskPercent: integer("disk_percent"),
+    /** Who ran a manual cleanup. */
+    startedBy: text("started_by").references(() => users.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("cleanup_runs_node_idx").on(t.nodeId, t.startedAt), uniqueIndex("cleanup_runs_node_run_unique").on(t.nodeId, t.runId)],
 );

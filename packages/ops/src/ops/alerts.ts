@@ -25,6 +25,8 @@ export const alertRuleEvents = [
   "node_offline",
   "node_health_check_failed",
   "disk_low",
+  "cleanup_ran",
+  "cleanup_failed",
   "update_available",
   "update_failed",
   "approval_requested",
