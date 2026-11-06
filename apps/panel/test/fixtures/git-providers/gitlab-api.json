@@ -1,0 +1,199 @@
+[
+  {
+    "request": "GET /api/v4/user",
+    "status": 200,
+    "body": {
+      "id": 77,
+      "username": "project_42_bot_3f2a",
+      "name": "seylo-deploy",
+      "state": "active",
+      "locked": false,
+      "avatar_url": "https://secure.gravatar.com/avatar/x?s=80&d=identicon",
+      "web_url": "https://gitlab.com/project_42_bot_3f2a",
+      "bot": true
+    }
+  },
+  {
+    "request": "GET /api/v4/projects",
+    "status": 200,
+    "headers": { "x-next-page": "", "x-page": "1", "x-per-page": "30" },
+    "body": [
+      {
+        "id": 42,
+        "description": "",
+        "name": "shop",
+        "name_with_namespace": "Acme / platform / shop",
+        "path": "shop",
+        "path_with_namespace": "acme/platform/shop",
+        "created_at": "2025-03-01T08:00:00.000Z",
+        "default_branch": "main",
+        "web_url": "https://gitlab.com/acme/platform/shop",
+        "visibility": "private",
+        "last_activity_at": "2026-11-05T10:01:44.120Z"
+      },
+      {
+        "id": 43,
+        "description": "Marketing site",
+        "name": "site",
+        "name_with_namespace": "Acme / site",
+        "path": "site",
+        "path_with_namespace": "acme/site",
+        "created_at": "2024-01-10T08:00:00.000Z",
+        "default_branch": null,
+        "web_url": "https://gitlab.com/acme/site",
+        "visibility": "public",
+        "last_activity_at": "2026-10-01T12:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop",
+    "status": 200,
+    "body": {
+      "id": 42,
+      "name": "shop",
+      "path_with_namespace": "acme/platform/shop",
+      "default_branch": "main",
+      "visibility": "private",
+      "last_activity_at": "2026-11-05T10:01:44.120Z",
+      "permissions": { "project_access": { "access_level": 40 }, "group_access": null }
+    }
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop/repository/branches",
+    "status": 200,
+    "headers": { "x-next-page": "" },
+    "body": [
+      {
+        "name": "feat/checkout",
+        "merged": false,
+        "protected": false,
+        "default": false,
+        "commit": { "id": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00", "short_id": "c0ffee00", "title": "Checkout: new layout" }
+      },
+      {
+        "name": "main",
+        "merged": false,
+        "protected": true,
+        "default": true,
+        "commit": { "id": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7", "short_id": "da156088", "title": "Fix the checkout total" }
+      }
+    ]
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop/repository/branches/main",
+    "status": 200,
+    "body": {
+      "name": "main",
+      "merged": false,
+      "protected": true,
+      "default": true,
+      "commit": {
+        "id": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7",
+        "short_id": "da156088",
+        "created_at": "2026-11-05T10:01:44.000+00:00",
+        "parent_ids": ["b6568db1bc1dcd7f8b4d5a946b0b91f9dacd7327"],
+        "title": "Fix the checkout total",
+        "message": "Fix the checkout total\n\nRounds per line.\n",
+        "author_name": "Jane Dev",
+        "author_email": "jane@example.com",
+        "committer_name": "Jane Dev",
+        "web_url": "https://gitlab.com/acme/platform/shop/-/commit/da1560886d4f094c3e6c9ef40349f7d38b5d27d7"
+      }
+    }
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop/repository/branches/nope",
+    "status": 404,
+    "body": { "message": "404 Branch Not Found" }
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop/repository/compare",
+    "status": 200,
+    "body": {
+      "commit": { "id": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7", "title": "Fix the checkout total" },
+      "commits": [
+        { "id": "b6568db1bc1dcd7f8b4d5a946b0b91f9dacd7327", "title": "Update the docs" },
+        { "id": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7", "title": "Fix the checkout total" }
+      ],
+      "diffs": [
+        {
+          "old_path": "README.md",
+          "new_path": "README.md",
+          "a_mode": "100644",
+          "b_mode": "100644",
+          "new_file": false,
+          "renamed_file": false,
+          "deleted_file": false,
+          "diff": "@@ -1 +1 @@\n"
+        },
+        {
+          "old_path": "apps/web/src/checkout/old-total.ts",
+          "new_path": "apps/web/src/checkout/total.ts",
+          "a_mode": "100644",
+          "b_mode": "100644",
+          "new_file": false,
+          "renamed_file": true,
+          "deleted_file": false,
+          "diff": ""
+        }
+      ],
+      "compare_timeout": false,
+      "compare_same_ref": false,
+      "web_url": "https://gitlab.com/acme/platform/shop/-/compare/95790bf8...da156088"
+    }
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop/merge_requests/7",
+    "status": 200,
+    "body": {
+      "id": 9901,
+      "iid": 7,
+      "project_id": 42,
+      "title": "New checkout",
+      "state": "opened",
+      "target_branch": "main",
+      "source_branch": "feat/checkout",
+      "source_project_id": 42,
+      "target_project_id": 42,
+      "draft": false,
+      "sha": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+      "web_url": "https://gitlab.com/acme/platform/shop/-/merge_requests/7"
+    }
+  },
+  {
+    "request": "GET /api/v4/projects/acme%2Fplatform%2Fshop/merge_requests/8",
+    "status": 200,
+    "body": {
+      "id": 9902,
+      "iid": 8,
+      "project_id": 42,
+      "title": "From a fork",
+      "state": "opened",
+      "target_branch": "main",
+      "source_branch": "main",
+      "source_project_id": 99,
+      "target_project_id": 42,
+      "sha": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+    }
+  },
+  {
+    "request": "POST /api/v4/projects/acme%2Fplatform%2Fshop/hooks",
+    "status": 201,
+    "body": {
+      "id": 1001,
+      "url": "https://panel.example.com/api/hooks/gitlab/x",
+      "project_id": 42,
+      "push_events": true,
+      "merge_requests_events": true,
+      "enable_ssl_verification": true,
+      "created_at": "2026-11-05T10:00:00.000Z"
+    }
+  },
+  { "request": "DELETE /api/v4/projects/acme%2Fplatform%2Fshop/hooks/1001", "status": 204, "body": null },
+  {
+    "request": "POST /api/v4/projects/acme%2Fplatform%2Fshop/statuses/da1560886d4f094c3e6c9ef40349f7d38b5d27d7",
+    "status": 201,
+    "body": { "id": 501, "sha": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7", "status": "pending", "name": "seylo/web" }
+  }
+]

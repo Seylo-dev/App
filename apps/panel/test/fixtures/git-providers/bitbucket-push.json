@@ -1,0 +1,52 @@
+{
+  "push": {
+    "changes": [
+      {
+        "old": {
+          "name": "main",
+          "type": "branch",
+          "target": { "type": "commit", "hash": "1e5d8f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e" },
+          "links": {}
+        },
+        "new": {
+          "name": "main",
+          "type": "branch",
+          "target": {
+            "type": "commit",
+            "hash": "9a6f3c2b1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a",
+            "date": "2026-11-05T10:01:44+00:00",
+            "message": "Fix the checkout total\n",
+            "author": {
+              "type": "author",
+              "raw": "Jane Dev <jane@example.com>",
+              "user": { "display_name": "Jane Dev", "nickname": "jdev", "type": "user" }
+            },
+            "parents": [{ "type": "commit", "hash": "1e5d8f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e" }]
+          },
+          "links": {}
+        },
+        "truncated": false,
+        "created": false,
+        "forced": false,
+        "closed": false,
+        "commits": [
+          {
+            "type": "commit",
+            "hash": "9a6f3c2b1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a",
+            "message": "Fix the checkout total\n",
+            "author": { "type": "author", "raw": "Jane Dev <jane@example.com>" }
+          }
+        ]
+      }
+    ]
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "acme-ws/shop",
+    "name": "shop",
+    "is_private": true,
+    "uuid": "{3b8a1e2c-7d4f-4e5a-9b6c-1d2e3f4a5b6c}",
+    "workspace": { "type": "workspace", "slug": "acme-ws", "name": "Acme" }
+  },
+  "actor": { "type": "user", "display_name": "Jane Dev", "nickname": "jdev" }
+}

@@ -66,6 +66,8 @@ export const ServiceSpecJson = Type.Object({
   stack: Type.Union([StackSettings, Type.Null()]),
   /** Set on preview services: the service and PR they preview. */
   preview: Type.Union([Type.Object({ ofServiceId: Type.String(), prNumber: Type.Integer() }), Type.Null()]),
+  /** Glob patterns a push must touch to deploy (@seylo/ops watch-paths); empty = every push deploys. */
+  watchPaths: services.WatchPaths,
 });
 export type ServiceSpecJson = Static<typeof ServiceSpecJson>;
 
@@ -128,6 +130,7 @@ export function defaultSpec(): ServiceSpecJson {
     member: null,
     stack: null,
     preview: null,
+    watchPaths: [],
   };
 }
 
@@ -197,6 +200,7 @@ export function readRunSettings(raw: unknown, fallback: ServiceSpecJson): RunSet
 export function needsBuild(spec: ServiceSpecJson): boolean {
   switch (spec.source.type) {
     case "github":
+    case "provider":
     case "git":
     case "inline":
     case "upload":

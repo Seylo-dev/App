@@ -1,0 +1,45 @@
+{
+  "ref": "refs/heads/main",
+  "before": "4b2ae2a1f0d4c8b2d1f7e3c5a6b8d9e0f1a2b3c4",
+  "after": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+  "compare_url": "https://git.example.com/acme/shop/compare/4b2ae2a1f0d4c8b2d1f7e3c5a6b8d9e0f1a2b3c4...8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+  "commits": [
+    {
+      "id": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+      "message": "Fix the checkout total\n",
+      "url": "https://git.example.com/acme/shop/commit/8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+      "author": { "name": "Jane Dev", "email": "jane@example.com", "username": "jdev" },
+      "committer": { "name": "Jane Dev", "email": "jane@example.com", "username": "jdev" },
+      "verification": null,
+      "timestamp": "2026-11-05T10:01:44Z",
+      "added": ["apps/web/src/checkout/total.ts"],
+      "removed": [],
+      "modified": ["apps/web/package.json"]
+    }
+  ],
+  "total_commits": 1,
+  "head_commit": {
+    "id": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+    "message": "Fix the checkout total\n",
+    "url": "https://git.example.com/acme/shop/commit/8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+    "author": { "name": "Jane Dev", "email": "jane@example.com", "username": "jdev" },
+    "committer": { "name": "Jane Dev", "email": "jane@example.com", "username": "jdev" },
+    "verification": null,
+    "timestamp": "2026-11-05T10:01:44Z",
+    "added": ["apps/web/src/checkout/total.ts"],
+    "removed": [],
+    "modified": ["apps/web/package.json"]
+  },
+  "repository": {
+    "id": 3,
+    "owner": { "id": 2, "login": "acme", "username": "acme" },
+    "name": "shop",
+    "full_name": "acme/shop",
+    "private": true,
+    "default_branch": "main",
+    "html_url": "https://git.example.com/acme/shop",
+    "clone_url": "https://git.example.com/acme/shop.git"
+  },
+  "pusher": { "id": 4, "login": "jdev", "username": "jdev" },
+  "sender": { "id": 4, "login": "jdev", "username": "jdev" }
+}

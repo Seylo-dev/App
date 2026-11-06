@@ -1,4 +1,5 @@
-// PR previews: each open pull request on a GitHub service with previews on
+// PR previews: each open pull request (GitLab: merge request) on a service
+// connected to GitHub, GitLab, Gitea/Forgejo or Bitbucket with previews on
 // gets its own service in the same project, built from the PR branch and
 // deployed on every push to it, and deleted when the PR closes. The
 // preview shares the service's environment (so the same database).
@@ -15,7 +16,7 @@ import { deleteServiceTree } from "../services/delete";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
 import { loadService, type ServiceRow } from "../services/rows";
-import { readSpec } from "../services/spec";
+import { readSpec, type ServiceSpecJson } from "../services/spec";
 import { systemContext } from "../services/system-context";
 
 export interface PullRequestInfo {
@@ -40,8 +41,13 @@ export function previewsUnavailable(svc: ServiceRow): string | null {
   const spec = readSpec(svc.spec);
   if (spec.preview) return "This service is itself a preview.";
   if (svc.parentId || svc.kind !== "app") return "Only app services have PR previews.";
-  if (spec.source.type !== "github") return "PR previews need a GitHub source.";
+  if (!previewable(spec.source)) return "PR previews need a GitHub, GitLab, Gitea/Forgejo or Bitbucket source.";
   return null;
+}
+
+/** Sources whose pull or merge requests become previews. */
+function previewable(source: ServiceSpecJson["source"]): source is Extract<ServiceSpecJson["source"], { type: "github" | "provider" }> {
+  return source.type === "github" || source.type === "provider";
 }
 
 /** Creates the PR's preview service (or updates it) and deploys the PR head. */
@@ -52,7 +58,7 @@ export async function openOrUpdatePreview(
   actor: string | null,
 ): Promise<PreviewOutcome> {
   const spec = readSpec(parent.spec);
-  if (spec.source.type !== "github" || !spec.previews.enabled) return { ignored: "PR previews are off for this service." };
+  if (!previewable(spec.source) || !spec.previews.enabled) return { ignored: "PR previews are off for this service." };
   if (pr.headRepo.toLowerCase() !== spec.source.repo.toLowerCase()) return { ignored: "Pull requests from forks are not previewed." };
 
   const existing = deps.db
@@ -70,7 +76,7 @@ export async function openOrUpdatePreview(
   } else {
     const svc = loadService(deps.db, previewServiceId);
     const current = readSpec(svc.spec);
-    if (current.source.type === "github" && current.source.branch !== pr.headBranch) {
+    if (previewable(current.source) && current.source.branch !== pr.headBranch) {
       deps.db
         .update(services)
         .set({ spec: { ...current, source: { ...current.source, branch: pr.headBranch } } })
@@ -108,7 +114,7 @@ export async function openOrUpdatePreview(
 function createPreviewService(deps: Deps, parent: ServiceRow, pr: PullRequestInfo): string {
   const spec = readSpec(parent.spec);
   const source = spec.source;
-  if (source.type !== "github") throw new OpError("CONFLICT", "PR previews need a GitHub source.");
+  if (!previewable(source)) throw new OpError("CONFLICT", "PR previews need a GitHub, GitLab, Gitea/Forgejo or Bitbucket source.");
   const placement = deps.db
     .select()
     .from(servicePlacements)

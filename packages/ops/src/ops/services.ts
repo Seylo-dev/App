@@ -63,11 +63,23 @@ export const Placement = Type.Object({
 
 export const GitBranch = Type.String({ minLength: 1, maxLength: 250, pattern: "^[^\\s~^:?*\\[\\\\]+$" });
 
+/** The git hosts with a native connection besides GitHub (gitProviders.ts). */
+export const GitProviderKind = Type.Union([Type.Literal("gitlab"), Type.Literal("gitea"), Type.Literal("bitbucket")], {
+  description: '"gitea" covers Forgejo too.',
+});
+
+/** A repository path at a git provider: "group/sub/project" (GitLab), "owner/name" (Gitea), "workspace/slug" (Bitbucket). */
+export const RepoFullPath = Type.String({ minLength: 3, maxLength: 300, pattern: "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$" });
+
+/** Watch paths: glob patterns (*, **, ?, ! excludes; the last match wins) a push must touch to deploy. */
+export const WatchPaths = Type.Array(Type.String({ minLength: 1, maxLength: 300, pattern: "^[^\\n\\r\\t]+$" }), { maxItems: 50 });
+
 /**
  * Where the code or image comes from. GitHub sources go through the
- * panel's GitHub App (github.connectRepo); generic git uses a stored
- * credential (git.ts) for private repos; images may use a registry login
- * (registries.ts).
+ * panel's GitHub App (github.connectRepo); GitLab, Gitea/Forgejo and
+ * Bitbucket through a stored connection (gitProviders.connectRepo);
+ * generic git uses a stored credential (git.ts) for private repos; images
+ * may use a registry login (registries.ts).
  */
 export const Source = Type.Union([
   Type.Object({
@@ -88,6 +100,17 @@ export const Source = Type.Union([
     /** git_credentials.id for private repos; null for public ones. */
     credentialId: Type.Union([Id, Type.Null()]),
     /** Generic git hosts deploy on push through the deploy trigger URL (webhooks.ts). */
+    deployOnPush: Type.Boolean(),
+  }),
+  Type.Object({
+    type: Type.Literal("provider"),
+    /** git_providers.id: the GitLab, Gitea/Forgejo or Bitbucket connection (gitProviders.ts). */
+    providerId: Id,
+    /** The connection's kind, for display; gitProviders.connectRepo sets it. */
+    provider: GitProviderKind,
+    repo: RepoFullPath,
+    branch: GitBranch,
+    /** Deploy automatically when the branch gets a push (through the repository webhook the panel creates). */
     deployOnPush: Type.Boolean(),
   }),
   Type.Object({
@@ -114,6 +137,9 @@ export const Source = Type.Union([
 export const SourceSummary = Type.Object({
   type: Type.Union([
     Type.Literal("github"),
+    Type.Literal("gitlab"),
+    Type.Literal("gitea"),
+    Type.Literal("bitbucket"),
     Type.Literal("git"),
     Type.Literal("image"),
     Type.Literal("inline"),
@@ -292,6 +318,8 @@ export const ServiceDetail = Type.Object({
   /** Members of a compose stack (kind "compose"); empty for other kinds. */
   members: Type.Array(Type.Object({ id: Id, name: ServiceName, status: ServiceStatus })),
   volumes: Type.Array(Volume),
+  /** Patterns a push must touch to deploy (services.setWatchPaths); empty = every push deploys. */
+  watchPaths: WatchPaths,
 });
 
 const serviceScope = (input: { serviceId: string }) => input.serviceId;
@@ -370,9 +398,22 @@ export const setSource = defineOp({
   kind: "mutation",
   summary: "Change where a service's code or image comes from",
   description:
-    "Switches a service to a git URL, a Docker image, an inline Dockerfile, uploads or no source. For GitHub repositories use github.connectRepo, which checks the App can read the repo. Applies on the next deploy.",
+    "Switches a service to a git URL, a Docker image, an inline Dockerfile, uploads or no source. For GitHub repositories use github.connectRepo, which checks the App can read the repo; for GitLab, Gitea/Forgejo and Bitbucket use gitProviders.connectRepo, which also creates the repository webhook. Applies on the next deploy.",
   input: Type.Object({ serviceId: Id, source: Source }),
   output: ServiceDetail,
+  permission: permission.service("services.update", serviceScope),
+  mcp: true,
+  audit: true,
+});
+
+export const setWatchPaths = defineOp({
+  id: "services.setWatchPaths",
+  kind: "mutation",
+  summary: "Set a service's watch paths",
+  description:
+    'Sets the glob patterns a push must touch to deploy the service (for monorepos), in order: * (not across "/"), ** (across folders), ?, and ! to exclude; the last pattern that matches a file decides. A push deploys when at least one changed file counts; when the changed files cannot be known it deploys. An empty list deploys on every push. Applies to GitHub, GitLab, Gitea/Forgejo and Bitbucket pushes, branch polling and the deploy trigger URL.',
+  input: Type.Object({ serviceId: Id, watchPaths: WatchPaths }),
+  output: Type.Object({ watchPaths: WatchPaths }),
   permission: permission.service("services.update", serviceScope),
   mcp: true,
   audit: true,

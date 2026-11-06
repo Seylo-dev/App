@@ -1,7 +1,7 @@
 // Service ops: list, read, create, settings, notes, placements and run state.
 // Delete is delete.ts, move is move.ts.
 
-import { OpError, services as serviceOps } from "@seylo/ops";
+import { normalizeWatchPaths, OpError, services as serviceOps, watchPatternProblem } from "@seylo/ops";
 import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains, servicePlacements, services, volumes } from "../../db/schema";
@@ -9,6 +9,7 @@ import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
+import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
 import { assertNameFree, assertNode, insertService, writeSpec } from "./insert";
 import { entryNodeOf, loadService, nameKey, projectServiceRows, type ServiceRow, toDetail, toSummaries, volumesOf } from "./rows";
@@ -35,10 +36,17 @@ export function updateSpec(
   change: (spec: ServiceSpecJson, row: ServiceRow) => ServiceSpecJson,
 ): ServiceRow {
   const row = loadService(ctx.db, serviceId);
-  const spec = change(readSpec(row.spec), row);
+  const before = readSpec(row.spec);
+  const spec = change(before, row);
   writeSpec(ctx.db, serviceId, spec);
+  // A repository webhook belongs to the repository the service deployed: another source drops it.
+  if (before.source.type === "provider" && !sameProviderRepo(before.source, spec.source)) dropHook(ctx, serviceId);
   publishService(ctx, row);
   return loadService(ctx.db, serviceId);
+}
+
+function sameProviderRepo(a: ServiceSpecJson["source"], b: ServiceSpecJson["source"]): boolean {
+  return a.type === "provider" && b.type === "provider" && a.providerId === b.providerId && a.repo.toLowerCase() === b.repo.toLowerCase();
 }
 
 function forbidMemberEdit(row: ServiceRow, what: string): void {
@@ -58,6 +66,14 @@ const create = implement(serviceOps.create, (input, ctx) => {
     throw new OpError("BAD_REQUEST", "Connect GitHub repositories with github.connectRepo after creating the service.", {
       field: "source",
     });
+  if (input.source?.type === "provider")
+    throw new OpError(
+      "BAD_REQUEST",
+      "Connect GitLab, Gitea and Bitbucket repositories with gitProviders.connectRepo after creating the service.",
+      {
+        field: "source",
+      },
+    );
   if (input.source) assertSourceAllowed(ctx, input.projectId, input.source);
   const spec: Partial<ServiceSpecJson> = {
     source: input.source ?? { type: "none" },
@@ -117,6 +133,8 @@ const setSource = implement(serviceOps.setSource, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (input.source.type === "github")
     throw new OpError("BAD_REQUEST", "Use github.connectRepo for GitHub repositories.", { field: "source" });
+  if (input.source.type === "provider")
+    throw new OpError("BAD_REQUEST", "Use gitProviders.connectRepo for GitLab, Gitea and Bitbucket repositories.", { field: "source" });
   if (row.kind !== "app" && row.kind !== "cron") throw new OpError("CONFLICT", `The source of a ${row.kind} service cannot be changed.`);
   forbidMemberEdit(row, "source");
   assertSourceAllowed(ctx, row.projectId, input.source);
@@ -124,10 +142,24 @@ const setSource = implement(serviceOps.setSource, (input, ctx) => {
     ...spec,
     source: input.source,
     build: input.source.type === "inline" ? { ...spec.build, builder: "dockerfile" } : spec.build,
-    // Previews need a GitHub source.
+    // Previews need a GitHub or git provider source.
     previews: { ...spec.previews, enabled: false },
   }));
   return toDetail(ctx.db, ctx.agents, next);
+});
+
+const setWatchPaths = implement(serviceOps.setWatchPaths, (input, ctx) => {
+  const row = loadService(ctx.db, input.serviceId);
+  if (row.parentId) throw new OpError("CONFLICT", `${row.name} belongs to a compose stack: set watch paths on the stack.`);
+  if (row.kind !== "app" && row.kind !== "cron" && row.kind !== "compose")
+    throw new OpError("CONFLICT", `A ${row.kind} service does not deploy on push.`);
+  const watchPaths = normalizeWatchPaths(input.watchPaths);
+  for (const [index, pattern] of watchPaths.entries()) {
+    const problem = watchPatternProblem(pattern);
+    if (problem) throw new OpError("BAD_REQUEST", `${pattern}: ${problem}`, { field: `watchPaths.${index}` });
+  }
+  const next = updateSpec(ctx, row.id, (spec) => ({ ...spec, watchPaths }));
+  return { watchPaths: readSpec(next.spec).watchPaths };
 });
 
 const setNotes = implement(serviceOps.setNotes, (input, ctx) => {
@@ -323,6 +355,7 @@ export const serviceOpsHandlers = [
   update,
   setSource,
   setNotes,
+  setWatchPaths,
   setHealthCheck,
   setCrashPolicy,
   setResources,

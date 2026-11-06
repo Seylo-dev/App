@@ -21,6 +21,8 @@ export type SealPurpose =
   | "domain.certificate"
   | "edge.ticket-key"
   | "git.credential"
+  | "git.provider"
+  | "git.webhook"
   | "lb.key"
   | "agent-tls.key"
   | "github.account"

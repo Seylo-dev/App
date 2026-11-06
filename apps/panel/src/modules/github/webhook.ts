@@ -2,13 +2,14 @@
 // is checked against the App's webhook secret (X-Hub-Signature-256) before
 // anything is parsed; deliveries are logged and deduplicated by GUID.
 
-import { createHash } from "node:crypto";
 import { readBodyText } from "@seylo/ops/elysia";
 import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { githubInstallations } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { changesFromPushPayload } from "../webhooks/changes";
 import { alreadyHandled, recordDelivery } from "../webhooks/deliveries";
+import { recordRejected, replayedBody } from "../webhooks/replay";
 import { appRow, forgetTokens, githubWebhookPath, verifySignature, webhookSecret } from "./app";
 import { type GithubInstallationPayload, upsertInstallation } from "./ops";
 import { handlePullRequest, handlePush } from "./push";
@@ -22,6 +23,7 @@ function json(status: number, body: unknown): Response {
 interface PushPayload {
   ref: string;
   deleted?: boolean;
+  before?: string;
   after: string;
   repository: { full_name: string };
   head_commit: { id: string; message: string; author?: { name?: string; username?: string } } | null;
@@ -94,6 +96,7 @@ export async function handleGithubEvent(
         message: p.head_commit?.message.split("\n")[0] ?? null,
         author: p.head_commit?.author?.username ?? p.head_commit?.author?.name ?? null,
         sender: p.sender?.login ?? null,
+        changes: changesFromPushPayload(payload),
       },
       { id: deliveryId, event, source: "github" },
     );
@@ -123,47 +126,6 @@ export async function handleGithubEvent(
   return { status: 200, body: { ok: true, ignored: event } };
 }
 
-/** Rejected deliveries recorded per hour at most: enough to see a wrong secret, not a disk filler. */
-const rejectedPerHour = 20;
-/** How long a signed body is remembered against replays (GitHub redelivers for 3 days). */
-const replayWindowMs = 3 * 24 * 3600 * 1000;
-const seenBodies = new WeakMap<object, Map<string, { deliveryId: string; at: number }>>();
-const rejectedCount = new WeakMap<object, { hour: number; n: number }>();
-
-function recordRejected(deps: Deps, deliveryId: string, event: string, detail: string): void {
-  const hour = Math.floor(Date.now() / 3_600_000);
-  const count = rejectedCount.get(deps.db);
-  const current = count?.hour === hour ? count : { hour, n: 0 };
-  current.n += 1;
-  rejectedCount.set(deps.db, current);
-  if (current.n > rejectedPerHour) return;
-  recordDelivery(deps.db, { source: "github", deliveryId, event, serviceId: null, outcome: "rejected", detail });
-}
-
-/**
- * Whether this signed body was already handled under another delivery id. The
- * signature covers only the body, so a captured push re-sent with a fresh
- * X-GitHub-Delivery would otherwise deploy that old commit again. GitHub's own
- * redeliveries keep their id and pass.
- */
-function replayed(deps: Deps, deliveryId: string, raw: string): boolean {
-  let seen = seenBodies.get(deps.db);
-  if (!seen) {
-    seen = new Map();
-    seenBodies.set(deps.db, seen);
-  }
-  const now = Date.now();
-  for (const [hash, entry] of seen) {
-    if (now - entry.at <= replayWindowMs && seen.size <= 10_000) break;
-    seen.delete(hash);
-  }
-  const hash = createHash("sha256").update(raw).digest("hex");
-  const before = seen.get(hash);
-  if (before && before.deliveryId !== deliveryId) return true;
-  seen.set(hash, { deliveryId, at: now });
-  return false;
-}
-
 export function githubWebhookRoute(deps: Deps) {
   return new Elysia().post(
     githubWebhookPath,
@@ -176,13 +138,18 @@ export function githubWebhookRoute(deps: Deps) {
       const deliveryId = (request.headers.get("x-github-delivery") ?? "").slice(0, 64);
       const event = (request.headers.get("x-github-event") ?? "unknown").slice(0, 64);
       if (!verifySignature(secret, raw, request.headers.get("x-hub-signature-256"))) {
-        recordRejected(deps, deliveryId || "missing", event, "The signature did not match.");
+        recordRejected(deps.db, { source: "github", event, serviceId: null, detail: "The signature did not match." });
         return json(401, { error: { code: "UNAUTHENTICATED", message: "The signature did not match." } });
       }
       // GitHub always sends one; without it the dedupe below could not work.
       if (!deliveryId) return json(400, { error: { code: "BAD_REQUEST", message: "X-GitHub-Delivery is missing." } });
-      if (event !== "ping" && replayed(deps, deliveryId, raw)) {
-        recordRejected(deps, deliveryId, event, "The same signed body was already delivered under another id (replay).");
+      if (event !== "ping" && replayedBody(deps.db, "github", deliveryId, raw)) {
+        recordRejected(deps.db, {
+          source: "github",
+          event,
+          serviceId: null,
+          detail: "The same signed body was already delivered under another id (replay).",
+        });
         return json(200, { ok: true, duplicate: true });
       }
       let payload: unknown;

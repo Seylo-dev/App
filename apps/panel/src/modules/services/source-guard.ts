@@ -1,13 +1,14 @@
-// What a source may point at. Git credentials, registry logins and GitHub
-// App installations are panel-wide secrets of the owner, so a member must
-// not be able to aim them anywhere they like:
+// What a source may point at. Git credentials, registry logins, GitHub
+// App installations and git provider connections are panel-wide secrets of
+// the owner, so a member must not be able to aim them anywhere they like:
 //
 // - a credential only ever goes to its own host (a git token for
 //   github.com is never sent to git.attacker.example, a registry password
 //   never to another registry);
 // - attaching one to a project needs the global manage action for it
-//   (git.manage, registries.manage, github.manage) unless a service of the
-//   same project already uses it, which is how an admin shares it there;
+//   (git.manage, registries.manage, github.manage, gitProviders.manage)
+//   unless a service of the same project already uses it, which is how an
+//   admin shares it there;
 // - an image may not come from the panel's registry relay
 //   (127.0.0.1:5755/<service id>): those images belong to their services
 //   and only deployments reference them.
@@ -55,7 +56,9 @@ export function assertImageAllowed(image: string, field = "source.image"): void 
 }
 
 /** Whether a service of this project uses the credential in its source or compose source. */
-function usedInProject(db: PanelDb, projectId: string, path: "credentialId" | "registryId" | "installationId", id: string): boolean {
+type AttachPath = "credentialId" | "registryId" | "installationId" | "providerId";
+
+function usedInProject(db: PanelDb, projectId: string, path: AttachPath, id: string): boolean {
   const source = sql`json_extract(${services.spec}, ${`$.source.${path}`})`;
   const stack = sql`json_extract(${services.spec}, ${`$.stack.source.${path}`})`;
   return (
@@ -70,8 +73,8 @@ function usedInProject(db: PanelDb, projectId: string, path: "credentialId" | "r
 function assertMayAttach(
   caller: Caller,
   projectId: string,
-  action: "git.manage" | "registries.manage" | "github.manage",
-  path: "credentialId" | "registryId" | "installationId",
+  action: "git.manage" | "registries.manage" | "github.manage" | "gitProviders.manage",
+  path: AttachPath,
   id: string,
   field: string,
   what: string,
@@ -120,6 +123,7 @@ export type GuardedSource =
   | { type: "git"; url: string; credentialId?: string | null }
   | { type: "image"; image: string; registryId?: string | null }
   | { type: "github"; installationId: string }
+  | { type: "provider"; providerId: string }
   | { type: string };
 
 /** Checks a source (service or compose stack) before it is stored for a service of `projectId`. */
@@ -135,6 +139,9 @@ export function assertSourceAllowed(caller: Caller, projectId: string, source: G
       assertRegistryHost(caller.db, source.registryId, source.image, at("registryId"));
       assertMayAttach(caller, projectId, "registries.manage", "registryId", source.registryId, at("registryId"), "registry login");
     }
+  }
+  if (source.type === "provider" && "providerId" in source) {
+    assertMayAttach(caller, projectId, "gitProviders.manage", "providerId", source.providerId, at("providerId"), "git provider connection");
   }
   if (source.type === "github" && "installationId" in source) {
     assertMayAttach(

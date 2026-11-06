@@ -12,6 +12,8 @@ import { resolveServiceEnv } from "../env/desired";
 import { openCredential } from "../git/credentials";
 import { listRemoteRefs, targetUrl } from "../git/remote";
 import { githubCommit, tokenForInstallation } from "../github/app";
+import { type CommitInfo, clientFor } from "../gitProviders/client";
+import { loadProvider, openToken } from "../gitProviders/rows";
 import type { ServiceRow } from "../services/rows";
 import { assertCredentialHost } from "../services/source-guard";
 import type { ServiceSpecJson } from "../services/spec";
@@ -22,6 +24,11 @@ export const registryRelay = "127.0.0.1:5755";
 
 export function imageReference(serviceId: string, generation: number): string {
   return `${registryRelay}/${serviceId}:${generation}`;
+}
+
+/** A user name the agent accepts for its credential helper (go/internal/build gitUserRe); anything else sends its default. */
+function gitUser(name: string | null | undefined): string {
+  return name && /^[A-Za-z0-9._@+-]{1,100}$/.test(name) ? name : "";
 }
 
 export interface ResolvedBuild {
@@ -97,6 +104,41 @@ export async function resolveBuild(
         cloneDetail: `${source.branch} at ${commit.sha.slice(0, 7)}`,
       };
     }
+    case "provider": {
+      // The connection's token goes only to its own host: the clone URL is built from the
+      // connection's address, never taken from the source.
+      const provider = loadProvider(deps.db, source.providerId, "source.providerId");
+      const client = clientFor(deps, provider);
+      let commit: CommitInfo | null;
+      try {
+        commit = input.commitSha ? await client.commit(source.repo, input.commitSha) : await client.branchHead(source.repo, source.branch);
+      } catch (error) {
+        // A known commit still builds when the provider's API is down; the clone needs only git.
+        if (!input.commitSha) throw error;
+        commit = { sha: input.commitSha, message: "", author: null };
+      }
+      if (!commit) throw new OpError("BAD_REQUEST", `${source.repo} has no branch ${source.branch}.`);
+      return {
+        request: create(BuildRequestSchema, {
+          ...base,
+          source: {
+            source: {
+              case: "git",
+              value: {
+                url: client.cloneUrl(source.repo),
+                ref: source.branch,
+                commit: commit.sha,
+                token: openToken(deps.secrets, provider),
+                username: gitUser(client.gitUsername()),
+              },
+            },
+          },
+        }),
+        builderLabel: builderLabels[builder],
+        commit: { sha: commit.sha, message: commit.message.split("\n")[0] || null, author: commit.author, branch: source.branch },
+        cloneDetail: `${source.branch} at ${commit.sha.slice(0, 7)}`,
+      };
+    }
     case "git": {
       // The stored credential only ever goes to its own host, whoever saved the source.
       if (source.credentialId) assertCredentialHost(deps.db, source.credentialId, source.url, "source.credentialId");
@@ -127,6 +169,8 @@ export async function resolveBuild(
                 ref: source.branch,
                 commit: sha ?? "",
                 token: auth?.token ?? "",
+                // Some hosts want a user name with the token (Bitbucket); empty keeps the agent's default.
+                username: auth?.token ? gitUser(auth.username) : "",
                 sshPrivateKey: auth?.sshPrivateKey ?? "",
                 sshKnownHosts: auth?.knownHosts ?? "",
               },

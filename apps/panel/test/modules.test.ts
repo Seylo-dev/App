@@ -10,7 +10,8 @@ import { testPanel } from "./helpers";
 
 test("every op contract has exactly one handler, and every handler a contract", () => {
   const handlers = collectHandlers(modules);
-  expect([...handlers.keys()].sort()).toEqual(allOps.map((op) => op.id));
+  // Both sorted the same way: allOps sorts by locale, which orders "gitProviders" after "github".
+  expect([...handlers.keys()].sort()).toEqual(allOps.map((op) => op.id).sort());
 });
 
 test("module names match their folders", () => {

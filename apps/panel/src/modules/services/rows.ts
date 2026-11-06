@@ -79,6 +79,8 @@ export function sourceSummary(row: ServiceRow, spec: ServiceSpecJson): SourceSum
   switch (s.type) {
     case "github":
       return { type: "github", label: s.repo, branch: s.branch, builder };
+    case "provider":
+      return { type: s.provider, label: s.repo, branch: s.branch, builder };
     case "git":
       return { type: "git", label: gitLabel(s.url), branch: s.branch, builder };
     case "image":
@@ -228,6 +230,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     notes: row.notes,
     members: all.slice(1).map((m) => ({ id: m.id, name: m.name, status: m.status })),
     volumes: volumesOf(db, row.id),
+    watchPaths: spec.watchPaths,
   };
 }
 

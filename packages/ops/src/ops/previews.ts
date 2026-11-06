@@ -1,4 +1,5 @@
-// PR previews: every open pull request on a GitHub-connected service gets
+// PR previews: every open pull request (GitLab: merge request) on a service
+// connected to GitHub, GitLab, Gitea/Forgejo or Bitbucket gets
 // its own preview service in the same project, deployed on each push and
 // deleted when the PR closes. Previews share the service's environment,
 // so they talk to the same database: enabling them needs an explicit
@@ -40,7 +41,7 @@ export const getSettings = defineOp({
   kind: "query",
   summary: "Get a service's PR preview settings",
   description:
-    "Returns whether PR previews are on for a service, their domain pattern and limit, and whether the service can have them at all (only GitHub sources can).",
+    "Returns whether PR previews are on for a service, their domain pattern and limit, and whether the service can have them at all (only GitHub and git provider sources can).",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     settings: PreviewSettings,

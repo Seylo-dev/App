@@ -12,6 +12,7 @@ import { githubApps, githubInstallations } from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { SecretBox } from "../../security/secret-box";
 import { getSetting } from "../../settings";
+import type { ChangedFileList } from "../webhooks/gate";
 import { githubRequest } from "./api";
 
 export const githubWebhookPath = "/api/hooks/github";
@@ -144,6 +145,23 @@ export async function githubCommit(token: string, repo: string, ref: string): Pr
     message: data.commit.message.split("\n")[0] ?? "",
     author: data.author?.login ?? data.commit.author?.name ?? null,
   };
+}
+
+/** GitHub lists at most 300 files in a compare; more means the list is cut. */
+const compareFileCap = 300;
+
+/** Files that differ between two commits (for watch paths), through the App. */
+export async function githubCompare(token: string, repo: string, before: string, after: string): Promise<ChangedFileList> {
+  const { data } = await githubRequest<{ files?: { filename: string; previous_filename?: string }[] }>(
+    `/repos/${repo}/compare/${encodeURIComponent(before)}...${encodeURIComponent(after)}`,
+    { auth: token },
+  );
+  const files = new Set<string>();
+  for (const f of data.files ?? []) {
+    files.add(f.filename);
+    if (f.previous_filename) files.add(f.previous_filename);
+  }
+  return { files: [...files], complete: (data.files?.length ?? 0) < compareFileCap };
 }
 
 /**

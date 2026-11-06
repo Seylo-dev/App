@@ -1,5 +1,5 @@
 // Push-to-deploy: the secret deploy trigger URL of a service (for CI and
-// git hosts other than GitHub) and the log of webhook deliveries. The
+// git hosts without a native connection) and the log of webhook deliveries. The
 // endpoints that receive webhooks are plain HTTP routes, not ops: GitHub
 // posts to the github module's endpoint, trigger URLs hit this module's
 // POST /api/hooks/deploy/<token>.
@@ -11,8 +11,14 @@ import { Empty, Id, Timestamp } from "../schemas";
 
 export const Delivery = Type.Object({
   id: Id,
-  source: Type.Union([Type.Literal("github"), Type.Literal("trigger")]),
-  /** "push", "pull_request.opened", "trigger". */
+  source: Type.Union([
+    Type.Literal("github"),
+    Type.Literal("trigger"),
+    Type.Literal("gitlab"),
+    Type.Literal("gitea"),
+    Type.Literal("bitbucket"),
+  ]),
+  /** "push", "pull_request.opened", "merge_request.update", "trigger". */
   event: Type.String(),
   outcome: Type.Union([Type.Literal("deployed"), Type.Literal("ignored"), Type.Literal("rejected"), Type.Literal("failed")]),
   /** Why, in plain words: "branch dev is not deployed", "signature did not match". */
@@ -50,7 +56,7 @@ export const rotateTrigger = defineOp({
   kind: "mutation",
   summary: "Create or rotate a deploy trigger URL",
   description:
-    "Creates a new secret deploy URL for a service and invalidates the old one. A POST to the URL deploys the service (optional query: commit=<sha>). The URL is returned only this once. While the panel has no domain it is a path (/api/hooks/deploy/...) to put after the panel's address.",
+    "Creates a new secret deploy URL for a service and invalidates the old one. A POST to the URL deploys the service (optional query: commit=<sha>). A JSON body in the push payload shape of GitHub, GitLab or Gitea (commits[].added/modified/removed, before, after) or { changedFiles: [...] } is checked against the service's watch paths and [skip ci] markers. The URL is returned only this once. While the panel has no domain it is a path (/api/hooks/deploy/...) to put after the panel's address.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({ url: Type.String(), hint: Type.String(), createdAt: Timestamp }),
   permission: permission.service("services.update", serviceScope),
@@ -76,7 +82,7 @@ export const listDeliveries = defineOp({
   kind: "query",
   summary: "List a service's webhook deliveries",
   description:
-    "Lists recent webhook deliveries (GitHub pushes and PR events, trigger URL calls) for a service, newest first, with what each one did and why.",
+    "Lists recent webhook deliveries (GitHub, GitLab, Gitea/Forgejo and Bitbucket pushes and merge or pull request events, trigger URL calls) for a service, newest first, with what each one did and why (including watch-path and [skip ci] skips).",
   input: Type.Object({ serviceId: Id, limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 50 })) }),
   output: Type.Object({ deliveries: Type.Array(Delivery) }),
   permission: permission.service("services.view", serviceScope),

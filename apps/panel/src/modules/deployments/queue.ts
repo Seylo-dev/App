@@ -10,6 +10,7 @@ import { panelServiceId } from "../nodes/panel-service";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
 import { engineFor, nextGeneration } from "./engine";
+import { appendLog } from "./logs";
 import { type DeploymentRow, deploymentDigest, initialSteps, publishDeploymentChange } from "./store";
 
 export interface QueueDeployInput {
@@ -29,6 +30,8 @@ export interface QueueDeployInput {
   uploadId?: string | null;
   /** Deployments of other services to wait for (a template's database before its app). */
   waitFor?: string[];
+  /** Lines for the start of the deploy log, such as which watch path a push matched. */
+  notes?: readonly string[];
 }
 
 export function queueDeploy(deps: Deps, input: QueueDeployInput): DeploymentRow {
@@ -78,6 +81,7 @@ export function queueDeploy(deps: Deps, input: QueueDeployInput): DeploymentRow 
     })
     .returning()
     .get();
+  if (input.notes && input.notes.length > 0) appendLog(deps, svc.id, row.id, "clone", input.notes);
   publishDeploymentChange(deps, svc.id, row.id);
   engineFor(deps).kick(row.id);
   return row;

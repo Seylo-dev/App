@@ -48,14 +48,15 @@ export function recordDelivery(db: PanelDb, record: DeliveryRecord): void {
 }
 
 /**
- * True when this GitHub delivery was already handled successfully (GitHub
- * retries and redeliveries reuse the GUID). Failed ones are handled again.
+ * True when this delivery was already handled successfully (providers'
+ * retries and redeliveries reuse their delivery id). Failed ones are
+ * handled again.
  */
-export function alreadyHandled(db: PanelDb, deliveryId: string): boolean {
+export function alreadyHandled(db: PanelDb, deliveryId: string, source: WebhookSource = "github"): boolean {
   const rows = db
     .select({ outcome: webhookDeliveries.outcome })
     .from(webhookDeliveries)
-    .where(and(eq(webhookDeliveries.source, "github"), eq(webhookDeliveries.deliveryId, deliveryId)))
+    .where(and(eq(webhookDeliveries.source, source), eq(webhookDeliveries.deliveryId, deliveryId)))
     .all();
   return rows.length > 0 && rows.every((r) => r.outcome !== "failed");
 }

@@ -20,6 +20,7 @@ import * as env from "./env";
 import * as exposures from "./exposures";
 import * as files from "./files";
 import * as git from "./git";
+import * as gitProviders from "./gitProviders";
 import * as github from "./github";
 import * as grants from "./grants";
 import * as invites from "./invites";
@@ -45,7 +46,7 @@ import * as uptime from "./uptime";
 import * as users from "./users";
 import * as webhooks from "./webhooks";
 
-export { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, domains, env, exposures, files, git, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
+export { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, domains, env, exposures, files, git, gitProviders, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
 
 /** Every op module by name; the name is the id prefix of its ops. */
-export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, domains, env, exposures, files, git, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;
+export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, domains, env, exposures, files, git, gitProviders, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;
