@@ -6,6 +6,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains, servicePlacements, services, volumes } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
@@ -61,6 +62,16 @@ const list = implement(serviceOps.list, (input, ctx) => ({
 
 const get = implement(serviceOps.get, (input, ctx) => toDetail(ctx.db, ctx.agents, loadService(ctx.db, input.serviceId)));
 
+/** A cron service's schedule as the node reads it: Sunday stored as 0, refused when the node could not run it. */
+function cronSettings(cron: NonNullable<ServiceSpecJson["cron"]>): NonNullable<ServiceSpecJson["cron"]> {
+  if (!isTimeZone(cron.timeZone))
+    throw new OpError("BAD_REQUEST", `${cron.timeZone} is not a time zone this panel knows.`, { field: "cron.timeZone" });
+  const schedule = normalizeCronSchedule(cron.schedule.trim());
+  const problem = nodeCronProblem(schedule, cron.timeZone);
+  if (problem) throw new OpError("BAD_REQUEST", `The schedule is not valid: ${problem}.`, { field: "cron.schedule" });
+  return { ...cron, schedule };
+}
+
 const create = implement(serviceOps.create, (input, ctx) => {
   if (input.kind === "cron" && !input.cron) throw new OpError("BAD_REQUEST", "Cron services need a schedule.", { field: "cron" });
   if (input.source?.type === "github")
@@ -80,7 +91,7 @@ const create = implement(serviceOps.create, (input, ctx) => {
     source: input.source ?? { type: "none" },
     build: { ...defaultBuild, ...input.build, ...(input.source?.type === "inline" ? { builder: "dockerfile" as const } : {}) },
     ports: input.ports ?? [],
-    cron: input.kind === "cron" ? (input.cron ?? null) : null,
+    cron: input.kind === "cron" && input.cron ? cronSettings(input.cron) : null,
   };
   const { id } = ctx.db.transaction((tx) =>
     insertService(tx, {
@@ -103,6 +114,9 @@ const create = implement(serviceOps.create, (input, ctx) => {
 
 const update = implement(serviceOps.update, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
+  if (input.cron !== undefined && row.kind !== "cron")
+    throw new OpError("BAD_REQUEST", "Only cron services have a schedule.", { field: "cron" });
+  const cron = input.cron === undefined ? undefined : cronSettings(input.cron);
   if (input.name !== undefined && input.name !== row.name) {
     if (row.protected) throw new OpError("CONFLICT", `${row.name} is protected and cannot be renamed.`, { field: "name" });
     assertNameFree(ctx.db, row.projectId, input.name, row.id);
@@ -112,15 +126,13 @@ const update = implement(serviceOps.update, (input, ctx) => {
       .where(eq(services.id, row.id))
       .run();
   }
-  if (input.cron !== undefined && row.kind !== "cron")
-    throw new OpError("BAD_REQUEST", "Only cron services have a schedule.", { field: "cron" });
   if (input.ports !== undefined || input.container !== undefined) forbidMemberEdit(row, "ports and command");
   const hadPorts = readSpec(row.spec).ports.length > 0;
   const next = updateSpec(ctx, row.id, (spec) => ({
     ...spec,
     container: input.container ? { ...spec.container, ...input.container } : spec.container,
     ports: input.ports ?? spec.ports,
-    cron: input.cron ?? spec.cron,
+    cron: cron ?? spec.cron,
   }));
   // An app created without a port (set later, after the source) gets its first-run IP:port now, unless it has a domain.
   if (row.kind === "app" && !hadPorts && (input.ports?.length ?? 0) > 0) {

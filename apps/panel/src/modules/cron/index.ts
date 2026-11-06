@@ -8,7 +8,7 @@ import { and, desc, eq, lt, or } from "drizzle-orm";
 import { cronJobs, cronRuns, servicePlacements, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { newId } from "../../ids";
-import { isTimeZone, nextCronRun, nodeCronProblem } from "../../jobs/cron-expr";
+import { isTimeZone, nextCronRun, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
 import { defineModule } from "../module";
 import { flusherFor } from "../nodes";
@@ -40,9 +40,11 @@ function getJob(ctx: OpContext, serviceId: string, cronJobId: string): JobRow {
 
 function toJob(ctx: Pick<Deps, "db">, row: JobRow) {
   const last = ctx.db.select().from(cronRuns).where(eq(cronRuns.cronJobId, row.id)).orderBy(desc(cronRuns.startedAt)).limit(1).get();
+  // Rows a 0.1 panel saved may write Sunday as 7; they read as 0, like the node gets them.
+  const schedule = normalizeCronSchedule(row.schedule);
   let next: Date | null = null;
   try {
-    next = row.enabled ? nextCronRun(row.schedule, row.timeZone, new Date()) : null;
+    next = row.enabled ? nextCronRun(schedule, row.timeZone, new Date()) : null;
   } catch {
     next = null;
   }
@@ -50,7 +52,7 @@ function toJob(ctx: Pick<Deps, "db">, row: JobRow) {
     id: row.id,
     serviceId: row.serviceId,
     name: row.name,
-    schedule: row.schedule,
+    schedule,
     timeZone: row.timeZone,
     command: row.command,
     timeoutSeconds: row.timeoutSeconds,
@@ -81,13 +83,15 @@ const list = implement(cron.list, (input, ctx) => ({
 const create = implement(cron.create, (input, ctx) => {
   requireService(ctx, input.serviceId);
   const timeZone = input.timeZone ?? "UTC";
-  checkSchedule(input.schedule, timeZone);
+  // Sunday is stored as 0 (the node's parser does not read 7).
+  const schedule = normalizeCronSchedule(input.schedule.trim());
+  checkSchedule(schedule, timeZone);
   const row = ctx.db
     .insert(cronJobs)
     .values({
       serviceId: input.serviceId,
       name: input.name,
-      schedule: input.schedule.trim(),
+      schedule,
       timeZone,
       command: input.command,
       timeoutSeconds: input.timeoutSeconds ?? 3600,
@@ -102,7 +106,7 @@ const create = implement(cron.create, (input, ctx) => {
 
 const update = implement(cron.update, (input, ctx) => {
   const existing = getJob(ctx, input.serviceId, input.cronJobId);
-  const schedule = input.schedule?.trim() ?? existing.schedule;
+  const schedule = normalizeCronSchedule(input.schedule?.trim() ?? existing.schedule);
   const timeZone = input.timeZone ?? existing.timeZone;
   if (input.schedule !== undefined || input.timeZone !== undefined) checkSchedule(schedule, timeZone);
   const row = ctx.db

@@ -33,6 +33,7 @@ import {
 import { asc, eq, inArray } from "drizzle-orm";
 import type { PanelDb } from "../db/client";
 import { cronJobs, nodes, services, users } from "../db/schema";
+import { normalizeCronSchedule } from "../jobs/cron-expr";
 import { nodeAddress, privateIpv4Of } from "../modules/domains/lookup";
 import { serviceSpecFor, servicesOnNode } from "../modules/services";
 import type { SecretBox } from "../security/secret-box";
@@ -111,7 +112,8 @@ function addCronJobs(db: PanelDb, spec: ServiceSpec): void {
   spec.cronJobs = jobs.map((job) =>
     create(CronJobSchema, {
       id: job.id,
-      schedule: job.schedule,
+      // Rows a 0.1 panel saved may write Sunday as 7, which the node's parser refuses.
+      schedule: normalizeCronSchedule(job.schedule),
       timeZone: job.timeZone,
       command: ["sh", "-c", job.command],
       timeout: seconds(job.timeoutSeconds),

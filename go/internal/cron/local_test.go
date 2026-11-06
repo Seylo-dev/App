@@ -340,6 +340,59 @@ func TestDisabledStoppedAndUnknownJobs(t *testing.T) {
 	}
 }
 
+func TestUnreadableScheduleIsReportedOnce(t *testing.T) {
+	h := newHarness(t, say("ok\n", 0))
+	// Panels before 0.2 saved Sunday as 7, which this parser refuses.
+	sunday := appSpec(&agentv1.CronJob{Id: "j1", Schedule: "0 4 * * 7", Command: []string{"x"}})
+	cronSvc := &agentv1.ServiceSpec{
+		Id: "c1", ProjectId: "p", Kind: agentv1.ServiceKind_SERVICE_KIND_CRON,
+		Image:    &agentv1.ImageRef{Reference: "alpine:3.22"},
+		KindSpec: &agentv1.ServiceSpec_Cron{Cron: &agentv1.CronSpec{Schedule: "0 4 * * 1-7"}},
+	}
+	_ = h.sched.Sync([]*agentv1.ServiceSpec{sunday, cronSvc})
+	got := map[string]*agentv1.CronRun{}
+	for range 2 {
+		r := h.report()
+		got[r.GetServiceId()+"/"+r.GetCronJobId()] = r
+	}
+	r := got["svc1/j1"]
+	if r == nil || got["c1/"] == nil {
+		t.Fatalf("reports = %v", got)
+	}
+	if r.GetResult() != agentv1.CronRunResult_CRON_RUN_RESULT_FAILED || r.GetExitCode() != -1 || !strings.HasPrefix(r.GetRunId(), "unreadable-") ||
+		len(r.GetLastLines()) != 1 || !strings.Contains(r.GetLastLines()[0], "not scheduled") || !strings.Contains(r.GetLastLines()[0], "above maximum") {
+		t.Fatalf("report = %v", r)
+	}
+	if len(h.sched.Jobs()) != 0 {
+		t.Fatalf("jobs = %v, want none scheduled", h.sched.Jobs())
+	}
+
+	// The same specs again (every desired-state sync): nothing new.
+	_ = h.sched.Sync([]*agentv1.ServiceSpec{sunday, cronSvc})
+	h.settle()
+	h.noReport()
+
+	// A restarted agent reports the same run id again, which the panel stores once.
+	jobs, bad := collectJobs([]*agentv1.ServiceSpec{sunday}, h.sched.log)
+	if len(jobs) != 0 || len(bad) != 1 || unreadableRun(bad[0], time.Now()).GetRunId() != r.GetRunId() {
+		t.Fatalf("restart: jobs %v, bad %v", jobs, bad)
+	}
+
+	// Another unreadable schedule is a new report; a fixed one is scheduled.
+	sunday.CronJobs[0].Schedule = "0 5 * * 7"
+	_ = h.sched.Sync([]*agentv1.ServiceSpec{sunday, cronSvc})
+	if r2 := h.report(); r2.GetCronJobId() != "j1" || r2.GetRunId() == r.GetRunId() {
+		t.Fatalf("changed schedule report = %v", r2)
+	}
+	sunday.CronJobs[0].Schedule = "0 5 * * 0"
+	_ = h.sched.Sync([]*agentv1.ServiceSpec{sunday, cronSvc})
+	h.settle()
+	h.noReport()
+	if _, ok := h.sched.Jobs()["svc1/j1"]; !ok {
+		t.Fatalf("fixed job not scheduled: %v", h.sched.Jobs())
+	}
+}
+
 func TestCronServiceAndSyncKeepsSchedule(t *testing.T) {
 	h := newHarness(t, say("done\n", 0))
 	cronSvc := &agentv1.ServiceSpec{

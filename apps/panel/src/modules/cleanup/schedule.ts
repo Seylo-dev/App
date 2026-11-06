@@ -7,7 +7,7 @@ import { type cleanup, OpError, type OpOutput } from "@seylo/ops";
 import { type CleanupSchedule, CleanupScheduleSchema } from "@seylo/proto";
 import { parseVersion } from "../../agent-hub/version";
 import type { CleanupScheduleJson, nodes } from "../../db/schema";
-import { isTimeZone, nextCronRun, nodeCronProblem } from "../../jobs/cron-expr";
+import { isTimeZone, nextCronRun, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 
 type Schedule = OpOutput<typeof cleanup.getSchedule>["schedule"];
 
@@ -43,7 +43,8 @@ export function toSchedule(json: CleanupScheduleJson): Schedule {
 export function fromSchedule(s: Schedule): CleanupScheduleJson {
   return {
     enabled: s.enabled,
-    cron: s.cron === null ? null : s.cron.trim().replace(/\s+/g, " "),
+    // Sunday is stored as 0 (the node's parser does not read 7).
+    cron: s.cron === null ? null : normalizeCronSchedule(s.cron.trim().replace(/\s+/g, " ")),
     diskPercent: s.diskPercent,
     images: s.kinds.images,
     buildCache: s.kinds.buildCache,
@@ -76,7 +77,7 @@ export function toProto(json: CleanupScheduleJson): CleanupSchedule | undefined 
   if (!json.enabled) return undefined;
   return create(CleanupScheduleSchema, {
     enabled: true,
-    cron: json.cron ?? "",
+    cron: json.cron === null ? "" : normalizeCronSchedule(json.cron),
     diskPercent: json.diskPercent ?? 0,
     images: json.images,
     buildCache: json.buildCache,

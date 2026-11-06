@@ -8,6 +8,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
+import { normalizeCronSchedule } from "../../jobs/cron-expr";
 import { latestCopy } from "./copies";
 import { readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
 import { serviceStatus, serviceUsage } from "./status";
@@ -225,7 +226,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     restartDelaySeconds,
     resources: spec.resources,
     deploy: spec.deploy,
-    cron: spec.cron,
+    cron: spec.cron && { ...spec.cron, schedule: normalizeCronSchedule(spec.cron.schedule) },
     stickySessions: spec.stickySessions,
     entryNodeId: entryNodeOf(spec.entryNodeId, summary.placements),
     notes: row.notes,

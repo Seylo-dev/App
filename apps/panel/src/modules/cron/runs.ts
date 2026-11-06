@@ -93,11 +93,19 @@ export function ingestRun(deps: Deps, nodeId: string, event: CronRunEvent): void
   deps.live.publish(`service:${service.id}`, { type: "invalidate", ops: ["cron.list", "cron.runs", "cron.run"] });
   if (result === "failed" || result === "timed_out") {
     const what = job ? `${job.name} on ${service.name}` : service.name;
+    // Exit code -1: the command never ran or was stopped, and the agent's last line says why (for
+    // example a schedule the node cannot read, so the job is not scheduled at all).
+    const agentLine = event.exitCode === -1 ? event.lastLines.at(-1) : undefined;
     deps.alerts.raise({
       event: "cron_failed",
       key: `cron-failed:${service.id}:${runKey}`,
       title: `Cron job ${what} ${result === "timed_out" ? "timed out" : "failed"}`,
-      message: result === "timed_out" ? "It ran past its timeout and was stopped." : `Exit code ${event.exitCode}.`,
+      message:
+        result === "timed_out"
+          ? "It ran past its timeout and was stopped."
+          : agentLine
+            ? `${agentLine.slice(0, 300).replace(/\.$/, "")}.`
+            : `Exit code ${event.exitCode}.`,
       serviceId: service.id,
       nodeId,
       link: null,

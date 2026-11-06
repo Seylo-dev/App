@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { alerts as alertOps, cron } from "@seylo/ops";
+import { alerts as alertOps, cron, services as serviceOps } from "@seylo/ops";
 import {
   CronRunResult,
   CronRunSchema,
@@ -12,8 +12,10 @@ import {
   RunCronNowRequestSchema,
   RunCronNowResponseSchema,
 } from "@seylo/proto";
+import { eq } from "drizzle-orm";
 import type { ConnectedAgent } from "../src/agent-hub/hub";
-import { nodes, projects, servicePlacements, services } from "../src/db/schema";
+import { cronJobs, nodes, projects, servicePlacements, services } from "../src/db/schema";
+import { compileServiceSpec } from "../src/desired/compile";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -65,10 +67,18 @@ test("create validates the schedule and zone and marks the service dirty", async
   const { service } = seed();
   const bad = await callOp(panel, cron.create, { serviceId: service.id, name: "x", schedule: "61 * * * *", command: "true" }, { cookie });
   expect(bad.status).toBe(400);
-  // croner reads 7 as Sunday, the agent's parser does not.
+  // croner reads 7 as Sunday, the agent's parser does not: it is stored as 0.
   const sunday = await callOp(panel, cron.create, { serviceId: service.id, name: "x", schedule: "0 4 * * 7", command: "true" }, { cookie });
-  expect(sunday.status).toBe(400);
-  expect(sunday.body.error.message).toContain("Sunday is 0");
+  expect(sunday.status).toBe(200);
+  expect(sunday.body.schedule).toBe("0 4 * * 0");
+  const weekdays = await callOp(
+    panel,
+    cron.update,
+    { serviceId: service.id, cronJobId: sunday.body.id, schedule: "30 2 * * MON-SUN" },
+    { cookie },
+  );
+  expect(weekdays.body.schedule).toBe("30 2 * * 1-6,0");
+  await callOp(panel, cron.remove, { serviceId: service.id, cronJobId: sunday.body.id }, { cookie });
   const zone = await callOp(
     panel,
     cron.create,
@@ -90,6 +100,49 @@ test("create validates the schedule and zone and marks the service dirty", async
   const disabled = await callOp(panel, cron.update, { serviceId: service.id, cronJobId: ok.body.id, enabled: false }, { cookie });
   expect(disabled.body.nextRunAt).toBeNull();
   expect((await callOp(panel, cron.list, { serviceId: service.id }, { cookie })).body.jobs).toHaveLength(1);
+});
+
+test("a job a 0.1 panel saved with 7 for Sunday is listed and sent to the node with 0", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const { node, service } = seed();
+  // Stopped and never deployed: the node still gets the spec, with its cron jobs.
+  panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, service.id)).run();
+  panel.deps.db.insert(cronJobs).values({ serviceId: service.id, name: "weekly", schedule: "0 4 * * 1-7", command: "true" }).run();
+  const [job] = (await callOp(panel, cron.list, { serviceId: service.id }, { cookie })).body.jobs;
+  expect(job.schedule).toBe("0 4 * * 1-6,0");
+  const spec = compileServiceSpec(panel.deps.db, node.id, service.id, { revision: 1n, secrets: panel.deps.secrets });
+  expect(spec?.cronJobs.map((j) => j.schedule)).toEqual(["0 4 * * 1-6,0"]);
+  // Saving the job again (any change) stores the normalized schedule.
+  await callOp(panel, cron.update, { serviceId: service.id, cronJobId: job.id, name: "every day" }, { cookie });
+  expect(panel.deps.db.select().from(cronJobs).where(eq(cronJobs.id, job.id)).get()?.schedule).toBe("0 4 * * 1-6,0");
+});
+
+test("a cron service's schedule is stored with Sunday as 0 and checked like a cron job's", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const { node, service } = seed();
+  const settings = (schedule: string, timeZone = "UTC") => ({
+    schedule,
+    timeZone,
+    command: [],
+    timeoutSeconds: 600,
+    concurrency: "forbid" as const,
+  });
+  const make = (name: string, cronSettings: ReturnType<typeof settings>) =>
+    callOp(panel, serviceOps.create, { projectId: service.projectId, name, kind: "cron", nodeId: node.id, cron: cronSettings }, { cookie });
+  const created = await make("weekly", settings("0 4 * * 7"));
+  expect(created.status).toBe(200);
+  expect(created.body.cron.schedule).toBe("0 4 * * 0");
+  const bad = await make("bad", settings("0 4 L * *"));
+  expect(bad.status).toBe(400);
+  expect(bad.body.error.details?.field).toBe("cron.schedule");
+  expect((await make("zone", settings("0 4 * * *", "Mars/Olympus"))).status).toBe(400);
+  const updated = await callOp(
+    panel,
+    serviceOps.update,
+    { serviceId: created.body.id, cron: settings("0 4 * * MON-SUN", "Europe/Berlin") },
+    { cookie },
+  );
+  expect(updated.body.cron).toMatchObject({ schedule: "0 4 * * 1-6,0", timeZone: "Europe/Berlin" });
 });
 
 test("run now calls the node, and the durable report completes the run once", async () => {
@@ -153,6 +206,39 @@ test("run now calls the node, and the durable report completes the run once", as
   const second = await callOp(panel, cron.runs, { serviceId: service.id, limit: 1, cursor: page.body.nextCursor }, { cookie });
   expect(second.body.runs).toHaveLength(1);
   expect(second.body.nextCursor).toBeNull();
+});
+
+test("a job the node cannot schedule is a failed run with the node's reason, stored once", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const { node, service } = seed();
+  const job = panel.deps.db
+    .insert(cronJobs)
+    .values({ serviceId: service.id, name: "weekly", schedule: "0 4 * * 7", command: "true" })
+    .returning()
+    .get();
+  const reason =
+    'not scheduled: this node cannot read the schedule (invalid cron schedule: "0 4 * * 7": end of range (7) above maximum (6): 7); save it again in the panel';
+  const report = create(EventSchema, {
+    payload: {
+      case: "cronRun",
+      value: create(CronRunSchema, {
+        serviceId: service.id,
+        cronJobId: job.id,
+        runId: "unreadable-0123456789abcdef",
+        result: CronRunResult.FAILED,
+        exitCode: -1,
+        lastLines: [reason],
+      }),
+    },
+  });
+  // Reported again after an agent restart: the same run.
+  panel.deps.agents.emitEvent(node.id, report);
+  panel.deps.agents.emitEvent(node.id, report);
+  const runs = (await callOp(panel, cron.runs, { serviceId: service.id }, { cookie })).body.runs;
+  expect(runs).toMatchObject([{ result: "failed", exitCode: -1, manual: false }]);
+  const alerts = (await callOp(panel, alertOps.list, { serviceId: service.id }, { cookie })).body.alerts;
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toMatchObject({ event: "cron_failed", title: "Cron job weekly on worker failed", message: `${reason}.` });
 });
 
 test("members need services.cron to change cron jobs and services.logs to read output", async () => {

@@ -91,7 +91,7 @@ describe("cleanup schedule", () => {
     expect(audits).toHaveLength(2);
   });
 
-  test("schedules the node could not run are refused", async () => {
+  test("schedules the node could not run are refused; Sunday as 7 is stored as 0", async () => {
     const agent = await join();
     const bad = async (schedule: typeof daily, field: string) => {
       const res = await callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule }, { cookie: owner.cookie });
@@ -102,11 +102,14 @@ describe("cleanup schedule", () => {
     // croner reads L and #, the agent's parser does not.
     await bad({ ...daily, cron: "0 4 L * *" }, "schedule.cron");
     await bad({ ...daily, cron: "0 4 * * 1#2" }, "schedule.cron");
-    // croner takes 7 for Sunday, the agent's parser stops at 6: refused, so it never silently stops running.
-    await bad({ ...daily, cron: "0 4 * * 7" }, "schedule.cron");
-    await bad({ ...daily, cron: "0 4 * * 1-7" }, "schedule.cron");
     await bad({ ...daily, cron: null, diskPercent: null }, "schedule");
     await bad({ ...daily, kinds: { images: false, buildCache: false, stoppedContainers: false, unusedVolumes: false } }, "schedule.kinds");
+    // Sunday written as 7 (croner reads it, the node's parser does not) is stored as 0.
+    await ok(
+      callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: { ...daily, cron: "0 4 * * 1-7" } }, { cookie: owner.cookie }),
+    );
+    const saved = await callOp(panel, cleanup.getSchedule, { nodeId: agent.nodeId }, { cookie: owner.cookie });
+    expect(saved.body.schedule.cron).toBe("0 4 * * 1-6,0");
     // The disk line alone is fine, and so is a node that never reported a zone (UTC).
     await ok(callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: { ...daily, cron: null } }, { cookie: owner.cookie }));
   });

@@ -53,6 +53,10 @@ type Local struct {
 	ctx    context.Context
 	report func(*agentv1.CronRun)
 	wg     sync.WaitGroup
+	// badReported is the fingerprint of each unreadable job already
+	// reported (or waiting in badPending for Run to report it).
+	badReported map[string]string
+	badPending  []*agentv1.CronRun
 }
 
 type activeRun struct {
@@ -76,19 +80,30 @@ func NewLocal(opts Options) *Local {
 		opts.After = time.After
 	}
 	return &Local{
-		opts:    opts,
-		log:     opts.Logger,
-		jobs:    map[string]*job{},
-		running: map[string]map[string]*activeRun{},
-		wake:    make(chan struct{}, 1),
+		opts:        opts,
+		log:         opts.Logger,
+		jobs:        map[string]*job{},
+		running:     map[string]map[string]*activeRun{},
+		wake:        make(chan struct{}, 1),
+		badReported: map[string]string{},
 	}
 }
 
-// Sync implements Scheduler.
+// Sync implements Scheduler. A job whose schedule this node cannot read
+// is reported once as a failed run (again only after its schedule
+// changes), never skipped silently.
 func (s *Local) Sync(specs []*agentv1.ServiceSpec) error {
-	next := collectJobs(specs, s.log)
+	next, bad := collectJobs(specs, s.log)
 	now := s.opts.Now()
 	s.mu.Lock()
+	reported := make(map[string]string, len(bad))
+	for _, u := range bad {
+		if s.badReported[u.key()] != u.fingerprint() {
+			s.badPending = append(s.badPending, unreadableRun(u, now))
+		}
+		reported[u.key()] = u.fingerprint()
+	}
+	s.badReported = reported
 	for k, j := range next {
 		if old, ok := s.jobs[k]; ok && old.hash == j.hash {
 			j.next = old.next
@@ -141,6 +156,16 @@ func (s *Local) Run(ctx context.Context, report func(*agentv1.CronRun)) error {
 	}()
 
 	for {
+		s.mu.Lock()
+		bad := s.badPending
+		s.badPending = nil
+		s.mu.Unlock()
+		for _, run := range bad {
+			s.log.Warn("cron job not scheduled: its schedule cannot be read; reported as a failed run",
+				"service_id", run.GetServiceId(), "cron_job_id", run.GetCronJobId(), "reason", run.GetLastLines())
+			report(run)
+		}
+
 		now := s.opts.Now()
 		var due []*job
 		var earliest time.Time

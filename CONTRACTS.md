@@ -80,7 +80,7 @@ packages use. "Built" means implemented and tested.
 | `metrics` | Node usage from /proc, per-service Docker stats (memory = usage - inactive_file), an hour of history, live watch | Built (verified in the VM) |
 | `console`, `shell` | Attach to the main process with history replay; PTY shells, database clients (via `dbtools`) and one-shot Exec through docker exec, with a marker-based process sweep; `ConsoleInfo` and the first `ShellResponse.info` carry user and working directory; `console/dockerapi` is the small Docker client the observe area shares (kept apart from `docker.Engine` on purpose, see Not built yet) | Built (verified in the VM) |
 | `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract | Built (escape fuzzing run as root in the VM) |
-| `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox | Built (runs, failure, timeout, skip verified in the VM) |
+| `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
 | `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO (minio-go), `keep_last` retention, restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
 | `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun`; an expression it cannot read is one failed `CleanupRun` per changed schedule | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
@@ -1027,12 +1027,20 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (node, run id) in `cleanup_runs` (newest 100 per node, with manual
   `cleanup.run` calls) and raises `cleanup_ran` (off by default, key
   `cleanup:<node>:<run>`) or `cleanup_failed` (`cleanup-failed:<node>:<run>`).
-  `cleanup.setSchedule` is destructive (models need approval). It and
-  `cron.create`/`cron.update` refuse cron syntax the panel's croner reads
-  but the agent's robfig/cron does not (`jobs/cron-expr.ts`
-  `nodeCronProblem`): `L`, `W`, `#`, and 7 for Sunday, also as the end of a
-  range (`1-7`, `MON-SUN`). Alert sizes use the web app's units (binary
-  steps, "3 GB").
+  `cleanup.setSchedule` is destructive (models need approval). It,
+  `cron.create`/`cron.update` and a cron service's schedule
+  (`services.create`/`services.update`) store Sunday as 0
+  (`jobs/cron-expr.ts` `normalizeCronSchedule`: croner, and so 0.1 panels,
+  also took 7, also as the end of a range, `1-7`, `MON-SUN`, which the
+  agent's robfig/cron refuses; `1-7` becomes `1-6,0`, never `*`), and
+  refuse what the agent still cannot read (`nodeCronProblem`: `L`, `W`,
+  `#`). Rows saved before are normalized when read: the cron list, a cron
+  service's detail and the desired state the node gets. A schedule the
+  agent cannot read anyway is not skipped silently: the agent reports one
+  failed `CronRun` per job and schedule (`unreadable-<hash>`, exit code -1,
+  the parser's reason as its line; the same id after an agent restart, so
+  the panel stores it once), and `cron_failed` shows that line. Alert
+  sizes use the web app's units (binary steps, "3 GB").
 - Bodies read before authentication are capped while streaming: op JSON
   bodies at 4 MiB (`maxOpBodyBytes`, `readBodyText` in `@seylo/ops/elysia`),
   the GitHub webhook at 5 MiB (after answering 404 without an App), git

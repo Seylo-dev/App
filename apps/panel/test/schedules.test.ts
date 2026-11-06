@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { jobs, schedules } from "../src/db/schema";
-import { agentCronProblem, cronProblem, nextCronRun, nodeCronProblem } from "../src/jobs/cron-expr";
+import { agentCronProblem, cronProblem, nextCronRun, nodeCronProblem, normalizeCronSchedule } from "../src/jobs/cron-expr";
 import { defineJob } from "../src/jobs/queue";
 import { createSchedules, missedAfterMs, scheduleDedupeKey } from "../src/jobs/schedules";
 import { silentLogger } from "../src/logger";
@@ -52,6 +52,36 @@ test("cron expressions croner reads but the agent's parser (day of week 0-6, no 
   }
   // The shape is cronProblem's to name.
   expect(nodeCronProblem("61 * * * *")).toContain("minute");
+});
+
+test("Sunday written as 7 becomes 0, firing on the same days, and the node's parser reads it", () => {
+  const cases: [string, string][] = [
+    ["0 4 * * 7", "0 4 * * 0"],
+    ["0 4 * * 1-7", "0 4 * * 1-6,0"],
+    ["0 4 * * 0-7", "0 4 * * 0-6"],
+    ["0 4 * * 1,7", "0 4 * * 1,0"],
+    ["0 4 * * 6-7", "0 4 * * 6,0"],
+    ["0 4 * * 1-7/2", "0 4 * * 1,3,5,0"],
+    ["0 4 * * MON-SUN", "0 4 * * 1-6,0"],
+    ["0 4 * * fri-sun", "0 4 * * 5-6,0"],
+    // A restricted day of week combines with the day of month by OR; it never turns into "*".
+    ["0  4 1 * 7", "0 4 1 * 0"],
+  ];
+  for (const [before, after] of cases) {
+    expect(normalizeCronSchedule(before)).toBe(after);
+    expect(nodeCronProblem(after)).toBeNull();
+    let a = at("2026-01-01T00:00:00Z");
+    let b = a;
+    for (let i = 0; i < 30; i++) {
+      a = nextCronRun(before, "UTC", a) as Date;
+      b = nextCronRun(after, "UTC", b) as Date;
+      expect(b.toISOString()).toBe(a.toISOString());
+    }
+  }
+  // Without a 7 nothing changes, not even the spacing.
+  for (const expr of ["0 4 * * 0", "0 4 * * sun-sat", "0 4 * * 1-5", "@weekly", "*/5  * * * *", "0 4 * * 7/2"]) {
+    expect(normalizeCronSchedule(expr)).toBe(expr);
+  }
 });
 
 test("an interval schedule enqueues one job per period, deduped while one is pending", () => {

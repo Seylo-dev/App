@@ -25,6 +25,7 @@ import { CronConcurrency, DeployMode, PortProtocol, ServiceKind, type ServiceSpe
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { deployments, servicePlacements, services, volumes } from "../../db/schema";
+import { normalizeCronSchedule } from "../../jobs/cron-expr";
 import type { SecretBox } from "../../security/secret-box";
 import { openRegistryLogin } from "../registries";
 import { entryNodeOf } from "./rows";
@@ -172,7 +173,8 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
     init.kindSpec = {
       case: "cron",
       value: {
-        schedule: run.cron.schedule,
+        // Specs a 0.1 panel saved may write Sunday as 7, which the node's parser refuses.
+        schedule: normalizeCronSchedule(run.cron.schedule),
         timeZone: run.cron.timeZone,
         timeout: seconds(run.cron.timeoutSeconds),
         concurrency:
