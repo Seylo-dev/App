@@ -17,12 +17,15 @@ import {
   parseFrame,
   ResultSchema,
   StatusCode,
+  SyncDesiredRequestSchema,
+  SyncDesiredResponseSchema,
 } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { agentConnectPath, agentSubprotocol } from "../src/agent-hub/endpoint";
 import { decideHello } from "../src/agent-hub/handshake";
 import { helloSignedBytes } from "../src/agent-hub/signature";
 import { joinTokens, nodes, projects, servicePlacements, services, users } from "../src/db/schema";
+import { flusherFor } from "../src/modules/nodes/index";
 import { hashToken } from "../src/security/tokens";
 import { type TestPanel, testPanel } from "./helpers";
 
@@ -241,9 +244,17 @@ describe("agent WebSocket", () => {
     // An empty ReportCrash is refused by the handler (no report), which proves it ran.
     expect(fromBinary(ResultSchema, resultFrame.payload).status?.code).toBe(StatusCode.INVALID_ARGUMENT);
 
+    const nodeId = accepted.step.value.nodeId;
+    const disconnected = new Promise<void>((resolve) => {
+      const off = panel.deps.agents.onConnection((id, online) => {
+        if (id !== nodeId || online) return;
+        off();
+        resolve();
+      });
+    });
     agent.ws.close();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(panel.deps.agents.isOnline(accepted.step.value.nodeId)).toBe(false);
+    await disconnected;
+    expect(panel.deps.agents.isOnline(nodeId)).toBe(false);
   });
 
   test("a rejected agent gets the reason and the socket closes", async () => {
@@ -316,17 +327,39 @@ describe("panel -> agent calls", () => {
         ],
       },
     });
+    const applied = new Promise<void>((resolve) => {
+      const off = panel.deps.agents.state.onChange((id, change) => {
+        if (id !== nodeId || change.kind !== "snapshot") return;
+        off();
+        resolve();
+      });
+    });
     reply(agent, 2, { status: { code: StatusCode.OK }, response: toBinary(GetStateSnapshotResponseSchema, snapshot) });
-    await Bun.sleep(20);
+    await applied;
     const view = panel.deps.agents.state.get(nodeId);
     expect(view?.synced).toBe(true);
     expect(view?.appliedRevision).toBe(5n);
     expect(panel.deps.agents.state.serviceStatuses("svc0000000000001")).toHaveLength(1);
     expect(panel.deps.agents.state.serviceStatuses("svc0000000000002")).toHaveLength(0);
 
+    // The snapshot is what the node's connect sync waits for (desired/flusher.ts). It
+    // would go out after the flusher's debounce, in the middle of the calls below on a
+    // slow machine; run it now and answer it, so this test owns every stream after it.
+    const connectSync = flusherFor(panel.deps)?.flush();
+    const syncFrame = await agent.next();
+    expect(syncFrame).toMatchObject({ kind: FrameKind.CALL, stream: 4 });
+    const sync = fromBinary(CallSchema, syncFrame.payload);
+    expect(sync.method).toBe("/seylo.agent.v1.AgentService/SyncDesired");
+    // The node's revision jumps past the one the agent reported as applied.
+    const revision = fromBinary(SyncDesiredRequestSchema, sync.request).state?.revision ?? 0n;
+    expect(revision).toBeGreaterThan(5n);
+    const accepted = create(SyncDesiredResponseSchema, { acceptedRevision: revision });
+    reply(agent, 4, { status: { code: StatusCode.OK }, response: toBinary(SyncDesiredResponseSchema, accepted) });
+    await connectSync;
+
     const pending = panel.deps.agents.call(nodeId, "fsList", { root: { serviceId: "svc0000000000001", volume: "data" }, path: "/" });
     const callFrame = await agent.next();
-    expect(callFrame).toMatchObject({ kind: FrameKind.CALL, stream: 4 });
+    expect(callFrame).toMatchObject({ kind: FrameKind.CALL, stream: 6 });
     const call = fromBinary(CallSchema, callFrame.payload);
     expect(call.method).toBe("/seylo.agent.v1.AgentService/FsList");
     expect(call.deadline).toBeDefined();
@@ -336,12 +369,14 @@ describe("panel -> agent calls", () => {
     const timeoutMs = Number(call.timeout?.seconds ?? 0n) * 1000 + Math.floor((call.timeout?.nanos ?? 0) / 1e6);
     expect(Math.abs(deadlineMs - timeoutMs - Date.now())).toBeLessThan(5_000);
     const listing = create(FsListResponseSchema, { entries: [{ name: "a.txt", path: "a.txt", size: 3n }] });
-    reply(agent, 4, { status: { code: StatusCode.OK }, response: toBinary(FsListResponseSchema, listing) });
+    reply(agent, 6, { status: { code: StatusCode.OK }, response: toBinary(FsListResponseSchema, listing) });
     expect((await pending).entries[0]?.name).toBe("a.txt");
 
     // An error status becomes the matching OpError with the agent's message.
     const missing = panel.deps.agents.call(nodeId, "fsStat", { root: { serviceId: "svc0000000000001", volume: "data" }, path: "x" });
     const statFrame = await agent.next();
+    expect(statFrame).toMatchObject({ kind: FrameKind.CALL, stream: 8 });
+    expect(fromBinary(CallSchema, statFrame.payload).method).toBe("/seylo.agent.v1.AgentService/FsStat");
     reply(agent, statFrame.stream, { status: { code: StatusCode.NOT_FOUND, message: "no such file" } });
     await expect(missing).rejects.toMatchObject({ code: "NOT_FOUND", message: "no such file", details: { reason: "agent" } });
     agent.ws.close();
@@ -367,7 +402,8 @@ describe("panel -> agent calls", () => {
     await agent.next();
     agent.ws.close();
     await expect(inFlight).rejects.toMatchObject({ code: "UNAVAILABLE", details: { reason: "offline" } });
-    await Bun.sleep(20);
+    // The session leaves the hub before it fails its calls, so the node is offline by now.
+    expect(panel.deps.agents.isOnline(nodeId)).toBe(false);
     const offline = panel.deps.agents.call(nodeId, "fsMkdir", { path: "c" });
     await expect(offline).rejects.toBeInstanceOf(OpError);
     await expect(offline).rejects.toMatchObject({ details: { reason: "offline" } });
