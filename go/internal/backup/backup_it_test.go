@@ -152,8 +152,10 @@ func TestDatabaseDumpRestoreRoundTrip(t *testing.T) {
 			{Name: "MARIADB_ROOT_PASSWORD", Value: pw}, {Name: "MARIADB_DATABASE", Value: "app"}}, "/var/lib/mysql"),
 		"mongo": {engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, image: "mongo:8.0", user: "admin", volume: "/data/db",
 			env: []*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}},
+		// --appendonly yes as the panel runs it: the restore must not leave
+		// Redis starting from an empty append-only file.
 		"redis": {engine: agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, image: "redis:7.4-alpine", volume: "/data",
-			cmd: []string{"redis-server", "--requirepass", pw}},
+			cmd: []string{"redis-server", "--requirepass", pw, "--appendonly", "yes"}},
 	}
 	images := []string{"busybox:1.37"}
 	for _, c := range cases {
@@ -288,5 +290,193 @@ func TestVolumeBackupRestoreAndRetention(t *testing.T) {
 	vol, _ := r.e.Layout.ServiceVolume(spec.GetId(), "data")
 	if entries, _ := os.ReadDir(filepath.Dir(vol)); len(entries) != 1 {
 		t.Fatalf("staging folders left: %v", entries)
+	}
+}
+
+// Images of the engines added in 0.2, pinned like the panel's catalog
+// (apps/panel/src/modules/databases/engines.ts).
+const (
+	imagePostgres18 = "postgres:18.6-alpine"
+	imagePgvector   = "pgvector/pgvector:0.8.7-pg18-trixie"
+	imageValkey     = "valkey/valkey:9.1.3-alpine"
+	imageKeyDB      = "eqalpha/keydb@sha256:6537505c42355ca1f571276bddf83f5b750f760f07b2a185a676481791e388ac"
+	imageDragonfly  = "ghcr.io/dragonflydb/dragonfly:v2.0.2"
+	imageClickHouse = "clickhouse/clickhouse-server:26.8.36.3"
+)
+
+// newEngine is a database the way the panel runs it: the same command,
+// env and data path as engines.ts, so the test covers what nodes get.
+type newEngine struct {
+	engine agentv1.DatabaseEngine
+	image  string
+	user   string
+	env    []*agentv1.EnvVar
+	cmd    []string
+	volume string
+	ports  []uint32
+}
+
+func newEngines() map[string]newEngine {
+	pgEnv := []*agentv1.EnvVar{{Name: "POSTGRES_USER", Value: "admin"}, {Name: "POSTGRES_PASSWORD", Value: pw}, {Name: "POSTGRES_DB", Value: "app"}}
+	return map[string]newEngine{
+		// Postgres 18 images keep data in /var/lib/postgresql/18/docker.
+		"postgres18": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres18, "admin", pgEnv, nil, "/var/lib/postgresql", []uint32{5432}},
+		"pgvector":   {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePgvector, "admin", pgEnv, nil, "/var/lib/postgresql", []uint32{5432}},
+		"valkey": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey, "default",
+			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}},
+			[]string{"sh", "-c", `exec docker-entrypoint.sh valkey-server --requirepass "$VALKEY_PASSWORD" --appendonly yes`}, "/data", []uint32{6379}},
+		"keydb": {agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, imageKeyDB, "default",
+			[]*agentv1.EnvVar{{Name: "KEYDB_PASSWORD", Value: pw}},
+			[]string{"sh", "-c", `exec docker-entrypoint.sh keydb-server /etc/keydb/keydb.conf --requirepass "$KEYDB_PASSWORD" --appendonly yes`}, "/data", []uint32{6379}},
+		"dragonfly": {agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY, imageDragonfly, "default",
+			[]*agentv1.EnvVar{{Name: "DFLY_requirepass", Value: pw}},
+			[]string{"dragonfly", "--logtostderr", "--dir", "/data", "--dbfilename", "dump", "--df_snapshot_format=false", "--snapshot_cron", "*/5 * * * *"}, "/data", []uint32{6379}},
+		"clickhouse": {agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, imageClickHouse, "admin",
+			[]*agentv1.EnvVar{{Name: "CLICKHOUSE_USER", Value: "admin"}, {Name: "CLICKHOUSE_PASSWORD", Value: pw}, {Name: "CLICKHOUSE_DB", Value: "app"},
+				{Name: "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", Value: "1"}}, nil, "/var/lib/clickhouse", []uint32{9000, 8123}},
+	}
+}
+
+// Each new engine starts as the panel runs it, answers its pre-logged-in
+// client (the Shell tab's command), and survives a backup to MinIO and a
+// restore; Redis-like engines also keep the restored data across another
+// restart (their append-only files are rebuilt from it).
+func TestNewEnginesDumpRestoreRoundTrip(t *testing.T) {
+	r := newRig(t)
+	cases := newEngines()
+	images := []string{}
+	for _, c := range cases {
+		images = append(images, c.image)
+	}
+	r.e.Pull(images...)
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := r.e.With(t)
+			spec := e.Spec("db"+name, "db-"+name, c.image)
+			spec.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
+			spec.Env = c.env
+			spec.Container = &agentv1.ContainerConfig{Command: c.cmd}
+			spec.Volumes = []*agentv1.VolumeMount{{Name: "data", ContainerPath: c.volume}}
+			for _, p := range c.ports {
+				spec.Ports = append(spec.Ports, &agentv1.PortSpec{ContainerPort: p})
+			}
+			spec.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{Engine: c.engine,
+				Credentials: &agentv1.DatabaseCredentials{AdminUser: c.user, AdminPassword: pw, Database: "app"}}}
+			r.add(spec)
+			cont := e.StartService(spec).Name
+
+			var write func(v string)
+			var read func() string
+			switch {
+			case c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
+				run := func(sql string) (string, int) {
+					return clientExec(e, spec, cont, "-tA", "-v", "ON_ERROR_STOP=1", "-c", sql)
+				}
+				// The image restarts the server once after init.
+				e.Eventually(name+" ready", 4*time.Minute, func() bool {
+					_, code := run("create table if not exists t (v varchar(20))")
+					return code == 0
+				})
+				if name == "pgvector" {
+					out, code := run("create extension if not exists vector; create table if not exists items (id int, e vector(3)); delete from items; insert into items values (1, '[1,2,3]'), (2, '[3,2,1]'); select id from items order by e <-> '[3,1,1]' limit 1")
+					if lines := strings.Split(out, "\n"); code != 0 || lines[len(lines)-1] != "2" {
+						t.Fatalf("pgvector query = %q (%d)", out, code)
+					}
+				}
+				if out, _ := run("show server_version_num"); !strings.HasPrefix(out, "18") {
+					t.Fatalf("server version %q", out)
+				}
+				write = func(v string) {
+					if out, code := run("delete from t; insert into t values ('" + v + "')"); code != 0 {
+						t.Fatalf("write: %s", out)
+					}
+				}
+				read = func() string { out, _ := run("select v from t"); return out }
+			case c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
+				run := func(sql string) (string, int) { return clientExec(e, spec, cont, "--multiquery", "--query", sql) }
+				// Ready once the init run created "app" and the real server listens.
+				e.Eventually(name+" ready", 4*time.Minute, func() bool {
+					_, code := run("CREATE TABLE IF NOT EXISTS t (v String) ENGINE = MergeTree ORDER BY v")
+					return code == 0
+				})
+				// A second database, with a name that needs quoting: backups
+				// hold every one but the system ones.
+				if out, code := run("CREATE DATABASE IF NOT EXISTS `odd-\\`db`; CREATE TABLE IF NOT EXISTS `odd-\\`db`.n (i UInt8) ENGINE = MergeTree ORDER BY i; INSERT INTO `odd-\\`db`.n VALUES (7)"); code != 0 {
+					t.Fatalf("other database: %s", out)
+				}
+				write = func(v string) {
+					if out, code := run("TRUNCATE TABLE t; INSERT INTO t VALUES ('" + v + "')"); code != 0 {
+						t.Fatalf("write: %s", out)
+					}
+				}
+				read = func() string {
+					var out string
+					e.Eventually("clickhouse readable", time.Minute, func() bool { var code int; out, code = run("SELECT v FROM t"); return code == 0 })
+					return out
+				}
+			default: // Redis-like
+				run := func(args ...string) (string, int) { return clientExec(e, spec, cont, args...) }
+				e.Eventually(name+" ready", 2*time.Minute, func() bool { out, _ := run("PING"); return out == "PONG" })
+				write = func(v string) {
+					if out, code := run("SET", "k", v); code != 0 || out != "OK" {
+						t.Fatalf("write: %s", out)
+					}
+				}
+				read = func() string {
+					var out string
+					// After a restore the server may still be loading.
+					e.Eventually(name+" readable", time.Minute, func() bool { out, _ = run("GET", "k"); return !strings.Contains(out, "LOADING") && out != "" })
+					return out
+				}
+			}
+
+			write("before")
+			subject := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{}}}
+			res := r.backup(e, subject, "run-"+name, 0, false)
+			if res.GetSizeBytes() == 0 || !strings.HasPrefix(res.GetObjectKey(), "node-a/"+spec.GetId()+"/pol1/") {
+				t.Fatalf("result = %v", res)
+			}
+			t.Logf("%s dump: %s (%d bytes)", name, res.GetObjectKey(), res.GetSizeBytes())
+			// Nothing the backup wrote into the data folder is left there.
+			vol, _ := r.e.Layout.ServiceVolume(spec.GetId(), "data")
+			if left, _ := filepath.Glob(filepath.Join(vol, "seylo-backup-*")); len(left) != 0 {
+				t.Fatalf("snapshot left in the volume: %v", left)
+			}
+			if left, _ := filepath.Glob(filepath.Join(vol, "backups", "seylo", "*")); len(left) != 0 {
+				t.Fatalf("backup zip left in the volume: %v", left)
+			}
+			write("after")
+			if got := read(); got != "after" {
+				t.Fatalf("read before restore = %q", got)
+			}
+			r.restore(e, subject, res.GetObjectKey())
+			if got := read(); got != "before" {
+				t.Fatalf("read after restore = %q, want before", got)
+			}
+			if c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE {
+				// Restored, not appended to: the drop before RESTORE found it in the zip.
+				if out, _ := clientExec(e, spec, cont, "--query", "SELECT sum(i) FROM `odd-\\`db`.n"); out != "7" {
+					t.Fatalf("other database after restore = %q", out)
+				}
+				if left, _ := filepath.Glob(filepath.Join(vol, "backups", "seylo", "*")); len(left) != 0 {
+					t.Fatalf("restore zip left in the volume: %v", left)
+				}
+			}
+			if c.volume == "/data" {
+				// The restored data is what the server writes back on the
+				// next stop and loads on the next start.
+				name := docker.ContainerName(spec.GetId(), 1, 0)
+				if err := e.D.Stop(e.Ctx(time.Minute), name, 20*time.Second); err != nil {
+					t.Fatal(err)
+				}
+				if err := e.D.Start(e.Ctx(time.Minute), name); err != nil {
+					t.Fatal(err)
+				}
+				if got := read(); got != "before" {
+					t.Fatalf("read after another restart = %q, want before", got)
+				}
+			}
+		})
 	}
 }

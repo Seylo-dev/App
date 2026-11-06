@@ -121,6 +121,19 @@ func TestTLSTerminatingDatabasePort(t *testing.T) {
 		t.Fatalf("ports %v", open)
 	}
 
+	// The other Redis-like engines and ClickHouse's native port are
+	// terminated by the gate too, on the engine's own port.
+	for engine, port := range map[agentv1.DatabaseEngine]uint32{
+		agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY:     6379,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB:      6379,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY:  6379,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE: 9000,
+	} {
+		spec.GetDatabase().Engine = engine
+		if ls, _ := ListenersFor(spec); !ls[0].TerminateTLS || ls[0].ContainerPort != port {
+			t.Fatalf("%v listener %+v", engine, ls[0])
+		}
+	}
 	// Postgres keeps its own TLS: a raw relay.
 	spec.GetDatabase().Engine = agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES
 	if ls, _ := ListenersFor(spec); ls[0].TerminateTLS {

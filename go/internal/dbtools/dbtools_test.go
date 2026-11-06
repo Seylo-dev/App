@@ -30,7 +30,9 @@ func TestClientCommandKeepsPasswordOutOfArgv(t *testing.T) {
 	for _, e := range []agentv1.DatabaseEngine{
 		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL,
 		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO,
-		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE,
 	} {
 		argv, env, err := ClientCommand(dbSpec("d", e, false).GetDatabase())
 		if err != nil {
@@ -48,17 +50,56 @@ func TestClientCommandKeepsPasswordOutOfArgv(t *testing.T) {
 	}
 }
 
+// Each engine opens its own image's client, signed in to the default
+// database where it has one.
+func TestClientCommandPerEngine(t *testing.T) {
+	want := map[agentv1.DatabaseEngine]string{
+		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:      "redis-cli -h 127.0.0.1 --no-auth-warning --user admin",
+		agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY:     "valkey-cli -h 127.0.0.1 --no-auth-warning --user admin",
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB:      "keydb-cli -h 127.0.0.1 --no-auth-warning --user admin",
+		agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY:  "redis-cli -h 127.0.0.1 --no-auth-warning --user admin",
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE: "clickhouse-client --host=127.0.0.1 --user=admin --database=app",
+	}
+	for e, w := range want {
+		argv, env, err := ClientCommand(dbSpec("d", e, false).GetDatabase())
+		if err != nil || strings.Join(argv, " ") != w {
+			t.Errorf("%v: argv %q, %v", e, argv, err)
+		}
+		key := "REDISCLI_AUTH="
+		if e == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE {
+			key = "CLICKHOUSE_PASSWORD="
+		}
+		if !slices.Equal(env, []string{key + "p@ss:w/rd"}) {
+			t.Errorf("%v: env %v", e, env)
+		}
+	}
+	// The default user is implied on Redis-like engines.
+	db := dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, false).GetDatabase()
+	db.Credentials.AdminUser = "default"
+	if argv, _, _ := ClientCommand(db); slices.Contains(argv, "--user") {
+		t.Errorf("default user named: %v", argv)
+	}
+	if _, _, err := ClientCommand(dbSpec("d", agentv1.DatabaseEngine(99), false).GetDatabase()); !errors.Is(err, ErrNoDatabase) {
+		t.Errorf("unknown engine err = %v", err)
+	}
+}
+
 func TestUITargets(t *testing.T) {
 	want := map[agentv1.DatabaseEngine]struct {
 		image string
 		port  uint32
 		env   string
 	}{
-		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES: {ImagePgweb, 8081, "DATABASE_URL=postgres://admin:p%40ss%3Aw%2Frd@db:5432/app?sslmode=disable"},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:    {ImagePhpMyAdmin, 80, "PMA_USER=admin"},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:  {ImagePhpMyAdmin, 80, "PMA_PORT=3306"},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:    {ImageMongoExpress, 8081, "ME_CONFIG_MONGODB_URL=mongodb://admin:p%40ss%3Aw%2Frd@db:27017/?authSource=admin"},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:    {ImageRedisCmdr, 8081, "REDIS_PASSWORD=p@ss:w/rd"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:  {ImagePgweb, 8081, "DATABASE_URL=postgres://admin:p%40ss%3Aw%2Frd@db:5432/app?sslmode=disable"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:     {ImagePhpMyAdmin, 80, "PMA_USER=admin"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:   {ImagePhpMyAdmin, 80, "PMA_PORT=3306"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:     {ImageMongoExpress, 8081, "ME_CONFIG_MONGODB_URL=mongodb://admin:p%40ss%3Aw%2Frd@db:27017/?authSource=admin"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:     {ImageRedisCmdr, 8081, "REDIS_PASSWORD=p@ss:w/rd"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY:    {ImageRedisCmdr, 8081, "REDIS_HOST=db"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB:     {ImageRedisCmdr, 8081, "REDIS_PORT=6379"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY: {ImageRedisCmdr, 8081, "REDIS_PASSWORD=p@ss:w/rd"},
+		// The Play page through nginx on the HTTP port, signed in with a Basic header of admin:p@ss:w/rd.
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE: {ImageClickHouseUI, 8080, "CH_AUTH=YWRtaW46cEBzczp3L3Jk"},
 	}
 	for e, w := range want {
 		tg, err := uiTarget(dbSpec("db1", e, true), [2]string{"a", "b"})
@@ -74,6 +115,17 @@ func TestUITargets(t *testing.T) {
 	}
 	if _, err := uiTarget(&agentv1.ServiceSpec{Id: "x", Kind: agentv1.ServiceKind_SERVICE_KIND_APP}, [2]string{}); !errors.Is(err, ErrNotFound) {
 		t.Fatal("app accepted")
+	}
+	// ClickHouse: the HTTP port, not the native one the spec lists first,
+	// and the password only inside the Basic header.
+	ch := dbSpec("db1", agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, true)
+	ch.Ports = []*agentv1.PortSpec{{ContainerPort: 9000}, {ContainerPort: 8123}}
+	tg, err := uiTarget(ch, [2]string{})
+	if err != nil || !slices.Contains(tg.Spec.Env, "CH_PORT=8123") || !slices.Contains(tg.Spec.Env, "CH_HOST=db") {
+		t.Fatalf("clickhouse target %+v, %v", tg, err)
+	}
+	if strings.Contains(strings.Join(tg.Spec.Env, " ")+strings.Join(tg.Spec.Cmd, " "), "p@ss") {
+		t.Fatal("clickhouse password in clear")
 	}
 }
 
@@ -94,6 +146,7 @@ func TestExposedUserJobKeepsSecretsInEnv(t *testing.T) {
 	for _, e := range []agentv1.DatabaseEngine{
 		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL,
 		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE,
 	} {
 		db := dbSpec("d", e, false).GetDatabase()
 		db.Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "remote", Password: "expo-secret"}
@@ -112,10 +165,15 @@ func TestExposedUserJobKeepsSecretsInEnv(t *testing.T) {
 			t.Errorf("%v: env = %v", e, j.env)
 		}
 	}
-	db := dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, false).GetDatabase()
-	db.Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "u", Password: "p"}
-	if _, err := exposedUserJob(db, nil); err == nil {
-		t.Error("redis got an exposed user job")
+	for _, e := range []agentv1.DatabaseEngine{
+		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY,
+	} {
+		db := dbSpec("d", e, false).GetDatabase()
+		db.Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "u", Password: "p"}
+		if _, err := exposedUserJob(db, nil); err == nil {
+			t.Errorf("%v got an exposed user job", e)
+		}
 	}
 	if _, err := exposedUserJob(dbSpec("d", agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, false).GetDatabase(), nil); err == nil {
 		t.Error("job without a user")
@@ -148,5 +206,27 @@ func TestCertForPrefersACMEAndKeepsSelfSigned(t *testing.T) {
 	}
 	if _, err := certFor(nil, dir, "../x", ""); err == nil {
 		t.Fatal("bad service id accepted")
+	}
+}
+
+// Only engines with a separate login get one; Redis-like engines are left
+// to the portgate's TLS.
+func TestExposedUsersSyncPicksEnginesWithAUser(t *testing.T) {
+	x := NewExposedUsers(nil, nil, t.TempDir(), nil)
+	var specs []*agentv1.ServiceSpec
+	for _, e := range []agentv1.DatabaseEngine{
+		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY,
+	} {
+		s := dbSpec(e.String(), e, false)
+		s.GetDatabase().Exposure = &agentv1.DatabaseExposure{Enabled: true, User: "external", Password: "p"}
+		specs = append(specs, s)
+	}
+	x.Sync(specs)
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if len(x.specs) != 2 || x.specs["DATABASE_ENGINE_POSTGRES"] == nil || x.specs["DATABASE_ENGINE_CLICKHOUSE"] == nil {
+		t.Fatalf("specs = %v", x.specs)
 	}
 }

@@ -64,6 +64,14 @@ func TestExposedUserCreatedAndRotated(t *testing.T) {
 			func(u, p string, _ bool) ([]string, []string) {
 				return []string{"mongosh", "--quiet", "mongodb://127.0.0.1:27017/app", "-u", u, "-p", p, "--authenticationDatabase", "admin", "--eval", "db.x.insertOne({i: 1})"}, nil
 			}, false},
+		// TLS is the portgate's (portgate's TestIntegrationDatabaseTLS).
+		"clickhouse": {agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, imageClickHouse, "admin",
+			[]*agentv1.EnvVar{{Name: "CLICKHOUSE_USER", Value: "admin"}, {Name: "CLICKHOUSE_PASSWORD", Value: admin}, {Name: "CLICKHOUSE_DB", Value: "app"},
+				{Name: "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", Value: "1"}},
+			func(u, p string, _ bool) ([]string, []string) {
+				return []string{"sh", "-c", `exec clickhouse-client --host=` + self + ` --user="$U" --multiquery --query "CREATE TABLE IF NOT EXISTS app.x (i Int32) ENGINE = MergeTree ORDER BY i; INSERT INTO app.x VALUES (1)"`},
+					[]string{"CLICKHOUSE_PASSWORD=" + p, "U=" + u}
+			}, false},
 	}
 	var images []string
 	for _, c := range cases {
@@ -84,6 +92,15 @@ func TestExposedUserCreatedAndRotated(t *testing.T) {
 					Credentials: &agentv1.DatabaseCredentials{AdminUser: c.user, AdminPassword: admin, Database: "app"},
 					Exposure:    &agentv1.DatabaseExposure{Enabled: true, User: "remote_user", Password: pw1}}}
 				cont := e.StartService(s).Name
+				if c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE {
+					// The image's first start serves 127.0.0.1 only while it
+					// creates the database; the panel's health check waits
+					// for the server on the container's own address.
+					e.Eventually("clickhouse listening", 3*time.Minute, func() bool {
+						out, code := e.Exec(cont, []string{"sh", "-c", `wget -qO- "http://$(hostname -i | cut -d' ' -f1):8123/ping"`}, nil)
+						return code == 0 && out == "Ok."
+					})
+				}
 				deadline := time.Now().Add(4 * time.Minute)
 				for err := x.Apply(e.Ctx(time.Minute), s); err != nil; err = x.Apply(e.Ctx(time.Minute), s) {
 					if time.Now().After(deadline) {

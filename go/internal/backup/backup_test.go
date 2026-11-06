@@ -170,9 +170,13 @@ func TestDumpCommands(t *testing.T) {
 		{agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, "", []string{"--all-databases"}, extSQL, true},
 		{agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, "app", []string{"mongodump", "--archive --gzip", `--db="$DB_NAME"`, "authenticationDatabase=admin"}, extMongo, false},
 		{agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, "", []string{"redis-cli", "--rdb -"}, extRedis, true},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, "", []string{"exec valkey-cli", "--rdb -"}, extRedis, true},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, "", []string{"exec keydb-cli", "--rdb -"}, extRedis, true},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY, "", []string{"SAVE RDB", `cat "$F"`, `rm -f "$F"`}, extRedis, true},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, "", []string{`$DB_QUERY ASYNC`, "system.backups", `cat "$F"`}, extClickHouse, false},
 	}
 	for _, c := range cases {
-		j, err := dumpJob(dbTarget{engine: c.engine, host: "db", port: 1, user: "u", password: `p"w\d`, database: c.db})
+		j, err := dumpJob(dbTarget{engine: c.engine, host: "db", port: 1, user: "u", password: `p"w\d`, database: c.db, dataDir: "/data"}, "run1")
 		must(t, err)
 		for _, w := range c.want {
 			if !strings.Contains(j.script, w) {
@@ -190,11 +194,25 @@ func TestDumpCommands(t *testing.T) {
 			t.Errorf("mysql option-file password not escaped: %v", j.env)
 		}
 	}
-	if _, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL}, extMongo); !errors.Is(err, ErrBadRequest) {
+	if _, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL}, extMongo, "s"); !errors.Is(err, ErrBadRequest) {
 		t.Error("mongo archive accepted for mysql")
 	}
-	if _, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES}, extPgCustom); !errors.Is(err, ErrBadRequest) {
+	if _, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES}, extPgCustom, "s"); !errors.Is(err, ErrBadRequest) {
 		t.Error("custom dump without target database accepted")
+	}
+	for _, e := range []agentv1.DatabaseEngine{agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY} {
+		if j, err := restoreJob(dbTarget{engine: e}, extRedis, "s"); err != nil || j.script != "" {
+			t.Errorf("%v RDB restore job = %+v, %v (the RDB swap does it)", e, j, err)
+		}
+		if _, err := restoreJob(dbTarget{engine: e}, extClickHouse, "s"); !errors.Is(err, ErrBadRequest) {
+			t.Errorf("%v accepted a ClickHouse archive", e)
+		}
+	}
+	if _, err := restoreJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, dataDir: "/x"}, extRedis, "s"); !errors.Is(err, ErrBadRequest) {
+		t.Error("RDB accepted for ClickHouse")
+	}
+	if _, err := dumpJob(dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE}, "r"); !errors.Is(err, ErrBadRequest) {
+		t.Error("ClickHouse dump without a data volume accepted")
 	}
 	if _, err := targetOf(&agentv1.ServiceSpec{Id: "x", Kind: agentv1.ServiceKind_SERVICE_KIND_APP}, ""); !errors.Is(err, ErrBadRequest) {
 		t.Error("app accepted as database")
@@ -613,5 +631,189 @@ func TestSuspendAllUndoesOnFailure(t *testing.T) {
 	}
 	if got := strings.Join(log, ", "); got != "stop a, start a" {
 		t.Fatalf("steps = %s", got)
+	}
+}
+
+// ClickHouse statements are built by the agent with quoted names; nothing
+// of the request reaches the shell unquoted.
+func TestClickHouseStatements(t *testing.T) {
+	env := func(j dbJob, key string) string {
+		for _, e := range j.env {
+			if v, ok := strings.CutPrefix(e, key+"="); ok {
+				return v
+			}
+		}
+		return "<none>"
+	}
+	all := dbTarget{engine: agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, host: "ch", port: 9000, user: "u", password: "pw", dataDir: "/var/lib/clickhouse"}
+	j, err := dumpJob(all, "run1")
+	must(t, err)
+	if q := env(j, "DB_QUERY"); q != "BACKUP ALL EXCEPT DATABASES system, information_schema, INFORMATION_SCHEMA TO File('seylo/backup-run1.zip')" {
+		t.Errorf("backup all = %q", q)
+	}
+	if env(j, "DB_FILE") != "backup-run1.zip" || env(j, "CLICKHOUSE_PASSWORD") != "pw" || !j.volumes || j.gzip {
+		t.Errorf("job = %+v", j)
+	}
+	one := all
+	one.database = "we`ird\\db"
+	j, err = dumpJob(one, "run1")
+	must(t, err)
+	if q := env(j, "DB_QUERY"); q != "BACKUP DATABASE `we\\`ird\\\\db` TO File('seylo/backup-run1.zip')" {
+		t.Errorf("backup one = %q", q)
+	}
+
+	r, err := restoreJob(all, extClickHouse, "20260101T000000Z")
+	must(t, err)
+	if q := env(r, "DB_QUERY"); q != "RESTORE ALL EXCEPT DATABASES system, information_schema, INFORMATION_SCHEMA FROM File('seylo/restore-20260101T000000Z.zip')" {
+		t.Errorf("restore all = %q", q)
+	}
+	list := env(r, "DB_LIST_QUERY")
+	if env(r, "DB_DROP") != "" || !strings.Contains(list, "replaceAll(replaceAll(name, '\\\\', '\\\\\\\\'), '`', '\\\\`')") ||
+		!strings.Contains(list, "file('/var/lib/clickhouse/backups/seylo/restore-20260101T000000Z.zip :: metadata/*.sql'") ||
+		!strings.Contains(list, "NOT IN ('', 'system', 'information_schema', 'INFORMATION_SCHEMA')") {
+		t.Errorf("restore all list query = %q", list)
+	}
+	r, err = restoreJob(one, extClickHouse, "s1")
+	must(t, err)
+	if d := env(r, "DB_DROP"); d != "DROP DATABASE IF EXISTS `we\\`ird\\\\db` SYNC;" {
+		t.Errorf("drop one = %q", d)
+	}
+	if !r.volumes || strings.Contains(r.script, "pw") {
+		t.Errorf("restore job = %+v", r)
+	}
+	if got := chString(`a'b\c`); got != `'a\'b\\c'` {
+		t.Errorf("chString = %s", got)
+	}
+}
+
+// Dragonfly and ClickHouse helpers mount the service's volumes at the
+// database's own paths; the others do not.
+func TestHelperMountsVolumesOnlyWhenTheJobNeedsThem(t *testing.T) {
+	df := dbSpec(agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY)
+	df.Ports = nil
+	pg := dbSpec(agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES)
+	pg.Id = "db2"
+	r := newRig(t, df, pg)
+	r.docker.fn = func(spec jobrun.Spec, stdio jobrun.IO) (jobrun.Result, error) {
+		fmt.Fprint(stdio.Stdout, "REDIS0011")
+		return jobrun.Result{}, nil
+	}
+	for _, id := range []string{"db1", "db2"} {
+		r.start(&agentv1.RunBackupRequest{BackupId: "pol1", RunId: "r-" + id,
+			Subject: &agentv1.BackupSubject{ServiceId: id, What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{}}}})
+		if res := r.result(); !res.GetSuccess() {
+			t.Fatalf("%s: %v", id, res)
+		}
+	}
+	vol, _ := r.layout.ServiceVolume("db1", "data")
+	var dfSpec, pgSpec jobrun.Spec
+	for _, s := range r.docker.specs {
+		if strings.Contains(s.Name, "db1") {
+			dfSpec = s
+		} else {
+			pgSpec = s
+		}
+	}
+	if !slices.Equal(dfSpec.Binds, []string{vol + ":/data"}) || !slices.Contains(dfSpec.Env, "DB_FILE=seylo-backup-r-db1") ||
+		!slices.Contains(dfSpec.Env, "DB_PORT=6379") || !slices.Contains(dfSpec.Env, "DB_DATA_DIR=/data") {
+		t.Fatalf("dragonfly helper = %+v", dfSpec)
+	}
+	if len(pgSpec.Binds) != 0 {
+		t.Fatalf("postgres helper mounts %v", pgSpec.Binds)
+	}
+}
+
+// Restoring an RDB moves every append-only file aside while the server is
+// stopped and writes the RDB as appendonly.aof too (an RDB preamble), since
+// with append-only on the server would start empty without one; Dragonfly
+// has no append-only file. A diskless replication marker after the RDB is
+// cut off.
+func TestRedisLikeRestoreSwapsFiles(t *testing.T) {
+	rdb := []byte("REDIS0011-new")
+	marked := append(append(append([]byte{}, rdb...), 0xFF, 1, 2, 3, 4, 5, 6, 7, 8), []byte(strings.Repeat("0a9f", 10))...)
+	clean := marked[:len(marked)-rdbEOFMarkLen]
+	for _, c := range []struct {
+		engine agentv1.DatabaseEngine
+		old    string // append-only file or folder there before
+		aof    bool   // appendonly.aof holds the RDB afterwards
+		input  []byte
+	}{
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, "appendonlydir", true, marked},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, "appendonlydir", true, rdb},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, "appendonly.aof", true, rdb},
+		{agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY, "", false, rdb},
+	} {
+		t.Run(c.engine.String(), func(t *testing.T) {
+			spec := dbSpec(c.engine)
+			r := newRig(t, spec)
+			vol, _ := r.layout.ServiceVolume("db1", "data")
+			must(t, os.MkdirAll(vol, 0o755))
+			must(t, os.WriteFile(filepath.Join(vol, "dump.rdb"), []byte("old"), 0o600))
+			if c.old != "" {
+				must(t, os.WriteFile(filepath.Join(vol, c.old), []byte("old aof"), 0o600))
+			}
+			var gz bytes.Buffer
+			w := gzip.NewWriter(&gz)
+			_, _ = w.Write(c.input)
+			must(t, w.Close())
+			want := string(c.input)
+			if &c.input[0] == &marked[0] {
+				want = string(clean)
+			}
+			key := "node1/db1/pol1/20260101T000000Z-r1.rdb.gz"
+			r.store.objs[key] = gz.Bytes()
+			_, err := r.runner.Restore(context.Background(), &agentv1.RestoreBackupRequest{ObjectKey: key,
+				Subject: &agentv1.BackupSubject{ServiceId: "db1", What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{}}}})
+			must(t, err)
+			if b, _ := os.ReadFile(filepath.Join(vol, "dump.rdb")); string(b) != want {
+				t.Fatalf("dump.rdb = %q", b)
+			}
+			b, aofErr := os.ReadFile(filepath.Join(vol, "appendonly.aof"))
+			if c.aof != (aofErr == nil && string(b) == want) {
+				t.Fatalf("appendonly.aof = %q, %v", b, aofErr)
+			}
+			entries, _ := os.ReadDir(vol)
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			files := 1
+			if c.old != "" {
+				files++ // moved aside, kept
+			}
+			if c.aof {
+				files++
+			}
+			if len(names) != files || (c.old != "" && !slices.ContainsFunc(names, func(n string) bool { return strings.HasPrefix(n, c.old+".before-restore-") })) {
+				t.Fatalf("files after restore = %v", names)
+			}
+			if len(r.suspends) != 1 || r.resumes != 1 {
+				t.Fatalf("suspends %v resumes %d", r.suspends, r.resumes)
+			}
+		})
+	}
+}
+
+func TestRDBEOFMark(t *testing.T) {
+	mark := strings.Repeat("deadbeef", 5)
+	ok := append([]byte{0xFF, 0, 0, 0, 0, 0, 0, 0, 0}, mark...)
+	if !rdbHasEOFMark(ok) {
+		t.Fatal("marker not seen")
+	}
+	for _, bad := range [][]byte{
+		append([]byte{0xFE, 0, 0, 0, 0, 0, 0, 0, 0}, mark...),                  // no EOF opcode before it
+		append([]byte{0xFF, 0, 0, 0, 0, 0, 0, 0, 0}, strings.ToUpper(mark)...), // not lowercase hex
+		ok[1:], // too short
+	} {
+		if rdbHasEOFMark(bad) {
+			t.Errorf("false marker %q", bad)
+		}
+	}
+	var tw tailWriter
+	for i := 0; i < 100; i++ {
+		_, _ = tw.Write([]byte{byte(i)})
+	}
+	if tw.n != 100 || len(tw.buf) != rdbTail || tw.buf[len(tw.buf)-1] != 99 {
+		t.Fatalf("tail = %d %v", tw.n, tw.buf)
 	}
 }

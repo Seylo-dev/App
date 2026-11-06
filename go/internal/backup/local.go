@@ -19,6 +19,7 @@ import (
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/datadir"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/jobrun"
 )
 
@@ -250,7 +251,7 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 	var ext string
 	var produce func(w io.Writer) error
 	if p.db != nil {
-		job, err := dumpJob(*p.db)
+		job, err := dumpJob(*p.db, p.req.GetRunId())
 		if err != nil {
 			return err
 		}
@@ -365,7 +366,11 @@ func (l *Local) runDump(ctx context.Context, p *backupPlan, job dbJob, w io.Writ
 		gz = gzip.NewWriter(w)
 		out = gz
 	}
-	res, err := l.opts.Docker.Run(ctx, helperSpec(p.spec, job, "backup-"+p.req.GetRunId()), jobrun.IO{Stdout: out, Stderr: errTail})
+	helper, err := l.helperSpec(p.spec, job, "backup-"+p.req.GetRunId())
+	if err != nil {
+		return err
+	}
+	res, err := l.opts.Docker.Run(ctx, helper, jobrun.IO{Stdout: out, Stderr: errTail})
 	if err != nil {
 		return err
 	}
@@ -389,9 +394,10 @@ func lastLine(t *jobrun.Tail) string {
 }
 
 // helperSpec is the dump or restore container: the database's own image
-// on its project network.
-func helperSpec(spec *agentv1.ServiceSpec, job dbJob, what string) jobrun.Spec {
-	return jobrun.Spec{
+// on its project network, with the service's volumes when the job needs
+// the files the server writes.
+func (l *Local) helperSpec(spec *agentv1.ServiceSpec, job dbJob, what string) (jobrun.Spec, error) {
+	s := jobrun.Spec{
 		Name:       jobrun.HelperName(spec.GetId(), what),
 		Image:      jobrun.ImageRef(spec.GetImage()),
 		Auth:       spec.GetImage().GetAuth(),
@@ -401,6 +407,14 @@ func helperSpec(spec *agentv1.ServiceSpec, job dbJob, what string) jobrun.Spec {
 		Labels:     jobrun.Labels(jobrun.OwnerOf(spec), jobrun.RoleBackup, map[string]string{jobrun.LabelRun: what}),
 		Network:    jobrun.ProjectNetwork(spec),
 	}
+	if job.volumes {
+		binds, err := jobrun.VolumeBinds(l.opts.Layout, spec)
+		if err != nil {
+			return jobrun.Spec{}, err
+		}
+		s.Binds = binds
+	}
+	return s, nil
 }
 
 // prune deletes objects past keep and returns their keys.
@@ -461,7 +475,7 @@ func (l *Local) Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) 
 		if err != nil {
 			return nil, err
 		}
-		if t.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS {
+		if dbengine.RedisLike(t.engine) {
 			if ext != extRedis {
 				return nil, fmt.Errorf("%w: %s is not a Redis backup", ErrBadRequest, key)
 			}
@@ -470,7 +484,7 @@ func (l *Local) Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) 
 			}
 			return l.restoreRedis(ctx, store, key, spec)
 		}
-		job, err := restoreJob(t, ext)
+		job, err := restoreJob(t, ext, newSuffix(l.opts.Now()))
 		if err != nil {
 			return nil, err
 		}
@@ -507,7 +521,11 @@ func (l *Local) restoreDump(ctx context.Context, store Store, key string, spec *
 	}
 	defer closeFn()
 	tail := jobrun.NewTail(20, []string{t.password})
-	res, err := l.opts.Docker.Run(ctx, helperSpec(spec, job, "restore-"+newSuffix(l.opts.Now())), jobrun.IO{Stdin: r, Stdout: tail, Stderr: tail})
+	helper, err := l.helperSpec(spec, job, "restore-"+newSuffix(l.opts.Now()))
+	if err != nil {
+		return nil, err
+	}
+	res, err := l.opts.Docker.Run(ctx, helper, jobrun.IO{Stdin: r, Stdout: tail, Stderr: tail})
 	if err != nil {
 		return nil, err
 	}
@@ -572,9 +590,16 @@ func swapDirs(dir, staging, old string) error {
 	return nil
 }
 
-// restoreRedis replaces dump.rdb in the data volume while Redis is
-// stopped. An append-only folder would win over the RDB on start, so it
-// is moved aside (kept, never deleted).
+// restoreRedis replaces dump.rdb in the data volume while the server (Redis,
+// Valkey, KeyDB or Dragonfly) is stopped. With append-only on (the panel
+// runs Redis, Valkey and KeyDB with --appendonly yes) the server loads only
+// its append-only files and starts empty when they are missing, so the
+// existing ones (the appendonlydir folder of Redis 7+ and Valkey, KeyDB's
+// single appendonly.aof) are moved aside (kept, never deleted) and the RDB
+// is also written as appendonly.aof: a file that starts with an RDB
+// preamble. KeyDB loads it as is; Redis 7+ and Valkey take it as an AOF
+// from before 7.0 and move it into a new appendonlydir. Dragonfly has no
+// append-only file and loads dump.rdb.
 func (l *Local) restoreRedis(ctx context.Context, store Store, key string, spec *agentv1.ServiceSpec) (*agentv1.RestoreBackupResponse, error) {
 	data, volume := "", ""
 	for _, v := range spec.GetVolumes() {
@@ -599,30 +624,30 @@ func (l *Local) restoreRedis(ctx context.Context, store Store, key string, spec 
 	}
 	suffix := newSuffix(l.opts.Now())
 	tmp := filepath.Join(data, "dump.rdb.restore-"+suffix)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
+	paths := []string{tmp}
+	aofCopy := ""
+	if spec.GetDatabase().GetEngine() != agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY {
+		aofCopy = filepath.Join(data, "appendonly.aof.restore-"+suffix)
+		paths = append(paths, aofCopy)
+	}
+	if err := writeRDB(paths, data, r); err != nil {
 		return nil, err
 	}
-	_, cerr := io.Copy(f, r)
-	// Through the open descriptor: the volume is container-writable, and
-	// a chown by path would follow a symlink swapped in for tmp.
-	if st, err := os.Stat(data); err == nil {
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-			_ = f.Chown(int(sys.Uid), int(sys.Gid))
-		}
+	for _, p := range paths {
+		defer os.Remove(p)
 	}
-	if err := errors.Join(cerr, f.Close()); err != nil {
-		os.Remove(tmp)
-		return nil, err
-	}
-	defer os.Remove(tmp)
 	resume, err := l.suspendAll(ctx, l.mounters(spec, volume, false))
 	if err != nil {
 		return nil, fmt.Errorf("stopping the service: %w", err)
 	}
 	var swapErr error
-	if aof := filepath.Join(data, "appendonlydir"); exists(aof) {
-		swapErr = os.Rename(aof, aof+".before-restore-"+suffix)
+	for _, name := range []string{"appendonlydir", "appendonly.aof"} {
+		if aof := filepath.Join(data, name); swapErr == nil && exists(aof) {
+			swapErr = os.Rename(aof, aof+".before-restore-"+suffix)
+		}
+	}
+	if swapErr == nil && aofCopy != "" {
+		swapErr = os.Rename(aofCopy, filepath.Join(data, "appendonly.aof"))
 	}
 	if swapErr == nil {
 		swapErr = os.Rename(tmp, filepath.Join(data, "dump.rdb"))
@@ -634,6 +659,95 @@ func (l *Local) restoreRedis(ctx context.Context, store Store, key string, spec 
 		return nil, swapErr
 	}
 	return &agentv1.RestoreBackupResponse{RestoredBytes: uint64(counter.n)}, nil
+}
+
+// rdbEOFMarkLen is the length of the hex marker a diskless replication
+// stream ends with. redis-cli --rdb - cannot truncate stdout, so RDBs it
+// dumped from a diskless master (Redis 7+ and Valkey by default) keep the
+// marker after the RDB's EOF opcode (0xFF) and 8-byte checksum. A dump.rdb
+// load stops at the EOF opcode, but an append-only file would read the
+// marker as a command and refuse to start.
+const rdbEOFMarkLen = 40
+
+// rdbTail is how many trailing bytes rdbHasEOFMark looks at.
+const rdbTail = 1 + 8 + rdbEOFMarkLen
+
+func rdbHasEOFMark(tail []byte) bool {
+	if len(tail) != rdbTail || tail[0] != 0xFF {
+		return false
+	}
+	for _, c := range tail[9:] {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// tailWriter keeps the last bytes written to it.
+type tailWriter struct {
+	buf []byte
+	n   int64
+}
+
+func (t *tailWriter) Write(p []byte) (int, error) {
+	t.n += int64(len(p))
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > rdbTail {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-rdbTail:]...)
+	}
+	return len(p), nil
+}
+
+// writeRDB writes the RDB in r to new files at paths (never through an
+// existing name, and never opened again by name: the folder is
+// container-writable) owned like dir, so the server that runs as dir's
+// owner can read and replace them, without a trailing diskless marker. On
+// error nothing is left behind.
+func writeRDB(paths []string, dir string, r io.Reader) (err error) {
+	var files []*os.File
+	defer func() {
+		for _, f := range files {
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			for _, p := range paths {
+				os.Remove(p)
+			}
+		}
+	}()
+	tail := &tailWriter{}
+	ws := []io.Writer{tail}
+	for _, p := range paths {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		files = append(files, f)
+		ws = append(ws, f)
+	}
+	if _, err := io.Copy(io.MultiWriter(ws...), r); err != nil {
+		return err
+	}
+	if rdbHasEOFMark(tail.buf) {
+		for _, f := range files {
+			if err := f.Truncate(tail.n - rdbEOFMarkLen); err != nil {
+				return err
+			}
+		}
+	}
+	// Through the open descriptors: a chown by path would follow a symlink
+	// swapped in for it.
+	if st, serr := os.Stat(dir); serr == nil {
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+			for _, f := range files {
+				_ = f.Chown(int(sys.Uid), int(sys.Gid))
+			}
+		}
+	}
+	return nil
 }
 
 func exists(p string) bool {
