@@ -20842,6 +20842,1882 @@
         "x-mcp": true
       }
     },
+    "/api/v1/dockerHub.create": {
+      "post": {
+        "operationId": "dockerHub.create",
+        "summary": "Create an app from a Docker Hub image",
+        "description": "Creates an app service that runs a Docker Hub image pinned to a tag, with its main port, a volume per mount path and a .env, then deploys it unless deployNow is false. A public main port gets the node's automatic domain when the node has a wildcard domain, otherwise IP:port until a domain is added. Use dockerHub.inspect first to read the image's ports, volumes and env defaults.",
+        "tags": [
+          "dockerHub"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectId",
+                  "name",
+                  "nodeId",
+                  "repository",
+                  "tag"
+                ],
+                "properties": {
+                  "projectId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                    "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                    "type": "string"
+                  },
+                  "nodeId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "repository": {
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^(?:[a-z0-9]+(?:[_-][a-z0-9]+)*/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$",
+                    "description": "A Docker Hub repository: \"nginx\" (official image) or \"namespace/name\". Never another registry: a namespace has no dots.",
+                    "type": "string"
+                  },
+                  "tag": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+                    "type": "string"
+                  },
+                  "registryId": {
+                    "anyOf": [
+                      {
+                        "pattern": "^[a-z0-9]{16}$",
+                        "description": "Panel-issued id.",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "port": {
+                    "anyOf": [
+                      {
+                        "minimum": 1,
+                        "maximum": 65535,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "public": {
+                    "type": "boolean"
+                  },
+                  "volumes": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "mountPath"
+                      ],
+                      "properties": {
+                        "mountPath": {
+                          "minLength": 2,
+                          "maxLength": 500,
+                          "pattern": "^/\\S*$",
+                          "type": "string"
+                        },
+                        "name": {
+                          "minLength": 1,
+                          "maxLength": 60,
+                          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "env": {
+                    "maxLength": 100000,
+                    "type": "string"
+                  },
+                  "deployNow": {
+                    "default": true,
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "projectId",
+                    "name",
+                    "kind",
+                    "parentId",
+                    "status",
+                    "source",
+                    "address",
+                    "placements",
+                    "cpuPercent",
+                    "memoryBytes",
+                    "memoryLimitBytes",
+                    "liveDeployment",
+                    "lastDeployedAt",
+                    "protected",
+                    "templateSlug",
+                    "createdAt",
+                    "updatedAt",
+                    "stopped",
+                    "generation",
+                    "sourceConfig",
+                    "build",
+                    "container",
+                    "ports",
+                    "healthCheck",
+                    "crashPolicy",
+                    "restartDelaySeconds",
+                    "resources",
+                    "deploy",
+                    "cron",
+                    "stickySessions",
+                    "entryNodeId",
+                    "notes",
+                    "members",
+                    "volumes"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                      "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "description": "Compose members have kind app and a parentId naming their stack.",
+                      "anyOf": [
+                        {
+                          "const": "app",
+                          "type": "string"
+                        },
+                        {
+                          "const": "compose",
+                          "type": "string"
+                        },
+                        {
+                          "const": "postgres",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mysql",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mariadb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mongo",
+                          "type": "string"
+                        },
+                        {
+                          "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "box",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cron",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "parentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "const": "idle",
+                          "type": "string"
+                        },
+                        {
+                          "const": "building",
+                          "type": "string"
+                        },
+                        {
+                          "const": "deploying",
+                          "type": "string"
+                        },
+                        {
+                          "const": "starting",
+                          "type": "string"
+                        },
+                        {
+                          "const": "running",
+                          "type": "string"
+                        },
+                        {
+                          "const": "partial",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unhealthy",
+                          "type": "string"
+                        },
+                        {
+                          "const": "crashed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stopped",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "label",
+                        "branch",
+                        "builder"
+                      ],
+                      "properties": {
+                        "type": {
+                          "anyOf": [
+                            {
+                              "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "git",
+                              "type": "string"
+                            },
+                            {
+                              "const": "image",
+                              "type": "string"
+                            },
+                            {
+                              "const": "inline",
+                              "type": "string"
+                            },
+                            {
+                              "const": "upload",
+                              "type": "string"
+                            },
+                            {
+                              "const": "compose",
+                              "type": "string"
+                            },
+                            {
+                              "const": "database",
+                              "type": "string"
+                            },
+                            {
+                              "const": "none",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "branch": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "builder": {
+                          "anyOf": [
+                            {
+                              "const": "railpack",
+                              "type": "string"
+                            },
+                            {
+                              "const": "nixpacks",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dockerfile",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "address": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "placements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "nodeId",
+                          "nodeName",
+                          "replicas"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "nodeName": {
+                            "type": "string"
+                          },
+                          "replicas": {
+                            "minimum": 1,
+                            "maximum": 32,
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "cpuPercent": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memoryBytes": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memoryLimitBytes": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "liveDeployment": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "label",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastDeployedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "protected": {
+                      "type": "boolean"
+                    },
+                    "templateSlug": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "stopped": {
+                      "type": "boolean"
+                    },
+                    "generation": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sourceConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "installationId",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "github",
+                              "type": "string"
+                            },
+                            "installationId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "repo": {
+                              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "url",
+                            "branch",
+                            "credentialId",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "git",
+                              "type": "string"
+                            },
+                            "url": {
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
+                            },
+                            "credentialId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "image",
+                            "registryId"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "image",
+                              "type": "string"
+                            },
+                            "image": {
+                              "minLength": 1,
+                              "maxLength": 300,
+                              "pattern": "^\\S+$",
+                              "type": "string"
+                            },
+                            "registryId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "inline",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "fileName"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "upload",
+                              "type": "string"
+                            },
+                            "fileName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "none",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "build": {
+                      "type": "object",
+                      "required": [
+                        "builder",
+                        "contextPath",
+                        "dockerfilePath",
+                        "inlineDockerfile",
+                        "targetStage",
+                        "buildNodeId",
+                        "startCommand",
+                        "installCommand",
+                        "buildCommand"
+                      ],
+                      "properties": {
+                        "builder": {
+                          "anyOf": [
+                            {
+                              "const": "railpack",
+                              "type": "string"
+                            },
+                            {
+                              "const": "nixpacks",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dockerfile",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "contextPath": {
+                          "maxLength": 300,
+                          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).*$",
+                          "type": "string"
+                        },
+                        "dockerfilePath": {
+                          "maxLength": 300,
+                          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).*$",
+                          "type": "string"
+                        },
+                        "inlineDockerfile": {
+                          "anyOf": [
+                            {
+                              "maxLength": 100000,
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "targetStage": {
+                          "maxLength": 100,
+                          "type": "string"
+                        },
+                        "buildNodeId": {
+                          "anyOf": [
+                            {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "startCommand": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        },
+                        "installCommand": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        },
+                        "buildCommand": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "container": {
+                      "type": "object",
+                      "required": [
+                        "command",
+                        "entrypoint",
+                        "workingDir",
+                        "user",
+                        "stopSignal",
+                        "stopGraceSeconds"
+                      ],
+                      "properties": {
+                        "command": {
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 2000,
+                            "type": "string"
+                          }
+                        },
+                        "entrypoint": {
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 2000,
+                            "type": "string"
+                          }
+                        },
+                        "workingDir": {
+                          "maxLength": 500,
+                          "type": "string"
+                        },
+                        "user": {
+                          "maxLength": 100,
+                          "type": "string"
+                        },
+                        "stopSignal": {
+                          "maxLength": 20,
+                          "pattern": "^(SIG[A-Z0-9]+)?$",
+                          "type": "string"
+                        },
+                        "stopGraceSeconds": {
+                          "minimum": 1,
+                          "maximum": 3600,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "ports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "containerPort",
+                          "protocol"
+                        ],
+                        "properties": {
+                          "containerPort": {
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "anyOf": [
+                              {
+                                "const": "tcp",
+                                "type": "string"
+                              },
+                              {
+                                "const": "udp",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "healthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "probe",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "failureThreshold"
+                          ],
+                          "properties": {
+                            "probe": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "port"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "const": "tcp",
+                                      "type": "string"
+                                    },
+                                    "port": {
+                                      "minimum": 1,
+                                      "maximum": 65535,
+                                      "type": "integer"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "port",
+                                    "path",
+                                    "host",
+                                    "expectedStatus"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "const": "http",
+                                      "type": "string"
+                                    },
+                                    "port": {
+                                      "minimum": 1,
+                                      "maximum": 65535,
+                                      "type": "integer"
+                                    },
+                                    "path": {
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "^/",
+                                      "type": "string"
+                                    },
+                                    "host": {
+                                      "maxLength": 253,
+                                      "type": "string"
+                                    },
+                                    "expectedStatus": {
+                                      "minimum": 0,
+                                      "maximum": 599,
+                                      "type": "integer"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "command"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "const": "command",
+                                      "type": "string"
+                                    },
+                                    "command": {
+                                      "minItems": 1,
+                                      "maxItems": 50,
+                                      "type": "array",
+                                      "items": {
+                                        "maxLength": 2000,
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "intervalSeconds": {
+                              "minimum": 1,
+                              "maximum": 3600,
+                              "type": "integer"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 1,
+                              "maximum": 600,
+                              "type": "integer"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "maximum": 3600,
+                              "type": "integer"
+                            },
+                            "failureThreshold": {
+                              "minimum": 1,
+                              "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "crashPolicy": {
+                      "type": "object",
+                      "required": [
+                        "restart",
+                        "stopAfterCrashes"
+                      ],
+                      "properties": {
+                        "restart": {
+                          "description": "Off = stay stopped after the first crash.",
+                          "type": "boolean"
+                        },
+                        "stopAfterCrashes": {
+                          "minimum": 0,
+                          "maximum": 1000,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "restartDelaySeconds": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "resources": {
+                      "type": "object",
+                      "required": [
+                        "memoryLimitBytes",
+                        "memoryReservationBytes",
+                        "cpuWeight",
+                        "pidsLimit"
+                      ],
+                      "properties": {
+                        "memoryLimitBytes": {
+                          "anyOf": [
+                            {
+                              "minimum": 6291456,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "memoryReservationBytes": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "cpuWeight": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 10000,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pidsLimit": {
+                          "anyOf": [
+                            {
+                              "minimum": 16,
+                              "maximum": 1000000,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "deploy": {
+                      "type": "object",
+                      "required": [
+                        "mode",
+                        "healthTimeoutSeconds"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "anyOf": [
+                            {
+                              "const": "rolling",
+                              "type": "string"
+                            },
+                            {
+                              "const": "recreate",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "healthTimeoutSeconds": {
+                          "minimum": 10,
+                          "maximum": 3600,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "cron": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "schedule",
+                            "timeZone",
+                            "command",
+                            "timeoutSeconds",
+                            "concurrency"
+                          ],
+                          "properties": {
+                            "schedule": {
+                              "minLength": 9,
+                              "maxLength": 120,
+                              "type": "string"
+                            },
+                            "timeZone": {
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "type": "string"
+                            },
+                            "command": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "maxLength": 2000,
+                                "type": "string"
+                              }
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 1,
+                              "maximum": 86400,
+                              "type": "integer"
+                            },
+                            "concurrency": {
+                              "anyOf": [
+                                {
+                                  "const": "forbid",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "allow",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "replace",
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "entryNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "notes": {
+                      "type": "string"
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "status"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "minLength": 1,
+                            "maxLength": 40,
+                            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                            "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                            "type": "string"
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "const": "idle",
+                                "type": "string"
+                              },
+                              {
+                                "const": "building",
+                                "type": "string"
+                              },
+                              {
+                                "const": "deploying",
+                                "type": "string"
+                              },
+                              {
+                                "const": "starting",
+                                "type": "string"
+                              },
+                              {
+                                "const": "running",
+                                "type": "string"
+                              },
+                              {
+                                "const": "partial",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unhealthy",
+                                "type": "string"
+                              },
+                              {
+                                "const": "crashed",
+                                "type": "string"
+                              },
+                              {
+                                "const": "stopped",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "volumes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "mountPath",
+                          "kind",
+                          "readOnly",
+                          "sharedWith"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "mountPath": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "volume",
+                                "type": "string"
+                              },
+                              {
+                                "const": "file",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "readOnly": {
+                            "type": "boolean"
+                          },
+                          "sharedWith": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "minLength": 1,
+                                  "maxLength": 40,
+                                  "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                                  "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "project:services.create",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/dockerHub.inspect": {
+      "get": {
+        "operationId": "dockerHub.inspect",
+        "summary": "Read an image's config",
+        "description": "Reads an image's config from Docker Hub's registry for linux/amd64 or linux/arm64 (whichever the image ships, preferring arch): exposed ports, VOLUME paths, ENV defaults, entrypoint and command, user, health check and labels, with the digest the tag points at. Costs at most one pull from Docker Hub's rate limit, none when the digest was read before.",
+        "tags": [
+          "dockerHub"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^(?:[a-z0-9]+(?:[_-][a-z0-9]+)*/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$",
+              "description": "A Docker Hub repository: \"nginx\" (official image) or \"namespace/name\". Never another registry: a namespace has no dots.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "arch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "amd64",
+                  "type": "string"
+                },
+                {
+                  "const": "arm64",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "repository",
+                    "tag",
+                    "digest",
+                    "platform",
+                    "platforms",
+                    "ports",
+                    "volumes",
+                    "env",
+                    "entrypoint",
+                    "cmd",
+                    "user",
+                    "workingDir",
+                    "healthcheck",
+                    "labels",
+                    "createdAt",
+                    "private"
+                  ],
+                  "properties": {
+                    "repository": {
+                      "minLength": 1,
+                      "maxLength": 255,
+                      "pattern": "^(?:[a-z0-9]+(?:[_-][a-z0-9]+)*/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$",
+                      "description": "A Docker Hub repository: \"nginx\" (official image) or \"namespace/name\". Never another registry: a namespace has no dots.",
+                      "type": "string"
+                    },
+                    "tag": {
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "type": "string"
+                    },
+                    "platforms": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "ports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "port",
+                          "protocol"
+                        ],
+                        "properties": {
+                          "port": {
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "anyOf": [
+                              {
+                                "const": "tcp",
+                                "type": "string"
+                              },
+                              {
+                                "const": "udp",
+                                "type": "string"
+                              },
+                              {
+                                "const": "sctp",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "volumes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "env": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "value"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "entrypoint": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cmd": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "user": {
+                      "type": "string"
+                    },
+                    "workingDir": {
+                      "type": "string"
+                    },
+                    "healthcheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "test",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "retries"
+                          ],
+                          "properties": {
+                            "test": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "intervalSeconds": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "timeoutSeconds": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startPeriodSeconds": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "retries": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "labels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "value"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "createdAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "private": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/dockerHub.search": {
+      "get": {
+        "operationId": "dockerHub.search",
+        "summary": "Search Docker Hub",
+        "description": "Searches Docker Hub for images by name or description. Official images and verified publishers come first, then the rest in Docker Hub's order, with pull counts, stars and badges. Answers are cached for 10 minutes.",
+        "tags": [
+          "dockerHub"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "maximum": 20,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "results",
+                    "page",
+                    "hasMore"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "repository",
+                          "publisher",
+                          "description",
+                          "pullCount",
+                          "stars",
+                          "badge",
+                          "updatedAt",
+                          "architectures"
+                        ],
+                        "properties": {
+                          "repository": {
+                            "minLength": 1,
+                            "maxLength": 255,
+                            "pattern": "^(?:[a-z0-9]+(?:[_-][a-z0-9]+)*/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$",
+                            "description": "A Docker Hub repository: \"nginx\" (official image) or \"namespace/name\". Never another registry: a namespace has no dots.",
+                            "type": "string"
+                          },
+                          "publisher": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "pullCount": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "stars": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "badge": {
+                            "anyOf": [
+                              {
+                                "const": "official",
+                                "type": "string"
+                              },
+                              {
+                                "const": "verified",
+                                "type": "string"
+                              },
+                              {
+                                "const": "openSource",
+                                "type": "string"
+                              },
+                              {
+                                "const": "none",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "updatedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "architectures": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/dockerHub.tags": {
+      "get": {
+        "operationId": "dockerHub.tags",
+        "summary": "List an image's tags",
+        "description": "Lists a Docker Hub repository's tags, newest first, with the Linux platforms and sizes each one ships, and suggests a tag to pin: the most specific version tag that points at the same image as latest. Answers are cached for 30 minutes.",
+        "tags": [
+          "dockerHub"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "repository",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^(?:[a-z0-9]+(?:[_-][a-z0-9]+)*/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$",
+              "description": "A Docker Hub repository: \"nginx\" (official image) or \"namespace/name\". Never another registry: a namespace has no dots.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tags",
+                    "suggested",
+                    "page",
+                    "hasMore"
+                  ],
+                  "properties": {
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "digest",
+                          "updatedAt",
+                          "platforms"
+                        ],
+                        "properties": {
+                          "name": {
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+                            "type": "string"
+                          },
+                          "digest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "updatedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "platforms": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "platform",
+                                "sizeBytes"
+                              ],
+                              "properties": {
+                                "platform": {
+                                  "type": "string"
+                                },
+                                "sizeBytes": {
+                                  "anyOf": [
+                                    {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "suggested": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "page": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
     "/api/v1/domains.add": {
       "post": {
         "operationId": "domains.add",

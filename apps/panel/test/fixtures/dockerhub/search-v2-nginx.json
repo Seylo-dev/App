@@ -1,0 +1,61 @@
+{
+  "count": 296087,
+  "next": "https://hub.docker.com/v2/search/repositories/?page=2&page_size=6&query=nginx",
+  "previous": "",
+  "results": [
+    {
+      "repo_name": "nginx",
+      "short_description": "Official build of Nginx.",
+      "star_count": 21417,
+      "pull_count": 13560944144,
+      "repo_owner": "",
+      "is_automated": false,
+      "is_official": true
+    },
+    {
+      "repo_name": "nginx/nginx-ingress",
+      "short_description": "NGINX and  NGINX Plus Ingress Controllers for Kubernetes",
+      "star_count": 124,
+      "pull_count": 1088447097,
+      "repo_owner": "",
+      "is_automated": false,
+      "is_official": false
+    },
+    {
+      "repo_name": "nginx/nginx-prometheus-exporter",
+      "short_description": "NGINX Prometheus Exporter for NGINX and NGINX Plus",
+      "star_count": 53,
+      "pull_count": 92198909,
+      "repo_owner": "",
+      "is_automated": false,
+      "is_official": false
+    },
+    {
+      "repo_name": "nginx/nginx-ingress-operator",
+      "short_description": "NGINX Ingress Operator for NGINX and NGINX Plus Ingress Controllers. Based on the Helm chart for NGI",
+      "star_count": 5,
+      "pull_count": 1313689,
+      "repo_owner": "",
+      "is_automated": false,
+      "is_official": false
+    },
+    {
+      "repo_name": "nginx/nginx-unprivileged",
+      "short_description": "Unprivileged NGINX images",
+      "star_count": 2,
+      "pull_count": 127786,
+      "repo_owner": "",
+      "is_automated": false,
+      "is_official": false
+    },
+    {
+      "repo_name": "nginx/nginxaas-loadbalancer-kubernetes",
+      "short_description": "",
+      "star_count": 1,
+      "pull_count": 18140,
+      "repo_owner": "",
+      "is_automated": false,
+      "is_official": false
+    }
+  ]
+}

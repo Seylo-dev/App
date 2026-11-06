@@ -1,0 +1,14 @@
+{
+  "repository": "gitea/gitea",
+  "tag": "28.3.0",
+  "indexDigest": "sha256:8967bf9deaf3c5c4adae13519436dc1b20c646ac83fe37ae810c933a1045227d",
+  "indexContentType": "application/vnd.oci.image.index.v1+json",
+  "amd64": {
+    "manifestDigest": "sha256:411af83e9be78029c0047a5f5a72f1d91b7c793ba5e5813b4e70a6bb8e4a0738",
+    "configDigest": "sha256:361e24f5ef63c7ff4af6a571371511bbc677d8b291dd597c12f338e36ae48b77"
+  },
+  "arm64": {
+    "manifestDigest": "sha256:0543eb2049bacecb24645d023c5b3cddbd77bc47d35b2761d0b4c63cc4667292",
+    "configDigest": "sha256:ee803f9248c5fb9a8a5ca80f5a1ef11a9ce4b10bf3b89aec3a8ac038b74a6082"
+  }
+}

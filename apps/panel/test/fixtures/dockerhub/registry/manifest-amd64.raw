@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:361e24f5ef63c7ff4af6a571371511bbc677d8b291dd597c12f338e36ae48b77",
+    "size": 2770
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:7b229517ed222597277036d94892173207d01a731ab3a88eeb1de2e963a2c788",
+      "size": 3853109
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:cf8380b088b4b5a7277d0dad7e4494168a74d3080b59693e143ee08613d9120c",
+      "size": 21667708
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:e9238b9fda0243418455e5853512be8aa03599c20197bf7b32419a8fd921682b",
+      "size": 909
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:0490b86d2de701f9d5711e039f8df3dd054c2e5d7f28242b918e8397e99ecae7",
+      "size": 4139
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:851696164775d4515b2f12336522eceb798830e7499c6ef093ad8428fea328e2",
+      "size": 46586652
+    }
+  ],
+  "annotations": {
+    "org.opencontainers.image.authors": "\"maintainers@gitea.io\"",
+    "org.opencontainers.image.created": "2026-11-01T08:27:58.142Z",
+    "org.opencontainers.image.description": "Git with a cup of tea! Painless self-hosted all-in-one software development service, including Git hosting, code review, team collaboration, package registry and CI/CD",
+    "org.opencontainers.image.licenses": "MIT",
+    "org.opencontainers.image.revision": "4f5a3e13e5f3aca85d830e3a9024c893b0bbf1e1",
+    "org.opencontainers.image.source": "https://github.com/go-gitea/gitea",
+    "org.opencontainers.image.title": "gitea",
+    "org.opencontainers.image.url": "https://github.com/go-gitea/gitea",
+    "org.opencontainers.image.version": "28.3.0"
+  }
+}

@@ -1,0 +1,530 @@
+{
+  "total": 1575,
+  "results": [
+    {
+      "id": "dhi/gitea",
+      "name": "Gitea",
+      "slug": "dhi/gitea",
+      "type": "dhi",
+      "publisher": {
+        "id": "b3ca4e261ea244c3a662a24602a90a2a",
+        "name": "dhi"
+      },
+      "created_at": "2026-07-17T00:27:12.562869Z",
+      "updated_at": "2026-11-06T18:11:34.7012563Z",
+      "short_description": "Gitea is a self-hosted, all-in-one software development platform that provides Git repository hosting, code review, issue tracking, a package registry, and CI/CD through Gitea Actions.",
+      "badge": "hardened",
+      "star_count": 0,
+      "pull_count": "100K+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        }
+      ],
+      "logo_url": {
+        "large": "https://djeqr6to3dedg.cloudfront.net/repo-logos/dhi/gitea/live/logo-1793988695059",
+        "small": "https://djeqr6to3dedg.cloudfront.net/repo-logos/dhi/gitea/live/logo-1793988695059"
+      },
+      "extension_reviewed": false,
+      "categories": [
+        {
+          "slug": "Developer tools",
+          "name": "Developer tools"
+        },
+        {
+          "slug": "Integration & delivery",
+          "name": "Integration & delivery"
+        }
+      ],
+      "archived": false,
+      "media_types": ["application/vnd.oci.image.index.v1+json"],
+      "content_types": ["image"],
+      "score": 37999696,
+      "raw_pull_count": 221109,
+      "additional_metadata": {
+        "els_available": false,
+        "fips_compliant": true,
+        "has_security_attestations": false,
+        "stig_certified": true,
+        "tools": [
+          {
+            "description": "Gitea server binary; also the admin/config CLI (gitea admin, gitea config), reachable through the /usr/local/bin/gitea wrapper.",
+            "name": "gitea"
+          },
+          {
+            "description": "Wrapper that applies GITEA__SECTION__KEY environment overrides to app.ini via gitea config edit-ini.",
+            "name": "environment-to-ini"
+          },
+          {
+            "description": "Git client used by Gitea for all repository operations.",
+            "name": "git"
+          }
+        ],
+        "url": "https://about.gitea.com/"
+      }
+    },
+    {
+      "id": "gitea/gitea",
+      "name": "gitea/gitea",
+      "slug": "gitea/gitea",
+      "type": "image",
+      "publisher": {
+        "id": "f6c6242e0fff43e1b5d2a43f29b8a85e",
+        "name": "gitea"
+      },
+      "created_at": "2016-11-29T07:04:30.946692Z",
+      "updated_at": "2026-11-06T12:37:13.920935Z",
+      "short_description": "Gitea: Git with a cup of tea - A painless self-hosted Git service.",
+      "badge": "none",
+      "star_count": 1063,
+      "pull_count": "100M+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        },
+        {
+          "name": "unknown",
+          "label": "unknown"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "unknown",
+          "label": "unknown"
+        },
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        },
+        {
+          "name": "riscv64",
+          "label": "riscv64"
+        }
+      ],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": [
+        "application/vnd.docker.container.image.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.index.v1+json"
+      ],
+      "content_types": ["image"],
+      "score": 2658773.5,
+      "raw_pull_count": 393711408,
+      "additional_metadata": {
+        "has_security_attestations": true
+      }
+    },
+    {
+      "id": "bitnamicharts/gitea",
+      "name": "bitnamicharts/gitea",
+      "slug": "bitnamicharts/gitea",
+      "type": "image",
+      "publisher": {
+        "id": "de99cb60826b4700a1f837a5c00621aa",
+        "name": "VMware"
+      },
+      "created_at": "2023-01-24T10:49:58.084915Z",
+      "updated_at": "2025-08-13T21:56:27.83827Z",
+      "short_description": "Bitnami Helm chart for Gitea",
+      "badge": "verified_publisher",
+      "star_count": 1,
+      "pull_count": "1M+",
+      "operating_systems": [],
+      "architectures": [],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/85bcf547a6bf62b855df2c682af81a4e?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/85bcf547a6bf62b855df2c682af81a4e?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [
+        {
+          "slug": "developer-tools",
+          "name": "Developer tools"
+        }
+      ],
+      "archived": false,
+      "media_types": ["application/vnd.cncf.helm.config.v1+json", "application/vnd.oci.image.index.v1+json"],
+      "content_types": ["helm", "image"],
+      "score": 958876.2,
+      "raw_pull_count": 1065102,
+      "additional_metadata": null
+    },
+    {
+      "id": "sbx/gitea",
+      "name": "sbx/gitea",
+      "slug": "sbx/gitea",
+      "type": "image",
+      "publisher": {
+        "id": "c3653c7368ab47bf9a70e0d714a0be33",
+        "name": "Docker, Inc"
+      },
+      "created_at": "2026-10-08T14:07:44.862802Z",
+      "updated_at": "2026-11-06T07:48:52.565913Z",
+      "short_description": "Wires a Gitea access token into the sandbox proxy so git-over-HTTPS and the Gitea API both authen...",
+      "badge": "verified_publisher",
+      "star_count": 1,
+      "pull_count": "2.8K",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        }
+      ],
+      "logo_url": {
+        "large": "https://djeqr6to3dedg.cloudfront.net/repo-logos/sbx/gitea/live/logo-1791474839064.svg",
+        "small": "https://djeqr6to3dedg.cloudfront.net/repo-logos/sbx/gitea/live/logo-1791474839064.svg"
+      },
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": ["application/vnd.docker.sandbox.kit.v3"],
+      "content_types": ["sbx_kit"],
+      "score": 521399.4,
+      "raw_pull_count": 2845,
+      "additional_metadata": {
+        "has_security_attestations": true,
+        "kinds": ["mixin"],
+        "names": ["Gitea"]
+      }
+    },
+    {
+      "id": "vulhub/gitea",
+      "name": "vulhub/gitea",
+      "slug": "vulhub/gitea",
+      "type": "image",
+      "publisher": {
+        "id": "ecb07b7b7c3e447a81271b1779a75247",
+        "name": "VulHub"
+      },
+      "created_at": "2018-07-14T14:13:49.444125Z",
+      "updated_at": "2018-07-14T14:13:49.757178Z",
+      "short_description": "",
+      "badge": "open_source",
+      "star_count": 0,
+      "pull_count": "10K+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        }
+      ],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/d3a27702bfece39c796c842553c9ca15?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/d3a27702bfece39c796c842553c9ca15?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [
+        {
+          "slug": "integration-and-delivery",
+          "name": "Integration & delivery"
+        },
+        {
+          "slug": "security",
+          "name": "Security"
+        },
+        {
+          "slug": "web-servers",
+          "name": "Web servers"
+        }
+      ],
+      "archived": false,
+      "media_types": ["application/vnd.docker.container.image.v1+json"],
+      "content_types": ["image"],
+      "score": 380236.84,
+      "raw_pull_count": 12730,
+      "additional_metadata": null
+    },
+    {
+      "id": "gitea/act_runner",
+      "name": "gitea/act_runner",
+      "slug": "gitea/act_runner",
+      "type": "image",
+      "publisher": {
+        "id": "f6c6242e0fff43e1b5d2a43f29b8a85e",
+        "name": "gitea"
+      },
+      "created_at": "2023-04-27T04:04:46.230044Z",
+      "updated_at": "2026-04-30T18:36:40.029712Z",
+      "short_description": "Deprecated Gitea runner. Moved to gitea/runner",
+      "badge": "none",
+      "star_count": 34,
+      "pull_count": "10M+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        },
+        {
+          "name": "unknown",
+          "label": "unknown"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "unknown",
+          "label": "unknown"
+        },
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        }
+      ],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": ["application/vnd.oci.image.index.v1+json"],
+      "content_types": ["image"],
+      "score": 260803.22,
+      "raw_pull_count": 11233048,
+      "additional_metadata": null
+    },
+    {
+      "id": "hkube/gitea",
+      "name": "hkube/gitea",
+      "slug": "hkube/gitea",
+      "type": "image",
+      "publisher": {
+        "id": "0c00e064e50048658233866d0820405f",
+        "name": "Kube-HPC"
+      },
+      "created_at": "2021-02-18T07:28:32.635782Z",
+      "updated_at": "2021-02-18T07:28:32.93132Z",
+      "short_description": "",
+      "badge": "open_source",
+      "star_count": 0,
+      "pull_count": "263",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        }
+      ],
+      "logo_url": {},
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": ["application/vnd.docker.container.image.v1+json"],
+      "content_types": ["image"],
+      "score": 224465.42,
+      "raw_pull_count": 263,
+      "additional_metadata": null
+    },
+    {
+      "id": "gitea/runner",
+      "name": "gitea/runner",
+      "slug": "gitea/runner",
+      "type": "image",
+      "publisher": {
+        "id": "f6c6242e0fff43e1b5d2a43f29b8a85e",
+        "name": "gitea"
+      },
+      "created_at": "2026-04-25T23:10:53.094827Z",
+      "updated_at": "2026-11-06T03:41:37.310199Z",
+      "short_description": "Official runner of Gitea Actions",
+      "badge": "none",
+      "star_count": 10,
+      "pull_count": "1M+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        },
+        {
+          "name": "unknown",
+          "label": "unknown"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        },
+        {
+          "name": "riscv64",
+          "label": "riscv64"
+        },
+        {
+          "name": "s390x",
+          "label": "IBM Z"
+        },
+        {
+          "name": "unknown",
+          "label": "unknown"
+        }
+      ],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": ["application/vnd.oci.image.index.v1+json"],
+      "content_types": ["image"],
+      "score": 218225.03,
+      "raw_pull_count": 1989497,
+      "additional_metadata": {
+        "has_security_attestations": true
+      }
+    },
+    {
+      "id": "gitea/runner-images",
+      "name": "gitea/runner-images",
+      "slug": "gitea/runner-images",
+      "type": "image",
+      "publisher": {
+        "id": "f6c6242e0fff43e1b5d2a43f29b8a85e",
+        "name": "gitea"
+      },
+      "created_at": "2024-04-01T08:18:55.507602Z",
+      "updated_at": "2026-11-03T04:48:43.890268Z",
+      "short_description": "Official images used by act_runner to run workflows.\n",
+      "badge": "none",
+      "star_count": 9,
+      "pull_count": "1M+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        },
+        {
+          "name": "unknown",
+          "label": "unknown"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        },
+        {
+          "name": "unknown",
+          "label": "unknown"
+        }
+      ],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": [
+        "application/vnd.docker.container.image.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.index.v1+json"
+      ],
+      "content_types": ["image"],
+      "score": 183528.9,
+      "raw_pull_count": 1479636,
+      "additional_metadata": {
+        "has_security_attestations": true
+      }
+    },
+    {
+      "id": "gitea/test-openldap",
+      "name": "gitea/test-openldap",
+      "slug": "gitea/test-openldap",
+      "type": "image",
+      "publisher": {
+        "id": "f6c6242e0fff43e1b5d2a43f29b8a85e",
+        "name": "gitea"
+      },
+      "created_at": "2018-05-04T23:24:21.283815Z",
+      "updated_at": "2019-07-11T01:47:34.010211Z",
+      "short_description": "",
+      "badge": "none",
+      "star_count": 0,
+      "pull_count": "500K+",
+      "operating_systems": [
+        {
+          "name": "linux",
+          "label": "Linux"
+        }
+      ],
+      "architectures": [
+        {
+          "name": "amd64",
+          "label": "x86-64"
+        },
+        {
+          "name": "arm64",
+          "label": "ARM 64"
+        }
+      ],
+      "logo_url": {
+        "large": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm",
+        "small": "https://www.gravatar.com/avatar/5603d5a79452bc237ac44f663d39f9aa?s=80&r=g&d=mm"
+      },
+      "extension_reviewed": false,
+      "categories": [],
+      "archived": false,
+      "media_types": ["application/vnd.docker.container.image.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"],
+      "content_types": ["image"],
+      "score": 172385.77,
+      "raw_pull_count": 624492,
+      "additional_metadata": null
+    }
+  ],
+  "search_after": [172385.77, "gitea/test-openldap"]
+}
