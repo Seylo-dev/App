@@ -40,6 +40,9 @@ export default {
   },
   source: {
     github: "GitHub {label}",
+    gitlab: "GitLab {label}",
+    gitea: "Gitea {label}",
+    bitbucket: "Bitbucket {label}",
     inline: "Dockerfile",
     upload: "Upload",
     none: "No source yet",

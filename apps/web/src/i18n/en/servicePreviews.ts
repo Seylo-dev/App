@@ -5,7 +5,7 @@ export default {
   title: "Pull request previews",
   description: "Every open pull request gets its own copy of this service, deployed on each push and removed when the PR closes.",
   unavailable: "Previews are not available for this service",
-  githubOnly: "Only services that deploy from GitHub can have previews.",
+  githubOnly: "Only services that deploy from GitHub, GitLab, Gitea or Bitbucket can have previews.",
   toSource: "Change the source",
   enabled: "Previews",
   enabledHint: "Turning them off removes the open previews.",

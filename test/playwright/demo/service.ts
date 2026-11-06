@@ -82,6 +82,7 @@ const baseService = (over: Input) => ({
     { id: "v000000000000001", name: "uploads", mountPath: "/app/uploads", kind: "volume", readOnly: false, sharedWith: [] },
     { id: "v000000000000002", name: "config.yml", mountPath: "/app/config.yml", kind: "file", readOnly: true, sharedWith: [] },
   ],
+  watchPaths: [],
   ...over,
 });
 

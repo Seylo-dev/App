@@ -30,6 +30,7 @@ import { Route as AppSettingsBackupsRouteImport } from "./routes/_app/settings/b
 import { Route as AppSettingsCleanupRouteImport } from "./routes/_app/settings/cleanup"
 import { Route as AppSettingsCloudflareRouteImport } from "./routes/_app/settings/cloudflare"
 import { Route as AppSettingsGeneralRouteImport } from "./routes/_app/settings/general"
+import { Route as AppSettingsGitProvidersRouteImport } from "./routes/_app/settings/git-providers"
 import { Route as AppSettingsGithubRouteImport } from "./routes/_app/settings/github"
 import { Route as AppSettingsMaintenanceRouteImport } from "./routes/_app/settings/maintenance"
 import { Route as AppSettingsNotificationsRouteImport } from "./routes/_app/settings/notifications"
@@ -160,6 +161,11 @@ const AppSettingsCloudflareRoute = AppSettingsCloudflareRouteImport.update({
 const AppSettingsGeneralRoute = AppSettingsGeneralRouteImport.update({
   id: "/general",
   path: "/general",
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsGitProvidersRoute = AppSettingsGitProvidersRouteImport.update({
+  id: "/git-providers",
+  path: "/git-providers",
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsGithubRoute = AppSettingsGithubRouteImport.update({
@@ -337,6 +343,7 @@ export interface FileRoutesByFullPath {
   "/settings/cleanup": typeof AppSettingsCleanupRoute
   "/settings/cloudflare": typeof AppSettingsCloudflareRoute
   "/settings/general": typeof AppSettingsGeneralRoute
+  "/settings/git-providers": typeof AppSettingsGitProvidersRoute
   "/settings/github": typeof AppSettingsGithubRoute
   "/settings/maintenance": typeof AppSettingsMaintenanceRoute
   "/settings/notifications": typeof AppSettingsNotificationsRoute
@@ -385,6 +392,7 @@ export interface FileRoutesByTo {
   "/settings/cleanup": typeof AppSettingsCleanupRoute
   "/settings/cloudflare": typeof AppSettingsCloudflareRoute
   "/settings/general": typeof AppSettingsGeneralRoute
+  "/settings/git-providers": typeof AppSettingsGitProvidersRoute
   "/settings/github": typeof AppSettingsGithubRoute
   "/settings/maintenance": typeof AppSettingsMaintenanceRoute
   "/settings/notifications": typeof AppSettingsNotificationsRoute
@@ -435,6 +443,7 @@ export interface FileRoutesById {
   "/_app/settings/cleanup": typeof AppSettingsCleanupRoute
   "/_app/settings/cloudflare": typeof AppSettingsCloudflareRoute
   "/_app/settings/general": typeof AppSettingsGeneralRoute
+  "/_app/settings/git-providers": typeof AppSettingsGitProvidersRoute
   "/_app/settings/github": typeof AppSettingsGithubRoute
   "/_app/settings/maintenance": typeof AppSettingsMaintenanceRoute
   "/_app/settings/notifications": typeof AppSettingsNotificationsRoute
@@ -486,6 +495,7 @@ export interface FileRouteTypes {
     | "/settings/cleanup"
     | "/settings/cloudflare"
     | "/settings/general"
+    | "/settings/git-providers"
     | "/settings/github"
     | "/settings/maintenance"
     | "/settings/notifications"
@@ -534,6 +544,7 @@ export interface FileRouteTypes {
     | "/settings/cleanup"
     | "/settings/cloudflare"
     | "/settings/general"
+    | "/settings/git-providers"
     | "/settings/github"
     | "/settings/maintenance"
     | "/settings/notifications"
@@ -583,6 +594,7 @@ export interface FileRouteTypes {
     | "/_app/settings/cleanup"
     | "/_app/settings/cloudflare"
     | "/_app/settings/general"
+    | "/_app/settings/git-providers"
     | "/_app/settings/github"
     | "/_app/settings/maintenance"
     | "/_app/settings/notifications"
@@ -770,6 +782,13 @@ declare module "@tanstack/react-router" {
       path: "/general"
       fullPath: "/settings/general"
       preLoaderRoute: typeof AppSettingsGeneralRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    "/_app/settings/git-providers": {
+      id: "/_app/settings/git-providers"
+      path: "/git-providers"
+      fullPath: "/settings/git-providers"
+      preLoaderRoute: typeof AppSettingsGitProvidersRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     "/_app/settings/github": {
@@ -972,6 +991,7 @@ interface AppSettingsRouteChildren {
   AppSettingsCleanupRoute: typeof AppSettingsCleanupRoute
   AppSettingsCloudflareRoute: typeof AppSettingsCloudflareRoute
   AppSettingsGeneralRoute: typeof AppSettingsGeneralRoute
+  AppSettingsGitProvidersRoute: typeof AppSettingsGitProvidersRoute
   AppSettingsGithubRoute: typeof AppSettingsGithubRoute
   AppSettingsMaintenanceRoute: typeof AppSettingsMaintenanceRoute
   AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
@@ -990,6 +1010,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsCleanupRoute: AppSettingsCleanupRoute,
   AppSettingsCloudflareRoute: AppSettingsCloudflareRoute,
   AppSettingsGeneralRoute: AppSettingsGeneralRoute,
+  AppSettingsGitProvidersRoute: AppSettingsGitProvidersRoute,
   AppSettingsGithubRoute: AppSettingsGithubRoute,
   AppSettingsMaintenanceRoute: AppSettingsMaintenanceRoute,
   AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
