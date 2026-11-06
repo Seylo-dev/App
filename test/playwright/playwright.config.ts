@@ -24,7 +24,7 @@ export default defineConfig({
     { name: "smoke", testMatch: /smoke\.spec\.ts$/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
     {
       name: "app",
-      testMatch: /(flows|reauth|screens)\.spec\.ts$/,
+      testMatch: /(flows|reauth|screens|motion)\.spec\.ts$/,
       dependencies: ["smoke"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } },
     },

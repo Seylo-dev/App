@@ -103,6 +103,11 @@ export interface DemoOptions {
   accent?: string | null;
   /** Answers that win over the demo data, for one test. */
   overrides?: Record<string, Handler>;
+  /**
+   * Holds each demo answer back this many milliseconds (or as many as the
+   * function says for an op id), so loading states stay on screen.
+   */
+  delay?: number | ((opId: string) => number);
 }
 
 export async function installDemo(page: Page, options: DemoOptions = {}): Promise<void> {
@@ -126,6 +131,8 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     const opId = new URL(route.request().url()).pathname.split("/").pop() ?? "";
     const handler = tables.find((table) => table[opId])?.[opId];
     if (!handler) return route.continue();
+    const wait = typeof options.delay === "function" ? options.delay(opId) : (options.delay ?? 0);
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(handler(inputOf(route))) });
   });
   await installSockets(page);
