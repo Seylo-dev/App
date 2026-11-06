@@ -1,0 +1,32 @@
+{
+  "action": "opened",
+  "number": 3,
+  "pull_request": {
+    "id": 21,
+    "url": "https://git.example.com/acme/shop/pulls/3",
+    "number": 3,
+    "user": { "id": 4, "login": "jdev" },
+    "title": "New checkout",
+    "body": "",
+    "state": "open",
+    "merged": false,
+    "head": {
+      "label": "feat/checkout",
+      "ref": "feat/checkout",
+      "sha": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "repo_id": 3,
+      "repo": { "id": 3, "full_name": "acme/shop" }
+    },
+    "base": {
+      "label": "main",
+      "ref": "main",
+      "sha": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+      "repo_id": 3,
+      "repo": { "id": 3, "full_name": "acme/shop" }
+    }
+  },
+  "repository": { "id": 3, "name": "shop", "full_name": "acme/shop" },
+  "sender": { "id": 4, "login": "jdev" },
+  "commit_id": "",
+  "review": null
+}

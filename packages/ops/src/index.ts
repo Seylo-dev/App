@@ -19,6 +19,7 @@ export * from "./permission";
 export * from "./redact";
 export * from "./registry";
 export * from "./schemas";
+export * from "./watch-paths";
 
 /** Every op contract, sorted by id. */
 export const allOps = collectOps(opModules);

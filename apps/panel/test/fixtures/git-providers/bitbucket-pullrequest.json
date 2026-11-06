@@ -1,0 +1,22 @@
+{
+  "pullrequest": {
+    "type": "pullrequest",
+    "id": 5,
+    "title": "New checkout",
+    "state": "OPEN",
+    "author": { "type": "user", "display_name": "Jane Dev", "nickname": "jdev" },
+    "source": {
+      "branch": { "name": "feat/checkout" },
+      "commit": { "type": "commit", "hash": "4f2a9c1e7b3d" },
+      "repository": { "type": "repository", "full_name": "acme-ws/shop", "name": "shop" }
+    },
+    "destination": {
+      "branch": { "name": "main" },
+      "commit": { "type": "commit", "hash": "9a6f3c2b1d0e" },
+      "repository": { "type": "repository", "full_name": "acme-ws/shop", "name": "shop" }
+    },
+    "close_source_branch": false
+  },
+  "repository": { "type": "repository", "full_name": "acme-ws/shop", "name": "shop" },
+  "actor": { "type": "user", "display_name": "Jane Dev", "nickname": "jdev" }
+}

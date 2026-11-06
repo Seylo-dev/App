@@ -60,11 +60,12 @@ export function isBusy(status: Status): boolean {
   return status === "building" || status === "deploying" || status === "starting";
 }
 
-/** "GitHub acme/shop-web · main · Railpack", "postgres:17 · internal only". */
+/** "GitHub acme/shop-web · main · Railpack", "GitLab acme/platform/shop · main", "postgres:17 · internal only". */
 export function sourceLine(service: Pick<Summary, "source" | "address">): string {
   const { source } = service;
   const parts: string[] = [];
-  if (source.type === "github") parts.push(t("project.source.github", { label: source.label }));
+  if (source.type === "github" || source.type === "gitlab" || source.type === "gitea" || source.type === "bitbucket")
+    parts.push(t(`project.source.${source.type}`, { label: source.label }));
   else if (source.type === "inline") parts.push(t("project.source.inline"));
   else if (source.type === "upload") parts.push(t("project.source.upload"));
   else if (source.type === "none") parts.push(t("project.source.none"));

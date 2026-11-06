@@ -190,6 +190,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   after 30 days (newest 20 per service and the live one keep theirs); a
   service keeps its two newest source uploads.
 - Proto changes are add-only within v1 (`proto/README.md`).
+- `GitSource.username` (added in 0.2): the HTTPS user name the agent's
+  credential helper answers with the token (validated: no spaces or line
+  breaks). Empty means `x-access-token`. The panel sends the git
+  provider's (`oauth2` for GitLab, the token's owner for Gitea,
+  `x-token-auth` or the account for Bitbucket) and a git credential's
+  user name. Older agents ignore it, so Bitbucket clones need a 0.2 agent.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -598,7 +604,9 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   session when a browser session runs them, while API keys pass
   (`requireFreshIfSession`; every key was made under a fresh sign-in):
   `invites.create` with role admin, `users.updateRole` to a higher role
-  (admin or owner), `nodes.createJoinToken`. Member invites, grants and
+  (admin or owner), `nodes.createJoinToken`, `gitProviders.create` and
+  `gitProviders.update` with a new token or user name (a token with write
+  access to repositories and webhooks). Member invites, grants and
   demotions are not gated.
 - Model callers (transport `mcp` or `ai`, or any `mcp` token on any
   transport) only reach ops with `mcp: true`; everything else is FORBIDDEN.
@@ -803,12 +811,105 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   tool hosts are never service hosts; the panel domain and `tlsHostname`
   refuse service hosts too; custom certificates may not name hosts that
   belong elsewhere. Templates need `domains.edit` for custom hosts.
+- Git providers (`modules/gitProviders/`): connections to GitLab
+  (gitlab.com or self-managed, also under a path), Gitea/Forgejo (any
+  https:// URL) and Bitbucket Cloud (one workspace) hold one token sealed
+  with purpose `git.provider`; `gitProviders.manage` (global, admins)
+  creates, changes and deletes them (a new token from a browser session
+  needs a fresh sign-in, see Re-auth), and the token is checked with the
+  provider before it is saved. Every API request goes to the connection's
+  own API base only (`http.ts`): the address is vetted with
+  `checkTarget` (cloud metadata and names that do not resolve are refused;
+  private addresses are allowed, admins add connections) and the request
+  connects to that address (no rebinding), redirects are refused, answers
+  are capped at 8 MiB. A provider source is `{ type: "provider",
+  providerId, provider, repo, branch, deployOnPush }`, written only by
+  `gitProviders.connectRepo` (`services.setSource` and `services.create`
+  refuse it); its clone URL is built from the connection's address, so the
+  token only goes to that host. `connectRepo` creates a repository webhook
+  (`git_provider_webhooks`, one per service, secret per hook sealed with
+  purpose `git.webhook`) at `POST /api/hooks/<kind>/<hook id>` on the panel
+  domain, else the address the caller reached the panel at; without either
+  the row keeps the reason. GitLab hooks need an https:// address (its
+  token is the secret itself, sent with every delivery), so a GitLab hook
+  waits for the panel domain with that reason instead of using a plain
+  http:// address; Gitea and Bitbucket sign the body and may (the Source
+  tab warns). `updateSpec` drops the hook (row now, the provider's hook in
+  the `gitProviders.removeHook` job) when the source leaves that
+  repository, `deleteServiceTree` when the service goes, and the poll
+  schedule (`repairHooks`, once an hour per service) re-creates hooks that
+  are not on the current panel domain and hooks the provider refused to
+  create (at the domain, else at the address they were meant for).
+  Deliveries: GitLab `X-Gitlab-Token`
+  (the secret itself), Gitea/Forgejo `X-Gitea-Signature` /
+  `X-Forgejo-Signature` (hex HMAC-SHA256 of the body), Bitbucket
+  `X-Hub-Signature` (`sha256=` + hex HMAC-SHA256), compared in constant
+  time; a delivery id is required (`Idempotency-Key` or
+  `X-Gitlab-Event-UUID`, `X-Forgejo-Delivery` or `X-Gitea-Delivery`,
+  `X-Request-UUID`), a body seen by the same hook under another id within
+  3 days is a replay (`webhooks/replay.ts`, also used by GitHub, keyed per
+  hook because providers post one body to the hook of every service of a
+  repository), a delivery id already handled for the hook's service is a
+  duplicate (scoped to the service: GitLab before 17.4 sends sibling hooks
+  of one push the same event UUID), rejected deliveries go to the
+  service's delivery list with their own row id (20 an hour at most).
+  Checked deliveries are rate limited per hook (20, then one every 3
+  seconds; 429 with `Retry-After`, logged as rejected); unchecked ones do
+  not use the budget. A push never builds a sha from the payload alone:
+  the branch head the provider's API reports is deployed (a payload sha
+  is used only when the API cannot say and the body is signed, never for
+  GitLab's token). A push while a push deploy of the service is still
+  queued joins it: that deploy builds the newer head (its log says so) and
+  the delivery is recorded as "A deploy was already queued", so at most
+  one push deploy waits behind the running one.
+  Merge/pull requests are read from the API (state, head, fork check);
+  previews follow GitHub's rules (shared-env acknowledgement, forks
+  refused, `[skip ci]` in the title). Branch polling (`gitProviders.poll`,
+  a schedule every minute) catches missed pushes at a cadence per service
+  set by its webhook: every minute while it has none that was created,
+  every 5 minutes as a safety net while it has one, and not at all while
+  that hook delivered within the last 5 minutes (`source_polls.checked_at`
+  holds the last look, failed looks included). Commit statuses
+  (`statusNotes`, per connection) are posted by the
+  `gitProviders.commitStatus` job from `onDeploymentChange`
+  (`deployments/store.ts`): pending, running, success, failed, cancelled,
+  with fixed descriptions (never the deploy's error: repository
+  collaborators need not be panel members; the link leads to the
+  deployments page); a commit shown as queued whose deploy a newer push
+  took over is posted as cancelled "Superseded by a newer push";
+  Bitbucket only with a public panel address (it requires a link).
+- Watch paths (`@seylo/ops` `watch-paths.ts`, `services.setWatchPaths`,
+  `spec.watchPaths`): ordered globs (`*` not across `/`, `**` across
+  folders and `**/` also none, `?`, `!` excludes; anchored at the root; a
+  trailing `/` means everything below); for each changed file the last
+  matching pattern decides, with only `!` patterns everything else
+  counts; a push deploys when one file counts. Matching never backtracks
+  (`globMatches` runs the glob as a set of positions over the path once;
+  repeats such as `**/**/` collapse), so a pattern cannot stall the panel
+  on a deep path; a changed path longer than 4096 characters is not
+  matched and makes the list incomplete (which deploys). `webhooks/gate.ts`
+  `pushGate` runs on every push path (GitHub webhook and polling, provider
+  webhooks and polling, the deploy trigger URL; stacks too): `[skip ci]`,
+  `[ci skip]`, `[skip cd]`, `[cd skip]` in the head commit message skip;
+  files come from the payload (`commits[].added/modified/removed`;
+  truncated when GitLab's `total_commits_count` or Gitea's `total_commits`
+  is larger, or GitHub's 2048 cap), else from the compare API between
+  before and after (GitHub compare, GitLab compare, Gitea 1.22+ compare,
+  Bitbucket diffstat `<new>..<old>`; capped answers count as incomplete);
+  an unknown or incomplete list without a match deploys. A deploy writes
+  the deciding line into its log (`queueDeploy({ notes })`); a skip is the
+  delivery's detail. The trigger URL reads a JSON body in the GitHub,
+  GitLab or Gitea push shape or `{ changedFiles }`; with only `?commit=`
+  the files between the live deployment's commit and that one come from
+  the source's compare API (`webhooks/compare.ts`). The web app's tester
+  runs the same matcher.
 - Sources and credentials (`modules/services/source-guard.ts`): a git
   credential only goes to its own host and a registry login to its own
   registry (checked on save and again before the token leaves the panel at
   deploy time); attaching a credential, registry login or GitHub App
-  installation to a project needs `git.manage`/`registries.manage`/
-  `github.manage` unless a service of that project already uses it. Image
+  installation (or git provider connection) to a project needs
+  `git.manage`/`registries.manage`/`github.manage`/`gitProviders.manage`
+  unless a service of that project already uses it. Image
   sources (also compose members and templates) may not name loopback hosts
   or port 5755 (the registry relay). Non-managers listing credentials,
   registries, channels or the GitHub device account get names and hosts
@@ -840,7 +941,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `RouteStatus.certificate_*`.
 - Bodies read before authentication are capped while streaming: op JSON
   bodies at 4 MiB (`maxOpBodyBytes`, `readBodyText` in `@seylo/ops/elysia`),
-  the GitHub webhook at 5 MiB (after answering 404 without an App). The
+  the GitHub webhook at 5 MiB (after answering 404 without an App), git
+  provider webhooks at 5 MiB (after answering 404 for an unknown hook id)
+  and deploy trigger URL bodies at 5 MiB. The
   webhook needs `X-GitHub-Delivery`, records at most 20 rejected deliveries
   an hour, and answers `duplicate` for a signed body already handled under
   another delivery id within 3 days (in memory). The App's hook is created
@@ -923,13 +1026,16 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it. The alert text says "Settings > Cleanup" while the screen is called "Docker cleanup" (`agent/disk_alert.go` `diskMessage`) | Fixed threshold; a slightly different screen name in the alert |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
+| Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (only provider pushes join a queued deploy) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
 
 ### Verification
 
 Besides the unit tests, the Go packages that drive Docker have integration
-tests that run in a Linux VM (`scripts/dev/vm-gotest.sh`), the web app has
+tests that run in a Linux VM (`scripts/dev/vm-gotest.sh`), git providers
+run against a real Gitea in that VM (`scripts/dev/it-gitea.sh`: the panel
+test `gitea.integration.test.ts` and the agent's `TestITGiteaPrivateClone`), the web app has
 Playwright suites (`test/playwright/run.sh`), and `make e2e` runs the real
 installer on three fresh VMs and 31 end-to-end checks against test-signed
 releases from a local mirror (`test/e2e-colima/README.md`; the evidence of
@@ -1318,7 +1424,7 @@ unless noted.
 |---|---|---|---|
 | Agent hub and nodes: PanelService handlers, calls and streams to agents, in-memory node state, the desired-state compiler (DB rows to `DesiredState`/`ServiceSpec`), nodes (join tokens, can-build, wildcard, games-first, health checks, reboot, Docker updates), fleet updates, cleanup runs, relays for logs, metrics (rollups into metrics.db), console, shell and files | `nodes`, `updates`, `cleanup`, `logs`, `metrics`, `terminals`, `files` | `src/agent-hub/`, `src/desired/`, `src/db/metrics/`, `drizzle.metrics.config.ts`, `drizzle/metrics/` | `infra.ts`, `runtime.ts` |
 | People and access: setup link, email and password, GitHub device flow, sessions, TOTP and recovery codes, passkeys, API keys; users, invites and grants; the audit log; the op pipeline, permission checks and the op framework | `auth`, `setup`, `users`, `invites`, `grants`, `apiKeys`, `audit` | `src/auth/`, `src/security/`, `src/ops/`, `scripts/create-owner.ts`, `scripts/setup-link.ts` | `identity.ts`, `audit.ts` |
-| Services and deploys: projects, services (all kinds, compose stacks split into members), deploys, builds, releases and rollback, PR previews, push-to-deploy webhooks and deploy triggers, the per-panel GitHub App, git and registry credentials, templates (QuickJS runner) and the template catalog, Docker Hub as a template source | `projects`, `services`, `compose`, `deployments`, `builds`, `previews`, `webhooks`, `github`, `git`, `registries`, `templates`, `dockerHub` | `src/template-runner/`, `templates/` (repository root) | `projects.ts`, `deploys.ts`, `git.ts`, `templates.ts` |
+| Services and deploys: projects, services (all kinds, compose stacks split into members), deploys, builds, releases and rollback, PR previews, push-to-deploy webhooks and deploy triggers, watch paths, the per-panel GitHub App, GitLab/Gitea/Bitbucket connections, git and registry credentials, templates (QuickJS runner) and the template catalog, Docker Hub as a template source | `projects`, `services`, `compose`, `deployments`, `builds`, `previews`, `webhooks`, `github`, `gitProviders`, `git`, `registries`, `templates`, `dockerHub` | `src/template-runner/`, `templates/` (repository root) | `projects.ts`, `deploys.ts`, `git.ts`, `templates.ts` |
 | Networking, env and data: domains, DNS checks and the Cloudflare DNS link, middlewares, first-run IP:port access and redirect-then-close, the env editor backend and `${{svc.VAR}}` references, databases (engines, credentials, web UIs, exposure with TLS), backups and restores, dev access (timed expose, Cloudflare tunnels), Boxes, maintenance pages, signing edge tickets (with the key from `security/edge-ticket-key.ts`) | `domains`, `env`, `databases`, `backups`, `exposures`, `tunnels`, `boxes`, `maintenance` | `packages/env-analyzer/` | `env.ts`, `networking.ts`, `backups.ts` |
 | System and automation: notification channels, alert rules and delivery, uptime checks, the job runner and recurring schedules, cron jobs (panel side), approvals, the MCP server and its OAuth, the AI assistant (routing, budget, usage), settings (branding, white label, themes, custom CSS, telemetry), and the panel core around them | `system`, `settings`, `notifications`, `alerts`, `uptime`, `cron`, `approvals`, `mcp`, `ai`, `telemetry` | `src/{jobs,live,http}/`, `src/{main,panel,deps,config,settings,logger,ids}.ts`, `src/modules/module.ts`, `src/db/client.ts`, `packages/ops/src/generators/{mcp,ai-tools}.ts` | `automation.ts`, `ops.ts`, `mcp.ts`, `settings.ts`, `columns.ts` |
 
@@ -1352,6 +1458,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - `services/delete.ts` `deleteServiceTree(deps, row)`: a service with its
   compose members, previews, grants, uploads and registry images.
 - HTTP: `POST /api/hooks/github` (signature checked, GUID deduped),
+  `POST /api/hooks/{gitlab,gitea,bitbucket}/<webhook id>` (git provider
+  webhooks, see "Git providers"),
   `POST /api/hooks/deploy/<token>` (deploy trigger URLs),
   `POST /api/uploads/services/<serviceId>` (a `.tar.gz` source, then a deploy).
 - Live: deployment log lines on `deployment:<id>` (`{ type: "log", lines }`),
@@ -1520,8 +1628,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `flows.spec.ts` (CLI sign-in approval, keys, invites, 2FA, appearance,
   channels on the real panel), `reauth.spec.ts` (the re-auth dialog on the
   real panel: it ages the owner's sessions in `panel.db`, then API key,
-  authenticator setup, CLI approval, GitHub link, passkey and a node join
-  command each ask first and go through; `/reauth`; sign in again) and
+  a git provider connection, authenticator setup, CLI approval, GitHub
+  link, passkey and a node join command each ask first and go through;
+  `/reauth`; sign in again) and
+  `git-providers.spec.ts` (Settings > Git providers, a provider repository
+  in the Source tab and the watch paths tester, on the demo data) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width and the accent check) and
   `dockerhub.spec.ts` (Docker Hub search, tag picker, prefilled form and

@@ -64,6 +64,8 @@ export async function pollBranches(deps: Deps): Promise<number> {
           message: res.data.commit.message.split("\n")[0] ?? null,
           author: res.data.author?.login ?? res.data.commit.author?.name ?? null,
           sender: null,
+          // A missed push: the files come from the compare API between the last seen head and this one.
+          changes: { files: null, truncated: false, before: poll.lastSha, after: sha, headMessage: res.data.commit.message },
         },
         { id: `poll-${svc.id}-${sha}`, event: "push", source: "github" },
       );

@@ -1,0 +1,143 @@
+[
+  {
+    "request": "GET /2.0/repositories/acme-ws",
+    "status": 200,
+    "body": {
+      "pagelen": 30,
+      "page": 1,
+      "values": [
+        {
+          "type": "repository",
+          "full_name": "acme-ws/shop",
+          "name": "shop",
+          "slug": "shop",
+          "is_private": true,
+          "mainbranch": { "name": "main", "type": "branch" },
+          "updated_on": "2026-11-05T10:01:45.881139+00:00",
+          "uuid": "{3b8a1e2c-7d4f-4e5a-9b6c-1d2e3f4a5b6c}"
+        },
+        {
+          "type": "repository",
+          "full_name": "acme-ws/empty",
+          "name": "empty",
+          "slug": "empty",
+          "is_private": false,
+          "mainbranch": null,
+          "updated_on": "2026-01-02T00:00:00.000000+00:00",
+          "uuid": "{9c8b7a6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d}"
+        }
+      ],
+      "next": "https://api.bitbucket.org/2.0/repositories/acme-ws?pagelen=30&page=2"
+    }
+  },
+  {
+    "request": "GET /2.0/repositories/acme-ws/shop",
+    "status": 200,
+    "body": {
+      "type": "repository",
+      "full_name": "acme-ws/shop",
+      "is_private": true,
+      "mainbranch": { "name": "main", "type": "branch" },
+      "updated_on": "2026-11-05T10:01:45.881139+00:00"
+    }
+  },
+  {
+    "request": "GET /2.0/repositories/acme-ws/shop/refs/branches",
+    "status": 200,
+    "body": {
+      "pagelen": 100,
+      "values": [
+        { "name": "feat/checkout", "type": "branch", "target": { "hash": "4f2a9c1e7b3d5a6c8e0f1a2b3c4d5e6f7a8b9c0d" } },
+        { "name": "main", "type": "branch", "target": { "hash": "9a6f3c2b1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a" } }
+      ],
+      "page": 1
+    }
+  },
+  {
+    "request": "GET /2.0/repositories/acme-ws/shop/refs/branches/main",
+    "status": 200,
+    "body": {
+      "name": "main",
+      "type": "branch",
+      "target": {
+        "type": "commit",
+        "hash": "9a6f3c2b1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a",
+        "date": "2026-11-05T10:01:44+00:00",
+        "message": "Fix the checkout total\n",
+        "author": { "type": "author", "raw": "Jane Dev <jane@example.com>", "user": { "display_name": "Jane Dev", "nickname": "jdev" } }
+      }
+    }
+  },
+  {
+    "request": "GET /2.0/repositories/acme-ws/shop/diffstat/9a6f3c2b1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a..1e5d8f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e",
+    "status": 200,
+    "body": {
+      "pagelen": 500,
+      "values": [
+        {
+          "type": "diffstat",
+          "status": "modified",
+          "lines_removed": 2,
+          "lines_added": 5,
+          "old": { "path": "apps/api/main.go", "type": "commit_file" },
+          "new": { "path": "apps/api/main.go", "type": "commit_file" }
+        },
+        {
+          "type": "diffstat",
+          "status": "added",
+          "lines_removed": 0,
+          "lines_added": 12,
+          "old": null,
+          "new": { "path": "docs/checkout.md", "type": "commit_file" }
+        }
+      ],
+      "page": 1,
+      "size": 2
+    }
+  },
+  {
+    "request": "GET /2.0/repositories/acme-ws/shop/pullrequests/5",
+    "status": 200,
+    "body": {
+      "type": "pullrequest",
+      "id": 5,
+      "title": "New checkout",
+      "state": "OPEN",
+      "source": {
+        "branch": { "name": "feat/checkout" },
+        "commit": { "hash": "4f2a9c1e7b3d" },
+        "repository": { "full_name": "acme-ws/shop" }
+      },
+      "destination": { "branch": { "name": "main" }, "commit": { "hash": "9a6f3c2b1d0e" }, "repository": { "full_name": "acme-ws/shop" } }
+    }
+  },
+  {
+    "request": "GET /2.0/repositories/acme-ws/shop/commit/4f2a9c1e7b3d",
+    "status": 200,
+    "body": {
+      "type": "commit",
+      "hash": "4f2a9c1e7b3d5a6c8e0f1a2b3c4d5e6f7a8b9c0d",
+      "message": "Checkout: new layout\n",
+      "author": { "raw": "Jane Dev <jane@example.com>", "user": { "nickname": "jdev" } }
+    }
+  },
+  {
+    "request": "POST /2.0/repositories/acme-ws/shop/hooks",
+    "status": 201,
+    "body": {
+      "type": "webhook_subscription",
+      "uuid": "{6a2c3e4f-8b9d-4c1a-9e7f-0b2d4f6a8c0e}",
+      "url": "https://panel.example.com/api/hooks/bitbucket/x",
+      "description": "Deploy on push",
+      "active": true,
+      "secret_set": true,
+      "events": ["pullrequest:created", "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:updated", "repo:push"]
+    }
+  },
+  { "request": "DELETE /2.0/repositories/acme-ws/shop/hooks/%7B6a2c3e4f-8b9d-4c1a-9e7f-0b2d4f6a8c0e%7D", "status": 204, "body": null },
+  {
+    "request": "POST /2.0/repositories/acme-ws/shop/commit/9a6f3c2b1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a/statuses/build",
+    "status": 201,
+    "body": { "type": "build", "key": "seylo/web", "state": "INPROGRESS" }
+  }
+]

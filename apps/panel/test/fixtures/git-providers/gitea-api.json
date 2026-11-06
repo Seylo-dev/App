@@ -1,0 +1,111 @@
+[
+  {
+    "request": "GET /api/v1/user",
+    "status": 200,
+    "body": { "id": 4, "login": "jdev", "full_name": "Jane Dev", "email": "jane@example.com", "is_admin": false, "username": "jdev" }
+  },
+  {
+    "request": "GET /api/v1/repos/search",
+    "status": 200,
+    "headers": { "x-total-count": "1" },
+    "body": {
+      "ok": true,
+      "data": [
+        {
+          "id": 3,
+          "owner": { "id": 2, "login": "acme" },
+          "name": "shop",
+          "full_name": "acme/shop",
+          "private": true,
+          "empty": false,
+          "default_branch": "main",
+          "updated_at": "2026-11-05T10:01:44Z",
+          "clone_url": "https://git.example.com/acme/shop.git"
+        }
+      ]
+    }
+  },
+  {
+    "request": "GET /api/v1/repos/acme/shop",
+    "status": 200,
+    "body": {
+      "id": 3,
+      "full_name": "acme/shop",
+      "private": true,
+      "empty": false,
+      "default_branch": "main",
+      "updated_at": "2026-11-05T10:01:44Z"
+    }
+  },
+  {
+    "request": "GET /api/v1/repos/acme/shop/branches",
+    "status": 200,
+    "body": [
+      { "name": "feat/checkout", "commit": { "id": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e", "message": "Checkout: new layout\n" } },
+      { "name": "main", "commit": { "id": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e", "message": "Fix the checkout total\n" } }
+    ]
+  },
+  {
+    "request": "GET /api/v1/repos/acme/shop/branches/main",
+    "status": 200,
+    "body": {
+      "name": "main",
+      "commit": {
+        "id": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+        "message": "Fix the checkout total\n",
+        "url": "https://git.example.com/acme/shop/commit/8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+        "author": { "name": "Jane Dev", "email": "jane@example.com", "username": "jdev" },
+        "committer": { "name": "Jane Dev", "email": "jane@example.com", "username": "jdev" },
+        "timestamp": "2026-11-05T10:01:44Z"
+      },
+      "protected": false
+    }
+  },
+  {
+    "request": "GET /api/v1/repos/acme/shop/compare/4b2ae2a1f0d4c8b2d1f7e3c5a6b8d9e0f1a2b3c4...8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+    "status": 200,
+    "body": {
+      "total_commits": 1,
+      "commits": [
+        {
+          "sha": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+          "commit": { "message": "Fix the checkout total\n" },
+          "files": [
+            { "filename": "apps/web/src/checkout/total.ts", "status": "added" },
+            { "filename": "apps/web/package.json", "status": "modified" }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "request": "GET /api/v1/repos/acme/shop/pulls/3",
+    "status": 200,
+    "body": {
+      "number": 3,
+      "title": "New checkout",
+      "state": "open",
+      "merged": false,
+      "head": { "ref": "feat/checkout", "sha": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e", "repo": { "full_name": "acme/shop" } },
+      "base": { "ref": "main", "sha": "8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e", "repo": { "full_name": "acme/shop" } }
+    }
+  },
+  {
+    "request": "POST /api/v1/repos/acme/shop/hooks",
+    "status": 201,
+    "body": {
+      "id": 7,
+      "type": "gitea",
+      "branch_filter": "*",
+      "config": { "content_type": "json", "url": "https://panel.example.com/api/hooks/gitea/x" },
+      "events": ["push", "pull_request"],
+      "active": true
+    }
+  },
+  { "request": "DELETE /api/v1/repos/acme/shop/hooks/7", "status": 204, "body": null },
+  {
+    "request": "POST /api/v1/repos/acme/shop/statuses/8d3f2e1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e",
+    "status": 201,
+    "body": { "id": 11, "status": "pending", "context": "seylo/web" }
+  }
+]

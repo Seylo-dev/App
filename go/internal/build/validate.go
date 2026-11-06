@@ -17,6 +17,9 @@ var (
 	// parser could mistake for a flag.
 	refRe    = regexp.MustCompile(`^[A-Za-z0-9._/+@-]{1,255}$`)
 	commitRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+	// A user name the credential helper may print: no line breaks or spaces, so it
+	// cannot add lines to git's credential protocol.
+	gitUserRe = regexp.MustCompile(`^[A-Za-z0-9._@+-]{1,100}$`)
 	// scp-like SSH address: git@github.com:org/repo.git
 	scpRe = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._~/+-][A-Za-z0-9._~/+ -]*$`)
 	// Variable names for build args and secrets.
@@ -113,6 +116,9 @@ func validateGit(g *agentv1.GitSource) error {
 	}
 	if g.GetToken() != "" && g.GetSshPrivateKey() != "" {
 		return invalid("use either an access token or an SSH key, not both")
+	}
+	if u := g.GetUsername(); u != "" && !gitUserRe.MatchString(u) {
+		return invalid("%q is not a git user name", u)
 	}
 	return nil
 }

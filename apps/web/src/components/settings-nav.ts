@@ -15,6 +15,7 @@ export const settingsNav = [
   { to: "/settings/people", label: "settings.sections.people" },
   { to: "/settings/api-keys", label: "settings.sections.apiKeys" },
   { to: "/settings/github", label: "settings.sections.github" },
+  { to: "/settings/git-providers", label: "settings.sections.gitProviders" },
   { to: "/settings/cloudflare", label: "settings.sections.cloudflare" },
   { to: "/settings/notifications", label: "settings.sections.notifications" },
   { to: "/settings/backups", label: "settings.sections.backups" },

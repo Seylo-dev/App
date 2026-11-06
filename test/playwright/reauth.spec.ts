@@ -2,8 +2,8 @@
 // panel run.sh started. A session is fresh for 15 minutes after sign-in, so
 // each test first ages the owner's sessions in panel.db; then a guarded
 // change (API key, authenticator app, CLI approval, GitHub link, passkey,
-// a node join command) must open "Confirm it's you" and go through by
-// itself once confirmed.
+// a node join command, a git provider token) must open "Confirm it's you"
+// and go through by itself once confirmed.
 // Passkeys need a panel domain, so that test stands in for the browser's
 // passkey prompt and the begin op, and checks what the dialog sends.
 
@@ -123,6 +123,32 @@ test("an old session confirms with the password, then the API key is created", a
   await page.getByRole("button", { name: "Done" }).click();
   const keys = (await (await page.request.get("/api/v1/apiKeys.list?kind=api")).json()) as { keys: { name: string }[] };
   expect(keys.keys.filter((k) => k.name === "pw-reauth")).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("an old session confirms before a git provider connection is saved, then the save runs again", async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto("/settings/git-providers");
+  await page.getByRole("radio", { name: "Gitea or Forgejo" }).click();
+  await page.getByLabel("Name").fill("pw-forge");
+  // A name that never resolves: after the re-auth the token check fails, so nothing is stored either way.
+  await page.getByLabel("Address").fill("https://pw-reauth.invalid");
+  await page.getByLabel("Token").fill("pw-gitea-token");
+  const save = page.getByRole("button", { name: "Check and save" });
+  const refused = await clickPastRateLimit(page, save, "gitProviders.create");
+  expect(refused.status()).toBe(403);
+  expect(((await refused.json()) as { error: { details?: { reason?: string } } }).error.details?.reason).toBe("reauth");
+  await expect(dialog(page)).toBeVisible();
+
+  const retried = page.waitForResponse((r) => isOp("gitProviders.create")(r) && r.request().method() === "POST");
+  expect((await confirmWithPassword(page)).ok()).toBe(true);
+  const answer = await retried;
+  await expect(dialog(page)).toHaveCount(0);
+  // The save ran again by itself and reached the token check.
+  expect(answer.status()).toBe(400);
+  expect(((await answer.json()) as { error: { details?: { field?: string } } }).error.details?.field).toBe("url");
+  const list = (await (await page.request.get("/api/v1/gitProviders.list")).json()) as { items: { name: string }[] };
+  expect(list.items.filter((p) => p.name === "pw-forge")).toHaveLength(0);
   expect(errors).toEqual([]);
 });
 

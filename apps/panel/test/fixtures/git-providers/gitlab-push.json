@@ -1,0 +1,69 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "95790bf891e76fee5e1747ab589903a6a1f80f22",
+  "after": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7",
+  "ref": "refs/heads/main",
+  "ref_protected": true,
+  "checkout_sha": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7",
+  "message": null,
+  "user_id": 4,
+  "user_name": "Jane Dev",
+  "user_username": "jdev",
+  "user_email": "",
+  "user_avatar": "https://gitlab.com/uploads/-/system/user/avatar/4/avatar.png",
+  "project_id": 42,
+  "project": {
+    "id": 42,
+    "name": "shop",
+    "description": "",
+    "web_url": "https://gitlab.com/acme/platform/shop",
+    "avatar_url": null,
+    "git_ssh_url": "git@gitlab.com:acme/platform/shop.git",
+    "git_http_url": "https://gitlab.com/acme/platform/shop.git",
+    "namespace": "platform",
+    "visibility_level": 0,
+    "path_with_namespace": "acme/platform/shop",
+    "default_branch": "main",
+    "ci_config_path": null,
+    "homepage": "https://gitlab.com/acme/platform/shop",
+    "url": "git@gitlab.com:acme/platform/shop.git",
+    "ssh_url": "git@gitlab.com:acme/platform/shop.git",
+    "http_url": "https://gitlab.com/acme/platform/shop.git"
+  },
+  "commits": [
+    {
+      "id": "b6568db1bc1dcd7f8b4d5a946b0b91f9dacd7327",
+      "message": "Update the docs\n",
+      "title": "Update the docs",
+      "timestamp": "2026-11-05T09:58:12+00:00",
+      "url": "https://gitlab.com/acme/platform/shop/-/commit/b6568db1bc1dcd7f8b4d5a946b0b91f9dacd7327",
+      "author": { "name": "Jane Dev", "email": "[REDACTED]" },
+      "added": [],
+      "modified": ["README.md"],
+      "removed": []
+    },
+    {
+      "id": "da1560886d4f094c3e6c9ef40349f7d38b5d27d7",
+      "message": "Fix the checkout total\n\nRounds per line.\n",
+      "title": "Fix the checkout total",
+      "timestamp": "2026-11-05T10:01:44+00:00",
+      "url": "https://gitlab.com/acme/platform/shop/-/commit/da1560886d4f094c3e6c9ef40349f7d38b5d27d7",
+      "author": { "name": "Jane Dev", "email": "[REDACTED]" },
+      "added": ["apps/web/src/checkout/total.ts"],
+      "modified": ["apps/web/package.json"],
+      "removed": ["apps/web/src/checkout/old-total.ts"]
+    }
+  ],
+  "total_commits_count": 2,
+  "push_options": {},
+  "repository": {
+    "name": "shop",
+    "url": "git@gitlab.com:acme/platform/shop.git",
+    "description": "",
+    "homepage": "https://gitlab.com/acme/platform/shop",
+    "git_http_url": "https://gitlab.com/acme/platform/shop.git",
+    "git_ssh_url": "git@gitlab.com:acme/platform/shop.git",
+    "visibility_level": 0
+  }
+}

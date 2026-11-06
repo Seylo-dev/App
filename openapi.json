@@ -11921,6 +11921,18 @@
                                   "type": "string"
                                 },
                                 {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                },
+                                {
                                   "const": "git",
                                   "type": "string"
                                 },
@@ -12271,6 +12283,18 @@
                                     "type": "string"
                                   },
                                   {
+                                    "const": "gitlab",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitea",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "bitbucket",
+                                    "type": "string"
+                                  },
+                                  {
                                     "const": "git",
                                     "type": "string"
                                   },
@@ -12559,7 +12583,8 @@
                         "entryNodeId",
                         "notes",
                         "members",
-                        "volumes"
+                        "volumes",
+                        "watchPaths"
                       ],
                       "properties": {
                         "id": {
@@ -12689,6 +12714,18 @@
                               "anyOf": [
                                 {
                                   "const": "github",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
                                   "type": "string"
                                 },
                                 {
@@ -12965,6 +13002,60 @@
                                       "type": "null"
                                     }
                                   ]
+                                },
+                                "deployOnPush": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "providerId",
+                                "provider",
+                                "repo",
+                                "branch",
+                                "deployOnPush"
+                              ],
+                              "properties": {
+                                "type": {
+                                  "const": "provider",
+                                  "type": "string"
+                                },
+                                "providerId": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "provider": {
+                                  "description": "\"gitea\" covers Forgejo too.",
+                                  "anyOf": [
+                                    {
+                                      "const": "gitlab",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "gitea",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "bitbucket",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "repo": {
+                                  "minLength": 3,
+                                  "maxLength": 300,
+                                  "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                                  "type": "string"
+                                },
+                                "branch": {
+                                  "minLength": 1,
+                                  "maxLength": 250,
+                                  "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                                  "type": "string"
                                 },
                                 "deployOnPush": {
                                   "type": "boolean"
@@ -13643,6 +13734,16 @@
                               }
                             }
                           }
+                        },
+                        "watchPaths": {
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "minLength": 1,
+                            "maxLength": 300,
+                            "pattern": "^[^\\n\\r\\t]+$",
+                            "type": "string"
+                          }
                         }
                       }
                     },
@@ -13910,6 +14011,18 @@
                                 "anyOf": [
                                   {
                                     "const": "github",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitlab",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitea",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "bitbucket",
                                     "type": "string"
                                   },
                                   {
@@ -21016,7 +21129,8 @@
                     "entryNodeId",
                     "notes",
                     "members",
-                    "volumes"
+                    "volumes",
+                    "watchPaths"
                   ],
                   "properties": {
                     "id": {
@@ -21146,6 +21260,18 @@
                           "anyOf": [
                             {
                               "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
                               "type": "string"
                             },
                             {
@@ -21422,6 +21548,60 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
                             },
                             "deployOnPush": {
                               "type": "boolean"
@@ -22099,6 +22279,16 @@
                             }
                           }
                         }
+                      }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
                       }
                     }
                   }
@@ -30994,7 +31184,8 @@
                     "entryNodeId",
                     "notes",
                     "members",
-                    "volumes"
+                    "volumes",
+                    "watchPaths"
                   ],
                   "properties": {
                     "id": {
@@ -31124,6 +31315,18 @@
                           "anyOf": [
                             {
                               "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
                               "type": "string"
                             },
                             {
@@ -31400,6 +31603,60 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
                             },
                             "deployOnPush": {
                               "type": "boolean"
@@ -32077,6 +32334,16 @@
                             }
                           }
                         }
+                      }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
                       }
                     }
                   }
@@ -33045,6 +33312,2502 @@
         },
         "x-op-kind": "mutation",
         "x-permission": "github.manage",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.branches": {
+      "get": {
+        "operationId": "gitProviders.branches",
+        "summary": "List a provider repository's branches",
+        "description": "Lists the branches of a repository through a connection, default branch first.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 3,
+              "maxLength": 300,
+              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "branches",
+                    "defaultBranch"
+                  ],
+                  "properties": {
+                    "branches": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "defaultBranch": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "project:services.create",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.check": {
+      "get": {
+        "operationId": "gitProviders.check",
+        "summary": "Check a git provider connection",
+        "description": "Asks the provider whether the stored token still works and who it acts as.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "account",
+                    "message"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "account": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "gitProviders.manage",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.connectRepo": {
+      "post": {
+        "operationId": "gitProviders.connectRepo",
+        "summary": "Connect a provider repository to a service",
+        "description": "Sets a service's source to a GitLab, Gitea/Forgejo or Bitbucket repository and branch read through a connection, after checking the connection can read it, and creates a webhook on the repository (pushes, and merge or pull requests for previews) with its own secret. With deployOnPush, pushes to the branch deploy the service. rootDir is the folder to build. A webhook of the service's previous repository is removed.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "providerId",
+                  "repo",
+                  "branch",
+                  "deployOnPush"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "repo": {
+                    "minLength": 3,
+                    "maxLength": 300,
+                    "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                    "type": "string"
+                  },
+                  "branch": {
+                    "minLength": 1,
+                    "maxLength": 250,
+                    "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                    "type": "string"
+                  },
+                  "rootDir": {
+                    "maxLength": 300,
+                    "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).*$",
+                    "type": "string"
+                  },
+                  "deployOnPush": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "projectId",
+                    "name",
+                    "kind",
+                    "parentId",
+                    "status",
+                    "source",
+                    "address",
+                    "placements",
+                    "cpuPercent",
+                    "memoryBytes",
+                    "memoryLimitBytes",
+                    "liveDeployment",
+                    "lastDeployedAt",
+                    "protected",
+                    "templateSlug",
+                    "createdAt",
+                    "updatedAt",
+                    "stopped",
+                    "generation",
+                    "sourceConfig",
+                    "build",
+                    "container",
+                    "ports",
+                    "healthCheck",
+                    "crashPolicy",
+                    "restartDelaySeconds",
+                    "resources",
+                    "deploy",
+                    "cron",
+                    "stickySessions",
+                    "entryNodeId",
+                    "notes",
+                    "members",
+                    "volumes",
+                    "watchPaths"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                      "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "description": "Compose members have kind app and a parentId naming their stack.",
+                      "anyOf": [
+                        {
+                          "const": "app",
+                          "type": "string"
+                        },
+                        {
+                          "const": "compose",
+                          "type": "string"
+                        },
+                        {
+                          "const": "postgres",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mysql",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mariadb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mongo",
+                          "type": "string"
+                        },
+                        {
+                          "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "box",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cron",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "parentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "const": "idle",
+                          "type": "string"
+                        },
+                        {
+                          "const": "building",
+                          "type": "string"
+                        },
+                        {
+                          "const": "deploying",
+                          "type": "string"
+                        },
+                        {
+                          "const": "starting",
+                          "type": "string"
+                        },
+                        {
+                          "const": "running",
+                          "type": "string"
+                        },
+                        {
+                          "const": "partial",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unhealthy",
+                          "type": "string"
+                        },
+                        {
+                          "const": "crashed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stopped",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "label",
+                        "branch",
+                        "builder"
+                      ],
+                      "properties": {
+                        "type": {
+                          "anyOf": [
+                            {
+                              "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
+                              "type": "string"
+                            },
+                            {
+                              "const": "git",
+                              "type": "string"
+                            },
+                            {
+                              "const": "image",
+                              "type": "string"
+                            },
+                            {
+                              "const": "inline",
+                              "type": "string"
+                            },
+                            {
+                              "const": "upload",
+                              "type": "string"
+                            },
+                            {
+                              "const": "compose",
+                              "type": "string"
+                            },
+                            {
+                              "const": "database",
+                              "type": "string"
+                            },
+                            {
+                              "const": "none",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "branch": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "builder": {
+                          "anyOf": [
+                            {
+                              "const": "railpack",
+                              "type": "string"
+                            },
+                            {
+                              "const": "nixpacks",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dockerfile",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "address": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "placements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "nodeId",
+                          "nodeName",
+                          "replicas"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "nodeName": {
+                            "type": "string"
+                          },
+                          "replicas": {
+                            "minimum": 1,
+                            "maximum": 32,
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "cpuPercent": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memoryBytes": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memoryLimitBytes": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "liveDeployment": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "label",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastDeployedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "protected": {
+                      "type": "boolean"
+                    },
+                    "templateSlug": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "stopped": {
+                      "type": "boolean"
+                    },
+                    "generation": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sourceConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "installationId",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "github",
+                              "type": "string"
+                            },
+                            "installationId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "repo": {
+                              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "url",
+                            "branch",
+                            "credentialId",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "git",
+                              "type": "string"
+                            },
+                            "url": {
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
+                            },
+                            "credentialId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "image",
+                            "registryId"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "image",
+                              "type": "string"
+                            },
+                            "image": {
+                              "minLength": 1,
+                              "maxLength": 300,
+                              "pattern": "^\\S+$",
+                              "type": "string"
+                            },
+                            "registryId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "inline",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "fileName"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "upload",
+                              "type": "string"
+                            },
+                            "fileName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "none",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "build": {
+                      "type": "object",
+                      "required": [
+                        "builder",
+                        "contextPath",
+                        "dockerfilePath",
+                        "inlineDockerfile",
+                        "targetStage",
+                        "buildNodeId",
+                        "startCommand",
+                        "installCommand",
+                        "buildCommand"
+                      ],
+                      "properties": {
+                        "builder": {
+                          "anyOf": [
+                            {
+                              "const": "railpack",
+                              "type": "string"
+                            },
+                            {
+                              "const": "nixpacks",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dockerfile",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "contextPath": {
+                          "maxLength": 300,
+                          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).*$",
+                          "type": "string"
+                        },
+                        "dockerfilePath": {
+                          "maxLength": 300,
+                          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).*$",
+                          "type": "string"
+                        },
+                        "inlineDockerfile": {
+                          "anyOf": [
+                            {
+                              "maxLength": 100000,
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "targetStage": {
+                          "maxLength": 100,
+                          "type": "string"
+                        },
+                        "buildNodeId": {
+                          "anyOf": [
+                            {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "startCommand": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        },
+                        "installCommand": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        },
+                        "buildCommand": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "container": {
+                      "type": "object",
+                      "required": [
+                        "command",
+                        "entrypoint",
+                        "workingDir",
+                        "user",
+                        "stopSignal",
+                        "stopGraceSeconds"
+                      ],
+                      "properties": {
+                        "command": {
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 2000,
+                            "type": "string"
+                          }
+                        },
+                        "entrypoint": {
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "maxLength": 2000,
+                            "type": "string"
+                          }
+                        },
+                        "workingDir": {
+                          "maxLength": 500,
+                          "type": "string"
+                        },
+                        "user": {
+                          "maxLength": 100,
+                          "type": "string"
+                        },
+                        "stopSignal": {
+                          "maxLength": 20,
+                          "pattern": "^(SIG[A-Z0-9]+)?$",
+                          "type": "string"
+                        },
+                        "stopGraceSeconds": {
+                          "minimum": 1,
+                          "maximum": 3600,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "ports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "containerPort",
+                          "protocol"
+                        ],
+                        "properties": {
+                          "containerPort": {
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "anyOf": [
+                              {
+                                "const": "tcp",
+                                "type": "string"
+                              },
+                              {
+                                "const": "udp",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "healthCheck": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "probe",
+                            "intervalSeconds",
+                            "timeoutSeconds",
+                            "startPeriodSeconds",
+                            "failureThreshold"
+                          ],
+                          "properties": {
+                            "probe": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "port"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "const": "tcp",
+                                      "type": "string"
+                                    },
+                                    "port": {
+                                      "minimum": 1,
+                                      "maximum": 65535,
+                                      "type": "integer"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "port",
+                                    "path",
+                                    "host",
+                                    "expectedStatus"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "const": "http",
+                                      "type": "string"
+                                    },
+                                    "port": {
+                                      "minimum": 1,
+                                      "maximum": 65535,
+                                      "type": "integer"
+                                    },
+                                    "path": {
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "^/",
+                                      "type": "string"
+                                    },
+                                    "host": {
+                                      "maxLength": 253,
+                                      "type": "string"
+                                    },
+                                    "expectedStatus": {
+                                      "minimum": 0,
+                                      "maximum": 599,
+                                      "type": "integer"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "command"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "const": "command",
+                                      "type": "string"
+                                    },
+                                    "command": {
+                                      "minItems": 1,
+                                      "maxItems": 50,
+                                      "type": "array",
+                                      "items": {
+                                        "maxLength": 2000,
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            "intervalSeconds": {
+                              "minimum": 1,
+                              "maximum": 3600,
+                              "type": "integer"
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 1,
+                              "maximum": 600,
+                              "type": "integer"
+                            },
+                            "startPeriodSeconds": {
+                              "minimum": 0,
+                              "maximum": 3600,
+                              "type": "integer"
+                            },
+                            "failureThreshold": {
+                              "minimum": 1,
+                              "maximum": 100,
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "crashPolicy": {
+                      "type": "object",
+                      "required": [
+                        "restart",
+                        "stopAfterCrashes"
+                      ],
+                      "properties": {
+                        "restart": {
+                          "description": "Off = stay stopped after the first crash.",
+                          "type": "boolean"
+                        },
+                        "stopAfterCrashes": {
+                          "minimum": 0,
+                          "maximum": 1000,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "restartDelaySeconds": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "resources": {
+                      "type": "object",
+                      "required": [
+                        "memoryLimitBytes",
+                        "memoryReservationBytes",
+                        "cpuWeight",
+                        "pidsLimit"
+                      ],
+                      "properties": {
+                        "memoryLimitBytes": {
+                          "anyOf": [
+                            {
+                              "minimum": 6291456,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "memoryReservationBytes": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "cpuWeight": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 10000,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pidsLimit": {
+                          "anyOf": [
+                            {
+                              "minimum": 16,
+                              "maximum": 1000000,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "deploy": {
+                      "type": "object",
+                      "required": [
+                        "mode",
+                        "healthTimeoutSeconds"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "anyOf": [
+                            {
+                              "const": "rolling",
+                              "type": "string"
+                            },
+                            {
+                              "const": "recreate",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "healthTimeoutSeconds": {
+                          "minimum": 10,
+                          "maximum": 3600,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "cron": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "schedule",
+                            "timeZone",
+                            "command",
+                            "timeoutSeconds",
+                            "concurrency"
+                          ],
+                          "properties": {
+                            "schedule": {
+                              "minLength": 9,
+                              "maxLength": 120,
+                              "type": "string"
+                            },
+                            "timeZone": {
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "type": "string"
+                            },
+                            "command": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "maxLength": 2000,
+                                "type": "string"
+                              }
+                            },
+                            "timeoutSeconds": {
+                              "minimum": 1,
+                              "maximum": 86400,
+                              "type": "integer"
+                            },
+                            "concurrency": {
+                              "anyOf": [
+                                {
+                                  "const": "forbid",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "allow",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "replace",
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stickySessions": {
+                      "type": "boolean"
+                    },
+                    "entryNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "notes": {
+                      "type": "string"
+                    },
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "status"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "minLength": 1,
+                            "maxLength": 40,
+                            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                            "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                            "type": "string"
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "const": "idle",
+                                "type": "string"
+                              },
+                              {
+                                "const": "building",
+                                "type": "string"
+                              },
+                              {
+                                "const": "deploying",
+                                "type": "string"
+                              },
+                              {
+                                "const": "starting",
+                                "type": "string"
+                              },
+                              {
+                                "const": "running",
+                                "type": "string"
+                              },
+                              {
+                                "const": "partial",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unhealthy",
+                                "type": "string"
+                              },
+                              {
+                                "const": "crashed",
+                                "type": "string"
+                              },
+                              {
+                                "const": "stopped",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "volumes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "mountPath",
+                          "kind",
+                          "readOnly",
+                          "sharedWith"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "mountPath": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "volume",
+                                "type": "string"
+                              },
+                              {
+                                "const": "file",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "readOnly": {
+                            "type": "boolean"
+                          },
+                          "sharedWith": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "minLength": 1,
+                                  "maxLength": 40,
+                                  "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                                  "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:services.update",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.create": {
+      "post": {
+        "operationId": "gitProviders.create",
+        "summary": "Connect a git provider",
+        "description": "Stores a GitLab, Gitea/Forgejo or Bitbucket connection after checking the token with the provider. GitLab: a personal, group or project access token with the api scope (url defaults to https://gitlab.com). Gitea/Forgejo: an access token with repository read and write (webhooks) for the instance at url. Bitbucket Cloud: a workspace access token (authKind token) or a user name and app password (authKind appPassword) with repository and webhook scopes, for one workspace. The token is sealed and never returned. From a browser session it needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise); API keys need none.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "name",
+                  "token"
+                ],
+                "properties": {
+                  "kind": {
+                    "description": "\"gitea\" covers Forgejo too.",
+                    "anyOf": [
+                      {
+                        "const": "gitlab",
+                        "type": "string"
+                      },
+                      {
+                        "const": "gitea",
+                        "type": "string"
+                      },
+                      {
+                        "const": "bitbucket",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "type": "string"
+                  },
+                  "url": {
+                    "minLength": 9,
+                    "maxLength": 300,
+                    "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$",
+                    "type": "string"
+                  },
+                  "workspace": {
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$",
+                    "type": "string"
+                  },
+                  "authKind": {
+                    "anyOf": [
+                      {
+                        "const": "token",
+                        "type": "string"
+                      },
+                      {
+                        "const": "appPassword",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "username": {
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^\\S+$",
+                    "type": "string"
+                  },
+                  "token": {
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "statusNotes": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "kind",
+                    "name",
+                    "url",
+                    "host",
+                    "workspace",
+                    "authKind",
+                    "account",
+                    "username",
+                    "statusNotes",
+                    "usedBy",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "description": "\"gitea\" covers Forgejo too.",
+                      "anyOf": [
+                        {
+                          "const": "gitlab",
+                          "type": "string"
+                        },
+                        {
+                          "const": "gitea",
+                          "type": "string"
+                        },
+                        {
+                          "const": "bitbucket",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "maxLength": 60,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "workspace": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "authKind": {
+                      "anyOf": [
+                        {
+                          "const": "token",
+                          "type": "string"
+                        },
+                        {
+                          "const": "appPassword",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "account": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "username": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "statusNotes": {
+                      "type": "boolean"
+                    },
+                    "usedBy": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "gitProviders.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/gitProviders.delete": {
+      "post": {
+        "operationId": "gitProviders.delete",
+        "summary": "Delete a git provider connection",
+        "description": "Deletes a connection and its token. Fails while a service's source still uses it.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "providerId"
+                ],
+                "properties": {
+                  "providerId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "gitProviders.manage",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.list": {
+      "get": {
+        "operationId": "gitProviders.list",
+        "summary": "List git provider connections",
+        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "kind",
+                          "name",
+                          "url",
+                          "host",
+                          "workspace",
+                          "authKind",
+                          "account",
+                          "username",
+                          "statusNotes",
+                          "usedBy",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "kind": {
+                            "description": "\"gitea\" covers Forgejo too.",
+                            "anyOf": [
+                              {
+                                "const": "gitlab",
+                                "type": "string"
+                              },
+                              {
+                                "const": "gitea",
+                                "type": "string"
+                              },
+                              {
+                                "const": "bitbucket",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "name": {
+                            "minLength": 1,
+                            "maxLength": 60,
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "host": {
+                            "type": "string"
+                          },
+                          "workspace": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "authKind": {
+                            "anyOf": [
+                              {
+                                "const": "token",
+                                "type": "string"
+                              },
+                              {
+                                "const": "appPassword",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "account": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "username": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "statusNotes": {
+                            "type": "boolean"
+                          },
+                          "usedBy": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "createdAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.repairWebhook": {
+      "post": {
+        "operationId": "gitProviders.repairWebhook",
+        "summary": "Create a service's repository webhook again",
+        "description": "Removes the service's webhook from the provider repository and creates a new one with a new secret, pointing at the panel's current address (its domain, else the address this call reached the panel at).",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "kind",
+                    "repo",
+                    "url",
+                    "created",
+                    "error",
+                    "insecure",
+                    "lastDeliveryAt",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "description": "\"gitea\" covers Forgejo too.",
+                          "anyOf": [
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "repo": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "url": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "insecure": {
+                      "type": "boolean"
+                    },
+                    "lastDeliveryAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:services.update",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.repos": {
+      "get": {
+        "operationId": "gitProviders.repos",
+        "summary": "List a provider's repositories",
+        "description": "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "repos",
+                    "hasMore"
+                  ],
+                  "properties": {
+                    "repos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "fullName",
+                          "private",
+                          "defaultBranch",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "fullName": {
+                            "type": "string"
+                          },
+                          "private": {
+                            "type": "boolean"
+                          },
+                          "defaultBranch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "updatedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "project:services.create",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/gitProviders.update": {
+      "post": {
+        "operationId": "gitProviders.update",
+        "summary": "Change a git provider connection",
+        "description": "Renames a connection, replaces its token (checked with the provider first) or turns commit statuses on or off. Omitted fields keep their value; the kind, address and workspace cannot change. A new token or user name from a browser session needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise); API keys need none.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "providerId"
+                ],
+                "properties": {
+                  "providerId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "type": "string"
+                  },
+                  "username": {
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^\\S+$",
+                    "type": "string"
+                  },
+                  "token": {
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "statusNotes": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "kind",
+                    "name",
+                    "url",
+                    "host",
+                    "workspace",
+                    "authKind",
+                    "account",
+                    "username",
+                    "statusNotes",
+                    "usedBy",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "description": "\"gitea\" covers Forgejo too.",
+                      "anyOf": [
+                        {
+                          "const": "gitlab",
+                          "type": "string"
+                        },
+                        {
+                          "const": "gitea",
+                          "type": "string"
+                        },
+                        {
+                          "const": "bitbucket",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "maxLength": 60,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "workspace": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "authKind": {
+                      "anyOf": [
+                        {
+                          "const": "token",
+                          "type": "string"
+                        },
+                        {
+                          "const": "appPassword",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "account": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "username": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "statusNotes": {
+                      "type": "boolean"
+                    },
+                    "usedBy": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "gitProviders.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/gitProviders.webhook": {
+      "get": {
+        "operationId": "gitProviders.webhook",
+        "summary": "Get a service's repository webhook",
+        "description": "Says whether the webhook the panel created on a provider repository exists, where it points and when it last delivered. Without a hook, push-to-deploy falls back to polling the branch.",
+        "tags": [
+          "gitProviders"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "kind",
+                    "repo",
+                    "url",
+                    "created",
+                    "error",
+                    "insecure",
+                    "lastDeliveryAt",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "description": "\"gitea\" covers Forgejo too.",
+                          "anyOf": [
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "repo": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "url": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "insecure": {
+                      "type": "boolean"
+                    },
+                    "lastDeliveryAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:services.view",
         "x-mcp": true
       }
     },
@@ -44289,7 +47052,7 @@
       "get": {
         "operationId": "previews.getSettings",
         "summary": "Get a service's PR preview settings",
-        "description": "Returns whether PR previews are on for a service, their domain pattern and limit, and whether the service can have them at all (only GitHub sources can).",
+        "description": "Returns whether PR previews are on for a service, their domain pattern and limit, and whether the service can have them at all (only GitHub and git provider sources can).",
         "tags": [
           "previews"
         ],
@@ -45966,6 +48729,60 @@
                         "type": "object",
                         "required": [
                           "type",
+                          "providerId",
+                          "provider",
+                          "repo",
+                          "branch",
+                          "deployOnPush"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "provider",
+                            "type": "string"
+                          },
+                          "providerId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "provider": {
+                            "description": "\"gitea\" covers Forgejo too.",
+                            "anyOf": [
+                              {
+                                "const": "gitlab",
+                                "type": "string"
+                              },
+                              {
+                                "const": "gitea",
+                                "type": "string"
+                              },
+                              {
+                                "const": "bitbucket",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "repo": {
+                            "minLength": 3,
+                            "maxLength": 300,
+                            "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                            "type": "string"
+                          },
+                          "branch": {
+                            "minLength": 1,
+                            "maxLength": 250,
+                            "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                            "type": "string"
+                          },
+                          "deployOnPush": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
                           "image",
                           "registryId"
                         ],
@@ -46245,7 +49062,8 @@
                     "entryNodeId",
                     "notes",
                     "members",
-                    "volumes"
+                    "volumes",
+                    "watchPaths"
                   ],
                   "properties": {
                     "id": {
@@ -46375,6 +49193,18 @@
                           "anyOf": [
                             {
                               "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
                               "type": "string"
                             },
                             {
@@ -46651,6 +49481,60 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
                             },
                             "deployOnPush": {
                               "type": "boolean"
@@ -47328,6 +50212,16 @@
                             }
                           }
                         }
+                      }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
                       }
                     }
                   }
@@ -47476,7 +50370,8 @@
                     "entryNodeId",
                     "notes",
                     "members",
-                    "volumes"
+                    "volumes",
+                    "watchPaths"
                   ],
                   "properties": {
                     "id": {
@@ -47606,6 +50501,18 @@
                           "anyOf": [
                             {
                               "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
                               "type": "string"
                             },
                             {
@@ -47882,6 +50789,60 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
                             },
                             "deployOnPush": {
                               "type": "boolean"
@@ -48559,6 +51520,16 @@
                             }
                           }
                         }
+                      }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
                       }
                     }
                   }
@@ -48766,6 +51737,18 @@
                                 "anyOf": [
                                   {
                                     "const": "github",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitlab",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitea",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "bitbucket",
                                     "type": "string"
                                   },
                                   {
@@ -49938,7 +52921,7 @@
       "post": {
         "operationId": "services.setSource",
         "summary": "Change where a service's code or image comes from",
-        "description": "Switches a service to a git URL, a Docker image, an inline Dockerfile, uploads or no source. For GitHub repositories use github.connectRepo, which checks the App can read the repo. Applies on the next deploy.",
+        "description": "Switches a service to a git URL, a Docker image, an inline Dockerfile, uploads or no source. For GitHub repositories use github.connectRepo, which checks the App can read the repo; for GitLab, Gitea/Forgejo and Bitbucket use gitProviders.connectRepo, which also creates the repository webhook. Applies on the next deploy.",
         "tags": [
           "services"
         ],
@@ -50039,6 +53022,60 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "deployOnPush": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "providerId",
+                          "provider",
+                          "repo",
+                          "branch",
+                          "deployOnPush"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "provider",
+                            "type": "string"
+                          },
+                          "providerId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "provider": {
+                            "description": "\"gitea\" covers Forgejo too.",
+                            "anyOf": [
+                              {
+                                "const": "gitlab",
+                                "type": "string"
+                              },
+                              {
+                                "const": "gitea",
+                                "type": "string"
+                              },
+                              {
+                                "const": "bitbucket",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "repo": {
+                            "minLength": 3,
+                            "maxLength": 300,
+                            "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                            "type": "string"
+                          },
+                          "branch": {
+                            "minLength": 1,
+                            "maxLength": 250,
+                            "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                            "type": "string"
                           },
                           "deployOnPush": {
                             "type": "boolean"
@@ -50173,7 +53210,8 @@
                     "entryNodeId",
                     "notes",
                     "members",
-                    "volumes"
+                    "volumes",
+                    "watchPaths"
                   ],
                   "properties": {
                     "id": {
@@ -50303,6 +53341,18 @@
                           "anyOf": [
                             {
                               "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
                               "type": "string"
                             },
                             {
@@ -50579,6 +53629,60 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
                             },
                             "deployOnPush": {
                               "type": "boolean"
@@ -51257,6 +54361,16 @@
                           }
                         }
                       }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -51425,6 +54539,88 @@
           }
         },
         "x-op-kind": "destructive",
+        "x-permission": "service:services.update",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/services.setWatchPaths": {
+      "post": {
+        "operationId": "services.setWatchPaths",
+        "summary": "Set a service's watch paths",
+        "description": "Sets the glob patterns a push must touch to deploy the service (for monorepos), in order: * (not across \"/\"), ** (across folders), ?, and ! to exclude; the last pattern that matches a file decides. A push deploys when at least one changed file counts; when the changed files cannot be known it deploys. An empty list deploys on every push. Applies to GitHub, GitLab, Gitea/Forgejo and Bitbucket pushes, branch polling and the deploy trigger URL.",
+        "tags": [
+          "services"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "watchPaths"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "watchPaths": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "maxLength": 300,
+                      "pattern": "^[^\\n\\r\\t]+$",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "watchPaths"
+                  ],
+                  "properties": {
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
         "x-permission": "service:services.update",
         "x-mcp": true
       }
@@ -51748,7 +54944,8 @@
                     "entryNodeId",
                     "notes",
                     "members",
-                    "volumes"
+                    "volumes",
+                    "watchPaths"
                   ],
                   "properties": {
                     "id": {
@@ -51878,6 +55075,18 @@
                           "anyOf": [
                             {
                               "const": "github",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitlab",
+                              "type": "string"
+                            },
+                            {
+                              "const": "gitea",
+                              "type": "string"
+                            },
+                            {
+                              "const": "bitbucket",
                               "type": "string"
                             },
                             {
@@ -52154,6 +55363,60 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "deployOnPush": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "providerId",
+                            "provider",
+                            "repo",
+                            "branch",
+                            "deployOnPush"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "provider",
+                              "type": "string"
+                            },
+                            "providerId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "provider": {
+                              "description": "\"gitea\" covers Forgejo too.",
+                              "anyOf": [
+                                {
+                                  "const": "gitlab",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "gitea",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "bitbucket",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "repo": {
+                              "minLength": 3,
+                              "maxLength": 300,
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "type": "string"
+                            },
+                            "branch": {
+                              "minLength": 1,
+                              "maxLength": 250,
+                              "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                              "type": "string"
                             },
                             "deployOnPush": {
                               "type": "boolean"
@@ -52831,6 +56094,16 @@
                             }
                           }
                         }
+                      }
+                    },
+                    "watchPaths": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "pattern": "^[^\\n\\r\\t]+$",
+                        "type": "string"
                       }
                     }
                   }
@@ -55288,6 +58561,18 @@
                                 "anyOf": [
                                   {
                                     "const": "github",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitlab",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "gitea",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "bitbucket",
                                     "type": "string"
                                   },
                                   {
@@ -61932,7 +65217,7 @@
       "get": {
         "operationId": "webhooks.listDeliveries",
         "summary": "List a service's webhook deliveries",
-        "description": "Lists recent webhook deliveries (GitHub pushes and PR events, trigger URL calls) for a service, newest first, with what each one did and why.",
+        "description": "Lists recent webhook deliveries (GitHub, GitLab, Gitea/Forgejo and Bitbucket pushes and merge or pull request events, trigger URL calls) for a service, newest first, with what each one did and why (including watch-path and [skip ci] skips).",
         "tags": [
           "webhooks"
         ],
@@ -62006,6 +65291,18 @@
                               },
                               {
                                 "const": "trigger",
+                                "type": "string"
+                              },
+                              {
+                                "const": "gitlab",
+                                "type": "string"
+                              },
+                              {
+                                "const": "gitea",
+                                "type": "string"
+                              },
+                              {
+                                "const": "bitbucket",
                                 "type": "string"
                               }
                             ]
@@ -62146,7 +65443,7 @@
       "post": {
         "operationId": "webhooks.rotateTrigger",
         "summary": "Create or rotate a deploy trigger URL",
-        "description": "Creates a new secret deploy URL for a service and invalidates the old one. A POST to the URL deploys the service (optional query: commit=<sha>). The URL is returned only this once. While the panel has no domain it is a path (/api/hooks/deploy/...) to put after the panel's address.",
+        "description": "Creates a new secret deploy URL for a service and invalidates the old one. A POST to the URL deploys the service (optional query: commit=<sha>). A JSON body in the push payload shape of GitHub, GitLab or Gitea (commits[].added/modified/removed, before, after) or { changedFiles: [...] } is checked against the service's watch paths and [skip ci] markers. The URL is returned only this once. While the panel has no domain it is a path (/api/hooks/deploy/...) to put after the panel's address.",
         "tags": [
           "webhooks"
         ],

@@ -83,7 +83,7 @@ func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git,
 			return nil, err
 		}
 		g.args = append(g.args, "-c", "credential."+origin+".helper="+credentialHelper)
-		g.env = append(g.env, "BUILD_GIT_HOST="+host, "BUILD_GIT_USER=x-access-token", "BUILD_GIT_TOKEN="+src.GetToken())
+		g.env = append(g.env, "BUILD_GIT_HOST="+host, "BUILD_GIT_USER="+gitUser(src), "BUILD_GIT_TOKEN="+src.GetToken())
 	}
 	if key := src.GetSshPrivateKey(); key != "" {
 		dir := filepath.Join(work, "ssh")
@@ -110,6 +110,19 @@ func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git,
 			" -o UserKnownHostsFile="+shellQuote(hostsFile)+" -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=30")
 	}
 	return g, nil
+}
+
+// defaultGitUser is the HTTPS user name sent with a token when the panel
+// names none: GitHub wants it, GitLab and Gitea take any name.
+const defaultGitUser = "x-access-token"
+
+// gitUser is the user name the credential helper answers with the token
+// (Bitbucket access tokens need "x-token-auth", app passwords the account).
+func gitUser(src *agentv1.GitSource) string {
+	if u := src.GetUsername(); u != "" {
+		return u
+	}
+	return defaultGitUser
 }
 
 // httpAllow is git's protocol.http.allow for src: a token or key is never

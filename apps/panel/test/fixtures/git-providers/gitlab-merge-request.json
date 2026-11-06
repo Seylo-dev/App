@@ -1,0 +1,36 @@
+{
+  "object_kind": "merge_request",
+  "event_type": "merge_request",
+  "user": { "id": 4, "name": "Jane Dev", "username": "jdev", "avatar_url": null, "email": "[REDACTED]" },
+  "project": {
+    "id": 42,
+    "name": "shop",
+    "web_url": "https://gitlab.com/acme/platform/shop",
+    "path_with_namespace": "acme/platform/shop",
+    "default_branch": "main"
+  },
+  "object_attributes": {
+    "id": 9901,
+    "iid": 7,
+    "title": "New checkout",
+    "action": "update",
+    "state": "opened",
+    "source_branch": "feat/checkout",
+    "target_branch": "main",
+    "source_project_id": 42,
+    "target_project_id": 42,
+    "oldrev": "95790bf891e76fee5e1747ab589903a6a1f80f22",
+    "last_commit": {
+      "id": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+      "message": "Checkout: new layout\n",
+      "title": "Checkout: new layout",
+      "author": { "name": "Jane Dev", "email": "[REDACTED]" }
+    },
+    "url": "https://gitlab.com/acme/platform/shop/-/merge_requests/7",
+    "merge_status": "can_be_merged",
+    "draft": false
+  },
+  "labels": [],
+  "changes": {},
+  "repository": { "name": "shop", "homepage": "https://gitlab.com/acme/platform/shop" }
+}

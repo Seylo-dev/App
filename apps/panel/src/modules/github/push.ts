@@ -2,6 +2,7 @@
 // branch, open/update/close PR previews. Used by the webhook route and by
 // the polling fallback.
 
+import { skipMarkerOf } from "@seylo/ops";
 import { sql } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { services, sourcePolls } from "../../db/schema";
@@ -9,8 +10,11 @@ import type { Deps } from "../../deps";
 import { queueDeploy } from "../deployments/queue";
 import { closePreview, openOrUpdatePreview, type PullRequestInfo } from "../previews/preview";
 import type { ServiceRow } from "../services/rows";
-import { readSpec } from "../services/spec";
+import { readSpec, type ServiceSpecJson } from "../services/spec";
+import type { PushChanges } from "../webhooks/changes";
 import { recordDelivery } from "../webhooks/deliveries";
+import { type ChangedFileList, type CompareFiles, pushGate } from "../webhooks/gate";
+import { githubCompare, tokenForInstallation } from "./app";
 
 export interface PushInfo {
   repo: string;
@@ -20,6 +24,13 @@ export interface PushInfo {
   author: string | null;
   /** GitHub login of who pushed. */
   sender: string | null;
+  /** What the push changed (watch paths, [skip ci]); null: nothing known, the compare API is asked when needed. */
+  changes?: PushChanges | null;
+}
+
+/** The changes of a push as far as they are known, with the compare API as the fallback for watch paths. */
+function changesOf(push: PushInfo): PushChanges {
+  return push.changes ?? { files: null, truncated: false, before: null, after: push.sha, headMessage: push.message };
 }
 
 /** Services (and stacks) whose GitHub source is this repo, any branch. */
@@ -50,6 +61,23 @@ export function setStackRefresher(fn: StackRefresher): void {
 
 export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: string; event: string; source: "github" }): Promise<number> {
   let deployed = 0;
+  // One compare per installation for every service of the repo that has watch paths.
+  const compares = new Map<string, Promise<ChangedFileList>>();
+  const compareFor =
+    (installationId: string): CompareFiles =>
+    (before, after) => {
+      const key = `${installationId}:${before}...${after}`;
+      let pending = compares.get(key);
+      if (!pending) {
+        pending = tokenForInstallation(deps.db, deps.secrets, installationId).then((token) =>
+          githubCompare(token, push.repo, before, after),
+        );
+        compares.set(key, pending);
+      }
+      return pending;
+    };
+  const gateFor = (spec: ServiceSpecJson, installationId: string) =>
+    pushGate({ watchPaths: spec.watchPaths, changes: changesOf(push), compare: compareFor(installationId), providerLabel: "GitHub" });
   const matches = servicesForRepo(deps.db, push.repo);
   if (matches.length === 0) {
     recordDelivery(deps.db, {
@@ -85,6 +113,11 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
           record("ignored", "Deploy on push is off.");
           continue;
         }
+        const stackGate = await gateFor(spec, source.installationId);
+        if (!stackGate.deploy) {
+          record("ignored", stackGate.detail);
+          continue;
+        }
         if (!refreshStack) {
           record("failed", "Compose stacks cannot be refreshed yet.");
           continue;
@@ -103,6 +136,11 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
         record("ignored", "Deploy on push is off.");
         continue;
       }
+      const gate = await gateFor(spec, spec.source.installationId);
+      if (!gate.deploy) {
+        record("ignored", gate.detail);
+        continue;
+      }
       const d = queueDeploy(deps, {
         serviceId: svc.id,
         trigger: "push",
@@ -111,6 +149,7 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
         commitMessage: push.message,
         commitAuthor: push.author,
         branch: push.branch,
+        notes: gate.logLines,
       });
       deps.db
         .insert(sourcePolls)
@@ -164,6 +203,11 @@ export async function handlePullRequest(
         continue;
       }
       if (action === "edited") continue;
+      const marker = skipMarkerOf(pr.title);
+      if (marker) {
+        record("ignored", `Skipped: the pull request title says ${marker}.`);
+        continue;
+      }
       const result = await openOrUpdatePreview(deps, svc, pr, sender);
       if ("ignored" in result) record("ignored", result.ignored);
       else record("deployed", result.detail, result.deployment.id);

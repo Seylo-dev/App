@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac, generateKeyPairSync } from "node:crypto";
 import { deployments as deploymentOps, github, previews as previewOps, projects, services as serviceOps, webhooks } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { deployments, githubApps, githubInstallations, previews, services, webhookDeliveries } from "../src/db/schema";
+import { deploymentLogs, deployments, githubApps, githubInstallations, previews, services, webhookDeliveries } from "../src/db/schema";
 import { pollBranches } from "../src/modules/github/poll";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
@@ -17,6 +17,7 @@ const realFetch = globalThis.fetch;
 const secret = "whsec-test";
 let heads: Record<string, string>;
 let apiCalls: string[];
+let compareFiles: string[] = [];
 
 function fakeGithub() {
   apiCalls = [];
@@ -43,6 +44,7 @@ function fakeGithub() {
       );
     }
     if (/^\/repos\/acme\/shop\/branches\//.test(url.pathname)) return ok({ name: "main" });
+    if (/^\/repos\/acme\/shop\/compare\//.test(url.pathname)) return ok({ files: compareFiles.map((filename) => ({ filename })) });
     return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
   }) as typeof fetch;
 }
@@ -222,6 +224,69 @@ describe("GitHub webhooks", () => {
     await fleet.settle();
     const d = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).get();
     expect(d?.commitSha).toBe(heads.main);
+  });
+});
+
+describe("GitHub pushes with watch paths and [skip ci]", () => {
+  const sha = (n: number) => String(n).repeat(40).slice(0, 40);
+  const pushWith = (n: number, files: string[] | null, message = "Change") => ({
+    ...push("main", sha(n)),
+    before: sha(n - 1),
+    head_commit: { id: sha(n), message, author: { username: "dev" } },
+    commits: files === null ? [] : [{ id: sha(n), message, added: [], modified: files, removed: [] }],
+  });
+  const logLines = (deploymentId: string) =>
+    panel.deps.db
+      .select()
+      .from(deploymentLogs)
+      .where(eq(deploymentLogs.deploymentId, deploymentId))
+      .all()
+      .map((l) => l.text);
+
+  test("only pushes that touch the watch paths deploy, and the log says which file matched", async () => {
+    const id = await githubService();
+    await callOp(panel, serviceOps.setWatchPaths, { serviceId: id, watchPaths: ["apps/web/**"] }, { cookie });
+    const skipped = await post("push", pushWith(2, ["apps/api/main.go"]));
+    expect(skipped.body).toMatchObject({ deployed: 0 });
+    let list = (await callOp(panel, webhooks.listDeliveries, { serviceId: id }, { cookie })).body.deliveries;
+    expect(list[0]).toMatchObject({ outcome: "ignored", detail: "Skipped by watch paths: the one changed file matches no pattern." });
+
+    await post("push", pushWith(3, ["apps/web/page.tsx"]));
+    const [d] = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).all();
+    expect(logLines(d?.id as string)).toContain("Watch paths: apps/web/page.tsx matches apps/web/**.");
+
+    await post("push", pushWith(4, ["apps/web/page.tsx"], "Small fix [skip ci]"));
+    list = (await callOp(panel, webhooks.listDeliveries, { serviceId: id }, { cookie })).body.deliveries;
+    expect(list[0].detail).toBe("Skipped: the head commit message says [skip ci].");
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).all()).toHaveLength(1);
+  });
+
+  test("a push without a file list asks GitHub's compare API", async () => {
+    const id = await githubService();
+    await callOp(panel, serviceOps.setWatchPaths, { serviceId: id, watchPaths: ["apps/web/**"] }, { cookie });
+    compareFiles = ["docs/readme.md"];
+    await post("push", pushWith(5, null));
+    expect(apiCalls).toContain(`GET /repos/acme/shop/compare/${sha(4)}...${sha(5)}`);
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).all()).toHaveLength(0);
+    compareFiles = ["apps/web/x.ts"];
+    await post("push", pushWith(6, null));
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, id)).all()).toHaveLength(1);
+  });
+
+  test("a pull request titled [skip ci] opens no preview", async () => {
+    const id = await githubService();
+    await callOp(panel, previewOps.updateSettings, { serviceId: id, enabled: true, acknowledgeSharedEnv: true }, { cookie });
+    await post("pull_request", {
+      action: "opened",
+      number: 4,
+      pull_request: {
+        title: "WIP [skip ci]",
+        head: { ref: "wip", sha: sha(7), repo: { full_name: "acme/shop" } },
+        base: { ref: "main", repo: { full_name: "acme/shop" } },
+      },
+      repository: { full_name: "acme/shop" },
+    });
+    expect((await callOp(panel, previewOps.list, { serviceId: id }, { cookie })).body.previews).toHaveLength(0);
   });
 });
 

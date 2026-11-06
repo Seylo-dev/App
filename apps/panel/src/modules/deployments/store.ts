@@ -175,10 +175,34 @@ export function loadDeployment(db: PanelDb, serviceId: string, deploymentId: str
  * "deployment:<id>" as a { type: "deployment" } event, so a deploy log page
  * follows status and steps without refetching.
  */
+/** Called after a deployment changed (status, steps, commit); never throws into the caller. */
+export type DeploymentListener = (row: DeploymentRow) => void;
+const deploymentListeners = new WeakMap<object, Set<DeploymentListener>>();
+
+/** Lets a module follow deployments of this panel (for example to post commit statuses). */
+export function onDeploymentChange(db: object, listener: DeploymentListener): () => void {
+  let set = deploymentListeners.get(db);
+  if (!set) {
+    set = new Set();
+    deploymentListeners.set(db, set);
+  }
+  set.add(listener);
+  return () => set.delete(listener);
+}
+
 export function publishDeploymentChange(deps: Pick<Deps, "db" | "live">, serviceId: string, deploymentId?: string): void {
   if (deploymentId) {
     const row = loadDeployment(deps.db, serviceId, deploymentId);
     if (row) deps.live.publish(`deployment:${deploymentId}`, { type: "deployment", deployment: toDeployment(deps.db, row) });
+    if (row) {
+      for (const listener of deploymentListeners.get(deps.db) ?? []) {
+        try {
+          listener(row);
+        } catch {
+          // A listener's failure is its own; the deploy goes on.
+        }
+      }
+    }
   }
   const svc = deps.db.select({ projectId: services.projectId }).from(services).where(eq(services.id, serviceId)).get();
   deps.live.publish(`service:${serviceId}`, {

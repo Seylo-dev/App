@@ -63,6 +63,9 @@ export default {
   },
   source: {
     github: "GitHub",
+    gitlab: "GitLab",
+    gitea: "Gitea",
+    bitbucket: "Bitbucket",
     git: "Git",
     image: "Image",
     inline: "Dockerfile",

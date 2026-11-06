@@ -13,6 +13,7 @@ export default {
     people: "People",
     apiKeys: "API keys and MCP",
     github: "GitHub",
+    gitProviders: "Git providers",
     cloudflare: "Cloudflare",
     notifications: "Notifications",
     backups: "Backups",

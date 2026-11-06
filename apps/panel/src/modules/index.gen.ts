@@ -21,6 +21,7 @@ import env from "./env";
 import exposures from "./exposures";
 import files from "./files";
 import git from "./git";
+import gitProviders from "./gitProviders";
 import github from "./github";
 import grants from "./grants";
 import invites from "./invites";
@@ -47,4 +48,4 @@ import users from "./users";
 import webhooks from "./webhooks";
 
 /** Every panel feature module; each one's default export is a defineModule() result. */
-export const modules = [ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;
+export const modules = [ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;

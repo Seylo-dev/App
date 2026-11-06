@@ -109,7 +109,70 @@ export const registryCredentials = sqliteTable("registry_credentials", {
   updatedAt: updatedAt(),
 });
 
-export type WebhookSource = "github" | "trigger";
+export type GitProviderKind = "gitlab" | "gitea" | "bitbucket";
+/** "token": a personal, group, project or workspace access token; "appPassword": Bitbucket user + app password. */
+export type GitProviderAuth = "token" | "appPassword";
+
+/**
+ * A connection to GitLab (gitlab.com or self-managed), Gitea/Forgejo or
+ * Bitbucket Cloud: the token the panel lists repositories, clones, creates
+ * repository webhooks and posts commit statuses with. Services reference
+ * one by id in a "provider" source.
+ */
+export const gitProviders = sqliteTable("git_providers", {
+  id: id(),
+  kind: text("kind").$type<GitProviderKind>().notNull(),
+  name: text("name").notNull(),
+  /** Web address without a trailing slash: https://gitlab.com, https://git.example.com, https://bitbucket.org. */
+  url: text("url").notNull(),
+  /** Bitbucket: the workspace whose repositories the connection lists. */
+  workspace: text("workspace"),
+  authKind: text("auth_kind").$type<GitProviderAuth>().notNull().default("token"),
+  /** Bitbucket app passwords: the account's user name. */
+  username: text("username"),
+  tokenSealed: sealed("token_sealed").notNull(),
+  /** Who the token acts as, read from the provider when it was saved. */
+  account: text("account"),
+  /** Post commit statuses (shown on merge and pull requests) for deploys and previews. */
+  statusNotes: integer("status_notes", { mode: "boolean" }).notNull().default(true),
+  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * The repository webhook the panel created for one service with a
+ * provider source. Its id is in the webhook URL; the secret is per hook.
+ */
+export const gitProviderWebhooks = sqliteTable(
+  "git_provider_webhooks",
+  {
+    id: id(),
+    serviceId: text("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    providerId: text("provider_id")
+      .notNull()
+      .references(() => gitProviders.id, { onDelete: "cascade" }),
+    /** Repository path at the provider ("group/sub/project", "owner/name", "workspace/slug"). */
+    repo: text("repo").notNull(),
+    secretSealed: sealed("secret_sealed").notNull(),
+    /** The provider's id of the hook; null while it could not be created. */
+    remoteId: text("remote_id"),
+    /** The URL the provider posts to. */
+    url: text("url"),
+    /** Why creating the hook failed, for the Source tab. */
+    error: text("error"),
+    lastDeliveryAt: timestamp("last_delivery_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("git_provider_webhooks_service_unique").on(t.serviceId),
+    index("git_provider_webhooks_provider_idx").on(t.providerId),
+  ],
+);
+
+export type WebhookSource = "github" | "trigger" | GitProviderKind;
 export type WebhookOutcome = "deployed" | "ignored" | "rejected" | "failed";
 
 /**

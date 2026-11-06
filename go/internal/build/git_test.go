@@ -23,6 +23,13 @@ import (
 // returned runner makes git trust the test server's certificate.
 func gitServer(t *testing.T, token string) (url string, repo string, runner Runner) {
 	t.Helper()
+	return gitServerFor(t, defaultGitUser, token)
+}
+
+// gitServerFor is gitServer for a host that wants a given HTTPS user name
+// with the token (Bitbucket: "x-token-auth" or the account).
+func gitServerFor(t *testing.T, user, token string) (url string, repo string, runner Runner) {
+	t.Helper()
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git is not installed")
@@ -69,8 +76,8 @@ func gitServer(t *testing.T, token string) (url string, repo string, runner Runn
 	}
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" {
-			user, pass, ok := r.BasicAuth()
-			if !ok || user != "x-access-token" || pass != token {
+			name, pass, ok := r.BasicAuth()
+			if !ok || name != user || pass != token {
 				w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
 				http.Error(w, "auth", http.StatusUnauthorized)
 				return
@@ -142,6 +149,50 @@ func TestFetchGitWithToken(t *testing.T) {
 				t.Fatal("the token is in .git/config")
 			}
 		})
+	}
+}
+
+// A provider that wants another user name (Bitbucket) gets the one the
+// panel sends; without one the clone sends x-access-token and is refused.
+func TestFetchGitWithUsername(t *testing.T) {
+	url, _, run := gitServerFor(t, "x-token-auth", "bb-token")
+	for _, c := range []struct {
+		name, user string
+		ok         bool
+	}{
+		{"named user", "x-token-auth", true},
+		{"default user", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			work := t.TempDir()
+			var log bytes.Buffer
+			src := &agentv1.GitSource{Url: url, Ref: "main", Token: "bb-token", Username: c.user}
+			if err := validateGit(src); err != nil {
+				t.Fatal(err)
+			}
+			_, err := fetchGit(context.Background(), run, &log, src, filepath.Join(work, "src"), work, false)
+			if c.ok && err != nil {
+				t.Fatalf("%v\n%s", err, log.String())
+			}
+			if !c.ok && !errors.Is(err, ErrFetch) {
+				t.Fatalf("got %v, want ErrFetch", err)
+			}
+		})
+	}
+}
+
+func TestGitUsernameIsValidated(t *testing.T) {
+	for _, bad := range []string{"two words", "line\nbreak", "x=y\npassword=z", strings.Repeat("a", 101)} {
+		src := &agentv1.GitSource{Url: "https://git.example.com/a/b.git", Token: "t", Username: bad}
+		if err := validateGit(src); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	for _, good := range []string{"x-token-auth", "oauth2", "jane.doe", "dev+ci@example.com"} {
+		src := &agentv1.GitSource{Url: "https://git.example.com/a/b.git", Token: "t", Username: good}
+		if err := validateGit(src); err != nil {
+			t.Errorf("%q: %v", good, err)
+		}
 	}
 }
 
