@@ -102,9 +102,11 @@ func (m *Manager) Open(ctx context.Context, open *agentv1.HostShellOpen) (*Sessi
 		return nil, err
 	}
 	// The setting may have turned off while the shell started: CloseAll did
-	// not see this one yet.
+	// not see this one yet. It never reaches the caller, so it leaves the
+	// open set here (no goroutine below forgets it).
 	if err := m.opts.Allowed(); err != nil {
 		s.closeWith(ReasonDisabled)
+		m.forget(s)
 		return nil, err
 	}
 	m.opts.Logger.Info("host shell opened", "session_id", s.sessionID, "opened_by", s.openedBy, "user", login.user, "shell", login.shell)

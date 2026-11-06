@@ -106,6 +106,37 @@ func TestAtMostTwoAndCloseAll(t *testing.T) {
 	}
 }
 
+// The setting turns off while a shell starts: Open refuses it and it must
+// not stay counted, or two such races would refuse every later shell.
+func TestTurnedOffWhileStartingIsNotCounted(t *testing.T) {
+	var calls atomic.Int32
+	m := New(Options{Allowed: func() error {
+		// Calls 1 and 3 are the checks before a start, 2 and 4 the
+		// rechecks after it: off by then. From call 5 on it stays on.
+		if n := calls.Add(1); n == 2 || n == 4 {
+			return ErrDisabled
+		}
+		return nil
+	}})
+	for range 2 {
+		if _, err := m.Open(context.Background(), &agentv1.HostShellOpen{}); !errors.Is(err, ErrDisabled) {
+			t.Fatalf("err = %v, want ErrDisabled", err)
+		}
+		if n := m.Count(); n != 0 {
+			t.Fatalf("open shells after a refused start = %d, want 0", n)
+		}
+	}
+	s, err := m.Open(context.Background(), &agentv1.HostShellOpen{})
+	if err != nil {
+		t.Fatalf("third shell: %v", err)
+	}
+	if m.Count() != 1 {
+		t.Fatalf("open shells = %d, want 1", m.Count())
+	}
+	_ = s.Close()
+	waitFor(t, func() bool { return m.Count() == 0 })
+}
+
 func TestIdleShellIsHungUp(t *testing.T) {
 	m := New(Options{Allowed: on, Idle: 200 * time.Millisecond})
 	s, err := m.Open(context.Background(), &agentv1.HostShellOpen{})
