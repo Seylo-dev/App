@@ -1,9 +1,11 @@
 // One node in a side sheet, opened from the Nodes table (?node=<id>&view=).
-// Three views:
+// Five views:
 //   overview  machine facts, usage graphs, services placed here, and the
 //             machine actions: update the agent, update Docker, reboot,
 //             agent logs
 //   health    the node health checks (the heart icon) with fix hints
+//   cleanup   the cleanup the node runs by itself and its recent cleanups
+//   shell     a root shell on the node itself (off until the owner allows it)
 //   settings  name, location, tags, wildcard domain, builds, games-first
 //             CPU (only next to Wings), log retention, remove the node
 
@@ -27,11 +29,13 @@ import { useLiveTopic } from "../../lib/live";
 import type { NodeDetail } from "../../lib/types";
 import { QueryError } from "../query-error";
 import { AgentLogsDialog } from "./agent-logs";
+import { NodeCleanup } from "./node-cleanup";
 import { NodeGraphs } from "./node-graphs";
 import { NodeHealth } from "./node-health";
 import { NodeSettingsForm } from "./node-settings";
+import { NodeShell } from "./node-shell";
 
-export type NodeView = "overview" | "health" | "settings";
+export type NodeView = "overview" | "health" | "cleanup" | "shell" | "settings";
 
 export function NodeSheet({
   nodeId,
@@ -85,6 +89,8 @@ function NodeSheetBody({
         >
           <SegmentedItem value="overview">{t("nodes.sheet.overview")}</SegmentedItem>
           <SegmentedItem value="health">{t("nodes.health")}</SegmentedItem>
+          <SegmentedItem value="cleanup">{t("nodeCleanup.tab")}</SegmentedItem>
+          <SegmentedItem value="shell">{t("nodeShell.tab")}</SegmentedItem>
           <SegmentedItem value="settings">{t("nodes.settings")}</SegmentedItem>
         </Segmented>
       </SheetHeader>
@@ -97,6 +103,10 @@ function NodeSheetBody({
           <Overview node={node.data} onClose={onClose} />
         ) : view === "health" ? (
           <NodeHealth nodeId={nodeId} />
+        ) : view === "cleanup" ? (
+          <NodeCleanup nodeId={nodeId} />
+        ) : view === "shell" ? (
+          <NodeShell node={node.data} />
         ) : (
           <NodeSettingsForm key={node.data.updatedAt} node={node.data} onRemoved={onClose} />
         )}

@@ -519,3 +519,72 @@ export function metricsNode(nodeId: string, range = "1h") {
 export const viewer = { id: "user000000000001", email: "you@example.com", name: "", role: "owner" };
 
 export const systemInfo = { name: "Seylo", version: "0.9.4", panelId: "demo", startedAt: iso(3 * day), nodes: { total: 3, online: 3 } };
+
+/** The node sheet's Cleanup view: a daily schedule with a disk line, and a few runs. */
+export function cleanupSchedule(nodeId: string) {
+  return {
+    nodeId,
+    schedule: {
+      enabled: true,
+      cron: "0 4 * * *",
+      diskPercent: 80,
+      kinds: { images: true, buildCache: true, stoppedContainers: true, unusedVolumes: false },
+    },
+    timeZone: "Europe/Berlin",
+    nextRunAt: iso(-9 * hour),
+    supported: true,
+  };
+}
+
+export function cleanupRuns(nodeId: string) {
+  const run = (id: string, msAgo: number, extra: Record<string, unknown>) => ({
+    id,
+    nodeId,
+    status: "succeeded",
+    error: null,
+    lines: [],
+    diskPercent: null,
+    startedBy: null,
+    startedAt: iso(msAgo),
+    finishedAt: iso(msAgo - 40_000),
+    ...extra,
+  });
+  return {
+    runs: [
+      run("cleanuprun000001", 5 * hour, {
+        trigger: "schedule",
+        bytesFreed: 3.2 * gb,
+        removedCount: 3,
+        lines: [
+          "image registry/acme/api:41 (1.4 GiB): older than the newest 3",
+          "image registry/acme/web:17 (1.1 GiB): older than the newest 3",
+          "container seylo-svcworker0000005-11 (12.0 MiB): old generation 11",
+        ],
+      }),
+      run("cleanuprun000002", 2 * day, { trigger: "disk", diskPercent: 87, bytesFreed: 6.8 * gb, removedCount: 9 }),
+      run("cleanuprun000003", 4 * day, { trigger: "manual", startedBy: "you@example.com", bytesFreed: 412 * mb, removedCount: 2 }),
+      run("cleanuprun000004", 6 * day, {
+        trigger: "schedule",
+        status: "failed",
+        error: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock",
+        bytesFreed: 0,
+        removedCount: 0,
+      }),
+    ],
+    bytesFreed30d: 10.4 * gb,
+  };
+}
+
+/** The node sheet's Shell view: allowed on the node, one shell open. */
+export function hostShellStatus(nodeId: string) {
+  return {
+    nodeId,
+    enabled: true,
+    available: true,
+    canOpen: true,
+    canEnable: true,
+    maxSessions: 2,
+    idleTimeoutSeconds: 900,
+    sessions: [{ id: "hostsession00001", userId: viewer.id, openedBy: "you@example.com", openedAt: iso(4 * min) }],
+  };
+}

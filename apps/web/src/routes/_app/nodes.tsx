@@ -1,6 +1,6 @@
 // Nodes (Nodes.dc.html): the update strip, the node table and "Add a
 // node". A node opens in a side sheet (?node=<id>&view=overview|health|
-// settings); ?add=true starts the add flow (from the palette and the
+// cleanup|shell|settings); ?add=true starts the add flow (from the palette and the
 // dashboard's empty state).
 
 import { Button } from "@seylo/ui/components/button";
@@ -14,7 +14,7 @@ import { UpdatesBanner } from "../../components/nodes/updates-banner";
 import { PageHeader } from "../../components/page-header";
 import { t } from "../../i18n/t";
 
-const views: readonly NodeView[] = ["overview", "health", "settings"];
+const views: readonly NodeView[] = ["overview", "health", "cleanup", "shell", "settings"];
 
 interface NodesSearch {
   node?: string;

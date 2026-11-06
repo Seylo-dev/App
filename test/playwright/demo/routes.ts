@@ -24,6 +24,9 @@ const worldHandlers: Record<string, Handler> = {
   "nodes.list": () => ({ nodes: world.nodes }),
   "nodes.get": (input) => world.nodeDetail(String(input.nodeId ?? "")),
   "nodes.healthReport": () => world.healthReport,
+  "cleanup.getSchedule": (input) => world.cleanupSchedule(String(input.nodeId ?? "")),
+  "cleanup.runs": (input) => world.cleanupRuns(String(input.nodeId ?? "")),
+  "hostShell.status": (input) => world.hostShellStatus(String(input.nodeId ?? "")),
   "nodes.listJoinTokens": () => ({ tokens: [] }),
   "nodes.createJoinToken": () => ({
     tokenId: "token00000000001",

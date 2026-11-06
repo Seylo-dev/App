@@ -26,6 +26,8 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["nodes", "/nodes"],
   ["node-overview", `/nodes?node=${ids.de}`, "dialog"],
   ["node-health", `/nodes?node=${ids.us}&view=health`, "dialog"],
+  ["node-cleanup", `/nodes?node=${ids.de}&view=cleanup`, "dialog"],
+  ["node-shell", `/nodes?node=${ids.de}&view=shell`, "dialog"],
   ["project", `/p/${ids.acme}`],
   ["templates", "/templates"],
   ["activity", "/activity"],
