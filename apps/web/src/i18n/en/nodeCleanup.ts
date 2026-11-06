@@ -29,6 +29,8 @@ export default {
   oldAgent: "This node's agent is too old to clean up on its own. Update the node first.",
   save: "Save schedule",
   saved: "Cleanup schedule saved",
+  changedElsewhere: "Someone else saved this schedule while you were editing it. Saving now replaces their version.",
+  loadSaved: "Load the saved schedule",
   manual: "To clean up right now, use Settings > Docker cleanup.",
   manualLink: "Open Docker cleanup",
   runs: "Recent cleanups",

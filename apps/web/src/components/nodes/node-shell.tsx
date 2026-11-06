@@ -147,9 +147,13 @@ function HostTerminal({ node, minutes, onClose }: { node: NodeDetail; minutes: n
       }
       subtitle={t("nodeShell.subtitle")}
       source={source}
-      describe={(info) =>
-        `${t("nodeShell.connected", { node: node.name, user: info.user || "root", workdir: info.workdir || "/" })} · ${t("nodeShell.idle", { minutes })}`
-      }
+      describe={(info) => {
+        // The agent's user from its first message (root on an installed node).
+        const where = info.user
+          ? t("nodeShell.connected", { node: node.name, user: info.user, workdir: info.workdir || "/" })
+          : t("nodeShell.connectedNoUser", { node: node.name, workdir: info.workdir || "/" });
+        return `${where} · ${t("nodeShell.idle", { minutes })}`;
+      }}
       keyboard
       fileName={`${node.name}-host-shell.log`}
       minHeight={440}

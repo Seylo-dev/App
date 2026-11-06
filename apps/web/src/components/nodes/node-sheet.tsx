@@ -85,7 +85,8 @@ function NodeSheetBody({
           aria-label={t("nodes.sheet.views")}
           value={view}
           onValueChange={(v) => onViewChange(v as NodeView)}
-          className="mt-2 self-start"
+          // Five views: on a phone the track scrolls inside the header instead of widening the sheet.
+          className="mt-2 max-w-full self-start overflow-x-auto"
         >
           <SegmentedItem value="overview">{t("nodes.sheet.overview")}</SegmentedItem>
           <SegmentedItem value="health">{t("nodes.health")}</SegmentedItem>

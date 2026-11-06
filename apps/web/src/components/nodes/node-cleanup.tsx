@@ -39,7 +39,7 @@ export function NodeCleanup({ nodeId }: { nodeId: string }) {
       ) : schedule.isPending ? (
         <ScheduleSkeleton />
       ) : (
-        <ScheduleForm key={JSON.stringify(schedule.data.schedule)} nodeId={nodeId} data={schedule.data} />
+        <ScheduleForm nodeId={nodeId} data={schedule.data} />
       )}
       <section aria-label={t("nodeCleanup.runs")} aria-busy={runs.isPending} className="flex flex-col gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
@@ -68,14 +68,39 @@ export function NodeCleanup({ nodeId }: { nodeId: string }) {
   );
 }
 
+/** The panel stores the expression trimmed with single spaces. */
+const cronKey = (cron: string | null) => (cron === null ? null : cron.trim().replace(/\s+/g, " "));
+
+function sameSchedule(a: Schedule, b: Schedule): boolean {
+  return (
+    a.enabled === b.enabled &&
+    cronKey(a.cron) === cronKey(b.cron) &&
+    a.diskPercent === b.diskPercent &&
+    kinds.every((kind) => a.kinds[kind] === b.kinds[kind])
+  );
+}
+
 function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) {
   const saved = data.schedule;
+  // The saved schedule the fields were loaded from. A save elsewhere (another
+  // admin, an API script; the live socket refetches) replaces the fields only
+  // while nobody edited them; otherwise a note offers to load it.
+  const [base, setBase] = useState(saved);
   const [enabled, setEnabled] = useState(saved.enabled);
   const [useCron, setUseCron] = useState(saved.cron !== null);
   const [cron, setCron] = useState(saved.cron ?? "0 4 * * *");
   const [useDisk, setUseDisk] = useState(saved.diskPercent !== null);
   const [disk, setDisk] = useState(String(saved.diskPercent ?? 80));
   const [picked, setPicked] = useState(saved.kinds);
+  const load = (s: Schedule) => {
+    setBase(s);
+    setEnabled(s.enabled);
+    setUseCron(s.cron !== null);
+    setCron(s.cron ?? "0 4 * * *");
+    setUseDisk(s.diskPercent !== null);
+    setDisk(String(s.diskPercent ?? 80));
+    setPicked(s.kinds);
+  };
   const save = useOpMutation(cleanup.setSchedule, {
     onSuccess: () => {
       toast.success(t("nodeCleanup.saved"));
@@ -90,7 +115,12 @@ function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) 
     diskPercent: useDisk ? Number(disk) : null,
     kinds: picked,
   };
-  const dirty = JSON.stringify(next) !== JSON.stringify(saved);
+  const edited = !sameSchedule(next, base);
+  const changedElsewhere = !sameSchedule(saved, base);
+  // Untouched fields, or the person's own save coming back: take it as is.
+  if (changedElsewhere && (!edited || sameSchedule(next, saved))) load(saved);
+  const conflict = changedElsewhere && edited && !sameSchedule(next, saved);
+  const dirty = !sameSchedule(next, saved);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     save.mutate({ nodeId, schedule: next });
@@ -103,6 +133,18 @@ function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) 
         <p className="m-0 text-[12.5px] text-muted-foreground">{t("nodeCleanup.scheduleHint")}</p>
       </div>
       {!data.supported && <Alert tone="warning">{t("nodeCleanup.oldAgent")}</Alert>}
+      {conflict && (
+        <Alert
+          tone="info"
+          action={
+            <Button size="sm" onClick={() => load(saved)}>
+              {t("nodeCleanup.loadSaved")}
+            </Button>
+          }
+        >
+          {t("nodeCleanup.changedElsewhere")}
+        </Alert>
+      )}
       <label htmlFor="cleanup-enabled" className="flex cursor-pointer items-start gap-3">
         <Switch id="cleanup-enabled" checked={enabled} onCheckedChange={setEnabled} className="mt-0.5" />
         <span className="flex flex-col gap-0.5">

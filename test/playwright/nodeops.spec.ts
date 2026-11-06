@@ -95,6 +95,55 @@ test.describe("node operations", () => {
     expect(errors).toEqual([]);
   });
 
+  test("cleanup: a save elsewhere keeps unsaved edits and offers to load it", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    let saved = cleanupSchedule(node).schedule;
+    await installDemo(page, {
+      overrides: { "cleanup.getSchedule": () => ({ ...cleanupSchedule(node), schedule: saved }) },
+    });
+    // The live socket: tell the sheet that cleanup.getSchedule changed, as
+    // the panel does after any cleanup.setSchedule for the node.
+    let live: { send(text: string): void } | null = null;
+    await page.routeWebSocket(/\/api\/live/, (ws) => {
+      ws.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { type: string; topic: string };
+        if (message.type !== "subscribe") return;
+        ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+        if (message.topic === `node:${node}`) live = ws;
+      });
+    });
+    const savedElsewhere = async (schedule: typeof saved) => {
+      saved = schedule;
+      await expect.poll(() => live !== null).toBe(true);
+      live?.send(JSON.stringify({ type: "event", topic: `node:${node}`, event: { type: "invalidate", ops: ["cleanup.getSchedule"] } }));
+    };
+    await page.goto(`/nodes?node=${node}&view=cleanup`);
+    const sheet = page.getByRole("dialog");
+    const cron = sheet.getByLabel("Cron expression");
+    await expect(cron).toHaveValue("0 4 * * *");
+
+    // Nobody is editing: the new schedule replaces the fields without a note.
+    await savedElsewhere({ ...saved, cron: "0 5 * * *" });
+    await expect(cron).toHaveValue("0 5 * * *");
+    const note = sheet.getByText("Someone else saved this schedule while you were editing it.", { exact: false });
+    await expect(note).toHaveCount(0);
+
+    // Editing: the edit stays and a note offers the saved version.
+    await cron.fill("30 2 * * 1-5");
+    await savedElsewhere({ ...saved, cron: "0 6 * * *", diskPercent: 85 });
+    await expect(note).toBeVisible();
+    await expect(cron).toHaveValue("30 2 * * 1-5");
+    await expect(sheet.getByRole("button", { name: "Save schedule" })).toBeEnabled();
+    await page.screenshot({ path: `${shots}/cleanup-changed-elsewhere.png` });
+    await sheet.getByRole("button", { name: "Load the saved schedule" }).click();
+    await expect(cron).toHaveValue("0 6 * * *");
+    await expect(sheet.getByLabel("Percent")).toHaveValue("85");
+    await expect(note).toHaveCount(0);
+    await expect(sheet.getByRole("button", { name: "Save schedule" })).toBeDisabled();
+    expect(errors).toEqual([]);
+  });
+
   test("shell: the owner allows host shells, opens one and types into it", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));

@@ -23,6 +23,7 @@ export default {
   openNow: { one: "{count} open now", other: "{count} open now" },
   openedBy: "{name}, {when}",
   connected: "Connected to {node} as {user} in {workdir}",
+  connectedNoUser: "Connected to {node} in {workdir}",
   idle: "closes after {minutes} minutes idle",
   confirmTitle: "Allow root shells on {name}?",
   confirmHint:
