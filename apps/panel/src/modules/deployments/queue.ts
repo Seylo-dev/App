@@ -7,6 +7,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { type DeploymentTrigger, deployments, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { panelServiceId } from "../nodes/panel-service";
+import { assertNoActiveCopy } from "../services/copies";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
 import { engineFor, nextGeneration } from "./engine";
@@ -36,6 +37,8 @@ export function queueDeploy(deps: Deps, input: QueueDeployInput): DeploymentRow 
   const spec = readSpec(svc.spec);
   if (svc.kind === "compose") throw new OpError("BAD_REQUEST", "Deploy the stack's members, or use compose.update.");
   if (svc.id === panelServiceId) throw new OpError("CONFLICT", "The panel updates itself from Settings > Updates.", { reason: "panel" });
+  // A clone's data copy writes its folders, or reads its stopped source's.
+  assertNoActiveCopy(deps.db, svc.id);
   if (spec.source.type === "none" && !input.rollbackOf) {
     throw new OpError("BAD_REQUEST", "Set a source first: a repository, an image or a Dockerfile.", { reason: "noSource" });
   }

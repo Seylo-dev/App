@@ -5,7 +5,7 @@
 // networking.ts (domains, ports, tunnels), runtime.ts (crash reports).
 
 import { type AnySQLiteColumn, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { createdAt, id, json, sealed, updatedAt } from "./columns";
+import { createdAt, id, json, sealed, timestamp, updatedAt } from "./columns";
 import { users } from "./identity";
 import { nodes } from "./infra";
 
@@ -137,4 +137,42 @@ export const volumes = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("volumes_service_name_unique").on(t.serviceId, t.name)],
+);
+
+export type ServiceCopyStatus = "queued" | "copying" | "done" | "failed";
+
+/**
+ * A clone's data copy (services.clone with data "copy"): the source's
+ * volumes go through the panel into the clone's folders on its node, the
+ * source stopped meanwhile when asked (always for databases). The clone
+ * cannot deploy until the copy ended.
+ */
+export const serviceCopies = sqliteTable(
+  "service_copies",
+  {
+    id: id(),
+    /** The clone. */
+    serviceId: text("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    sourceServiceId: text("source_service_id").references((): AnySQLiteColumn => services.id, { onDelete: "set null" }),
+    /** Kept for display once the source is gone. */
+    sourceName: text("source_name").notNull(),
+    fromNodeId: text("from_node_id").notNull(),
+    toNodeId: text("to_node_id").notNull(),
+    status: text("status").$type<ServiceCopyStatus>().notNull().default("queued"),
+    /** Stop the source while its folders are read, and start it again afterwards. */
+    stopSource: integer("stop_source", { mode: "boolean" }).notNull().default(true),
+    /** The copy stopped the source and owes it a start (also after a panel restart mid-copy). */
+    sourceStopped: integer("source_stopped", { mode: "boolean" }).notNull().default(false),
+    /** Volume names copied (the clone uses the same names). */
+    volumes: json<string[]>("volumes").notNull(),
+    bytesCopied: integer("bytes_copied").notNull().default(0),
+    error: text("error"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    startedAt: timestamp("started_at"),
+    finishedAt: timestamp("finished_at"),
+  },
+  (t) => [index("service_copies_service_idx").on(t.serviceId), index("service_copies_source_idx").on(t.sourceServiceId)],
 );

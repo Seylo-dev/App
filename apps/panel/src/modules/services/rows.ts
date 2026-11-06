@@ -8,6 +8,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
+import { latestCopy } from "./copies";
 import { readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
 import { serviceStatus, serviceUsage } from "./status";
 
@@ -228,6 +229,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     notes: row.notes,
     members: all.slice(1).map((m) => ({ id: m.id, name: m.name, status: m.status })),
     volumes: volumesOf(db, row.id),
+    dataCopy: latestCopy(db, row.id),
   };
 }
 

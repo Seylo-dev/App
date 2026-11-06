@@ -38,6 +38,7 @@ import type { Deps } from "../../deps";
 import type { RefusedSpec } from "../../desired";
 import { sealDeploymentEnv } from "../env/desired";
 import { dataVolumes } from "../services/insert";
+import { restoreProjectMove } from "../services/project-move-restore";
 import { loadService } from "../services/rows";
 import { assertImageAllowed } from "../services/source-guard";
 import { needsBuild, readSpec, runSettingsOf } from "../services/spec";
@@ -754,7 +755,12 @@ function succeed(s: EngineState, d: DeploymentRow): void {
   });
   if (d.trigger === "move" && d.movedFromNodeId) s.deps.agents.desired.markDirty({ nodeId: d.movedFromNodeId });
   s.deps.jobs.enqueue(registryGcJobType, { serviceId: d.serviceId }, { dedupeKey: `registry-gc:${d.serviceId}` });
-  appendLog(s.deps, d.serviceId, d.id, "switch", [d.trigger === "move" ? "The service runs on its new node." : "The new version is live."]);
+  const finalLine = d.projectMove
+    ? "The service runs on its new project's network."
+    : d.trigger === "move"
+      ? "The service runs on its new node."
+      : "The new version is live.";
+  appendLog(s.deps, d.serviceId, d.id, "switch", [finalLine]);
   publishDeploymentChange(s.deps, d.serviceId, d.id);
   kickNext(s, d.serviceId);
 }
@@ -774,6 +780,7 @@ export function finish(
   const { db } = s.deps;
   const now = new Date();
   let reverted = false;
+  let projectBack: string | null = null;
   db.transaction((tx) => {
     tx.update(deployments)
       .set({
@@ -801,8 +808,25 @@ export function finish(
       restoreMove(tx, d);
       reverted = true;
     }
+    if (d.projectMove) {
+      projectBack = restoreProjectMove(tx, d);
+      reverted = true;
+    }
   });
   appendLog(s.deps, d.serviceId, d.id, lastStep(d), [message], outcome === "failed");
+  if (d.projectMove) {
+    const back = projectBack === d.projectMove.fromProjectId;
+    appendLog(s.deps, d.serviceId, d.id, lastStep(d), [
+      back
+        ? "The service went back to its old project, with the grants the move removed."
+        : "The service could not go back to its old project (removed, or a service there took its name); it stays in the new one.",
+    ]);
+    for (const projectId of [d.projectMove.fromProjectId, d.projectMove.toProjectId]) {
+      s.deps.live.publish(`project:${projectId}`, { type: "invalidate", ops: ["services.list", "projects.get", "env.references"] });
+    }
+    s.deps.live.publish("panel", { type: "invalidate", ops: ["projects.list"] });
+    for (const g of d.projectMove.removedGrants) s.deps.live.recheck({ userId: g.userId });
+  }
   if (reverted) s.deps.agents.desired.markDirty({ serviceId: d.serviceId });
   if (reverted && d.trigger === "move") for (const nodeId of d.targetNodeIds) s.deps.agents.desired.markDirty({ nodeId });
   publishDeploymentChange(s.deps, d.serviceId, d.id);

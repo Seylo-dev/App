@@ -30,6 +30,16 @@ export interface DeployNodeResult {
   digest: string | null;
 }
 
+/** What a move to another project changed besides the service row, to undo on failure. */
+export interface ProjectMove {
+  fromProjectId: string;
+  toProjectId: string;
+  /** Grants on the service itself, removed because access follows the new project. */
+  removedGrants: { userId: string; actions: string[]; createdBy: string | null }[];
+  /** Pending invites that named the service, with the grant entry the move took out. */
+  removedInviteGrants: { inviteId: string; actions: string[] }[];
+}
+
 /** A release of a service. Rollback deploys an older row's image digest again. */
 export const deployments = sqliteTable(
   "deployments",
@@ -86,6 +96,12 @@ export const deployments = sqliteTable(
     movedFromNodeId: text("moved_from_node_id"),
     /** Moves: the service's volumes are being copied; the rollout waits for it. */
     moveCopying: integer("move_copying", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Moves to another project (trigger "move"): the project the service
+     * left and the grants the move removed, so a failed switch puts both
+     * back (services/move-project.ts).
+     */
+    projectMove: json<ProjectMove>("project_move"),
     /** Deployments (of other services) that must finish before this one starts, for example a template's database. */
     waitFor: json<string[]>("wait_for").notNull().default(sql`'[]'`),
     /** Archive of an upload source (source_uploads.id) this deploy builds. */

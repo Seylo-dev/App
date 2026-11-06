@@ -262,6 +262,24 @@ export const Volume = Type.Object({
 export const volumeNamePattern = "^[a-z0-9][a-z0-9_-]*$";
 export const VolumeName = Type.String({ minLength: 1, maxLength: 60, pattern: volumeNamePattern });
 
+/**
+ * A clone's data copy (services.clone with data "copy"): the source's
+ * volumes are copied into the clone's folders on its node. The clone
+ * cannot deploy until it ended.
+ */
+export const DataCopy = Type.Object({
+  id: Id,
+  status: Type.Union([Type.Literal("queued"), Type.Literal("copying"), Type.Literal("done"), Type.Literal("failed")]),
+  /** Name of the service the data comes from. */
+  fromName: Type.String(),
+  volumes: Type.Array(Type.String()),
+  bytesCopied: Type.Integer({ minimum: 0 }),
+  /** Why it failed; the clone keeps whatever arrived and can still start empty. */
+  error: Type.Union([Type.String(), Type.Null()]),
+  startedAt: Type.Union([Timestamp, Type.Null()]),
+  finishedAt: Type.Union([Timestamp, Type.Null()]),
+});
+
 /** Everything the service page shows. */
 export const ServiceDetail = Type.Object({
   ...ServiceSummary.properties,
@@ -292,6 +310,8 @@ export const ServiceDetail = Type.Object({
   /** Members of a compose stack (kind "compose"); empty for other kinds. */
   members: Type.Array(Type.Object({ id: Id, name: ServiceName, status: ServiceStatus })),
   volumes: Type.Array(Volume),
+  /** Clones: the newest copy of the source's data, while it runs and after. */
+  dataCopy: Type.Optional(Type.Union([DataCopy, Type.Null()])),
 });
 
 const serviceScope = (input: { serviceId: string }) => input.serviceId;
@@ -546,6 +566,191 @@ export const remove = defineOp({
   }),
   output: Empty,
   permission: permission.service("services.delete", serviceScope),
+  mcp: true,
+  audit: true,
+});
+
+/** Variables of a service that point at something its project provides. */
+export const ReferenceEffect = Type.Object({
+  /** The variable that holds it. */
+  key: Type.String(),
+  /** "db.URL" for ${{db.URL}}, "project.API_KEY" for a shared variable, "db:5432" for a host name in a value. */
+  target: Type.String(),
+  via: Type.Union([Type.Literal("reference"), Type.Literal("hostname")]),
+  /** unresolved: the new project has nothing by that name. retargeted: it now means the new project's service or variable. */
+  effect: Type.Union([Type.Literal("unresolved"), Type.Literal("retargeted")]),
+});
+
+export const CloneDataMode = Type.Union([Type.Literal("empty"), Type.Literal("copy")], {
+  description: "empty: the clone's volumes start empty. copy: the source's volume data is copied into them.",
+});
+
+/** Why copying data is not offered. */
+export const CloneDataBlock = Type.Union([
+  Type.Literal("noVolumes"),
+  /** Databases copy their files and logins together, which needs databases.credentials on the source. */
+  Type.Literal("databaseLogins"),
+  /** Needs files.read on the source. */
+  Type.Literal("files"),
+  Type.Literal("offline"),
+  Type.Literal("agentTooOld"),
+]);
+
+export const clonePreview = defineOp({
+  id: "services.clonePreview",
+  kind: "query",
+  summary: "Show what a clone of a service would get",
+  description:
+    "Says what services.clone would copy for you into the given project and node: the suggested name, whether the environment comes along (only when you can read it), the volumes and whether their data can be copied, the automatic domain the clone can get, and the variables that would point at nothing or at another service in the target project.",
+  input: Type.Object({
+    serviceId: Id,
+    /** Target project; defaults to the source's. */
+    projectId: Type.Optional(Id),
+    /** Target node; defaults to the source's first node. */
+    nodeId: Type.Optional(Id),
+  }),
+  output: Type.Object({
+    name: ServiceName,
+    kind: ServiceKind,
+    projectId: Id,
+    nodeId: Id,
+    /** copied: the .env and file mounts come along. hidden: you cannot read them, so the clone starts without. none: there are none. */
+    env: Type.Union([Type.Literal("copied"), Type.Literal("hidden"), Type.Literal("none")]),
+    volumes: Type.Array(Type.Object({ name: Type.String(), mountPath: Type.String() })),
+    data: Type.Object({
+      available: Type.Boolean(),
+      blockedBy: Type.Union([CloneDataBlock, Type.Null()]),
+      /** Databases always stop while their files are read (a running database's files are not a usable copy). */
+      alwaysStops: Type.Boolean(),
+    }),
+    /** Host of the automatic domain the clone can get on the target node; null when it cannot get one. */
+    autoDomain: Type.Union([Type.String(), Type.Null()]),
+    /** The source's main domain has access rules (basic auth, IP allowlist, rate limit, redirects) that go to the automatic domain. */
+    middlewares: Type.Boolean(),
+    /** In another project: variables that would point at nothing or at something else there. */
+    references: Type.Array(ReferenceEffect),
+  }),
+  permission: permission.service("services.view", serviceScope),
+  mcp: true,
+  audit: false,
+});
+
+export const clone = defineOp({
+  id: "services.clone",
+  kind: "mutation",
+  summary: "Clone a service",
+  description:
+    "Copies a service (app, cron, database, Box, or a compose member as a standalone app) into the same or another project and node: source, build settings, environment (only when you can read it), health check, resources, crash policy, notes, and the main domain's access rules onto a new automatic domain. Domains, deploy history, cron jobs, backups, alerts and exposed ports are not copied. Volumes start empty or get a copy of the source's data (the source stops during the copy when stopSource is set, always for databases). The clone is created stopped and named <name>-copy unless named. Needs services.view on the source and services.create in the target project.",
+  input: Type.Object({
+    serviceId: Id,
+    projectId: Id,
+    nodeId: Id,
+    name: Type.Optional(ServiceName),
+    data: Type.Optional(CloneDataMode),
+    /** With data "copy": stop the source while its files are read, then start it again. Databases always stop. Default true. */
+    stopSource: Type.Optional(Type.Boolean()),
+    /** Add an automatic domain from the target node's wildcard record (needs domains.edit there). */
+    autoDomain: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({
+    service: ServiceDetail,
+    /** What came along for you. */
+    copied: Type.Object({
+      env: Type.Boolean(),
+      fileMounts: Type.Boolean(),
+      /** Database logins (copied with the data; a clone that starts empty gets new ones). */
+      databaseLogins: Type.Boolean(),
+      middlewares: Type.Boolean(),
+      autoDomain: Type.Union([Type.String(), Type.Null()]),
+    }),
+    dataCopy: Type.Union([DataCopy, Type.Null()]),
+  }),
+  permission: permission.service("services.view", serviceScope),
+  mcp: true,
+  audit: true,
+});
+
+export const MoveBlock = Type.Union([
+  Type.Literal("sameProject"),
+  Type.Literal("protected"),
+  Type.Literal("compose"),
+  Type.Literal("preview"),
+  Type.Literal("previews"),
+  Type.Literal("nameTaken"),
+  Type.Literal("deploying"),
+  Type.Literal("copying"),
+  /** Moving needs every service action on it: the new project may give you more than you hold now. */
+  Type.Literal("access"),
+]);
+
+/** What moving a service to another project changes. */
+export const MoveImpact = Type.Object({
+  /** Reasons the move cannot run; services.moveProject answers CONFLICT or FORBIDDEN with the same reason. */
+  blockers: Type.Array(Type.Object({ reason: MoveBlock, message: Type.String() })),
+  /** Services of the old project that reach this one by ${{name.VAR}} or its host name, and lose it. */
+  referencedBy: Type.Array(
+    Type.Object({
+      serviceId: Id,
+      name: ServiceName,
+      /** Their variables that do; empty when you cannot read their environment. */
+      keys: Type.Array(Type.String()),
+    }),
+  ),
+  /** Services of the old project you cannot see that reference it. */
+  hiddenReferrers: Type.Integer({ minimum: 0 }),
+  /**
+   * Services of the new project that already use its name: their
+   * references start reading its variables and their host names start
+   * reaching it.
+   */
+  targetReferrers: Type.Array(Type.Object({ serviceId: Id, name: ServiceName, keys: Type.Array(Type.String()) })),
+  /** Services of the new project you cannot see that already use its name. */
+  hiddenTargetReferrers: Type.Integer({ minimum: 0 }),
+  /** The service's own variables that point into the old project. */
+  ownReferences: Type.Array(ReferenceEffect),
+  /** Shared variables of the old project it receives now that the new project does not have. Names only when you can read them. */
+  sharedLost: Type.Object({ count: Type.Integer({ minimum: 0 }), names: Type.Array(Type.String()) }),
+  /** Grants on the service itself go: access follows the new project. Names only when you may see who has access. */
+  grants: Type.Object({ count: Type.Integer({ minimum: 0 }), names: Type.Array(Type.String()) }),
+  /** Pending invites that would have given access to the service. */
+  invites: Type.Integer({ minimum: 0 }),
+  /** Running copies switch to the new project network like a deploy (health checked, no rebuild). */
+  switches: Type.Boolean(),
+});
+
+export const moveProjectImpact = defineOp({
+  id: "services.moveProjectImpact",
+  kind: "query",
+  summary: "Show what moving a service to another project changes",
+  description:
+    "Lists what services.moveProject would change: services of the old project that reference the service or use its host name (they lose access), the service's own references and host names that point into the old project, shared variables it would no longer receive, grants and invites that go, and anything that blocks the move. Needs services.create in the target project.",
+  input: Type.Object({ serviceId: Id, projectId: Id }),
+  output: MoveImpact,
+  permission: permission.service("services.view", serviceScope),
+  mcp: true,
+  audit: false,
+});
+
+export const moveProject = defineOp({
+  id: "services.moveProject",
+  // Others lose access: services of the old project and people with grants on the service.
+  kind: "destructive",
+  summary: "Move a service to another project",
+  description:
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ${{svc.VAR}} is the reference syntax, not a template
+    "Re-homes a service in another project: its private network, shared variables, ${{svc.VAR}} references and internal host name follow the new project, and grants on the service itself are removed (access follows the new project). Running copies switch to the new project network like a deploy, health checked and without a rebuild; if the switch fails the service goes back. Check services.moveProjectImpact first and pass confirm: true when it lists anything. Needs every service action on the service and services.create in the target project.",
+  input: Type.Object({
+    serviceId: Id,
+    projectId: Id,
+    /** Required when services.moveProjectImpact lists references, grants or invites. */
+    confirm: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({
+    /** The switch's deployment; null when nothing runs, so the move took effect at once. */
+    deploymentId: Type.Union([Id, Type.Null()]),
+    impact: MoveImpact,
+  }),
+  permission: permission.service("services.move", serviceScope),
   mcp: true,
   audit: true,
 });

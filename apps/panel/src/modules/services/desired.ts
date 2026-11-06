@@ -14,7 +14,9 @@
 // Run settings come from the target deployment's snapshot, so changes wait
 // for the next deploy; crash policy, stopped and replicas are current.
 // Databases and Boxes are placed and returned even without a deployment;
-// databaseRuntime/boxRuntime replace their image, env and ports.
+// databaseRuntime/boxRuntime replace their image, env and ports. A stopped
+// service that was never deployed (a clone) is returned stopped with no
+// image, so its node keeps its folders.
 
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
@@ -56,12 +58,15 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
   if (!svc || svc.kind === "compose") return null;
   // Databases and Boxes run from their module's runtime (image, env, ports) and need no deployment.
   const ownRuntime = runtimeKinds.has(svc.kind);
-  if (!svc.targetDeploymentId && !ownRuntime) return null;
+  // A stopped service that was never deployed (a clone) goes as a stopped spec without an image, so
+  // its node keeps the folders a data copy fills instead of sweeping them as an orphan's.
+  const parked = svc.stopped && !svc.targetDeploymentId;
+  if (!svc.targetDeploymentId && !ownRuntime && !parked) return null;
   const placements = db.select().from(servicePlacements).where(eq(servicePlacements.serviceId, serviceId)).all();
   const here = placements.find((p) => p.nodeId === nodeId);
   if (!here) return null;
   const found = svc.targetDeploymentId ? db.select().from(deployments).where(eq(deployments.id, svc.targetDeploymentId)).get() : undefined;
-  if (!found?.imageRef && !ownRuntime) return null;
+  if (!found?.imageRef && !ownRuntime && !parked) return null;
   const target = found ?? { imageRef: "", imageDigest: null, generation: Math.max(1, svc.generation), runSettings: null };
 
   const spec = readSpec(svc.spec);
