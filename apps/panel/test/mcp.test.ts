@@ -5,18 +5,23 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { approvals as approvalOps, auth, env as envOps, mcp } from "@seylo/ops";
+import { approvals as approvalOps, auth, databases as dbOps, env as envOps, mcp } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { approvals, auditLog, mcpAuthCodes, mcpClients, projects, services, sessions } from "../src/db/schema";
+import { approvals, auditLog, mcpAuthCodes, mcpClients, nodes, projects, services, sessions } from "../src/db/schema";
+import { enginesCapability } from "../src/modules/databases/engines";
 import { writeServiceEnv } from "../src/modules/env/store";
 import { setSetting } from "../src/settings";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { seedNode, seedProject, settleDeploys } from "./seed-helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
   panel = testPanel();
 });
-afterEach(() => panel.close());
+afterEach(async () => {
+  await settleDeploys(panel);
+  panel.close();
+});
 
 const origin = "http://panel.test";
 
@@ -307,6 +312,41 @@ test("tool results are redacted like the assistant's: env values and file conten
   expect(everything).not.toContain("pw-123456");
   // The web app (not a model) still gets the values.
   expect(JSON.stringify((await callOp(panel, envOps.get, { serviceId: service.id }, { cookie })).body)).toContain("sk_live_hunter2");
+});
+
+test("database connection details reach the model host without a password, ClickHouse's HTTP URL included", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  const { cookie } = await createUser(panel, "owner");
+  const tokens = await connect(cookie, "read");
+  const project = seedProject(panel);
+  const node = seedNode(panel, { ipv4: "203.0.113.10" });
+  panel.deps.db
+    .update(nodes)
+    .set({ facts: { capabilities: [enginesCapability] } })
+    .where(eq(nodes.id, node.id))
+    .run();
+  const created = await callOp(
+    panel,
+    dbOps.create,
+    { projectId: project.id, name: "events", engine: "clickhouse", nodeId: node.id },
+    { cookie },
+  );
+  expect(created.status).toBe(200);
+  const serviceId = created.body.serviceId;
+  // The web app gets the secrets view.
+  const direct = await callOp(panel, dbOps.connection, { serviceId }, { cookie });
+  const { password } = direct.body.internal;
+  expect(direct.body.internal.httpUrl).toContain(password);
+
+  const called = await rpc(tokens.access_token, "tools/call", { name: "databases_connection", arguments: { serviceId } });
+  expect(called.body.result.isError).toBe(false);
+  expect(JSON.stringify(called.body.result)).not.toContain(password);
+  expect(called.body.result.structuredContent.internal).toMatchObject({
+    url: "[redacted]",
+    password: "[redacted]",
+    httpUrl: "[redacted]",
+    user: direct.body.internal.user,
+  });
 });
 
 test("registration is rate limited per address and junk clients cannot block a real one", async () => {

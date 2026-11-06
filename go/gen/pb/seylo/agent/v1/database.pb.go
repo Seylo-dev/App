@@ -22,6 +22,11 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// The engines from VALKEY on need an agent that advertises the capability
+// "database.engines.v2" in NodeFacts.capabilities (it has no RPC of its
+// own): an older agent would run the container but fail its shell, web UI
+// and backups, and relay its exposed port without TLS. The panel creates
+// them only on such nodes and never sends their exposure to other agents.
 type DatabaseEngine int32
 
 const (
@@ -31,6 +36,18 @@ const (
 	DatabaseEngine_DATABASE_ENGINE_MARIADB     DatabaseEngine = 3
 	DatabaseEngine_DATABASE_ENGINE_MONGO       DatabaseEngine = 4
 	DatabaseEngine_DATABASE_ENGINE_REDIS       DatabaseEngine = 5
+	// Redis-compatible: valkey-cli, RDB dumps over the replication protocol.
+	DatabaseEngine_DATABASE_ENGINE_VALKEY DatabaseEngine = 6 // added in 0.2 (engines)
+	// Redis-compatible: keydb-cli, RDB dumps; its append-only file is one
+	// file (appendonly.aof), not a folder.
+	DatabaseEngine_DATABASE_ENGINE_KEYDB DatabaseEngine = 7 // added in 0.2 (engines)
+	// Redis-compatible: redis-cli; no replication dump, so backups run SAVE
+	// RDB into the data volume (the server runs with --dbfilename dump and
+	// --df_snapshot_format=false so its snapshots are dump.rdb).
+	DatabaseEngine_DATABASE_ENGINE_DRAGONFLY DatabaseEngine = 8 // added in 0.2 (engines)
+	// Native protocol on 9000 (the port exposure uses), HTTP on 8123;
+	// backups are BACKUP/RESTORE through a file in the data volume.
+	DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE DatabaseEngine = 9 // added in 0.2 (engines)
 )
 
 // Enum value maps for DatabaseEngine.
@@ -42,6 +59,10 @@ var (
 		3: "DATABASE_ENGINE_MARIADB",
 		4: "DATABASE_ENGINE_MONGO",
 		5: "DATABASE_ENGINE_REDIS",
+		6: "DATABASE_ENGINE_VALKEY",
+		7: "DATABASE_ENGINE_KEYDB",
+		8: "DATABASE_ENGINE_DRAGONFLY",
+		9: "DATABASE_ENGINE_CLICKHOUSE",
 	}
 	DatabaseEngine_value = map[string]int32{
 		"DATABASE_ENGINE_UNSPECIFIED": 0,
@@ -50,6 +71,10 @@ var (
 		"DATABASE_ENGINE_MARIADB":     3,
 		"DATABASE_ENGINE_MONGO":       4,
 		"DATABASE_ENGINE_REDIS":       5,
+		"DATABASE_ENGINE_VALKEY":      6,
+		"DATABASE_ENGINE_KEYDB":       7,
+		"DATABASE_ENGINE_DRAGONFLY":   8,
+		"DATABASE_ENGINE_CLICKHOUSE":  9,
 	}
 )
 
@@ -398,14 +423,18 @@ const file_seylo_agent_v1_database_proto_rawDesc = "" +
 	"\x14allowed_source_cidrs\x18\x03 \x03(\tR\x12allowedSourceCidrs\x12!\n" +
 	"\ftls_hostname\x18\x04 \x01(\tR\vtlsHostname\x12\x12\n" +
 	"\x04user\x18\x05 \x01(\tR\x04user\x12\x1a\n" +
-	"\bpassword\x18\x06 \x01(\tR\bpassword*\xbd\x01\n" +
+	"\bpassword\x18\x06 \x01(\tR\bpassword*\xb3\x02\n" +
 	"\x0eDatabaseEngine\x12\x1f\n" +
 	"\x1bDATABASE_ENGINE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18DATABASE_ENGINE_POSTGRES\x10\x01\x12\x19\n" +
 	"\x15DATABASE_ENGINE_MYSQL\x10\x02\x12\x1b\n" +
 	"\x17DATABASE_ENGINE_MARIADB\x10\x03\x12\x19\n" +
 	"\x15DATABASE_ENGINE_MONGO\x10\x04\x12\x19\n" +
-	"\x15DATABASE_ENGINE_REDIS\x10\x05B\xb8\x01\n" +
+	"\x15DATABASE_ENGINE_REDIS\x10\x05\x12\x1a\n" +
+	"\x16DATABASE_ENGINE_VALKEY\x10\x06\x12\x19\n" +
+	"\x15DATABASE_ENGINE_KEYDB\x10\a\x12\x1d\n" +
+	"\x19DATABASE_ENGINE_DRAGONFLY\x10\b\x12\x1e\n" +
+	"\x1aDATABASE_ENGINE_CLICKHOUSE\x10\tB\xb8\x01\n" +
 	"\x12com.seylo.agent.v1B\rDatabaseProtoP\x01Z9github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1;agentv1\xa2\x02\x03SAX\xaa\x02\x0eSeylo.Agent.V1\xca\x02\x0eSeylo\\Agent\\V1\xe2\x02\x1aSeylo\\Agent\\V1\\GPBMetadata\xea\x02\x10Seylo::Agent::V1b\x06proto3"
 
 var (

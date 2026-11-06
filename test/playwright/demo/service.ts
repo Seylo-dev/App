@@ -21,6 +21,8 @@ export const ids = {
   redis: world.redis,
   web: world.web,
   stack: "svcmonitoring0a6",
+  // Not in the project list: opened by its URL only (databases.spec.ts, the connection screen).
+  clickhouse: "svcevents0000c01",
   box: "svcbox000000000a",
   cron: "svcreports00000b",
   nodeDe: world.de,
@@ -110,6 +112,16 @@ const servicesById = {
     liveDeployment: null,
   }),
   [ids.redis]: baseService({ id: ids.redis, name: "redis", kind: "redis", address: "redis:6379" }),
+  [ids.clickhouse]: baseService({
+    id: ids.clickhouse,
+    name: "events",
+    kind: "clickhouse",
+    source: { type: "database", label: "clickhouse/clickhouse-server:26.8.36.3", branch: null, builder: null },
+    sourceConfig: { type: "image", image: "clickhouse/clickhouse-server:26.8.36.3", registryId: null },
+    ports: [{ containerPort: 9000, protocol: "tcp" }],
+    address: "events:9000",
+    liveDeployment: null,
+  }),
   [ids.web]: baseService({ id: ids.web, name: "web", kind: "app", address: "shop.example.com" }),
   [ids.box]: baseService({ id: ids.box, name: "box", kind: "box", ports: [], liveDeployment: null }),
   [ids.cron]: baseService({
@@ -512,39 +524,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   }),
   "backups.listRuns": () => ({ runs: [run(0, "succeeded"), run(1, "succeeded"), run(2, "failed"), run(3, "succeeded")], hasMore: false }),
   "backups.listDestinations": () => ({ destinations: [], choices: [{ id: "x000000000000001", name: "acme-backups", provider: "r2", bucket: "acme-backups" }] }),
-  "databases.get": (input: Input) => ({
-    serviceId: input.serviceId,
-    projectId: ids.project,
-    name: input.serviceId === ids.redis ? "redis" : "db",
-    engine: input.serviceId === ids.redis ? "redis" : "postgres",
-    version: input.serviceId === ids.redis ? "7.4" : "17.6",
-    nodeId: de.id,
-    nodeName: de.name,
-    internal: { host: "db", port: 5432, database: "shop", user: "postgres" },
-    exposure: {
-      enabled: true,
-      host: "203.0.113.10",
-      port: 15432,
-      user: "external",
-      allowedCidrs: [],
-      tlsHostname: null,
-      certificate: "selfSigned",
-    },
-    webUi: { tool: "pgweb", idleMinutes: 15, running: true, lastActiveAt: ago(4 * min) },
-    createdAt: ago(30 * day),
-  }),
-  "databases.connection": () => ({
-    internal: { url: "postgres://postgres:Zq8vN3pXr7Lm2Kd9@db:5432/shop?sslmode=disable", host: "db", port: 5432, database: "shop", user: "postgres", password: "Zq8vN3pXr7Lm2Kd9" },
-    exposed: {
-      url: "postgres://external:Ht5wQ9bLc2Vn8Rx4@203.0.113.10:15432/shop?sslmode=require",
-      host: "203.0.113.10",
-      port: 15432,
-      database: "shop",
-      user: "external",
-      password: "Ht5wQ9bLc2Vn8Rx4",
-      tlsParams: "sslmode=require",
-    },
-  }),
+  "databases.get": (input: Input) => databaseOf(String(input.serviceId)),
+  "databases.connection": (input: Input) => connectionOf(String(input.serviceId)),
   "previews.getSettings": () => ({ settings: { enabled: true, domainPattern: "", maxPreviews: 5 }, available: true, unavailableReason: null }),
   "previews.list": () => ({
     previews: [
@@ -597,8 +578,117 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "logs.follow": () => ({ url: "/api/logs/follow?t=tk", ticket: "tk", expiresAt: ago(-min) }),
   "terminals.console": () => ({ url: "/api/terminal/console?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: null, generation: null }, idleTimeoutSeconds: 1800 }),
   "terminals.shell": () => ({ url: "/api/terminal/shell?t=tk", ticket: "tk", expiresAt: ago(-min), target: { nodeId: de.id, nodeName: de.name, containerId: null, generation: null }, idleTimeoutSeconds: 1800 }),
-  "databases.openShell": () => ({ ticket: "tk", socketPath: "/api/terminal/db", client: "psql", expiresAt: ago(-min) }),
+  "databases.openShell": (input: Input) => ({
+    ticket: "tk",
+    socketPath: "/api/terminal/db",
+    client: databaseOf(String(input.serviceId)).shellClient,
+    expiresAt: ago(-min),
+  }),
 };
+
+/** databases.get for the demo's Postgres, Redis and ClickHouse (events) databases; databases.spec.ts makes db a pgvector one. */
+export function databaseOf(serviceId: string) {
+  const exposure = {
+    enabled: true,
+    host: "203.0.113.10",
+    port: 15432,
+    user: "external",
+    allowedCidrs: [],
+    needsAllowedCidrs: false,
+    tlsHostname: null,
+    certificate: "selfSigned",
+    certificateIssuer: null,
+    certificateExpiresAt: null,
+  };
+  const base = {
+    serviceId,
+    projectId: ids.project,
+    nodeId: de.id,
+    nodeName: de.name,
+    variant: null,
+    exposure,
+    webUi: { tool: "pgweb", idleMinutes: 15, running: true, lastActiveAt: ago(4 * min) },
+    createdAt: ago(30 * day),
+  };
+  if (serviceId === ids.redis)
+    return {
+      ...base,
+      name: "redis",
+      engine: "redis",
+      version: "7.4",
+      internal: { host: "redis", port: 6379, database: "", user: "default", httpPort: null },
+      exposure: { ...exposure, port: 16379, user: "default" },
+      shellClient: "redis-cli",
+      webUi: { ...base.webUi, tool: "Redis Commander" },
+    };
+  if (serviceId === ids.clickhouse)
+    return {
+      ...base,
+      name: "events",
+      engine: "clickhouse",
+      version: "26.8",
+      internal: { host: "events", port: 9000, database: "events", user: "ch_k3v9q2m8x1", httpPort: 8123 },
+      exposure: { ...exposure, enabled: false, host: null, port: null, certificate: "none" },
+      shellClient: "clickhouse-client",
+      webUi: { ...base.webUi, tool: "ClickHouse Play", running: false, lastActiveAt: null },
+    };
+  return {
+    ...base,
+    name: "db",
+    engine: "postgres",
+    version: "17.6",
+    internal: { host: "db", port: 5432, database: "shop", user: "postgres", httpPort: null },
+    shellClient: "psql",
+  };
+}
+
+function connectionOf(serviceId: string) {
+  if (serviceId === ids.redis)
+    return {
+      internal: { url: "redis://default:Rk2mV7wTq9Lx4Pb8@redis:6379", host: "redis", port: 6379, database: "", user: "default", password: "Rk2mV7wTq9Lx4Pb8" },
+      exposed: {
+        url: "rediss://default:Rk2mV7wTq9Lx4Pb8@203.0.113.10:16379",
+        host: "203.0.113.10",
+        port: 16379,
+        database: "",
+        user: "default",
+        password: "Rk2mV7wTq9Lx4Pb8",
+        tlsParams: "",
+      },
+    };
+  if (serviceId === ids.clickhouse)
+    return {
+      internal: {
+        url: "clickhouse://ch_k3v9q2m8x1:Wd4nB8sKq1Pz7Hv2@events:9000/events",
+        httpUrl: "http://ch_k3v9q2m8x1:Wd4nB8sKq1Pz7Hv2@events:8123/events",
+        host: "events",
+        port: 9000,
+        database: "events",
+        user: "ch_k3v9q2m8x1",
+        password: "Wd4nB8sKq1Pz7Hv2",
+      },
+      exposed: null,
+    };
+  return {
+    internal: {
+      url: "postgres://postgres:Zq8vN3pXr7Lm2Kd9@db:5432/shop?sslmode=disable",
+      host: "db",
+      port: 5432,
+      database: "shop",
+      user: "postgres",
+      password: "Zq8vN3pXr7Lm2Kd9",
+    },
+    exposed: {
+      url: "postgres://external:Ht5wQ9bLc2Vn8Rx4@203.0.113.10:15432/shop?sslmode=require",
+      host: "203.0.113.10",
+      port: 15432,
+      database: "shop",
+      user: "external",
+      password: "Ht5wQ9bLc2Vn8Rx4",
+      tlsParams: "sslmode=require",
+    },
+  };
+}
 
 
 export { logEntries };

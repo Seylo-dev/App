@@ -3,18 +3,21 @@ package dbtools
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/jobrun"
 )
 
@@ -36,12 +39,61 @@ var ErrNotFound = errors.New("no database web UI for this service on this node")
 const DefaultIdle = 15 * time.Minute
 
 // UI images, pinned. The agent picks them by engine; the panel sends none.
+// ClickHouse needs no UI image of its own: its server serves the Play page
+// on the HTTP port, and ImageClickHouseUI is only the proxy that signs it
+// in (clickhouseUIScript).
 const (
 	ImagePgweb        = "sosedoff/pgweb:0.17.0"
 	ImagePhpMyAdmin   = "phpmyadmin:5.2.3"
 	ImageMongoExpress = "mongo-express:1.0.2-20-alpine3.19"
 	ImageRedisCmdr    = "ghcr.io/joeferner/redis-commander:0.9.1"
+	ImageClickHouseUI = "nginx:1.30.6-alpine"
 )
+
+// clickhouseUIScript runs in ImageClickHouseUI: an nginx in front of the
+// server's HTTP interface that opens the Play page on "/" and signs every
+// request in as the admin with a Basic header it sets itself. Whatever a
+// browser sends as Authorization or X-ClickHouse-User/-Key is replaced or
+// dropped, and a request with credential URL parameters (user, password,
+// quota_key, which ClickHouse prefers over the header) or a percent-encoded
+// parameter name (which could spell one) is refused, so the password never
+// reaches the browser and the edge ticket stays the only login. Play adds
+// those parameters only when someone fills its user or password field. The
+// upstream is resolved through Docker's DNS on each request, so a
+// recreated database container is found again.
+var clickhouseUIScript = strings.Replace(clickhouseUITemplate, "@CREDENTIAL_ARGS@", strings.ReplaceAll(clickhouseCredentialArgs, "$", `\$`), 1)
+
+// clickhouseCredentialArgs matches (case-insensitively, as nginx's ~*) a
+// query string that carries ClickHouse credentials or a percent-encoded
+// parameter name.
+const clickhouseCredentialArgs = `(^|&)((user|password|quota_key)(=|&|$)|[^=&]*%)`
+
+const clickhouseUITemplate = `set -e
+cat > /etc/nginx/conf.d/default.conf <<EOF
+resolver 127.0.0.11 valid=10s ipv6=off;
+server {
+  listen 8080;
+  client_max_body_size 64m;
+  proxy_http_version 1.1;
+  proxy_buffering off;
+  proxy_read_timeout 1h;
+  proxy_set_header Authorization "Basic $CH_AUTH";
+  proxy_set_header X-ClickHouse-User "";
+  proxy_set_header X-ClickHouse-Key "";
+  proxy_set_header Cookie "";
+  if (\$args ~* "@CREDENTIAL_ARGS@") { return 403; }
+  set \$upstream http://$CH_HOST:$CH_PORT;
+  location = / {
+    if (\$args = "") { return 302 /play; }
+    proxy_pass \$upstream;
+  }
+  location / {
+    proxy_pass \$upstream;
+  }
+}
+EOF
+exec nginx -g 'daemon off;'
+`
 
 // uiName is the helper container of a database's UI.
 func uiName(serviceID string) string { return jobrun.HelperName(serviceID, "db-ui") }
@@ -69,21 +121,21 @@ func uiTarget(spec *agentv1.ServiceSpec, sessionSecrets [2]string) (jobrun.Targe
 		Network:  t.Network,
 		KeepLogs: true,
 	}
-	switch db.GetEngine() {
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
+	switch e := db.GetEngine(); {
+	case e == agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
 		u := url.URL{Scheme: "postgres", User: url.UserPassword(c.GetAdminUser(), c.GetAdminPassword()),
 			Host: host + ":" + ps, Path: "/" + c.GetDatabase(), RawQuery: "sslmode=disable"}
 		s.Image = ImagePgweb
 		s.Env = []string{"PGWEB_DATABASE_URL=" + u.String(), "DATABASE_URL=" + u.String()}
 		s.Cmd = []string{"/usr/bin/pgweb", "--bind=0.0.0.0", "--listen=8081", "--lock-session", "--skip-open"}
 		t.Port = 8081
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
+	case e == agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, e == agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
 		// PMA_USER and PMA_PASSWORD switch phpMyAdmin to config auth: it
 		// signs in by itself.
 		s.Image = ImagePhpMyAdmin
 		s.Env = []string{"PMA_HOST=" + host, "PMA_PORT=" + ps, "PMA_USER=" + c.GetAdminUser(), "PMA_PASSWORD=" + c.GetAdminPassword()}
 		t.Port = 80
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
+	case e == agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
 		u := url.URL{Scheme: "mongodb", Host: host + ":" + ps, Path: "/"}
 		if c.GetAdminUser() != "" {
 			u.User = url.UserPassword(c.GetAdminUser(), c.GetAdminPassword())
@@ -100,13 +152,21 @@ func uiTarget(spec *agentv1.ServiceSpec, sessionSecrets [2]string) (jobrun.Targe
 			"ME_CONFIG_SITE_SESSIONSECRET=" + sessionSecrets[1],
 		}
 		t.Port = 8081
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:
+	case dbengine.RedisLike(e):
+		// Redis Commander speaks to Valkey, KeyDB and Dragonfly as to Redis.
 		s.Image = ImageRedisCmdr
 		s.Env = []string{"REDIS_HOST=" + host, "REDIS_PORT=" + ps, "REDIS_PASSWORD=" + c.GetAdminPassword()}
 		if u := c.GetAdminUser(); u != "" && u != "default" {
 			s.Env = append(s.Env, "REDIS_USERNAME="+u)
 		}
 		t.Port = 8081
+	case e == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
+		auth := base64.StdEncoding.EncodeToString([]byte(c.GetAdminUser() + ":" + c.GetAdminPassword()))
+		s.Image = ImageClickHouseUI
+		s.Entrypoint = []string{"/bin/sh", "-c"}
+		s.Cmd = []string{clickhouseUIScript}
+		s.Env = []string{"CH_HOST=" + host, "CH_PORT=" + strconv.FormatUint(uint64(dbengine.HTTPPort(e)), 10), "CH_AUTH=" + auth}
+		t.Port = 8080
 	default:
 		return jobrun.Target{}, fmt.Errorf("%w: unknown engine %v", ErrNotFound, db.GetEngine())
 	}
@@ -118,16 +178,7 @@ func enginePort(spec *agentv1.ServiceSpec) uint32 {
 	if ps := spec.GetPorts(); len(ps) > 0 && ps[0].GetContainerPort() != 0 {
 		return ps[0].GetContainerPort()
 	}
-	switch spec.GetDatabase().GetEngine() {
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
-		return 5432
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
-		return 3306
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
-		return 27017
-	default:
-		return 6379
-	}
+	return dbengine.Port(spec.GetDatabase().GetEngine())
 }
 
 func randomHex() string {

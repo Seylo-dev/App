@@ -45,6 +45,7 @@ import {
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
+import { assertEngineRunsOn } from "../databases/capability";
 import { generatePassword } from "../databases/engines";
 import { findDatabase, writeSecret } from "../databases/info";
 import { mainPort } from "../domains/lookup";
@@ -60,7 +61,7 @@ import { assertNode, insertService, writeSpec } from "./insert";
 import { relayVolume, waitStopped } from "./move";
 import { requireTargetProject } from "./move-project";
 import { publishService } from "./ops";
-import { loadService, nameKey, type ServiceRow, toDetail } from "./rows";
+import { loadService, nameKey, nodeNames, type ServiceRow, toDetail } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
 import { readSpec, type ServiceSpecJson } from "./spec";
 
@@ -300,6 +301,7 @@ async function copyNewestUpload(deps: Deps, fromServiceId: string, toServiceId: 
 export const clone = implement(serviceOps.clone, async (input, ctx) => {
   const svc = loadService(ctx.db, input.serviceId);
   const plan = planClone(ctx, svc, input);
+  assertEngineRunsOn(ctx.db, ctx.agents, svc.id, plan.nodeId, nodeNames(ctx.db, [plan.nodeId]).get(plan.nodeId), "nodeId");
   const data = input.data ?? "empty";
   if (data === "copy" && plan.dataBlock) {
     const [code, message] = dataBlockErrors[plan.dataBlock];

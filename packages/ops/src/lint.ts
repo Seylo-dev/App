@@ -4,7 +4,7 @@
 import { Kind, type TSchema } from "@sinclair/typebox";
 import type { AnyOpContract } from "./define";
 import { registeredFormats } from "./formats";
-import { schemaHasPath, secretLookingPaths } from "./schema-paths";
+import { pathsWhere, schemaHasPath, secretLookingPaths } from "./schema-paths";
 
 /** TypeBox kinds that have no JSON form; they would break OpenAPI and MCP. */
 const nonJsonKinds = new Set([
@@ -62,6 +62,16 @@ export function lintOp(op: AnyOpContract): string[] {
     }
   }
   return problems;
+}
+
+/**
+ * Fields of op's input or output whose name matches and that sensitive does
+ * not cover: for checks narrower than lintOp's, such as "every URL a
+ * databases op returns carries a password".
+ */
+export function unredactedPaths(op: AnyOpContract, side: "input" | "output", match: (key: string) => boolean): string[] {
+  const declared = op.sensitive?.[side] ?? [];
+  return pathsWhere(op[side], match).filter((path) => !declared.some((d) => covers(d, path)));
 }
 
 /** A declared path covers itself and everything below it. */

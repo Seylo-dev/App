@@ -61,6 +61,7 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["database-connection", service(svc.db, "connection")],
   ["database-backups", service(svc.db, "backups")],
   ["redis-connection", service(svc.redis, "connection")],
+  ["clickhouse-connection", service(svc.clickhouse, "connection")],
   // Settings.
   ...(
     [

@@ -1,119 +1,317 @@
-// What differs per database engine: pinned images per major version, the
-// port, the container environment that creates the first user, health
-// checks, connection URLs, the commands that change a password in a
-// running database (run through the agent's Exec, password on stdin), and
-// the web UI and shell client names.
+// What differs per database engine: pinned images per major version (and
+// per variant, such as pgvector), the ports, the container command and
+// environment that create the first user, health checks, connection URLs,
+// the commands that change a password in a running database (run through
+// the agent's Exec, password on stdin), and the web UI and shell client
+// names.
 
 import type { DatabaseEngine } from "../../db/schema";
 
 export interface EngineVersion {
   /** Major version as people pick it, for example "17". */
   version: string;
-  /** Exact image tag; never a floating tag, so a redeploy runs the same bytes. */
+  /** Exact image tag (or digest); never a floating tag, so a redeploy runs the same bytes. */
   image: string;
   /** Where the data volume is mounted. */
   dataPath: string;
 }
 
+/** The engine with extensions in its image, on the same majors. */
+export interface EngineVariant {
+  id: string;
+  label: string;
+  versions: EngineVersion[];
+}
+
 export interface Engine {
   engine: DatabaseEngine;
   label: string;
+  /** Main port; ClickHouse's native protocol. */
   port: number;
+  /** ClickHouse's HTTP interface; null for the others. */
+  httpPort: number | null;
   /** Newest first; the first one is the default. */
   versions: EngineVersion[];
-  defaultUser: string;
-  /** Redis has no databases to create. */
+  variants: EngineVariant[];
+  /** The admin user when none is given; null generates one (ClickHouse). */
+  defaultUser: string | null;
+  /** The Redis-like engines have no databases to create. */
   hasDatabase: boolean;
+  /** Redis protocol with one user, "default"; exposed access uses it over TLS. */
+  redisLike: boolean;
   webUiTool: string;
   shellClient: string;
   /** URL scheme for connection strings. */
   scheme: string;
   /** Driver hint for TLS connections from outside. */
   tlsParams: string;
+  /**
+   * How a new admin password takes effect: "exec" changes it in the running
+   * database first (changePasswordExec); "restart" means the server reads it
+   * from its environment at every start, so the new env (which recreates the
+   * container) is the change.
+   */
+  passwordChange: "exec" | "restart";
+  /** Only agents that advertise database.engines.v2 run it (database.proto). */
+  needsAgentCapability: boolean;
+  /** A caution for whoever picks the engine (databases.engines); null for most. */
+  notice: string | null;
+  /**
+   * Exposure only to listed source addresses, never to anyone: for an engine
+   * that gets no security fixes, so its known holes are not one password
+   * away from the internet.
+   */
+  exposureNeedsAllowlist: boolean;
 }
+
+/**
+ * KeyDB 6.3.4 (2023) is its last release. It forked Redis 6.2 before the
+ * 2025 Lua advisories (fixed in Redis 6.2.20 and Valkey), so it still has
+ * them, and its one user may run scripts.
+ */
+export const keydbNotice =
+  "Unmaintained: KeyDB has had no release since 6.3.4 (2023), so it gets no security fixes, including the 2025 Redis Lua scripting advisories (CVE-2025-49844, CVE-2025-46817, CVE-2025-46818, CVE-2025-46819). Prefer Valkey. Exposure needs allowed source addresses.";
+
+/** The agent capability for the engines added in 0.2 (go/internal/dbengine). */
+export const enginesCapability = "database.engines.v2";
+
+const pg = (version: string, image: string): EngineVersion => ({
+  version,
+  image,
+  // Postgres 18 images keep data in /var/lib/postgresql/18/docker and refuse a mount at the old path.
+  dataPath: Number(version) >= 18 ? "/var/lib/postgresql" : "/var/lib/postgresql/data",
+});
 
 export const engines: Record<DatabaseEngine, Engine> = {
   postgres: {
     engine: "postgres",
     label: "PostgreSQL",
     port: 5432,
+    httpPort: null,
     versions: [
-      { version: "17", image: "postgres:17.6-alpine", dataPath: "/var/lib/postgresql/data" },
-      { version: "16", image: "postgres:16.10-alpine", dataPath: "/var/lib/postgresql/data" },
-      { version: "15", image: "postgres:15.14-alpine", dataPath: "/var/lib/postgresql/data" },
+      pg("18", "postgres:18.6-alpine"),
+      pg("17", "postgres:17.6-alpine"),
+      pg("16", "postgres:16.10-alpine"),
+      pg("15", "postgres:15.14-alpine"),
+    ],
+    variants: [
+      {
+        id: "pgvector",
+        label: "pgvector",
+        // Debian-based (the plain images are Alpine): a database cannot switch between them in place.
+        versions: [
+          pg("18", "pgvector/pgvector:0.8.7-pg18-trixie"),
+          pg("17", "pgvector/pgvector:0.8.7-pg17-trixie"),
+          pg("16", "pgvector/pgvector:0.8.7-pg16-trixie"),
+          pg("15", "pgvector/pgvector:0.8.7-pg15-trixie"),
+        ],
+      },
     ],
     defaultUser: "postgres",
     hasDatabase: true,
+    redisLike: false,
     webUiTool: "pgweb",
     shellClient: "psql",
     scheme: "postgresql",
     tlsParams: "sslmode=require",
+    passwordChange: "exec",
+    needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   mysql: {
     engine: "mysql",
     label: "MySQL",
     port: 3306,
+    httpPort: null,
     versions: [
       { version: "8.4", image: "mysql:8.4.6", dataPath: "/var/lib/mysql" },
       { version: "8.0", image: "mysql:8.0.43", dataPath: "/var/lib/mysql" },
     ],
+    variants: [],
     defaultUser: "root",
     hasDatabase: true,
-    webUiTool: "Adminer",
+    redisLike: false,
+    webUiTool: "phpMyAdmin",
     shellClient: "mysql",
     scheme: "mysql",
     tlsParams: "ssl-mode=REQUIRED",
+    passwordChange: "exec",
+    needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   mariadb: {
     engine: "mariadb",
     label: "MariaDB",
     port: 3306,
+    httpPort: null,
     versions: [
       { version: "11.8", image: "mariadb:11.8.2", dataPath: "/var/lib/mysql" },
       { version: "11.4", image: "mariadb:11.4.7", dataPath: "/var/lib/mysql" },
       { version: "10.11", image: "mariadb:10.11.13", dataPath: "/var/lib/mysql" },
     ],
+    variants: [],
     defaultUser: "root",
     hasDatabase: true,
-    webUiTool: "Adminer",
+    redisLike: false,
+    webUiTool: "phpMyAdmin",
     shellClient: "mariadb",
     scheme: "mysql",
     tlsParams: "ssl-mode=REQUIRED",
+    passwordChange: "exec",
+    needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   mongo: {
     engine: "mongo",
     label: "MongoDB",
     port: 27017,
+    httpPort: null,
     versions: [
       { version: "8.0", image: "mongo:8.0.12", dataPath: "/data/db" },
       { version: "7.0", image: "mongo:7.0.21", dataPath: "/data/db" },
     ],
+    variants: [],
     defaultUser: "root",
     hasDatabase: true,
+    redisLike: false,
     webUiTool: "mongo-express",
     shellClient: "mongosh",
     scheme: "mongodb",
     tlsParams: "tls=true",
+    passwordChange: "exec",
+    needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   redis: {
     engine: "redis",
     label: "Redis",
     port: 6379,
+    httpPort: null,
     versions: [
       { version: "8.2", image: "redis:8.2.1-alpine", dataPath: "/data" },
       { version: "7.4", image: "redis:7.4.5-alpine", dataPath: "/data" },
     ],
+    variants: [],
     defaultUser: "default",
     hasDatabase: false,
+    redisLike: true,
     webUiTool: "Redis Commander",
     shellClient: "redis-cli",
     scheme: "redis",
     tlsParams: "",
+    passwordChange: "exec",
+    needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
+  },
+  valkey: {
+    engine: "valkey",
+    label: "Valkey",
+    port: 6379,
+    httpPort: null,
+    versions: [
+      { version: "9.1", image: "valkey/valkey:9.1.3-alpine", dataPath: "/data" },
+      { version: "9.0", image: "valkey/valkey:9.0.7-alpine", dataPath: "/data" },
+      { version: "8.1", image: "valkey/valkey:8.1.11-alpine", dataPath: "/data" },
+    ],
+    variants: [],
+    defaultUser: "default",
+    hasDatabase: false,
+    redisLike: true,
+    webUiTool: "Redis Commander",
+    shellClient: "valkey-cli",
+    scheme: "redis",
+    tlsParams: "",
+    passwordChange: "exec",
+    needsAgentCapability: true,
+    notice: null,
+    exposureNeedsAllowlist: false,
+  },
+  keydb: {
+    engine: "keydb",
+    label: "KeyDB",
+    port: 6379,
+    httpPort: null,
+    versions: [
+      // KeyDB publishes no multi-arch version tag: this is the index of x86_64_v6.3.4 and arm64_v6.3.4.
+      {
+        version: "6.3",
+        image: "eqalpha/keydb@sha256:6537505c42355ca1f571276bddf83f5b750f760f07b2a185a676481791e388ac",
+        dataPath: "/data",
+      },
+    ],
+    variants: [],
+    defaultUser: "default",
+    hasDatabase: false,
+    redisLike: true,
+    webUiTool: "Redis Commander",
+    shellClient: "keydb-cli",
+    scheme: "redis",
+    tlsParams: "",
+    passwordChange: "exec",
+    needsAgentCapability: true,
+    notice: keydbNotice,
+    exposureNeedsAllowlist: true,
+  },
+  dragonfly: {
+    engine: "dragonfly",
+    label: "Dragonfly",
+    port: 6379,
+    httpPort: null,
+    versions: [{ version: "2.0", image: "ghcr.io/dragonflydb/dragonfly:v2.0.2", dataPath: "/data" }],
+    variants: [],
+    defaultUser: "default",
+    hasDatabase: false,
+    redisLike: true,
+    webUiTool: "Redis Commander",
+    shellClient: "redis-cli",
+    scheme: "redis",
+    tlsParams: "",
+    // CONFIG SET requirepass leaves the old password working on Dragonfly.
+    passwordChange: "restart",
+    needsAgentCapability: true,
+    notice: null,
+    exposureNeedsAllowlist: false,
+  },
+  clickhouse: {
+    engine: "clickhouse",
+    label: "ClickHouse",
+    port: 9000,
+    httpPort: 8123,
+    versions: [
+      { version: "26.8", image: "clickhouse/clickhouse-server:26.8.36.3", dataPath: "/var/lib/clickhouse" },
+      { version: "26.3", image: "clickhouse/clickhouse-server:26.3.62.3", dataPath: "/var/lib/clickhouse" },
+    ],
+    variants: [],
+    defaultUser: null,
+    hasDatabase: true,
+    redisLike: false,
+    webUiTool: "ClickHouse Play",
+    shellClient: "clickhouse-client",
+    scheme: "clickhouse",
+    tlsParams: "secure=true",
+    // The image writes the user from CLICKHOUSE_USER/PASSWORD into a read-only users.d file at every start.
+    passwordChange: "restart",
+    needsAgentCapability: true,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
 };
 
-export function engineVersion(engine: DatabaseEngine, version: string | undefined): EngineVersion | null {
-  const list = engines[engine].versions;
+/** The image list of an engine or of one of its variants; null for a variant it does not have. */
+export function engineVersions(engine: DatabaseEngine, variant: string | null | undefined): EngineVersion[] | null {
+  const e = engines[engine];
+  if (!variant) return e.versions;
+  return e.variants.find((v) => v.id === variant)?.versions ?? null;
+}
+
+export function engineVersion(engine: DatabaseEngine, version: string | undefined, variant?: string | null): EngineVersion | null {
+  const list = engineVersions(engine, variant);
+  if (!list) return null;
   if (version === undefined) return list[0] ?? null;
   return list.find((v) => v.version === version) ?? null;
 }
@@ -121,7 +319,7 @@ export function engineVersion(engine: DatabaseEngine, version: string | undefine
 export interface Credentials {
   user: string;
   password: string;
-  /** Empty for Redis. */
+  /** Empty for the Redis-like engines. */
   database: string;
 }
 
@@ -146,12 +344,56 @@ export function containerEnv(engine: DatabaseEngine, creds: Credentials): { name
       ];
     case "redis":
       return [env("REDIS_PASSWORD", creds.password, true)];
+    case "valkey":
+      return [env("VALKEY_PASSWORD", creds.password, true)];
+    case "keydb":
+      return [env("KEYDB_PASSWORD", creds.password, true)];
+    case "dragonfly":
+      // Dragonfly reads every flag from DFLY_<flag>, so the password stays off its command line.
+      return [env("DFLY_requirepass", creds.password, true)];
+    case "clickhouse":
+      return [
+        env("CLICKHOUSE_USER", creds.user),
+        env("CLICKHOUSE_PASSWORD", creds.password, true),
+        env("CLICKHOUSE_DB", creds.database),
+        // Lets the admin create the exposed user with SQL.
+        env("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "1"),
+      ];
   }
 }
 
-/** Container command override; only Redis needs one (password from the environment, not the command line). */
+/**
+ * Container command override. Redis-like engines take the password from the
+ * environment, not the command line (Redis, Valkey and KeyDB hide their
+ * arguments behind their process title). Valkey and KeyDB go through the
+ * image's entrypoint so the server drops root like it does by default;
+ * Dragonfly's entrypoint does that for "dragonfly" itself. Dragonfly writes
+ * RDB snapshots as dump.rdb (what backups restore), on shutdown and every
+ * five minutes, since it has no append-only file.
+ */
 export function containerCommand(engine: DatabaseEngine): string[] {
-  return engine === "redis" ? ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'] : [];
+  switch (engine) {
+    case "redis":
+      return ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'];
+    case "valkey":
+      return ["sh", "-c", 'exec docker-entrypoint.sh valkey-server --requirepass "$VALKEY_PASSWORD" --appendonly yes'];
+    case "keydb":
+      return ["sh", "-c", 'exec docker-entrypoint.sh keydb-server /etc/keydb/keydb.conf --requirepass "$KEYDB_PASSWORD" --appendonly yes'];
+    case "dragonfly":
+      return [
+        "dragonfly",
+        "--logtostderr",
+        "--dir",
+        "/data",
+        "--dbfilename",
+        "dump",
+        "--df_snapshot_format=false",
+        "--snapshot_cron",
+        "*/5 * * * *",
+      ];
+    default:
+      return [];
+  }
 }
 
 /** Health check command run inside the container. None needs the current password. */
@@ -167,8 +409,14 @@ export function healthCommand(engine: DatabaseEngine): string[] {
     case "mongo":
       return ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"];
     case "redis":
+    case "valkey":
+    case "keydb":
+    case "dragonfly":
       // NOAUTH also proves the server answers, so the check survives a password reset before the next deploy.
-      return ["sh", "-c", "redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'"];
+      return ["sh", "-c", `${engines[engine].shellClient} ping 2>&1 | grep -qE 'PONG|NOAUTH'`];
+    case "clickhouse":
+      // On the container's own address: the image's first start serves 127.0.0.1 only while it creates the database.
+      return ["sh", "-c", `wget -qO- "http://$(hostname -i | cut -d' ' -f1):8123/ping" | grep -q Ok`];
   }
 }
 
@@ -178,17 +426,29 @@ export function connectionUrl(engine: DatabaseEngine, creds: Credentials, host: 
   const auth = `${encodeURIComponent(creds.user)}:${encodeURIComponent(creds.password)}@`;
   const path = e.hasDatabase ? `/${encodeURIComponent(creds.database)}` : "";
   const params = [engine === "mongo" ? "authSource=admin" : "", tls ? e.tlsParams : ""].filter(Boolean).join("&");
-  const scheme = engine === "redis" && tls ? "rediss" : e.scheme;
+  const scheme = e.redisLike && tls ? "rediss" : e.scheme;
   return `${scheme}://${auth}${host}:${port}${path}${params ? `?${params}` : ""}`;
+}
+
+/**
+ * ClickHouse's HTTP interface on the project network, in the form its HTTP
+ * clients take (the database as the path): http://user:password@host:8123/db.
+ * Null for the other engines.
+ */
+export function httpUrl(engine: DatabaseEngine, creds: Credentials, host: string): string | null {
+  const port = engines[engine].httpPort;
+  if (port === null) return null;
+  return `http://${encodeURIComponent(creds.user)}:${encodeURIComponent(creds.password)}@${host}:${port}/${encodeURIComponent(creds.database)}`;
 }
 
 /**
  * Exec call that changes the password of `user` in a running database. The
  * new password goes on stdin, so it never shows in a process list. The
  * container's environment still holds the old password, which is what
- * these commands sign in with.
+ * these commands sign in with. Null for engines whose password changes by
+ * restarting with the new environment (passwordChange "restart").
  */
-export function changePasswordExec(engine: DatabaseEngine, user: string, password: string): { command: string[]; stdin: string } {
+export function changePasswordExec(engine: DatabaseEngine, user: string, password: string): { command: string[]; stdin: string } | null {
   switch (engine) {
     case "postgres":
       return {
@@ -215,8 +475,16 @@ export function changePasswordExec(engine: DatabaseEngine, user: string, passwor
         stdin: `db.changeUserPassword("${user}", "${password}")\n`,
       };
     case "redis":
-      // -x takes the last argument from stdin.
-      return { command: ["sh", "-c", 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" -x CONFIG SET requirepass'], stdin: password };
+    case "valkey":
+    case "keydb": {
+      // -x takes the last argument from stdin; the old password signs in through REDISCLI_AUTH, not argv.
+      const variable = { redis: "REDIS_PASSWORD", valkey: "VALKEY_PASSWORD", keydb: "KEYDB_PASSWORD" }[engine];
+      const cli = engines[engine].shellClient;
+      return { command: ["sh", "-c", `REDISCLI_AUTH="$${variable}" ${cli} --no-auth-warning -x CONFIG SET requirepass`], stdin: password };
+    }
+    case "dragonfly":
+    case "clickhouse":
+      return null;
   }
 }
 
@@ -228,13 +496,22 @@ export function defaultDatabaseName(serviceName: string): string {
 
 /** 32 characters from the password alphabet the contracts allow. */
 export function generatePassword(length = 32): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return randomFrom("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", length);
+}
+
+/** A generated admin user name, "<prefix>_" and 10 lowercase letters and digits, for engines without a usual one. */
+export function generateUserName(prefix: string): string {
+  return `${prefix}_${randomFrom("abcdefghijklmnopqrstuvwxyz0123456789", 10)}`;
+}
+
+function randomFrom(alphabet: string, length: number): string {
+  // Reject the top byte values so every character is equally likely.
+  const limit = 256 - (256 % alphabet.length);
   const bytes = crypto.getRandomValues(new Uint8Array(length * 2));
   let out = "";
   for (const b of bytes) {
-    // 248 = 4 * 62: reject the top values so every character is equally likely.
-    if (b < 248) out += alphabet[b % alphabet.length];
+    if (b < limit) out += alphabet[b % alphabet.length];
     if (out.length === length) break;
   }
-  return out.length === length ? out : generatePassword(length);
+  return out.length === length ? out : randomFrom(alphabet, length);
 }

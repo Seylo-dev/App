@@ -92,5 +92,6 @@ CREATE TABLE `service_copies` (
 CREATE INDEX `service_copies_service_idx` ON `service_copies` (`service_id`);--> statement-breakpoint
 CREATE INDEX `service_copies_source_idx` ON `service_copies` (`source_service_id`);--> statement-breakpoint
 ALTER TABLE `deployments` ADD `project_move` text;--> statement-breakpoint
+ALTER TABLE `service_databases` ADD `variant` text;--> statement-breakpoint
 ALTER TABLE `nodes` ADD `cleanup_schedule` text;--> statement-breakpoint
 ALTER TABLE `nodes` ADD `host_shell` integer DEFAULT false NOT NULL;

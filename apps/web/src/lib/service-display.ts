@@ -2,6 +2,7 @@
 // the kind tag, the status chip and the one-line source. One place, so
 // every list reads the same.
 
+import { databases } from "@seylo/ops";
 import type { ChipProps } from "@seylo/ui/components/chip";
 import { t } from "../i18n/t";
 import { formatAgo } from "./format";
@@ -25,6 +26,10 @@ const kindTags: Record<ServiceKind, KindTag> = {
   mariadb: { label: "MDB", tone: "sky" },
   mongo: { label: "MGO", tone: "green" },
   redis: { label: "RDS", tone: "red" },
+  valkey: { label: "VK", tone: "red" },
+  keydb: { label: "KDB", tone: "red" },
+  dragonfly: { label: "DF", tone: "red" },
+  clickhouse: { label: "CH", tone: "amber" },
   box: { label: "BOX", tone: "amber" },
   cron: { label: "CRON", tone: "gray" },
 };
@@ -36,7 +41,7 @@ export function kindTag(service: Pick<Summary, "kind" | "templateSlug" | "protec
   return kindTags[service.kind];
 }
 
-export const databaseKinds: ReadonlySet<ServiceKind> = new Set(["postgres", "mysql", "mariadb", "mongo", "redis"]);
+export const databaseKinds: ReadonlySet<ServiceKind> = new Set(databases.databaseEngineIds);
 
 const statusTones: Record<Status, { tone: Tone; dot: Dot }> = {
   idle: { tone: "gray", dot: "off" },

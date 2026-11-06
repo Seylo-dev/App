@@ -5,8 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"time"
-
-	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 )
 
 // ErrNoCertificates refuses a TLS-terminating listener on a gate built
@@ -55,12 +53,4 @@ func (m *Manager) certInfo(serviceID, host string) (string, time.Time, bool) {
 		issuer = leaf.Issuer.Organization[0]
 	}
 	return issuer, leaf.NotAfter, true
-}
-
-// terminatesTLS reports the engines whose exposed port the gate wraps in
-// TLS itself: they speak TLS from the first byte, so a relay can
-// terminate it (Postgres, MySQL and MariaDB negotiate TLS inside their
-// protocol and use their own).
-func terminatesTLS(engine agentv1.DatabaseEngine) bool {
-	return engine == agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO || engine == agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS
 }

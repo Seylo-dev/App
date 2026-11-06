@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/database.proto.
  */
 export const file_seylo_agent_v1_database: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zZXlsby9hZ2VudC92MS9kYXRhYmFzZS5wcm90bxIOc2V5bG8uYWdlbnQudjEi6wEKDERhdGFiYXNlU3BlYxIuCgZlbmdpbmUYASABKA4yHi5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUVuZ2luZRIPCgd2ZXJzaW9uGAIgASgJEjgKC2NyZWRlbnRpYWxzGAMgASgLMiMuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VDcmVkZW50aWFscxIsCgV0b29scxgEIAEoCzIdLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlVG9vbHMSMgoIZXhwb3N1cmUYBSABKAsyIC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUV4cG9zdXJlIlMKE0RhdGFiYXNlQ3JlZGVudGlhbHMSEgoKYWRtaW5fdXNlchgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIQCghkYXRhYmFzZRgDIAEoCSJXCg1EYXRhYmFzZVRvb2xzEg4KBndlYl91aRgBIAEoCBI2ChN3ZWJfdWlfaWRsZV90aW1lb3V0GAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIooBChBEYXRhYmFzZUV4cG9zdXJlEg8KB2VuYWJsZWQYASABKAgSEQoJaG9zdF9wb3J0GAIgASgNEhwKFGFsbG93ZWRfc291cmNlX2NpZHJzGAMgAygJEhQKDHRsc19ob3N0bmFtZRgEIAEoCRIMCgR1c2VyGAUgASgJEhAKCHBhc3N3b3JkGAYgASgJKr0BCg5EYXRhYmFzZUVuZ2luZRIfChtEQVRBQkFTRV9FTkdJTkVfVU5TUEVDSUZJRUQQABIcChhEQVRBQkFTRV9FTkdJTkVfUE9TVEdSRVMQARIZChVEQVRBQkFTRV9FTkdJTkVfTVlTUUwQAhIbChdEQVRBQkFTRV9FTkdJTkVfTUFSSUFEQhADEhkKFURBVEFCQVNFX0VOR0lORV9NT05HTxAEEhkKFURBVEFCQVNFX0VOR0lORV9SRURJUxAFQrgBChJjb20uc2V5bG8uYWdlbnQudjFCDURhdGFiYXNlUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_duration]);
+  fileDesc("Ch1zZXlsby9hZ2VudC92MS9kYXRhYmFzZS5wcm90bxIOc2V5bG8uYWdlbnQudjEi6wEKDERhdGFiYXNlU3BlYxIuCgZlbmdpbmUYASABKA4yHi5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUVuZ2luZRIPCgd2ZXJzaW9uGAIgASgJEjgKC2NyZWRlbnRpYWxzGAMgASgLMiMuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VDcmVkZW50aWFscxIsCgV0b29scxgEIAEoCzIdLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlVG9vbHMSMgoIZXhwb3N1cmUYBSABKAsyIC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUV4cG9zdXJlIlMKE0RhdGFiYXNlQ3JlZGVudGlhbHMSEgoKYWRtaW5fdXNlchgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIQCghkYXRhYmFzZRgDIAEoCSJXCg1EYXRhYmFzZVRvb2xzEg4KBndlYl91aRgBIAEoCBI2ChN3ZWJfdWlfaWRsZV90aW1lb3V0GAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIooBChBEYXRhYmFzZUV4cG9zdXJlEg8KB2VuYWJsZWQYASABKAgSEQoJaG9zdF9wb3J0GAIgASgNEhwKFGFsbG93ZWRfc291cmNlX2NpZHJzGAMgAygJEhQKDHRsc19ob3N0bmFtZRgEIAEoCRIMCgR1c2VyGAUgASgJEhAKCHBhc3N3b3JkGAYgASgJKrMCCg5EYXRhYmFzZUVuZ2luZRIfChtEQVRBQkFTRV9FTkdJTkVfVU5TUEVDSUZJRUQQABIcChhEQVRBQkFTRV9FTkdJTkVfUE9TVEdSRVMQARIZChVEQVRBQkFTRV9FTkdJTkVfTVlTUUwQAhIbChdEQVRBQkFTRV9FTkdJTkVfTUFSSUFEQhADEhkKFURBVEFCQVNFX0VOR0lORV9NT05HTxAEEhkKFURBVEFCQVNFX0VOR0lORV9SRURJUxAFEhoKFkRBVEFCQVNFX0VOR0lORV9WQUxLRVkQBhIZChVEQVRBQkFTRV9FTkdJTkVfS0VZREIQBxIdChlEQVRBQkFTRV9FTkdJTkVfRFJBR09ORkxZEAgSHgoaREFUQUJBU0VfRU5HSU5FX0NMSUNLSE9VU0UQCUK4AQoSY29tLnNleWxvLmFnZW50LnYxQg1EYXRhYmFzZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_duration]);
 
 /**
  * DatabaseSpec is set on SERVICE_KIND_DATABASE services. The image, env and
@@ -174,6 +174,12 @@ export const DatabaseExposureSchema: GenMessage<DatabaseExposure> = /*@__PURE__*
   messageDesc(file_seylo_agent_v1_database, 3);
 
 /**
+ * The engines from VALKEY on need an agent that advertises the capability
+ * "database.engines.v2" in NodeFacts.capabilities (it has no RPC of its
+ * own): an older agent would run the container but fail its shell, web UI
+ * and backups, and relay its exposed port without TLS. The panel creates
+ * them only on such nodes and never sends their exposure to other agents.
+ *
  * @generated from enum seylo.agent.v1.DatabaseEngine
  */
 export enum DatabaseEngine {
@@ -206,6 +212,46 @@ export enum DatabaseEngine {
    * @generated from enum value: DATABASE_ENGINE_REDIS = 5;
    */
   REDIS = 5,
+
+  /**
+   * Redis-compatible: valkey-cli, RDB dumps over the replication protocol.
+   *
+   * added in 0.2 (engines)
+   *
+   * @generated from enum value: DATABASE_ENGINE_VALKEY = 6;
+   */
+  VALKEY = 6,
+
+  /**
+   * Redis-compatible: keydb-cli, RDB dumps; its append-only file is one
+   * file (appendonly.aof), not a folder.
+   *
+   * added in 0.2 (engines)
+   *
+   * @generated from enum value: DATABASE_ENGINE_KEYDB = 7;
+   */
+  KEYDB = 7,
+
+  /**
+   * Redis-compatible: redis-cli; no replication dump, so backups run SAVE
+   * RDB into the data volume (the server runs with --dbfilename dump and
+   * --df_snapshot_format=false so its snapshots are dump.rdb).
+   *
+   * added in 0.2 (engines)
+   *
+   * @generated from enum value: DATABASE_ENGINE_DRAGONFLY = 8;
+   */
+  DRAGONFLY = 8,
+
+  /**
+   * Native protocol on 9000 (the port exposure uses), HTTP on 8123;
+   * backups are BACKUP/RESTORE through a file in the data volume.
+   *
+   * added in 0.2 (engines)
+   *
+   * @generated from enum value: DATABASE_ENGINE_CLICKHOUSE = 9;
+   */
+  CLICKHOUSE = 9,
 }
 
 /**

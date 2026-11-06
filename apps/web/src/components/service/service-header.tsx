@@ -67,6 +67,7 @@ function DatabaseSubtitle({ serviceId }: { serviceId: string }) {
   return (
     <span className="text-[12.5px] text-muted-foreground">
       {t("service.header.databaseVersion", { engine: t(`service.kind.${db.data.engine}`), version: db.data.version })}
+      {db.data.variant && t("service.header.databaseVariant", { variant: db.data.variant })}
     </span>
   );
 }

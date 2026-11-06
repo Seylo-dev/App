@@ -98,7 +98,9 @@ scripts/dev/vm.sh 'docker ps'                            # any command as root i
 in the same VM (a throwaway container, removed afterwards).
 
 Use a VM you keep for this only: the tests create and remove containers,
-networks and volumes. `SEYLO_VM_ARCH=amd64` builds for an x86-64 VM.
+networks and volumes. `SEYLO_IT_PREFIX=<a-z0-9, up to 8>` starts the test
+projects' ids (and so their container and network names) with your own
+prefix instead of `jbit`, when several runs share one VM. `SEYLO_VM_ARCH=amd64` builds for an x86-64 VM.
 `vm-gotest.sh` passes every `SEYLO_IT_*` variable into the VM; two tests
 need one: the update guard test runs a real build
 (`SEYLO_IT_GUARD_BIN=<absolute path of a linux seylo binary>`) and the
@@ -110,8 +112,12 @@ Nixpacks build test pulls a large image (`SEYLO_IT_NIXPACKS=1`).
 its own dependencies and Chromium) starts a panel on a fresh data dir and
 Vite in front of it, then runs the Playwright suites: smoke (setup, sign-in, real panel),
 flows (CLI sign-in approval, keys, invites, 2FA, appearance, channels),
-re-auth, screens (every screen with demo data in all four theme
-presets) and dockerhub (Docker Hub search and the prefilled image form, demo data). `test/playwright/run.sh --project smoke` runs one suite;
+re-auth, databases (the New database form and the database Connection
+tabs), and on demo data dockerhub (Docker Hub search and the prefilled image
+form), git-providers (Settings > Git providers, provider sources and watch
+paths), nodeops (the node sheet's Cleanup and Shell views), clone-move (the
+Clone and Move to project dialogs) and screens (every screen in all four
+theme presets). `test/playwright/run.sh --project smoke` runs one suite;
 `PRESETS=seylo` and `SCREENS=` narrow the screens suite. Screenshots land in
 `test/playwright/shots/`.
 

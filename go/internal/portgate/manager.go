@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/docker"
 )
 
@@ -212,26 +213,15 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 		out = append(out, Listener{
 			ID: "database", ServiceID: id, HostPort: db.GetExposure().GetHostPort(), ContainerPort: port,
 			AllowedSourceCIDRs: db.GetExposure().GetAllowedSourceCidrs(),
-			TerminateTLS:       terminatesTLS(db.GetEngine()), TLSHost: db.GetExposure().GetTlsHostname(),
+			TerminateTLS:       dbengine.TLSAtGate(db.GetEngine()), TLSHost: db.GetExposure().GetTlsHostname(),
 		})
 	}
 	return out, errs
 }
 
-// DatabasePort is the engine's default port inside the container.
-func DatabasePort(engine agentv1.DatabaseEngine) uint32 {
-	switch engine {
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:
-		return 5432
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
-		return 3306
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
-		return 27017
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:
-		return 6379
-	}
-	return 0
-}
+// DatabasePort is the engine's main port inside the container (the
+// port exposure relays to; ClickHouse's native protocol).
+func DatabasePort(engine agentv1.DatabaseEngine) uint32 { return dbengine.Port(engine) }
 
 // SyncAll implements Gate.
 func (m *Manager) SyncAll(ctx context.Context, desired *agentv1.DesiredState) error {

@@ -10,7 +10,7 @@ import { portExposures, serviceDatabases, serviceSecrets } from "../../db/schema
 import type { Deps } from "../../deps";
 import type { SecretBox } from "../../security/secret-box";
 import { getService, nodeAddress, type PlacedNode, type ServiceRow, serviceNodes } from "../domains/lookup";
-import { type Credentials, connectionUrl, type Engine, engines } from "./engines";
+import { type Credentials, connectionUrl, type Engine, engines, httpUrl } from "./engines";
 
 type Tx = Parameters<Parameters<PanelDb["transaction"]>[0]>[0];
 
@@ -71,11 +71,10 @@ export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: stri
     engine,
     node: serviceNodes(deps.db, serviceId)[0] ?? null,
     admin: { user: row.adminUser, password: adminPassword, database: row.databaseName },
-    // Redis has one user: exposed access uses it over TLS.
-    exposedUser:
-      row.engine === "redis"
-        ? { user: row.adminUser, password: adminPassword, database: "" }
-        : { user: row.exposedUser, password: exposedPassword, database: row.databaseName },
+    // The Redis-like engines have one user: exposed access uses it over TLS.
+    exposedUser: engine.redisLike
+      ? { user: row.adminUser, password: adminPassword, database: "" }
+      : { user: row.exposedUser, password: exposedPassword, database: row.databaseName },
     exposure,
   };
 }
@@ -89,10 +88,20 @@ export interface Connection {
   password: string;
 }
 
-/** For services of the project on the same node: host is the service name on the project network. */
-export function internalConnection(info: DatabaseInfo): Connection {
+/**
+ * For services of the project on the same node: host is the service name on
+ * the project network. ClickHouse adds its HTTP interface (httpUrl).
+ */
+export function internalConnection(info: DatabaseInfo): Connection & { httpUrl?: string } {
   const host = info.service.name;
-  return { url: connectionUrl(info.row.engine, info.admin, host, info.engine.port), host, port: info.engine.port, ...info.admin };
+  const http = httpUrl(info.row.engine, info.admin, host);
+  return {
+    url: connectionUrl(info.row.engine, info.admin, host, info.engine.port),
+    host,
+    port: info.engine.port,
+    ...info.admin,
+    ...(http ? { httpUrl: http } : {}),
+  };
 }
 
 /** Host and port people connect to from outside; null while exposure is off or the port is not known yet. */
@@ -106,15 +115,22 @@ export function exposedAddress(info: DatabaseInfo): { host: string; port: number
 export function exposedConnection(info: DatabaseInfo): (Connection & { tlsParams: string }) | null {
   const address = exposedAddress(info);
   if (!address || address.port === null) return null;
-  // Mongo speaks TLS from the first byte through the agent; with no host name the certificate is
-  // self-signed, so clients must be told to accept it (Postgres and MySQL "require" never verifies).
-  const selfSignedMongo = info.row.engine === "mongo" && !info.row.tlsHostname;
+  // Mongo and ClickHouse speak TLS from the first byte through the agent; with no host name the
+  // certificate is self-signed, so clients must be told to accept it (Postgres and MySQL "require"
+  // never verifies).
+  const accept = info.row.tlsHostname ? "" : (selfSignedParam[info.row.engine] ?? "");
   const url = connectionUrl(info.row.engine, info.exposedUser, address.host, address.port, true);
   return {
-    url: selfSignedMongo ? `${url}&tlsAllowInvalidCertificates=true` : url,
+    url: accept ? `${url}&${accept}` : url,
     host: address.host,
     port: address.port,
     ...info.exposedUser,
-    tlsParams: selfSignedMongo ? `${info.engine.tlsParams}&tlsAllowInvalidCertificates=true` : info.engine.tlsParams,
+    tlsParams: accept ? `${info.engine.tlsParams}&${accept}` : info.engine.tlsParams,
   };
 }
+
+/** The driver option that accepts the self-signed certificate, for engines whose URLs carry one. */
+const selfSignedParam: Partial<Record<DatabaseRow["engine"], string>> = {
+  mongo: "tlsAllowInvalidCertificates=true",
+  clickhouse: "skip_verify=true",
+};

@@ -39,8 +39,19 @@ func TestWebUIsStartAndStop(t *testing.T) {
 		"mongo": {agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, "mongo:8.0", "admin",
 			[]*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}, nil, "Mongo Express"},
 		"redis": {agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, "redis:7.4-alpine", "", nil, []string{"redis-server", "--requirepass", pw}, "Redis Commander"},
+		"postgres18": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres18, "admin",
+			[]*agentv1.EnvVar{{Name: "POSTGRES_USER", Value: "admin"}, {Name: "POSTGRES_PASSWORD", Value: pw}, {Name: "POSTGRES_DB", Value: "app"}}, nil, "pgweb"},
+		"valkey": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey, "default", []*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}},
+			[]string{"sh", "-c", `exec docker-entrypoint.sh valkey-server --requirepass "$VALKEY_PASSWORD" --appendonly yes`}, "Redis Commander"},
+		"keydb": {agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, imageKeyDB, "default", []*agentv1.EnvVar{{Name: "KEYDB_PASSWORD", Value: pw}},
+			[]string{"sh", "-c", `exec docker-entrypoint.sh keydb-server /etc/keydb/keydb.conf --requirepass "$KEYDB_PASSWORD" --appendonly yes`}, "Redis Commander"},
+		"dragonfly": {agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY, imageDragonfly, "default", []*agentv1.EnvVar{{Name: "DFLY_requirepass", Value: pw}},
+			[]string{"dragonfly", "--logtostderr", "--dir", "/data", "--dbfilename", "dump", "--df_snapshot_format=false"}, "Redis Commander"},
+		// "/" sends the browser to ClickHouse's own Play page.
+		"clickhouse": {agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, imageClickHouse, "admin", []*agentv1.EnvVar{
+			{Name: "CLICKHOUSE_USER", Value: "admin"}, {Name: "CLICKHOUSE_PASSWORD", Value: pw}, {Name: "CLICKHOUSE_DB", Value: "app"}}, nil, "ClickHouse Query"},
 	}
-	images := []string{dbtools.ImagePgweb, dbtools.ImagePhpMyAdmin, dbtools.ImageMongoExpress, dbtools.ImageRedisCmdr}
+	images := []string{dbtools.ImagePgweb, dbtools.ImagePhpMyAdmin, dbtools.ImageMongoExpress, dbtools.ImageRedisCmdr, dbtools.ImageClickHouseUI}
 	for _, c := range cases {
 		images = append(images, c.image)
 	}
@@ -54,6 +65,9 @@ func TestWebUIsStartAndStop(t *testing.T) {
 		s.Kind = agentv1.ServiceKind_SERVICE_KIND_DATABASE
 		s.Env = c.env
 		s.Container = &agentv1.ContainerConfig{Command: c.cmd}
+		if c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE {
+			s.Ports = []*agentv1.PortSpec{{ContainerPort: 9000}, {ContainerPort: 8123}}
+		}
 		s.KindSpec = &agentv1.ServiceSpec_Database{Database: &agentv1.DatabaseSpec{Engine: c.engine,
 			Credentials: &agentv1.DatabaseCredentials{AdminUser: c.user, AdminPassword: pw, Database: "app"},
 			Tools:       &agentv1.DatabaseTools{WebUi: true}}}
@@ -75,6 +89,11 @@ func TestWebUIsStartAndStop(t *testing.T) {
 				}
 				var body string
 				e.Eventually(name+" UI answers", 3*time.Minute, func() bool {
+					// Like the edge, wake on every request: a UI that gave up
+					// on a database still starting is started again.
+					if up, err = uis.Wake(e.Ctx(time.Minute), id); err != nil {
+						return false
+					}
 					resp, err := http.Get(up + "/")
 					if err != nil {
 						return false
@@ -91,7 +110,58 @@ func TestWebUIsStartAndStop(t *testing.T) {
 					if strings.Contains(body, `name="pma_password"`) {
 						t.Fatal("phpMyAdmin shows a login form")
 					}
-				case "postgres":
+				case "valkey", "keydb", "dragonfly":
+					// Redis Commander lists the server it is signed in to.
+					e.Eventually(name+" connected", time.Minute, func() bool {
+						resp, err := http.Get(up + "/apiv2/server/info")
+						if err != nil {
+							return false
+						}
+						b, _ := io.ReadAll(resp.Body)
+						resp.Body.Close()
+						return resp.StatusCode == 200 && strings.Contains(string(b), `"Redis version"`)
+					})
+				case "clickhouse":
+					// Queries run as the admin whatever the browser sends:
+					// nothing, or a Basic header of someone else.
+					for _, auth := range []string{"", "Basic " + "bm9ib2R5Ong="} {
+						req, _ := http.NewRequest(http.MethodPost, up+"/?default_format=TSV", strings.NewReader("SELECT currentUser()"))
+						if auth != "" {
+							req.Header.Set("Authorization", auth)
+						}
+						resp, err := http.DefaultClient.Do(req)
+						if err != nil {
+							t.Fatal(err)
+						}
+						b, _ := io.ReadAll(resp.Body)
+						resp.Body.Close()
+						if resp.StatusCode != 200 || strings.TrimSpace(string(b)) != "admin" {
+							t.Fatalf("query through the UI proxy (%q) = %d %s", auth, resp.StatusCode, b)
+						}
+					}
+					// Credentials as URL parameters (which ClickHouse takes over
+					// the header) are refused, spelled plainly or percent-encoded;
+					// other parameters pass.
+					for query, want := range map[string]int{
+						"user=nobody&password=x":                http.StatusForbidden,
+						"default_format=TSV&user=nobody":        http.StatusForbidden,
+						"password=x":                            http.StatusForbidden,
+						"quota_key=k":                           http.StatusForbidden,
+						"%75ser=nobody":                         http.StatusForbidden,
+						"default_format=TSV&param_user=1":       http.StatusOK,
+						"default_format=TSV&max_result_rows=10": http.StatusOK,
+					} {
+						resp, err := http.Post(up+"/?"+query, "text/plain", strings.NewReader("SELECT currentUser()"))
+						if err != nil {
+							t.Fatal(err)
+						}
+						b, _ := io.ReadAll(resp.Body)
+						resp.Body.Close()
+						if resp.StatusCode != want {
+							t.Fatalf("query through the UI proxy with ?%s = %d %s, want %d", query, resp.StatusCode, b, want)
+						}
+					}
+				case "postgres", "postgres18":
 					resp, err := http.Get(up + "/api/connection")
 					if err != nil {
 						t.Fatal(err)

@@ -44,7 +44,20 @@ export const projectPrefs = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.projectId] }), index("project_prefs_project_idx").on(t.projectId)],
 );
 
-export type ServiceKind = "app" | "compose" | "postgres" | "mysql" | "mariadb" | "mongo" | "redis" | "box" | "cron";
+export type ServiceKind =
+  | "app"
+  | "compose"
+  | "postgres"
+  | "mysql"
+  | "mariadb"
+  | "mongo"
+  | "redis"
+  | "valkey"
+  | "keydb"
+  | "dragonfly"
+  | "clickhouse"
+  | "box"
+  | "cron";
 
 export const services = sqliteTable(
   "services",

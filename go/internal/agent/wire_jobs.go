@@ -15,6 +15,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/box"
 	"github.com/seylo-dev/app/go/internal/cleanup"
 	"github.com/seylo-dev/app/go/internal/cron"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/dbtools"
 	"github.com/seylo-dev/app/go/internal/edge"
 	"github.com/seylo-dev/app/go/internal/jobrun"
@@ -129,9 +130,9 @@ type sleeper interface {
 }
 
 // wireJobs: register RunBackup, RestoreBackup (backup.run.v1), RunCronNow
-// (cron.run.v1) and Prune (node.prune.v1); add the cron, backup, tunnel,
-// tool and scheduled cleanup loops; follow the desired state through
-// d.Feed.
+// (cron.run.v1) and Prune (node.prune.v1); advertise database.engines.v2;
+// add the cron, backup, tunnel, tool and scheduled cleanup loops; follow
+// the desired state through d.Feed.
 func wireJobs(reg *Registry, d *Deps) error {
 	p, ok := d.Cron.(*jobsParts)
 	if !ok {
@@ -168,6 +169,10 @@ func wireJobs(reg *Registry, d *Deps) error {
 			p.log.Error("queueing a job result", "err", err)
 		}
 	}
+
+	// Valkey, KeyDB, Dragonfly and ClickHouse: backups and dbtools (here)
+	// and the portgate's TLS (network area) all handle them in this build.
+	reg.Advertise(dbengine.Capability)
 
 	rpc.HandleUnary(reg, "RunCronNow", func(ctx context.Context, req *agentv1.RunCronNowRequest) (*agentv1.RunCronNowResponse, error) {
 		resp, err := d.Cron.RunNow(ctx, req)

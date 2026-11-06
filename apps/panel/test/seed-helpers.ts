@@ -66,11 +66,21 @@ export interface FakeAgent {
   snapshot(init: MessageInitShape<typeof StateSnapshotSchema>): StateSnapshot;
 }
 
-/** Registers a connected agent for nodeId; methods without a handler answer an empty response. */
-export function fakeAgent(panel: Panel, nodeId: string, handlers: FakeHandlers = {}, methods: AgentMethodName[] = []): FakeAgent {
+/**
+ * Registers a connected agent for nodeId; methods without a handler answer an
+ * empty response. features are capabilities without methods it advertises
+ * too (database.engines.v2).
+ */
+export function fakeAgent(
+  panel: Panel,
+  nodeId: string,
+  handlers: FakeHandlers = {},
+  methods: AgentMethodName[] = [],
+  features: string[] = [],
+): FakeAgent {
   const calls: FakeAgent["calls"] = [];
   const names = [...new Set([...methods, ...(Object.keys(handlers) as AgentMethodName[])])];
-  const capabilities = [...new Set(names.map((m) => methodCapability(m)))];
+  const capabilities = [...new Set([...names.map((m) => methodCapability(m)), ...features])];
   const sessionId = unique();
   const agent = {
     nodeId,

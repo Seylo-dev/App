@@ -1,7 +1,7 @@
 // How service and deployment states look: chip tone, status dot and label
 // key. One table per state type so every screen shows them the same way.
 
-import type { deployments, services } from "@seylo/ops";
+import { databases, type deployments, type services } from "@seylo/ops";
 import type { MessageKey } from "../../i18n/t";
 
 export type ServiceStatus = (typeof services.ServiceStatus)["static"];
@@ -62,12 +62,16 @@ export const kindLook: Record<ServiceKind, KindLook> = {
   mariadb: { badge: "MDB", tone: "sky", label: "service.kind.mariadb" },
   mongo: { badge: "MGO", tone: "green", label: "service.kind.mongo" },
   redis: { badge: "RDS", tone: "red", label: "service.kind.redis" },
+  valkey: { badge: "VK", tone: "red", label: "service.kind.valkey" },
+  keydb: { badge: "KDB", tone: "red", label: "service.kind.keydb" },
+  dragonfly: { badge: "DF", tone: "red", label: "service.kind.dragonfly" },
+  clickhouse: { badge: "CH", tone: "amber", label: "service.kind.clickhouse" },
   box: { badge: "BOX", tone: "violet", label: "service.kind.box" },
   cron: { badge: "CRN", tone: "amber", label: "service.kind.cron" },
 };
 
-const databaseKinds = new Set<ServiceKind>(["postgres", "mysql", "mariadb", "mongo", "redis"]);
+const databaseKinds: ReadonlySet<string> = new Set(databases.databaseEngineIds);
 
 export function isDatabaseKind(kind: string): boolean {
-  return databaseKinds.has(kind as ServiceKind);
+  return databaseKinds.has(kind);
 }

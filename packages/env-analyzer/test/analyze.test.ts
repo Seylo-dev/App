@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { type AnalyzeContext, analyzeEnv, databaseVariables, describeReference, parseEnv, referenceCompletions, resolveEnv } from "../src";
+import {
+  type AnalyzeContext,
+  analyzeEnv,
+  appVariables,
+  builtinVariablesFor,
+  clickhouseVariables,
+  databaseVariables,
+  describeReference,
+  parseEnv,
+  referenceCompletions,
+  resolveEnv,
+} from "../src";
 
 const fsn = { id: "n1", name: "de-fsn-1" };
 const ash = { id: "n2", name: "us-ash-1" };
@@ -148,5 +159,36 @@ describe("resolve", () => {
     expect(completions.find((c) => c.label === "db.INTERNAL_URL")?.reachable).toBe(false);
     expect(completions.find((c) => c.label === "api.INTERNAL_URL")?.insertText).toBe("${{api.INTERNAL_URL}}");
     expect(completions.at(-1)?.reachable).toBe(false);
+  });
+});
+
+describe("database engine variables", () => {
+  test("every engine is a database; ClickHouse adds its HTTP interface", () => {
+    for (const kind of ["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly"]) {
+      expect(builtinVariablesFor(kind)).toBe(databaseVariables);
+    }
+    expect(builtinVariablesFor("clickhouse")).toBe(clickhouseVariables);
+    expect(clickhouseVariables.find((v) => v.name === "INTERNAL_HTTP_URL")).toMatchObject({ scope: "internal" });
+    expect(builtinVariablesFor("app")).toBe(appVariables);
+  });
+
+  test("ClickHouse's HTTP URL on another node is an internal reference like INTERNAL_URL", () => {
+    const ch: AnalyzeContext = {
+      self: { serviceId: "worker", name: "worker", nodes: [ash] },
+      targets: [
+        {
+          name: "events",
+          kind: "service",
+          serviceId: "chid",
+          serviceKind: "clickhouse",
+          nodes: [fsn],
+          internalHost: "events",
+          exposed: true,
+          variables: clickhouseVariables.map((v) => ({ ...v, value: `v-${v.name}` })),
+        },
+      ],
+    };
+    const result = analyzeEnv("CH=${{events.INTERNAL_HTTP_URL}}\nOK=${{events.EXPOSED_URL}}\n", ch);
+    expect(result.diagnostics.map((d) => [d.code, d.range.startLine])).toEqual([["internal-reference-other-node", 1]]);
   });
 });

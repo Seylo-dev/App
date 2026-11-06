@@ -7,7 +7,7 @@
 //   const { values } = resolveEnv(parsed, context);
 
 export { analyzeEnv, analyzeParsed, missingNodes } from "./analyze";
-export { appVariables, type BuiltinVariable, builtinVariablesFor, databaseVariables } from "./builtins";
+export { appVariables, type BuiltinVariable, builtinVariablesFor, clickhouseVariables, databaseVariables } from "./builtins";
 export { type HostMention, hostMentions } from "./hosts";
 export { parseEnv, stringifyEnv } from "./parse";
 export { formatReference, referenceAt, scanReferences, sharedTarget, substituteReferences } from "./references";

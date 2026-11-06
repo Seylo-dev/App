@@ -5,14 +5,16 @@ import (
 	"fmt"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 )
 
 // ErrNoDatabase means the service is not a database (or has no spec).
 var ErrNoDatabase = errors.New("not a database service")
 
-// ClientCommand returns the engine's client command, already signed in,
-// to exec inside the database container itself (it connects to
-// 127.0.0.1), plus the env that carries the password. Put the env on the
+// ClientCommand returns the engine's client command (psql, mysql or
+// mariadb, mongosh, clickhouse-client, or the Redis-like engine's own CLI),
+// already signed in, to exec inside the database container itself (it
+// connects to 127.0.0.1), plus the env that carries the password. Put the env on the
 // exec, never in argv, so the password stays out of process listings.
 func ClientCommand(db *agentv1.DatabaseSpec) (argv []string, env []string, err error) {
 	if db == nil {
@@ -49,8 +51,21 @@ func ClientCommand(db *agentv1.DatabaseSpec) (argv []string, env []string, err e
 		script := `if [ -n "$DB_USER" ]; then exec mongosh "mongodb://127.0.0.1:27017/$DB_NAME" --username "$DB_USER" --password "$DB_PASSWORD" --authenticationDatabase admin; fi; exec mongosh "mongodb://127.0.0.1:27017/$DB_NAME"`
 		argv = []string{"sh", "-c", script}
 		env = []string{"DB_USER=" + user, "DB_PASSWORD=" + pass, "DB_NAME=" + name}
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:
-		argv = []string{"redis-cli", "-h", "127.0.0.1", "--no-auth-warning"}
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
+		// clickhouse-client reads CLICKHOUSE_PASSWORD from its environment.
+		argv = []string{"clickhouse-client", "--host=127.0.0.1"}
+		if user != "" {
+			argv = append(argv, "--user="+user)
+		}
+		if name != "" {
+			argv = append(argv, "--database="+name)
+		}
+		env = []string{"CLICKHOUSE_PASSWORD=" + pass}
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
+		agentv1.DatabaseEngine_DATABASE_ENGINE_KEYDB, agentv1.DatabaseEngine_DATABASE_ENGINE_DRAGONFLY:
+		// valkey-cli, keydb-cli and the redis-cli in Dragonfly's image all
+		// read REDISCLI_AUTH.
+		argv = []string{dbengine.RedisCLI(db.GetEngine()), "-h", "127.0.0.1", "--no-auth-warning"}
 		if user != "" && user != "default" {
 			argv = append(argv, "--user", user)
 		}

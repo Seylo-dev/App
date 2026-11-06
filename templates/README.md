@@ -76,8 +76,9 @@ export function generate(input: { serviceName: string; image: string }) {
 Service types: `app` (an image with env, domains, volume and file mounts,
 extra ports and an optional `deploy.command`, which replaces the image's
 entrypoint and runs in `/bin/sh -c`) and the databases `postgres`, `mysql`,
-`mariadb`, `mongo` and `redis` (`version`, `database`, `user`, `password`;
-created like any database, with web UI, shell and backups).
+`mariadb`, `mongo`, `redis`, `valkey`, `keydb`, `dragonfly` and `clickhouse`
+(`version`, `variant` such as `pgvector` for `postgres`, `database`, `user`,
+`password`; created like any database, with web UI, shell and backups).
 
 `~templates-utils` gives `randomPassword(n)`, `randomString(n)`,
 `randomHex(bytes)`, `randomBase64(bytes)`, `env({...})` (KEY=value lines),
@@ -85,7 +86,8 @@ created like any database, with web UI, shell and backups).
 resolves on every deploy, so a reset database password reaches the app) and
 `PRIMARY_DOMAIN` (the node's automatic domain). Database services offer
 `INTERNAL_URL`, `INTERNAL_HOST`, `INTERNAL_PORT`, `USER`, `PASSWORD` and
-`DATABASE`; apps offer `URL`, `DOMAIN` and `INTERNAL_URL`.
+`DATABASE` (`clickhouse` also `INTERNAL_HTTP_URL` and `INTERNAL_HTTP_PORT`);
+apps offer `URL`, `DOMAIN` and `INTERNAL_URL`.
 
 Pin image tags. Every template is run by
 `apps/panel/test/templates.test.ts`, which checks the output and that each

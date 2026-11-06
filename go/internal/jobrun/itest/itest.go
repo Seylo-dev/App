@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,16 @@ type Env struct {
 	Layout  datadir.Layout
 }
 
+// projectPrefix starts every test project id (and so every container and
+// network name); SEYLO_IT_PREFIX (1-8 of a-z0-9) sets another one, so runs
+// sharing a VM can tell their resources apart.
+func projectPrefix() string {
+	if p := os.Getenv("SEYLO_IT_PREFIX"); regexp.MustCompile(`^[a-z0-9]{1,8}$`).MatchString(p) {
+		return p
+	}
+	return "jbit"
+}
+
 // New skips unless SEYLO_IT=1, then creates a unique project network and
 // registers cleanup of everything labeled with that project.
 func New(t *testing.T) *Env {
@@ -47,7 +58,7 @@ func New(t *testing.T) *Env {
 	}
 	var b [4]byte
 	_, _ = rand.Read(b[:])
-	e := &Env{T: t, D: d, Project: "jbit" + hex.EncodeToString(b[:]), Layout: datadir.New(t.TempDir())}
+	e := &Env{T: t, D: d, Project: projectPrefix() + hex.EncodeToString(b[:]), Layout: datadir.New(t.TempDir())}
 	e.Network = docker.ProjectNetwork(e.Project)
 	ctx := context.Background()
 	if _, err := d.Client().NetworkCreate(ctx, e.Network, client.NetworkCreateOptions{Driver: "bridge",

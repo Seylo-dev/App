@@ -3,19 +3,21 @@
 // depends on the kind:
 //   app       a Docker image or a git URL now, or nothing (set the source later)
 //   cron      an image, a schedule and a command
-//   database  the engine and an optional version
+//   database  the engine, its version (and pgvector for Postgres)
 //   compose   a pasted compose file, previewed before it is created
 //   box       an optional repository to clone
 // After creating, the service page opens.
 
 import { boxes, compose, databases, OpError, services } from "@seylo/ops";
-import { useOpMutation } from "@seylo/ops/react";
+import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
+import { Skeleton } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 import { useNavigate } from "@tanstack/react-router";
@@ -24,19 +26,29 @@ import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { ComposePreview } from "../../lib/types";
 import { NodePicker, ProjectPicker } from "../pickers";
+import { QueryError } from "../query-error";
 import { type CatalogKind, KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
+import { shortImage } from "./short-image";
 
 type FormKind = Exclude<NewServiceKind, CatalogKind>;
 type AppSource = "image" | "git" | "none";
-type Engine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis";
+type Engine = (typeof databases.DatabaseEngine)["static"];
 
-const engines: readonly { engine: Engine; label: MessageKey; tag: string }[] = [
+/** note: a word on the card; notice: what to know before picking it, under the version. */
+const engines: readonly { engine: Engine; label: MessageKey; tag: string; note?: MessageKey; notice?: MessageKey }[] = [
   { engine: "postgres", label: "newService.engines.postgres", tag: "PG" },
   { engine: "mysql", label: "newService.engines.mysql", tag: "MY" },
   { engine: "mariadb", label: "newService.engines.mariadb", tag: "MDB" },
   { engine: "mongo", label: "newService.engines.mongo", tag: "MGO" },
   { engine: "redis", label: "newService.engines.redis", tag: "RDS" },
+  { engine: "valkey", label: "newService.engines.valkey", tag: "VK" },
+  { engine: "keydb", label: "newService.engines.keydb", tag: "KDB", note: "newService.keydbNote", notice: "newService.keydbNotice" },
+  { engine: "dragonfly", label: "newService.engines.dragonfly", tag: "DF" },
+  { engine: "clickhouse", label: "newService.engines.clickhouse", tag: "CH" },
 ];
+
+/** The Postgres image variant the form offers as a checkbox. */
+const pgvector = "pgvector";
 
 const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -73,7 +85,9 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   const [schedule, setSchedule] = useState("0 * * * *");
   const [command, setCommand] = useState("");
   const [engine, setEngine] = useState<Engine>("postgres");
+  // "" is the engine's newest version.
   const [version, setVersion] = useState("");
+  const [withPgvector, setWithPgvector] = useState(false);
   const [yaml, setYaml] = useState("");
   const [repository, setRepository] = useState("");
   const [error, setError] = useState<unknown>(null);
@@ -106,7 +120,12 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
     setError(null);
     const base = { projectId, name, nodeId };
     if (kind === "database") {
-      createDatabase.mutate({ ...base, engine, version: version.trim() || undefined });
+      createDatabase.mutate({
+        ...base,
+        engine,
+        version: version || undefined,
+        variant: engine === "postgres" && withPgvector ? pgvector : undefined,
+      });
     } else if (kind === "compose") {
       createStack.mutate({ ...base, source: { type: "inline", yaml }, deployNow });
     } else if (kind === "box") {
@@ -250,23 +269,43 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
         <>
           <RadioGroup
             value={engine}
-            onValueChange={(v) => setEngine(v as Engine)}
+            onValueChange={(v) => {
+              setEngine(v as Engine);
+              setVersion("");
+            }}
             aria-label={t("newService.engine")}
             className="grid grid-cols-2 gap-2 sm:grid-cols-3"
           >
             {engines.map((item) => (
-              <RadioCard key={item.engine} value={item.engine} title={t(item.label)} icon={<KindBadge tag={item.tag} tone="sky" />} />
+              <RadioCard
+                key={item.engine}
+                value={item.engine}
+                title={t(item.label)}
+                description={item.note && <span className="text-chip-amber-fg">{t(item.note)}</span>}
+                icon={<KindBadge tag={item.tag} tone="sky" />}
+              />
             ))}
           </RadioGroup>
-          <Field id="ns-version" label="newService.version" hint="newService.versionHint">
-            <Input
-              id="ns-version"
-              value={version}
-              onChange={(e) => setVersion(e.target.value)}
-              placeholder={t("newService.latest")}
-              className="font-mono"
-            />
-          </Field>
+          <EngineVersion
+            engine={engine}
+            version={version}
+            onVersion={setVersion}
+            withPgvector={withPgvector}
+            onPgvector={setWithPgvector}
+          />
+          {engines.map(
+            (item) =>
+              item.engine === engine &&
+              item.notice && (
+                <p
+                  key={item.engine}
+                  role="note"
+                  className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-[12.5px] leading-normal text-chip-amber-fg"
+                >
+                  {t(item.notice)}
+                </p>
+              ),
+          )}
         </>
       )}
 
@@ -335,6 +374,73 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The engine's versions from the panel's catalog (databases.engines), newest
+ * first, and the pgvector checkbox for Postgres. A version the variant does
+ * not have falls back to the newest.
+ */
+function EngineVersion({
+  engine,
+  version,
+  onVersion,
+  withPgvector,
+  onPgvector,
+}: {
+  engine: Engine;
+  version: string;
+  onVersion: (version: string) => void;
+  withPgvector: boolean;
+  onPgvector: (on: boolean) => void;
+}) {
+  const catalog = useOp(databases.engines, {}, { staleTime: Number.POSITIVE_INFINITY });
+  if (catalog.isError) return <QueryError error={catalog.error} onRetry={() => void catalog.refetch()} />;
+  const info = catalog.data?.engines.find((e) => e.engine === engine);
+  if (!info) {
+    return (
+      <div role="status" aria-busy="true" aria-label={t("newService.versionsLoading")} className="flex flex-col gap-1.5">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-[38px]" />
+      </div>
+    );
+  }
+  const variant = info.variants.find((v) => v.id === pgvector);
+  const versions = (withPgvector && variant ? variant : info).versions;
+  const newest = versions[0]?.version ?? "";
+  const current = versions.some((v) => v.version === version) ? version : newest;
+  return (
+    <>
+      <Field id="ns-version" label="newService.version" hint="newService.versionHint">
+        <Select value={current} onValueChange={(v) => onVersion(v === newest ? "" : v)}>
+          <SelectTrigger id="ns-version" className="font-mono">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {versions.map((v) => (
+              <SelectItem key={v.version} value={v.version}>
+                <span className="flex min-w-0 items-center gap-2">
+                  {v.version === newest ? t("newService.versionLatest", { version: v.version }) : v.version}
+                  <span title={v.image} className="max-w-[260px] truncate font-mono text-xs text-muted-foreground">
+                    {shortImage(v.image)}
+                  </span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {variant && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="ns-pgvector" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
+            <Checkbox id="ns-pgvector" checked={withPgvector} onCheckedChange={(v) => onPgvector(v === true)} />
+            {t("newService.pgvector")}
+          </label>
+          <span className="pl-[26px] text-xs text-muted-foreground">{t("newService.pgvectorHint")}</span>
+        </div>
+      )}
+    </>
   );
 }
 

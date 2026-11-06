@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/jobrun"
 )
@@ -30,9 +31,11 @@ import (
 //   - MySQL: the certificate is installed with SET PERSIST and ALTER
 //     INSTANCE RELOAD TLS; the user gets REQUIRE SSL.
 //   - MariaDB (11.4+ makes its own certificate at start): REQUIRE SSL.
-//   - Mongo: the user only. TLS is the portgate's: it terminates TLS on
-//     the exposed port with Certificate and relays plain TCP inside.
-//   - Redis: no separate user; TLS as for Mongo.
+//   - Mongo and ClickHouse: the user only. TLS is the portgate's: it
+//     terminates TLS on the exposed port with Certificate and relays plain
+//     TCP inside.
+//   - Redis, Valkey, KeyDB and Dragonfly: no separate user; TLS as for
+//     Mongo.
 
 // userRe bounds exposed user names to what every engine accepts unquoted,
 // so they can go into pg_hba.conf and SQL safely.
@@ -115,6 +118,24 @@ const roles = [{ role: "readWrite", db: d }, { role: "dbAdmin", db: d }];
 if (admin.getUser(u)) { admin.updateUser(u, { pwd: p, roles: roles }); } else { admin.createUser({ user: u, pwd: p, roles: roles }); }
 `
 
+// clickhouseScript creates or updates the user with a SHA-256 password and
+// grants it the database. The statements reach clickhouse-client on stdin
+// from the printf builtin, so the password is never in an argv; the
+// admin's password comes from CLICKHOUSE_PASSWORD. The values are escaped
+// as a string literal and as backquoted identifiers (B is a backquote).
+const clickhouseScript = `set -e
+B=$(printf '\140')
+esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"; }
+idq() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/$B/\\\\$B/g"; }
+P=$(esc "$EXPOSED_PASSWORD"); U=$(idq "$EXPOSED_USER"); D=$(idq "$EXPOSED_DB")
+export CLICKHOUSE_PASSWORD="$ADMIN_PASSWORD"
+printf '%s\n' \
+  "CREATE USER IF NOT EXISTS $B$U$B IDENTIFIED WITH sha256_password BY '$P';" \
+  "ALTER USER $B$U$B IDENTIFIED WITH sha256_password BY '$P';" \
+  "GRANT ALL ON $B$D$B.* TO $B$U$B;" |
+  clickhouse-client --host=127.0.0.1 --user="$ADMIN_USER" --multiquery
+`
+
 func exposedUserJob(db *agentv1.DatabaseSpec, tls *tlsMaterial) (exposedJob, error) {
 	exp := db.GetExposure()
 	c := db.GetCredentials()
@@ -142,8 +163,11 @@ func exposedUserJob(db *agentv1.DatabaseSpec, tls *tlsMaterial) (exposedJob, err
 	case agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:
 		script := `exec mongosh --quiet "mongodb://127.0.0.1:27017/admin" --username "$ADMIN_USER" --password "$ADMIN_PASSWORD" --authenticationDatabase admin --file /dev/stdin`
 		return exposedJob{argv: []string{"sh", "-c", script}, env: env, stdin: mongoJS}, nil
-	case agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:
-		return exposedJob{}, errors.New("redis has no separate exposed user")
+	case agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
+		return exposedJob{argv: []string{"sh", "-c", clickhouseScript}, env: env}, nil
+	}
+	if dbengine.RedisLike(db.GetEngine()) {
+		return exposedJob{}, errors.New("redis-like engines have no separate exposed user")
 	}
 	return exposedJob{}, fmt.Errorf("unknown engine %v", db.GetEngine())
 }
@@ -188,7 +212,7 @@ func (x *ExposedUsers) Sync(specs []*agentv1.ServiceSpec) {
 	for _, s := range specs {
 		exp := s.GetDatabase().GetExposure()
 		if s.GetKind() == agentv1.ServiceKind_SERVICE_KIND_DATABASE && exp.GetEnabled() && exp.GetUser() != "" && !s.GetStopped() &&
-			s.GetDatabase().GetEngine() != agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS {
+			dbengine.SeparateExposedUser(s.GetDatabase().GetEngine()) {
 			next[s.GetId()] = s
 		}
 	}

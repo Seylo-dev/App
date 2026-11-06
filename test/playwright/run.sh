@@ -4,8 +4,9 @@
 #
 #   test/playwright/run.sh                     everything: smoke (setup, sign-in, real
 #                                              panel), flows (settings and CLI sign-in
-#                                              on the real panel) and screens (every
-#                                              screen with demo data, four presets)
+#                                              on the real panel), databases (the engine
+#                                              form and connection tabs) and screens
+#                                              (every screen with demo data, four presets)
 #   PRESETS=seylo test/playwright/run.sh       screens in one preset only
 #   test/playwright/run.sh --project smoke     extra arguments go to `playwright test`
 #

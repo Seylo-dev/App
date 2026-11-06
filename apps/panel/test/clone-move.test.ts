@@ -30,6 +30,7 @@ import {
   volumes,
 } from "../src/db/schema";
 import { compileDesiredState } from "../src/desired";
+import { enginesCapability } from "../src/modules/databases/engines";
 import { engineFor } from "../src/modules/deployments/engine";
 import { cloneDataJob, cloneName } from "../src/modules/services/clone";
 import { serviceSpecFor } from "../src/modules/services/desired";
@@ -588,6 +589,25 @@ describe("cloning databases and data", () => {
     const detail = await callOp(panel, serviceOps.get, { serviceId: cloneId }, { cookie });
     expect(detail.body.dataCopy).toMatchObject({ status: "done", fromName: "files", bytesCopied: 23 });
     expect((await callOp(panel, deploymentOps.deploy, { serviceId: cloneId }, { cookie })).status).toBe(200);
+  });
+
+  test("a database clone goes only to a node whose agent runs its engine", async () => {
+    // node-c is offline and advertised database.engines.v2 last time; node-a's live agent does not.
+    const nodeC = fleet.addNode("node-c", { online: false });
+    panel.deps.db
+      .update(nodes)
+      .set({ facts: { capabilities: [enginesCapability] } })
+      .where(eq(nodes.id, nodeC))
+      .run();
+    const created = await callOp(panel, dbOps.create, { projectId: shop, name: "cache", engine: "valkey", nodeId: nodeC }, { cookie });
+    expect(created.status).toBe(200);
+    const id = created.body.serviceId as string;
+    const refused = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { cookie });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.details).toMatchObject({ reason: "agentTooOld", field: "nodeId" });
+    expect(panel.deps.db.select().from(services).where(eq(services.nameKey, "cache-copy")).get()).toBeUndefined();
+    const sameNode = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeC }, { cookie });
+    expect(sameNode.status).toBe(200);
   });
 
   test("a database clone's first start deploys it", async () => {

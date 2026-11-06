@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0677ad53-2c02-4fc5-b095-61dd1e9b48fc",
+  "id": "010ae754-4e2f-40b3-861d-d9b86550d926",
   "prevId": "9c000edb-4c92-49d8-9da1-0b0f297dea61",
   "tables": {
     "audit_log": {
@@ -2573,6 +2573,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "variant": {
+          "name": "variant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "database_name": {

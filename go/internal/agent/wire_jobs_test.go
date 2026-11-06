@@ -16,7 +16,7 @@ func TestWireJobsRegistersAndMapsErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []string{"cron.run.v1", "backup.run.v1", "node.prune.v1"} {
+	for _, c := range []string{"cron.run.v1", "backup.run.v1", "node.prune.v1", "database.engines.v2"} {
 		if !slices.Contains(reg.Capabilities(), c) {
 			t.Errorf("capability %s not advertised: %v", c, reg.Capabilities())
 		}

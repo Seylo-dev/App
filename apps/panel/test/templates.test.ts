@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { projects, templates } from "@seylo/ops";
 import { DeployStage } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { deployments, domains, nodes, services, volumes } from "../src/db/schema";
+import { deployments, domains, nodes, serviceDatabases, services, volumes } from "../src/db/schema";
 import { readServiceEnv } from "../src/modules/env/store";
 import { serviceSpecFor } from "../src/modules/services/desired";
 import { builtInTemplates } from "../src/modules/templates/catalog";
@@ -212,5 +212,54 @@ export function generate(input: { serviceName: string; image: string }) {
     expect((await callOp(panel, templates.deleteCustom, { slug: "hello" }, { cookie: memberCookie })).status).toBe(403);
     expect((await callOp(panel, templates.deleteCustom, { slug: "hello" }, { cookie })).status).toBe(200);
     expect((await callOp(panel, templates.get, { slug: "hello" }, { cookie })).status).toBe(404);
+  });
+});
+
+describe("template databases", () => {
+  test("a template can ask for an engine variant (pgvector) and the new engines", async () => {
+    const meta = `name: "Vectors"
+description: "An app with a vector store."
+category: "Other"
+schema:
+  type: object
+  properties: {}
+`;
+    const code = `export function generate(input: { serviceName: string }) {
+  return { services: [
+    { type: "postgres", data: { serviceName: input.serviceName + "-db", variant: "pgvector", version: "17" } },
+    { type: "app", data: { serviceName: input.serviceName, source: { type: "image", image: "nginx:1.27" }, env: "DB=\${{" + input.serviceName + "-db.INTERNAL_URL}}" } },
+  ] };
+}`;
+    expect((await callOp(panel, templates.saveCustom, { slug: "vectors", metaYaml: meta, source: code }, { cookie })).status).toBe(200);
+    const preview = await callOp(
+      panel,
+      templates.preview,
+      { projectId, slug: "vectors", name: "vec", nodeId: nodeA, values: {} },
+      { cookie },
+    );
+    expect(preview.body.services[0]).toMatchObject({ name: "vec-db", kind: "postgres", image: "postgres (pgvector) 17" });
+    const created = await callOp(
+      panel,
+      templates.create,
+      { projectId, slug: "vectors", name: "vec", nodeId: nodeA, values: {} },
+      { cookie },
+    );
+    expect(created.status).toBe(200);
+    const db = panel.deps.db.select().from(serviceDatabases).all();
+    expect(db.map((d) => [d.engine, d.variant, d.version])).toEqual([["postgres", "pgvector", "17"]]);
+
+    // The output schema takes the new engine names (installing them needs a node that runs them).
+    const ch = code.replace(
+      'type: "postgres", data: { serviceName: input.serviceName + "-db", variant: "pgvector", version: "17" }',
+      'type: "clickhouse", data: { serviceName: input.serviceName + "-db" }',
+    );
+    expect((await callOp(panel, templates.saveCustom, { slug: "events", metaYaml: meta, source: ch }, { cookie })).status).toBe(200);
+    const chPreview = await callOp(
+      panel,
+      templates.preview,
+      { projectId, slug: "events", name: "ev", nodeId: nodeA, values: {} },
+      { cookie },
+    );
+    expect(chPreview.body.services[0]).toMatchObject({ name: "ev-db", kind: "clickhouse" });
   });
 });
