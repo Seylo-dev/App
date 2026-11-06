@@ -1,0 +1,346 @@
+name: Release
+
+# A pushed v* tag makes a DRAFT GitHub release with `make release`: the
+# binaries, checksums signed with the release key, install.sh, openapi.json,
+# the multi-arch panel image on ghcr.io and the signed update manifest. A
+# maintainer reviews the draft and publishes it by hand (CONTRIBUTING.md,
+# Releases).
+#
+# Run by hand (workflow_dispatch) it is a dry run that publishes nothing: the
+# same checks and goreleaser config in snapshot mode, signed with a throwaway
+# key made inside the job, and no secrets. Real releases only come from tags.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run, publishes nothing (real releases only come from a pushed v* tag)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # .goreleaser.yaml uses dockers_v2 (goreleaser 2.12 or later). Keep this in
+  # step with the goreleaser used for `make release` and `make release-check`.
+  GORELEASER_VERSION: v2.20.0
+  # Pinned like the actions: the arm64 emulator and the BuildKit that builds
+  # the panel image.
+  BINFMT_IMAGE: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+  BUILDKIT_IMAGE: moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+
+jobs:
+  refuse:
+    name: Refuse a dispatched release
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Real releases only come from a pushed v* tag
+        run: |
+          echo "::error::A run started by hand is always a dry run. Release by pushing a v* tag (CONTRIBUTING.md, Releases)."
+          exit 1
+
+  dry-run:
+    name: Dry run (publishes nothing)
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: release-dry-run-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads tags and the changelog from history
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1.7.0
+        with:
+          version: 1.75.0
+          setup_only: true
+
+      # minisign signs the release; dash and jq are for the installer tests.
+      - name: Release tools
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
+
+      - run: make install
+      - run: make check-gen
+      - run: make test
+
+      - name: Tree is clean
+        # A real release stops here too: goreleaser refuses a dirty tree.
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            echo "::error::the checks left changes in the tree; goreleaser would refuse to release"
+            exit 1
+          fi
+
+      - name: Throwaway signing key
+        run: |
+          umask 077
+          dir="$RUNNER_TEMP/dry-run-key"
+          mkdir "$dir"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          printf '%s\n%s\n' "$password" "$password" | minisign -G -p "$dir/key.pub" -s "$dir/key" >/dev/null
+          echo "MINISIGN_PASSWORD=$password" >>"$GITHUB_ENV"
+
+      - name: Preflight, with the throwaway key standing in for brand.json's
+        env:
+          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
+        run: |
+          set -a && . installer/brand.env && set +a
+          if [[ "$BRAND_MINISIGN_PUBLIC_KEY" == "$BRAND_PLACEHOLDER_PREFIX"* ]]; then
+            echo "::warning::brand.json minisignPublicKey is still a placeholder: a tag release stops at the preflight until it is set (CONTRIBUTING.md, Releases)"
+          fi
+          BRAND_MINISIGN_PUBLIC_KEY=$(sed -n 2p "$RUNNER_TEMP/dry-run-key/key.pub")
+          scripts/release-preflight.sh
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: ${{ env.BINFMT_IMAGE }}
+          platforms: arm64
+          cache-image: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+          cache-binary: false
+
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      - name: goreleaser in snapshot mode (builds and signs everything, pushes nothing)
+        env:
+          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
+        run: make release-dry-run
+
+      - name: Panel images
+        # A snapshot builds one image per platform, tagged <version>-<arch>,
+        # and loads them into the local Docker instead of pushing an index.
+        run: |
+          set -a && . installer/brand.env && set +a
+          version=$(jq -r .version dist/metadata.json)
+          for arch in amd64 arm64; do
+            image="$BRAND_IMAGE:$version-$arch"
+            platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")
+            if [ "$platform" != "linux/$arch" ]; then
+              echo "::error::$image is $platform, want linux/$arch"
+              exit 1
+            fi
+            echo "$image: $platform"
+          done
+
+      - name: Signed manifest (not uploaded)
+        # The local amd64 image's id stands in for the pushed index digest,
+        # so the manifest step needs no registry.
+        env:
+          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
+          DRY_RUN: "1"
+        run: |
+          set -a && . installer/brand.env && set +a
+          version=$(jq -r .version dist/metadata.json)
+          PANEL_DIGEST=$(docker image inspect --format '{{.Id}}' "$BRAND_IMAGE:$version-amd64")
+          export PANEL_DIGEST
+          scripts/release-manifest.sh
+
+      - name: Check what a release would attach
+        run: |
+          set -a && . installer/brand.env && set +a
+          pub=$(sed -n 2p "$RUNNER_TEMP/dry-run-key/key.pub")
+          minisign -Vm dist/checksums.txt -P "$pub"
+          minisign -Vm dist/manifest.json -P "$pub"
+          (cd dist && sha256sum --strict --ignore-missing -c checksums.txt)
+          for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
+            "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
+            checksums.txt checksums.txt.minisig install.sh manifest.json manifest.json.minisig; do
+            [ -s "dist/$f" ] || { echo "::error::dist/$f is missing"; exit 1; }
+          done
+          [ -s openapi.json ] || { echo "::error::openapi.json is missing"; exit 1; }
+          {
+            echo "### Dry run of $(jq -r .version dist/metadata.json) - nothing was published"
+            echo
+            echo "Signed with a throwaway key made in this job. A tag release would attach:"
+            echo
+            echo '```'
+            (cd dist && ls -l "${BRAND_SLUG}"_* checksums.txt checksums.txt.minisig install.sh manifest.json manifest.json.minisig)
+            ls -l openapi.json
+            echo '```'
+            echo
+            echo "Panel images (built per platform, not pushed):"
+            echo
+            echo '```'
+            docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' "$BRAND_IMAGE"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the throwaway key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/dry-run-key"
+
+  release:
+    name: Draft release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write # the draft release and its files
+      packages: write # the panel image on ghcr.io
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads tags and the changelog from history
+          persist-credentials: false
+
+      - name: Tag is the version goreleaser derives
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$TAG is not a vMAJOR.MINOR.PATCH[-PRERELEASE] tag"
+            exit 1
+          fi
+          # goreleaser releases the highest version tag on HEAD.
+          derived=$(git tag --points-at HEAD --sort=-version:refname | head -1)
+          if [ "$derived" != "$TAG" ]; then
+            echo "::error::goreleaser would release ${derived:-nothing} from this commit, not $TAG"
+            exit 1
+          fi
+
+      - name: Release secrets are set
+        env:
+          KEY_SET: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+        run: |
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::the repository secret MINISIGN_SECRET_KEY is not set (CONTRIBUTING.md, Releases)"
+            exit 1
+          fi
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1.7.0
+        with:
+          version: 1.75.0
+          setup_only: true
+
+      # minisign signs the release; dash and jq are for the installer tests.
+      - name: Release tools
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
+
+      - run: make install
+      - run: make check-gen
+      - run: make test
+
+      - name: Tree is clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            echo "::error::the checks left changes in the tree; goreleaser would refuse to release"
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: ${{ env.BINFMT_IMAGE }}
+          platforms: arm64
+          cache-image: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+          cache-binary: false
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      - name: Signing key
+        env:
+          RELEASE_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$RELEASE_KEY" | tr -d '\r' >"$RUNNER_TEMP/release.key"
+
+      # Preflight, goreleaser (draft release, image push), signed manifest.
+      - name: make release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINISIGN_SECRET_KEY: ${{ runner.temp }}/release.key
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: make release
+
+      - name: Check the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -a && . installer/brand.env && set +a
+          version=$(jq -r .version dist/metadata.json)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::goreleaser released $version, not $TAG"
+            exit 1
+          fi
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          [ "$draft" = true ] || { echo "::error::release $TAG is not a draft"; exit 1; }
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
+            "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
+            checksums.txt checksums.txt.minisig install.sh openapi.json manifest.json manifest.json.minisig; do
+            grep -qxF "$f" <<<"$assets" || { echo "::error::the draft has no $f"; exit 1; }
+          done
+          {
+            echo "### Draft release $TAG"
+            echo
+            echo "Review it and publish it by hand: https://github.com/$GITHUB_REPOSITORY/releases"
+            echo
+            echo '```'
+            echo "$assets"
+            docker buildx imagetools inspect "$BRAND_IMAGE:$version"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.key"

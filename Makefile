@@ -12,7 +12,7 @@ GO_MODULE := $(shell sed -n 's/^module //p' go/go.mod)
 VERSION_PKG := $(GO_MODULE)/internal/version
 
 .PHONY: help install gen gen-brand gen-proto gen-ts check-gen build build-go build-ts test test-go test-ts lint breaking \
-	test-installer installer panel-image release-check release-snapshot release e2e e2e-checks e2e-refresh e2e-down
+	test-installer installer panel-image release-check release-snapshot release-dry-run release e2e e2e-checks e2e-refresh e2e-down
 
 help: ## List targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -81,6 +81,9 @@ release-check: ## Validate .goreleaser.yaml
 release-snapshot: ## Build the release binaries and install.sh into dist/ (no publish, sign or image)
 	$(BRAND_ENV) goreleaser release --snapshot --clean --skip=sign,docker,before
 	scripts/render-installer.sh latest dist/install.sh
+
+release-dry-run: ## goreleaser as in `make release`, publishing nothing: snapshot, signed, one panel image per platform loaded locally (MINISIGN_SECRET_KEY, MINISIGN_PASSWORD)
+	$(BRAND_ENV) goreleaser release --snapshot --clean
 
 release: ## Publish from a v* tag (GITHUB_TOKEN, MINISIGN_SECRET_KEY, MINISIGN_PASSWORD, docker login)
 	$(BRAND_ENV) scripts/release-preflight.sh

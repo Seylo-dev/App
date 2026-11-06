@@ -10,13 +10,17 @@
 #   - MINISIGN_SECRET_KEY does not sign for that public key (installers,
 #     agents and panels would refuse every file of the release);
 #   - the GitHub repo <githubOrg>/<githubRepo> does not exist or the token
-#     cannot push to it (the org is unclaimed or someone else's).
+#     cannot push to it (the org is unclaimed or someone else's). In GitHub
+#     Actions (.github/workflows/release.yml) the job's token can only write
+#     to the repository the workflow runs in, so that repository must be
+#     <githubOrg>/<githubRepo>.
 #
 # Warns (does not fail) about the GitHub OAuth client id placeholder and a
 # docs URL that does not answer.
 #
 # Needs the brand variables (the Makefile exports installer/brand.env),
 # MINISIGN_SECRET_KEY, MINISIGN_PASSWORD (may be empty), minisign and gh.
+# GITHUB_ACTIONS and GITHUB_REPOSITORY come from the Actions runner.
 set -euo pipefail
 : "${BRAND_PLACEHOLDER_PREFIX:?run through the Makefile}" "${BRAND_MINISIGN_PUBLIC_KEY:?}" "${BRAND_GITHUB_ORG:?}" "${BRAND_GITHUB_REPO:?}"
 
@@ -54,8 +58,15 @@ else
   fi
 fi
 
+lower() { printf %s "$1" | tr '[:upper:]' '[:lower:]'; }
 if ! command -v gh >/dev/null 2>&1; then
   fail "gh is not installed (needed to check the GitHub repo and upload the manifest)"
+elif [ "${GITHUB_ACTIONS:-}" = true ]; then
+  # The Actions token has no .permissions to read, and it can only write to
+  # the repository the workflow runs in.
+  if [ "$(lower "${GITHUB_REPOSITORY:-}")" != "$(lower "$BRAND_GITHUB_ORG/$BRAND_GITHUB_REPO")" ]; then
+    fail "this workflow runs in ${GITHUB_REPOSITORY:-an unknown repository}, but brand.json releases to $BRAND_GITHUB_ORG/$BRAND_GITHUB_REPO; release from that repository"
+  fi
 else
   push=$(gh api "repos/$BRAND_GITHUB_ORG/$BRAND_GITHUB_REPO" --jq .permissions.push 2>/dev/null || true)
   if [ "$push" != true ]; then
