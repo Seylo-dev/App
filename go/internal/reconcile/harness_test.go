@@ -221,6 +221,8 @@ type harness struct {
 	rt      *Runtime
 	cancel  context.CancelFunc
 	done    chan error
+	// drain is Options.ReattachDrain from the next start (default 1ms).
+	drain time.Duration
 }
 
 func newHarness(t *testing.T) *harness {
@@ -256,6 +258,10 @@ func newHarnessWith(t *testing.T, setup func(*dockertest.Fake)) *harness {
 // like an agent restart.
 func (h *harness) start() {
 	h.t.Helper()
+	drain := h.drain
+	if drain == 0 {
+		drain = time.Millisecond
+	}
 	logger := slog.New(slog.DiscardHandler)
 	if os.Getenv("SEYLO_TEST_LOG") != "" {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -274,7 +280,7 @@ func (h *harness) start() {
 		Router:        h.router,
 		ResyncEvery:   time.Hour,
 		LogWait:       time.Millisecond,
-		ReattachDrain: time.Millisecond,
+		ReattachDrain: drain,
 		Logs:          h.logs,
 	})
 	if err != nil {

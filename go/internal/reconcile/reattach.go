@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -89,6 +90,71 @@ func (w *worker) forgetReattached(ids []string) {
 	}
 }
 
+// healNetworks takes the containers in netsUnsure off every project
+// network but the one they serve. Membership is not otherwise looked at:
+// without this a container whose move was interrupted after it was
+// recorded would stay reachable from its old project, and that project's
+// network could never be removed (Docker refuses while a container is on it).
+func (w *worker) healNetworks(ctx context.Context, list []docker.Container) {
+	if len(w.netsUnsure) == 0 {
+		return
+	}
+	alive := map[string]bool{}
+	failed := false
+	for _, c := range list {
+		alive[c.ID] = true
+		if !w.netsUnsure[c.ID] {
+			continue
+		}
+		if w.leaveOtherProjects(ctx, c.ID, c.Name, w.r.projectOf(c.ID, c.Labels)) {
+			delete(w.netsUnsure, c.ID)
+		} else {
+			failed = true
+		}
+	}
+	for id := range w.netsUnsure {
+		if !alive[id] {
+			delete(w.netsUnsure, id)
+		}
+	}
+	if failed {
+		w.retryLater(10 * time.Second)
+	}
+}
+
+// leaveOtherProjects disconnects a container from every project network
+// except project's. It reports whether the container is now on no other
+// one (a container that is gone counts).
+func (w *worker) leaveOtherProjects(ctx context.Context, id, name, project string) bool {
+	d, err := w.r.o.Docker.InspectContainer(ctx, id)
+	if errors.Is(err, docker.ErrNotFound) {
+		return true
+	}
+	if err != nil {
+		w.log.Warn("checking the networks of a moved container", "container", name, "err", err)
+		return false
+	}
+	keep, prefix := docker.ProjectNetwork(project), docker.ProjectNetwork("")
+	ok, left := true, false
+	for n := range d.Networks {
+		if n == keep || !strings.HasPrefix(n, prefix) {
+			continue
+		}
+		if err := w.r.o.Docker.DisconnectNetwork(ctx, n, id); err != nil {
+			w.log.Warn("leaving another project's network", "container", name, "network", n, "err", err)
+			ok = false
+			continue
+		}
+		left = true
+		w.log.Info("left another project's network", "container", name, "network", n)
+	}
+	if left {
+		// That network may have no service left on this node.
+		w.r.kickNetworks()
+	}
+	return ok
+}
+
 // reattachable returns the running containers that can move to spec's
 // project network as they are: every running container of the service is
 // on another project and runs exactly spec apart from the project. Nil
@@ -126,6 +192,9 @@ func (w *worker) reattach(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 	oldNets := map[string]string{}
 	for _, c := range moved {
 		oldNets[c.ID] = docker.ProjectNetwork(w.r.projectOf(c.ID, c.Labels))
+		// Until it is known to be on exactly one project network again,
+		// every pass checks it (an interrupted move, a failed disconnect).
+		w.netsUnsure[c.ID] = true
 	}
 	oldLive := w.running(ctx, moved)
 
@@ -251,20 +320,27 @@ func (w *worker) reattach(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 			return
 		}
 	}
-	select {
-	case <-rollCtx.Done():
-		// Superseded or stopping: the containers stay on both networks
-		// until the next pass decides; the route already points at the new one.
-		return
-	case <-time.After(w.r.o.ReattachDrain):
-	}
-	for _, c := range moved {
-		if old := oldNets[c.ID]; old != newNet {
-			if err := w.r.o.Docker.DisconnectNetwork(ctx, old, c.ID); err != nil {
-				w.log.Warn("leaving the old project network", "container", c.Name, "network", old, "err", err)
+	// The move is recorded and the route points at the new addresses, so
+	// leaving every other project network is right whatever happens next.
+	leaveOld := func() {
+		for _, c := range moved {
+			if w.leaveOtherProjects(ctx, c.ID, c.Name, spec.GetProjectId()) {
+				delete(w.netsUnsure, c.ID)
 			}
 		}
 	}
+	select {
+	case <-rollCtx.Done():
+		// Superseded: no drain, the next pass decides the rest. Stopping:
+		// the next start's pass leaves the old network (netsUnsure comes
+		// back from the record).
+		if ctx.Err() == nil {
+			leaveOld()
+		}
+		return
+	case <-time.After(w.r.o.ReattachDrain):
+	}
+	leaveOld()
 	// Containers of the old spec that were not running (crashed leftovers) go.
 	var rest []docker.Container
 	for _, c := range others {

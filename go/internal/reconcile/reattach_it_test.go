@@ -149,3 +149,79 @@ func TestITMoveProjectReattach(t *testing.T) {
 		t.Fatalf("after an agent restart: %q %v", got, ok)
 	}
 }
+
+// networkNames returns the networks a container is on, sorted.
+func (e *itEnv) networkNames(container string) []string {
+	e.t.Helper()
+	d, err := e.eng.InspectContainer(context.Background(), container)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var out []string
+	for n := range d.Networks {
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// TestITMoveProjectInterruptedLeavesTheOldNetwork stops the agent after a
+// move is recorded but before the container left the old project's
+// network: the next start takes it off, so the old project no longer
+// reaches it and its network can go.
+func TestITMoveProjectInterruptedLeavesTheOldNetwork(t *testing.T) {
+	e := newIT(t)
+	e.stop()
+	e.drain = time.Hour
+	e.start()
+	ctx := context.Background()
+	id := e.id("web")
+	e.apply(1, e.web("web", "p", "hello", 1))
+	e.apply(2, e.web("peer", "p", "peer", 1))
+	for _, s := range []string{id, e.id("peer")} {
+		if p := e.result(s, 1); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+			t.Fatalf("%s: %v", s, p)
+		}
+	}
+	e.settle()
+	web := docker.ContainerName(id, 1, 0)
+	peer := docker.ContainerName(e.id("peer"), 1, 0)
+	before, err := e.eng.InspectContainer(ctx, web)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e.apply(3, e.web("web", "q", "hello", 2))
+	deadline := time.Now().Add(time.Minute)
+	for {
+		if _, ok := e.rt.reattached.Load(before.ID); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the move was never recorded")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	e.stop()
+	oldNet, newNet := docker.ProjectNetwork(e.prefix+"p"), docker.ProjectNetwork(e.prefix+"q")
+	if got := e.networkNames(web); !slices.Equal(got, []string{oldNet, newNet}) {
+		t.Fatalf("networks while stopped mid-drain = %v", got)
+	}
+
+	e.drain = 0
+	e.start()
+	e.settle()
+	if p := e.result(id, 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("move: %v", p)
+	}
+	if got := e.networkNames(web); !slices.Equal(got, []string{newNet}) {
+		t.Fatalf("networks after the restart = %v", got)
+	}
+	after, err := e.eng.InspectContainer(ctx, web)
+	if err != nil || after.ID != before.ID || !after.StartedAt.Equal(before.StartedAt) {
+		t.Fatalf("the container was recreated or restarted: %v", err)
+	}
+	if _, ok := e.fetchFrom(peer, "http://web:8080/"); ok {
+		t.Fatal("the old project still reaches web after the restart")
+	}
+}

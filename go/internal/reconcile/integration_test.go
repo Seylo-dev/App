@@ -46,6 +46,8 @@ type itEnv struct {
 	rt      *Runtime
 	cancel  context.CancelFunc
 	done    chan error
+	// drain is Options.ReattachDrain from the next start (0: the default).
+	drain time.Duration
 }
 
 func newIT(t *testing.T) *itEnv {
@@ -91,7 +93,7 @@ func (e *itEnv) start() {
 		Crash: crash.NewTracker(nil), Layout: e.layout, Logger: logger,
 		Desired: e.desired, Feed: state.NewDesiredFeed(), State: e.state,
 		Reports: e.rec, Events: e.rec, Router: e.router, Scope: e.scope,
-		ResyncEvery: time.Hour,
+		ResyncEvery: time.Hour, ReattachDrain: e.drain,
 	})
 	if err != nil {
 		e.t.Fatal(err)

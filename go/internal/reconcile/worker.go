@@ -45,6 +45,11 @@ type worker struct {
 	last      *agentv1.ServiceStatus
 	// digests caches image id -> repo digest for Instance.image_digest.
 	digests map[string]string
+	// netsUnsure are containers that may still be on another project's
+	// network: a move to another project was interrupted (superseded
+	// during its drain, the agent stopped, a disconnect failed). Each pass
+	// takes them off every project network but their own (healNetworks).
+	netsUnsure map[string]bool
 
 	rollMu     sync.Mutex
 	rolling    bool
@@ -72,15 +77,16 @@ var errSuperseded = errors.New("a newer version of the service arrived")
 
 func newWorker(r *Runtime, id string) *worker {
 	return &worker{
-		r:         r,
-		id:        id,
-		log:       r.log.With("service_id", id),
-		kickCh:    make(chan struct{}, 1),
-		events:    make(chan docker.Event, 64),
-		requests:  make(chan workerRequest),
-		expected:  map[string]bool{},
-		restartAt: map[string]time.Time{},
-		watches:   map[string]*health.Watch{},
+		r:          r,
+		id:         id,
+		log:        r.log.With("service_id", id),
+		kickCh:     make(chan struct{}, 1),
+		events:     make(chan docker.Event, 64),
+		requests:   make(chan workerRequest),
+		expected:   map[string]bool{},
+		restartAt:  map[string]time.Time{},
+		watches:    map[string]*health.Watch{},
+		netsUnsure: map[string]bool{},
 	}
 }
 
@@ -168,6 +174,11 @@ func (w *worker) ensureRecord() {
 	w.rec, w.recLoaded = rec, true
 	w.r.o.Crash.Seed(w.id, rec.CrashStreak, rec.LastCrash)
 	w.publishReattached()
+	// The agent may have stopped between recording a move and leaving the
+	// old network: check every moved container once.
+	for id := range rec.Reattached {
+		w.netsUnsure[id] = true
+	}
 }
 
 // resetCrashes ends the crash streak on purpose (a new generation is
@@ -284,6 +295,7 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 		w.retryLater(5 * time.Second)
 		return false
 	}
+	w.healNetworks(ctx, list)
 
 	var target, others []docker.Container
 	for _, c := range list {

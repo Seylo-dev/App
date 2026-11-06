@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
@@ -86,6 +87,86 @@ func TestMoveProjectReattachesWithoutRestart(t *testing.T) {
 	rec, err := loadRecord(h.layout, "svc")
 	if err != nil || len(rec.Reattached) != 0 {
 		t.Fatalf("record = %+v, %v", rec, err)
+	}
+}
+
+// startLongMove starts a move of svc to p2 with a long drain and returns
+// once the move is recorded: the container is on both networks then.
+func startLongMove(t *testing.T) (*harness, *agentv1.ServiceSpec) {
+	t.Helper()
+	h := newHarness(t)
+	h.stop()
+	h.drain = time.Minute
+	h.start()
+	s1 := appSpec("svc", 1, "app:v1")
+	h.apply(1, s1)
+	h.deployResult("svc", 1)
+	s2 := cloneSpec(s1, 2, func(s *agentv1.ServiceSpec) { s.ProjectId = "p2" })
+	if _, err := h.rt.Apply(context.Background(), 2, s2); err != nil {
+		t.Fatal(err)
+	}
+	h.waitFor("the move recorded", func() bool {
+		c, ok := h.eng.Get("seylo-svc-1")
+		if !ok {
+			return false
+		}
+		_, recorded := h.rt.reattached.Load(c.ID)
+		return recorded && h.router.get("svc") != nil && !strings.Contains(h.router.get("svc")[0].URL, "seylo-svc-1")
+	})
+	if got := networksOf(h, "seylo-svc-1"); len(got) != 2 {
+		t.Fatalf("networks while draining = %v", got)
+	}
+	return h, s2
+}
+
+func TestMoveProjectSupersededDuringDrainLeavesTheOldNetwork(t *testing.T) {
+	h, s2 := startLongMove(t)
+	before, _ := h.eng.Get("seylo-svc-1")
+	// A newer generation with the same containers (a route change) arrives mid-drain.
+	h.apply(3, cloneSpec(s2, 3, func(s *agentv1.ServiceSpec) {
+		s.Routing.Routes[0].Hosts = []string{"web2.example.com"}
+	}))
+	if p := h.deployResult("svc", 3); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("generation 3: %v", p)
+	}
+	if got := networksOf(h, "seylo-svc-1"); !slices.Equal(got, []string{docker.ProjectNetwork("p2")}) {
+		t.Fatalf("networks = %v", got)
+	}
+	if after, _ := h.eng.Get("seylo-svc-1"); after.ID != before.ID || after.Restarts != 0 {
+		t.Fatalf("the container was recreated or restarted: %+v", after)
+	}
+	// Nothing holds the old project network any more, so it can go
+	// (Docker refuses while a container is on it).
+	if err := h.eng.RemoveNetwork(context.Background(), docker.ProjectNetwork("p1")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMoveProjectAgentStopAfterTheRecordLeavesTheOldNetwork(t *testing.T) {
+	h, _ := startLongMove(t)
+	before, _ := h.eng.Get("seylo-svc-1")
+	// The agent stops (or crashes) between recording the move and leaving
+	// the old network.
+	h.stop()
+	if got := networksOf(h, "seylo-svc-1"); len(got) != 2 {
+		t.Fatalf("networks after the stop = %v", got)
+	}
+	h.drain = 0
+	h.start()
+	h.settle()
+	if got := networksOf(h, "seylo-svc-1"); !slices.Equal(got, []string{docker.ProjectNetwork("p2")}) {
+		t.Fatalf("networks = %v", got)
+	}
+	if after, _ := h.eng.Get("seylo-svc-1"); after.ID != before.ID || after.Restarts != 0 {
+		t.Fatalf("the container was recreated or restarted: %+v", after)
+	}
+	if p := h.deployResult("svc", 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("move: %v", p)
+	}
+	// Nothing holds the old project network any more, so it can go
+	// (Docker refuses while a container is on it).
+	if err := h.eng.RemoveNetwork(context.Background(), docker.ProjectNetwork("p1")); err != nil {
+		t.Fatal(err)
 	}
 }
 
