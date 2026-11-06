@@ -100,6 +100,9 @@ func TestRouteStatusCertificates(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString
 	_ = os.WriteFile(acme, []byte(`{"le":{"Certificates":[{"domain":{"main":"ok.example.com"},"certificate":"`+b64([]byte(cert))+`","key":"`+b64([]byte(key))+`"}]}}`), 0o600)
 	failures := NewCertFailures()
+	// The fixture line is stamped 2026-11-05T10:00:00Z; read it an hour later so
+	// the 24 h failure window never depends on the day the test runs.
+	failures.now = func() time.Time { return time.Date(2026, 11, 5, 11, 0, 0, 0, time.UTC) }
 	failures.Observe(traefikTextFailure)
 	r := NewFileRouter(FileConfig{Dir: filepath.Join(dir, "dynamic"), AcmeFile: acme, CertFailures: failures})
 	customExp := time.Now().Add(10 * 24 * time.Hour).Truncate(time.Second).UTC()
