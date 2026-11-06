@@ -30,7 +30,7 @@ done
 
 go -C go run ./internal/update/releasetool \
   -version "$version" -binaries "$PWD/$bins" -image "$image" -digest "$digest" \
-  -installer "$PWD/dist/install.sh" -min-agent "${MIN_AGENT:-}" -min-upgrade-from "${MIN_UPGRADE_FROM:-}" \
+  -installer "$PWD/build/install.sh" -min-agent "${MIN_AGENT:-}" -min-upgrade-from "${MIN_UPGRADE_FROM:-}" \
   -out "$PWD/dist/manifest.json"
 
 printf '%s\n' "${MINISIGN_PASSWORD:-}" | minisign -S -s "${MINISIGN_SECRET_KEY:?}" -m dist/manifest.json -x dist/manifest.json.minisig \

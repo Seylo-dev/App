@@ -15,7 +15,9 @@ before:
   hooks:
     - bun install --frozen-lockfile
     - bun run build
-    - scripts/render-installer.sh {{ .Version }} dist/install.sh
+    # Not into dist/: goreleaser refuses a dist/ that is not empty after
+    # these hooks.
+    - scripts/render-installer.sh {{ .Version }} build/install.sh
 
 builds:
   - id: agent
@@ -121,7 +123,7 @@ release:
   # install.sh is what the install host serves; openapi.json is the API
   # reference the docs sync from releases/latest/download/openapi.json.
   extra_files:
-    - glob: dist/install.sh
+    - glob: build/install.sh
     - glob: openapi.json
 
 changelog:

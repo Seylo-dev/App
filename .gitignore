@@ -1,9 +1,10 @@
 # Dependencies
 node_modules/
 
-# Build output
+# Build output (build/ holds the release's rendered install.sh)
 /dist/
 /bin/
+/build/
 apps/*/dist/
 packages/*/dist/
 

@@ -177,18 +177,20 @@ jobs:
           (cd dist && sha256sum --strict --ignore-missing -c checksums.txt)
           for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
             "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
-            checksums.txt checksums.txt.minisig install.sh manifest.json manifest.json.minisig; do
+            checksums.txt checksums.txt.minisig manifest.json manifest.json.minisig; do
             [ -s "dist/$f" ] || { echo "::error::dist/$f is missing"; exit 1; }
           done
-          [ -s openapi.json ] || { echo "::error::openapi.json is missing"; exit 1; }
+          for f in build/install.sh openapi.json; do
+            [ -s "$f" ] || { echo "::error::$f is missing"; exit 1; }
+          done
           {
             echo "### Dry run of $(jq -r .version dist/metadata.json) - nothing was published"
             echo
             echo "Signed with a throwaway key made in this job. A tag release would attach:"
             echo
             echo '```'
-            (cd dist && ls -l "${BRAND_SLUG}"_* checksums.txt checksums.txt.minisig install.sh manifest.json manifest.json.minisig)
-            ls -l openapi.json
+            (cd dist && ls -l "${BRAND_SLUG}"_* checksums.txt checksums.txt.minisig manifest.json manifest.json.minisig)
+            ls -l build/install.sh openapi.json
             echo '```'
             echo
             echo "Panel images (built per platform, not pushed):"
