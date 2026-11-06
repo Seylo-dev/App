@@ -251,6 +251,7 @@ function McpClients() {
             {
               id: "name",
               header: t("settingsKeys.create.name"),
+              skeletonLines: 2,
               cell: (c) => (
                 <span className="flex min-w-0 flex-col">
                   <span className="font-medium">{c.name}</span>
@@ -258,11 +259,12 @@ function McpClients() {
                 </span>
               ),
             },
-            { id: "tokens", header: t("settingsKeys.mcp.activeTokens"), cell: (c) => c.activeTokens },
+            { id: "tokens", header: t("settingsKeys.mcp.activeTokens"), skeletonWidth: "17%", cell: (c) => c.activeTokens },
             {
               id: "used",
               header: t("settingsKeys.lastUsed"),
               align: "right",
+              skeletonWidth: "16%",
               cell: (c) => (
                 <span className="text-muted-foreground">{c.lastUsedAt ? formatRelative(c.lastUsedAt) : t("settings.never")}</span>
               ),

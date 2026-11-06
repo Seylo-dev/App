@@ -115,7 +115,8 @@ function ApprovalCardSkeleton() {
       </div>
       <div className="flex flex-col gap-2">
         <Skeleton className="h-8 w-28" />
-        <Skeleton className="h-[104px]" />
+        {/* The input of a one-field op: the code block's 36px bar, three 12.5px lines at 1.7 and 12px below. */}
+        <Skeleton className="h-[calc(3lh+48px)] text-[12.5px] leading-[1.7]" />
       </div>
       <div className="flex justify-end gap-2 border-t border-divider pt-3">
         <ButtonSkeleton className="w-16" />

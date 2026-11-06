@@ -93,6 +93,7 @@ function UsersSection() {
             {
               id: "person",
               header: t("settingsPeople.users.person"),
+              skeletonLines: 2,
               sortValue: (u) => u.email,
               cell: (u) => (
                 <span className="flex min-w-0 items-center gap-2.5">
@@ -108,6 +109,7 @@ function UsersSection() {
             {
               id: "role",
               header: t("settingsPeople.invite.role"),
+              skeletonWidth: "10%",
               sortValue: (u) => ["owner", "admin", "member"].indexOf(u.role),
               cell: (u) => <Chip tone={u.role === "member" ? "gray" : "blue"}>{t(`roles.${u.role}`)}</Chip>,
             },
@@ -115,6 +117,7 @@ function UsersSection() {
               id: "access",
               header: t("settingsPeople.users.access"),
               hideOnMobile: true,
+              skeletonWidth: "19.5%",
               cell: (u) =>
                 u.role === "member" ? (
                   <span className="text-muted-foreground">{t("settingsPeople.users.grants", { count: u.grantCount })}</span>
@@ -126,6 +129,7 @@ function UsersSection() {
               id: "security",
               header: t("settingsPeople.users.security"),
               hideOnMobile: true,
+              skeletonWidth: "17.5%",
               cell: (u) => (
                 <span className="flex gap-1">
                   {u.twoFactor ? (
@@ -141,6 +145,7 @@ function UsersSection() {
               id: "last",
               header: t("settingsPeople.users.lastLogin"),
               hideOnMobile: true,
+              skeletonWidth: "13%",
               sortValue: (u) => u.lastLoginAt ?? "",
               cell: (u) => (
                 <span className="text-muted-foreground">{u.lastLoginAt ? formatRelative(u.lastLoginAt) : t("settings.never")}</span>
@@ -150,6 +155,7 @@ function UsersSection() {
               id: "status",
               header: t("settingsPeople.users.status"),
               align: "right",
+              skeletonWidth: "11.5%",
               cell: (u) => <Chip tone={u.status === "active" ? "green" : "red"}>{t(`settingsPeople.status.${u.status}`)}</Chip>,
             },
           ]}
@@ -225,12 +231,14 @@ function InvitesSection({ onInvite }: { onInvite: () => void }) {
             {
               id: "role",
               header: t("settingsPeople.invite.role"),
+              skeletonWidth: "13%",
               cell: (i) => <Chip tone={i.role === "admin" ? "blue" : "gray"}>{t(`roles.${i.role}`)}</Chip>,
             },
             {
               id: "access",
               header: t("settingsPeople.users.access"),
               hideOnMobile: true,
+              skeletonWidth: "23%",
               cell: (i) =>
                 i.role === "admin" ? (
                   <span className="text-muted-foreground">{t("settingsActions.all")}</span>
@@ -253,12 +261,14 @@ function InvitesSection({ onInvite }: { onInvite: () => void }) {
               id: "by",
               header: t("settingsPeople.invites.invitedBy"),
               hideOnMobile: true,
+              skeletonWidth: "11.5%",
               cell: (i) => <span className="text-muted-foreground">{i.invitedBy ? i.invitedBy.name || i.invitedBy.email : "-"}</span>,
             },
             {
               id: "expires",
               header: t("settingsPeople.invites.expires"),
               hideOnMobile: true,
+              skeletonWidth: "12%",
               sortValue: (i) => i.expiresAt,
               cell: (i) => (
                 <span className="text-muted-foreground">
@@ -270,6 +280,7 @@ function InvitesSection({ onInvite }: { onInvite: () => void }) {
               id: "status",
               header: t("settingsPeople.users.status"),
               align: "right",
+              skeletonWidth: "12.5%",
               cell: (i) => <Chip tone={inviteTones[i.status]}>{t(`settingsPeople.invites.statuses.${i.status}`)}</Chip>,
             },
           ]}

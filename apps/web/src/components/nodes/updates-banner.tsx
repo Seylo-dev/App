@@ -7,6 +7,7 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
+import { ButtonSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
@@ -48,43 +49,53 @@ export function UpdatesBanner() {
         {t("nodes.updates.autoUpdate")}
       </label>
       <span className="text-[12.5px] text-ink-strong">{t("nodes.updates.hint")}</span>
-      <span className="ml-auto flex flex-wrap items-center gap-2.5 text-[12.5px]">
-        {status.isError && (
-          <span className="text-muted-foreground">
-            {isNotBuilt(status.error) ? t("nodes.updates.notBuilt") : errorMessage(status.error, t("common.unknownError"))}
-          </span>
-        )}
-        {data?.checkError && <Chip tone="red">{data.checkError}</Chip>}
-        {run ? (
-          <Chip tone="amber">
-            <StatusDot status="busy" pulse />
-            {t("nodes.updates.rollingOut", { version: run.targetVersion, done: run.doneSteps, total: run.totalSteps })}
-          </Chip>
-        ) : data?.panel.updateAvailable && data.panel.latestVersion ? (
-          <Button size="sm" variant="primary" disabled={updatePanel.isPending} onClick={() => updatePanel.mutate({})}>
-            {t("nodes.updates.updateTo", { version: data.panel.latestVersion })}
-          </Button>
-        ) : (
-          data && (
-            <Chip tone="green">
-              <StatusDot status="ok" />
-              {t("nodes.updates.upToDate", { version: data.panel.currentVersion })}
+      {status.isPending ? (
+        // The status chip and the buttons while the status loads, at their loaded size, so the strip
+        // wraps the same way and the node table under it stays put.
+        <LoadingRegion label={t("common.loading")} className="ml-auto flex flex-wrap items-center gap-2.5">
+          <Skeleton className="h-[22px] w-40 rounded-chip" />
+          <ButtonSkeleton size="sm" className="w-[84px]" />
+          <ButtonSkeleton size="sm" className="w-[86px]" />
+        </LoadingRegion>
+      ) : (
+        <span className="ml-auto flex flex-wrap items-center gap-2.5 text-[12.5px]">
+          {status.isError && (
+            <span className="text-muted-foreground">
+              {isNotBuilt(status.error) ? t("nodes.updates.notBuilt") : errorMessage(status.error, t("common.unknownError"))}
+            </span>
+          )}
+          {data?.checkError && <Chip tone="red">{data.checkError}</Chip>}
+          {run ? (
+            <Chip tone="amber">
+              <StatusDot status="busy" pulse />
+              {t("nodes.updates.rollingOut", { version: run.targetVersion, done: run.doneSteps, total: run.totalSteps })}
             </Chip>
-          )
-        )}
-        {data && !run && (
-          <Button size="sm" disabled={check.isPending} onClick={() => check.mutate({})}>
-            {t("nodes.updates.checkNow")}
-          </Button>
-        )}
-        {data?.panel.changelogUrl && (
-          <Button size="sm" asChild>
-            <a href={data.panel.changelogUrl} target="_blank" rel="noreferrer">
-              {t("nodes.updates.changelog")}
-            </a>
-          </Button>
-        )}
-      </span>
+          ) : data?.panel.updateAvailable && data.panel.latestVersion ? (
+            <Button size="sm" variant="primary" disabled={updatePanel.isPending} onClick={() => updatePanel.mutate({})}>
+              {t("nodes.updates.updateTo", { version: data.panel.latestVersion })}
+            </Button>
+          ) : (
+            data && (
+              <Chip tone="green">
+                <StatusDot status="ok" />
+                {t("nodes.updates.upToDate", { version: data.panel.currentVersion })}
+              </Chip>
+            )
+          )}
+          {data && !run && (
+            <Button size="sm" disabled={check.isPending} onClick={() => check.mutate({})}>
+              {t("nodes.updates.checkNow")}
+            </Button>
+          )}
+          {data?.panel.changelogUrl && (
+            <Button size="sm" asChild>
+              <a href={data.panel.changelogUrl} target="_blank" rel="noreferrer">
+                {t("nodes.updates.changelog")}
+              </a>
+            </Button>
+          )}
+        </span>
+      )}
     </section>
   );
 }

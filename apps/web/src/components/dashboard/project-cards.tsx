@@ -161,7 +161,12 @@ function ProjectCardSkeleton({ rows }: { rows: number }) {
   );
 }
 
-/** A service row while the project's services load (ServiceRow's sizes). */
+/**
+ * A service row while the project's services load, in ServiceRow's line
+ * boxes: the status chip is one 11.5px line plus its 2px padding, like the
+ * real chip. It assumes a running service (with a usage line); a stopped
+ * one is 3px shorter.
+ */
 function ServiceRowSkeleton() {
   return (
     <div aria-hidden="true" className="flex items-center gap-2.5 border-t border-divider px-2 py-[9px]">
@@ -171,7 +176,7 @@ function ServiceRowSkeleton() {
         <SkeletonText className="w-44 text-[11.5px]" />
       </span>
       <span className="ml-auto flex shrink-0 flex-col items-end gap-[3px]">
-        <Skeleton className="h-[21px] w-16 rounded-chip" />
+        <Skeleton className="h-[calc(1lh+4px)] w-16 rounded-chip text-[11.5px]" />
         <SkeletonText className="w-20 text-[11.5px]" />
       </span>
     </div>
