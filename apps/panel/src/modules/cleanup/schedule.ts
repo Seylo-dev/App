@@ -5,8 +5,8 @@
 import { create } from "@bufbuild/protobuf";
 import { type cleanup, OpError, type OpOutput } from "@seylo/ops";
 import { type CleanupSchedule, CleanupScheduleSchema } from "@seylo/proto";
-import type { CleanupScheduleJson, nodes } from "../../db/schema";
 import { parseVersion } from "../../agent-hub/version";
+import type { CleanupScheduleJson, nodes } from "../../db/schema";
 import { cronProblem, isTimeZone, nextCronRun } from "../../jobs/cron-expr";
 
 type Schedule = OpOutput<typeof cleanup.getSchedule>["schedule"];

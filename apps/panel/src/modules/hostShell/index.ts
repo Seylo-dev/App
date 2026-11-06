@@ -9,8 +9,8 @@
 // ended. Opening one raises a security_change alert for the owner.
 
 import { hostShell, OpError } from "@seylo/ops";
-import { Elysia } from "elysia";
 import { eq } from "drizzle-orm";
+import { Elysia } from "elysia";
 import { requireFreshSignIn } from "../../auth/fresh";
 import { requireSession } from "../../auth/sign-in";
 import { nodes } from "../../db/schema";
@@ -90,7 +90,8 @@ const open = implement(hostShell.open, (input, ctx) => {
       reason: "hostShellOff",
     });
   }
-  if (!ctx.agents.isOnline(node.id)) throw new OpError("UNAVAILABLE", "The node is offline. Try again when it is back.", { reason: "offline" });
+  if (!ctx.agents.isOnline(node.id))
+    throw new OpError("UNAVAILABLE", "The node is offline. Try again when it is back.", { reason: "offline" });
   if (!ctx.agents.supports(node.id, "hostShell")) {
     throw new OpError("NOT_IMPLEMENTED", "This node's agent is too old for host shells. Update the node and try again.", {
       reason: "capability",
@@ -98,7 +99,9 @@ const open = implement(hostShell.open, (input, ctx) => {
   }
   const store = hostShellsFor(ctx);
   if (store.inUse(node.id) >= maxSessionsPerNode) {
-    throw new OpError("CONFLICT", `${maxSessionsPerNode} host shells are open on this node already. Close one first.`, { reason: "tooMany" });
+    throw new OpError("CONFLICT", `${maxSessionsPerNode} host shells are open on this node already. Close one first.`, {
+      reason: "tooMany",
+    });
   }
   const issued = store.issue({
     nodeId: node.id,
@@ -225,7 +228,16 @@ function hostShellHttp(deps: Deps) {
       session.stop();
       quietly(() => ws.close(1000, "closed"));
     };
-    store.add({ id, nodeId: ticket.nodeId, nodeName: ticket.nodeName, userId: ticket.userId, authSessionId: ticket.authSessionId, openedBy: ticket.openedBy, openedAt, close });
+    store.add({
+      id,
+      nodeId: ticket.nodeId,
+      nodeName: ticket.nodeName,
+      userId: ticket.userId,
+      authSessionId: ticket.authSessionId,
+      openedBy: ticket.openedBy,
+      openedAt,
+      close,
+    });
     live.set(ws.id, session);
     recheck = setInterval(() => {
       const no = refusal(deps.db, ticket);

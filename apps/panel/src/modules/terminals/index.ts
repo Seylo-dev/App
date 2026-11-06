@@ -187,18 +187,18 @@ export function startTerminal(
             },
           })
         : deps.agents.open(ticket.nodeId, "shell", {
-          message: {
-            case: "open",
-            value: {
-              serviceId: ticket.serviceId,
-              containerId: ticket.containerId,
-              command: ticket.command,
-              size: { columns: ticket.columns, rows: ticket.rows },
-              databaseClient: ticket.databaseClient,
-              user: ticket.user,
+            message: {
+              case: "open",
+              value: {
+                serviceId: ticket.serviceId,
+                containerId: ticket.containerId,
+                command: ticket.command,
+                size: { columns: ticket.columns, rows: ticket.rows },
+                databaseClient: ticket.databaseClient,
+                user: ticket.user,
+              },
             },
-          },
-        });
+          });
 
   // "ready" waits for the agent's info message (container, user, working
   // directory). Older agents start with output, and a quiet console may say

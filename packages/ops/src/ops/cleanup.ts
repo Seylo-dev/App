@@ -60,7 +60,8 @@ export const CleanupKinds = Type.Object({
   buildCache: Type.Boolean({ description: "The build cache of this panel's own builders." }),
   stoppedContainers: Type.Boolean({ description: "Finished job containers, old generations and containers of removed services." }),
   unusedVolumes: Type.Boolean({
-    description: "Docker volumes and data folders of services removed from this node. Their data is gone for good, so it has its own switch.",
+    description:
+      "Docker volumes and data folders of services removed from this node. Their data is gone for good, so it has its own switch.",
   }),
 });
 

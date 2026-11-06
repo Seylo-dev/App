@@ -191,11 +191,15 @@ describe("opening a host shell", () => {
 
     c.ws.send(new TextEncoder().encode("exit\n"));
     await until("exit", () => c.control.some((m) => m.type === "exit"));
-    await until("the close audit", () => panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).all().length === 1);
+    await until(
+      "the close audit",
+      () => panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).all().length === 1,
+    );
     const close = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).get();
     expect(close).toMatchObject({ actorId: owner.user.id, outcome: "ok" });
-    expect(close?.input).toMatchObject({ nodeId: agent.nodeId, reason: "exited" });
-    expect(typeof (close?.input as { durationSeconds: number }).durationSeconds).toBe("number");
+    const closed = close?.input as { nodeId: string; reason: string; durationSeconds: number } | undefined;
+    expect(closed).toMatchObject({ nodeId: agent.nodeId, reason: "exited" });
+    expect(typeof closed?.durationSeconds).toBe("number");
     const openAudit = panel.deps.db
       .select()
       .from(auditLog)
@@ -226,7 +230,10 @@ describe("opening a host shell", () => {
     await ok(callOp(panel, hostShell.setEnabled, { nodeId: agent.nodeId, enabled: false }, { cookie: owner.cookie }));
     await until("both closed", () => ca.closed() !== null && cb.closed() !== null);
     expect(ca.control.some((m) => m.type === "closed" && m.reason?.includes("turned off"))).toBe(true);
-    await until("two close audits", () => panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).all().length === 2);
+    await until(
+      "two close audits",
+      () => panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).all().length === 2,
+    );
     for (const row of panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).all()) {
       expect((row.input as { reason: string }).reason).toBe("Host shells were turned off for this node.");
     }
@@ -253,9 +260,7 @@ test("the relay closes a host shell after its idle time", async () => {
   let ended = "";
   const never = new Promise<never>(() => {});
   const stream = {
-    async *[Symbol.asyncIterator]() {
-      await never;
-    },
+    [Symbol.asyncIterator]: () => ({ next: () => never }),
     done: never,
     cancel: (reason: string) => {
       cancelled = reason;

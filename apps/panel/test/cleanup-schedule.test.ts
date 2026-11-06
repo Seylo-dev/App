@@ -79,7 +79,9 @@ describe("cleanup schedule", () => {
     expect(sent).toMatchObject({ enabled: true, cron: "0 4 * * *", diskPercent: 80, images: true, unusedVolumes: false });
 
     // Turned off: the setting is not sent at all.
-    await ok(callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: { ...daily, enabled: false } }, { cookie: owner.cookie }));
+    await ok(
+      callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: { ...daily, enabled: false } }, { cookie: owner.cookie }),
+    );
     await panel.deps.agents.desired.settled();
     const off = (await agent.waitFor("SyncDesired", syncs + 2)).at(-1).state.settings;
     expect(off.cleanup).toBeUndefined();
@@ -109,7 +111,9 @@ describe("cleanup schedule", () => {
     const agent = await join();
     const member = await createUser(panel, "member");
     expect((await callOp(panel, cleanup.getSchedule, { nodeId: agent.nodeId }, { cookie: member.cookie })).status).toBe(403);
-    expect((await callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: daily }, { cookie: member.cookie })).status).toBe(403);
+    expect((await callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: daily }, { cookie: member.cookie })).status).toBe(
+      403,
+    );
     const readOnly = createApiKey(panel, owner.user.id, { readOnly: true });
     expect((await callOp(panel, cleanup.getSchedule, { nodeId: agent.nodeId }, { bearer: readOnly })).status).toBe(200);
     expect((await callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: daily }, { bearer: readOnly })).status).toBe(403);
@@ -157,7 +161,10 @@ describe("cleanup runs", () => {
 
   test("a manual cleanup is in the same history with who ran it", async () => {
     const agent = await join();
-    agent.handle("Prune", (req: { dryRun: boolean }) => ({ reclaimedBytes: req.dryRun ? 0n : 4096n, removed: ["container old (4.0 KiB): old generation 3"] }));
+    agent.handle("Prune", (req: { dryRun: boolean }) => ({
+      reclaimedBytes: req.dryRun ? 0n : 4096n,
+      removed: ["container old (4.0 KiB): old generation 3"],
+    }));
     await ok(callOp(panel, cleanup.run, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
     await ok(callOp(panel, cleanup.preview, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
     const listed = await ok(callOp(panel, cleanup.runs, { nodeId: agent.nodeId }, { cookie: owner.cookie }));

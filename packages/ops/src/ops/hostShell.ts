@@ -60,7 +60,7 @@ export const setEnabled = defineOp({
   kind: "mutation",
   summary: "Allow or forbid host shells on a node",
   description:
-    "Turns root shells on this node from the panel on or off. Only the owner turns them on, from a browser session that signed in or confirmed it is them in the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise). Turning them off closes every open one.",
+    'Turns root shells on this node from the panel on or off. Only the owner turns them on, from a browser session that signed in or confirmed it is them in the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise). Turning them off closes every open one.',
   input: Type.Object({ nodeId: Id, enabled: Type.Boolean() }),
   output: Type.Object({ nodeId: Id, enabled: Type.Boolean() }),
   permission: permission.global("nodes.manage"),
