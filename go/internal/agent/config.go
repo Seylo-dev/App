@@ -62,6 +62,10 @@ type FileConfig struct {
 	// stays as a standing one (dialed after panel_url failed for 5 minutes)
 	// and any other is dropped. Written by the agent.
 	Fallback *PanelAddress `yaml:"fallback,omitempty"`
+	// NoHostShell refuses root shells on this host from the panel
+	// (HostShell), whatever the panel's node setting says. Only someone
+	// with root on the node can set it.
+	NoHostShell bool `yaml:"no_host_shell,omitempty"`
 }
 
 // PanelAddress is one way to reach the panel, as config.yml stores it.

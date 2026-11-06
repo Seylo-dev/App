@@ -44,6 +44,9 @@ type Config struct {
 	AcmeCACertificates string
 	// AcmeCAServerName is config.yml's acme_ca_server_name.
 	AcmeCAServerName string
+	// NoHostShell is config.yml's no_host_shell: HostShell is refused
+	// whatever the panel says.
+	NoHostShell bool
 }
 
 // Deps is everything the wiring functions share. The agent fills the

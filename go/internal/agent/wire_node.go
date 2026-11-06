@@ -1,6 +1,7 @@
 package agent
 
-// Node wiring: updates, node health checks and troubleshoot reports.
+// Node wiring: updates, node health checks, troubleshoot reports and host
+// shells (host_shell.go).
 
 import (
 	"context"
@@ -132,6 +133,7 @@ func wireNode(reg *Registry, d *Deps) error {
 		return errors.New("provideNode did not set the update service")
 	}
 	checks := &healthMemory{last: map[string]agentv1.NodeCheckStatus{}}
+	registerHostShell(reg, d)
 
 	rpc.HandleUnary(reg, "UpdateAgent", func(ctx context.Context, req *agentv1.UpdateAgentRequest) (*agentv1.UpdateAgentResponse, error) {
 		if err := d.Updater.UpdateAgent(ctx, req); err != nil {
