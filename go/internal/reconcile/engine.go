@@ -162,7 +162,11 @@ type Options struct {
 	// LogWait is how long a crash report waits for the log store to catch
 	// up with the last lines (default 500ms).
 	LogWait time.Duration
-	Now     func() time.Time
+	// ReattachDrain is how long a container that moved to another
+	// project's network keeps its old network after the route switched,
+	// so requests already on the way finish (default 2s).
+	ReattachDrain time.Duration
+	Now           func() time.Time
 }
 
 // Runtime is the Engine implementation: one worker goroutine per service
@@ -189,6 +193,9 @@ type Runtime struct {
 	refusedGen map[string]uint64
 
 	resolveTurn atomic.Uint64
+	// reattached mirrors the workers' records for readers outside them
+	// (Resolve, syncNetworks): container id -> reattachment.
+	reattached sync.Map
 	// webUI reads a database web UI's state (SetWebUIStatus).
 	webUI atomic.Pointer[func(serviceID string) *agentv1.ToolStatus]
 }
@@ -237,6 +244,9 @@ func New(o Options) (*Runtime, error) {
 	}
 	if o.LogWait <= 0 {
 		o.LogWait = 500 * time.Millisecond
+	}
+	if o.ReattachDrain <= 0 {
+		o.ReattachDrain = 2 * time.Second
 	}
 	if o.Now == nil {
 		o.Now = time.Now

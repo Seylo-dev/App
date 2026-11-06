@@ -43,7 +43,7 @@ function targetPortFor(service: ServiceRow, requested: number | undefined): numb
  * host routed by another service is only available to callers who may edit
  * that service's domains (see ownership.ts).
  */
-function insertDomain(caller: HostCaller, db: PanelDb, values: typeof domains.$inferInsert): DomainRow {
+export function insertDomain(caller: HostCaller, db: PanelDb, values: typeof domains.$inferInsert): DomainRow {
   assertHostAvailable({ ...caller, db }, values.host, values.serviceId);
   const taken = db
     .select({ id: domains.id })

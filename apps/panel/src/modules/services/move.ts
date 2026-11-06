@@ -20,6 +20,7 @@ import { engineFor, finish, nextGeneration } from "../deployments/engine";
 import { appendLog } from "../deployments/logs";
 import { hasActiveDeploy } from "../deployments/queue";
 import { initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
+import { assertNoActiveCopy } from "./copies";
 import { assertNode, dataVolumes } from "./insert";
 import { actorOf, publishService } from "./ops";
 import { loadService, nodeNames } from "./rows";
@@ -38,6 +39,8 @@ export const move = implement(serviceOps.move, (input, ctx) => {
   const from = (placements[0] as (typeof placements)[number]).nodeId;
   if (from === input.toNodeId) throw new OpError("BAD_REQUEST", "The service already runs on this node.", { field: "toNodeId" });
   assertNode(ctx.db, input.toNodeId);
+  // A clone's data copy reads (or writes) its folder on this node; the move stops it and removes that folder.
+  assertNoActiveCopy(ctx.db, svc.id, { anySource: true });
   if (!svc.liveDeploymentId) throw new OpError("CONFLICT", "Deploy the service before moving it.");
   if (hasActiveDeploy(ctx, svc.id)) throw new OpError("CONFLICT", "Wait for the running deploy to finish.");
   const live = ctx.db.select().from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get();
@@ -101,8 +104,8 @@ export const move = implement(serviceOps.move, (input, ctx) => {
   return { deploymentId: row.id };
 });
 
-/** Waits until the old node reports no running container of the service. */
-async function waitStopped(deps: Deps, serviceId: string, nodeId: string): Promise<boolean> {
+/** Waits until the node reports no running container of the service. */
+export async function waitStopped(deps: Deps, serviceId: string, nodeId: string): Promise<boolean> {
   const deadline = Date.now() + stopWaitMs;
   while (Date.now() < deadline) {
     const status = deps.agents.state.serviceStatuses(serviceId).find((s) => s.nodeId === nodeId)?.status;
@@ -112,10 +115,20 @@ async function waitStopped(deps: Deps, serviceId: string, nodeId: string): Promi
   return false;
 }
 
-/** Copies one volume: ExportVolume on `from` piped into ImportVolume on `to`. */
-export async function relayVolume(deps: Deps, input: { serviceId: string; volume: string; from: string; to: string }): Promise<number> {
+/**
+ * Copies one volume: ExportVolume on `from` piped into ImportVolume on `to`.
+ * `toServiceId` (a clone) receives it instead of the same service.
+ */
+export async function relayVolume(
+  deps: Deps,
+  input: { serviceId: string; volume: string; from: string; to: string; toServiceId?: string },
+): Promise<number> {
   const exported = deps.agents.openRaw(input.from, "exportVolume", { serviceId: input.serviceId, volume: input.volume });
-  const imported = deps.agents.openRaw(input.to, "importVolume", { serviceId: input.serviceId, volume: input.volume, replace: true });
+  const imported = deps.agents.openRaw(input.to, "importVolume", {
+    serviceId: input.toServiceId ?? input.serviceId,
+    volume: input.volume,
+    replace: true,
+  });
   try {
     for await (const chunk of exported.body) await imported.writer.write(chunk);
     imported.writer.end();

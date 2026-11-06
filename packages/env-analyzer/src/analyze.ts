@@ -4,6 +4,7 @@
 // network, so db:5432 or ${{db.INTERNAL_URL}} only works for services that
 // have an instance on every node this service runs on.
 
+import { hostMentions } from "./hosts";
 import { parseEnv } from "./parse";
 import { formatReference, sharedTarget } from "./references";
 import { LineIndex } from "./source";
@@ -145,18 +146,11 @@ function checkLiteralAddresses(index: LineIndex, entry: EnvEntry, context: Analy
     if (!target.internalHost || target.kind !== "service") continue;
     const missing = missingNodes(context.self.nodes, target.nodes);
     if (missing.length === 0) continue;
-    const host = escapeRegExp(target.internalHost);
-    const pattern = new RegExp(`(^|@|//)(${host})(:\\d{1,5})?(?=$|[/?#\\s,;])|(^|[\\s,;=(])(${host}):(\\d{1,5})(?=$|[/?#\\s,;)])`, "gi");
-    for (const match of raw.matchAll(pattern)) {
-      const prefix = match[1] ?? match[4] ?? "";
-      const hostText = match[2] ?? match[5] ?? "";
-      const port = match[3] ?? (match[6] ? `:${match[6]}` : "");
-      // "^db$" alone only counts when it is the whole value.
-      if (prefix === "" && match.index === 0 && port === "" && hostText.length !== raw.trim().length) continue;
-      const from = start + (match.index ?? 0) + prefix.length;
-      const to = from + hostText.length + port.length;
+    for (const mention of hostMentions(raw, target.internalHost)) {
+      const from = start + mention.from;
+      const to = from + mention.host.length + mention.port.length;
       if (entry.references.some((r) => from < r.range.end && to > r.range.start)) continue;
-      out.push(crossNodeDiagnostic("address", target, missing, context, index.range(from, to), null, entry, `${hostText}${port}`));
+      out.push(crossNodeDiagnostic("address", target, missing, context, index.range(from, to), null, entry, `${mention.host}${mention.port}`));
     }
   }
   return out;
@@ -321,6 +315,3 @@ function diag(
   return { code, severity, message, detail, params, range, fixes };
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}

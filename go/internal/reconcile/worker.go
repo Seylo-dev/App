@@ -45,6 +45,11 @@ type worker struct {
 	last      *agentv1.ServiceStatus
 	// digests caches image id -> repo digest for Instance.image_digest.
 	digests map[string]string
+	// netsUnsure are containers that may still be on another project's
+	// network: a move to another project was interrupted (superseded
+	// during its drain, the agent stopped, a disconnect failed). Each pass
+	// takes them off every project network but their own (healNetworks).
+	netsUnsure map[string]bool
 
 	rollMu     sync.Mutex
 	rolling    bool
@@ -72,15 +77,16 @@ var errSuperseded = errors.New("a newer version of the service arrived")
 
 func newWorker(r *Runtime, id string) *worker {
 	return &worker{
-		r:         r,
-		id:        id,
-		log:       r.log.With("service_id", id),
-		kickCh:    make(chan struct{}, 1),
-		events:    make(chan docker.Event, 64),
-		requests:  make(chan workerRequest),
-		expected:  map[string]bool{},
-		restartAt: map[string]time.Time{},
-		watches:   map[string]*health.Watch{},
+		r:          r,
+		id:         id,
+		log:        r.log.With("service_id", id),
+		kickCh:     make(chan struct{}, 1),
+		events:     make(chan docker.Event, 64),
+		requests:   make(chan workerRequest),
+		expected:   map[string]bool{},
+		restartAt:  map[string]time.Time{},
+		watches:    map[string]*health.Watch{},
+		netsUnsure: map[string]bool{},
 	}
 }
 
@@ -167,6 +173,12 @@ func (w *worker) ensureRecord() {
 	}
 	w.rec, w.recLoaded = rec, true
 	w.r.o.Crash.Seed(w.id, rec.CrashStreak, rec.LastCrash)
+	w.publishReattached()
+	// The agent may have stopped between recording a move and leaving the
+	// old network: check every moved container once.
+	for id := range rec.Reattached {
+		w.netsUnsure[id] = true
+	}
 }
 
 // resetCrashes ends the crash streak on purpose (a new generation is
@@ -226,6 +238,7 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 		w.retryLater(5 * time.Second)
 		return false
 	}
+	w.pruneReattached(list)
 	if spec == nil {
 		if protectedInstances(list) {
 			// Protected (Panel project) containers are never removed for
@@ -282,10 +295,11 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 		w.retryLater(5 * time.Second)
 		return false
 	}
+	w.healNetworks(ctx, list)
 
 	var target, others []docker.Container
 	for _, c := range list {
-		if instanceHash(c.Labels, spec, hash) == hash {
+		if w.hashOf(c.ID, c.Labels, spec, hash) == hash {
 			target = append(target, c)
 		} else {
 			others = append(others, c)
@@ -307,6 +321,11 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 		w.message = "waiting for " + waiting + " to run"
 		w.phase = agentv1.ServicePhase_SERVICE_PHASE_PENDING
 		w.retryLater(3 * time.Second)
+		return false
+	}
+	if moved := w.reattachable(spec, hash, others); len(moved) > 0 {
+		// Only the project changed: the running containers change network.
+		w.reattach(ctx, spec, hash, moved, others)
 		return false
 	}
 	w.rollout(ctx, spec, hash, others)
@@ -407,7 +426,7 @@ func (w *worker) startStopped(ctx context.Context, spec *agentv1.ServiceSpec, li
 		if c.State == agentv1.InstanceState_INSTANCE_STATE_RUNNING || c.State == agentv1.InstanceState_INSTANCE_STATE_RESTARTING {
 			continue
 		}
-		if hash != "" && instanceHash(c.Labels, spec, hash) != hash {
+		if hash != "" && w.hashOf(c.ID, c.Labels, spec, hash) != hash {
 			continue
 		}
 		if at, ok := w.restartAt[c.ID]; ok {
@@ -440,7 +459,7 @@ func (w *worker) running(ctx context.Context, list []docker.Container) []liveIns
 		if err != nil || !d.Running {
 			continue
 		}
-		ip := d.Networks[docker.ProjectNetwork(c.Labels[docker.LabelProject])]
+		ip := d.Networks[docker.ProjectNetwork(w.r.projectOf(c.ID, c.Labels))]
 		out = append(out, liveInstance{id: d.ID, name: d.Name, ip: ip})
 		if !d.StartedAt.IsZero() {
 			w.r.o.Crash.Running(w.id, d.StartedAt)
@@ -543,6 +562,7 @@ func (w *worker) removeAll(ctx context.Context, list []docker.Container, grace t
 		})
 	}
 	wg.Wait()
+	w.forgetReattached(ids)
 }
 
 // teardown removes a service that left the desired state.
@@ -624,7 +644,7 @@ func (w *worker) crashed(ctx context.Context, ev docker.Event) {
 		return
 	}
 	hash := SpecHash(spec)
-	if instanceHash(ev.Labels, spec, hash) != hash {
+	if w.hashOf(ev.ContainerID, ev.Labels, spec, hash) != hash {
 		// An old generation died: the next pass cleans up.
 		w.kick()
 		return
@@ -738,7 +758,7 @@ func (w *worker) restart(ctx context.Context) error {
 	}
 	grace := spec.GetContainer().GetStopGracePeriod().AsDuration()
 	for _, c := range list {
-		if instanceHash(c.Labels, spec, hash) != hash {
+		if w.hashOf(c.ID, c.Labels, spec, hash) != hash {
 			continue
 		}
 		delete(w.restartAt, c.ID)
@@ -817,7 +837,7 @@ func (w *worker) probeRunning(ctx context.Context) {
 		return
 	}
 	changed := false
-	live := w.running(ctx, filterHash(list, spec, hash))
+	live := w.running(ctx, w.filterHash(list, spec, hash))
 	for _, inst := range live {
 		watch := w.watches[inst.id]
 		if watch == nil {
@@ -848,10 +868,10 @@ func (w *worker) probeRunning(ctx context.Context) {
 	}
 }
 
-func filterHash(list []docker.Container, spec *agentv1.ServiceSpec, hash string) []docker.Container {
+func (w *worker) filterHash(list []docker.Container, spec *agentv1.ServiceSpec, hash string) []docker.Container {
 	var out []docker.Container
 	for _, c := range list {
-		if instanceHash(c.Labels, spec, hash) == hash {
+		if w.hashOf(c.ID, c.Labels, spec, hash) == hash {
 			out = append(out, c)
 		}
 	}

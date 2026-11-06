@@ -23,7 +23,7 @@ packages/brand/           generated brand constants for TypeScript (@seylo/brand
 packages/proto/           generated protocol + frame codec for TypeScript (@seylo/proto)
 packages/ops/             operation registry: contracts, generators, typed client (@seylo/ops)
 packages/ui/              UI kit (shadcn-style components) and design tokens (@seylo/ui)
-packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics (@seylo/env-analyzer)
+packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, literal host names (`hostMentions`) (@seylo/env-analyzer)
 installer/                install.sh.tmpl + generated brand.env and install.sh (scripts/render-installer.sh)
 openapi.json              generated from the op registry (scripts/gen-openapi.ts)
 biome.json                TypeScript/CSS formatting and lint rules
@@ -66,7 +66,7 @@ packages use. "Built" means implemented and tested.
 | `panelapi` | Laptop CLI client for the panel op API (hand-written over the contracts, not generated), saved logins in `~/.config/seylo/config.json`, `SEYLO_PANEL_URL` + `SEYLO_TOKEN` for CI | Built (tested against a fake panel) |
 | `troubleshoot` | Redacted Markdown report + upload to `<site>/l`; exact secret values from the persisted desired state (`crash.SecretValues`) are stripped before the shape-based pass, and an upload prints which sections it contains | Built (uploads verified against the site API) |
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
-| `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping` | Built (`Runtime`) |
+| `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
@@ -493,8 +493,31 @@ local API, join and resume. The areas:
   back, exited with code N).
 - `services/<id>/runtime.json` is reconcile's memory across agent restarts
   (crash-policy halt, the crash streak and its latest crash, failed
-  generation, sleeping); it and file mounts are written with
+  generation, sleeping, containers re-attached to another project's
+  network); it and file mounts are written with
   `state.WriteFileAtomic` (fsync of the file and the folder).
+- A service moved to another project (`services.moveProject`) arrives as a
+  spec whose `project_id` changed. When that is the only change
+  (`SpecHash` with the old project equals the container's), reconcile
+  keeps the running containers: they join `seylo-p-<new project>` with the
+  same aliases, are health checked on the new address, the route switches
+  to that address and is verified through Traefik, and after
+  `Options.ReattachDrain` (2 s) they leave the old network; the route then
+  names them again. Their labels keep the old project and hash, so
+  `runtime.json` (`reattached`: container id -> project and hash) decides
+  their network, whether they serve the spec, `Resolve` and adoption after
+  an agent restart; the entry goes with the container. A failed health
+  check leaves them on the old network and fails the generation. A move
+  interrupted after it was recorded (a newer spec during the drain skips
+  the drain; an agent stop or crash, a failed disconnect) is finished by
+  the next pass: containers in doubt (every recorded one after a start)
+  leave every `seylo-p-*` network but their own (`healNetworks`), so the
+  old project stops reaching them and its network can be removed. Anything
+  else changed too (the new project's shared variables, for example) is an
+  ordinary rollout. Project networks any of our service containers still
+  use are never removed, and the proxy is not taken off them. Agents from
+  before this always roll new containers (recreate-mode services, such as
+  databases, restart once).
 - Containers of services the desired state does not name are removed only
   once a desired state with revision > 0 was accepted; with none (a fresh,
   wiped or damaged `desired.pb`) the agent keeps what it adopted running
@@ -1081,7 +1104,8 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Observe Docker access goes through `console/dockerapi`, not `d.Docker`: kept on purpose. It needs raw multiplexed log frames with `until` (partial lines, the restart cursor), separate stdout/stderr for non-TTY exec, exec inspect for the process sweep, destroy events and one-shot stats, none of which `docker.Engine` exposes; moving it would mean five new Engine methods and re-verifying logs capture, console, shell and metrics for no user-visible change. It only reads, attaches and execs | Two Docker clients in the agent (both scoped to our containers) |
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent) | Logged errors / reopen links |
 | GitHub: device-flow sign-in needs a GitHub OAuth App client id (`brand.oauthClientId` is a placeholder); the App manifest flow, installations, webhooks and polling are tested only against a mocked api.github.com; a public git repo build was not run | `githubAvailable: false`; GitHub ops answer UNAVAILABLE |
-| Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`) | CONFLICT `reason: compose` |
+| Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
+| Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`) | Works as tested |
 | Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of other nodes: a dead node's share is retried on the balancing node's own copies per request (GET/HEAD/OPTIONS only; a POST to a copy that just died fails once) | Covered by unit, fake-agent and VM package tests |
@@ -1503,11 +1527,87 @@ unless noted.
 ### Services and deploys
 
 Shared shapes live in `ops/services.ts` (`ServiceSummary`, `ServiceDetail`,
-`Source`, `HealthCheck`, `CrashPolicy`, `Resources`, `NodeRef`) and
+`Source`, `HealthCheck`, `CrashPolicy`, `Resources`, `NodeRef`, `DataCopy`,
+`MoveImpact`) and
 `ops/builds.ts` (`BuildSettings`, `RepoPath`); other op files import them,
 never the reverse. Permission actions: `projects.view|create|update|delete`,
 `services.view|create|update|delete|deploy|control|scale|move` (project or
 service scope), global `github.manage`, `git.manage`, `registries.manage`.
+
+Clones (`services.clonePreview`, `services.clone`, `services/clone.ts`):
+`services.view` on the source and `services.create` in the target project
+(checked in the handler, `move-project.ts` `requireTargetProject`). A clone
+copies the spec (source, build, container, ports, health check, crash
+policy, resources, deploy strategy, cron schedule), notes, template slug,
+replicas, volumes (names and paths) and a Box's or database's settings
+row, never domains, deployments, cron jobs, backups, alerts, uptime
+checks, deploy triggers, tunnels, exposures, maintenance pages or grants.
+What the caller cannot read stays behind: the `.env` and file mounts need
+`env.view` on the source, and since writing them needs it anywhere,
+`env.edit` in the target project (file mounts also `files.write` there;
+`clonePreview.env` says `hidden` or `noWrite`). The copied `.env` names the
+clone where it named the source itself (`impact.ts` `renameSelf`:
+`${{web.X}}` and `web` as a URL host or `host:port`; a value that is only
+the name is kept and listed), and passes `checkEnvReferences` in the target
+project; `clonePreview.references` lists the renamed ones (`renamed`) and
+what points elsewhere. The newest upload archive needs `files.read`, database
+logins come only with a data copy (`databases.credentials`; an empty clone
+gets new passwords for every `service_secrets` name), other volume data
+`files.read`, the main domain's access rules `domains.view` on the source
+and `domains.edit` in the target (they go onto a new automatic domain
+`<name>.<node wildcard>`). Push deploys and previews are off on the clone,
+a compose member becomes a standalone app (`member: null`), compose stacks
+and protected services are refused (CONFLICT `reason: compose|protected`).
+The clone is created `stopped` and never deployed: `serviceSpecFor` sends
+such a "parked" service as a stopped spec without an image (so its node
+keeps its folders), and `services.start` of a stopped, never-deployed
+service deploys it (needs `services.deploy`). Names default to
+`<name>-copy`, `-copy-2`, ... (40 characters, free in the target project).
+A data copy is a `service_copies` row and the slow job `services.cloneData`:
+it stops the source when asked (always for databases, which needs
+`services.control`), waits until its node reports it stopped, pipes every
+volume ExportVolume -> ImportVolume through the panel (`relayVolume` with
+`toServiceId`), records `bytesCopied`, and starts the source again
+(`sourceStopped` survives a panel restart, and the row a deleted clone).
+While a copy runs, `queueDeploy`, `services.start` and `boxes.open` refuse
+the clone and a source it stopped, and `services.move` (to another node)
+refuses the clone and any source it reads (CONFLICT `reason: copying`,
+`copies.ts`); a second copy from the same source is refused. `ServiceDetail.dataCopy` is the
+newest copy; the web shows it under the header.
+
+Moves to another project (`services.moveProjectImpact`,
+`services.moveProject`, `services/move-project.ts`, `impact.ts`): the op's
+permission is `services.move`, and the handler also needs every grantable
+service action on the service ("manage": the new project may give the
+caller more than they hold now) and `services.create` in the target. The
+impact lists services of the old project that reference the service
+(`${{name.VAR}}` or its host name typed into a value,
+`@seylo/env-analyzer` `hostMentions`), services of the new project that
+already use its name, its own references and host names that point into
+the old project (`unresolved` or `retargeted`), shared variables it stops
+receiving, grants on the service and pending invites naming it; names and
+keys only where the caller may see them. Blockers (CONFLICT, FORBIDDEN for
+`access`): `sameProject`, `protected`, `compose` (stacks and members),
+`preview` (a preview service), `previews` (open previews), `nameTaken`,
+`deploying`, `copying`, `access`, and `references`: a service of the new
+project references the name for more than an address (an own variable or
+a database credential, `isOpenVariable`), written while nothing had that
+name, so its writer was never checked; the same rule makes a clone skip or
+refuse such a name. With anything in the impact the op needs `confirm:
+true` (CONFLICT `reason: confirm`). The service's own `.env` must pass
+`checkEnvReferences` in the target. In one transaction the row's
+`project_id` changes, grants on the service are deleted (access follows
+the new project; a per-service grant would otherwise reach its shared
+variables) and invite entries naming it removed. A running service gets a
+deployment with trigger `move` and `deployments.project_move` (from, to,
+removed grants and invite entries): the live image and run settings again,
+no build, env sealed at start in the new project; the agent re-attaches or
+rolls. Until that deployment ships (queued or building), `serviceSpecFor`
+keeps the old project in the node's spec, so a recompile in between never
+moves the containers ahead of their deployment. Success logs "runs on its new project's network"; failure or cancel
+puts the project, grants and invite entries back (`project-move-restore.ts`
+from the engine's `finish`) unless the old project is gone or took the name.
+A stopped or never-deployed service just changes project (no deployment).
 `compose.preview` and `templates.preview` are POST mutations (bodies too
 large for a query string) that change nothing. Project collapse and order
 are per person (`project_prefs`). Global `templates.manage` gates custom
@@ -1529,6 +1629,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the services part of the desired state (the compiler calls it).
 - `services/delete.ts` `deleteServiceTree(deps, row)`: a service with its
   compose members, previews, grants, uploads and registry images.
+- `services/copies.ts` `assertNoActiveCopy(db, serviceId, { anySource })`:
+  CONFLICT while a clone's data copy writes the service's folders or reads
+  a source it stopped (`anySource`: or reads it at all).
+- `services/impact.ts`: `ownReferenceEffects`, `referrersOf`,
+  `sharedVariablesLost`, `plantedReferences`, `renameSelf` on plain project shapes
+  (`projectEnvOf(buildEnvGraph(...))`), and `moveImpact` for an op caller.
 - HTTP: `POST /api/hooks/github` (signature checked, GUID deduped),
   `POST /api/hooks/{gitlab,gitea,bitbucket}/<webhook id>` (git provider
   webhooks, see "Git providers"),
@@ -1686,7 +1792,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `editor/env-editor.tsx` (.env editor with env-analyzer markers, hovers,
   completions), `terminal/xterm-view.tsx` +
   `terminal/use-terminal-session.ts` (ticketed terminal sockets, one xterm
-  write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`). In
+  write per frame), `op-state.tsx` (`OpErrorNote`, `retryOp`),
+  `copy/` (the header's "..." `ServiceMenu` with the Clone and Move to
+  project dialogs, and `DataCopyNote` under the header while a clone's
+  data is copied). In
   `components/settings/`: `action-picker.tsx` (`ActionPicker`),
   `actions.ts` (labels from the `settingsActions` i18n section; a test
   fails when an action has no label), `grant-scopes.tsx` (`ScopePicker`),
@@ -1709,7 +1818,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `dockerhub.spec.ts` (Docker Hub search, tag picker, prefilled form and
   create, popular images, with `demo/dockerhub.ts`),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
-  data: saving a schedule, allowing and opening a host shell) and
+  data: saving a schedule, allowing and opening a host shell),
+  `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo
+  data, with the ops answered and recorded per test) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width and the accent check;
   screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`

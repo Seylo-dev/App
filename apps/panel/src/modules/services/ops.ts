@@ -11,6 +11,7 @@ import { queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
 import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
+import { assertNoActiveCopy } from "./copies";
 import { assertNameFree, assertNode, insertService, writeSpec } from "./insert";
 import { entryNodeOf, loadService, nameKey, projectServiceRows, type ServiceRow, toDetail, toSummaries, volumesOf } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
@@ -305,13 +306,25 @@ function members(ctx: OpContext, row: ServiceRow): ServiceRow[] {
 
 const start = implement(serviceOps.start, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
+  for (const m of members(ctx, row)) assertNoActiveCopy(ctx.db, m.id);
+  if (row.kind !== "compose" && !row.targetDeploymentId) {
+    // A clone starts stopped and never deployed: starting it is its first deploy.
+    if (!row.stopped) throw new OpError("CONFLICT", "This service was never deployed. Deploy it first.");
+    if (!ctx.access.can("services.deploy", { type: "service", id: row.id })) {
+      throw new OpError("FORBIDDEN", "Starting a service for the first time deploys it, which needs the services.deploy permission.", {
+        action: "services.deploy",
+      });
+    }
+    queueDeploy(ctx, { serviceId: row.id, trigger: "manual", actor: actorOf(ctx), triggeredBy: userOf(ctx.principal)?.id ?? null });
+    publishService(ctx, row);
+    return {};
+  }
   for (const m of members(ctx, row)) {
     if (!m.targetDeploymentId) continue;
     ctx.db.update(services).set({ stopped: false }).where(eq(services.id, m.id)).run();
     ctx.agents.desired.markDirty({ serviceId: m.id });
     publishService(ctx, m);
   }
-  if (row.kind !== "compose" && !row.targetDeploymentId) throw new OpError("CONFLICT", "This service was never deployed. Deploy it first.");
   publishService(ctx, row);
   return {};
 });

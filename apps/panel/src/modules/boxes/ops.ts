@@ -13,6 +13,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { edgeToolLink } from "../databases/edge-ticket";
 import { queueDeploy } from "../deployments/queue";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
+import { assertNoActiveCopy } from "../services/copies";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
 import { defaultContainer } from "../services/spec";
@@ -95,6 +96,8 @@ export const get = implement(boxOps.get, (input, ctx) => toBox(ctx, input.servic
 export const open = implement(boxOps.open, (input, ctx) => {
   const box = toBox(ctx, input.serviceId);
   const service = getService(ctx.db, input.serviceId);
+  // Opening starts it: not while a clone's data copy writes its folders or reads them stopped.
+  assertNoActiveCopy(ctx.db, service.id);
   const node = serviceNodes(ctx.db, input.serviceId)[0];
   if (!node) throw new OpError("CONFLICT", "The Box is not placed on a node.", { reason: "noNode" });
   const link = edgeToolLink(ctx, "box", box.serviceId, node, userOf(ctx.principal)?.id ?? "");
