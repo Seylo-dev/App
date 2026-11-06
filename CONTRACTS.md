@@ -66,7 +66,7 @@ packages use. "Built" means implemented and tested.
 | `panelapi` | Laptop CLI client for the panel op API (hand-written over the contracts, not generated), saved logins in `~/.config/seylo/config.json`, `SEYLO_PANEL_URL` + `SEYLO_TOKEN` for CI | Built (tested against a fake panel) |
 | `troubleshoot` | Redacted Markdown report + upload to `<site>/l`; exact secret values from the persisted desired state (`crash.SecretValues`) are stripped before the shape-based pass, and an upload prints which sections it contains | Built (uploads verified against the site API) |
 | `state` | `FileDesiredStore`, `DesiredSync` (revision rules, save then publish), `MemoryStore` (actual state, epoch/seq; in memory by design), bounded `FileOutbox`, `Reporter`, `DesiredFeed`, `WriteFileAtomic` | Built |
-| `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`) |
+| `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
@@ -469,7 +469,12 @@ local API, join and resume. The areas:
   `runtime.json` (`reattached`: container id -> project and hash) decides
   their network, whether they serve the spec, `Resolve` and adoption after
   an agent restart; the entry goes with the container. A failed health
-  check leaves them on the old network and fails the generation. Anything
+  check leaves them on the old network and fails the generation. A move
+  interrupted after it was recorded (a newer spec during the drain skips
+  the drain; an agent stop or crash, a failed disconnect) is finished by
+  the next pass: containers in doubt (every recorded one after a start)
+  leave every `seylo-p-*` network but their own (`healNetworks`), so the
+  old project stops reaching them and its network can be removed. Anything
   else changed too (the new project's shared variables, for example) is an
   ordinary rollout. Project networks any of our service containers still
   use are never removed, and the proxy is not taken off them. Agents from
@@ -932,7 +937,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent) | Logged errors / reopen links |
 | GitHub: device-flow sign-in needs a GitHub OAuth App client id (`brand.oauthClientId` is a placeholder); the App manifest flow, installations, webhooks and polling are tested only against a mocked api.github.com; a public git repo build was not run | `githubAvailable: false`; GitHub ops answer UNAVAILABLE |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
-| Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases | CONFLICT `reason: previews`; the dialog lists references |
+| Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`) | Works as tested |
 | Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of other nodes: a dead node's share is retried on the balancing node's own copies per request (GET/HEAD/OPTIONS only; a POST to a copy that just died fails once) | Covered by unit, fake-agent and VM package tests |
@@ -1359,8 +1364,14 @@ replicas, volumes (names and paths) and a Box's or database's settings
 row, never domains, deployments, cron jobs, backups, alerts, uptime
 checks, deploy triggers, tunnels, exposures, maintenance pages or grants.
 What the caller cannot read stays behind: the `.env` and file mounts need
-`env.view` on the source (and the copied `.env` passes `checkEnvReferences`
-in the target project), the newest upload archive `files.read`, database
+`env.view` on the source, and since writing them needs it anywhere,
+`env.edit` in the target project (file mounts also `files.write` there;
+`clonePreview.env` says `hidden` or `noWrite`). The copied `.env` names the
+clone where it named the source itself (`impact.ts` `renameSelf`:
+`${{web.X}}` and `web` as a URL host or `host:port`; a value that is only
+the name is kept and listed), and passes `checkEnvReferences` in the target
+project; `clonePreview.references` lists the renamed ones (`renamed`) and
+what points elsewhere. The newest upload archive needs `files.read`, database
 logins come only with a data copy (`databases.credentials`; an empty clone
 gets new passwords for every `service_secrets` name), other volume data
 `files.read`, the main domain's access rules `domains.view` on the source
@@ -1379,9 +1390,10 @@ it stops the source when asked (always for databases, which needs
 volume ExportVolume -> ImportVolume through the panel (`relayVolume` with
 `toServiceId`), records `bytesCopied`, and starts the source again
 (`sourceStopped` survives a panel restart, and the row a deleted clone).
-While a copy runs, `queueDeploy` and `services.start` refuse the clone and
-a source it stopped (CONFLICT `reason: copying`, `copies.ts`), and a second
-copy from the same source is refused. `ServiceDetail.dataCopy` is the
+While a copy runs, `queueDeploy`, `services.start` and `boxes.open` refuse
+the clone and a source it stopped, and `services.move` (to another node)
+refuses the clone and any source it reads (CONFLICT `reason: copying`,
+`copies.ts`); a second copy from the same source is refused. `ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
 Moves to another project (`services.moveProjectImpact`,
@@ -1411,7 +1423,9 @@ variables) and invite entries naming it removed. A running service gets a
 deployment with trigger `move` and `deployments.project_move` (from, to,
 removed grants and invite entries): the live image and run settings again,
 no build, env sealed at start in the new project; the agent re-attaches or
-rolls. Success logs "runs on its new project's network"; failure or cancel
+rolls. Until that deployment ships (queued or building), `serviceSpecFor`
+keeps the old project in the node's spec, so a recompile in between never
+moves the containers ahead of their deployment. Success logs "runs on its new project's network"; failure or cancel
 puts the project, grants and invite entries back (`project-move-restore.ts`
 from the engine's `finish`) unless the old project is gone or took the name.
 A stopped or never-deployed service just changes project (no deployment).
@@ -1436,10 +1450,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the services part of the desired state (the compiler calls it).
 - `services/delete.ts` `deleteServiceTree(deps, row)`: a service with its
   compose members, previews, grants, uploads and registry images.
-- `services/copies.ts` `assertNoActiveCopy(db, serviceId)`: CONFLICT while a
-  clone's data copy writes the service's folders or reads a source it stopped.
+- `services/copies.ts` `assertNoActiveCopy(db, serviceId, { anySource })`:
+  CONFLICT while a clone's data copy writes the service's folders or reads
+  a source it stopped (`anySource`: or reads it at all).
 - `services/impact.ts`: `ownReferenceEffects`, `referrersOf`,
-  `sharedVariablesLost`, `plantedReferences` on plain project shapes
+  `sharedVariablesLost`, `plantedReferences`, `renameSelf` on plain project shapes
   (`projectEnvOf(buildEnvGraph(...))`), and `moveImpact` for an op caller.
 - HTTP: `POST /api/hooks/github` (signature checked, GUID deduped),
   `POST /api/hooks/deploy/<token>` (deploy trigger URLs),
