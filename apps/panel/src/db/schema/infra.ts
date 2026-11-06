@@ -3,7 +3,7 @@
 
 import { blob, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createdAt, id, json, timestamp, updatedAt } from "./columns";
-import { users } from "./identity";
+import { type Role, users } from "./identity";
 
 /**
  * When and what a node cleans up by itself (NodeSettings.cleanup). Null on
@@ -188,3 +188,25 @@ export const cleanupRuns = sqliteTable(
   },
   (t) => [index("cleanup_runs_node_idx").on(t.nodeId, t.startedAt), uniqueIndex("cleanup_runs_node_run_unique").on(t.nodeId, t.runId)],
 );
+
+/**
+ * Open host shells (modules/hostShell), so the close of one that a panel
+ * restart or crash ended is still recorded: the next start writes its
+ * hostShell.close and deletes the row. last_seen_at moves with the 30 s
+ * recheck. No foreign keys: the record must survive the node or the person
+ * being deleted meanwhile.
+ */
+export const hostShellSessions = sqliteTable("host_shell_sessions", {
+  id: text("id").primaryKey(),
+  nodeId: text("node_id").notNull(),
+  nodeName: text("node_name").notNull(),
+  userId: text("user_id").notNull(),
+  authSessionId: text("auth_session_id").notNull(),
+  openedBy: text("opened_by").notNull(),
+  email: text("email").notNull(),
+  role: text("role").$type<Role>().notNull(),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  openedAt: timestamp("opened_at").notNull(),
+  lastSeenAt: timestamp("last_seen_at").notNull(),
+});

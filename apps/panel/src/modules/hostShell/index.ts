@@ -6,7 +6,9 @@
 //
 // Every open is the hostShell.open audit entry; every close writes
 // hostShell.close with who, the node, how long it was open and why it
-// ended. Opening one raises a security_change alert for the owner.
+// ended (also for shells the node refused, and on the next start for those
+// a panel restart ended). Once the agent accepted the shell it is listed in
+// hostShell.status and raises a security_change alert for the owner.
 
 import { hostShell, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
@@ -16,12 +18,21 @@ import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { isSameOrigin } from "../../http/origin";
 import { newId } from "../../ids";
-import { writeAuditEvent } from "../../ops/audit";
 import { implement, type OpContext } from "../../ops/implement";
 import { badTicketCloseCode } from "../logs/follow";
 import { defineModule } from "../module";
 import { startTerminal } from "../terminals";
-import { hostShellsFor, idleTimeoutSeconds, maxSessionsPerNode, recheckMs, refusal } from "./sessions";
+import {
+  auditClose,
+  closeLeftovers,
+  hostShellsFor,
+  idleTimeoutSeconds,
+  maxSessionsPerNode,
+  openRows,
+  recheckMs,
+  refusal,
+  type ShellRecord,
+} from "./sessions";
 
 export const hostShellSocketPath = "/api/streams/host-shell";
 
@@ -158,37 +169,66 @@ function hostShellHttp(deps: Deps) {
     if (why) return refuse(why);
     if (store.inUse(ticket.nodeId) >= maxSessionsPerNode) return refuse(`${maxSessionsPerNode} host shells are open on this node already.`);
 
-    const id = newId();
-    const openedAt = new Date();
-    let closeReason: string | null = null;
-    let recheck: ReturnType<typeof setInterval> | undefined;
-    const principal = {
-      type: "session" as const,
-      sessionId: ticket.authSessionId,
-      user: { id: ticket.userId, email: ticket.email, name: ticket.openedBy, role: ticket.role },
+    const shell: ShellRecord = {
+      id: newId(),
+      nodeId: ticket.nodeId,
+      nodeName: ticket.nodeName,
+      userId: ticket.userId,
+      authSessionId: ticket.authSessionId,
+      openedBy: ticket.openedBy,
+      email: ticket.email,
+      role: ticket.role,
+      ip: ticket.ip,
+      userAgent: ticket.userAgent,
+      openedAt: new Date(),
     };
-    const finished = (reason: string) => {
+    const { id } = shell;
+    let closeReason: string | null = null;
+    let accepted = false;
+    let recheck: ReturnType<typeof setInterval> | undefined;
+    // The agent answered: the shell runs. Only now is it listed and the
+    // owner alerted (the node may still refuse: config.yml no_host_shell,
+    // its own cap, a setting it has not synced yet).
+    const onReady = () => {
+      accepted = true;
+      if (!store.markReady(id)) return;
+      invalidate(deps, ticket.nodeId);
+      deps.alerts.raise({
+        event: "security_change",
+        key: `host-shell:${ticket.nodeId}:${id}`,
+        title: `${ticket.openedBy} opened a root shell on ${ticket.nodeName}`,
+        message: `If this was not ${ticket.openedBy}, turn host shells off for ${ticket.nodeName} in its Shell tab and change the password.${ticket.ip ? ` From ${ticket.ip}.` : ""}`,
+        nodeId: ticket.nodeId,
+        link: `/nodes?node=${ticket.nodeId}&view=shell`,
+      });
+    };
+    const finished = (reason: string, note?: string) => {
       clearInterval(recheck);
       store.remove(id);
+      openRows.remove(deps.db, id);
       live.delete(ws.id);
-      const durationMs = Date.now() - openedAt.getTime();
-      writeAuditEvent(deps.db, {
-        eventId: "hostShell.close",
-        principal,
-        input: {
-          nodeId: ticket.nodeId,
-          nodeName: ticket.nodeName,
-          sessionId: id,
-          openedAt: openedAt.toISOString(),
-          durationSeconds: Math.round(durationMs / 1000),
-          reason: closeReason ?? reason,
-        },
-        ip: ticket.ip,
-        userAgent: ticket.userAgent,
-        durationMs,
-      });
-      invalidate(deps, ticket.nodeId);
+      let why = closeReason ?? reason;
+      if (!accepted && closeReason === null) {
+        // A stream that failed or ended before the agent answered is a refusal.
+        if (reason === "closed" || reason === "ended") why = `refused by the node: ${note ?? "the stream ended"}`;
+        else if (reason === "failed") why = `the shell could not start: ${note ?? "unknown error"}`;
+      }
+      auditClose(deps.db, shell, why);
+      if (accepted) invalidate(deps, ticket.nodeId);
     };
+    // Counted against the cap at once, recorded for a restart, listed on onReady.
+    store.add({
+      id,
+      nodeId: ticket.nodeId,
+      nodeName: ticket.nodeName,
+      userId: ticket.userId,
+      authSessionId: ticket.authSessionId,
+      openedBy: ticket.openedBy,
+      openedAt: shell.openedAt,
+      ready: false,
+      close: (reason) => close(reason),
+    });
+    openRows.add(deps.db, shell);
     let session: ReturnType<typeof startTerminal>;
     try {
       session = startTerminal(
@@ -201,7 +241,8 @@ function hostShellHttp(deps: Deps) {
           generation: 0,
           tail: 0,
           command: [],
-          user: "root",
+          // The agent says which user in its info message (root on an installed node).
+          user: "",
           databaseClient: false,
           columns: ticket.columns,
           rows: ticket.rows,
@@ -214,10 +255,12 @@ function hostShellHttp(deps: Deps) {
           sendControl: (message) => ws.send(JSON.stringify(message)),
           close: (code, reason) => ws.close(code, reason),
         },
-        { onEnd: finished },
+        { onReady, onEnd: finished },
       );
     } catch (error) {
-      refuse(error instanceof OpError ? error.message : "The shell could not start.");
+      const message = error instanceof OpError ? error.message : "The shell could not start.";
+      finished("failed", message);
+      refuse(message);
       return;
     }
     const close = (reason: string) => {
@@ -226,31 +269,13 @@ function hostShellHttp(deps: Deps) {
       session.stop();
       quietly(() => ws.close(1000, "closed"));
     };
-    store.add({
-      id,
-      nodeId: ticket.nodeId,
-      nodeName: ticket.nodeName,
-      userId: ticket.userId,
-      authSessionId: ticket.authSessionId,
-      openedBy: ticket.openedBy,
-      openedAt,
-      close,
-    });
     live.set(ws.id, session);
     recheck = setInterval(() => {
       const no = refusal(deps.db, ticket);
       if (no) close(no);
+      else openRows.seen(deps.db, id);
     }, recheckMs);
     (recheck as { unref?: () => void }).unref?.();
-    invalidate(deps, ticket.nodeId);
-    deps.alerts.raise({
-      event: "security_change",
-      key: `host-shell:${ticket.nodeId}:${id}`,
-      title: `${ticket.openedBy} opened a root shell on ${ticket.nodeName}`,
-      message: `If this was not ${ticket.openedBy}, turn host shells off for ${ticket.nodeName} in its Shell tab and change the password.${ticket.ip ? ` From ${ticket.ip}.` : ""}`,
-      nodeId: ticket.nodeId,
-      link: `/nodes?node=${ticket.nodeId}&view=shell`,
-    });
   };
 
   return new Elysia({ name: "host-shell-socket" }).ws(hostShellSocketPath, {
@@ -278,6 +303,9 @@ function hostShellHttp(deps: Deps) {
 }
 
 function start(deps: Deps) {
+  // Shells the last run of the panel ended without recording the close.
+  const left = closeLeftovers(deps.db);
+  if (left > 0) deps.logger.info({ count: left }, "recorded the close of host shells a panel restart ended");
   // NodeSettings.host_shell: the agent refuses host shells while it is off.
   deps.agents.desired.contribute({
     name: "hostShell",

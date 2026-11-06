@@ -134,8 +134,19 @@ interface Session {
 }
 
 export interface TerminalHooks {
-  /** Called once when the session ends, with why ("exited", "idle", "ended", "closed", "left"). */
-  onEnd?(reason: string): void;
+  /**
+   * Called once when the agent's stream first answers: with its info message
+   * (host shells and current agents send it first), or null when older
+   * agents start with output. Never for a stream the agent refused; "ready"
+   * on the socket may go out before this (see readyWaitMs).
+   */
+  onReady?(info: { user: string; workingDir: string } | null): void;
+  /**
+   * Called once when the session ends, with why ("exited", "idle", "ended",
+   * "closed", "left") and the note the viewer got, if any (for "closed"
+   * after a stream error: the agent's message).
+   */
+  onEnd?(reason: string, note?: string): void;
 }
 
 /** Starts the agent stream for a redeemed ticket and pumps it to the socket. */
@@ -147,15 +158,16 @@ export function startTerminal(
 ): Session {
   let idle: ReturnType<typeof setTimeout> | undefined;
   let ended = false;
-  const finish = (reason: string) => {
+  let answered = false;
+  const finish = (reason: string, note?: string) => {
     ended = true;
     clearTimeout(idle);
-    hooks.onEnd?.(reason);
+    hooks.onEnd?.(reason, note);
   };
   const end = (code: number, reason: string, message?: terminals.TerminalServerMessage) => {
     if (ended) return;
     ready();
-    finish(reason);
+    finish(reason, message?.type === "closed" ? message.reason : undefined);
     if (message) socket.sendControl(message);
     socket.close(code, reason);
   };
@@ -224,6 +236,11 @@ export function startTerminal(
     try {
       for await (const res of stream) {
         touch();
+        if (!answered && !ended) {
+          answered = true;
+          const info = res.message.case === "info" ? res.message.value : null;
+          hooks.onReady?.(info ? { user: info.user, workingDir: info.workingDir } : null);
+        }
         if (res.message.case === "info") {
           const info = res.message.value;
           ready({

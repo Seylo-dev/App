@@ -1059,7 +1059,8 @@ func (*HostShellResponse_Info) isHostShellResponse_Message() {}
 
 type HostShellInfo struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Always "root".
+	// The agent's user, whose login shell this is (root on an installed
+	// node).
 	User string `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	// The shell's home folder, for example "/root".
 	WorkingDir string `protobuf:"bytes,2,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`

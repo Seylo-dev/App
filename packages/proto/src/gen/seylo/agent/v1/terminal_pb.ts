@@ -477,7 +477,8 @@ export const HostShellResponseSchema: GenMessage<HostShellResponse> = /*@__PURE_
  */
 export type HostShellInfo = Message<"seylo.agent.v1.HostShellInfo"> & {
   /**
-   * Always "root".
+   * The agent's user, whose login shell this is (root on an installed
+   * node).
    *
    * @generated from field: string user = 1;
    */

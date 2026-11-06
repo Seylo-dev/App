@@ -7,10 +7,12 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { allOps, hostShell } from "@seylo/ops";
+import { StatusCode } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
-import { alerts, auditLog, sessions } from "../src/db/schema";
+import { alerts, auditLog, hostShellSessions, sessions } from "../src/db/schema";
+import { closeLeftovers, restartReason } from "../src/modules/hostShell/sessions";
 import { startTerminal } from "../src/modules/terminals";
-import type { FakeAgent } from "./fake-agent";
+import { type FakeAgent, FakeStatus } from "./fake-agent";
 import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
 import { joinAgent, listen } from "./hub-helpers";
 
@@ -180,6 +182,14 @@ describe("opening a host shell", () => {
     const status = await ok(callOp(panel, hostShell.status, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
     expect(status).toMatchObject({ enabled: true, available: true, canOpen: true, canEnable: true, maxSessions: 2 });
     expect(status.sessions).toHaveLength(1);
+    // Recorded while open, for the close after a panel restart.
+    expect(
+      panel.deps.db
+        .select()
+        .from(hostShellSessions)
+        .all()
+        .map((r) => r.id),
+    ).toEqual([status.sessions[0]?.id ?? ""]);
 
     const opened = panel.deps.db
       .select()
@@ -200,6 +210,7 @@ describe("opening a host shell", () => {
     const closed = close?.input as { nodeId: string; reason: string; durationSeconds: number } | undefined;
     expect(closed).toMatchObject({ nodeId: agent.nodeId, reason: "exited" });
     expect(typeof closed?.durationSeconds).toBe("number");
+    expect(panel.deps.db.select().from(hostShellSessions).all()).toHaveLength(0);
     const openAudit = panel.deps.db
       .select()
       .from(auditLog)
@@ -239,6 +250,114 @@ describe("opening a host shell", () => {
     }
     const status = await ok(callOp(panel, hostShell.status, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
     expect(status).toMatchObject({ enabled: false, sessions: [] });
+  });
+
+  test("a shell the node refuses raises no alert, is never listed and is audited as refused", async () => {
+    const agent = await join();
+    await ok(callOp(panel, hostShell.setEnabled, { nodeId: agent.nodeId, enabled: true }, { cookie: owner.cookie }));
+    agent.handleStream("HostShell", async () => {
+      throw new FakeStatus(
+        StatusCode.PERMISSION_DENIED,
+        "host shells are turned off on this node: this node's config.yml sets no_host_shell",
+      );
+    });
+    const ticket = await ok(callOp(panel, hostShell.open, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
+    const c = connect(ticket.url);
+    await until("refusal", () => c.closed() !== null);
+    expect(c.control.at(-1)).toMatchObject({ type: "closed", reason: expect.stringContaining("no_host_shell") });
+    await until(
+      "the close audit",
+      () => panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).all().length === 1,
+    );
+    const close = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).get();
+    expect((close?.input as { reason?: string } | undefined)?.reason).toBe(
+      "refused by the node: host shells are turned off on this node: this node's config.yml sets no_host_shell",
+    );
+    const opened = panel.deps.db
+      .select()
+      .from(alerts)
+      .where(eq(alerts.event, "security_change"))
+      .all()
+      .filter((a) => a.title.includes("opened a root shell"));
+    expect(opened).toHaveLength(0);
+    const status = await ok(callOp(panel, hostShell.status, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
+    expect(status.sessions).toEqual([]);
+    expect(panel.deps.db.select().from(hostShellSessions).all()).toHaveLength(0);
+  });
+
+  test("a shell is listed and alerted only once the agent answered", async () => {
+    const agent = await join();
+    await ok(callOp(panel, hostShell.setEnabled, { nodeId: agent.nodeId, enabled: true }, { cookie: owner.cookie }));
+    let answer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    agent.handleStream("HostShell", async (_first, stream) => {
+      await answered;
+      await stream.send({ message: { case: "info", value: { user: "deploy", workingDir: "/home/deploy", hostname: "edge-1" } } });
+      while (await stream.recv()) {
+        // until the panel hangs up
+      }
+    });
+    const ticket = await ok(callOp(panel, hostShell.open, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
+    const c = connect(ticket.url);
+    await c.opened;
+    await until("the agent stream", () => agent.requests("HostShell").length === 1);
+    const alerted = () =>
+      panel.deps.db
+        .select()
+        .from(alerts)
+        .where(eq(alerts.event, "security_change"))
+        .all()
+        .filter((a) => a.title.includes("opened a root shell")).length;
+    const listed = async () =>
+      (await ok(callOp(panel, hostShell.status, { nodeId: agent.nodeId }, { cookie: owner.cookie }))).sessions.length;
+    expect(await listed()).toBe(0);
+    expect(alerted()).toBe(0);
+    // Not listed yet, but counted: the cap holds while the agent answers.
+    expect(panel.deps.db.select().from(hostShellSessions).all()).toHaveLength(1);
+
+    answer();
+    await until("ready", () => c.control.some((m) => m.type === "ready"));
+    // The label follows the agent's user, not an assumed root.
+    expect(c.control.find((m) => m.type === "ready")).toMatchObject({ user: "deploy", workdir: "/home/deploy" });
+    await until("the alert", () => alerted() === 1);
+    expect(await listed()).toBe(1);
+  });
+
+  test("the next start records the close of shells a panel restart ended", async () => {
+    const openedAt = new Date(Date.now() - 10 * 60_000);
+    const lastSeenAt = new Date(Date.now() - 7 * 60_000);
+    panel.deps.db
+      .insert(hostShellSessions)
+      .values({
+        id: "hs-left",
+        nodeId: "node-gone",
+        nodeName: "edge-9",
+        userId: owner.user.id,
+        authSessionId: "s-1",
+        openedBy: "owner",
+        email: owner.user.email,
+        role: "owner",
+        ip: "203.0.113.9",
+        userAgent: "test",
+        openedAt,
+        lastSeenAt,
+      })
+      .run();
+    expect(closeLeftovers(panel.deps.db)).toBe(1);
+    expect(panel.deps.db.select().from(hostShellSessions).all()).toHaveLength(0);
+    const close = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "hostShell.close")).get();
+    expect(close).toMatchObject({ actorId: owner.user.id, ip: "203.0.113.9" });
+    expect(close?.input).toMatchObject({
+      nodeId: "node-gone",
+      nodeName: "edge-9",
+      sessionId: "hs-left",
+      reason: restartReason,
+      durationSeconds: 180,
+    });
+    // Once only.
+    expect(closeLeftovers(panel.deps.db)).toBe(0);
   });
 
   test("a session ends when its sign-in ends", async () => {

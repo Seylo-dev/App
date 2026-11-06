@@ -130,7 +130,8 @@ message HostShellResponse {
 }
 
 message HostShellInfo {
-  // Always "root".
+  // The agent's user, whose login shell this is (root on an installed
+  // node).
   string user = 1;
   // The shell's home folder, for example "/root".
   string working_dir = 2;
