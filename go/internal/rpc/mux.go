@@ -68,17 +68,42 @@ func (h *Handler) FullName() string { return MethodName(h.Method) }
 //
 // Methods that are not registered answer UNIMPLEMENTED, and a capability
 // is advertised only when every method that carries it is registered.
+// Capabilities that name a behaviour instead of methods are added with
+// Advertise.
 type Mux struct {
 	service protoreflect.ServiceDescriptor
 
 	mu       sync.RWMutex
 	handlers map[string]*Handler // by full method name
+	features map[string]bool     // Advertise
 	err      error
 }
 
 // NewMux returns an empty registry for service.
 func NewMux(service protoreflect.ServiceDescriptor) *Mux {
-	return &Mux{service: service, handlers: map[string]*Handler{}}
+	return &Mux{service: service, handlers: map[string]*Handler{}, features: map[string]bool{}}
+}
+
+// Advertise adds a capability that no method carries: one that says this
+// side handles something new in messages it already takes (for example
+// "database.engines.v2", new DatabaseEngine values in ServiceSpec). The
+// area that implements it calls Advertise while wiring. Naming a method
+// capability here is a registration mistake: those come from handlers.
+func (m *Mux) Advertise(capability string) {
+	if capability == "" {
+		m.fail("empty capability")
+		return
+	}
+	methods := m.service.Methods()
+	for i := range methods.Len() {
+		if MethodCapability(methods.Get(i)) == capability {
+			m.fail("%s is a method capability; register its methods instead", capability)
+			return
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.features[capability] = true
 }
 
 // NewAgentMux returns an empty AgentService registry.
@@ -141,7 +166,8 @@ func (m *Mux) Registered() []string {
 }
 
 // Capabilities returns, sorted, every capability whose methods are all
-// registered. This is what the agent advertises in NodeFacts.
+// registered, plus the advertised ones. This is what the agent advertises
+// in NodeFacts.
 func (m *Mux) Capabilities() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -160,11 +186,14 @@ func (m *Mux) Capabilities() []string {
 			complete[capName] = registered
 		}
 	}
-	out := make([]string, 0, len(complete))
+	out := make([]string, 0, len(complete)+len(m.features))
 	for capName, ok := range complete {
 		if ok {
 			out = append(out, capName)
 		}
+	}
+	for capName := range m.features {
+		out = append(out, capName)
 	}
 	slices.Sort(out)
 	return out

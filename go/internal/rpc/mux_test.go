@@ -136,3 +136,27 @@ func TestLinkDisconnected(t *testing.T) {
 		t.Fatalf("MethodRegistryTunnel = %q", MethodRegistryTunnel)
 	}
 }
+
+func TestMuxAdvertise(t *testing.T) {
+	m := NewAgentMux()
+	m.Advertise("database.engines.v2")
+	HandleUnary(m, "RunCronNow", func(context.Context, *agentv1.RunCronNowRequest) (*agentv1.RunCronNowResponse, error) {
+		return nil, nil
+	})
+	if got := m.Capabilities(); !slices.Equal(got, []string{"cron.run.v1", "database.engines.v2"}) {
+		t.Fatalf("Capabilities = %v", got)
+	}
+	if m.Err() != nil {
+		t.Fatal(m.Err())
+	}
+	// A method capability cannot be advertised without its methods.
+	m.Advertise("metrics.read.v1")
+	if !errors.Is(m.Err(), ErrRegistration) || slices.Contains(m.Capabilities(), "metrics.read.v1") {
+		t.Fatalf("Err = %v, Capabilities = %v", m.Err(), m.Capabilities())
+	}
+	empty := NewAgentMux()
+	empty.Advertise("")
+	if !errors.Is(empty.Err(), ErrRegistration) {
+		t.Fatal("empty capability accepted")
+	}
+}
