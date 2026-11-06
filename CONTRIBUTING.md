@@ -94,6 +94,9 @@ scripts/dev/vm-gotest.sh ./internal/agent -run TestITShellPTY -v
 scripts/dev/vm.sh 'docker ps'                            # any command as root in the VM
 ```
 
+`scripts/dev/it-gitea.sh` runs the git provider tests against a real Gitea
+in the same VM (a throwaway container, removed afterwards).
+
 Use a VM you keep for this only: the tests create and remove containers,
 networks and volumes. `SEYLO_VM_ARCH=amd64` builds for an x86-64 VM.
 `vm-gotest.sh` passes every `SEYLO_IT_*` variable into the VM; two tests
