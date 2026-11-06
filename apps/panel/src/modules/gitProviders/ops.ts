@@ -25,6 +25,16 @@ function canManage(ctx: OpContext): boolean {
   return ctx.access.can("gitProviders.manage");
 }
 
+/**
+ * The address a webhook may point at when the panel has no domain: the one
+ * the caller reached the panel at, but only for people who manage
+ * connections. Anyone else could name any host in the Host header and have
+ * the provider send the repository's pushes (and the hook's secret) there.
+ */
+function hookOrigin(ctx: OpContext): string | null {
+  return canManage(ctx) ? (ctx.origin ?? null) : null;
+}
+
 function publishList(ctx: OpContext): void {
   ctx.live.publish("panel", { type: "invalidate", ops: [contracts.list.id] });
 }
@@ -217,7 +227,7 @@ const connectRepo = implement(contracts.connectRepo, async (input, ctx) => {
     build: { ...spec.build, contextPath: input.rootDir ?? spec.build.contextPath },
   }));
   ctx.db.delete(sourcePolls).where(eq(sourcePolls.serviceId, svc.id)).run();
-  await ensureHook(ctx, { serviceId: svc.id, provider, repo: input.repo, origin: ctx.origin });
+  await ensureHook(ctx, { serviceId: svc.id, provider, repo: input.repo, origin: hookOrigin(ctx) });
   ctx.live.publish(`service:${svc.id}`, { type: "invalidate", ops: [contracts.webhook.id] });
   return toDetail(ctx.db, ctx.agents, next);
 });
@@ -245,7 +255,7 @@ const repairWebhook = implement(contracts.repairWebhook, async (input, ctx) => {
   const source = readSpec(svc.spec).source;
   if (source.type !== "provider") throw new OpError("CONFLICT", "The service's source is not a GitLab, Gitea or Bitbucket repository.");
   const provider = loadProvider(ctx.db, source.providerId);
-  const row = await ensureHook(ctx, { serviceId: svc.id, provider, repo: source.repo, origin: ctx.origin, force: true });
+  const row = await ensureHook(ctx, { serviceId: svc.id, provider, repo: source.repo, origin: hookOrigin(ctx), force: true });
   ctx.live.publish(`service:${svc.id}`, { type: "invalidate", ops: [contracts.webhook.id] });
   return toWebhook(ctx, svc.id, row);
 });

@@ -3,7 +3,7 @@
 // app passwords sign in with the account's user name, for the API and git.
 
 import type { ChangedFiles, ClientConfig, CommitInfo, CommitStatusState, MergeRequestInfo, ProviderClient, RepoInfo } from "./client";
-import { type ApiResponse, type ApiTarget, apiRequest, encodePath, ProviderApiError } from "./http";
+import { type ApiResponse, type ApiTarget, apiRequest, encodePath, encodeSegment, ProviderApiError } from "./http";
 import { bitbucketApi, bitbucketWeb } from "./rows";
 
 interface BitbucketRepo {
@@ -70,7 +70,7 @@ export function bitbucketClient({ deps, row, token }: ClientConfig): ProviderCli
   const target: ApiTarget = { label: "Bitbucket", base: bitbucketApi, auth };
   const get = <T>(path: string, query?: Record<string, string | number | boolean | undefined>) =>
     apiRequest<T>(deps, target, path, { query });
-  const workspace = encodeURIComponent(row.workspace ?? "");
+  const workspace = encodeSegment(row.workspace ?? "");
 
   const client: ProviderClient = {
     kind: "bitbucket",
@@ -117,7 +117,7 @@ export function bitbucketClient({ deps, row, token }: ClientConfig): ProviderCli
       }
     },
     async commit(repo, ref) {
-      return toCommit((await get<BitbucketCommit>(`/repositories/${encodePath(repo)}/commit/${encodeURIComponent(ref)}`)).data);
+      return toCommit((await get<BitbucketCommit>(`/repositories/${encodePath(repo)}/commit/${encodeSegment(ref)}`)).data);
     },
     async compare(repo, before, after): Promise<ChangedFiles> {
       // "<new>..<old>": the changes of new since its merge base with old (Bitbucket's pull request direction).
@@ -126,7 +126,7 @@ export function bitbucketClient({ deps, row, token }: ClientConfig): ProviderCli
       let pages = 0;
       while (params && pages < maxDiffPages) {
         const res: ApiResponse<Page<DiffStat>> = await get<Page<DiffStat>>(
-          `/repositories/${encodePath(repo)}/diffstat/${encodeURIComponent(after)}..${encodeURIComponent(before)}`,
+          `/repositories/${encodePath(repo)}/diffstat/${encodeSegment(after)}..${encodeSegment(before)}`,
           params,
         );
         for (const d of res.data.values) {
@@ -174,7 +174,7 @@ export function bitbucketClient({ deps, row, token }: ClientConfig): ProviderCli
     },
     async deleteHook(repo, id) {
       try {
-        await apiRequest(deps, target, `/repositories/${encodePath(repo)}/hooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await apiRequest(deps, target, `/repositories/${encodePath(repo)}/hooks/${encodeSegment(id)}`, { method: "DELETE" });
       } catch (error) {
         if (error instanceof ProviderApiError && error.status === 404) return;
         throw error;
@@ -183,7 +183,7 @@ export function bitbucketClient({ deps, row, token }: ClientConfig): ProviderCli
     async setStatus(repo, sha, status) {
       // Bitbucket requires a link; without a public panel address there is nothing to point at.
       if (!status.targetUrl) return;
-      await apiRequest(deps, target, `/repositories/${encodePath(repo)}/commit/${encodeURIComponent(sha)}/statuses/build`, {
+      await apiRequest(deps, target, `/repositories/${encodePath(repo)}/commit/${encodeSegment(sha)}/statuses/build`, {
         method: "POST",
         body: {
           key: status.context.slice(0, 40),

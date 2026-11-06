@@ -64,9 +64,19 @@ export function apiUrl(base: string, path: string, query: ApiRequest["query"] = 
   return url.toString();
 }
 
+/**
+ * One URL path segment. "." and ".." (also percent-encoded, which URL
+ * parsing folds the same way) are refused: a repository or branch name must
+ * never walk the request to another API endpoint with the token.
+ */
+export function encodeSegment(segment: string): string {
+  if (segment === "" || /^(\.|%2e){1,2}$/i.test(segment)) throw new ProviderApiError(0, `"${segment}" is not a valid name.`);
+  return encodeURIComponent(segment);
+}
+
 /** Encodes each segment of a repository path ("group/sub/project") for a URL path. */
 export function encodePath(path: string): string {
-  return path.split("/").map(encodeURIComponent).join("/");
+  return path.split("/").map(encodeSegment).join("/");
 }
 
 async function readCapped(response: Response): Promise<string> {

@@ -36,6 +36,8 @@ export type ProviderEvent = PushEvent | MergeRequestEvent | { type: "ping" } | {
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json => (value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {});
 const str = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null);
+/** A commit id, or null for anything else a payload might carry there. */
+const sha = (value: unknown): string | null => (typeof value === "string" && /^[0-9a-f]{7,64}$/i.test(value) ? value.toLowerCase() : null);
 const branchOf = (ref: unknown): string | null => {
   const r = str(ref);
   return r?.startsWith("refs/heads/") ? r.slice("refs/heads/".length) : null;
@@ -45,8 +47,8 @@ function gitlab(event: string, p: Json): ProviderEvent[] {
   const repo = str(obj(p.project).path_with_namespace) ?? "";
   if (event === "Push Hook" || p.object_kind === "push") {
     const changes = changesFromPushPayload(p) ?? { files: null, truncated: false, before: null, after: null, headMessage: null };
-    const after = str(p.after);
-    const head = (Array.isArray(p.commits) ? (p.commits as Json[]) : []).find((c) => str(c.id) === after);
+    const after = sha(p.after);
+    const head = (Array.isArray(p.commits) ? (p.commits as Json[]) : []).find((c) => sha(c.id) === after);
     return [
       {
         type: "push",
@@ -98,8 +100,8 @@ function gitea(event: string, p: Json): ProviderEvent[] {
         type: "push",
         repo,
         branch: branchOf(p.ref),
-        deleted: isNullSha(str(p.after)),
-        after: str(p.after),
+        deleted: isNullSha(sha(p.after)),
+        after: sha(p.after),
         changes,
         author: str(obj(head.author).username) ?? str(obj(head.author).name),
         sender: str(obj(p.pusher).login) ?? str(obj(p.sender).login),
@@ -144,7 +146,7 @@ function bitbucket(event: string, p: Json): ProviderEvent[] {
       const branch = ref && ref.type === "branch" ? str(ref.name) : null;
       const target = obj(next?.target);
       const author = obj(target.author);
-      const after = str(target.hash);
+      const after = sha(target.hash);
       out.push({
         type: "push",
         repo,
@@ -152,7 +154,7 @@ function bitbucket(event: string, p: Json): ProviderEvent[] {
         deleted: next === null,
         after,
         // Bitbucket lists no files: they always come from the diffstat API.
-        changes: { files: null, truncated: true, before: str(obj(old?.target).hash), after, headMessage: str(target.message) },
+        changes: { files: null, truncated: true, before: sha(obj(old?.target).hash), after, headMessage: str(target.message) },
         author: str(obj(author.user).nickname) ?? str(author.raw)?.replace(/\s*<[^>]*>$/, "") ?? null,
         sender,
       });

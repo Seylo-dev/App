@@ -13048,7 +13048,7 @@
                                 "repo": {
                                   "minLength": 3,
                                   "maxLength": 300,
-                                  "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                                  "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                                   "type": "string"
                                 },
                                 "branch": {
@@ -29657,7 +29657,7 @@
                             "repo": {
                               "minLength": 3,
                               "maxLength": 300,
-                              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                               "type": "string"
                             },
                             "branch": {
@@ -31367,7 +31367,7 @@
             "schema": {
               "minLength": 3,
               "maxLength": 300,
-              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
               "type": "string"
             }
           },
@@ -31537,7 +31537,7 @@
                   "repo": {
                     "minLength": 3,
                     "maxLength": 300,
-                    "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                    "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                     "type": "string"
                   },
                   "branch": {
@@ -32066,7 +32066,7 @@
                             "repo": {
                               "minLength": 3,
                               "maxLength": 300,
-                              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                               "type": "string"
                             },
                             "branch": {
@@ -32836,7 +32836,7 @@
                   "workspace": {
                     "minLength": 1,
                     "maxLength": 100,
-                    "pattern": "^[A-Za-z0-9_.-]+$",
+                    "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$",
                     "type": "string"
                   },
                   "authKind": {
@@ -46773,7 +46773,7 @@
                           "repo": {
                             "minLength": 3,
                             "maxLength": 300,
-                            "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                            "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                             "type": "string"
                           },
                           "branch": {
@@ -47535,7 +47535,7 @@
                             "repo": {
                               "minLength": 3,
                               "maxLength": 300,
-                              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                               "type": "string"
                             },
                             "branch": {
@@ -48843,7 +48843,7 @@
                             "repo": {
                               "minLength": 3,
                               "maxLength": 300,
-                              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                               "type": "string"
                             },
                             "branch": {
@@ -51076,7 +51076,7 @@
                           "repo": {
                             "minLength": 3,
                             "maxLength": 300,
-                            "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                            "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                             "type": "string"
                           },
                           "branch": {
@@ -51683,7 +51683,7 @@
                             "repo": {
                               "minLength": 3,
                               "maxLength": 300,
-                              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                               "type": "string"
                             },
                             "branch": {
@@ -53417,7 +53417,7 @@
                             "repo": {
                               "minLength": 3,
                               "maxLength": 300,
-                              "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+                              "pattern": "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
                               "type": "string"
                             },
                             "branch": {

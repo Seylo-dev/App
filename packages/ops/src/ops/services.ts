@@ -69,7 +69,11 @@ export const GitProviderKind = Type.Union([Type.Literal("gitlab"), Type.Literal(
 });
 
 /** A repository path at a git provider: "group/sub/project" (GitLab), "owner/name" (Gitea), "workspace/slug" (Bitbucket). */
-export const RepoFullPath = Type.String({ minLength: 3, maxLength: 300, pattern: "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$" });
+export const RepoFullPath = Type.String({
+  minLength: 3,
+  maxLength: 300,
+  pattern: "^(?!(.*/)?\\.{1,2}(/|$))[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$",
+});
 
 /** Watch paths: glob patterns (*, **, ?, ! excludes; the last match wins) a push must touch to deploy. */
 export const WatchPaths = Type.Array(Type.String({ minLength: 1, maxLength: 300, pattern: "^[^\\n\\r\\t]+$" }), { maxItems: 50 });

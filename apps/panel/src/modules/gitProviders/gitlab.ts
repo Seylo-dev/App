@@ -4,7 +4,7 @@
 // access tokens all work with PRIVATE-TOKEN and clone as "oauth2".
 
 import type { ChangedFiles, ClientConfig, CommitInfo, CommitStatusState, MergeRequestInfo, ProviderClient, RepoInfo } from "./client";
-import { type ApiTarget, apiRequest, ProviderApiError } from "./http";
+import { type ApiTarget, apiRequest, encodeSegment, ProviderApiError } from "./http";
 
 interface GitlabProject {
   path_with_namespace: string;
@@ -31,6 +31,7 @@ const stateMap: Record<CommitStatusState, string> = {
 };
 
 function project(repo: string): string {
+  for (const segment of repo.split("/")) encodeSegment(segment);
   return encodeURIComponent(repo);
 }
 
@@ -89,9 +90,7 @@ export function gitlabClient({ deps, row, token }: ClientConfig): ProviderClient
     },
     async branchHead(repo, branch) {
       try {
-        const { data } = await get<{ commit: GitlabCommit }>(
-          `/projects/${project(repo)}/repository/branches/${encodeURIComponent(branch)}`,
-        );
+        const { data } = await get<{ commit: GitlabCommit }>(`/projects/${project(repo)}/repository/branches/${encodeSegment(branch)}`);
         return toCommit(data.commit);
       } catch (error) {
         if (error instanceof ProviderApiError && error.status === 404) return null;
@@ -99,7 +98,7 @@ export function gitlabClient({ deps, row, token }: ClientConfig): ProviderClient
       }
     },
     async commit(repo, ref) {
-      return toCommit((await get<GitlabCommit>(`/projects/${project(repo)}/repository/commits/${encodeURIComponent(ref)}`)).data);
+      return toCommit((await get<GitlabCommit>(`/projects/${project(repo)}/repository/commits/${encodeSegment(ref)}`)).data);
     },
     async compare(repo, before, after): Promise<ChangedFiles> {
       const { data } = await get<{ diffs: { old_path: string; new_path: string }[]; compare_timeout?: boolean }>(
@@ -153,14 +152,14 @@ export function gitlabClient({ deps, row, token }: ClientConfig): ProviderClient
     },
     async deleteHook(repo, id) {
       try {
-        await apiRequest(deps, target, `/projects/${project(repo)}/hooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await apiRequest(deps, target, `/projects/${project(repo)}/hooks/${encodeSegment(id)}`, { method: "DELETE" });
       } catch (error) {
         if (error instanceof ProviderApiError && error.status === 404) return;
         throw error;
       }
     },
     async setStatus(repo, sha, status) {
-      await apiRequest(deps, target, `/projects/${project(repo)}/statuses/${encodeURIComponent(sha)}`, {
+      await apiRequest(deps, target, `/projects/${project(repo)}/statuses/${encodeSegment(sha)}`, {
         method: "POST",
         body: {
           state: stateMap[status.state],

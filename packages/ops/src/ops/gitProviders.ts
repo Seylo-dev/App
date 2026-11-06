@@ -29,7 +29,7 @@ export const ProviderUrl = Type.String({
 
 const ProviderName = Type.String({ minLength: 1, maxLength: 60 });
 const Token = Type.String({ minLength: 1, maxLength: 2000 });
-const Workspace = Type.String({ minLength: 1, maxLength: 100, pattern: "^[A-Za-z0-9_.-]+$" });
+const Workspace = Type.String({ minLength: 1, maxLength: 100, pattern: "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$" });
 const Username = Type.String({ minLength: 1, maxLength: 100, pattern: "^\\S+$" });
 
 export const Provider = Type.Object({

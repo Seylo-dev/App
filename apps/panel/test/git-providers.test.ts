@@ -253,6 +253,39 @@ describe("connecting a repository", () => {
     expect((await callOp(panel, providerOps.repos, { projectId, providerId }, { cookie: member.cookie })).status).toBe(200);
   });
 
+  test("repository paths with dot segments are refused by the contract", async () => {
+    const providerId = await connection("gitea");
+    const res = await callOp(panel, providerOps.branches, { projectId, providerId, repo: "acme/../admin" }, { cookie });
+    expect(res.status).toBe(400);
+    expect(fake.calls("git.example.com").some((c) => c.includes("admin"))).toBe(false);
+  });
+
+  test("without a domain, only a connection manager's address is used for the webhook", async () => {
+    setSetting(panel.deps.db, "panelDomain", null);
+    const providerId = await connection("gitea");
+    const id = (await callOp(panel, serviceOps.create, { projectId, name: "api", kind: "app", nodeId: nodeA }, { cookie })).body.id;
+    // An admin used the connection in the project, so a member of the project may connect a repo with it.
+    const other = (await callOp(panel, serviceOps.create, { projectId, name: "api2", kind: "app", nodeId: nodeA }, { cookie })).body.id;
+    await callOp(
+      panel,
+      providerOps.connectRepo,
+      { serviceId: other, providerId, repo: "acme/shop", branch: "main", deployOnPush: true },
+      { cookie },
+    );
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "project", projectId, ["*"]);
+    const res = await callOp(
+      panel,
+      providerOps.connectRepo,
+      { serviceId: id, providerId, repo: "acme/shop", branch: "main", deployOnPush: true },
+      { cookie: member.cookie, headers: { host: "attacker.example" } },
+    );
+    expect(res.status).toBe(200);
+    const hook = await callOp(panel, providerOps.webhook, { serviceId: id }, { cookie });
+    expect(hook.body).toMatchObject({ created: false, url: null });
+    expect(fake.sent.some((r) => JSON.stringify(r.body ?? "").includes("attacker.example"))).toBe(false);
+  });
+
   test("without a panel address the source is saved and the webhook says what to do", async () => {
     setSetting(panel.deps.db, "panelDomain", null);
     const providerId = await connection("gitea");

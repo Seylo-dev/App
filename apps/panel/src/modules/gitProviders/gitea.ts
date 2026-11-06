@@ -3,7 +3,7 @@
 // token's owner as the user name.
 
 import type { ChangedFiles, ClientConfig, CommitInfo, CommitStatusState, MergeRequestInfo, ProviderClient, RepoInfo } from "./client";
-import { type ApiTarget, apiRequest, encodePath, ProviderApiError } from "./http";
+import { type ApiTarget, apiRequest, encodePath, encodeSegment, ProviderApiError } from "./http";
 
 interface GiteaRepo {
   full_name: string;
@@ -97,13 +97,13 @@ export function giteaClient({ deps, row, token }: ClientConfig): ProviderClient 
         sha: string;
         commit: { message: string; author?: { name?: string } };
         author?: { login?: string } | null;
-      }>(`/repos/${encodePath(repo)}/git/commits/${encodeURIComponent(ref)}`, { stat: false, files: false, verification: false });
+      }>(`/repos/${encodePath(repo)}/git/commits/${encodeSegment(ref)}`, { stat: false, files: false, verification: false });
       return { sha: data.sha, message: data.commit.message ?? "", author: data.author?.login || data.commit.author?.name || null };
     },
     async compare(repo, before, after): Promise<ChangedFiles> {
       // Gitea 1.22 and later (and Forgejo 8): the commits between the two, each with its files.
       const { data } = await get<{ total_commits: number; commits: { files?: { filename: string }[] | null }[] }>(
-        `/repos/${encodePath(repo)}/compare/${encodeURIComponent(before)}...${encodeURIComponent(after)}`,
+        `/repos/${encodePath(repo)}/compare/${encodeSegment(before)}...${encodeSegment(after)}`,
       );
       const files = new Set<string>();
       let listed = true;
@@ -148,14 +148,14 @@ export function giteaClient({ deps, row, token }: ClientConfig): ProviderClient 
     },
     async deleteHook(repo, id) {
       try {
-        await apiRequest(deps, target, `/repos/${encodePath(repo)}/hooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await apiRequest(deps, target, `/repos/${encodePath(repo)}/hooks/${encodeSegment(id)}`, { method: "DELETE" });
       } catch (error) {
         if (error instanceof ProviderApiError && error.status === 404) return;
         throw error;
       }
     },
     async setStatus(repo, sha, status) {
-      await apiRequest(deps, target, `/repos/${encodePath(repo)}/statuses/${encodeURIComponent(sha)}`, {
+      await apiRequest(deps, target, `/repos/${encodePath(repo)}/statuses/${encodeSegment(sha)}`, {
         method: "POST",
         body: {
           state: stateMap[status.state],

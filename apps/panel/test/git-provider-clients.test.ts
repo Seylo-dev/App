@@ -320,6 +320,17 @@ describe("provider HTTP rules", () => {
     expect(requests).toBe(1);
   });
 
+  test("dot segments in repository or branch names never walk the request elsewhere", async () => {
+    const gitea = clientFor(panel.deps, row({ kind: "gitea", url: "https://git.example.com" }));
+    await expect(gitea.repo("acme/../../admin")).rejects.toThrow("not a valid name");
+    await expect(gitea.branchHead("acme/shop", "../../../admin/users")).rejects.toThrow("not a valid name");
+    await expect(gitea.repo("acme/%2e%2e")).rejects.toThrow("not a valid name");
+    const gitlab = clientFor(panel.deps, row({ kind: "gitlab", url: "https://gitlab.com" }));
+    await expect(gitlab.repo("a/../b")).rejects.toThrow("not a valid name");
+    await expect(gitlab.branchHead("acme/platform/shop", "..")).rejects.toThrow("not a valid name");
+    expect(fake.sent).toHaveLength(0);
+  });
+
   test("errors carry the provider's message; huge answers are cut off", async () => {
     setProviderFetch(async () => new Response(JSON.stringify({ message: "token expired" }), { status: 401 }));
     await expect(apiRequest(panel.deps, target, "/user")).rejects.toThrow("Gitea answered 401: token expired");
