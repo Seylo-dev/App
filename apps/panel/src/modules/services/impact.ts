@@ -5,13 +5,12 @@
 // on plain shapes are pure (tested directly); moveImpact reads the rows,
 // filters by what the caller may see and adds what blocks a move.
 
-import { appVariables, databaseVariables, hostMentions, type ParsedEnv, parseEnv, sharedTarget } from "@seylo/env-analyzer";
+import { appVariables, builtinVariablesFor, hostMentions, type ParsedEnv, parseEnv, sharedTarget } from "@seylo/env-analyzer";
 import { allOps, grantableActions, OpError, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { grants, invites, previews, projects, services, users } from "../../db/schema";
 import type { OpContext } from "../../ops/implement";
-import { findDatabase } from "../databases/info";
 import { hasActiveDeploy } from "../deployments/queue";
 import { receivesShared } from "../env/desired";
 import { buildEnvGraph, type EnvGraph } from "../env/graph";
@@ -183,17 +182,19 @@ export function referrersOf(name: string, project: ProjectEnv, selfId: string): 
 }
 
 /** Database variables that carry the password (env/graph.ts credentialVariables). */
-const credentialVariables = new Set(["PASSWORD", "INTERNAL_URL", "EXPOSED_URL"]);
+const credentialVariables = new Set(["PASSWORD", "INTERNAL_URL", "INTERNAL_HTTP_URL", "EXPOSED_URL"]);
 
 /**
  * Whether ${{svc.VAR}} only reads an address of the service (a built-in
- * like URL or INTERNAL_HOST), which anyone in its project may use.
- * Its own variables and database credentials are not open.
+ * like URL, INTERNAL_HOST or ClickHouse's INTERNAL_HTTP_PORT), which anyone
+ * in its project may use. Its own variables and database credentials
+ * (ClickHouse's INTERNAL_HTTP_URL too) are not open.
  */
-export function isOpenVariable(isDatabase: boolean, variable: string): boolean {
-  const def = (isDatabase ? databaseVariables : appVariables).find((d) => d.name === variable);
+export function isOpenVariable(serviceKind: string, variable: string): boolean {
+  const builtins = builtinVariablesFor(serviceKind);
+  const def = builtins.find((d) => d.name === variable);
   if (!def || def.sensitive) return false;
-  return !(isDatabase && credentialVariables.has(variable));
+  return !(builtins !== appVariables && credentialVariables.has(variable));
 }
 
 /**
@@ -205,7 +206,7 @@ export function isOpenVariable(isDatabase: boolean, variable: string): boolean {
 export function plantedReferences(
   project: ProjectEnv,
   name: string,
-  isDatabase: boolean,
+  serviceKind: string,
   selfId: string,
 ): { service: EnvService; key: string; reference: string }[] {
   const wanted = name.toLowerCase();
@@ -214,7 +215,7 @@ export function plantedReferences(
     if (service.id === selfId) continue;
     for (const entry of service.parsed.entries) {
       for (const ref of entry.references) {
-        if (ref.target.toLowerCase() !== wanted || isOpenVariable(isDatabase, ref.variable)) continue;
+        if (ref.target.toLowerCase() !== wanted || isOpenVariable(serviceKind, ref.variable)) continue;
         out.push({ service, key: entry.key, reference: `${ref.target}.${ref.variable}` });
       }
     }
@@ -316,7 +317,7 @@ function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string, t
   if (hasActiveDeploy(ctx, svc.id)) block("deploying", "Wait for the running deploy to finish.");
   if (activeCopy(ctx.db, svc.id)) block("copying", "Wait for its data copy to finish.");
   if (targetProjectId !== svc.projectId) {
-    const planted = plantedReferences(to, svc.name, findDatabase(ctx.db, svc.id) !== undefined, svc.id);
+    const planted = plantedReferences(to, svc.name, svc.kind, svc.id);
     if (planted.length > 0)
       block("references", plantedMessage(ctx, planted, target?.name ?? "that project", "Remove that reference first."));
   }

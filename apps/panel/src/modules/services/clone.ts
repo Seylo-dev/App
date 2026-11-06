@@ -150,8 +150,8 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
   const to = projectEnvOf(buildEnvGraph(ctx, projectId));
   // A suggested name never lands on references someone left waiting for it.
   const name =
-    input.name ?? cloneName((n) => nameTaken(ctx, projectId, n) || plantedReferences(to, n, isDatabase, svc.id).length > 0, svc.name);
-  const planted = plantedReferences(to, name, isDatabase, svc.id);
+    input.name ?? cloneName((n) => nameTaken(ctx, projectId, n) || plantedReferences(to, n, svc.kind, svc.id).length > 0, svc.name);
+  const planted = plantedReferences(to, name, svc.kind, svc.id);
 
   const spec = readSpec(svc.spec);
   const envReadable = can("env.view", "service", svc.id);

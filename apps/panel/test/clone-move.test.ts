@@ -35,7 +35,14 @@ import { enginesCapability } from "../src/modules/databases/engines";
 import { engineFor } from "../src/modules/deployments/engine";
 import { cloneDataJob, cloneName } from "../src/modules/services/clone";
 import { serviceSpecFor } from "../src/modules/services/desired";
-import { ownReferenceEffects, referrersOf, renameSelf, sharedVariablesLost } from "../src/modules/services/impact";
+import {
+  isOpenVariable,
+  ownReferenceEffects,
+  plantedReferences,
+  referrersOf,
+  renameSelf,
+  sharedVariablesLost,
+} from "../src/modules/services/impact";
 import { hashToken, prefixedToken } from "../src/security/tokens";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
@@ -731,6 +738,26 @@ describe("move impact analysis", () => {
     const self = project.services[0] as ReturnType<typeof svc>;
     expect(sharedVariablesLost(self, project, { services: [], shared: parsed("B=9\n") })).toEqual(["A"]);
     expect(sharedVariablesLost({ ...self, kind: "postgres" }, project, { services: [], shared: parsed("") })).toEqual([]);
+  });
+
+  test("open variables are the addresses of the service's kind; ClickHouse's HTTP URL carries the password", () => {
+    expect(isOpenVariable("app", "INTERNAL_URL")).toBe(true);
+    expect(isOpenVariable("app", "SECRET")).toBe(false);
+    expect(isOpenVariable("postgres", "INTERNAL_HOST")).toBe(true);
+    expect(isOpenVariable("postgres", "INTERNAL_URL")).toBe(false);
+    expect(isOpenVariable("postgres", "PASSWORD")).toBe(false);
+    expect(isOpenVariable("clickhouse", "INTERNAL_HTTP_PORT")).toBe(true);
+    expect(isOpenVariable("clickhouse", "INTERNAL_HTTP_URL")).toBe(false);
+    // Only ClickHouse has an HTTP interface.
+    expect(isOpenVariable("postgres", "INTERNAL_HTTP_PORT")).toBe(false);
+
+    const project = {
+      services: [
+        svc("s1", "dash", "CH=${{events.INTERNAL_HTTP_URL}}\nPORT=${{events.INTERNAL_HTTP_PORT}}\nHOST=${{events.INTERNAL_HOST}}\n"),
+      ],
+      shared: parsed(""),
+    };
+    expect(plantedReferences(project, "events", "clickhouse", "x").map((p) => p.reference)).toEqual(["events.INTERNAL_HTTP_URL"]);
   });
 });
 
