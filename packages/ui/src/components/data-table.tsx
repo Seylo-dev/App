@@ -22,6 +22,15 @@ export interface DataTableColumn<T> {
   align?: "left" | "right";
   /** Width like "120px" or "30%"; omit to share the rest. */
   width?: string;
+  /**
+   * The width this column usually ends up with once rows are in, like "18%"
+   * (of the table) or "140px". Only the loading placeholder cells take it,
+   * so the header stays where it is when the rows arrive. Give it to every
+   * column but one: that one takes the rest, as it does with real rows.
+   */
+  skeletonWidth?: string;
+  /** 2 when the cells show a 13px line over a 12px detail line (a name and its email), so placeholder rows are as tall. */
+  skeletonLines?: 1 | 2;
   className?: string;
   /** Hide the column under the md breakpoint. */
   hideOnMobile?: boolean;
@@ -169,6 +178,7 @@ export function DataTable<T>({
                 {columns.map((col, i) => (
                   <td
                     key={col.id}
+                    style={col.skeletonWidth ? { width: col.skeletonWidth } : undefined}
                     className={cn(
                       "border-t border-divider py-3.5",
                       pad(i, i === colCount - 1),
@@ -176,8 +186,9 @@ export function DataTable<T>({
                       col.className,
                     )}
                   >
-                    {/* One line of the row's 13px text, so the row is as tall as a loaded one. */}
+                    {/* The row's 13px line (and the 12px detail line), so the row is as tall as a loaded one. */}
                     <SkeletonText className={cn("w-3/4", col.align === "right" && "ml-auto")} />
+                    {col.skeletonLines === 2 && <SkeletonText className={cn("w-1/2 text-xs", col.align === "right" && "ml-auto")} />}
                   </td>
                 ))}
                 {rowActions && <td className="border-t border-divider" />}
