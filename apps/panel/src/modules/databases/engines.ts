@@ -54,7 +54,23 @@ export interface Engine {
   passwordChange: "exec" | "restart";
   /** Only agents that advertise database.engines.v2 run it (database.proto). */
   needsAgentCapability: boolean;
+  /** A caution for whoever picks the engine (databases.engines); null for most. */
+  notice: string | null;
+  /**
+   * Exposure only to listed source addresses, never to anyone: for an engine
+   * that gets no security fixes, so its known holes are not one password
+   * away from the internet.
+   */
+  exposureNeedsAllowlist: boolean;
 }
+
+/**
+ * KeyDB 6.3.4 (2023) is its last release. It forked Redis 6.2 before the
+ * 2025 Lua advisories (fixed in Redis 6.2.20 and Valkey), so it still has
+ * them, and its one user may run scripts.
+ */
+export const keydbNotice =
+  "Unmaintained: KeyDB has had no release since 6.3.4 (2023), so it gets no security fixes, including the 2025 Redis Lua scripting advisories (CVE-2025-49844, CVE-2025-46817, CVE-2025-46818, CVE-2025-46819). Prefer Valkey. Exposure needs allowed source addresses.";
 
 /** The agent capability for the engines added in 0.2 (go/internal/dbengine). */
 export const enginesCapability = "database.engines.v2";
@@ -100,6 +116,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "sslmode=require",
     passwordChange: "exec",
     needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   mysql: {
     engine: "mysql",
@@ -120,6 +138,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "ssl-mode=REQUIRED",
     passwordChange: "exec",
     needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   mariadb: {
     engine: "mariadb",
@@ -141,6 +161,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "ssl-mode=REQUIRED",
     passwordChange: "exec",
     needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   mongo: {
     engine: "mongo",
@@ -161,6 +183,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "tls=true",
     passwordChange: "exec",
     needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   redis: {
     engine: "redis",
@@ -181,6 +205,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "",
     passwordChange: "exec",
     needsAgentCapability: false,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   valkey: {
     engine: "valkey",
@@ -202,6 +228,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "",
     passwordChange: "exec",
     needsAgentCapability: true,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   keydb: {
     engine: "keydb",
@@ -226,6 +254,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     tlsParams: "",
     passwordChange: "exec",
     needsAgentCapability: true,
+    notice: keydbNotice,
+    exposureNeedsAllowlist: true,
   },
   dragonfly: {
     engine: "dragonfly",
@@ -244,6 +274,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     // CONFIG SET requirepass leaves the old password working on Dragonfly.
     passwordChange: "restart",
     needsAgentCapability: true,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
   clickhouse: {
     engine: "clickhouse",
@@ -265,6 +297,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
     // The image writes the user from CLICKHOUSE_USER/PASSWORD into a read-only users.d file at every start.
     passwordChange: "restart",
     needsAgentCapability: true,
+    notice: null,
+    exposureNeedsAllowlist: false,
   },
 };
 

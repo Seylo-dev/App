@@ -326,7 +326,46 @@ describe("more engines", () => {
       hasDatabase: true,
       shellClient: "clickhouse-client",
       webUiTool: "ClickHouse Play",
+      notice: null,
     });
+    // KeyDB says why to think twice wherever it is picked (the form, MCP, the assistant).
+    const keydb = res.body.engines.find((e: { engine: string }) => e.engine === "keydb");
+    expect(keydb.notice).toContain("no security fixes");
+    expect(keydb.notice).toContain("CVE-2025-49844");
+    expect(keydb.notice).toContain("Prefer Valkey");
+    expect(res.body.engines.filter((e: { notice: string | null }) => e.notice !== null).map((e: { engine: string }) => e.engine)).toEqual([
+      "keydb",
+    ]);
+  });
+
+  test("KeyDB, which gets no security fixes, is exposed only to listed addresses", async () => {
+    const { res, node } = await createDb("keydb");
+    expect(res.status).toBe(200);
+    const serviceId = res.body.serviceId;
+    expect(res.body.exposure).toMatchObject({ enabled: false, needsAllowedCidrs: true });
+    const open = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie });
+    expect(open.status).toBe(400);
+    expect(open.body.error.details).toMatchObject({ field: "allowedCidrs", reason: "allowlistRequired" });
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toEqual({ enabled: false });
+
+    const limited = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, allowedCidrs: ["198.51.100.24"] }, { cookie });
+    expect(limited.status).toBe(200);
+    expect(limited.body.exposure).toMatchObject({ enabled: true, allowedCidrs: ["198.51.100.24/32"], needsAllowedCidrs: true });
+    // Emptying the list later is refused too; turning exposure off is not.
+    const emptied = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true, allowedCidrs: [] }, { cookie });
+    expect(emptied.status).toBe(400);
+    expect((await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure.allowedCidrs).toEqual(["198.51.100.24/32"]);
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: false }, { cookie })).status).toBe(200);
+
+    // Valkey, its maintained fork-mate, has no such rule.
+    const valkey = await callOp(
+      panel,
+      dbOps.create,
+      { projectId: res.body.projectId, name: "cache", engine: "valkey", nodeId: node.id },
+      { cookie },
+    );
+    expect(valkey.body.exposure.needsAllowedCidrs).toBe(false);
+    expect((await callOp(panel, dbOps.setExposure, { serviceId: valkey.body.serviceId, enabled: true }, { cookie })).status).toBe(200);
   });
 
   test("URLs, commands and health checks of the new engines", () => {

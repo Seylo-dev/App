@@ -128,7 +128,8 @@ cat "$F"
 // clickhousePrelude: q runs a query as the admin (clickhouse-client reads
 // CLICKHOUSE_PASSWORD), wait_for follows an ASYNC BACKUP or RESTORE in
 // system.backups until it ends, so a long one never depends on one
-// connection staying up. The server's backups folder is "backups" in its
+// connection staying up (an unreachable server counts as a missing
+// operation, so a restart ends the wait after about 30 s). The server's backups folder is "backups" in its
 // data folder (the image's default allowed_path); our files live in
 // backups/seylo, owned by the server's user so its BACKUP can write there.
 const clickhousePrelude = `set -e
@@ -136,11 +137,11 @@ q() { clickhouse-client --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --
 wait_for() {
   missing=0
   while :; do
-    ST=$(q --param_id="$1" --query "SELECT status FROM system.backups WHERE id = {id:String}")
+    ST=$(q --param_id="$1" --query "SELECT status FROM system.backups WHERE id = {id:String}" 2>/dev/null) || ST=""
     case "$ST" in
       BACKUP_CREATED|RESTORED) return 0 ;;
       *FAILED*|*CANCELLED*)
-        q --param_id="$1" --query "SELECT error FROM system.backups WHERE id = {id:String}" >&2
+        q --param_id="$1" --query "SELECT error FROM system.backups WHERE id = {id:String} FORMAT TSVRaw" >&2
         return 1 ;;
       "")
         missing=$((missing + 1))
@@ -162,12 +163,23 @@ wait_for "$ID"
 cat "$F"
 `
 
-// clickhouseRestore copies the zip from stdin into the backups folder,
-// drops the databases it holds (DB_DROP names the one asked for, else
-// DB_LIST_QUERY makes clickhouse-local read them from the archive's
-// metadata/<db>.sql entries and quote them), then runs RESTORE. A zip
-// clickhouse-local cannot read stops the restore before anything is
-// dropped.
+// clickhouseRestore copies the zip from stdin into the backups folder and
+// replaces the databases it holds without losing them on a failure:
+//
+//  1. NAMES lists them, one per line, escaped as query parameters take
+//     them (DB_NAMES for the one asked for, else DB_LIST_QUERY makes
+//     clickhouse-local read the archive's metadata/<db>.sql entries; a
+//     zip it cannot read stops here, before anything changed).
+//  2. Each one that exists is renamed to <name><DB_ASIDE> (RENAME
+//     DATABASE, instant for Atomic databases). If one cannot be, the ones
+//     already moved go back and nothing is restored.
+//  3. RESTORE runs. If it fails, whatever it created under those names is
+//     dropped and the renamed ones go back: the server is as it was.
+//  4. After RESTORED, the renamed copies are dropped.
+//
+// If putting them back fails too (the server is down), the last line says
+// they are kept under the suffix. Names go to the server as Identifier
+// query parameters, never spliced into SQL.
 const clickhouseRestore = clickhousePrelude + `OWNER=$(stat -c %u:%g "$DB_DATA_DIR")
 mkdir -p "$DIR"
 chown "$OWNER" "$DB_DATA_DIR/backups" "$DIR"
@@ -175,11 +187,75 @@ trap 'rm -f "$F"' EXIT
 cat > "$F"
 chown "$OWNER" "$F"
 chmod 640 "$F"
-DROPS="$DB_DROP"
-if [ -z "$DROPS" ]; then DROPS=$(clickhouse local --query "$DB_LIST_QUERY"); fi
-if [ -n "$DROPS" ]; then printf '%s\n' "$DROPS" | q --multiquery; fi
-ID=$(q --query "$DB_QUERY ASYNC" | cut -f1)
-wait_for "$ID"
+A="$DB_ASIDE"
+NAMES="$DB_NAMES"
+if [ -z "$NAMES" ]; then NAMES=$(clickhouse local --query "$DB_LIST_QUERY"); fi
+count() { q --param_n="$1" --query "SELECT count() FROM system.databases WHERE name = {n:String}"; }
+ren() { q --param_a="$1" --param_b="$2" --query "RENAME DATABASE {a:Identifier} TO {b:Identifier}"; }
+drop() { q --param_n="$1" --query "DROP DATABASE IF EXISTS {n:Identifier} SYNC"; }
+move_aside() {
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    C=$(count "$n") || return 1
+    if [ "$C" = 1 ]; then ren "$n" "$n$A" || return 1; fi
+  done <<NAMES_END
+$NAMES
+NAMES_END
+}
+# put_back renames every copy back; with "created" it first drops what the
+# failed RESTORE made under each name (only the renamed ones existed before).
+put_back() {
+  bad=0
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    C=$(count "$n$A") || { bad=1; continue; }
+    if [ "$1" = created ]; then drop "$n" || { bad=1; continue; }; fi
+    if [ "$C" = 1 ]; then ren "$n$A" "$n" || bad=1; fi
+  done <<NAMES_END
+$NAMES
+NAMES_END
+  return $bad
+}
+drop_aside() {
+  bad=0
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    drop "$n$A" || bad=1
+  done <<NAMES_END
+$NAMES
+NAMES_END
+  return $bad
+}
+restore() {
+  OUT=$(q --query "$DB_QUERY ASYNC") || return 1
+  wait_for "$(printf '%s' "$OUT" | cut -f1)"
+}
+# oneline: the cause on the status line without ClickHouse's stack trace,
+# short enough to stay one line of the agent's error tail (it splits lines
+# past 4 KiB). say prints with printf: dash's echo would turn a \n in the
+# cause into a line break.
+oneline() { printf '%s' "$1" | tr '\n' ' ' | sed 's/,* *Stack trace.*//' | cut -c1-1000; }
+say() { printf '%s\n' "$*" >&2; }
+if ! CAUSE=$(move_aside 2>&1); then
+  if put_back moved >/dev/null 2>&1; then
+    say "could not move the existing databases aside, nothing was restored: $(oneline "$CAUSE")"
+  else
+    say "could not move the existing databases aside, and some stay renamed with the suffix $A: $(oneline "$CAUSE")"
+  fi
+  exit 1
+fi
+if ! CAUSE=$(restore 2>&1); then
+  if put_back created >/dev/null 2>&1; then
+    say "RESTORE failed, the databases are back as they were: $(oneline "$CAUSE")"
+  else
+    say "RESTORE failed, and the previous databases are kept renamed with the suffix $A: $(oneline "$CAUSE")"
+  fi
+  exit 1
+fi
+if ! CAUSE=$(drop_aside 2>&1); then
+  say "restored, but the previous copies (suffix $A) could not be dropped: $(oneline "$CAUSE")"
+  exit 1
+fi
 `
 
 // systemDatabases are never backed up, dropped or restored.
@@ -194,6 +270,16 @@ func chIdent(s string) string {
 func chString(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 }
+
+// tsvEscape escapes a value the way ClickHouse's TSV format (and so
+// clickhouse-client's --param_<name>) reads it back.
+func tsvEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "\t", `\t`, "\n", `\n`, "\r", `\r`).Replace(s)
+}
+
+// restoreAside is the suffix a ClickHouse restore renames the databases it
+// replaces with until RESTORE succeeds; run is the restore's time suffix.
+func restoreAside(run string) string { return "__seylo_pre_restore_" + run }
 
 // clickhouseFile is a run's zip in the backups folder, as BACKUP and
 // RESTORE name it (relative to allowed_path).
@@ -311,19 +397,19 @@ func restoreJob(t dbTarget, ext, run string) (dbJob, error) {
 		}
 		file := "restore-" + run + ".zip"
 		// Like pg_restore --clean: what the backup holds replaces what is
-		// there; other databases stay.
-		what, drop := "ALL EXCEPT DATABASES "+systemDatabases, ""
+		// there; other databases stay. The replaced ones are renamed aside
+		// until RESTORE succeeds (clickhouseRestore).
+		what, names := "ALL EXCEPT DATABASES "+systemDatabases, ""
 		if t.database != "" {
-			what, drop = "DATABASE "+chIdent(t.database), "DROP DATABASE IF EXISTS "+chIdent(t.database)+" SYNC;"
+			what, names = "DATABASE "+chIdent(t.database), tsvEscape(t.database)
 		}
-		// name quoted as an identifier: \ and ` escaped with a backslash.
-		quoted := "'`' || replaceAll(replaceAll(name, " + chString(`\`) + ", " + chString(`\\`) + "), '`', " + chString("\\`") + ") || '`'"
-		list := "SELECT 'DROP DATABASE IF EXISTS ' || " + quoted + " || ' SYNC;' FROM (" +
+		// One name per line, TSV-escaped: what --param_<name> unescapes.
+		list := "SELECT name FROM (" +
 			"SELECT DISTINCT decodeURLComponent(extract(_file, '^metadata/([^/]+)[.]sql$')) AS name " +
 			"FROM file(" + chString(t.dataDir+"/backups/seylo/"+file+" :: metadata/*.sql") + ", 'LineAsString')) " +
-			"WHERE name NOT IN ('', 'system', 'information_schema', 'INFORMATION_SCHEMA') FORMAT TSVRaw"
-		j.env = append(j.env, "CLICKHOUSE_PASSWORD="+t.password, "DB_FILE="+file, "DB_DROP="+drop, "DB_LIST_QUERY="+list,
-			"DB_QUERY=RESTORE "+what+" FROM "+clickhouseFile(file))
+			"WHERE name NOT IN ('', 'system', 'information_schema', 'INFORMATION_SCHEMA') FORMAT TSV"
+		j.env = append(j.env, "CLICKHOUSE_PASSWORD="+t.password, "DB_FILE="+file, "DB_NAMES="+names, "DB_LIST_QUERY="+list,
+			"DB_ASIDE="+restoreAside(run), "DB_QUERY=RESTORE "+what+" FROM "+clickhouseFile(file))
 		j.script = clickhouseRestore
 		j.volumes = true
 	default:

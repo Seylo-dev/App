@@ -3,8 +3,11 @@
 package backup_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -240,6 +243,9 @@ func TestDatabaseDumpRestoreRoundTrip(t *testing.T) {
 			if got := read(); got != "after" {
 				t.Fatalf("read before restore = %q", got)
 			}
+			if c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE {
+				r.failedClickHouseRestores(e, spec, cont, subject, res.GetObjectKey(), read)
+			}
 			r.restore(e, subject, res.GetObjectKey())
 			if got := read(); got != "before" {
 				t.Fatalf("read after restore = %q, want before", got)
@@ -293,6 +299,95 @@ func TestVolumeBackupRestoreAndRetention(t *testing.T) {
 	}
 }
 
+// failedClickHouseRestores restores broken copies of the backup at key: a
+// truncated zip (26.x still lists its metadata, so RESTORE fails after the
+// rename; a zip clickhouse-local cannot list changes nothing) and a zip
+// missing one of app's data files, for every database (all renamed aside,
+// RESTORE fails, all put back) and for app alone. Each fails and
+// leaves the rows written after the backup readable, with no renamed
+// copies and no zip left behind. (A truncated zip is no use for the
+// single-database case: 26.8 restores app from it when app's entries come
+// first.)
+func (r *rig) failedClickHouseRestores(e *itest.Env, spec *agentv1.ServiceSpec, cont string, subject *agentv1.BackupSubject, key string, read func() string) {
+	e.T.Helper()
+	cli, err := minio.New(strings.TrimPrefix(r.dest.GetEndpoint(), "http://"), &minio.Options{
+		Creds: credentials.NewStaticV4(r.dest.GetAccessKeyId(), r.dest.GetSecretAccessKey(), ""), Region: r.dest.GetRegion()})
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	ctx := e.Ctx(5 * time.Minute)
+	obj, err := cli.GetObject(ctx, r.dest.GetBucket(), key, minio.GetObjectOptions{})
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	good, err := io.ReadAll(obj)
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	put := func(tag string, body []byte) string {
+		broken := strings.Replace(key, "-run-", "-"+tag+"-run-", 1)
+		if broken == key {
+			e.T.Fatalf("no run id in %s", key)
+		}
+		if _, err := cli.PutObject(ctx, r.dest.GetBucket(), broken, bytes.NewReader(body), int64(len(body)), minio.PutObjectOptions{}); err != nil {
+			e.T.Fatal(err)
+		}
+		return broken
+	}
+	// Every entry but app's first data file: the metadata lists fine, RESTORE fails.
+	zr, err := zip.NewReader(bytes.NewReader(good), int64(len(good)))
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	var missing bytes.Buffer
+	zw := zip.NewWriter(&missing)
+	dropped := ""
+	for _, f := range zr.File {
+		if dropped == "" && strings.HasPrefix(f.Name, "data/app/") && !strings.HasSuffix(f.Name, "/") {
+			dropped = f.Name
+			continue
+		}
+		if err := zw.Copy(f); err != nil {
+			e.T.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil || dropped == "" {
+		e.T.Fatalf("rebuilding the zip: %v (dropped %q)", err, dropped)
+	}
+	one := &agentv1.BackupSubject{ServiceId: spec.GetId(), What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{Database: "app"}}}
+	// rolledBack: the database(s) went aside, RESTORE failed and they came back.
+	const rolledBack = "RESTORE failed, the databases are back as they were: "
+	for _, c := range []struct {
+		name    string
+		subject *agentv1.BackupSubject
+		key     string
+		want    string
+	}{
+		{"truncated", subject, put("truncated", good[:len(good)/2]), "the restore exited with code"},
+		{"incomplete (no " + dropped + ")", subject, put("incomplete", missing.Bytes()), rolledBack},
+		{"incomplete (no " + dropped + "), app only,", one, put("incomplete1", missing.Bytes()), rolledBack},
+	} {
+		_, err := r.runner.Restore(e.Ctx(5*time.Minute), &agentv1.RestoreBackupRequest{Subject: c.subject, Destination: r.dest, ObjectKey: c.key})
+		e.T.Logf("%s zip: %v", c.name, err)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			e.T.Fatalf("restoring the %s zip: err = %v, want %q", c.name, err, c.want)
+		}
+		if got := read(); got != "after" {
+			e.T.Fatalf("after the %s zip: read = %q, want after", c.name, got)
+		}
+		if out, _ := clientExec(e, spec, cont, "--query", "SELECT sum(i) FROM `odd-\\`db`.n"); out != "7" {
+			e.T.Fatalf("after the %s zip: other database = %q", c.name, out)
+		}
+		if out, _ := clientExec(e, spec, cont, "--query", "SELECT name FROM system.databases WHERE name LIKE '%seylo_pre_restore%'"); out != "" {
+			e.T.Fatalf("after the %s zip: renamed copies left: %q", c.name, out)
+		}
+		vol, _ := r.e.Layout.ServiceVolume(spec.GetId(), "data")
+		if left, _ := filepath.Glob(filepath.Join(vol, "backups", "seylo", "*")); len(left) != 0 {
+			e.T.Fatalf("after the %s zip: zip left in the volume: %v", c.name, left)
+		}
+	}
+}
+
 // Images of the engines added in 0.2, pinned like the panel's catalog
 // (apps/panel/src/modules/databases/engines.ts).
 const (
@@ -303,8 +398,11 @@ const (
 	imageDragonfly  = "ghcr.io/dragonflydb/dragonfly:v2.0.2"
 	imageClickHouse = "clickhouse/clickhouse-server:26.8.36.3"
 	// The older majors the panel offers.
+	imageValkey90     = "valkey/valkey:9.0.7-alpine"
 	imageValkey81     = "valkey/valkey:8.1.11-alpine"
 	imageClickHouse26 = "clickhouse/clickhouse-server:26.3.62.3"
+	imagePostgres17pv = "pgvector/pgvector:0.8.7-pg17-trixie"
+	imagePostgres16pv = "pgvector/pgvector:0.8.7-pg16-trixie"
 	imagePostgres15pv = "pgvector/pgvector:0.8.7-pg15-trixie"
 )
 
@@ -330,8 +428,12 @@ func newEngines() map[string]newEngine {
 		"postgres18": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres18, "admin", pgEnv, nil, "/var/lib/postgresql", []uint32{5432}},
 		"pgvector":   {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePgvector, "admin", pgEnv, nil, "/var/lib/postgresql", []uint32{5432}},
 		// pgvector before 18 keeps the old data path.
+		"pgvector17": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres17pv, "admin", pgEnv, nil, "/var/lib/postgresql/data", []uint32{5432}},
+		"pgvector16": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres16pv, "admin", pgEnv, nil, "/var/lib/postgresql/data", []uint32{5432}},
 		"pgvector15": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres15pv, "admin", pgEnv, nil, "/var/lib/postgresql/data", []uint32{5432}},
 		"valkey": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey, "default",
+			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}}, valkey, "/data", []uint32{6379}},
+		"valkey90": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey90, "default",
 			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}}, valkey, "/data", []uint32{6379}},
 		"valkey81": {agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY, imageValkey81, "default",
 			[]*agentv1.EnvVar{{Name: "VALKEY_PASSWORD", Value: pw}}, valkey, "/data", []uint32{6379}},
@@ -394,8 +496,8 @@ func TestNewEnginesDumpRestoreRoundTrip(t *testing.T) {
 					}
 				}
 				major := "18"
-				if name == "pgvector15" {
-					major = "15"
+				if v, ok := strings.CutPrefix(name, "pgvector"); ok && v != "" {
+					major = v
 				}
 				if out, _ := run("show server_version_num"); !strings.HasPrefix(out, major) {
 					t.Fatalf("server version %q, want %s", out, major)
@@ -462,6 +564,9 @@ func TestNewEnginesDumpRestoreRoundTrip(t *testing.T) {
 			write("after")
 			if got := read(); got != "after" {
 				t.Fatalf("read before restore = %q", got)
+			}
+			if c.engine == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE {
+				r.failedClickHouseRestores(e, spec, cont, subject, res.GetObjectKey(), read)
 			}
 			r.restore(e, subject, res.GetObjectKey())
 			if got := read(); got != "before" {

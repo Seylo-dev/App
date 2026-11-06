@@ -668,15 +668,26 @@ func TestClickHouseStatements(t *testing.T) {
 		t.Errorf("restore all = %q", q)
 	}
 	list := env(r, "DB_LIST_QUERY")
-	if env(r, "DB_DROP") != "" || !strings.Contains(list, "replaceAll(replaceAll(name, '\\\\', '\\\\\\\\'), '`', '\\\\`')") ||
+	if env(r, "DB_NAMES") != "" || !strings.HasSuffix(list, " FORMAT TSV") ||
 		!strings.Contains(list, "file('/var/lib/clickhouse/backups/seylo/restore-20260101T000000Z.zip :: metadata/*.sql'") ||
 		!strings.Contains(list, "NOT IN ('', 'system', 'information_schema', 'INFORMATION_SCHEMA')") {
 		t.Errorf("restore all list query = %q", list)
 	}
+	if a := env(r, "DB_ASIDE"); a != "__seylo_pre_restore_20260101T000000Z" {
+		t.Errorf("aside suffix = %q", a)
+	}
+	// Nothing drops a database before RESTORE: the script renames them aside.
+	if strings.Contains(r.script, "DROP DATABASE IF EXISTS {n:Identifier}") && !strings.Contains(r.script, "RENAME DATABASE {a:Identifier} TO {b:Identifier}") {
+		t.Errorf("restore script = %s", r.script)
+	}
 	r, err = restoreJob(one, extClickHouse, "s1")
 	must(t, err)
-	if d := env(r, "DB_DROP"); d != "DROP DATABASE IF EXISTS `we\\`ird\\\\db` SYNC;" {
-		t.Errorf("drop one = %q", d)
+	// The one database as a TSV-escaped query parameter, never spliced into SQL.
+	if d := env(r, "DB_NAMES"); d != "we`ird\\\\db" {
+		t.Errorf("names one = %q", d)
+	}
+	if q := env(r, "DB_QUERY"); q != "RESTORE DATABASE `we\\`ird\\\\db` FROM File('seylo/restore-s1.zip')" {
+		t.Errorf("restore one = %q", q)
 	}
 	if !r.volumes || strings.Contains(r.script, "pw") {
 		t.Errorf("restore job = %+v", r)
@@ -791,6 +802,53 @@ func TestRedisLikeRestoreSwapsFiles(t *testing.T) {
 				t.Fatalf("suspends %v resumes %d", r.suspends, r.resumes)
 			}
 		})
+	}
+}
+
+// A second RDB restore deletes the append-only copies the first one moved
+// aside and keeps its own, so the volume holds one undo, not one per
+// restore. Other files, and whatever a planted symlink points at, stay.
+func TestRedisRestoreKeepsOnlyItsOwnUndo(t *testing.T) {
+	spec := dbSpec(agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY)
+	r := newRig(t, spec)
+	vol, _ := r.layout.ServiceVolume("db1", "data")
+	must(t, os.MkdirAll(filepath.Join(vol, "appendonlydir"), 0o755))
+	must(t, os.WriteFile(filepath.Join(vol, "appendonlydir", "a.aof"), []byte("current"), 0o600))
+	earlier := filepath.Join(vol, "appendonlydir.before-restore-20250101T000000Z")
+	must(t, os.MkdirAll(earlier, 0o755))
+	must(t, os.WriteFile(filepath.Join(earlier, "a.aof"), []byte("old"), 0o600))
+	must(t, os.WriteFile(filepath.Join(vol, "appendonly.aof.before-restore-20250101T000000Z"), []byte("old"), 0o600))
+	must(t, os.WriteFile(filepath.Join(vol, "notes.before-restore-20250101T000000Z"), []byte("mine"), 0o600))
+	outside := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(outside, "keep"), []byte("x"), 0o600))
+	must(t, os.Symlink(outside, filepath.Join(vol, "appendonlydir.before-restore-20240101T000000Z")))
+
+	var gz bytes.Buffer
+	w := gzip.NewWriter(&gz)
+	_, _ = w.Write([]byte("REDIS0011-new"))
+	must(t, w.Close())
+	key := "node1/db1/pol1/20260101T000000Z-r1.rdb.gz"
+	r.store.objs[key] = gz.Bytes()
+	_, err := r.runner.Restore(context.Background(), &agentv1.RestoreBackupRequest{ObjectKey: key,
+		Subject: &agentv1.BackupSubject{ServiceId: "db1", What: &agentv1.BackupSubject_Database{Database: &agentv1.DatabaseDump{}}}})
+	must(t, err)
+
+	entries, _ := os.ReadDir(vol)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	slices.Sort(names)
+	// This restore's undo is named by the rig's clock.
+	undo := slices.IndexFunc(names, func(n string) bool { return strings.HasPrefix(n, "appendonlydir.before-restore-2026") })
+	if len(names) != 4 || undo < 0 || names[0] != "appendonly.aof" || names[2] != "dump.rdb" || names[3] != "notes.before-restore-20250101T000000Z" {
+		t.Fatalf("files after restore = %v", names)
+	}
+	if b, _ := os.ReadFile(filepath.Join(vol, names[undo], "a.aof")); string(b) != "current" {
+		t.Fatalf("this restore's undo = %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "keep")); err != nil {
+		t.Fatalf("the symlink's target was touched: %v", err)
 	}
 }
 

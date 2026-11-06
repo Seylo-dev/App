@@ -39,12 +39,20 @@ function resolve(schema: TSchema, segments: string[]): boolean {
  * Every leaf path whose last field name looks like a secret, for example
  * "password" or "providers.*.apiKey".
  */
-export function secretLookingPaths(schema: TSchema, prefix: string[] = []): string[] {
+export function secretLookingPaths(schema: TSchema): string[] {
+  return pathsWhere(schema, looksSecret);
+}
+
+/**
+ * Every path whose last field name matches, for checks narrower than the
+ * registry-wide one (a module whose URLs carry passwords, say).
+ */
+export function pathsWhere(schema: TSchema, match: (key: string) => boolean, prefix: string[] = []): string[] {
   const found: string[] = [];
   for (const [key, child] of childrenOf(schema)) {
     const path = [...prefix, key];
-    if (key !== "*" && looksSecret(key)) found.push(path.join("."));
-    found.push(...secretLookingPaths(child, path));
+    if (key !== "*" && match(key)) found.push(path.join("."));
+    found.push(...pathsWhere(child, match, path));
   }
   return [...new Set(found)];
 }

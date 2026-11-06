@@ -1,7 +1,8 @@
 // The database engines on screen: the New database form (every engine,
-// versions from databases.engines on the real panel, pgvector for Postgres)
-// and the Connection tab of a ClickHouse database (native and HTTP URLs)
-// and of a pgvector one. Demo data (demo/*.ts) stands in for the fleet;
+// versions from databases.engines on the real panel, pgvector for Postgres,
+// KeyDB's unmaintained notice and its digest pin), KeyDB's exposure asking
+// for allowed IPs first, and the Connection tab of a ClickHouse database
+// (native and HTTP URLs) and of a pgvector one. Demo data (demo/*.ts) stands in for the fleet;
 // databases.create is answered here so nothing is deployed.
 //
 // Screenshots: $SHOTS_DIR/databases/*.png.
@@ -59,6 +60,21 @@ test.describe("database engines", () => {
 
     await dialog.getByRole("radio", { name: "Valkey" }).click();
     await expect(version).toContainText("9.1 (newest)");
+    await expect(dialog.getByRole("note")).toHaveCount(0);
+
+    // KeyDB: unmaintained, said on the card and under the version; its digest pin shows shortened.
+    const keydb = dialog.getByRole("radio", { name: /KeyDB/ });
+    await expect(keydb).toContainText("Unmaintained");
+    await keydb.click();
+    await expect(dialog.getByRole("note")).toContainText("no security fixes");
+    await expect(dialog.getByRole("note")).toContainText("Prefer Valkey");
+    await expect(version).toContainText("6.3 (newest)");
+    await version.click();
+    const pinned = page.getByRole("option", { name: /^6\.3/ }).locator("[title]");
+    await expect(pinned).toHaveText("eqalpha/keydb@sha256:6537505c4235…");
+    await expect(pinned).toHaveAttribute("title", /^eqalpha\/keydb@sha256:[0-9a-f]{64}$/);
+    await page.screenshot({ path: `${shots}/new-database-keydb.png` });
+    await page.keyboard.press("Escape");
 
     // Postgres with pgvector: the versions list the pgvector images.
     await dialog.getByRole("radio", { name: "Postgres" }).click();
@@ -94,6 +110,41 @@ test.describe("database engines", () => {
     await expect(tools.getByText("clickhouse-client")).toBeVisible();
     await expect(page.locator('main [data-slot="skeleton"]')).toHaveCount(0);
     await page.screenshot({ path: `${shots}/clickhouse-connection.png`, fullPage: true });
+  });
+
+  test("KeyDB asks for allowed IPs before it is exposed", async ({ page }) => {
+    let exposure: Record<string, unknown> | null = null;
+    const keydb = () => ({
+      ...databaseOf(svc.redis),
+      engine: "keydb",
+      version: "6.3",
+      shellClient: "keydb-cli",
+      exposure: { ...databaseOf(svc.redis).exposure, enabled: false, host: null, port: null, certificate: "none", needsAllowedCidrs: true },
+    });
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.redis ? keydb() : databaseOf(String(input.serviceId))),
+        "databases.setExposure": (input) => {
+          exposure = input;
+          return keydb();
+        },
+      },
+    });
+    await page.goto(connection(svc.redis));
+    const exposed = page.getByRole("region", { name: "Exposed connection" });
+    await exposed.getByLabel("Exposed").click();
+    // No request yet: the settings open with the reason.
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Exposure settings" })).toBeVisible();
+    await expect(dialog.getByRole("note")).toContainText("no security fixes");
+    expect(exposure).toBeNull();
+    await dialog.getByLabel("Allowed IPs").fill("198.51.100.24/32");
+    // The dialog fades in.
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/keydb-exposure.png` });
+    await dialog.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => exposure).not.toBeNull();
+    expect(exposure).toMatchObject({ serviceId: svc.redis, enabled: true, allowedCidrs: ["198.51.100.24/32"] });
   });
 
   test("a pgvector database says how to turn the extension on", async ({ page }) => {

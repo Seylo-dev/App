@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,10 +54,21 @@ const (
 // server's HTTP interface that opens the Play page on "/" and signs every
 // request in as the admin with a Basic header it sets itself. Whatever a
 // browser sends as Authorization or X-ClickHouse-User/-Key is replaced or
-// dropped, so the password never reaches the browser and the edge ticket
-// stays the only login. The upstream is resolved through Docker's DNS on
-// each request, so a recreated database container is found again.
-const clickhouseUIScript = `set -e
+// dropped, and a request with credential URL parameters (user, password,
+// quota_key, which ClickHouse prefers over the header) or a percent-encoded
+// parameter name (which could spell one) is refused, so the password never
+// reaches the browser and the edge ticket stays the only login. Play adds
+// those parameters only when someone fills its user or password field. The
+// upstream is resolved through Docker's DNS on each request, so a
+// recreated database container is found again.
+var clickhouseUIScript = strings.Replace(clickhouseUITemplate, "@CREDENTIAL_ARGS@", strings.ReplaceAll(clickhouseCredentialArgs, "$", `\$`), 1)
+
+// clickhouseCredentialArgs matches (case-insensitively, as nginx's ~*) a
+// query string that carries ClickHouse credentials or a percent-encoded
+// parameter name.
+const clickhouseCredentialArgs = `(^|&)((user|password|quota_key)(=|&|$)|[^=&]*%)`
+
+const clickhouseUITemplate = `set -e
 cat > /etc/nginx/conf.d/default.conf <<EOF
 resolver 127.0.0.11 valid=10s ipv6=off;
 server {
@@ -69,6 +81,7 @@ server {
   proxy_set_header X-ClickHouse-User "";
   proxy_set_header X-ClickHouse-Key "";
   proxy_set_header Cookie "";
+  if (\$args ~* "@CREDENTIAL_ARGS@") { return 403; }
   set \$upstream http://$CH_HOST:$CH_PORT;
   location = / {
     if (\$args = "") { return 302 /play; }

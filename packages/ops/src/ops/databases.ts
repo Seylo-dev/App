@@ -67,6 +67,11 @@ export const DatabaseExposure = Type.Object({
   user: Type.String(),
   /** Empty means anyone may connect; the UI warns about it. */
   allowedCidrs: Type.Array(Cidr),
+  /**
+   * The engine may be exposed only to listed source addresses (KeyDB, which
+   * gets no security fixes): setExposure refuses an empty allowedCidrs.
+   */
+  needsAllowedCidrs: Type.Boolean(),
   /** Host name of the ACME certificate; null means a self-signed certificate. */
   tlsHostname: Type.Union([Type.String(), Type.Null()]),
   certificate: Type.Union([
@@ -168,6 +173,8 @@ export const EngineInfo = Type.Object({
   hasDatabase: Type.Boolean(),
   shellClient: Type.String(),
   webUiTool: Type.String(),
+  /** A caution for whoever picks the engine, for example that upstream ships no security fixes; null for most. */
+  notice: Type.Union([Type.String(), Type.Null()]),
 });
 
 export const engines = defineOp({
@@ -175,7 +182,7 @@ export const engines = defineOp({
   kind: "query",
   summary: "List database engines",
   description:
-    "Lists the engines databases.create accepts, with their major versions, image variants (pgvector), default users and tools. Images are pinned to exact versions.",
+    "Lists the engines databases.create accepts, with their major versions, image variants (pgvector), default users, tools and a notice where an engine needs one (KeyDB is unmaintained and gets no security fixes; prefer Valkey). Images are pinned to exact versions.",
   input: Type.Object({}),
   output: Type.Object({ engines: Type.Array(EngineInfo) }),
   // A fixed catalog that holds nothing of the panel's: anyone signed in may read it.
@@ -189,7 +196,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Create a database",
   description:
-    "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions and variants. Other services on the same node reach it at <name>:<port>; services on other nodes need exposure.",
+    "Creates a Postgres, MySQL, MariaDB, Mongo, Redis, Valkey, KeyDB, Dragonfly or ClickHouse service in a project on one node, with generated credentials (or the ones given) and a data volume. Postgres takes variant pgvector for an image with the vector extension. databases.engines lists versions, variants and notices (KeyDB gets no security fixes; prefer Valkey). Other services on the same node reach it at <name>:<port>; services on other nodes need exposure.",
   input: Type.Object({
     projectId: Id,
     name: DatabaseName,
@@ -233,7 +240,7 @@ export const connection = defineOp({
     "Returns the internal connection URL and, when exposure is on, the exposed URL, with passwords. Internal URLs only work for services of the project on the same node.",
   input: Type.Object({ serviceId: Id }),
   output: DatabaseConnection,
-  sensitive: { output: ["internal.url", "internal.password", "exposed.url", "exposed.password"] },
+  sensitive: { output: ["internal.url", "internal.password", "internal.httpUrl", "exposed.url", "exposed.password"] },
   permission: serviceScope("databases.credentials"),
   mcp: true,
   audit: false,
@@ -303,7 +310,7 @@ export const setExposure = defineOp({
   kind: "mutation",
   summary: "Expose a database",
   description:
-    "Turns TLS exposure on or off. On: the agent listens on a node port with the database's own TLS for a separate user, optionally limited to source CIDRs. The internal URL does not change. Fields left out keep their value.",
+    "Turns TLS exposure on or off. On: the agent listens on a node port with the database's own TLS for a separate user, optionally limited to source CIDRs (required where exposure.needsAllowedCidrs is true, as for KeyDB). The internal URL does not change. Fields left out keep their value.",
   input: Type.Object({
     serviceId: Id,
     enabled: Type.Boolean(),

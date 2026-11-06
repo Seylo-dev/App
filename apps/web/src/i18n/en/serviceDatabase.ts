@@ -35,6 +35,8 @@ export default {
   exposureTitle: "Exposure settings",
   exposureBody: "Who may connect, and which certificate the database presents.",
   allowedIps: "Allowed IPs",
+  allowlistRequired:
+    "This engine gets no security fixes, so it can only be exposed to the IPs or CIDRs you list here. Prefer Valkey for anything public.",
   tlsHostname: "TLS host name",
   tlsHostnameHint: "A name pointing at the node gets a Let's Encrypt certificate. Empty uses a self-signed one.",
   publicPort: "Port",

@@ -17,7 +17,10 @@
 //   - Restores download, unpack into a staging folder and swap (volumes,
 //     the RDB of Redis, Valkey, KeyDB and Dragonfly) or pipe into
 //     pg_restore/psql/mysql/mongorestore, or into a ClickHouse helper that
-//     drops the databases the zip holds and runs RESTORE.
+//     renames the databases the zip holds aside, runs RESTORE and drops the
+//     renamed copies only after it succeeded (puts them back when it
+//     fails). An RDB restore keeps the append-only files it replaced as one
+//     undo and deletes those of earlier restores.
 //
 // Interfaces used by other packages:
 //

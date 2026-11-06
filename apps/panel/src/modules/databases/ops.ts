@@ -108,6 +108,7 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
       port: address?.port ?? null,
       user: info.exposedUser.user,
       allowedCidrs: info.exposure?.allowedCidrs ?? [],
+      needsAllowedCidrs: info.engine.exposureNeedsAllowlist,
       tlsHostname: info.row.tlsHostname,
       certificate,
       certificateIssuer: seen.certIssuer,
@@ -139,6 +140,7 @@ export const listEngines = implement(dbOps.engines, () => ({
     hasDatabase: e.hasDatabase,
     shellClient: e.shellClient,
     webUiTool: e.webUiTool,
+    notice: e.notice,
   })),
 }));
 
@@ -313,6 +315,14 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
     assertHostUnclaimed(ctx.db, tlsHostname, { field: "tlsHostname", exceptDatabaseOf: info.service.id });
   }
   const cidrs = input.allowedCidrs === undefined ? (info.exposure?.allowedCidrs ?? []) : normalizeCidrs(input.allowedCidrs);
+  // An engine with known, unfixed holes (KeyDB) is never open to anyone with the password.
+  if (input.enabled && info.engine.exposureNeedsAllowlist && cidrs.length === 0) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `${info.engine.label} gets no security fixes, so it can only be exposed to listed addresses. Add allowed IPs or CIDRs.`,
+      { field: "allowedCidrs", reason: "allowlistRequired" },
+    );
+  }
   ctx.db.transaction((tx) => {
     tx.update(serviceDatabases).set({ tlsHostname }).where(eq(serviceDatabases.serviceId, info.service.id)).run();
     if (!input.enabled) {

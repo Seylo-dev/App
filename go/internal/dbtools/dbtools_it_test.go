@@ -139,6 +139,28 @@ func TestWebUIsStartAndStop(t *testing.T) {
 							t.Fatalf("query through the UI proxy (%q) = %d %s", auth, resp.StatusCode, b)
 						}
 					}
+					// Credentials as URL parameters (which ClickHouse takes over
+					// the header) are refused, spelled plainly or percent-encoded;
+					// other parameters pass.
+					for query, want := range map[string]int{
+						"user=nobody&password=x":                http.StatusForbidden,
+						"default_format=TSV&user=nobody":        http.StatusForbidden,
+						"password=x":                            http.StatusForbidden,
+						"quota_key=k":                           http.StatusForbidden,
+						"%75ser=nobody":                         http.StatusForbidden,
+						"default_format=TSV&param_user=1":       http.StatusOK,
+						"default_format=TSV&max_result_rows=10": http.StatusOK,
+					} {
+						resp, err := http.Post(up+"/?"+query, "text/plain", strings.NewReader("SELECT currentUser()"))
+						if err != nil {
+							t.Fatal(err)
+						}
+						b, _ := io.ReadAll(resp.Body)
+						resp.Body.Close()
+						if resp.StatusCode != want {
+							t.Fatalf("query through the UI proxy with ?%s = %d %s, want %d", query, resp.StatusCode, b, want)
+						}
+					}
 				case "postgres", "postgres18":
 					resp, err := http.Get(up + "/api/connection")
 					if err != nil {

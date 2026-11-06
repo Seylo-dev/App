@@ -186,7 +186,12 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
             id="db-exposed"
             checked={e.enabled}
             disabled={set.isPending}
-            onCheckedChange={(v) => set.mutate({ serviceId: service.id, enabled: v === true })}
+            onCheckedChange={(v) =>
+              // An engine that may only be exposed to listed addresses asks for them first.
+              v === true && e.needsAllowedCidrs && e.allowedCidrs.length === 0
+                ? setEditing(true)
+                : set.mutate({ serviceId: service.id, enabled: v === true })
+            }
           />
           {t("serviceDatabase.exposedToggle")}
         </label>
@@ -285,6 +290,11 @@ function ExposureDialog({ service, db, onClose }: { service: ServiceDetail; db: 
             <DialogTitle>{t("serviceDatabase.exposureTitle")}</DialogTitle>
             <DialogDescription>{t("serviceDatabase.exposureBody")}</DialogDescription>
           </div>
+          {db.exposure.needsAllowedCidrs && (
+            <p role="note" className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-[12.5px] leading-normal text-chip-amber-fg">
+              {t("serviceDatabase.allowlistRequired")}
+            </p>
+          )}
           <Field label={t("serviceDatabase.allowedIps")} htmlFor="x-cidrs" hint={t("serviceDomains.access.allowlistHint")}>
             <Textarea id="x-cidrs" mono rows={3} value={cidrs} onChange={(e) => setCidrs(e.target.value)} />
           </Field>

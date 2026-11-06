@@ -28,19 +28,21 @@ import type { ComposePreview } from "../../lib/types";
 import { NodePicker, ProjectPicker } from "../pickers";
 import { QueryError } from "../query-error";
 import { KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
+import { shortImage } from "./short-image";
 
 type FormKind = Exclude<NewServiceKind, "template">;
 type AppSource = "image" | "git" | "none";
 type Engine = (typeof databases.DatabaseEngine)["static"];
 
-const engines: readonly { engine: Engine; label: MessageKey; tag: string }[] = [
+/** note: a word on the card; notice: what to know before picking it, under the version. */
+const engines: readonly { engine: Engine; label: MessageKey; tag: string; note?: MessageKey; notice?: MessageKey }[] = [
   { engine: "postgres", label: "newService.engines.postgres", tag: "PG" },
   { engine: "mysql", label: "newService.engines.mysql", tag: "MY" },
   { engine: "mariadb", label: "newService.engines.mariadb", tag: "MDB" },
   { engine: "mongo", label: "newService.engines.mongo", tag: "MGO" },
   { engine: "redis", label: "newService.engines.redis", tag: "RDS" },
   { engine: "valkey", label: "newService.engines.valkey", tag: "VK" },
-  { engine: "keydb", label: "newService.engines.keydb", tag: "KDB" },
+  { engine: "keydb", label: "newService.engines.keydb", tag: "KDB", note: "newService.keydbNote", notice: "newService.keydbNotice" },
   { engine: "dragonfly", label: "newService.engines.dragonfly", tag: "DF" },
   { engine: "clickhouse", label: "newService.engines.clickhouse", tag: "CH" },
 ];
@@ -275,7 +277,13 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             className="grid grid-cols-2 gap-2 sm:grid-cols-3"
           >
             {engines.map((item) => (
-              <RadioCard key={item.engine} value={item.engine} title={t(item.label)} icon={<KindBadge tag={item.tag} tone="sky" />} />
+              <RadioCard
+                key={item.engine}
+                value={item.engine}
+                title={t(item.label)}
+                description={item.note && <span className="text-chip-amber-fg">{t(item.note)}</span>}
+                icon={<KindBadge tag={item.tag} tone="sky" />}
+              />
             ))}
           </RadioGroup>
           <EngineVersion
@@ -285,6 +293,19 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             withPgvector={withPgvector}
             onPgvector={setWithPgvector}
           />
+          {engines.map(
+            (item) =>
+              item.engine === engine &&
+              item.notice && (
+                <p
+                  key={item.engine}
+                  role="note"
+                  className="m-0 rounded-control bg-chip-amber-bg px-3 py-2.5 text-[12.5px] leading-normal text-chip-amber-fg"
+                >
+                  {t(item.notice)}
+                </p>
+              ),
+          )}
         </>
       )}
 
@@ -399,9 +420,11 @@ function EngineVersion({
           <SelectContent>
             {versions.map((v) => (
               <SelectItem key={v.version} value={v.version}>
-                <span className="flex items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2">
                   {v.version === newest ? t("newService.versionLatest", { version: v.version }) : v.version}
-                  <span className="font-mono text-xs text-muted-foreground">{v.image}</span>
+                  <span title={v.image} className="max-w-[260px] truncate font-mono text-xs text-muted-foreground">
+                    {shortImage(v.image)}
+                  </span>
                 </span>
               </SelectItem>
             ))}

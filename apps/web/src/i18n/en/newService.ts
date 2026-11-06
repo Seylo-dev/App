@@ -61,6 +61,9 @@ export default {
   versionHint: "Images are pinned to this exact release.",
   versionLatest: "{version} (newest)",
   versionsLoading: "Loading versions",
+  keydbNote: "Unmaintained",
+  keydbNotice:
+    "KeyDB has had no release since 2023 and gets no security fixes, including the 2025 Redis Lua advisories (CVE-2025-49844 and three more). Prefer Valkey. It can only be exposed to allowed IPs.",
   pgvector: "Include pgvector",
   pgvectorHint: "A Postgres image with the vector extension. Run CREATE EXTENSION vector; in the database to use it.",
   composeFile: "docker-compose.yml",

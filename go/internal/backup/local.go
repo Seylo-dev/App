@@ -3,12 +3,15 @@ package backup
 import (
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -484,11 +487,12 @@ func (l *Local) Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) 
 			}
 			return l.restoreRedis(ctx, store, key, spec)
 		}
-		job, err := restoreJob(t, ext, newSuffix(l.opts.Now()))
+		run := restoreRun(l.opts.Now())
+		job, err := restoreJob(t, ext, run)
 		if err != nil {
 			return nil, err
 		}
-		return l.restoreDump(ctx, store, key, spec, t, job)
+		return l.restoreDump(ctx, store, key, spec, t, job, run)
 	default:
 		return nil, fmt.Errorf("%w: the subject has neither a volume nor a database", ErrBadRequest)
 	}
@@ -514,14 +518,24 @@ func open(ctx context.Context, store Store, key string, gunzip bool) (io.Reader,
 	return r, cr, closeFn, nil
 }
 
-func (l *Local) restoreDump(ctx context.Context, store Store, key string, spec *agentv1.ServiceSpec, t dbTarget, job dbJob) (*agentv1.RestoreBackupResponse, error) {
+// restoreRun names one restore's helper container and the files it keeps
+// in the data volume (ClickHouse's zip, the renamed databases): the time
+// plus random characters, so two restores in the same second (a retry
+// right after a failure) never share a name.
+func restoreRun(now time.Time) string {
+	b := make([]byte, 3)
+	_, _ = rand.Read(b)
+	return newSuffix(now) + "-" + hex.EncodeToString(b)
+}
+
+func (l *Local) restoreDump(ctx context.Context, store Store, key string, spec *agentv1.ServiceSpec, t dbTarget, job dbJob, run string) (*agentv1.RestoreBackupResponse, error) {
 	r, counter, closeFn, err := open(ctx, store, key, job.gzip)
 	if err != nil {
 		return nil, err
 	}
 	defer closeFn()
 	tail := jobrun.NewTail(20, []string{t.password})
-	helper, err := l.helperSpec(spec, job, "restore-"+newSuffix(l.opts.Now()))
+	helper, err := l.helperSpec(spec, job, "restore-"+run)
 	if err != nil {
 		return nil, err
 	}
@@ -595,7 +609,9 @@ func swapDirs(dir, staging, old string) error {
 // runs Redis, Valkey and KeyDB with --appendonly yes) the server loads only
 // its append-only files and starts empty when they are missing, so the
 // existing ones (the appendonlydir folder of Redis 7+ and Valkey, KeyDB's
-// single appendonly.aof) are moved aside (kept, never deleted) and the RDB
+// single appendonly.aof) are moved aside as <name>.before-restore-<time>
+// (the undo for this restore; the copies of earlier restores are deleted
+// once this one is in place, so the volume holds at most one) and the RDB
 // is also written as appendonly.aof: a file that starts with an RDB
 // preamble. KeyDB loads it as is; Redis 7+ and Valkey take it as an AOF
 // from before 7.0 and move it into a new appendonlydir. Dragonfly has no
@@ -658,7 +674,35 @@ func (l *Local) restoreRedis(ctx context.Context, store Store, key string, spec 
 	if swapErr != nil {
 		return nil, swapErr
 	}
+	if err := pruneRedisUndo(data, suffix); err != nil {
+		l.log.Warn("deleting the append-only copies of earlier restores", "service_id", spec.GetId(), "err", err)
+	}
 	return &agentv1.RestoreBackupResponse{RestoredBytes: uint64(counter.n)}, nil
+}
+
+// redisUndo matches the append-only files an RDB restore moved aside.
+var redisUndo = regexp.MustCompile(`^(appendonlydir|appendonly\.aof)\.before-restore-(\d{8}T\d{6}Z)$`)
+
+// pruneRedisUndo deletes the append-only copies earlier restores moved
+// aside in data, keeping the ones of the restore at keep. The folder is
+// container-writable: os.RemoveAll unlinks a planted symlink instead of
+// following it (it walks with openat and O_NOFOLLOW).
+func pruneRedisUndo(data, keep string) error {
+	entries, err := os.ReadDir(data)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		m := redisUndo.FindStringSubmatch(e.Name())
+		if m == nil || m[2] == keep {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(data, e.Name())); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // rdbEOFMarkLen is the length of the hex marker a diskless replication

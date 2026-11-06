@@ -593,6 +593,7 @@ export function databaseOf(serviceId: string) {
     port: 15432,
     user: "external",
     allowedCidrs: [],
+    needsAllowedCidrs: false,
     tlsHostname: null,
     certificate: "selfSigned",
     certificateIssuer: null,

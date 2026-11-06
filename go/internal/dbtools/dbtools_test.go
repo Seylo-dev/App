@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -126,6 +127,35 @@ func TestUITargets(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(tg.Spec.Env, " ")+strings.Join(tg.Spec.Cmd, " "), "p@ss") {
 		t.Fatal("clickhouse password in clear")
+	}
+}
+
+// The ClickHouse UI proxy refuses credentials as URL parameters (they win
+// over its Basic header) and percent-encoded parameter names; Play's own
+// parameters pass. The pattern reaches nginx with $ escaped for the shell.
+func TestClickHouseUIRefusesCredentialArgs(t *testing.T) {
+	if !strings.Contains(clickhouseUIScript, `if (\$args ~* "(^|&)((user|password|quota_key)(=|&|\$)|[^=&]*%)") { return 403; }`) {
+		t.Fatalf("script = %s", clickhouseUIScript)
+	}
+	re := regexp.MustCompile("(?i)" + clickhouseCredentialArgs)
+	for args, refused := range map[string]bool{
+		"user=nobody":        true,
+		"a=1&password=x":     true,
+		"USER=x":             true,
+		"user":               true,
+		"x=1&quota_key=k":    true,
+		"%75ser=nobody":      true,
+		"a=1&p%61ssword=x":   true,
+		"":                   false,
+		"default_format=TSV": false,
+		"param_user=1":       false,
+		"username=1":         false,
+		"q=user%3Dx":         false,
+		"add_http_cors_header=1&default_format=JSONCompact&max_result_rows=1000": false,
+	} {
+		if got := re.MatchString(args); got != refused {
+			t.Errorf("?%s refused = %v, want %v", args, got, refused)
+		}
 	}
 }
 
