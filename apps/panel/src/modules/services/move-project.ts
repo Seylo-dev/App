@@ -8,8 +8,10 @@
 // like a deploy: a deployment with trigger "move" runs the live image again
 // (no rebuild) with its env resolved in the new project, and the agent
 // re-attaches the containers to seylo-p-<new project> health-gated (or
-// rolls new ones when more than the project changed). A failed or
-// cancelled switch puts the service, its grants and invites back
+// rolls new ones when more than the project changed). Until that
+// deployment ships, the node's spec keeps the old project
+// (services/desired.ts), so only the deployment moves the containers. A
+// failed or cancelled switch puts the service, its grants and invites back
 // (project-move-restore.ts, called by the deployments engine).
 
 import { OpError, services as serviceOps } from "@seylo/ops";

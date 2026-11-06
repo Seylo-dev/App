@@ -20,6 +20,7 @@ import { engineFor, finish, nextGeneration } from "../deployments/engine";
 import { appendLog } from "../deployments/logs";
 import { hasActiveDeploy } from "../deployments/queue";
 import { initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
+import { assertNoActiveCopy } from "./copies";
 import { assertNode, dataVolumes } from "./insert";
 import { actorOf, publishService } from "./ops";
 import { loadService, nodeNames } from "./rows";
@@ -38,6 +39,8 @@ export const move = implement(serviceOps.move, (input, ctx) => {
   const from = (placements[0] as (typeof placements)[number]).nodeId;
   if (from === input.toNodeId) throw new OpError("BAD_REQUEST", "The service already runs on this node.", { field: "toNodeId" });
   assertNode(ctx.db, input.toNodeId);
+  // A clone's data copy reads (or writes) its folder on this node; the move stops it and removes that folder.
+  assertNoActiveCopy(ctx.db, svc.id, { anySource: true });
   if (!svc.liveDeploymentId) throw new OpError("CONFLICT", "Deploy the service before moving it.");
   if (hasActiveDeploy(ctx, svc.id)) throw new OpError("CONFLICT", "Wait for the running deploy to finish.");
   const live = ctx.db.select().from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get();

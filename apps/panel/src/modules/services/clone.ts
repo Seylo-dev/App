@@ -6,10 +6,14 @@
 // main domain's access rules on a new automatic domain. What the caller
 // cannot read stays behind: the .env and file mounts need env.view on the
 // source, a database's logins and data need databases.credentials, other
-// volume data needs files.read. Domains (unique per host), deploy history,
-// cron jobs, backups, alerts and exposed ports are never copied. The clone
-// starts stopped and never deployed; a stopped, never-deployed service is
-// still sent to its node (services/desired.ts) so copied data is kept.
+// volume data needs files.read. Writing them into the clone needs what
+// writing them there always needs: env.edit in the target project (and
+// files.write for file mounts). The copied .env names the clone where it
+// named the source itself (impact.ts renameSelf). Domains (unique per
+// host), deploy history, cron jobs, backups, alerts and exposed ports are
+// never copied. The clone starts stopped and never deployed; a stopped,
+// never-deployed service is still sent to its node (services/desired.ts)
+// so copied data is kept.
 //
 // Data copies run as a job: stop the source when asked (always for
 // databases), pipe each volume ExportVolume -> ImportVolume through the
@@ -51,7 +55,7 @@ import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { toDataCopy } from "./copies";
-import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect } from "./impact";
+import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
 import { assertNode, insertService, writeSpec } from "./insert";
 import { relayVolume, waitStopped } from "./move";
 import { requireTargetProject } from "./move-project";
@@ -106,9 +110,11 @@ interface ClonePlan {
   replicas: number;
   name: string;
   isDatabase: boolean;
-  envReadable: boolean;
+  /** The .env and file mounts come along: readable on the source and writable in the target project. */
+  envCopied: boolean;
+  /** The clone's .env: the source's with its own name changed to the clone's. */
   envText: string;
-  env: "copied" | "hidden" | "none";
+  env: "copied" | "hidden" | "noWrite" | "none";
   dataVolumes: (typeof volumes.$inferSelect)[];
   fileMounts: (typeof volumes.$inferSelect)[];
   dataBlock: CloneDataBlock | null;
@@ -148,11 +154,15 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
 
   const spec = readSpec(svc.spec);
   const envReadable = can("env.view", "service", svc.id);
-  const envText = readServiceEnv(ctx.db, ctx.secrets, svc.id).text;
+  const sourceEnv = readServiceEnv(ctx.db, ctx.secrets, svc.id).text;
   const all = ctx.db.select().from(volumes).where(eq(volumes.serviceId, svc.id)).orderBy(asc(volumes.name)).all();
   const dataVolumes = all.filter((v) => v.kind === "volume");
   const fileMounts = all.filter((v) => v.kind === "file");
-  const hasEnv = parseEnv(envText).entries.length > 0 || fileMounts.length > 0;
+  const hasEnv = parseEnv(sourceEnv).entries.length > 0 || fileMounts.length > 0;
+  // services.create alone does not let anyone set a service's env or files in that project.
+  const envWritable = can("env.edit", "project", projectId) && (fileMounts.length === 0 || can("files.write", "project", projectId));
+  const envCopied = hasEnv && envReadable && envWritable;
+  const own = envCopied ? renameSelf(sourceEnv, svc.name, name) : { text: "", renamed: [], kept: [] };
 
   let dataBlock: CloneDataBlock | null = null;
   if (dataVolumes.length === 0) dataBlock = "noVolumes";
@@ -172,11 +182,19 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
   else if (ctx.db.select({ id: domains.id }).from(domains).where(eq(domains.host, host)).get()) autoDomainBlock = "taken";
   const primary = can("domains.view", "service", svc.id) ? primaryDomain(ctx.db, svc.id) : undefined;
 
-  let references: ReferenceEffect[] = [];
-  if (projectId !== svc.projectId && envReadable) {
+  // What changes meaning in the copied .env: its own name (now the clone's), a value that is just
+  // that name (now the source, or the target project's service of that name), and in another
+  // project its references and host names.
+  const sourceName = svc.name.toLowerCase();
+  const sourceThere = projectId === svc.projectId || to.services.some((s) => s.name.toLowerCase() === sourceName);
+  const references: ReferenceEffect[] = [
+    ...own.renamed.map((r) => ({ ...r, effect: "renamed" as const })),
+    ...own.kept.map((k) => ({ ...k, via: "hostname" as const, effect: sourceThere ? ("retargeted" as const) : ("unresolved" as const) })),
+  ];
+  if (projectId !== svc.projectId && envCopied) {
     const from = projectEnvOf(buildEnvGraph(ctx, svc.projectId));
     const self = from.services.find((s) => s.id === svc.id);
-    if (self) references = ownReferenceEffects(self, from, to);
+    if (self) references.push(...ownReferenceEffects({ ...self, parsed: parseEnv(own.text) }, from, to));
   }
 
   return {
@@ -188,9 +206,9 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
     replicas: placements[0]?.replicas ?? 1,
     name,
     isDatabase,
-    envReadable,
-    envText,
-    env: !hasEnv ? "none" : envReadable ? "copied" : "hidden",
+    envCopied,
+    envText: own.text,
+    env: !hasEnv ? "none" : !envReadable ? "hidden" : !envWritable ? "noWrite" : "copied",
     dataVolumes,
     fileMounts,
     dataBlock,
@@ -324,7 +342,7 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   const spec = cloneSpecOf(plan.spec);
   assertSourceAllowed(ctx, plan.projectId, spec.source);
   // The copied .env resolves in the target project: the same rule as saving it there.
-  if (plan.envReadable && plan.envText.trim()) checkEnvReferences(ctx, plan.projectId, [plan.name], plan.envText);
+  if (plan.envCopied && plan.envText.trim()) checkEnvReferences(ctx, plan.projectId, [plan.name], plan.envText);
 
   const user = userOf(ctx.principal);
   const copyLogins = plan.isDatabase && data === "copy";
@@ -343,7 +361,7 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
       volumes: plan.dataVolumes.map((v) => ({ name: v.name, mountPath: v.mountPath, readOnly: v.readOnly })),
     });
     tx.update(services).set({ stopped: true }).where(eq(services.id, id)).run();
-    if (plan.envReadable) {
+    if (plan.envCopied) {
       for (const f of plan.fileMounts) {
         const content = f.contentSealed ? ctx.secrets.open(f.contentSealed, "volume.file") : null;
         tx.insert(volumes)
@@ -424,12 +442,12 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   if (created.copy) {
     ctx.jobs.enqueue(cloneDataJobType, { copyId: created.copy.id }, { maxAttempts: 1, dedupeKey: `clone-data:${created.copy.id}` });
   }
-  ctx.auditDetails?.({ cloneId: created.id, cloneName: plan.name, projectId: plan.projectId, nodeId: plan.nodeId, data });
+  ctx.auditDetails?.({ cloneId: created.id, cloneName: plan.name, projectId: plan.projectId, nodeId: plan.nodeId, data, env: plan.env });
   return {
     service: toDetail(ctx.db, ctx.agents, row),
     copied: {
-      env: plan.envReadable && plan.env === "copied",
-      fileMounts: plan.envReadable && plan.fileMounts.length > 0,
+      env: plan.envCopied && plan.envText.trim() !== "",
+      fileMounts: plan.envCopied && plan.fileMounts.length > 0,
       databaseLogins: copyLogins,
       middlewares: middlewares !== null && created.domain !== null,
       autoDomain: created.domain,

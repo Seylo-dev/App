@@ -577,8 +577,11 @@ export const ReferenceEffect = Type.Object({
   /** "db.URL" for ${{db.URL}}, "project.API_KEY" for a shared variable, "db:5432" for a host name in a value. */
   target: Type.String(),
   via: Type.Union([Type.Literal("reference"), Type.Literal("hostname")]),
-  /** unresolved: the new project has nothing by that name. retargeted: it now means the new project's service or variable. */
-  effect: Type.Union([Type.Literal("unresolved"), Type.Literal("retargeted")]),
+  /**
+   * unresolved: the new project has nothing by that name. retargeted: it now means the new project's
+   * service or variable. renamed (clones only): it named the source itself and names the clone instead.
+   */
+  effect: Type.Union([Type.Literal("unresolved"), Type.Literal("retargeted"), Type.Literal("renamed")]),
 });
 
 export const CloneDataMode = Type.Union([Type.Literal("empty"), Type.Literal("copy")], {
@@ -603,7 +606,7 @@ export const clonePreview = defineOp({
   kind: "query",
   summary: "Show what a clone of a service would get",
   description:
-    "Says what services.clone would copy for you into the given project and node: the suggested name, whether the environment comes along (only when you can read it), the volumes and whether their data can be copied, the automatic domain the clone can get, and the variables that would point at nothing or at another service in the target project.",
+    "Says what services.clone would copy for you into the given project and node: the suggested name, whether the environment comes along (only when you can read it on the source and edit it in the target project), the volumes and whether their data can be copied, the automatic domain the clone can get, and the variables that change meaning: ones that named the source itself (renamed to the clone) and ones that would point at nothing or at another service in the target project.",
   input: Type.Object({
     serviceId: Id,
     /** Target project; defaults to the source's. */
@@ -616,8 +619,12 @@ export const clonePreview = defineOp({
     kind: ServiceKind,
     projectId: Id,
     nodeId: Id,
-    /** copied: the .env and file mounts come along. hidden: you cannot read them, so the clone starts without. none: there are none. */
-    env: Type.Union([Type.Literal("copied"), Type.Literal("hidden"), Type.Literal("none")]),
+    /**
+     * copied: the .env and file mounts come along. hidden: you cannot read them, so the clone starts without.
+     * noWrite: you cannot edit env (env.edit), or files for file mounts (files.write), in the target project,
+     * so the clone starts without. none: there are none.
+     */
+    env: Type.Union([Type.Literal("copied"), Type.Literal("hidden"), Type.Literal("noWrite"), Type.Literal("none")]),
     volumes: Type.Array(Type.Object({ name: Type.String(), mountPath: Type.String() })),
     data: Type.Object({
       available: Type.Boolean(),
@@ -629,7 +636,11 @@ export const clonePreview = defineOp({
     autoDomain: Type.Union([Type.String(), Type.Null()]),
     /** The source's main domain has access rules (basic auth, IP allowlist, rate limit, redirects) that go to the automatic domain. */
     middlewares: Type.Boolean(),
-    /** In another project: variables that would point at nothing or at something else there. */
+    /**
+     * Variables of the copied .env that change meaning: references and host names that named the source
+     * itself (renamed), a value that is just the source's name (it now reaches the source, or the target
+     * project's service of that name), and in another project what would point at nothing or at something else.
+     */
     references: Type.Array(ReferenceEffect),
   }),
   permission: permission.service("services.view", serviceScope),
@@ -642,7 +653,7 @@ export const clone = defineOp({
   kind: "mutation",
   summary: "Clone a service",
   description:
-    "Copies a service (app, cron, database, Box, or a compose member as a standalone app) into the same or another project and node: source, build settings, environment (only when you can read it), health check, resources, crash policy, notes, and the main domain's access rules onto a new automatic domain. Domains, deploy history, cron jobs, backups, alerts and exposed ports are not copied. Volumes start empty or get a copy of the source's data (the source stops during the copy when stopSource is set, always for databases). The clone is created stopped and named <name>-copy unless named. Needs services.view on the source and services.create in the target project.",
+    "Copies a service (app, cron, database, Box, or a compose member as a standalone app) into the same or another project and node: source, build settings, environment (only when you can read it and may edit env, and files for file mounts, in the target project; its references to the source itself name the clone), health check, resources, crash policy, notes, and the main domain's access rules onto a new automatic domain. Domains, deploy history, cron jobs, backups, alerts and exposed ports are not copied. Volumes start empty or get a copy of the source's data (the source stops during the copy when stopSource is set, always for databases). The clone is created stopped and named <name>-copy unless named. Needs services.view on the source and services.create in the target project.",
   input: Type.Object({
     serviceId: Id,
     projectId: Id,

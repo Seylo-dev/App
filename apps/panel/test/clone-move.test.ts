@@ -1,9 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseEnv } from "@seylo/env-analyzer";
-import { databases as dbOps, deployments as deploymentOps, domains as domainOps, env, projects, services as serviceOps } from "@seylo/ops";
-import { DeployStage } from "@seylo/proto";
-import { and, eq } from "drizzle-orm";
 import {
+  boxes as boxOps,
+  databases as dbOps,
+  deployments as deploymentOps,
+  domains as domainOps,
+  env,
+  projects,
+  services as serviceOps,
+} from "@seylo/ops";
+import { DeployStage } from "@seylo/proto";
+import { and, eq, sql } from "drizzle-orm";
+import {
+  apiKeys,
   deployments,
   domains,
   grants,
@@ -13,11 +26,15 @@ import {
   serviceDatabases,
   serviceSecrets,
   services,
+  sourceUploads,
   volumes,
 } from "../src/db/schema";
-import { cloneName } from "../src/modules/services/clone";
+import { compileDesiredState } from "../src/desired";
+import { engineFor } from "../src/modules/deployments/engine";
+import { cloneDataJob, cloneName } from "../src/modules/services/clone";
 import { serviceSpecFor } from "../src/modules/services/desired";
-import { ownReferenceEffects, referrersOf, sharedVariablesLost } from "../src/modules/services/impact";
+import { ownReferenceEffects, referrersOf, renameSelf, sharedVariablesLost } from "../src/modules/services/impact";
+import { hashToken, prefixedToken } from "../src/security/tokens";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 
@@ -234,7 +251,7 @@ describe("services.clone", () => {
       .run();
     const member = await createUser(panel, "member");
     grant(panel, member.user.id, "service", id, ["services.view"]);
-    grant(panel, member.user.id, "project", blog, ["services.create", "services.view", "env.view"]);
+    grant(panel, member.user.id, "project", blog, ["services.create", "services.view", "env.view", "env.edit", "files.write"]);
 
     const preview = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie: member.cookie });
     expect(preview.body.env).toBe("hidden");
@@ -252,12 +269,95 @@ describe("services.clone", () => {
     expect(panel.deps.secrets.open(file?.contentSealed ?? "", "volume.file")).toBe("password=x");
   });
 
+  test("env and file mounts stay behind without env.edit (and files.write) in the target project", async () => {
+    const id = await app(shop, "web", { env: "TOKEN=abc\n" });
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", id, ["services.view", "env.view"]);
+    // services.create alone does not let anyone set a service's env there.
+    grant(panel, member.user.id, "project", blog, ["services.create", "services.view"]);
+    const preview = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie: member.cookie });
+    expect(preview.body.env).toBe("noWrite");
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { cookie: member.cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.copied).toMatchObject({ env: false, fileMounts: false });
+    expect((await callOp(panel, env.get, { serviceId: res.body.service.id }, { cookie })).body.text).toBe("");
+
+    // With env.edit the .env comes along; a file mount also needs files.write.
+    regrant(member.user.id, "project", blog, ["services.create", "services.view", "env.edit"]);
+    expect((await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie: member.cookie })).body.env).toBe(
+      "copied",
+    );
+    panel.deps.db
+      .insert(volumes)
+      .values({
+        serviceId: id,
+        name: "config",
+        mountPath: "/etc/app.conf",
+        kind: "file",
+        contentSealed: panel.deps.secrets.seal("x", "volume.file"),
+      })
+      .run();
+    expect((await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie: member.cookie })).body.env).toBe(
+      "noWrite",
+    );
+    regrant(member.user.id, "project", blog, ["services.create", "services.view", "env.edit", "files.write"]);
+    const full = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { cookie: member.cookie });
+    expect(full.body.copied).toMatchObject({ env: true, fileMounts: true });
+  });
+
+  test("the copied .env names the clone where it named the source itself", async () => {
+    const text =
+      'A=${{web.URL}}\nSELF=http://web:8080/health\nHOST=web\nB=${{ WEB.PORT }}\nQ="postgres://u:p@web:5432/app"\nOTHER=${{api.URL}}\n';
+    await app(shop, "api");
+    const id = await app(shop, "web", { env: text });
+    const preview = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: shop }, { cookie });
+    expect(preview.body.name).toBe("web-copy");
+    expect(preview.body.references).toEqual([
+      { key: "A", target: "web.URL", via: "reference", effect: "renamed" },
+      { key: "SELF", target: "web:8080", via: "hostname", effect: "renamed" },
+      { key: "B", target: "WEB.PORT", via: "reference", effect: "renamed" },
+      { key: "Q", target: "web:5432", via: "hostname", effect: "renamed" },
+      // A value that is just the name may be a database or user name: it stays, and now reaches the source.
+      { key: "HOST", target: "web", via: "hostname", effect: "retargeted" },
+    ]);
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA }, { cookie });
+    expect(res.status).toBe(200);
+    expect((await callOp(panel, env.get, { serviceId: res.body.service.id }, { cookie })).body.text).toBe(
+      'A=${{web-copy.URL}}\nSELF=http://web-copy:8080/health\nHOST=web\nB=${{ web-copy.PORT }}\nQ="postgres://u:p@web-copy:5432/app"\nOTHER=${{api.URL}}\n',
+    );
+    // In another project the bare name points at nothing (blog has no web).
+    const there = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie });
+    expect(there.body.references).toContainEqual({ key: "HOST", target: "web", via: "hostname", effect: "unresolved" });
+    expect(there.body.references).toContainEqual({ key: "OTHER", target: "api.URL", via: "reference", effect: "unresolved" });
+    expect(there.body.references).toContainEqual({ key: "A", target: "web.URL", via: "reference", effect: "renamed" });
+  });
+
+  test("renameSelf: references and URL hosts follow the clone's name, a bare value stays", () => {
+    expect(renameSelf("A=${{web.URL}}\n", "web", "web-copy")).toEqual({
+      text: "A=${{web-copy.URL}}\n",
+      renamed: [{ key: "A", target: "web.URL", via: "reference" }],
+      kept: [],
+    });
+    expect(renameSelf("DB_NAME=web\nX='web:80'\nY=webby:80\nZ=${{web2.URL}}\n", "web", "web-copy")).toEqual({
+      text: "DB_NAME=web\nX='web-copy:80'\nY=webby:80\nZ=${{web2.URL}}\n",
+      renamed: [{ key: "X", target: "web:80", via: "hostname" }],
+      kept: [{ key: "DB_NAME", target: "web" }],
+    });
+    expect(renameSelf("A=${{web.URL}}\n", "web", "WEB").renamed).toEqual([]);
+    // Every occurrence changes; each is listed once.
+    expect(renameSelf("A=http://web:80,http://web:80\n", "web", "w2")).toEqual({
+      text: "A=http://w2:80,http://w2:80\n",
+      renamed: [{ key: "A", target: "web:80", via: "hostname" }],
+      kept: [],
+    });
+  });
+
   test("a copied .env may not reach into the target project past what the caller can read", async () => {
     await app(blog, "vault", { env: "MASTER=hunter2\n" });
     const id = await app(shop, "web", { env: "SECRET=${{vault.MASTER}}\n" });
     const member = await createUser(panel, "member");
     grant(panel, member.user.id, "service", id, ["services.view", "env.view"]);
-    grant(panel, member.user.id, "project", blog, ["services.create", "services.view"]);
+    grant(panel, member.user.id, "project", blog, ["services.create", "services.view", "env.edit"]);
     const preview = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { cookie: member.cookie });
     expect(preview.body.references).toEqual([{ key: "SECRET", target: "vault.MASTER", via: "reference", effect: "retargeted" }]);
     const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { cookie: member.cookie });
@@ -283,6 +383,103 @@ describe("services.clone", () => {
     expect(res.body.service.sourceConfig).toMatchObject({ type: "git", deployOnPush: false });
     const cloneSpec = row(res.body.service.id)?.spec as { previews: { enabled: boolean } } | undefined;
     expect(cloneSpec?.previews.enabled).toBe(false);
+  });
+
+  test("an upload app's clone gets a copy of the newest archive, for people who can read its files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "seylo-clone-upload-"));
+    (panel.deps.config as { dataDir: string }).dataDir = dir;
+    try {
+      const id = await app(shop, "site");
+      const spec = row(id)?.spec as Record<string, unknown>;
+      panel.deps.db
+        .update(services)
+        .set({ spec: { ...spec, source: { type: "upload", fileName: "site-v2.tar.gz" } } })
+        .where(eq(services.id, id))
+        .run();
+      await mkdir(join(dir, "uploads"), { recursive: true });
+      const upload = (fileName: string, content: string, createdAt: Date) => {
+        const r = panel.deps.db
+          .insert(sourceUploads)
+          .values({ serviceId: id, fileName, sizeBytes: content.length, sha256: "0".repeat(64), createdAt })
+          .returning()
+          .get();
+        writeFileSync(join(dir, "uploads", `${r.id}.tar.gz`), content);
+      };
+      upload("site-v1.tar.gz", "old archive", new Date(Date.now() - 120_000));
+      upload("site-v2.tar.gz", "newest archive", new Date(Date.now() - 60_000));
+
+      const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { cookie });
+      expect(res.status).toBe(200);
+      const cloneId = res.body.service.id as string;
+      const copied = panel.deps.db.select().from(sourceUploads).where(eq(sourceUploads.serviceId, cloneId)).all();
+      expect(copied.map((u) => [u.fileName, u.sizeBytes])).toEqual([["site-v2.tar.gz", "newest archive".length]]);
+      expect(readFileSync(join(dir, "uploads", `${copied[0]?.id}.tar.gz`), "utf8")).toBe("newest archive");
+      expect((await callOp(panel, serviceOps.get, { serviceId: cloneId }, { cookie })).body.sourceConfig).toEqual({
+        type: "upload",
+        fileName: "site-v2.tar.gz",
+      });
+
+      // The archive is the source's files: without files.read the clone waits for its own upload.
+      const member = await createUser(panel, "member");
+      grant(panel, member.user.id, "service", id, ["services.view"]);
+      grant(panel, member.user.id, "project", blog, ["services.create", "services.view"]);
+      const bare = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { cookie: member.cookie });
+      expect(bare.status).toBe(200);
+      expect(panel.deps.db.select().from(sourceUploads).where(eq(sourceUploads.serviceId, bare.body.service.id)).all()).toEqual([]);
+      expect(row(bare.body.service.id)?.spec).toMatchObject({ source: { type: "upload", fileName: null } });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("API keys on clone and move", () => {
+  function key(userId: string, options: { projectIds?: string[]; readOnly?: boolean }) {
+    const token = prefixedToken("key");
+    panel.deps.db
+      .insert(apiKeys)
+      .values({
+        userId,
+        name: "test",
+        prefix: token.slice(0, 12),
+        tokenHash: hashToken(token),
+        actions: ["*"],
+        projectIds: options.projectIds ?? null,
+        readOnly: options.readOnly ?? false,
+      })
+      .run();
+    return token;
+  }
+
+  test("a key limited to one project clones and moves only inside it; a read-only key only previews", async () => {
+    const id = await app(shop, "api");
+    const owner = await createUser(panel, "owner");
+    const limited = key(owner.user.id, { projectIds: [shop] });
+    const forbidden = { code: "FORBIDDEN", details: { action: "services.create" } };
+
+    expect((await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: shop }, { bearer: limited })).status).toBe(200);
+    expect((await callOp(panel, serviceOps.clone, { serviceId: id, projectId: shop, nodeId: nodeA }, { bearer: limited })).status).toBe(
+      200,
+    );
+    // The op's own permission is on the source (inside the key's project); the target is checked in the handler.
+    const preview = await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { bearer: limited });
+    expect(preview.body.error).toMatchObject(forbidden);
+    const clone = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { bearer: limited });
+    expect(clone.body.error).toMatchObject(forbidden);
+    const impact = await callOp(panel, serviceOps.moveProjectImpact, { serviceId: id, projectId: blog }, { bearer: limited });
+    expect(impact.body.error).toMatchObject(forbidden);
+    const move = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { bearer: limited });
+    expect(move.body.error).toMatchObject(forbidden);
+    expect(panel.deps.db.select().from(services).where(eq(services.projectId, blog)).all()).toEqual([]);
+
+    const readOnly = key(owner.user.id, { readOnly: true });
+    expect((await callOp(panel, serviceOps.clonePreview, { serviceId: id, projectId: blog }, { bearer: readOnly })).status).toBe(200);
+    expect((await callOp(panel, serviceOps.moveProjectImpact, { serviceId: id, projectId: blog }, { bearer: readOnly })).status).toBe(200);
+    const roClone = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeA }, { bearer: readOnly });
+    expect(roClone.status).toBe(403);
+    const roMove = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { bearer: readOnly });
+    expect(roMove.status).toBe(403);
+    expect(row(id)?.projectId).toBe(shop);
   });
 });
 
@@ -370,6 +567,65 @@ describe("cloning databases and data", () => {
     const detail = await callOp(panel, serviceOps.get, { serviceId: cloneId }, { cookie });
     expect(detail.body.dataCopy).toMatchObject({ status: "done", fromName: "files", bytesCopied: 23 });
     expect((await callOp(panel, deploymentOps.deploy, { serviceId: cloneId }, { cookie })).status).toBe(200);
+  });
+
+  test("a database clone's first start deploys it", async () => {
+    const id = await postgres();
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB }, { cookie });
+    expect(res.status).toBe(200);
+    const cloneId = res.body.service.id as string;
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, cloneId, nodeB)?.stopped).toBe(true);
+    expect((await callOp(panel, serviceOps.start, { serviceId: cloneId }, { cookie })).status).toBe(200);
+    await fleet.settle();
+    const deploys = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, cloneId)).all();
+    expect(deploys.map((d) => [d.status, d.targetNodeIds])).toEqual([["deploying", [nodeB]]]);
+    const spec = serviceSpecFor(panel.deps.db, panel.deps.secrets, cloneId, nodeB);
+    expect(spec?.stopped).toBe(false);
+    expect(spec?.projectId).toBe(blog);
+    expect(spec?.image?.reference).toContain("postgres");
+    fleet.deployProgress(nodeB, cloneId, deploys[0]?.generation ?? 0, DeployStage.SUCCEEDED);
+    await fleet.settle();
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, cloneId)).get()?.status).toBe("live");
+    // Starting it again is an ordinary start now.
+    expect((await callOp(panel, serviceOps.start, { serviceId: cloneId }, { cookie })).status).toBe(200);
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, cloneId)).all()).toHaveLength(1);
+  });
+
+  test("a copy interrupted by a panel restart resumes: no second stop, the whole volume again, once", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    const gen = await deployLive(id);
+    fleet.volumes.set(nodeA, new Map([[`${id}/data`, new TextEncoder().encode("the bytes of the volume")]]));
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    const cloneId = res.body.service.id as string;
+    const copyId = res.body.dataCopy.id as string;
+    // The first run stopped the source and wrote part of the volume when the panel restarted.
+    const startedAt = new Date(Date.now() - 60_000);
+    panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, id)).run();
+    panel.deps.db
+      .update(serviceCopies)
+      .set({ status: "copying", sourceStopped: true, startedAt, bytesCopied: 4 })
+      .where(eq(serviceCopies.id, copyId))
+      .run();
+    fleet.volumes.set(nodeB, new Map([[`${cloneId}/data`, new TextEncoder().encode("the ")]]));
+    fleet.reportRunning(nodeA, id, gen, "", 8 /* STOPPED */);
+
+    // The job runs again after the restart.
+    const job = (attempt: number) => ({ ...panel.deps, jobId: `clone-data:${copyId}`, attempt });
+    await cloneDataJob.run({ copyId }, job(1));
+    await fleet.settle();
+    expect(new TextDecoder().decode(fleet.volumes.get(nodeB)?.get(`${cloneId}/data`))).toBe("the bytes of the volume");
+    const copy = panel.deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, copyId)).get();
+    expect(copy).toMatchObject({ status: "done", bytesCopied: 23, sourceStopped: false });
+    expect(copy?.startedAt?.getTime()).toBeLessThan(Date.now() - 30_000);
+    expect(row(id)?.stopped).toBe(false);
+    const exports = () => fleet.calls.filter((c) => c.method === "exportVolume").length;
+    expect(exports()).toBe(1);
+
+    // The run queued before the restart finds it done and touches nothing.
+    await cloneDataJob.run({ copyId }, job(1));
+    expect(exports()).toBe(1);
+    expect(row(id)?.stopped).toBe(false);
+    expect(panel.deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, copyId)).get()?.status).toBe("done");
   });
 
   test("copying volume data needs files.read and online nodes", async () => {
@@ -562,6 +818,75 @@ describe("services.moveProject", () => {
     expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.projectId).toBe(shop);
   });
 
+  test("a cancelled switch puts the service, its grants and invites back", async () => {
+    const id = await app(shop, "api");
+    await deployLive(id);
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", id, ["services.view", "logs.view"]);
+    const invite = panel.deps.db
+      .insert(invites)
+      .values({
+        email: "sam@example.com",
+        grants: [{ scopeType: "service", scopeId: id, actions: ["services.view"] }],
+        tokenHash: "x",
+        expiresAt: new Date(Date.now() + 86_400_000),
+      })
+      .returning()
+      .get();
+    const inviteGrants = () => panel.deps.db.select().from(invites).where(eq(invites.id, invite.id)).get()?.grants;
+    const res = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { cookie });
+    expect(res.status).toBe(200);
+    await fleet.settle();
+    expect(row(id)?.projectId).toBe(blog);
+    expect(panel.deps.db.select().from(grants).where(eq(grants.scopeId, id)).all()).toEqual([]);
+    expect(inviteGrants()).toEqual([]);
+
+    const cancelled = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId: res.body.deploymentId }, { cookie });
+    expect(cancelled.status).toBe(200);
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.id, res.body.deploymentId)).get()?.status).toBe("cancelled");
+    expect(row(id)?.projectId).toBe(shop);
+    const restored = panel.deps.db.select().from(grants).where(eq(grants.scopeId, id)).all();
+    expect(restored.map((g) => [g.userId, g.actions])).toEqual([[member.user.id, ["services.view", "logs.view"]]]);
+    expect(inviteGrants()).toEqual([{ scopeType: "service", scopeId: id, actions: ["services.view"] }]);
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.projectId).toBe(shop);
+    expect((await callOp(panel, serviceOps.get, { serviceId: id }, { cookie: member.cookie })).status).toBe(200);
+  });
+
+  test("the node keeps the old project until the switch deployment ships", async () => {
+    const id = await app(shop, "api");
+    const gen = await deployLive(id);
+    // Hold the switch in the queue, as if the engine had not reached it yet.
+    panel.deps.db.run(
+      sql.raw(
+        `CREATE TEMP TRIGGER hold_move AFTER INSERT ON deployments WHEN NEW."trigger" = 'move' BEGIN UPDATE deployments SET move_copying = 1 WHERE id = NEW.id; END`,
+      ),
+    );
+    const res = await callOp(panel, serviceOps.moveProject, { serviceId: id, projectId: blog, confirm: true }, { cookie });
+    expect(res.status).toBe(200);
+    await fleet.settle();
+    const deploymentId = res.body.deploymentId as string;
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.id, deploymentId)).get()?.status).toBe("queued");
+    expect(row(id)?.projectId).toBe(blog);
+
+    // Something else changes on the node and its desired state is compiled again meanwhile.
+    panel.deps.agents.desired.markDirty({ nodeId: nodeA });
+    await fleet.settle();
+    const compile = () => compileDesiredState(panel.deps.db, nodeA, { revision: 1n, secrets: panel.deps.secrets });
+    const held = compile();
+    expect(held.services.find((s) => s.id === id)).toMatchObject({ projectId: shop, generation: BigInt(gen) });
+    expect(held.networks.map((n) => n.projectId)).toEqual([shop]);
+
+    // The engine reaches it: the switch ships with the new project.
+    panel.deps.db.run(sql.raw("DROP TRIGGER hold_move"));
+    panel.deps.db.update(deployments).set({ moveCopying: false }).where(eq(deployments.id, deploymentId)).run();
+    engineFor(panel.deps).kick(deploymentId);
+    await fleet.settle();
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.id, deploymentId)).get()?.status).toBe("deploying");
+    const shipped = compile();
+    expect(shipped.services.find((s) => s.id === id)).toMatchObject({ projectId: blog, generation: BigInt(gen + 1) });
+    expect(shipped.networks.map((n) => n.projectId)).toEqual([blog]);
+  });
+
   test("protected services and compose members cannot move", async () => {
     const id = await app(shop, "api");
     panel.deps.db.update(services).set({ protected: true }).where(eq(services.id, id)).run();
@@ -624,6 +949,35 @@ describe("data copy guards", () => {
     // One copy from a source at a time.
     const second = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
     expect(second.body.error).toMatchObject({ code: "CONFLICT", details: { reason: "copying" } });
+  });
+
+  test("a Box being copied cannot be opened, and a service being copied cannot change node", async () => {
+    const box = await callOp(panel, boxOps.create, { projectId: shop, name: "dev", nodeId: nodeA }, { cookie });
+    expect(box.status).toBe(200);
+    const boxId = box.body.serviceId as string;
+    await fleet.settle();
+    const boxClone = await callOp(panel, serviceOps.clone, { serviceId: boxId, projectId: shop, nodeId: nodeA, data: "copy" }, { cookie });
+    expect(boxClone.status).toBe(200);
+    const copying = { code: "CONFLICT", details: { reason: "copying" } };
+    // Opening starts a Box: not the source the copy stops, not the clone it writes.
+    expect((await callOp(panel, boxOps.open, { serviceId: boxId }, { cookie })).body.error).toMatchObject(copying);
+    expect((await callOp(panel, boxOps.open, { serviceId: boxClone.body.service.id }, { cookie })).body.error).toMatchObject(copying);
+    expect(row(boxClone.body.service.id)?.stopped).toBe(true);
+
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    // Even a copy that leaves the source running reads its folder on node-a.
+    const res = await callOp(
+      panel,
+      serviceOps.clone,
+      { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy", stopSource: false },
+      { cookie },
+    );
+    expect(res.status).toBe(200);
+    expect((await callOp(panel, serviceOps.move, { serviceId: id, toNodeId: nodeB }, { cookie })).body.error).toMatchObject(copying);
+    const cloneMove = await callOp(panel, serviceOps.move, { serviceId: res.body.service.id, toNodeId: nodeA }, { cookie });
+    expect(cloneMove.body.error).toMatchObject(copying);
+    expect(panel.deps.db.select().from(deployments).where(eq(deployments.trigger, "move")).all()).toEqual([]);
   });
 
   test("a clone deleted while its copy waits still gets its source started again", async () => {

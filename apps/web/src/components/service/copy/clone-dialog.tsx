@@ -89,6 +89,9 @@ export function CloneDialog({
   });
 
   const p = preview.data;
+  // Variables that named the source itself now name the clone: shown apart from the warnings.
+  const renamed = p?.references.filter((r) => r.effect === "renamed") ?? [];
+  const changed = p?.references.filter((r) => r.effect !== "renamed") ?? [];
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!p) return;
@@ -150,6 +153,11 @@ export function CloneDialog({
                     {t("serviceCopy.clone.envHidden")}
                   </Alert>
                 )}
+                {p.env === "noWrite" && (
+                  <Alert tone="warning" className="py-2">
+                    {t("serviceCopy.clone.envNoWrite", { project: projectName })}
+                  </Alert>
+                )}
               </div>
 
               {p.volumes.length > 0 && (
@@ -199,12 +207,25 @@ export function CloneDialog({
                 </CheckLabel>
               )}
 
-              {p.references.length > 0 && (
+              {renamed.length > 0 && (
+                <div className="flex flex-col gap-1 text-[12.5px] text-muted-foreground">
+                  <span>{t("serviceCopy.clone.renamed", { name: service.name })}</span>
+                  <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+                    {renamed.map((r) => (
+                      <li key={`${r.key}:${r.target}`}>
+                        <span className="font-mono">{r.key}</span> <span className="font-mono">{r.target}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {changed.length > 0 && (
                 <Alert tone="warning" className="py-2">
                   <div className="flex flex-col gap-1">
                     <span>{t("serviceCopy.clone.references", { project: projectName })}</span>
                     <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-                      {p.references.map((r) => (
+                      {changed.map((r) => (
                         <li key={`${r.key}:${r.target}`}>
                           <span className="font-mono">{r.key}</span> <span className="font-mono">{r.target}</span>{" "}
                           {r.effect === "unresolved"

@@ -21,7 +21,7 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import { CronConcurrency, DeployMode, PortProtocol, ServiceKind, type ServiceSpec, ServiceSpecSchema } from "@seylo/proto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { deployments, servicePlacements, services, volumes } from "../../db/schema";
 import type { SecretBox } from "../../security/secret-box";
@@ -92,9 +92,26 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
       )
       .get() !== undefined && mounts.some((v) => v.kind === "volume");
 
+  // A move to another project waiting for its switch deployment (services/move-project.ts): the
+  // node keeps the old project until that deployment ships (rollout points the service at it), so
+  // an unrelated recompile in between does not move the containers ahead of their deployment.
+  const pendingMove = db
+    .select({ projectMove: deployments.projectMove })
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.serviceId, serviceId),
+        isNotNull(deployments.projectMove),
+        // rollout() sets "deploying" and the service's target together.
+        inArray(deployments.status, ["queued", "building"]),
+      ),
+    )
+    .get()?.projectMove;
+  const projectId = pendingMove && pendingMove.toProjectId === svc.projectId ? pendingMove.fromProjectId : svc.projectId;
+
   const init: ServiceSpecInit = {
     id: svc.id,
-    projectId: svc.projectId,
+    projectId,
     name: svc.name,
     kind,
     generation: BigInt(Math.max(1, target.generation)),

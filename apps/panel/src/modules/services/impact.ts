@@ -5,7 +5,7 @@
 // on plain shapes are pure (tested directly); moveImpact reads the rows,
 // filters by what the caller may see and adds what blocks a move.
 
-import { appVariables, databaseVariables, hostMentions, type ParsedEnv, sharedTarget } from "@seylo/env-analyzer";
+import { appVariables, databaseVariables, hostMentions, type ParsedEnv, parseEnv, sharedTarget } from "@seylo/env-analyzer";
 import { allOps, grantableActions, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
@@ -99,6 +99,70 @@ export function ownReferenceEffects(self: EnvService, from: ProjectEnv, to: Proj
     }
   }
   return out;
+}
+
+/** What renameSelf changed and what it left. */
+export interface SelfRename {
+  text: string;
+  /** ${{from.X}} and `from` as a URL host or host:port, now naming the clone. */
+  renamed: { key: string; target: string; via: "reference" | "hostname" }[];
+  /** Values that are just `from` (HOST=web, but also DB_NAME=web): maybe a host, maybe not, so they stay. */
+  kept: { key: string; target: string }[];
+}
+
+/**
+ * A clone's .env with the source's name swapped for the clone's where it
+ * named the service itself: ${{web.X}} in web's .env, and web as a host in
+ * a URL or with a port (http://web/, user@web, web:3000). Copied as they
+ * are, they would name the source (same project) or whatever has that name
+ * in the target project. A value that is only the name is not touched: it
+ * may be a database or user name rather than a host.
+ */
+export function renameSelf(text: string, from: string, to: string): SelfRename {
+  if (from.toLowerCase() === to.toLowerCase()) return { text, renamed: [], kept: [] };
+  const wanted = from.toLowerCase();
+  const edits: { start: number; end: number }[] = [];
+  const renamed: SelfRename["renamed"] = [];
+  const kept: SelfRename["kept"] = [];
+  const seen = new Set<string>();
+  // Each variable and target once, however often the value repeats it.
+  const once = (key: string, target: string) => {
+    const id = `${key}\u0000${target}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  };
+  for (const entry of parseEnv(text).entries) {
+    for (const ref of entry.references) {
+      if (ref.target.toLowerCase() !== wanted) continue;
+      edits.push({ start: ref.targetRange.start, end: ref.targetRange.end });
+      const target = `${ref.target}.${ref.variable}`;
+      if (once(entry.key, target)) renamed.push({ key: entry.key, target, via: "reference" });
+    }
+    // Host names are found in the value as written (inside its quotes), references blanked out.
+    const { start, end } = entry.valueRange;
+    const quoted = entry.quote !== "none" && end > start;
+    const base = quoted ? start + 1 : start;
+    const close = quoted && end - start >= 2 && text[end - 1] === text[start] ? end - 1 : end;
+    let raw = text.slice(base, close);
+    for (const ref of entry.references) {
+      const at = ref.range.start - base;
+      raw = raw.slice(0, at) + " ".repeat(ref.raw.length) + raw.slice(at + ref.raw.length);
+    }
+    for (const m of hostMentions(raw, from)) {
+      const before = raw[m.from - 1];
+      if (m.port === "" && before !== "@" && before !== "/") {
+        if (once(entry.key, m.host)) kept.push({ key: entry.key, target: m.host });
+        continue;
+      }
+      edits.push({ start: base + m.from, end: base + m.from + m.host.length });
+      const target = `${m.host}${m.port}`;
+      if (once(entry.key, target)) renamed.push({ key: entry.key, target, via: "hostname" });
+    }
+  }
+  let out = text;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, edit.start) + to + out.slice(edit.end);
+  return { text: out, renamed, kept };
 }
 
 /** Services of `project` (other than `selfId`) whose variables reference `name` or use it as a host, with those variables. */

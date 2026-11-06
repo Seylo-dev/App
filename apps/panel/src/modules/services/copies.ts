@@ -34,27 +34,31 @@ export function latestCopy(db: PanelDb, serviceId: string): DataCopy | null {
 
 /**
  * A copy that has not ended and involves the service: as the clone it
- * writes into, or as the source it reads (only a copy that stops the
- * source holds the source back).
+ * writes into, or as the source it reads. Only a copy that stops the
+ * source holds the source back from starting; anySource also counts one
+ * that reads it while it runs (moving it to another node removes the
+ * folder being read).
  */
-export function activeCopy(db: PanelDb, serviceId: string): { row: ServiceCopyRow; role: "clone" | "source" } | null {
+export function activeCopy(
+  db: PanelDb,
+  serviceId: string,
+  options: { anySource?: boolean } = {},
+): { row: ServiceCopyRow; role: "clone" | "source" } | null {
+  const asSource = options.anySource
+    ? eq(serviceCopies.sourceServiceId, serviceId)
+    : and(eq(serviceCopies.sourceServiceId, serviceId), eq(serviceCopies.stopSource, true));
   const row = db
     .select()
     .from(serviceCopies)
-    .where(
-      and(
-        inArray(serviceCopies.status, [...running]),
-        or(eq(serviceCopies.serviceId, serviceId), and(eq(serviceCopies.sourceServiceId, serviceId), eq(serviceCopies.stopSource, true))),
-      ),
-    )
+    .where(and(inArray(serviceCopies.status, [...running]), or(eq(serviceCopies.serviceId, serviceId), asSource)))
     .get();
   if (!row) return null;
   return { row, role: row.serviceId === serviceId ? "clone" : "source" };
 }
 
 /** CONFLICT while a copy is busy with the service's folders. */
-export function assertNoActiveCopy(db: PanelDb, serviceId: string): void {
-  const copy = activeCopy(db, serviceId);
+export function assertNoActiveCopy(db: PanelDb, serviceId: string, options: { anySource?: boolean } = {}): void {
+  const copy = activeCopy(db, serviceId, options);
   if (!copy) return;
   throw new OpError(
     "CONFLICT",

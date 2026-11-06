@@ -23,13 +23,16 @@ test.describe("clone and move", () => {
           kind: "app",
           projectId: input.projectId ?? ids.acme,
           nodeId: input.nodeId ?? ids.de,
-          env: "copied",
+          // In personal this person cannot edit env, so it stays behind.
+          env: input.projectId === ids.personal ? "noWrite" : "copied",
           volumes: [{ name: "uploads", mountPath: "/app/uploads" }],
           data: { available: true, blockedBy: null, alwaysStops: false },
           autoDomain: "api-copy.de1.acme.dev",
           middlewares: true,
           references:
-            input.projectId === ids.personal ? [{ key: "DATABASE_URL", target: "db.INTERNAL_URL", via: "reference", effect: "unresolved" }] : [],
+            input.projectId === ids.personal
+              ? [{ key: "DATABASE_URL", target: "db.INTERNAL_URL", via: "reference", effect: "unresolved" }]
+              : [{ key: "SELF_URL", target: "api:8080", via: "hostname", effect: "renamed" }],
         }),
         "services.clone": (input) => {
           sent.push(input);
@@ -51,11 +54,17 @@ test.describe("clone and move", () => {
     await expect(dialog.locator('[data-slot="skeleton"]')).toHaveCount(0);
     await expect(dialog.getByText("Environment variables and config files")).toBeVisible();
     await expect(dialog.getByText("Not copied: domains, deploy history")).toBeVisible();
+    // Its own host name in a value now names the clone; not a warning.
+    await expect(dialog.getByText("These variables named api itself and now name the clone:")).toBeVisible();
+    await expect(dialog.getByText("SELF_URL")).toBeVisible();
+    await expect(dialog.getByText("In acme-shop these variables point somewhere else:")).toHaveCount(0);
 
-    // Another project: the references that change show up.
+    // Another project: the references that change show up, and the env stays behind there.
     await dialog.getByLabel("Project").click();
     await page.getByRole("option", { name: "personal" }).click();
     await expect(dialog.getByText("DATABASE_URL")).toBeVisible();
+    await expect(dialog.getByText("you cannot edit them in personal")).toBeVisible();
+    await expect(dialog.getByText("SELF_URL")).toHaveCount(0);
     await expect(dialog.getByLabel("Name")).toHaveValue("api");
     await dialog.getByLabel("Project").click();
     await page.getByRole("option", { name: "acme-shop" }).click();
