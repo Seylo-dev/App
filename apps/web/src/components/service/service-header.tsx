@@ -12,6 +12,7 @@ import { useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { isPanelService } from "../../lib/service-display";
+import { ServiceMenu } from "./copy/service-menu";
 import { useInvalidate } from "./invalidate";
 import { KindBadge } from "./kind-badge";
 import { isNotBuilt, retryOp } from "./op-state";
@@ -34,8 +35,9 @@ export function ServiceHeader({ service }: { service: ServiceDetail }) {
         </Chip>
       ))}
       <HeaderAddress service={service} href={href} />
-      <div className="ml-auto flex flex-wrap gap-2">
+      <div className="ml-auto flex flex-wrap items-center gap-2">
         <HeaderActions service={service} />
+        <ServiceMenu service={service} />
       </div>
     </header>
   );

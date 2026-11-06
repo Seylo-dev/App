@@ -41,9 +41,20 @@ export function NodePicker({ id, value, onChange }: { id: string; value: string;
   );
 }
 
-export function ProjectPicker({ id, value, onChange }: { id: string; value: string; onChange: (projectId: string) => void }) {
+export function ProjectPicker({
+  id,
+  value,
+  onChange,
+  exclude,
+}: {
+  id: string;
+  value: string;
+  onChange: (projectId: string) => void;
+  /** A project left out of the list (the one a service moves away from). */
+  exclude?: string;
+}) {
   const list = useOp(projects.list, {});
-  const options = list.data?.projects.filter((project) => !project.protected) ?? [];
+  const options = list.data?.projects.filter((project) => !project.protected && project.id !== exclude) ?? [];
   const first = options[0];
 
   useEffect(() => {

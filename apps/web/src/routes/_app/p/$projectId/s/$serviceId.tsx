@@ -8,6 +8,7 @@ import { useOp } from "@seylo/ops/react";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { TabList, tabClassName } from "@seylo/ui/components/tabs";
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { DataCopyNote } from "../../../../../components/service/copy/data-copy-note";
 import { OpErrorNote, retryOp } from "../../../../../components/service/op-state";
 import { ServiceHeader } from "../../../../../components/service/service-header";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
@@ -48,6 +49,7 @@ function ServiceLayout() {
       ) : (
         <OpErrorNote error={service.error} />
       )}
+      {service.data && <DataCopyNote service={service.data} />}
       {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
       <TabList aria-label={t("service.sections")} className="flex-nowrap overflow-x-auto [scrollbar-width:none]">
         {tabs.map((tab) => (
