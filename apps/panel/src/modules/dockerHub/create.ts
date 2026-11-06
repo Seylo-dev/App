@@ -19,6 +19,7 @@ import { insertService } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
 import { loadService, toDetail } from "../services/rows";
 import { assertSourceAllowed } from "../services/source-guard";
+import { defaultSpec } from "../services/spec";
 import { autoSubdomain } from "../templates/install";
 import { isRepository } from "./parse";
 
@@ -107,7 +108,11 @@ export async function createFromDockerHub(ctx: OpContext, input: CreateInput) {
       kind: "app",
       nodeId: input.nodeId,
       createdBy: userId,
-      spec: { source, ports: port ? [{ containerPort: port, protocol: "tcp" }] : [] },
+      spec: {
+        source,
+        ports: port ? [{ containerPort: port, protocol: "tcp" }] : [],
+        ...(input.command?.length ? { container: { ...defaultSpec().container, command: input.command } } : {}),
+      },
       volumes,
     }),
   );

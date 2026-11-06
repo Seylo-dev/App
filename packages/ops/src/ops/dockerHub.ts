@@ -192,6 +192,8 @@ export const create = defineOp({
         { maxItems: 20 },
       ),
     ),
+    /** Replaces the image's CMD (its entrypoint stays), for images that need arguments such as "server /data". */
+    command: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 100 })),
     /** .env text, as the Environment tab saves it. */
     env: Type.Optional(Type.String({ maxLength: 100_000 })),
     deployNow: Type.Optional(Type.Boolean({ default: true })),

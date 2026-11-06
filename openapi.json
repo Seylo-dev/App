@@ -20953,6 +20953,14 @@
                       }
                     }
                   },
+                  "command": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "maxLength": 2000,
+                      "type": "string"
+                    }
+                  },
                   "env": {
                     "maxLength": 100000,
                     "type": "string"

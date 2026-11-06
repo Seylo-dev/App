@@ -163,6 +163,17 @@ describe("dockerHub.create", () => {
     expect(panel.deps.db.select().from(domains).where(eq(domains.serviceId, internal.body.id)).all()).toHaveLength(0);
   });
 
+  test("a command replaces the image's CMD", async () => {
+    const res = await callOp(
+      panel,
+      dockerHub.create,
+      { ...base(), name: "store", command: ["server", "/data", "--console-address", ":9001"], deployNow: false },
+      { cookie: owner },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.container).toMatchObject({ command: ["server", "/data", "--console-address", ":9001"], entrypoint: [] });
+  });
+
   test("official images keep their short name", async () => {
     const res = await callOp(
       panel,
