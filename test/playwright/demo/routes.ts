@@ -1,12 +1,14 @@
 // Answers the browser's op requests and sockets from the demo data, so every
 // screen renders with the boards' data without a fleet behind the panel.
 // Order: per-test overrides, then the panel world (fixtures.ts), the
-// service screens (service.ts) and the settings screens (settings.ts). Ops
+// service screens (service.ts), the settings screens (settings.ts) and
+// Docker Hub (dockerhub.ts). Ops
 // without demo data go to the real panel the run started (signed in).
 // Sockets: the live socket accepts every subscription and streams a few
 // deployment log lines; log follow and the terminals answer like an agent.
 
 import type { Page, Route } from "@playwright/test";
+import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
 import { handlers as serviceHandlers, logEntries } from "./service";
 import { fixtures as settingsFixtures } from "./settings";
@@ -121,6 +123,7 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     worldHandlers,
     serviceHandlers as Record<string, Handler>,
     settingsHandlers,
+    dockerHubHandlers as Record<string, Handler>,
   ];
   await page.route(/\/api\/v1\/[a-zA-Z]+\.[a-zA-Z]+/, async (route: Route) => {
     const opId = new URL(route.request().url()).pathname.split("/").pop() ?? "";

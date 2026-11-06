@@ -28,6 +28,7 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["node-health", `/nodes?node=${ids.us}&view=health`, "dialog"],
   ["project", `/p/${ids.acme}`],
   ["templates", "/templates"],
+  ["templates-docker-hub", "/templates?tab=docker-hub&q=gitea"],
   ["activity", "/activity"],
   ["approvals", "/approvals"],
   ["cli-approve", "/cli/approve?code=ABCD-EFGH"],
@@ -130,6 +131,13 @@ test.describe("screens", () => {
           await expect(page.getByRole("dialog")).toBeVisible();
           await page.waitForTimeout(1200);
           await page.screenshot({ path: `${shots}/${preset}/template-install.png` });
+          await page.keyboard.press("Escape");
+
+          await page.goto(`/templates?project=${ids.acme}&tab=docker-hub&q=gitea`);
+          await page.getByRole("button", { name: /^gitea\/gitea / }).click();
+          await expect(page.getByRole("dialog").locator(".monaco-editor")).toBeVisible({ timeout: 15_000 });
+          await page.waitForTimeout(800);
+          await page.screenshot({ path: `${shots}/${preset}/docker-hub-image.png` });
           await page.keyboard.press("Escape");
 
           await page.keyboard.press("ControlOrMeta+k");

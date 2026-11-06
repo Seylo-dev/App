@@ -1,16 +1,23 @@
 // Templates (Templates.dc.html): the catalog with search and category
 // chips; a card opens the install dialog. ?project=<id> preselects the
 // project (from a project's New service menu), ?q= and ?category= keep the
-// filter in the URL.
+// filter in the URL. ?tab=docker-hub switches to Docker Hub search (the
+// same search box, sent to dockerHub.search); the popular images row and
+// every Docker Hub result open the prefilled image form.
 
 import { templates } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useDeferredValue, useState } from "react";
+import { HubResults } from "../../components/docker-hub/hub-results";
+import { type HubTarget, ImageDialog } from "../../components/docker-hub/image-dialog";
+import { PopularRow } from "../../components/docker-hub/popular-row";
+import { useDebounced } from "../../components/docker-hub/use-debounced";
 import { PageHeader } from "../../components/page-header";
 import { QueryError } from "../../components/query-error";
 import { InstallDialog } from "../../components/templates/install-dialog";
@@ -22,6 +29,7 @@ interface TemplatesSearch {
   project?: string;
   category?: string;
   q?: string;
+  tab?: "docker-hub";
 }
 
 export const Route = createFileRoute("/_app/templates")({
@@ -29,6 +37,7 @@ export const Route = createFileRoute("/_app/templates")({
     project: typeof search.project === "string" && /^[a-z0-9]{16}$/.test(search.project) ? search.project : undefined,
     category: typeof search.category === "string" && search.category !== "" ? search.category.slice(0, 60) : undefined,
     q: typeof search.q === "string" && search.q !== "" ? search.q.slice(0, 100) : undefined,
+    tab: search.tab === "docker-hub" ? "docker-hub" : undefined,
   }),
   component: TemplatesPage,
 });
@@ -39,6 +48,10 @@ function TemplatesPage() {
   const [text, setText] = useState(search.q ?? "");
   const query = useDeferredValue(text.trim());
   const [installing, setInstalling] = useState<TemplateSummary | null>(null);
+  const [image, setImage] = useState<HubTarget | null>(null);
+  const hub = search.tab === "docker-hub";
+  // Docker Hub is searched once typing pauses; the catalog filters as you type.
+  const hubQuery = useDebounced(text.trim(), 350);
   const list = useOp(templates.list, { category: search.category, query: query || undefined }, { placeholderData: (previous) => previous });
   // Categories and the count come from the unfiltered catalog, so the chips do not jump while typing.
   const all = useOp(templates.list, {});
@@ -61,15 +74,40 @@ function TemplatesPage() {
                 setText(e.target.value);
                 void navigate({ search: (prev) => ({ ...prev, q: e.target.value || undefined }), replace: true });
               }}
-              placeholder={all.data ? t("templates.searchCount", { count: all.data.templates.length }) : t("templates.search")}
-              aria-label={t("templates.search")}
+              placeholder={
+                hub
+                  ? t("dockerHub.search")
+                  : all.data
+                    ? t("templates.searchCount", { count: all.data.templates.length })
+                    : t("templates.search")
+              }
+              aria-label={hub ? t("dockerHub.search") : t("templates.search")}
               className="min-w-0 flex-1 border-0 bg-transparent text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
             />
           </label>
         }
       />
 
-      {categories.length > 0 && (
+      <Segmented
+        aria-label={t("dockerHub.tabs")}
+        tone="track"
+        value={hub ? "docker-hub" : "templates"}
+        onValueChange={(value) =>
+          void navigate({ search: (prev) => ({ ...prev, tab: value === "docker-hub" ? "docker-hub" : undefined }), replace: true })
+        }
+        className="self-start"
+      >
+        <SegmentedItem value="templates" className="transition-colors duration-200">
+          {t("dockerHub.tabTemplates")}
+        </SegmentedItem>
+        <SegmentedItem value="docker-hub" className="transition-colors duration-200">
+          {t("dockerHub.tabDockerHub")}
+        </SegmentedItem>
+      </Segmented>
+
+      {hub && <HubResults query={hubQuery} onPick={setImage} />}
+
+      {!hub && categories.length > 0 && (
         <fieldset
           aria-label={t("templates.categories")}
           className="m-0 flex max-w-full min-w-0 border-0 flex-wrap gap-0.5 self-start rounded-control bg-track p-[3px]"
@@ -85,7 +123,7 @@ function TemplatesPage() {
         </fieldset>
       )}
 
-      {list.isError && !list.data ? (
+      {hub ? null : list.isError && !list.data ? (
         <QueryError error={list.error} onRetry={() => void list.refetch()} />
       ) : list.isPending ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
@@ -120,7 +158,10 @@ function TemplatesPage() {
         </div>
       )}
 
+      {!hub && !search.category && !query && <PopularRow onPick={setImage} />}
+
       <InstallDialog template={installing} projectId={search.project} onClose={() => setInstalling(null)} />
+      <ImageDialog target={image} projectId={search.project} onClose={() => setImage(null)} />
     </>
   );
 }
