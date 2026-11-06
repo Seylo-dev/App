@@ -374,12 +374,19 @@ func (d *Docker) kill(id string) {
 	}
 }
 
-// forceRemove removes a container whatever its state. It runs on a fresh
-// context because it is cleanup after the caller's context may have ended.
+// removeOptions removes the container with its anonymous volumes: an
+// image with a VOLUME line (most database images) gives every container
+// one, and nothing else would ever remove it (it has no labels, so cleanup
+// never sees it). Named volumes and bind mounts stay.
+var removeOptions = client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}
+
+// forceRemove removes a container whatever its state, with its anonymous
+// volumes. It runs on a fresh context because it is cleanup after the
+// caller's context may have ended.
 func (d *Docker) forceRemove(id string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := d.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true}); err != nil && !IsNotFound(err) {
+	if _, err := d.cli.ContainerRemove(ctx, id, removeOptions); err != nil && !IsNotFound(err) {
 		d.log.Warn("removing container", "container", id, "err", err)
 	}
 }
@@ -514,9 +521,10 @@ func (d *Docker) Start(ctx context.Context, nameOrID string) error {
 	return nil
 }
 
-// Remove stops and removes a container; a missing one is not an error.
+// Remove stops and removes a container with its anonymous volumes; a
+// missing one is not an error.
 func (d *Docker) Remove(ctx context.Context, nameOrID string) error {
-	_, err := d.cli.ContainerRemove(ctx, nameOrID, client.ContainerRemoveOptions{Force: true})
+	_, err := d.cli.ContainerRemove(ctx, nameOrID, removeOptions)
 	if err != nil && !IsNotFound(err) {
 		return fmt.Errorf("removing %s: %w", nameOrID, err)
 	}

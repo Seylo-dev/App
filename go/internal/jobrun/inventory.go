@@ -128,7 +128,8 @@ func (d *Docker) Networks(ctx context.Context) ([]Network, error) {
 // managed label.
 var ErrNotManaged = errors.New("refusing to remove a resource not managed by us")
 
-// RemoveContainer removes a stopped managed container.
+// RemoveContainer removes a stopped managed container with its anonymous
+// volumes (named volumes stay).
 func (d *Docker) RemoveContainer(ctx context.Context, id string) error {
 	c, found, err := d.Inspect(ctx, id)
 	if err != nil || !found {
@@ -140,7 +141,7 @@ func (d *Docker) RemoveContainer(ctx context.Context, id string) error {
 	if c.Running {
 		return fmt.Errorf("container %s is running", c.Name)
 	}
-	_, err = d.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{})
+	_, err = d.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: true})
 	if err != nil && !IsNotFound(err) {
 		return fmt.Errorf("removing container %s: %w", c.Name, err)
 	}
