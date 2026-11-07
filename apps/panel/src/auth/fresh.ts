@@ -1,9 +1,10 @@
 // "Fresh sign-in" (sudo mode): ops that add a way into an account (a
 // passkey, a GitHub link, an authenticator app, an API key, a CLI approval,
 // a first password) need proof that the person is at the keyboard now, not
-// only a session that may have been left open somewhere. So do the admin ops
-// that hand lasting access to someone else (an admin invite, a promotion to
-// admin or owner, a node join token) when a browser session runs them. A
+// only a session that may have been left open somewhere. So do the ops that
+// hand lasting access to someone else (any invite, a grant that adds
+// actions, a promotion to admin or owner, a node join token) when a browser
+// session runs them. A
 // session is fresh for 15 minutes after it signed in or after auth.reauth
 // confirmed it.
 
@@ -46,9 +47,10 @@ export function requireFreshSignIn(ctx: OpContext, now = new Date()): { userId: 
 }
 
 /**
- * requireFreshSignIn for browser sessions; API keys pass. For admin ops that
- * hand lasting access to someone else (invites.create as admin,
- * users.updateRole up to admin or owner, nodes.createJoinToken): admins also
+ * requireFreshSignIn for browser sessions; API keys pass. For ops that hand
+ * lasting access to someone else (invites.create, grants.setOnProject and
+ * setOnService when they add actions, users.updateRole up to admin or owner,
+ * nodes.createJoinToken): admins also
  * run them from scripts, and every key was itself made under a fresh sign-in
  * (apiKeys.create, cliLogin.approve, the MCP consent), so the threat left is
  * a session left open.

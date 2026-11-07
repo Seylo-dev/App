@@ -4,10 +4,11 @@
 
 import { grants as grantOps, OpError, type ScopeKind } from "@seylo/ops";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { requireFreshIfSession } from "../../auth/fresh";
 import { grants, services, users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { defineModule } from "../module";
-import { checkGrantActions, findGrant, type GrantRow, listGrantsOf, requireScope, toGrants } from "./rows";
+import { checkGrantActions, findGrant, type GrantRow, grantAdds, listGrantsOf, requireScope, toGrants } from "./rows";
 
 function withUsers(ctx: OpContext, rows: GrantRow[]) {
   const people = new Map(
@@ -99,6 +100,8 @@ function setGrant(ctx: OpContext, scopeType: ScopeKind, scopeId: string, userId:
   if (!target) throw new OpError("NOT_FOUND", "That person does not exist.");
   if (target.role !== "member") throw new OpError("BAD_REQUEST", "Owners and admins can already do everything; grants are for members.");
   const checked = checkGrantActions(ctx.access, scopeType, scopeId, actions);
+  // More access for someone else is lasting access: a session left open may not hand it out.
+  if (grantAdds(scopeType, findGrant(ctx.db, userId, scopeType, scopeId)?.actions ?? [], checked)) requireFreshIfSession(ctx);
   const row = ctx.db
     .insert(grants)
     .values({ userId, scopeType, scopeId, actions: checked, createdBy: ctx.principal.user.id })

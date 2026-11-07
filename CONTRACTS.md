@@ -679,14 +679,18 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   and a retry. Wrong answers count toward the per-address lock. The MCP
   OAuth consent page (`/oauth/authorize`) sends a stale session to the web
   app's `/reauth?redirect=<back>` page first and refuses a stale Allow.
-  Admin ops that hand someone else lasting access need the same fresh
-  session when a browser session runs them, while API keys pass
+  Ops that hand someone else lasting access need the same fresh session
+  when a browser session runs them, while API keys pass
   (`requireFreshIfSession`; every key was made under a fresh sign-in):
-  `invites.create` with role admin, `users.updateRole` to a higher role
-  (admin or owner), `nodes.createJoinToken`, `gitProviders.create` and
-  `gitProviders.update` with a new token or user name (a token with write
-  access to repositories and webhooks). Member invites, grants and
-  demotions are not gated.
+  `invites.create` (every role: a member invite carries its grants),
+  `grants.setOnProject` and `grants.setOnService` when the new action list
+  gives anything the person's grant there did not (a new grant, an action,
+  or a wildcard that also covers later actions: `grants/rows.ts`
+  `grantAdds`), `users.updateRole` to a higher role (admin or owner),
+  `nodes.createJoinToken`, `gitProviders.create` and `gitProviders.update`
+  with a new token or user name (a token with write access to
+  repositories and webhooks). Removing or narrowing a grant and demotions
+  are not gated.
 - Host shells (`modules/hostShell`): `hostShell.setEnabled` takes
   `nodes.manage`, but turning host shells on needs the owner role and a
   fresh browser session (`requireFreshSignIn`); turning them off works for
@@ -1199,7 +1203,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of other nodes: a dead node's share is retried on the balancing node's own copies per request (GET/HEAD/OPTIONS only; a POST to a copy that just died fails once) | Covered by unit, fake-agent and VM package tests |
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
 | Removing or changing the panel domain after nodes moved to it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node whose address before the move was an unpinned https:// address (another domain) has no fallback after the first cycle and cannot reach the panel until it rejoins (`seylo join --force`). Plain-HTTP nodes never move, so this does not reach them | Those nodes go offline after a domain removal or change; the node offline alert fires |
-| Re-auth scope: member invites, project and service grants and demotions are not gated (scoped access only), and API keys never are (admin keys may invite admins, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
+| Re-auth scope: demotions and grants that only take actions away are not gated, and API keys never are (admin keys may invite, widen grants, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |

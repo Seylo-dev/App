@@ -4,7 +4,16 @@
 // passkey; API keys keep the plain session-only refusal.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { auth, cliLogin, invites as inviteOps, apiKeys as keyOps, nodes as nodeOps, sessionCookie, users as userOps } from "@seylo/ops";
+import {
+  auth,
+  cliLogin,
+  grants as grantOps,
+  invites as inviteOps,
+  apiKeys as keyOps,
+  nodes as nodeOps,
+  sessionCookie,
+  users as userOps,
+} from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { freshSignInMs } from "../src/auth/fresh";
 import { issueRecoveryCodes } from "../src/auth/second-factor";
@@ -12,8 +21,8 @@ import { createSession } from "../src/auth/sessions";
 import { sessions, totpSecrets, users } from "../src/db/schema";
 import { base32Decode, hotp, totpStep } from "../src/security/totp";
 import { setSetting } from "../src/settings";
-import { createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
-import { call, cookieFrom, mockGithub, noLimits, ok, VirtualAuthenticator } from "./people-helpers";
+import { createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
+import { call, cookieFrom, mockGithub, noLimits, ok, seedProject, seedService, VirtualAuthenticator } from "./people-helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
@@ -211,17 +220,36 @@ test("cliLogin.approve without expiresInDays gives a 7-day key, like the approva
   expect(days).toBeLessThan(7.1);
 });
 
-test("admin ops that hand out lasting access need a fresh session; members' invites, demotions and API keys do not", async () => {
+test("ops that hand out lasting access need a fresh session; demotions, narrowing a grant and API keys do not", async () => {
   const owner = await createUser(panel, "owner");
   const member = await createUser(panel, "member");
   const admin = await createUser(panel, "admin");
+  const grantee = await createUser(panel, "member");
+  const project = seedProject(panel);
+  const service = seedService(panel, project.id);
+  grant(panel, grantee.user.id, "project", project.id, ["services.view", "services.logs"]);
   age(owner.user.id, 60 * 60 * 1000);
   const { cookie } = owner;
 
   const guarded = {
     adminInvite: () => call(panel, inviteOps.create, { email: "new-admin@example.com", role: "admin", sendEmail: false }, { cookie }),
+    memberInvite: () =>
+      call(
+        panel,
+        inviteOps.create,
+        {
+          email: "guest@example.com",
+          role: "member",
+          grants: [{ scopeType: "project", scopeId: project.id, actions: ["*"] }],
+          sendEmail: false,
+        },
+        { cookie },
+      ),
     promoteToAdmin: () => call(panel, userOps.updateRole, { userId: member.user.id, role: "admin" }, { cookie }),
     joinToken: () => call(panel, nodeOps.createJoinToken, {}, { cookie }),
+    widenGrant: () => call(panel, grantOps.setOnProject, { projectId: project.id, userId: grantee.user.id, actions: ["*"] }, { cookie }),
+    newServiceGrant: () =>
+      call(panel, grantOps.setOnService, { serviceId: service.id, userId: grantee.user.id, actions: ["services.view"] }, { cookie }),
   };
   for (const [name, attempt] of Object.entries(guarded)) {
     const res = await attempt();
@@ -231,12 +259,15 @@ test("admin ops that hand out lasting access need a fresh session; members' invi
   expect((await ok(panel, inviteOps.list, {}, { cookie })).body.invites).toHaveLength(0);
   expect((await ok(panel, userOps.get, { userId: member.user.id }, { cookie })).body.user.role).toBe("member");
   expect((await ok(panel, nodeOps.listJoinTokens, {}, { cookie })).body.tokens).toHaveLength(0);
+  const grantsNow = (await ok(panel, grantOps.listByUser, { userId: grantee.user.id }, { cookie })).body.grants;
+  expect(grantsNow.map((g: { actions: string[] }) => g.actions)).toEqual([["services.view", "services.logs"]]);
 
-  // A member invite and a demotion hand out nothing new.
-  expect(
-    (await call(panel, inviteOps.create, { email: "guest@example.com", role: "member", grants: [], sendEmail: false }, { cookie })).status,
-  ).toBe(200);
+  // Taking access away (or keeping it the same) hands out nothing new.
   expect((await call(panel, userOps.updateRole, { userId: admin.user.id, role: "member" }, { cookie })).status).toBe(200);
+  const narrow = { projectId: project.id, userId: grantee.user.id, actions: ["services.view"] };
+  expect((await call(panel, grantOps.setOnProject, narrow, { cookie })).status).toBe(200);
+  expect((await call(panel, grantOps.setOnProject, narrow, { cookie })).status).toBe(200);
+  expect((await call(panel, grantOps.removeFromProject, { projectId: project.id, userId: grantee.user.id }, { cookie })).status).toBe(200);
 
   await ok(panel, auth.reauth, { password: owner.password }, { cookie });
   for (const [name, attempt] of Object.entries(guarded)) {
@@ -251,4 +282,6 @@ test("admin ops that hand out lasting access need a fresh session; members' invi
   expect(invite.status).toBe(200);
   expect((await call(panel, userOps.updateRole, { userId: admin.user.id, role: "admin" }, { bearer })).status).toBe(200);
   expect((await call(panel, nodeOps.createJoinToken, {}, { bearer })).status).toBe(200);
+  const viaKey = await call(panel, grantOps.setOnProject, { projectId: project.id, userId: grantee.user.id, actions: ["*"] }, { bearer });
+  expect(viaKey.status).toBe(200);
 });
