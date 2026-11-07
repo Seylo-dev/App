@@ -42,8 +42,9 @@ import (
 // tunnels and plain http requests go on to that proxy, the way curl sent
 // them. The node cannot see where the proxy connects, so then the check is
 // on the target before the request goes out (an IP address exactly; a name
-// by what it resolves to on the node, when it resolves), and the proxy's own
-// rules decide the rest. ssh connects directly, as it did before.
+// by what it resolves to on the node; a name the node cannot resolve only
+// for an allowed internal host), and the proxy's own rules decide the rest.
+// ssh connects directly, as it did before.
 
 const gitDialTimeout = 30 * time.Second
 
@@ -309,7 +310,10 @@ func (p *gitProxy) dial(ctx context.Context, host, port string) (net.Conn, error
 func (p *gitProxy) refuse(host, port string, blocked *netguard.BlockedError) *BlockedHostError {
 	target := net.JoinHostPort(strings.Trim(host, "[]"), port)
 	e := &BlockedHostError{Target: target, Reason: blocked.Error()}
-	if blocked.Addr.IsValid() && normHost(host) != blocked.Addr.String() {
+	switch {
+	case !blocked.Addr.IsValid():
+		e.Reason = blocked.What
+	case normHost(host) != blocked.Addr.String():
 		e.Reason = fmt.Sprintf("%s resolves to %s, %s", host, blocked.Addr, blocked.What)
 	}
 	switch class, _ := netguard.Classify(blocked.Addr); {
@@ -364,8 +368,9 @@ func (p *gitProxy) upstreamFor(scheme, host, port string) (*url.URL, error) {
 
 // checkBeforeUpstream applies the fetch's policy to a target the agent's
 // HTTP proxy will connect to: an IP address exactly, a name by what it
-// resolves to on the node. A name the node cannot resolve goes on (behind a
-// proxy, often only the proxy can); the proxy resolves it again in any case.
+// resolves to on the node. A name the node cannot resolve goes on only when
+// internal addresses are allowed for it (allow_internal_host): the proxy
+// could resolve it to anything, an internal address included.
 func (p *gitProxy) checkBeforeUpstream(ctx context.Context, host, port string) error {
 	allowed := p.policy.internalAllowed(host, port)
 	name := strings.Trim(host, "[]")
@@ -379,8 +384,11 @@ func (p *gitProxy) checkBeforeUpstream(ctx context.Context, host, port string) e
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	addrs, err := gitLookup(ctx, name)
-	if err != nil {
-		return nil
+	if err != nil || len(addrs) == 0 {
+		if allowed {
+			return nil
+		}
+		return p.refuse(host, port, &netguard.BlockedError{What: "the node cannot resolve " + name + ", so it cannot check where the agent's proxy would connect"})
 	}
 	for _, a := range addrs {
 		var blocked *netguard.BlockedError

@@ -125,7 +125,8 @@ func portOf(t *testing.T, rawURL string) string {
 
 func TestGitGoesThroughTheAgentsProxy(t *testing.T) {
 	url, _, run, hits := gitServerHits(t, defaultGitUser, "", nil)
-	// git.proxied.test resolves nowhere on the node; only the proxy reaches it.
+	// git.proxied.test has a public address the node cannot reach; only the proxy does.
+	nodeDNS(t, map[string]string{"git.proxied.test": "93.184.216.34"})
 	named := "git.proxied.test:" + portOf(t, url)
 	up := startFakeUpstream(t, map[string]string{named: "127.0.0.1:" + portOf(t, url)}, false)
 	setProxyEnv(t, "http://agent:pw@"+up.addr, "", "")
@@ -160,6 +161,7 @@ func TestGitGoesThroughTheAgentsProxy(t *testing.T) {
 func TestGitPlainHTTPGoesThroughTheAgentsProxy(t *testing.T) {
 	url, hits := plainGitServer(t)
 	port := portOf(t, url)
+	nodeDNS(t, map[string]string{"git.proxied.test": "93.184.216.34"})
 	named := "git.proxied.test:" + port
 	up := startFakeUpstream(t, map[string]string{named: "127.0.0.1:" + port}, false)
 	setProxyEnv(t, "", "http://"+up.addr, "")
@@ -209,6 +211,7 @@ func TestGitSkipsTheAgentsProxyForNoProxyAndSSH(t *testing.T) {
 // before anything goes to the proxy.
 func TestGitThroughTheAgentsProxyIsChecked(t *testing.T) {
 	url, _, run, _ := gitServerHits(t, defaultGitUser, "", nil)
+	nodeDNS(t, map[string]string{"git.proxied.test": "93.184.216.34"})
 	denied := startFakeUpstream(t, nil, true)
 	setProxyEnv(t, "http://"+denied.addr, "", "")
 	ctx := context.Background()
@@ -261,9 +264,7 @@ func connectThrough(t *testing.T, proxy, target string) int {
 func TestGitProxyChecksWhatTheNameResolvesToOnTheNode(t *testing.T) {
 	up := startFakeUpstream(t, map[string]string{}, true)
 	setProxyEnv(t, "http://"+up.addr, "", "")
-	old := gitLookup
-	t.Cleanup(func() { gitLookup = old })
-	gitLookup = fakeLookup(map[string]string{"rebind.proxied.test": "10.0.0.7", "meta.proxied.test": "169.254.169.254", "pub.proxied.test": "93.184.216.34"})
+	nodeDNS(t, map[string]string{"rebind.proxied.test": "10.0.0.7", "meta.proxied.test": "169.254.169.254", "pub.proxied.test": "93.184.216.34"})
 
 	var log bytes.Buffer
 	p, err := startGitProxy(gitPolicy{source: gitTarget{host: "rebind.proxied.test", port: "443"}}, &log)
@@ -318,9 +319,7 @@ func TestGitProxyChecksWhatTheNameResolvesToOnTheNode(t *testing.T) {
 // The agent's proxy itself may be on a private address (the node's operator
 // set it), never on a metadata one, and only http:// or https://.
 func TestGitAgentsProxyAddress(t *testing.T) {
-	old := gitLookup
-	t.Cleanup(func() { gitLookup = old })
-	gitLookup = fakeLookup(nil)
+	nodeDNS(t, map[string]string{"git.proxied.test": "93.184.216.34"})
 	for proxy, want := range map[string]string{
 		"http://169.254.169.254:80": "cloud metadata",
 		"socks5://127.0.0.1:1080":   "only through http:// or https:// proxies",
@@ -341,6 +340,69 @@ func TestGitAgentsProxyAddress(t *testing.T) {
 	if err != nil || up.Host != "proxy.lan:1080" {
 		t.Fatalf("a proxy without a port: %v %v", up, err)
 	}
+}
+
+// A name the node cannot resolve could be anything at the proxy, an
+// internal address included: it goes to the proxy only for an allowed
+// internal host (agentio-2). Before, it always went on unchecked.
+func TestGitProxyRefusesNamesTheNodeCannotResolve(t *testing.T) {
+	up := startFakeUpstream(t, map[string]string{}, true)
+	setProxyEnv(t, "http://"+up.addr, "http://"+up.addr, "")
+	nodeDNS(t, nil)
+
+	var log bytes.Buffer
+	p, err := startGitProxy(gitPolicy{source: gitTarget{host: "lan.proxied.test", port: "443"}}, &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if got := connectThrough(t, p.Addr(), "lan.proxied.test:443"); got != http.StatusForbidden {
+		t.Fatalf("unresolvable name: %d\n%s", got, log.String())
+	}
+	if r := p.Refused(); r == nil || !strings.Contains(r.Error(), "cannot resolve lan.proxied.test") || !strings.Contains(r.Error(), "git.allowInternalHost") {
+		t.Fatalf("refused: %v", r)
+	}
+	// Plain http requests take the same check.
+	c, err := net.Dial("tcp", p.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = c.Write([]byte("GET http://lan.proxied.test/repo.git/info/refs HTTP/1.1\r\nHost: lan.proxied.test\r\n\r\n"))
+	plain, err := http.ReadResponse(bufio.NewReader(c), nil)
+	_ = c.Close()
+	if err != nil || plain.StatusCode != http.StatusForbidden {
+		t.Fatalf("plain http, unresolvable name: %v %v", plain, err)
+	}
+	if seen, _ := up.requests(); len(seen) != 0 {
+		t.Fatalf("went to the proxy: %v", seen)
+	}
+
+	// With allow_internal_host for that host (an admin's git.allowInternalHost), it goes on.
+	allowed, err := startGitProxy(gitPolicy{source: gitTarget{host: "lan.proxied.test", port: "443"}, allowInternal: true}, &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer allowed.Close()
+	_ = connectThrough(t, allowed.Addr(), "lan.proxied.test:443")
+	if seen, _ := up.requests(); len(seen) != 1 || seen[0] != "CONNECT lan.proxied.test:443" {
+		t.Fatalf("allowed host, proxy saw %v", seen)
+	}
+	// Only that host.
+	if got := connectThrough(t, allowed.Addr(), "other.proxied.test:443"); got != http.StatusForbidden {
+		t.Fatalf("another unresolvable host: %d", got)
+	}
+	if seen, _ := up.requests(); len(seen) != 1 {
+		t.Fatalf("another host went to the proxy: %v", seen)
+	}
+}
+
+// nodeDNS makes names (host -> address) the node's DNS for one test; any
+// other name does not resolve.
+func nodeDNS(t *testing.T, names map[string]string) {
+	t.Helper()
+	old := gitLookup
+	t.Cleanup(func() { gitLookup = old })
+	gitLookup = fakeLookup(names)
 }
 
 // fakeLookup is the node's DNS for gitLookup.
