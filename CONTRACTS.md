@@ -251,11 +251,10 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the socket actually connects to (after DNS) and refuses loopback,
   private, link-local, CGNAT, unique-local, multicast, unspecified and
   reserved addresses, also as IPv4-mapped, IPv4-compatible, NAT64 or 6to4
-  forms, and the node's own interface addresses, public ones included (a
-  connection to them stays on the node, past a firewall that hides a
-  service from the internet; read again at most every 5 seconds, and if
-  they cannot be read public addresses are refused too). With this field
-  set, internal addresses (and the node's own) are allowed for the
+  forms. The node's own public addresses are not refused (a git server on
+  the node, reached by its public name, keeps working); refusing them
+  needs the panel to know every node address first (see Not built yet).
+  With this field set, internal addresses are allowed for the
   source's own host and port only (not for a redirect or submodule to
   another host); cloud metadata addresses never. The panel sets it for a
   generic git source exactly when its host is in `git_internal_hosts` for
@@ -279,11 +278,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   proxy connects, so then the address check is on the target before the
   request goes out: an IP address exactly, a name by what it resolves to
   on the node (all its addresses). A name the node cannot resolve goes on
-  to the proxy only with `allow_internal_host` for that host (the proxy
-  could resolve it to anything): on a node whose DNS knows no outside
-  names, an admin allows each git host with `git.allowInternalHost`.
-  Rebinding between that lookup and the proxy's own is up to the proxy's
-  rules. A
+  to the proxy unchecked (nodes whose DNS knows no outside names rely on
+  the proxy to resolve), so then the proxy's own rules decide, as they do
+  for rebinding between the node's lookup and the proxy's. A
   0.2 agent behind a panel that never sends the field clones from public
   addresses only.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
@@ -1514,6 +1511,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
+| Git and the node's own addresses: a node does not refuse git connections to its own public addresses, and a name the node cannot resolve goes to its HTTP proxy unchecked. Refusing both needs the panel to know every node address (admin-set public address plus the addresses agents report) so an admin's save of a git server on a node records the host, and a node-level opt-in for proxy-only DNS. The panel's address classifier (uptime/targets.ts) also lacks a few ranges netguard has (6to4, IPv4-compatible, fec0::/10, documentation ranges); the node refuses those anyway | Planned for 0.2.1 |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled by `bun scripts/rotate-master-key.ts --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key and LB CA, so every node is joined again with `seylo join --force`; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
