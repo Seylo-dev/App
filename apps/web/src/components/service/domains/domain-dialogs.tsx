@@ -1,6 +1,7 @@
 // Dialogs of the Domains card: add a domain, change its routing, its access
 // rules (basic auth, IP allowlist, rate limit, redirects) and upload a
-// custom certificate.
+// custom certificate (where a Let's Encrypt certificate that is not there
+// yet can also be regenerated).
 
 import { domains, type OpInput } from "@seylo/ops";
 import { useOpMutation } from "@seylo/ops/react";
@@ -20,6 +21,7 @@ import { CheckLabel, Field, parseIntOrNull, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
 import type { ServiceDetail } from "../use-service";
+import { canRegenerate, LetsEncryptState } from "./certificate-state";
 import type { Domain } from "./domain-row";
 
 type HttpsMode = Domain["https"];
@@ -365,6 +367,7 @@ export function CertificateDialog({
       error={save.error}
       onSubmit={() => save.mutate({ serviceId, domainId: domain.id, certPem, privateKey })}
     >
+      {canRegenerate(domain) && <LetsEncryptState serviceId={serviceId} domain={domain} />}
       <Field label={t("serviceDomains.form.certPem")} htmlFor="c-cert">
         <Textarea
           id="c-cert"
