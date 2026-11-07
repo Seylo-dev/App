@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,7 +157,7 @@ func (e *itEnv) cleanup() {
 			_ = e.docker.RemoveContainer(ctx, c.ID)
 		}
 	}
-	for _, n := range []string{e.projNet, e.edgeNet, e.prefix + "-wnet"} {
+	for _, n := range []string{e.projNet, e.edgeNet, e.prefix + "-wnet", e.prefix + "-va"} {
 		_, _ = e.docker.Client().NetworkRemove(ctx, n, networkRemoveOptions())
 	}
 }
@@ -617,30 +618,61 @@ func withFailingPebble(e *itEnv, cfg *TraefikConfig) {
 	startPebble(e, cfg, []string{"PEBBLE_VA_NOSLEEP=1"})
 }
 
+// withPebbleOnPort80 runs Pebble with real validation against port 80,
+// where Traefik's web entry point listens inside the Docker network
+// (Pebble's own config says 5002). Test host names fail until they
+// resolve to Traefik for Pebble (see TestIntegrationACMERetry).
+func withPebbleOnPort80(e *itEnv, cfg *TraefikConfig) {
+	startPebbleWith(e, cfg, []string{"PEBBLE_VA_NOSLEEP=1"}, true)
+}
+
 func startPebble(e *itEnv, cfg *TraefikConfig, env []string) {
+	startPebbleWith(e, cfg, env, false)
+}
+
+// readFromContainer reads one file out of a container (created or running).
+func readFromContainer(e *itEnv, id, path string) []byte {
+	e.t.Helper()
+	res, err := e.docker.Client().CopyFromContainer(e.ctx, id, client.CopyFromContainerOptions{SourcePath: path})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer res.Content.Close()
+	tr := tar.NewReader(res.Content)
+	if _, err := tr.Next(); err != nil {
+		e.t.Fatal(err)
+	}
+	data, _ := io.ReadAll(tr)
+	return data
+}
+
+func startPebbleWith(e *itEnv, cfg *TraefikConfig, env []string, httpPort80 bool) {
 	t := e.t
 	if err := e.docker.EnsureImage(e.ctx, pebbleImage); err != nil {
 		t.Fatal(err)
 	}
 	name := e.prefix + "-pebble"
-	id, err := e.docker.CreateContainer(e.ctx, ContainerSpec{Name: name, Image: pebbleImage, Labels: e.labels(), Network: e.edgeNet,
-		Env: env})
+	spec := ContainerSpec{Name: name, Image: pebbleImage, Labels: e.labels(), Network: e.edgeNet, Env: env}
+	confDir := t.TempDir()
+	_ = os.Chmod(confDir, 0o755) // whatever user Pebble runs as reads it
+	if httpPort80 {
+		spec.Cmd = []string{"-config", "/it/pebble-config.json"}
+		spec.Mounts = []BindMount{{Source: confDir, Target: "/it", ReadOnly: true}}
+	}
+	id, err := e.docker.CreateContainer(e.ctx, spec)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if httpPort80 {
+		conf := regexp.MustCompile(`"httpPort":\s*\d+`).ReplaceAll(readFromContainer(e, id, "/test/config/pebble-config.json"), []byte(`"httpPort": 80`))
+		if err := os.WriteFile(filepath.Join(confDir, "pebble-config.json"), conf, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := e.docker.StartContainer(e.ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	res, err := e.docker.Client().CopyFromContainer(e.ctx, id, client.CopyFromContainerOptions{SourcePath: "/test/certs/pebble.minica.pem"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Content.Close()
-	tr := tar.NewReader(res.Content)
-	if _, err := tr.Next(); err != nil {
-		t.Fatal(err)
-	}
-	ca, _ := io.ReadAll(tr)
+	ca := readFromContainer(e, id, "/test/certs/pebble.minica.pem")
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}

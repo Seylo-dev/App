@@ -70,7 +70,7 @@ packages use. "Built" means implemented and tested.
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
-| `proxy` | Traefik route files (`Build`, `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS, certificate issuer and expiry, `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
+| `proxy` | Traefik route files (`Build`, `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS, certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages, tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM) |
 | `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
@@ -364,7 +364,7 @@ local API, join and resume. The areas:
 | Area | Wire file | Packages |
 |---|---|---|
 | runtime | `wire_runtime.go` | `docker`, `reconcile`, `health`, `crash`, `volumes` |
-| network | `wire_network.go` | `proxy`, `edge`, `portgate`, `wings` |
+| network | `wire_network.go` (and `cert_retry.go`) | `proxy`, `edge`, `portgate`, `wings` |
 | build | `wire_build.go` | `build`, `registry`, `compose` |
 | observe | `wire_observe.go` | `logs`, `metrics`, `console` (with `console/dockerapi`), `shell`, `fs` |
 | jobs | `wire_jobs.go` | `cron`, `backup`, `tunnel`, `cleanup`, `dbtools`, `box`, `jobrun` |
@@ -565,7 +565,27 @@ local API, join and resume. The areas:
   to project networks like the fork's Traefik. Tool session cookies are
   signed with `<datadir>/network/edge-session.key` (kept across agent
   restarts). Route certificate failures come from the Traefik container's
-  log (the last 24 h, kept until a certificate appears). Exposed Mongo and
+  log (the last 24 h, kept until a certificate appears). RetryCertificate
+  (`routing.certificate-retry.v1`, `proxy/certretry.go`) makes Traefik ask
+  the CA again for an ACME route's hosts without a certificate, without a
+  restart: Traefik's ACME provider runs for every router's hosts without a
+  certificate on each changed dynamic configuration (an equal one is
+  skipped), so the route's routers get a new name
+  (`seylo-<svc>-r-<route>-c<n>`, `BuildInput.CertRetries`), the file is
+  written atomically, and the hosts' failures are dropped
+  (`CertFailures.Retried`: failure lines from before the retry, as a
+  restarted log follower replays them, are ignored; Traefik logs whole
+  seconds, so one in the retry's second counts). The route is
+  CERTIFICATE_PENDING until a certificate or a new failure appears, and the
+  agent publishes the service's status at once (`Refresh`). Other routers
+  keep their names, so nothing else reloads; the name stays for later
+  renders (a deploy does not trigger another attempt) and goes with the
+  route or service. The count is in memory: an agent restart rewrites every
+  route file anyway (a new probe secret), which Traefik also takes as a
+  change. NOT_FOUND when the route is not on the node, FAILED_PRECONDITION
+  when it is not ACME or every host has a certificate (Traefik renews
+  those). The same next to the Wings fork: the files are in its dynamic
+  folder, and the LB file does not change. Exposed Mongo and
   Redis ports are TLS-terminated by the portgate with the certificate
   from `dbtools.Certificate` (ACME for `tls_hostname`, else the
   self-signed one in `<state>/db-tls/<id>.{crt,key}`). Tool hosts are `seylo-box-<id>.<wildcard>` and
@@ -1199,6 +1219,7 @@ or the method descriptor's options (TS). Current names:
 | `node.prune.v1`, `node.update.v1`, `node.healthcheck.v1`, `node.troubleshoot.v1`, `node.reboot.v1`, `node.docker-update.v1` | Prune, UpdateAgent, RunHealthCheck, Troubleshoot, Reboot, UpdateDocker |
 | `node.host-shell.v1` | HostShell |
 | `node.agent-logs.v1` | AgentLogs |
+| `routing.certificate-retry.v1` | RetryCertificate |
 | `panel.report.v1` | ReportCrash, ReportEvent |
 | `node.panel-update.v1` | UpdatePanel |
 | `compose.parse.v1` | ParseCompose |
@@ -1770,6 +1791,29 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `https://<slug>-box-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>`;
   without a wildcard domain on the node the ops answer CONFLICT
   (`details.reason` `noWildcardDomain`).
+- Regenerate certificate (`domains.retryCertificate`,
+  `modules/domains/certificate-retry.ts`): a mutation with `domains.edit`
+  on the service (an API key needs that action and must not be read-only,
+  as MCP tokens are by default; `mcp: true`, a mutation and never
+  destructive, so models need no approval), audited, refusals included. Only `https: acme` domains whose certificate is
+  pending or failed (CONFLICT `reason` `notAcme`, `certificateValid`). Once
+  a minute per domain, in memory (RATE_LIMITED `reason: certificateRetry`
+  with `retryAfter`; a refused try does not start the minute). DNS is
+  looked up now (and stored): `missing` or `wrongTarget` is refused
+  (CONFLICT `reason: dnsNotPointing`, the DNS check's message plus why),
+  since Let's Encrypt validates through that record and counts every
+  failed validation (5 per host name per hour). The agents asked are the
+  online placed nodes the record points at (every online placed node when
+  it is `proxied` or `unknown`); none online is UNAVAILABLE, one without
+  `routing.certificate-retry.v1` is CONFLICT `reason: agentTooOld` ("Update
+  the node first") before any call. A node's own refusal comes through
+  when no node took the retry. Then `cert_status` is `pending` until the
+  next report; the `certificate_failed` alert stays open until a route goes
+  ACTIVE. The web's row shows "Generating SSL certificate" with a spinner
+  while pending and, when failed, the CA's reason with "Regenerate
+  certificate" (also in the row's menu and the certificate dialog); an
+  error naming the CA's rate limit (429, `rateLimited`, "too many ...")
+  explains the 5-per-hour limit.
 - Route ids are domain ids: `RouteStatus` reports update the domain's
   certificate state and `liveAt`; when the primary domain goes live,
   first-run IP:port switches to redirect (24 h) then closes

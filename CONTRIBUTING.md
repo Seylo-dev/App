@@ -117,7 +117,8 @@ re-auth, databases (the New database form and the database Connection
 tabs), and on demo data dockerhub (Docker Hub search and the prefilled image
 form), git-providers (Settings > Git providers, provider sources and watch
 paths), nodeops (the node sheet's Cleanup and Shell views), clone-move (the
-Clone and Move to project dialogs) and screens (every screen in all four
+Clone and Move to project dialogs), certificates (the Domains tab's
+Generating SSL certificate state and Regenerate certificate) and screens (every screen in all four
 theme presets). `test/playwright/run.sh --project smoke` runs one suite;
 `PRESETS=seylo` and `SCREENS=` narrow the screens suite. Screenshots land in
 `test/playwright/shots/`.

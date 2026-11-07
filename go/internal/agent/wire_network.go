@@ -242,11 +242,17 @@ func handoffLocation(h *edge.Handoffs) portgate.Handoff {
 	}
 }
 
-// wireNetwork: no AgentService methods (routes and ports arrive in
-// ServiceSpec); the edge listener, Traefik (own or the Wings fork's) and
-// the desired-state follower run as components, the edge ticket key comes
-// from each handshake, and Wings is reported in d.Facts.
+// wireNetwork: RetryCertificate (cert_retry.go) is the area's only
+// AgentService method (routes and ports arrive in ServiceSpec); the edge
+// listener, Traefik (own or the Wings fork's) and the desired-state
+// follower run as components, the edge ticket key comes from each
+// handshake, and Wings is reported in d.Facts.
 func wireNetwork(reg *Registry, d *Deps) error {
+	log := d.Logger
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	registerCertRetry(reg, d, log.With("component", "network"))
 	p, ok := d.Gate.(*networkParts)
 	if !ok {
 		// Tests replaced the components; nothing of ours to run.

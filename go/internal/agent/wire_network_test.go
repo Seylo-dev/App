@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 	"github.com/seylo-dev/app/go/internal/edge"
 	"github.com/seylo-dev/app/go/internal/proxy"
 	"github.com/seylo-dev/app/go/internal/reconcile"
+	"github.com/seylo-dev/app/go/internal/rpc"
+	"github.com/seylo-dev/app/go/internal/rpc/rpctest"
 )
 
 func TestWireNetworkProvidesAndFollows(t *testing.T) {
@@ -321,5 +324,66 @@ func TestEdgeBridgeProblem(t *testing.T) {
 	// A name too long for an interface never gets a bridge name: nothing to say.
 	if msg := edgeBridgeProblem("a-network-name-longer-than-15", proxy.NetworkInfo{}); msg != "" {
 		t.Fatalf("long name: %q", msg)
+	}
+}
+
+// refreshEngine records Refresh calls; nothing else of reconcile is used.
+type refreshEngine struct {
+	reconcile.Engine
+	refreshed chan string
+}
+
+func (r refreshEngine) Refresh(serviceID string) { r.refreshed <- serviceID }
+
+func TestWireNetworkRetryCertificate(t *testing.T) {
+	d, _ := newTestDeps(t)
+	if err := provideNetwork(d); err != nil {
+		t.Fatal(err)
+	}
+	engine := refreshEngine{refreshed: make(chan string, 4)}
+	d.Reconcile = engine
+	reg := newRegistry()
+	if err := wireNetwork(reg, d); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(reg.Capabilities(), "routing.certificate-retry.v1") {
+		t.Fatalf("capability not advertised: %v", reg.Capabilities())
+	}
+	ctx := context.Background()
+	spec := &agentv1.ServiceSpec{Id: "svc1", ProjectId: "p1", Routing: &agentv1.Routing{Routes: []*agentv1.Route{
+		{Id: "r1", Hosts: []string{"a.example.com"}, TargetPort: 3000, Https: agentv1.HttpsMode_HTTPS_MODE_ACME},
+		{Id: "r2", Hosts: []string{"b.example.com"}, TargetPort: 3000, Https: agentv1.HttpsMode_HTTPS_MODE_OFF},
+	}}}
+	if err := d.Router.Apply(ctx, spec, []proxy.Upstream{{URL: "http://seylo-svc1-1:3000"}}); err != nil {
+		t.Fatal(err)
+	}
+	panel := rpctest.NewPeer(t, reg)
+	var resp agentv1.RetryCertificateResponse
+	if err := panel.Call(ctx, "RetryCertificate", &agentv1.RetryCertificateRequest{ServiceId: "svc1", RouteId: "r1"}, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.GetStatus().GetState() != agentv1.RouteState_ROUTE_STATE_CERTIFICATE_PENDING || !slices.Equal(resp.GetHosts(), []string{"a.example.com"}) {
+		t.Fatalf("response %v", &resp)
+	}
+	if got := <-engine.refreshed; got != "svc1" {
+		t.Fatalf("refreshed %q", got)
+	}
+	data, err := os.ReadFile(filepath.Join(d.Gate.(*networkParts).router.Dir(), "seylo-svc1.yml"))
+	if err != nil || !strings.Contains(string(data), "seylo-svc1-r-r1-c1:") {
+		t.Fatalf("route file not renamed: %v\n%s", err, data)
+	}
+	code := func(err error) agentv1.StatusCode { return rpc.StatusOf(err).GetCode() }
+	for _, tc := range []struct {
+		req  *agentv1.RetryCertificateRequest
+		want agentv1.StatusCode
+	}{
+		{&agentv1.RetryCertificateRequest{ServiceId: "svc1", RouteId: "nope"}, agentv1.StatusCode_STATUS_CODE_NOT_FOUND},
+		{&agentv1.RetryCertificateRequest{ServiceId: "svc1", RouteId: "r2"}, agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION},
+		{&agentv1.RetryCertificateRequest{ServiceId: "svc1"}, agentv1.StatusCode_STATUS_CODE_INVALID_ARGUMENT},
+	} {
+		err := panel.Call(ctx, "RetryCertificate", tc.req, &agentv1.RetryCertificateResponse{})
+		if code(err) != tc.want || rpc.StatusOf(err).GetMessage() == "" {
+			t.Errorf("%v: %v, want %v", tc.req, err, tc.want)
+		}
 	}
 }

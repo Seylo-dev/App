@@ -67,6 +67,9 @@ type FileRouter struct {
 
 	mu       sync.Mutex
 	services map[string]applied
+	// retries counts the certificate retries per service and route
+	// (certretry.go); the count names the route's routers.
+	retries  map[string]map[string]uint64
 	settings *agentv1.NodeSettings
 	// lbTLS is the rendered LBTLSFile (nil: none written).
 	lbTLS       []byte
@@ -109,6 +112,7 @@ func NewFileRouter(cfg FileConfig) *FileRouter {
 		secret:   hex.EncodeToString(secret[:]),
 		client:   &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		services: map[string]applied{},
+		retries:  map[string]map[string]uint64{},
 		dns:      map[string]dnsEntry{},
 	}
 }
@@ -125,6 +129,7 @@ func (r *FileRouter) input(spec *agentv1.ServiceSpec, upstreams []Upstream) Buil
 		ProbeSecret:  r.secret,
 		ProbeSource:  r.probeSource,
 		LBEntryPoint: r.cfg.LBEntryPoint,
+		CertRetries:  r.retryNames(spec.GetId()),
 	}
 }
 
@@ -140,6 +145,7 @@ func (r *FileRouter) Apply(ctx context.Context, spec *agentv1.ServiceSpec, upstr
 	if err := r.checkHostsLocked(spec); err != nil {
 		return err
 	}
+	r.pruneRetriesLocked(spec.GetId(), spec)
 	a, err := r.render(spec, upstreams)
 	if err != nil {
 		return err
@@ -237,6 +243,7 @@ func (r *FileRouter) Remove(ctx context.Context, serviceID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.services, serviceID)
+	r.pruneRetriesLocked(serviceID, nil)
 	if r.cfg.LBDir != "" {
 		if err := removeFile(r.cfg.LBDir, docker.RouteFile(serviceID)); err != nil {
 			return err

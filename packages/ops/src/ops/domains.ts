@@ -308,6 +308,19 @@ export const setPrimary = defineOp({
   audit: true,
 });
 
+export const retryCertificate = defineOp({
+  id: "domains.retryCertificate",
+  kind: "mutation",
+  summary: "Regenerate a domain's certificate",
+  description:
+    "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise). Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
+  input: Type.Object(DomainRef),
+  output: Domain,
+  permission: byService("domains.edit"),
+  mcp: true,
+  audit: true,
+});
+
 export const remove = defineOp({
   id: "domains.remove",
   kind: "destructive",

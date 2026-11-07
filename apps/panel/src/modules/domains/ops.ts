@@ -22,7 +22,7 @@ function afterChange(ctx: OpContext, serviceId: string) {
   invalidateService(ctx, serviceId, changedOps);
 }
 
-function requireDomain(db: PanelDb, serviceId: string, domainId: string): DomainRow {
+export function requireDomain(db: PanelDb, serviceId: string, domainId: string): DomainRow {
   const row = getDomain(db, serviceId, domainId);
   if (!row) throw new OpError("NOT_FOUND", "That domain does not exist on this service.", { domainId });
   return row;

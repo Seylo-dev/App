@@ -1,5 +1,6 @@
 // One domain in the Domains card (Domains.dc.html): state tile, URL, chips,
-// where it routes, certificate or DNS state, a menu of actions, and for a
+// where it routes, certificate or DNS state (Generating SSL certificate, or
+// the CA's reason and Regenerate certificate), a menu of actions, and for a
 // domain still waiting on DNS, the record to create with a Cloudflare link.
 
 import { domains, type OpOutput } from "@seylo/ops";
@@ -35,6 +36,15 @@ import { errorMessage } from "../../../lib/api";
 import { formatDate, formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
+import {
+  canRegenerate,
+  FailedChip,
+  GeneratingChip,
+  isRateLimited,
+  RateLimitNote,
+  RegenerateButton,
+  useRegenerate,
+} from "./certificate-state";
 
 export type Domain = OpOutput<typeof domains.list>["domains"][number];
 export type DomainDialog = "routing" | "access" | "certificate";
@@ -75,6 +85,10 @@ export function DomainRow({
     toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));
   const primary = useOpMutation(domains.setPrimary, { onSuccess: () => invalidate(domains.list), onError: fail });
   const remove = useOpMutation(domains.remove, { onSuccess: () => invalidate(domains.list) });
+  const regenerate = useRegenerate(serviceId);
+  const generating = d.https === "acme" && (d.certificate.status === "pending" || regenerate.isPending);
+  const runRegenerate = () => regenerate.mutate({ serviceId, domainId: d.id });
+  const rateLimited = !waiting && !generating && d.certificate.status === "failed" && isRateLimited(d.certificate.error);
   const mw = d.middlewares;
   const Icon = d.forward
     ? IconCornerDownRight
@@ -87,7 +101,10 @@ export function DomainRow({
           : IconLock;
 
   return (
-    <div className={cn("flex flex-col gap-3 border-t border-divider px-5 py-3", waiting && "bg-chip-amber-bg/40 pb-4")}>
+    <div
+      data-domain={d.host}
+      className={cn("flex flex-col gap-3 border-t border-divider px-5 py-3", waiting && "bg-chip-amber-bg/40 pb-4")}
+    >
       <div className="flex flex-wrap items-center gap-3">
         <span aria-hidden="true" className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", tileTone[tone])}>
           <Icon size={14} stroke={2.2} />
@@ -119,7 +136,7 @@ export function DomainRow({
         {mw.rateLimit && <Chip tone="gray">{t("serviceDomains.chips.rateLimit", { average: mw.rateLimit.average })}</Chip>}
         {mw.redirects.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.redirects", { count: mw.redirects.length })}</Chip>}
         <span className="ml-auto flex items-center gap-2">
-          <RowStatus d={d} waiting={waiting} />
+          <RowStatus d={d} waiting={waiting} generating={generating} onRegenerate={runRegenerate} busy={regenerate.isPending} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="icon" variant="ghost" aria-label={t("serviceDomains.actions", { host: d.host })}>
@@ -131,6 +148,11 @@ export function DomainRow({
               {!d.forward && <DropdownMenuItem onSelect={() => onEdit("access")}>{t("serviceDomains.menu.access")}</DropdownMenuItem>}
               {!d.auto && (
                 <DropdownMenuItem onSelect={() => onEdit("certificate")}>{t("serviceDomains.menu.certificate")}</DropdownMenuItem>
+              )}
+              {canRegenerate(d) && (
+                <DropdownMenuItem disabled={regenerate.isPending} onSelect={runRegenerate}>
+                  {t("serviceDomains.regenerate")}
+                </DropdownMenuItem>
               )}
               {!d.primary && !d.forward && (
                 <DropdownMenuItem onSelect={() => primary.mutate({ serviceId, domainId: d.id })}>
@@ -146,6 +168,7 @@ export function DomainRow({
         </span>
       </div>
       {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} />}
+      {rateLimited && <RateLimitNote />}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -162,7 +185,19 @@ export function DomainRow({
 /** Let's Encrypt renews 30 days before expiry; under two weeks left means renewals are failing. */
 const expiringSoonMs = 14 * 86_400_000;
 
-function RowStatus({ d, waiting }: { d: Domain; waiting: boolean }) {
+function RowStatus({
+  d,
+  waiting,
+  generating,
+  onRegenerate,
+  busy,
+}: {
+  d: Domain;
+  waiting: boolean;
+  generating: boolean;
+  onRegenerate: () => void;
+  busy: boolean;
+}) {
   if (waiting) {
     return (
       <span className="flex items-center gap-2">
@@ -176,6 +211,14 @@ function RowStatus({ d, waiting }: { d: Domain; waiting: boolean }) {
       </span>
     );
   }
+  if (generating) return <GeneratingChip />;
+  if (d.https === "acme" && d.certificate.status === "failed")
+    return (
+      <span className="flex min-w-0 flex-wrap items-center gap-2">
+        <FailedChip error={d.certificate.error} />
+        <RegenerateButton busy={busy} onClick={onRegenerate} />
+      </span>
+    );
   if (d.forward) return null;
   if (d.auto)
     return (
@@ -199,18 +242,13 @@ function RowStatus({ d, waiting }: { d: Domain; waiting: boolean }) {
       <span className="text-xs text-muted-foreground">{text}</span>
     );
   }
+  // Let's Encrypt's pending and failed states are above; what is left is a
+  // certificate without an expiry date yet.
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-2">
-      <Chip tone={cert.status === "failed" ? "red" : "amber"}>
-        <StatusDot status={cert.status === "failed" ? "error" : "busy"} pulse={cert.status === "pending"} />
-        {t(`serviceDomains.cert.${cert.status}`)}
-      </Chip>
-      {cert.status === "failed" && cert.error && (
-        <span title={cert.error} className="min-w-0 max-w-[60ch] truncate text-xs text-chip-red-fg">
-          {cert.error}
-        </span>
-      )}
-    </span>
+    <Chip tone="amber">
+      <StatusDot status="busy" />
+      {t(`serviceDomains.cert.${cert.status}`)}
+    </Chip>
   );
 }
 

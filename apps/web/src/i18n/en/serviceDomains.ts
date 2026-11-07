@@ -23,6 +23,13 @@ export default {
   certValid: "Certificate valid until {date}",
   certValidVia: "Certificate valid until {date} · via {issuer}",
   certSoonHint: "Renewal should have happened by now. Check that the domain still points at the node.",
+  generating: "Generating SSL certificate",
+  generatingHint:
+    "Let's Encrypt is checking the domain and issuing its certificate. This usually takes under a minute once DNS points at the node.",
+  regenerate: "Regenerate certificate",
+  regenerateStarted: "Asking Let's Encrypt again for {host}.",
+  rateLimitNote:
+    "Let's Encrypt allows 5 failed validations per host name per hour, and this domain reached that limit. Fix what made the earlier attempts fail, wait for the hour to pass, then regenerate.",
   checked: "checked {when}",
   addRecord: "Add this record where the domain's DNS is managed:",
   addRecordIn: "Add this record where {zone}'s DNS is managed:",
