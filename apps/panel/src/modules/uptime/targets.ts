@@ -171,8 +171,15 @@ function ownTarget(deps: Pick<Deps, "db">, addresses: readonly string[]): boolea
 /**
  * Decides whether an uptime check may request this URL. Hostnames are
  * resolved; every address must be public (or the panel's own).
+ * `ownNodes: false` drops the "panel's own" exception: a node's address on
+ * a private network then counts like any other internal address (git
+ * sources, where such a host needs an admin's approval per project).
  */
-export async function checkTarget(deps: Pick<Deps, "db">, url: string, options: { allowInternal?: boolean } = {}): Promise<TargetCheck> {
+export async function checkTarget(
+  deps: Pick<Deps, "db">,
+  url: string,
+  options: { allowInternal?: boolean; ownNodes?: boolean } = {},
+): Promise<TargetCheck> {
   if (options.allowInternal ?? getSetting(deps.db, "uptimeAllowInternalTargets") === true) return { ok: true, address: null, byName: true };
   let host: string;
   try {
@@ -199,7 +206,7 @@ export async function checkTarget(deps: Pick<Deps, "db">, url: string, options: 
   if (blocked.length === 0) return { ok: true, address: pin, byName: false };
   // The metadata service is never one of ours, even on a node's own address.
   const first = blocked.find((b) => b.reason === "metadata") ?? (blocked[0] as { address: string; reason: BlockReason });
-  if (first.reason !== "metadata" && ownTarget(deps, addresses)) return { ok: true, address: pin, byName: false };
+  if (first.reason !== "metadata" && options.ownNodes !== false && ownTarget(deps, addresses)) return { ok: true, address: pin, byName: false };
   return { ok: false, reason: first.reason as BlockReason, address: first.address };
 }
 

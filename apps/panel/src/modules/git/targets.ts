@@ -2,7 +2,8 @@
 // network (and FetchGitFile hands the file back), so a git URL is a way into
 // the node's network: a member could read an internal Gitea or a loopback
 // service through it. Public addresses are fine. An internal one (private,
-// loopback, link-local or reserved, or a name the panel cannot resolve) is
+// loopback, link-local or reserved, or a name the panel cannot resolve; a
+// node's own address on a private network too, unlike for uptime checks) is
 // allowed only for hosts an admin (git.manage) saved a source with in the
 // same project: saving records the host (git_internal_hosts), and the
 // project's members may then use it too, like a shared credential. Cloud
@@ -60,7 +61,7 @@ function hostOf(url: string, field: string): string {
 }
 
 /** True when an admin allowed this git host (host[:port] as urlHost gives it, lower case) in the project. */
-export function approved(db: PanelDb, projectId: string, host: string): boolean {
+function approved(db: PanelDb, projectId: string, host: string): boolean {
   return (
     db
       .select({ id: gitInternalHosts.id })
@@ -88,7 +89,8 @@ export async function assertGitTarget(
 ): Promise<GitTargetVerdict> {
   const field = input.field ?? "source.url";
   const host = hostOf(input.url, field);
-  const target = await checkTarget({ db }, targetUrl(input.url), { allowInternal: false });
+  // A node's private address is internal here: the node needs allow_internal_host to clone from it.
+  const target = await checkTarget({ db }, targetUrl(input.url), { allowInternal: false, ownNodes: false });
   if (target.ok) return { allowInternalHost: approved(db, input.projectId, host) };
   if (target.reason !== "metadata") {
     if (approved(db, input.projectId, host)) return { allowInternalHost: true };
@@ -131,7 +133,7 @@ export async function gitReadTarget(
   input: { projectId: string; url: string; admin: boolean; field?: string },
 ): Promise<{ ok: true; address: string } | { ok: false; check: Extract<TargetCheck, { ok: false }> }> {
   const host = hostOf(input.url, input.field ?? "url");
-  const target = await checkTarget({ db }, targetUrl(input.url), { allowInternal: false });
+  const target = await checkTarget({ db }, targetUrl(input.url), { allowInternal: false, ownNodes: false });
   if (target.ok) return { ok: true, address: target.address as string };
   if (target.reason !== "metadata" && target.reason !== "unresolvable" && (input.admin || approved(db, input.projectId, host)))
     return { ok: true, address: target.address };

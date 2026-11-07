@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { compose, git as gitOps, projects, services as serviceOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { gitInternalHosts } from "../src/db/schema";
+import { gitInternalHosts, nodes } from "../src/db/schema";
 import { resolveBuild } from "../src/modules/deployments/source";
 import { loadService } from "../src/modules/services/rows";
 import { readSpec } from "../src/modules/services/spec";
@@ -122,6 +122,21 @@ test("builds and FetchGitFile tell the node when the host may be internal, and o
     { url: "https://gitea.lan/stack.git", allowInternalHost: true },
     { url: "https://git.example.com/stack.git", allowInternalHost: false },
   ]);
+});
+
+// Uptime checks may reach a node's own address (an admin set it), but for git that address is
+// internal like any other: the node clones from it only for a host an admin allowed for the project.
+test("a node's own private address is an internal git host", async () => {
+  panel.deps.db.update(nodes).set({ publicAddress: "10.0.0.9" }).where(eq(nodes.id, nodeA)).run();
+  dns.set("gitea.node", ["10.0.0.9"]);
+  // Before: the member's source was saved (the uptime exception), and the node was never told the host is allowed.
+  const byMember = await callOp(panel, serviceOps.create, gitService("https://gitea.node:3000/a.git", "member-src"), { cookie: member });
+  expect(byMember.body.error?.details?.reason).toBe("internalTarget");
+  const byOwner = await callOp(panel, serviceOps.create, gitService("https://gitea.node:3000/a.git", "owner-src"), { cookie: owner });
+  expect(byOwner.status).toBe(200);
+  expect(panel.deps.db.select().from(gitInternalHosts).where(eq(gitInternalHosts.host, "gitea.node:3000")).all()).toHaveLength(1);
+  // Before: allowInternalHost was false, so a 0.2 node refused the admin's git server on its own LAN address.
+  expect((await built(byOwner.body.id)).allowInternalHost).toBe(true);
 });
 
 /** A smart-HTTP ref advertisement with main as the default branch. */

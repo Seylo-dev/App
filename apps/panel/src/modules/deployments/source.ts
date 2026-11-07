@@ -154,7 +154,7 @@ export async function resolveBuild(
         // Best effort: the node resolves the branch itself when the panel cannot reach the host.
         try {
           // Only public addresses: the node resolves the commit itself otherwise.
-          const target = await checkTarget(deps, targetUrl(source.url), { allowInternal: false });
+          const target = await checkTarget(deps, targetUrl(source.url), { allowInternal: false, ownNodes: false });
           sha = target.ok
             ? ((await listRemoteRefs(source.url, auth ?? {}, { address: target.address, byName: target.byName })).heads.get(
                 source.branch,
