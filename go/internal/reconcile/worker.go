@@ -36,13 +36,16 @@ type worker struct {
 	expected map[string]bool
 	// restartAt are crashed containers waiting for their restart delay.
 	restartAt map[string]time.Time
-	watches   map[string]*health.Watch
-	nextProbe time.Time
-	message   string
-	phase     agentv1.ServicePhase // set while deploying or pulling
-	lastSync  syncKeys
-	tunnelURL string
-	last      *agentv1.ServiceStatus
+	// seenRunning are containers this worker saw running, whose exits it
+	// gets die events for.
+	seenRunning map[string]bool
+	watches     map[string]*health.Watch
+	nextProbe   time.Time
+	message     string
+	phase       agentv1.ServicePhase // set while deploying or pulling
+	lastSync    syncKeys
+	tunnelURL   string
+	last        *agentv1.ServiceStatus
 	// digests caches image id -> repo digest for Instance.image_digest.
 	digests map[string]string
 	// netsUnsure are containers that may still be on another project's
@@ -77,16 +80,17 @@ var errSuperseded = errors.New("a newer version of the service arrived")
 
 func newWorker(r *Runtime, id string) *worker {
 	return &worker{
-		r:          r,
-		id:         id,
-		log:        r.log.With("service_id", id),
-		kickCh:     make(chan struct{}, 1),
-		events:     make(chan docker.Event, 64),
-		requests:   make(chan workerRequest),
-		expected:   map[string]bool{},
-		restartAt:  map[string]time.Time{},
-		watches:    map[string]*health.Watch{},
-		netsUnsure: map[string]bool{},
+		r:           r,
+		id:          id,
+		log:         r.log.With("service_id", id),
+		kickCh:      make(chan struct{}, 1),
+		events:      make(chan docker.Event, 64),
+		requests:    make(chan workerRequest),
+		expected:    map[string]bool{},
+		restartAt:   map[string]time.Time{},
+		watches:     map[string]*health.Watch{},
+		seenRunning: map[string]bool{},
+		netsUnsure:  map[string]bool{},
 	}
 }
 
@@ -138,6 +142,10 @@ func (w *worker) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-w.kickCh:
+			// Events that already arrived go first: a die event handled after
+			// the pass would find its container started by it, and the crash
+			// would go unreported.
+			w.drainEvents(ctx)
 			if w.pass(ctx) {
 				return
 			}
@@ -159,6 +167,18 @@ func (w *worker) run(ctx context.Context) {
 		}
 		if !w.nextProbe.IsZero() {
 			probe.Reset(max(w.nextProbe.Sub(w.r.o.Now()), 10*time.Millisecond))
+		}
+	}
+}
+
+// drainEvents handles the events already waiting, without blocking.
+func (w *worker) drainEvents(ctx context.Context) {
+	for {
+		select {
+		case ev := <-w.events:
+			w.handleEvent(ctx, ev)
+		default:
+			return
 		}
 	}
 }
@@ -418,6 +438,11 @@ func (w *worker) converge(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 	}
 }
 
+// dieEventWait is how long a pass leaves a container that has just exited
+// to its die event (the crash policy and the crash report) before starting
+// it itself.
+const dieEventWait = 2 * time.Second
+
 // startStopped starts stopped instances unless a crash restart is still
 // waiting for its delay. hash, when set, limits it to that spec.
 func (w *worker) startStopped(ctx context.Context, spec *agentv1.ServiceSpec, list []docker.Container, hash string) {
@@ -434,6 +459,20 @@ func (w *worker) startStopped(ctx context.Context, spec *agentv1.ServiceSpec, li
 				continue
 			}
 			delete(w.restartAt, c.ID)
+		} else if w.seenRunning[c.ID] && !w.expected[c.ID] {
+			// An exit Docker just made may still be on its way as a die event:
+			// starting the container now would hide the crash (no report, no
+			// crash policy delay), as handleEvent then finds it running. Leave
+			// it to the event for a moment; an exit whose event never comes
+			// (Docker restarted while nobody listened) starts after that.
+			// Containers this worker never saw running (exited before the
+			// agent started, after a reboot) start at once.
+			if d, err := w.r.o.Docker.InspectContainer(ctx, c.ID); err == nil && !d.Running && !d.FinishedAt.IsZero() {
+				if wait := dieEventWait - now.Sub(d.FinishedAt); wait > 0 {
+					w.retryLater(wait)
+					continue
+				}
+			}
 		}
 		if err := w.r.o.Docker.StartContainer(ctx, c.ID); err != nil {
 			w.log.Warn("starting container", "container", c.Name, "err", err)
@@ -442,6 +481,7 @@ func (w *worker) startStopped(ctx context.Context, spec *agentv1.ServiceSpec, li
 			continue
 		}
 		w.watches[c.ID] = health.NewWatch(spec.GetHealthCheck(), now)
+		w.seenRunning[c.ID] = true
 		w.r.o.Crash.Running(w.id, now)
 	}
 }
@@ -461,6 +501,7 @@ func (w *worker) running(ctx context.Context, list []docker.Container) []liveIns
 		}
 		ip := d.Networks[docker.ProjectNetwork(w.r.projectOf(c.ID, c.Labels))]
 		out = append(out, liveInstance{id: d.ID, name: d.Name, ip: ip})
+		w.seenRunning[d.ID] = true
 		if !d.StartedAt.IsZero() {
 			w.r.o.Crash.Running(w.id, d.StartedAt)
 		}
@@ -534,6 +575,7 @@ func (w *worker) stopRemove(ctx context.Context, id string, grace time.Duration)
 	w.expected[id] = true
 	delete(w.restartAt, id)
 	delete(w.watches, id)
+	delete(w.seenRunning, id)
 	if err := w.r.o.Docker.StopContainer(ctx, id, grace); err != nil && !errors.Is(err, docker.ErrNotFound) {
 		w.log.Warn("stopping container", "container", id, "err", err)
 	}
@@ -549,6 +591,7 @@ func (w *worker) removeAll(ctx context.Context, list []docker.Container, grace t
 		w.expected[c.ID] = true
 		delete(w.restartAt, c.ID)
 		delete(w.watches, c.ID)
+		delete(w.seenRunning, c.ID)
 		ids = append(ids, c.ID)
 	}
 	for _, id := range ids {
@@ -624,6 +667,7 @@ func (w *worker) deleteData(ctx context.Context) error {
 func (w *worker) handleEvent(ctx context.Context, ev docker.Event) {
 	switch ev.Action {
 	case docker.EventStart:
+		w.seenRunning[ev.ContainerID] = true
 		w.r.o.Crash.Running(w.id, ev.Time)
 	case docker.EventDie:
 		if w.expected[ev.ContainerID] {

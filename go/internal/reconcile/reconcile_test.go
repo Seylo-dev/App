@@ -290,6 +290,31 @@ func TestCrashPolicyRestartsThenGivesUp(t *testing.T) {
 	}
 }
 
+// A pass that runs between a crash and its die event (a resync, another
+// kick) must not start the container: the event would then find it running
+// and the crash would go unreported, restarted at once without the delay.
+func TestPassBeforeTheDieEventLeavesTheCrashToIt(t *testing.T) {
+	h := newHarness(t)
+	h.apply(1, appSpec("svc", 1, "app:v1"))
+	h.deployResult("svc", 1)
+
+	h.eng.CrashQuietly("seylo-svc-1", 3)
+	h.rt.resync(context.Background())
+	h.settle()
+	if got := h.running("svc"); len(got) != 0 {
+		t.Fatalf("a pass started the crashed container before its die event: %v", got)
+	}
+	h.eng.EmitDie("seylo-svc-1")
+	r := h.rec.WaitCrash(t, func(c *agentv1.CrashReport) bool { return true })
+	if r.GetExitCode() != 3 || r.GetAction() != agentv1.CrashAction_CRASH_ACTION_RESTARTING || r.GetStreak() != 1 {
+		t.Fatalf("report = %v", r)
+	}
+	h.waitFor("restart after the delay", func() bool { return len(h.running("svc")) == 1 })
+	if n := len(h.rec.Crashes()); n != 1 {
+		t.Fatalf("%d crash reports, want 1", n)
+	}
+}
+
 func TestCrashRestartOff(t *testing.T) {
 	h := newHarness(t)
 	s1 := appSpec("svc", 1, "app:v1")

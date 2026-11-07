@@ -332,6 +332,28 @@ func (f *Fake) StartContainer(ctx context.Context, id string) error {
 	return nil
 }
 
+// CrashQuietly makes a running container exit with code without an event
+// yet, as when the die event is still on its way; EmitDie sends it.
+func (f *Fake) CrashQuietly(id string, code int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c := f.find(id); c != nil && c.Running {
+		c.Running, c.ExitCode, c.Finished = false, code, f.now()
+		for n := range c.Networks {
+			c.Networks[n] = ""
+		}
+	}
+}
+
+// EmitDie sends the die event of a container's last exit.
+func (f *Fake) EmitDie(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c := f.find(id); c != nil {
+		f.emitLocked(c, docker.EventDie, c.ExitCode)
+	}
+}
+
 // Crash makes a running container exit with code, as if the process died.
 func (f *Fake) Crash(id string, code int, oom bool) {
 	f.mu.Lock()
