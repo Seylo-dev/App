@@ -1360,8 +1360,14 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   ones (bad signature, too large, replay) and repeats (the same delivery
   id and body again, pings) count, 60 then one a second (429). GitHub
   sends every delivery from a few addresses and does not retry, so its
-  new signed deliveries never use the bucket up. The route takes 5 MiB (after
-  answering 404 without an App), git
+  new signed deliveries never use the bucket up. Senders inside GitHub's
+  hook ranges (the `hooks` list of api.github.com/meta, hardcoded in
+  `modules/github/hook-addresses.ts`) take no token at all: every GitHub
+  user's webhooks come from there, so a webhook with the wrong secret
+  pointed at the panel must not get the App's deliveries refused unread;
+  they are always read and verified (5 MiB cap, shared body budget), and
+  a refused one's row names the GitHub hook that sent it. The route takes
+  5 MiB (after answering 404 without an App), git
   provider webhooks at 5 MiB (after answering 404 for an unknown hook id),
   deploy trigger URL bodies at 5 MiB and the public OAuth endpoints
   (`/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`)

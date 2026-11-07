@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { bodyBudget, bufferedBodyBytes } from "@seylo/ops/elysia";
 import { githubApps, webhookDeliveries } from "../src/db/schema";
+import { createProxyTrust } from "../src/http/proxy-trust";
 import { type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -175,6 +176,60 @@ test("webhook: a signed delivery posted again under its own id, and pings, keep 
     // Pings are not remembered, so each one keeps its token.
     expect((await signedDelivery(3, "ping")).status).toBe(200);
     expect((await signedDelivery(4, "ping")).status).toBe(429);
+  } finally {
+    setSystemTime();
+  }
+});
+
+test("webhook: deliveries from GitHub's own addresses are always read, so anyone's refused ones never block the App's", async () => {
+  // Behind the panel's proxy, which names the sender in X-Forwarded-For.
+  panel.close();
+  panel = testPanel({ proxy: createProxyTrust({ always: true, proxies: [] }) });
+  insertGithubApp();
+  setSystemTime(new Date("2026-11-07T12:00:00Z"));
+  try {
+    const from = (address: string) => ({ "x-forwarded-for": address });
+    const hook = {
+      "x-github-hook-id": "123",
+      "x-github-hook-installation-target-type": "repository",
+      "x-github-hook-installation-target-id": "456",
+    };
+    const unsigned = (n: number, address: string) =>
+      post("/api/hooks/github", "{}", {
+        ...from(address),
+        ...hook,
+        "x-github-delivery": `attacker-${address}-${n}`,
+        "x-github-event": "issues",
+        "x-hub-signature-256": "sha256=00",
+      });
+    const signed = (n: number, address: string) => {
+      const body = JSON.stringify({ zen: `delivery ${n}` });
+      const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+      return post("/api/hooks/github", body, {
+        ...from(address),
+        "x-github-delivery": `ok-${n}`,
+        "x-github-event": "meta",
+        "x-hub-signature-256": signature,
+      });
+    };
+    // Someone's own repository webhook with the wrong secret, delivered from GitHub's address (IPv4 and IPv6 ranges).
+    // Before: 429 from the 61st on, and the App's next delivery from there was refused unread.
+    for (const [n, address] of ["140.82.115.10", "2606:50c0:8000::153"].entries()) {
+      const statuses: number[] = [];
+      for (let i = 0; i < 1000; i++) statuses.push((await unsigned(i, address)).status);
+      expect(statuses.filter((s) => s !== 401)).toEqual([]);
+      expect((await signed(n, address)).status).toBe(200);
+    }
+    // The refused rows name the webhook that sent them.
+    const rejected = panel.deps.db.select().from(webhookDeliveries).all();
+    expect(rejected[0]?.detail).toBe("The signature did not match (GitHub hook 123 on repository 456).");
+    // Any other address still gets 60 refused deliveries, then 429 before the body is read.
+    const other: number[] = [];
+    for (let i = 0; i < 61; i++) other.push((await unsigned(i, "203.0.113.5")).status);
+    expect(other.slice(0, 60).every((s) => s === 401)).toBe(true);
+    expect(other[60]).toBe(429);
+    // A forged GitHub address in a header the proxy did not write is not believed.
+    expect((await unsigned(61, "140.82.115.10, 203.0.113.5")).status).toBe(429);
   } finally {
     setSystemTime();
   }

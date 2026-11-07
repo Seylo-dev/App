@@ -15,6 +15,7 @@ import { changesFromPushPayload } from "../webhooks/changes";
 import { alreadyHandled, recordDelivery } from "../webhooks/deliveries";
 import { bodySeen, recordRejected } from "../webhooks/replay";
 import { appRow, forgetTokens, githubWebhookPath, verifySignature, webhookSecret } from "./app";
+import { isGithubHookAddress } from "./hook-addresses";
 import { type GithubInstallationPayload, upsertInstallation } from "./ops";
 import { handlePullRequest, handlePush } from "./push";
 
@@ -137,11 +138,13 @@ export async function handleGithubEvent(
  * gives it back. Only deliveries being read and refused or repeated ones
  * (bad signature, too large, a replayed body, the same delivery again, a
  * ping) count: an address gets a burst of 60 of those, then 1 per second.
- * GitHub sends every delivery of every installation from a few addresses
- * and does not retry a refused one, so its new signed deliveries must
- * never use the bucket up, however busy the organisation.
- * The bytes held by all body reads at once are capped by the shared body
- * budget (bodyBudget in @seylo/ops/elysia).
+ * GitHub's own delivery addresses (hook-addresses.ts) take no token at
+ * all: every GitHub user's webhooks come from them, so anyone could point
+ * a webhook with the wrong secret here, use their bucket up and get the
+ * panel's own deliveries refused unread (GitHub Apps do not retry). Those
+ * are always read and verified, bounded by the 5 MiB cap, GitHub's own
+ * delivery rate and the shared body budget (bodyBudget in
+ * @seylo/ops/elysia), which caps the bytes held by all reads at once.
  */
 const senderRules = { standard: { burst: 60, refillPerSecond: 1 }, strict: { burst: 60, refillPerSecond: 1 } };
 const senderLimiters = new WeakMap<object, RateLimiter>();
@@ -155,6 +158,21 @@ function senderLimiter(deps: Pick<Deps, "db">): RateLimiter {
   return limiter;
 }
 
+/**
+ * Which GitHub webhook sent a delivery, as GitHub's headers name it
+ * (" (GitHub hook 123 on repository 456)"), or "" without them: a refused
+ * delivery from GitHub's addresses is someone's own webhook pointed here,
+ * and this is what finds it. Unverified, so only digits and short words.
+ */
+function hookOf(headers: Headers): string {
+  const hook = headers.get("x-github-hook-id") ?? "";
+  const type = headers.get("x-github-hook-installation-target-type") ?? "";
+  const target = headers.get("x-github-hook-installation-target-id") ?? "";
+  if (!/^\d{1,20}$/.test(hook)) return "";
+  const on = /^[a-z_]{1,32}$/.test(type) && /^\d{1,20}$/.test(target) ? ` on ${type} ${target}` : "";
+  return ` (GitHub hook ${hook}${on})`;
+}
+
 export function githubWebhookRoute(deps: Deps) {
   return new Elysia().post(
     githubWebhookPath,
@@ -163,9 +181,14 @@ export function githubWebhookRoute(deps: Deps) {
       const secret = webhookSecret(deps.db, deps.secrets);
       if (!secret) return json(404, { error: { code: "NOT_FOUND", message: "This panel has no GitHub App." } });
       const peer = server?.requestIP(request)?.address ?? null;
-      const sender = `github-hook:${addressKey(clientIp(request, peer, deps.proxy.trusts(peer)))}`;
+      const ip = clientIp(request, peer, deps.proxy.trusts(peer));
+      const sender = `github-hook:${addressKey(ip)}`;
       const limiter = senderLimiter(deps);
-      const wait = limiter.take(sender, "standard");
+      const counted = ip === null || !isGithubHookAddress(ip);
+      const refund = () => {
+        if (counted) limiter.refund(sender, "standard");
+      };
+      const wait = counted ? limiter.take(sender, "standard") : 0;
       if (wait > 0) {
         return new Response(
           JSON.stringify({ error: { code: "RATE_LIMITED", message: `Too many refused deliveries. Try again in ${wait} seconds.` } }),
@@ -175,14 +198,19 @@ export function githubWebhookRoute(deps: Deps) {
       const read = await readBodyText(request, maxBody);
       if (!read.ok) {
         // "busy" is the panel's state, not something this sender did.
-        if (read.reason === "busy") limiter.refund(sender, "standard");
+        if (read.reason === "busy") refund();
         return bodyRefused(read.reason);
       }
       const raw = read.text;
       const deliveryId = (request.headers.get("x-github-delivery") ?? "").slice(0, 64);
       const event = (request.headers.get("x-github-event") ?? "unknown").slice(0, 64);
       if (!verifySignature(secret, raw, request.headers.get("x-hub-signature-256"))) {
-        recordRejected(deps.db, { source: "github", event, serviceId: null, detail: "The signature did not match." });
+        recordRejected(deps.db, {
+          source: "github",
+          event,
+          serviceId: null,
+          detail: `The signature did not match${hookOf(request.headers)}.`,
+        });
         return json(401, { error: { code: "UNAUTHENTICATED", message: "The signature did not match." } });
       }
       // GitHub always sends one; without it the dedupe below could not work.
@@ -202,7 +230,7 @@ export function githubWebhookRoute(deps: Deps) {
       // same delivery sent again (a redelivery, or a captured one posted in
       // a loop) and pings keep their token, so a signed body cannot be
       // replayed for free.
-      if (seen === "new") limiter.refund(sender, "standard");
+      if (seen === "new") refund();
       let payload: unknown;
       try {
         payload = JSON.parse(raw);
