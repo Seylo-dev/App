@@ -17,7 +17,54 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/panel_service.proto.
  */
 export const file_seylo_agent_v1_panel_service: GenFile = /*@__PURE__*/
-  fileDesc("CiJzZXlsby9hZ2VudC92MS9wYW5lbF9zZXJ2aWNlLnByb3RvEg5zZXlsby5hZ2VudC52MSJUChJSZXBvcnRDcmFzaFJlcXVlc3QSEQoJb3V0Ym94X2lkGAEgASgEEisKBnJlcG9ydBgCIAEoCzIbLnNleWxvLmFnZW50LnYxLkNyYXNoUmVwb3J0IhUKE1JlcG9ydENyYXNoUmVzcG9uc2UiTQoSUmVwb3J0RXZlbnRSZXF1ZXN0EhEKCW91dGJveF9pZBgBIAEoBBIkCgVldmVudBgCIAEoCzIVLnNleWxvLmFnZW50LnYxLkV2ZW50IhUKE1JlcG9ydEV2ZW50UmVzcG9uc2UiMAoWR2V0RGVzaXJlZFN0YXRlUmVxdWVzdBIWCg5rbm93bl9yZXZpc2lvbhgBIAEoBCJGChdHZXREZXNpcmVkU3RhdGVSZXNwb25zZRIrCgVzdGF0ZRgBIAEoCzIcLnNleWxvLmFnZW50LnYxLkRlc2lyZWRTdGF0ZTLmAwoMUGFuZWxTZXJ2aWNlEmsKC1JlcG9ydENyYXNoEiIuc2V5bG8uYWdlbnQudjEuUmVwb3J0Q3Jhc2hSZXF1ZXN0GiMuc2V5bG8uYWdlbnQudjEuUmVwb3J0Q3Jhc2hSZXNwb25zZSITyvMYD3BhbmVsLnJlcG9ydC52MRJrCgtSZXBvcnRFdmVudBIiLnNleWxvLmFnZW50LnYxLlJlcG9ydEV2ZW50UmVxdWVzdBojLnNleWxvLmFnZW50LnYxLlJlcG9ydEV2ZW50UmVzcG9uc2UiE8rzGA9wYW5lbC5yZXBvcnQudjESeAoPR2V0RGVzaXJlZFN0YXRlEiYuc2V5bG8uYWdlbnQudjEuR2V0RGVzaXJlZFN0YXRlUmVxdWVzdBonLnNleWxvLmFnZW50LnYxLkdldERlc2lyZWRTdGF0ZVJlc3BvbnNlIhTK8xgQcGFuZWwuZGVzaXJlZC52MRKBAQoOUmVnaXN0cnlUdW5uZWwSJS5zZXlsby5hZ2VudC52MS5SZWdpc3RyeVR1bm5lbFJlcXVlc3QaJi5zZXlsby5hZ2VudC52MS5SZWdpc3RyeVR1bm5lbFJlc3BvbnNlIiDA8xgDyvMYGHBhbmVsLnJlZ2lzdHJ5LXR1bm5lbC52MUK8AQoSY29tLnNleWxvLmFnZW50LnYxQhFQYW5lbFNlcnZpY2VQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_seylo_agent_v1_desired, file_seylo_agent_v1_events, file_seylo_agent_v1_options, file_seylo_agent_v1_tunnel]);
+  fileDesc("CiJzZXlsby9hZ2VudC92MS9wYW5lbF9zZXJ2aWNlLnByb3RvEg5zZXlsby5hZ2VudC52MSI6ChZDaGVja0VkZ2VBY2Nlc3NSZXF1ZXN0Eg8KB3N1YmplY3QYASABKAkSDwoHdXNlcl9pZBgCIAEoCSIqChdDaGVja0VkZ2VBY2Nlc3NSZXNwb25zZRIPCgdhbGxvd2VkGAEgASgIIlQKElJlcG9ydENyYXNoUmVxdWVzdBIRCglvdXRib3hfaWQYASABKAQSKwoGcmVwb3J0GAIgASgLMhsuc2V5bG8uYWdlbnQudjEuQ3Jhc2hSZXBvcnQiFQoTUmVwb3J0Q3Jhc2hSZXNwb25zZSJNChJSZXBvcnRFdmVudFJlcXVlc3QSEQoJb3V0Ym94X2lkGAEgASgEEiQKBWV2ZW50GAIgASgLMhUuc2V5bG8uYWdlbnQudjEuRXZlbnQiFQoTUmVwb3J0RXZlbnRSZXNwb25zZSIwChZHZXREZXNpcmVkU3RhdGVSZXF1ZXN0EhYKDmtub3duX3JldmlzaW9uGAEgASgEIkYKF0dldERlc2lyZWRTdGF0ZVJlc3BvbnNlEisKBXN0YXRlGAEgASgLMhwuc2V5bG8uYWdlbnQudjEuRGVzaXJlZFN0YXRlMuQECgxQYW5lbFNlcnZpY2USawoLUmVwb3J0Q3Jhc2gSIi5zZXlsby5hZ2VudC52MS5SZXBvcnRDcmFzaFJlcXVlc3QaIy5zZXlsby5hZ2VudC52MS5SZXBvcnRDcmFzaFJlc3BvbnNlIhPK8xgPcGFuZWwucmVwb3J0LnYxEmsKC1JlcG9ydEV2ZW50EiIuc2V5bG8uYWdlbnQudjEuUmVwb3J0RXZlbnRSZXF1ZXN0GiMuc2V5bG8uYWdlbnQudjEuUmVwb3J0RXZlbnRSZXNwb25zZSITyvMYD3BhbmVsLnJlcG9ydC52MRJ4Cg9HZXREZXNpcmVkU3RhdGUSJi5zZXlsby5hZ2VudC52MS5HZXREZXNpcmVkU3RhdGVSZXF1ZXN0Gicuc2V5bG8uYWdlbnQudjEuR2V0RGVzaXJlZFN0YXRlUmVzcG9uc2UiFMrzGBBwYW5lbC5kZXNpcmVkLnYxEoEBCg5SZWdpc3RyeVR1bm5lbBIlLnNleWxvLmFnZW50LnYxLlJlZ2lzdHJ5VHVubmVsUmVxdWVzdBomLnNleWxvLmFnZW50LnYxLlJlZ2lzdHJ5VHVubmVsUmVzcG9uc2UiIMDzGAPK8xgYcGFuZWwucmVnaXN0cnktdHVubmVsLnYxEnwKD0NoZWNrRWRnZUFjY2VzcxImLnNleWxvLmFnZW50LnYxLkNoZWNrRWRnZUFjY2Vzc1JlcXVlc3QaJy5zZXlsby5hZ2VudC52MS5DaGVja0VkZ2VBY2Nlc3NSZXNwb25zZSIYyvMYFHBhbmVsLmVkZ2UtYWNjZXNzLnYxQrwBChJjb20uc2V5bG8uYWdlbnQudjFCEVBhbmVsU2VydmljZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_seylo_agent_v1_desired, file_seylo_agent_v1_events, file_seylo_agent_v1_options, file_seylo_agent_v1_tunnel]);
+
+/**
+ * @generated from message seylo.agent.v1.CheckEdgeAccessRequest
+ */
+export type CheckEdgeAccessRequest = Message<"seylo.agent.v1.CheckEdgeAccessRequest"> & {
+  /**
+   * The ticket's subject: "box:<service id>" or "db-ui:<service id>".
+   *
+   * @generated from field: string subject = 1;
+   */
+  subject: string;
+
+  /**
+   * The ticket's uid: the panel user the ticket was issued to.
+   *
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.CheckEdgeAccessRequest.
+ * Use `create(CheckEdgeAccessRequestSchema)` to create a new message.
+ */
+export const CheckEdgeAccessRequestSchema: GenMessage<CheckEdgeAccessRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 0);
+
+/**
+ * @generated from message seylo.agent.v1.CheckEdgeAccessResponse
+ */
+export type CheckEdgeAccessResponse = Message<"seylo.agent.v1.CheckEdgeAccessResponse"> & {
+  /**
+   * False when the user is gone or disabled, no longer has what opening
+   * this tool needs (boxes.open / databases.openWebUi on the service), or
+   * the service does not run on the asking node.
+   *
+   * @generated from field: bool allowed = 1;
+   */
+  allowed: boolean;
+};
+
+/**
+ * Describes the message seylo.agent.v1.CheckEdgeAccessResponse.
+ * Use `create(CheckEdgeAccessResponseSchema)` to create a new message.
+ */
+export const CheckEdgeAccessResponseSchema: GenMessage<CheckEdgeAccessResponse> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 1);
 
 /**
  * @generated from message seylo.agent.v1.ReportCrashRequest
@@ -41,7 +88,7 @@ export type ReportCrashRequest = Message<"seylo.agent.v1.ReportCrashRequest"> & 
  * Use `create(ReportCrashRequestSchema)` to create a new message.
  */
 export const ReportCrashRequestSchema: GenMessage<ReportCrashRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 0);
+  messageDesc(file_seylo_agent_v1_panel_service, 2);
 
 /**
  * @generated from message seylo.agent.v1.ReportCrashResponse
@@ -54,7 +101,7 @@ export type ReportCrashResponse = Message<"seylo.agent.v1.ReportCrashResponse"> 
  * Use `create(ReportCrashResponseSchema)` to create a new message.
  */
 export const ReportCrashResponseSchema: GenMessage<ReportCrashResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 1);
+  messageDesc(file_seylo_agent_v1_panel_service, 3);
 
 /**
  * @generated from message seylo.agent.v1.ReportEventRequest
@@ -76,7 +123,7 @@ export type ReportEventRequest = Message<"seylo.agent.v1.ReportEventRequest"> & 
  * Use `create(ReportEventRequestSchema)` to create a new message.
  */
 export const ReportEventRequestSchema: GenMessage<ReportEventRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 2);
+  messageDesc(file_seylo_agent_v1_panel_service, 4);
 
 /**
  * @generated from message seylo.agent.v1.ReportEventResponse
@@ -89,7 +136,7 @@ export type ReportEventResponse = Message<"seylo.agent.v1.ReportEventResponse"> 
  * Use `create(ReportEventResponseSchema)` to create a new message.
  */
 export const ReportEventResponseSchema: GenMessage<ReportEventResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 3);
+  messageDesc(file_seylo_agent_v1_panel_service, 5);
 
 /**
  * @generated from message seylo.agent.v1.GetDesiredStateRequest
@@ -108,7 +155,7 @@ export type GetDesiredStateRequest = Message<"seylo.agent.v1.GetDesiredStateRequ
  * Use `create(GetDesiredStateRequestSchema)` to create a new message.
  */
 export const GetDesiredStateRequestSchema: GenMessage<GetDesiredStateRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 4);
+  messageDesc(file_seylo_agent_v1_panel_service, 6);
 
 /**
  * @generated from message seylo.agent.v1.GetDesiredStateResponse
@@ -127,7 +174,7 @@ export type GetDesiredStateResponse = Message<"seylo.agent.v1.GetDesiredStateRes
  * Use `create(GetDesiredStateResponseSchema)` to create a new message.
  */
 export const GetDesiredStateResponseSchema: GenMessage<GetDesiredStateResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 5);
+  messageDesc(file_seylo_agent_v1_panel_service, 7);
 
 /**
  * PanelService is implemented by the panel and called by agents.
@@ -175,6 +222,22 @@ export const PanelService: GenService<{
     methodKind: "unary";
     input: typeof RegistryTunnelRequestSchema;
     output: typeof RegistryTunnelResponseSchema;
+  },
+  /**
+   * Asks whether the user an edge ticket opened a tool for (a Box or a
+   * database web UI) may still use it. The agent's edge asks for every
+   * tool session in use at most once a minute and ends the session on
+   * allowed=false, so revoking a grant closes the tool within about a
+   * minute. Without this method (UNIMPLEMENTED) or while the panel is
+   * unreachable, a session ends an hour after the panel last confirmed it
+   * (its ticket counts). Added in 0.2.
+   *
+   * @generated from rpc seylo.agent.v1.PanelService.CheckEdgeAccess
+   */
+  checkEdgeAccess: {
+    methodKind: "unary";
+    input: typeof CheckEdgeAccessRequestSchema;
+    output: typeof CheckEdgeAccessResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_seylo_agent_v1_panel_service, 0);

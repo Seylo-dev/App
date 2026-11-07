@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,13 @@ import (
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const testEdge = "http://172.30.0.1:5756"
+
+// fakeLBTLS is complete NodeSettings.lb_tls for route files (Build only
+// checks that it is there; lbtls_test.go checks real certificates).
+var fakeLBTLS = &agentv1.LoadBalancerTls{
+	CaPem: "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n", CertPem: "-----BEGIN CERTIFICATE-----\nNODE\n-----END CERTIFICATE-----\n",
+	KeyPem: "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n", ServerName: "lb.seylo.internal",
+}
 
 func route(id string, hosts ...string) *agentv1.Route {
 	return &agentv1.Route{Id: id, Hosts: hosts, TargetPort: 3000, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true}
@@ -90,6 +98,7 @@ func TestBuildGolden(t *testing.T) {
 				return s
 			}(),
 			Upstreams:    ups("http://seylo-svc7-4:3000"),
+			Settings:     &agentv1.NodeSettings{LbTls: fakeLBTLS},
 			Edge:         testEdge,
 			LBEntryPoint: true,
 		}},
@@ -99,11 +108,8 @@ func TestBuildGolden(t *testing.T) {
 				s.LoadBalancer = &agentv1.LoadBalancer{RemoteUpstreams: []*agentv1.RemoteUpstream{{NodeId: "n2", Url: "https://198.51.100.2:5757"}}}
 				return s
 			}(),
-			Upstreams: ups("http://seylo-svc7-4:3000"),
-			Settings: &agentv1.NodeSettings{LbTls: &agentv1.LoadBalancerTls{
-				CaPem: "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n", CertPem: "-----BEGIN CERTIFICATE-----\nNODE\n-----END CERTIFICATE-----\n",
-				KeyPem: "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n", ServerName: "lb.seylo.internal",
-			}},
+			Upstreams:    ups("http://seylo-svc7-4:3000"),
+			Settings:     &agentv1.NodeSettings{LbTls: fakeLBTLS},
 			Edge:         testEdge,
 			LBEntryPoint: true,
 		}},
@@ -123,6 +129,7 @@ func TestBuildGolden(t *testing.T) {
 				&agentv1.Route{Id: "admin", Hosts: []string{"admin.x.example.com"}, TargetPort: 9000, Https: agentv1.HttpsMode_HTTPS_MODE_OFF},
 			),
 			Upstreams:    ups("http://seylo-svc9-1:3000", "http://seylo-svc9-1-1:3000"),
+			Settings:     &agentv1.NodeSettings{LbTls: fakeLBTLS},
 			Edge:         testEdge,
 			LBEntryPoint: true,
 		}},
@@ -196,6 +203,51 @@ func TestBuildWithoutEdgeOrRoutes(t *testing.T) {
 	built, err = Build(BuildInput{Service: app("svc1"), Upstreams: ups("http://x:1"), Edge: testEdge})
 	if err != nil || built.Data != nil {
 		t.Fatalf("no routes: %v %q", err, built.Data)
+	}
+}
+
+// Without the panel's LB mutual TLS the LB entry point (published on
+// every interface) gets no routers at all: an internet client sending a
+// service's Host to :5757 finds nothing, instead of reaching it past the
+// rate limit and redirects (runtime-2).
+func TestBuildNoLBRoutersWithoutLBTLS(t *testing.T) {
+	spec := app("svc7", route("r1", "lb.example.com"), &agentv1.Route{Id: "r2", Hosts: []string{"plain.example.com"}, TargetPort: 3000})
+	spec.LoadBalancer = &agentv1.LoadBalancer{RemoteUpstreams: []*agentv1.RemoteUpstream{{NodeId: "n2", Url: "https://198.51.100.2:5757"}}}
+	incomplete := &agentv1.LoadBalancerTls{CaPem: fakeLBTLS.GetCaPem(), ServerName: "lb.seylo.internal"}
+	for name, settings := range map[string]*agentv1.NodeSettings{"no settings": nil, "no lb_tls": {}, "incomplete lb_tls": {LbTls: incomplete}} {
+		for _, upstreams := range [][]Upstream{ups("http://seylo-svc7-4:3000"), nil} {
+			for _, lbOnly := range []bool{false, true} {
+				built, err := Build(BuildInput{Service: spec, Upstreams: upstreams, Settings: settings, Edge: testEdge, LBEntryPoint: true, LBOnly: lbOnly})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(built.Data), EntryPointLB) {
+					t.Fatalf("%s (upstreams %d, LB only %v): routers on the LB entry point:\n%s", name, len(upstreams), lbOnly, built.Data)
+				}
+			}
+		}
+	}
+	// With lb_tls every LB router requires the client certificate.
+	built, err := Build(BuildInput{Service: spec, Upstreams: ups("http://seylo-svc7-4:3000"), Settings: &agentv1.NodeSettings{LbTls: fakeLBTLS}, Edge: testEdge, LBEntryPoint: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg dynamicConfig
+	if err := yaml.Unmarshal(built.Data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	lbRouters := 0
+	for name, r := range cfg.HTTP.Routers {
+		if !slices.Contains(r.EntryPoints, EntryPointLB) {
+			continue
+		}
+		lbRouters++
+		if r.TLS == nil || r.TLS.Options != LBTLSOptions {
+			t.Errorf("LB router %s without the mutual TLS options: %+v", name, r.TLS)
+		}
+	}
+	if lbRouters != 2 {
+		t.Fatalf("%d LB routers with lb_tls, want one per route:\n%s", lbRouters, built.Data)
 	}
 }
 

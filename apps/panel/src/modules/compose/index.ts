@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { servicePlacements } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
+import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { setStackRefresher } from "../github/push";
 import { defineModule } from "../module";
 import { deleteServiceTree } from "../services/delete";
@@ -32,7 +33,8 @@ function requireStack(ctx: Pick<OpContext, "db">, serviceId: string): ServiceRow
 
 const preview = implement(composeOps.preview, async (input, ctx) => {
   assertSourceAllowed(ctx, input.projectId, input.source);
-  const yaml = await fetchComposeFile(ctx, input.source, undefined, input.nodeId);
+  await assertGitSourceTarget(ctx.db, input.projectId, input.source, gitCaller(ctx));
+  const yaml = await fetchComposeFile(ctx, input.projectId, input.source, undefined, input.nodeId);
   const plan = await planFromSource(ctx, { stackName: input.name, nodeId: input.nodeId, source: input.source, yaml, env: {} });
   assertPlanReferences(ctx, input.projectId, plan);
   const { members, conflicts } = diffMembers(ctx, null, plan, input.projectId, input.source);
@@ -45,7 +47,8 @@ const preview = implement(composeOps.preview, async (input, ctx) => {
 
 const create = implement(composeOps.create, async (input, ctx) => {
   assertSourceAllowed(ctx, input.projectId, input.source);
-  const yaml = await fetchComposeFile(ctx, input.source, undefined, input.nodeId);
+  await assertGitSourceTarget(ctx.db, input.projectId, input.source, gitCaller(ctx));
+  const yaml = await fetchComposeFile(ctx, input.projectId, input.source, undefined, input.nodeId);
   const plan = await planFromSource(ctx, { stackName: input.name, nodeId: input.nodeId, source: input.source, yaml, env: {} });
   if (plan.members.length === 0) throw new OpError("BAD_REQUEST", "The compose file has no services.", { field: "source" });
   assertPlanReferences(ctx, input.projectId, plan);
@@ -84,7 +87,8 @@ const update = implement(composeOps.update, async (input, ctx) => {
   const stack = requireStack(ctx, input.serviceId);
   const nodeId = stackNode(ctx, stack);
   assertSourceAllowed(ctx, stack.projectId, input.source);
-  const yaml = await fetchComposeFile(ctx, input.source, undefined, nodeId);
+  await assertGitSourceTarget(ctx.db, stack.projectId, input.source, gitCaller(ctx));
+  const yaml = await fetchComposeFile(ctx, stack.projectId, input.source, undefined, nodeId);
   const plan = await planFromSource(ctx, { stackName: stack.name, nodeId, source: input.source, yaml, env: stackEnv(ctx, stack.id) });
   assertPlanReferences(ctx, stack.projectId, plan);
   if (input.dryRun) {
@@ -111,7 +115,7 @@ export default defineModule({
     setStackRefresher(async (deps, stack, push) => {
       const source = loadStackSource(deps, stack);
       const nodeId = stackNode(deps, stack);
-      const yaml = await fetchComposeFile(deps, source, push.sha, nodeId);
+      const yaml = await fetchComposeFile(deps, stack.projectId, source, push.sha, nodeId);
       const plan = await planFromSource(deps, { stackName: stack.name, nodeId, source, yaml, env: stackEnv(deps, stack.id) });
       assertPushReferences(deps, stack, plan);
       const diff = await applyPlan(deps, {

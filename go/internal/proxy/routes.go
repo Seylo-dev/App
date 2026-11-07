@@ -503,7 +503,7 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		b.cfg.HTTP.Routers[b.n.route(r.GetId(), "handoff")] = h
 	}
 
-	if b.in.LBEntryPoint && len(r.GetAllowedSourceCidrs()) == 0 && (m != modeUpstream || len(b.in.Upstreams) == 0) && m != modeTool {
+	if b.lbRouters() && len(r.GetAllowedSourceCidrs()) == 0 && (m != modeUpstream || len(b.in.Upstreams) == 0) && m != modeTool {
 		// No copy here right now (stopped, between restarts, maintenance):
 		// answer the forwarding node 503, so it retries on its own copies,
 		// rather than 404 (no router) or a page.
@@ -512,14 +512,14 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 			EntryPoints: []string{EntryPointLB},
 			Rule:        ruleText,
 			Service:     b.n.svc("none"),
-			TLS:         lbRouterTLS(b.in.Settings),
+			TLS:         &routerTLS{Options: LBTLSOptions},
 		}
 	}
-	if b.in.LBEntryPoint && m == modeUpstream && len(b.in.Upstreams) > 0 && len(r.GetAllowedSourceCidrs()) == 0 {
+	if b.lbRouters() && m == modeUpstream && len(b.in.Upstreams) > 0 && len(r.GetAllowedSourceCidrs()) == 0 {
 		// Traffic another node forwards here goes to local replicas only.
 		// The entry node already applied the rate limit and redirects, and
-		// with lb_tls only sibling nodes (a client certificate from the
-		// panel's CA) get here, so those middlewares are left out (here the
+		// only sibling nodes (a client certificate from the panel's LB CA,
+		// see lbRouters) get here, so those middlewares are left out (here the
 		// client is the other node, so they would throttle everyone as
 		// one). Routes with an IP allowlist are left out too: the list
 		// could not be checked against the other node.
@@ -534,10 +534,20 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 			Rule:        ruleText,
 			Middlewares: lbChain,
 			Service:     b.upstreamService(r, true),
-			TLS:         lbRouterTLS(b.in.Settings),
+			TLS:         &routerTLS{Options: LBTLSOptions},
 		}
 	}
 	return nil
+}
+
+// lbRouters reports whether the route file gets routers on the LB entry
+// point: only on a Traefik that has one, and only with the panel's LB
+// mutual TLS (NodeSettings.lb_tls). The entry point is published on every
+// interface (Docker ports bypass the firewall) and its routers skip the
+// rate limit and redirects, so without lb_tls it routes nothing (Traefik
+// answers 404) rather than taking any client (runtime-2).
+func (b *builder) lbRouters() bool {
+	return b.in.LBEntryPoint && lbTLSOf(b.in.Settings) != nil
 }
 
 // idempotentMethods matches the requests a failover may replay.

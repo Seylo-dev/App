@@ -80,6 +80,9 @@ export function startDesiredFlusher(
   const callTimeoutMs = options.callTimeoutMs ?? 15_000;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let chain: Promise<void> = Promise.resolve();
+  /** currentState's last answer per node, reused for the same revision for a few seconds (it holds unsealed env). */
+  const currentCache = new Map<string, { revision: bigint; state: ReturnType<typeof compileDesiredState>; at: number }>();
+  const currentCacheMs = 5_000;
   let stopped = false;
 
   const compileOptions = (revision: bigint): CompileOptions => ({
@@ -320,6 +323,7 @@ export function startDesiredFlusher(
     if (!online) {
       // What the agent holds is unknown until it reconnects and is synced again.
       sent.delete(nodeId);
+      currentCache.delete(nodeId);
       return;
     }
     if (!agents.supports(nodeId, "getStateSnapshot")) {
@@ -359,7 +363,12 @@ export function startDesiredFlusher(
       let revision = BigInt(node.revision);
       if (revision === 0n) revision = bump(nodeId);
       if (knownRevision >= revision) return null;
-      return compileDesiredState(db, nodeId, compileOptions(revision));
+      // Repeated asks for one revision get the state compiled for the first (a revision names one state).
+      const cached = currentCache.get(nodeId);
+      if (cached && cached.revision === revision && Date.now() - cached.at < currentCacheMs) return cached.state;
+      const state = compileDesiredState(db, nodeId, compileOptions(revision));
+      currentCache.set(nodeId, { revision, state, at: Date.now() });
+      return state;
     },
     stop() {
       stopped = true;
@@ -369,6 +378,7 @@ export function startDesiredFlusher(
       unsubscribeState();
       for (const wait of awaitingSnapshot.values()) clearTimeout(wait);
       awaitingSnapshot.clear();
+      currentCache.clear();
     },
   };
 }

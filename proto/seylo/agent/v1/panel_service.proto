@@ -30,6 +30,31 @@ service PanelService {
     option (capability) = "panel.registry-tunnel.v1";
     option (stream_mode) = STREAM_MODE_RAW_BIDI;
   }
+
+  // Asks whether the user an edge ticket opened a tool for (a Box or a
+  // database web UI) may still use it. The agent's edge asks for every
+  // tool session in use at most once a minute and ends the session on
+  // allowed=false, so revoking a grant closes the tool within about a
+  // minute. Without this method (UNIMPLEMENTED) or while the panel is
+  // unreachable, a session ends an hour after the panel last confirmed it
+  // (its ticket counts). Added in 0.2.
+  rpc CheckEdgeAccess(CheckEdgeAccessRequest) returns (CheckEdgeAccessResponse) {
+    option (capability) = "panel.edge-access.v1";
+  }
+}
+
+message CheckEdgeAccessRequest {
+  // The ticket's subject: "box:<service id>" or "db-ui:<service id>".
+  string subject = 1;
+  // The ticket's uid: the panel user the ticket was issued to.
+  string user_id = 2;
+}
+
+message CheckEdgeAccessResponse {
+  // False when the user is gone or disabled, no longer has what opening
+  // this tool needs (boxes.open / databases.openWebUi on the service), or
+  // the service does not run on the asking node.
+  bool allowed = 1;
 }
 
 message ReportCrashRequest {

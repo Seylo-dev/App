@@ -494,6 +494,15 @@ func TestIntegrationSharedWingsTraefik(t *testing.T) {
 	}
 
 	router := NewFileRouter(FileConfig{Dir: cfg.DynamicDir, LBDir: lbCfg.DynamicDir, Containers: []string{cfg.Name, lbCfg.Name}})
+	// The LB entry point routes only with the panel's mutual TLS.
+	const lbName = "lb.seylo.internal"
+	ca := newTestLBCA(t)
+	router.SetSettings(&agentv1.NodeSettings{LbTls: ca.issue(t, lbName)})
+	sibling := ca.issue(t, lbName)
+	siblingPair, err := tls.X509KeyPair([]byte(sibling.GetCertPem()), []byte(sibling.GetKeyPem()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	router.SetEdge("http://" + e.edgeAddr)
 	attach := func() {
 		// What wings.Attacher does: edge + project networks, then the probe.
@@ -530,7 +539,9 @@ func TestIntegrationSharedWingsTraefik(t *testing.T) {
 	if code, body := get(); code != 200 || !strings.Contains(body, "Name: w1") {
 		t.Fatalf("through the shared Traefik: %d %q", code, body)
 	}
-	lbClient := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	lbClient := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		InsecureSkipVerify: true, ServerName: lbName, Certificates: []tls.Certificate{siblingPair},
+	}}}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("https://127.0.0.1:%d/", lbPort), nil)

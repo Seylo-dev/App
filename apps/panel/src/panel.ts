@@ -31,7 +31,7 @@ import { injectBoot, readBoot } from "./modules/settings/boot";
 import { collectHandlers } from "./ops/handlers";
 import { createOpExecutor, type ExecuteOp } from "./ops/pipeline";
 import { createRateLimiter, type RateLimiter } from "./ops/rate-limit";
-import { ensureEdgeTicketKey } from "./security/edge-ticket-key";
+import { type EdgeTicketKey, ensureEdgeTicketKey } from "./security/edge-ticket-key";
 import { createSecretBox } from "./security/secret-box";
 import { ensurePanelId } from "./settings";
 
@@ -100,9 +100,9 @@ export function createPanel(options: PanelOptions): Panel {
   const edgeKey = ensureEdgeTicketKey(db, secrets);
   for (const module of panelModules) module.start?.(deps);
 
-  const app = buildApp(deps, execute, edgeKey.publicKey, moduleRoutes(deps, panelModules));
+  const app = buildApp(deps, execute, edgeKey, moduleRoutes(deps, panelModules));
   // Agents' node health check reads /api/health at the URL they joined (the pinned TLS port).
-  const agentApp = new Elysia({ name: "agent-tls" }).use(health(deps)).use(agentRoutes(deps, edgeKey.publicKey));
+  const agentApp = new Elysia({ name: "agent-tls" }).use(health(deps)).use(agentRoutes(deps, edgeKey));
   return { app, agentApp, deps, runner, execute };
 }
 
@@ -115,7 +115,7 @@ function moduleRoutes(deps: Deps, panelModules: readonly PanelModule[]): AnyElys
   return routes;
 }
 
-function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketPublicKey: Uint8Array, modules: AnyElysia) {
+function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, modules: AnyElysia) {
   return new Elysia()
     .onRequest(({ request, set, server }) => {
       // A Response's own headers win, so pages with stricter rules keep them.
@@ -126,7 +126,7 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketPublicKey: Uint8Arra
     .use(opRoutes(allOps, httpOpHandler(execute, deps)))
     .use(modules)
     .use(liveEndpoint(deps))
-    .use(agentRoutes(deps, edgeTicketPublicKey))
+    .use(agentRoutes(deps, edgeTicketKey))
     .use(
       webApp(deps.config.webDist, {
         renderIndex: (html) => injectBoot(html, readBoot(deps.db)),
@@ -143,14 +143,14 @@ function panelNodeProxies(db: Databases["db"]): string[] {
 }
 
 /** The agent WebSocket endpoint; served on the main port and on the agents' TLS port. */
-function agentRoutes(deps: Deps, edgeTicketPublicKey: Uint8Array) {
+function agentRoutes(deps: Deps, edgeTicketKey: EdgeTicketKey) {
   return agentEndpoint({
     db: deps.db,
     hub: deps.agents,
     logger: deps.logger.child({ component: "agent-hub" }),
     panelId: deps.panelId,
     panelVersion: deps.config.version,
-    edgeTicketPublicKey,
+    edgeTicketKey,
     panelNodeFromInstallerOnly: deps.config.image !== null,
     proxy: deps.proxy,
     // Nodes that joined over an IP address move to the live panel domain.

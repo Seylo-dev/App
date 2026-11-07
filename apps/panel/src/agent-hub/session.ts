@@ -34,6 +34,7 @@ import {
 import type { PanelDb } from "../db/client";
 import { newId } from "../ids";
 import type { Logger } from "../logger";
+import type { EdgeTicketKey } from "../security/edge-ticket-key";
 import {
   agentStatusError,
   type CallOptions,
@@ -44,16 +45,19 @@ import {
   type StreamOptions,
 } from "./calls";
 import { Channel, ProtocolViolation } from "./channel";
+import { capFields, factsLimits } from "./field-caps";
 import { decideHello } from "./handshake";
 import type { AgentHub, AgentTransport, ConnectedAgent } from "./hub";
 import { PanelServiceError } from "./panel-service-types";
+import { signAccept } from "./signature";
 import type { OpenedStream } from "./streams";
 import { agentVersionAllowed } from "./version";
 import { FrameWriter } from "./writer";
 
 /** The socket as the session needs it; the endpoint adapts Bun's. */
 export interface AgentSocket {
-  send(bytes: Uint8Array): void;
+  /** Bun's send status: bytes sent, -1 queued under backpressure, 0 dropped (FrameWriter closes on that). */
+  send(bytes: Uint8Array): number;
   close(code: number, reason: string): void;
   /** Bytes queued in the socket; lets the writer hold DATA back under backpressure. */
   bufferedAmount?(): number;
@@ -65,7 +69,8 @@ export interface SessionDeps {
   logger: Logger;
   panelId: string;
   panelVersion: string;
-  edgeTicketPublicKey: Uint8Array;
+  /** The panel's identity key: agents get the public half and verify HelloAccepted.panel_signature and edge tickets with it. */
+  edgeTicketKey: EdgeTicketKey;
   /** Only the installer's join token makes the panel node (the panel runs as the installer's managed service). */
   panelNodeFromInstallerOnly?: boolean;
   /** Where this node should dial from now on (HelloAccepted.panel_url/panel_pin); null keeps its address. */
@@ -75,9 +80,10 @@ export interface SessionDeps {
 type HandshakeStep = NonNullable<MessageInitShape<typeof HandshakeSchema>["step"]>;
 type Settle = (result: { ok: true; bytes: Uint8Array } | { ok: false; error: Error }) => void;
 
-/** WebSocket close codes: 1002 protocol error, 1008 policy violation. */
+/** WebSocket close codes: 1002 protocol error, 1008 policy violation, 1011 the panel cannot go on. */
 const closeProtocolError = 1002;
 const closeRejected = 1008;
+const closeUnavailable = 1011;
 
 /**
  * Limits on what one agent may make the panel hold. A compromised node may
@@ -94,6 +100,13 @@ export const agentLimits = {
   maxPendingCalls: 256,
   /** Bytes received on agent-opened streams and not read yet, summed. */
   maxBufferedBytes: 32 << 20,
+  /**
+   * Stream-0 EVENT frames (best-effort progress, state deltas, metrics,
+   * facts): a token bucket per connection. Past it frames are dropped before
+   * they are decoded; a dropped state delta makes the panel fetch a snapshot.
+   */
+  eventBurst: 2000,
+  eventsPerSecond: 200,
 };
 
 export class AgentSession {
@@ -116,6 +129,11 @@ export class AgentSession {
   /** Agent-opened streams and calls in flight, for the caps. */
   private agentStreams = 0;
   private agentCalls = 0;
+  /** EVENT token bucket (agentLimits.eventBurst / eventsPerSecond). */
+  private eventTokens = agentLimits.eventBurst;
+  private eventsRefilledAt = performance.now();
+  private eventsDropped = 0;
+  private eventsDropLoggedAt = 0;
 
   constructor(
     private readonly socket: AgentSocket,
@@ -127,7 +145,7 @@ export class AgentSession {
     /** The panel base URL the agent dialed, for example "https://panel.example.com" (lowercased). */
     private readonly address: string | null = null,
   ) {
-    this.writer = new FrameWriter(socket);
+    this.writer = new FrameWriter(socket, () => queueMicrotask(() => this.backpressureClose()));
   }
 
   get nodeId(): string {
@@ -322,6 +340,8 @@ export class AgentSession {
       return;
     }
 
+    // Facts are stored (nodes.facts) and shown; they are not signed, so cut them first.
+    if (hello.facts) capFields(hello.facts, factsLimits);
     const decision = decideHello(this.deps.db, this.deps.panelId, this.nonce, hello, {
       remoteIp: this.remoteIp,
       panelNodeFromInstallerOnly: this.deps.panelNodeFromInstallerOnly ?? false,
@@ -339,14 +359,27 @@ export class AgentSession {
     }
     this.state = "ready";
     const move = this.moveTargetFor(decision.nodeId);
+    const panelUrl = move?.url ?? "";
+    const panelPin = move?.pin ?? "";
+    // Proves this panel holds the identity key the node recorded at its first connect (signature.ts).
+    const panelSignature = signAccept(this.deps.edgeTicketKey.privateKey, {
+      panelId: this.deps.panelId,
+      nodeId: decision.nodeId,
+      sessionId: this.sessionId,
+      nonce: this.nonce,
+      clientSignature: hello.credential.value?.signature ?? new Uint8Array(),
+      panelUrl,
+      panelPin,
+    });
     this.sendHandshake({
       case: "accepted",
       value: {
         nodeId: decision.nodeId,
         sessionId: this.sessionId,
-        edgeTicketPublicKey: this.deps.edgeTicketPublicKey,
-        panelUrl: move?.url ?? "",
-        panelPin: move?.pin ?? "",
+        edgeTicketPublicKey: this.deps.edgeTicketKey.publicKey,
+        panelUrl,
+        panelPin,
+        panelSignature,
       },
     });
     this.deps.logger.info({ nodeId: decision.nodeId, sessionId: this.sessionId, joined: decision.joined }, "agent connected");
@@ -367,11 +400,37 @@ export class AgentSession {
   private receiveReady(frame: Frame): void {
     if (frame.stream === CONNECTION_STREAM) {
       if (frame.kind !== FrameKind.EVENT) throw new ProtocolViolation(`${FrameKind[frame.kind]} on stream 0`);
-      this.deps.hub.emitEvent(this.nodeId, fromBinary(EventSchema, frame.payload));
+      if (!this.takeEventToken()) return;
+      const event = fromBinary(EventSchema, frame.payload);
+      if (event.payload.case === "nodeFacts") capFields(event.payload.value, factsLimits);
+      this.deps.hub.emitEvent(this.nodeId, event);
       return;
     }
     if (frame.stream % 2 === 0) this.receivePanelStream(frame);
     else this.receiveAgentStream(frame);
+  }
+
+  /** Whether one more EVENT fits the bucket; a drop is logged once a minute with the count. */
+  private takeEventToken(): boolean {
+    const now = performance.now();
+    this.eventTokens = Math.min(
+      agentLimits.eventBurst,
+      this.eventTokens + ((now - this.eventsRefilledAt) / 1000) * agentLimits.eventsPerSecond,
+    );
+    this.eventsRefilledAt = now;
+    if (this.eventTokens >= 1) {
+      this.eventTokens -= 1;
+      return true;
+    }
+    this.eventsDropped += 1;
+    if (now - this.eventsDropLoggedAt >= 60_000) {
+      this.eventsDropLoggedAt = now;
+      this.deps.logger.warn(
+        { nodeId: this.nodeIdValue, dropped: this.eventsDropped, perSecond: agentLimits.eventsPerSecond },
+        "agent sends events faster than the panel takes them; dropping the excess",
+      );
+    }
+    return false;
   }
 
   /** Frames on streams the panel opened (even ids). */
@@ -537,6 +596,17 @@ export class AgentSession {
     this.state = "closed";
     this.writer.close();
     this.socket.close(closeRejected, message.slice(0, 120));
+  }
+
+  /** The socket dropped a frame (the agent stopped reading): end the session so both sides start over. */
+  private backpressureClose(): void {
+    if (this.state === "closed") return;
+    this.deps.logger.warn(
+      { nodeId: this.nodeIdValue || undefined },
+      "agent socket dropped a frame under backpressure (the agent stopped reading); closing the connection",
+    );
+    this.closed();
+    this.socket.close(closeUnavailable, "the agent stopped reading");
   }
 
   private protocolError(reason: string): void {

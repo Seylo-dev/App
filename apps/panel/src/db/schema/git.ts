@@ -2,10 +2,10 @@
 // flow), git and registry credentials, and the webhook deliveries that
 // trigger push-to-deploy and previews.
 
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createdAt, id, sealed, timestamp, updatedAt } from "./columns";
 import { users } from "./identity";
-import { services } from "./projects";
+import { projects, services } from "./projects";
 
 /** The GitHub App created for this panel with the manifest flow. */
 export const githubApps = sqliteTable("github_apps", {
@@ -204,6 +204,25 @@ export const webhookDeliveries = sqliteTable(
 );
 
 /**
+ * Signed webhook bodies already handled, by hash, for replay protection
+ * (modules/webhooks/replay.ts): the same body under another delivery id
+ * is a replay. Kept 3 days (GitHub redelivers for 3), at most 10,000.
+ */
+export const webhookBodies = sqliteTable(
+  "webhook_bodies",
+  {
+    source: text("source").$type<WebhookSource>().notNull(),
+    /** The provider hook the body came to; "" for GitHub's one App hook. */
+    hookId: text("hook_id").notNull(),
+    /** sha256 of the raw body, hex. */
+    bodyHash: text("body_hash").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.hookId, t.bodyHash] }), index("webhook_bodies_seen_idx").on(t.seenAt)],
+);
+
+/**
  * Polling fallback for push-to-deploy: the last commit seen on a
  * service's branch, for panels GitHub cannot reach with webhooks.
  */
@@ -217,3 +236,25 @@ export const sourcePolls = sqliteTable("source_polls", {
   etag: text("etag"),
   checkedAt: timestamp("checked_at"),
 });
+
+/**
+ * Internal git hosts (private, loopback or link-local addresses, or names
+ * the panel cannot resolve) a project's services may clone from. Nodes
+ * clone as root in their own network, so only an admin (git.manage) can
+ * add one, by saving a git source with that host in the project; members
+ * of the project may then use it too (modules/git/targets.ts).
+ */
+export const gitInternalHosts = sqliteTable(
+  "git_internal_hosts",
+  {
+    id: id(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** urlHost() of the git URL, lowercased: "10.0.0.7:3000", "gitea.lan". */
+    host: text("host").notNull(),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("git_internal_hosts_project_host_unique").on(t.projectId, t.host)],
+);

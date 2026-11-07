@@ -3,13 +3,18 @@
 // certificate for one shared server name; the agent's Traefik then accepts
 // only peers that present a certificate of this CA, and a balancing node
 // checks the peer by that name. Certificates are made when a node connects
-// and renewed by the daily prune job when under 30 days are left; the
-// desired state only reads them (contributors must not write).
+// and renewed by the prune job when under 30 days are left; the desired
+// state only reads them (contributors must not write). Agents turn load
+// balancing to a node off while it has no certificate, so a node that
+// cannot get one raises an alert, resolved once it has one
+// (issueNodeCertificate).
 
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { slug } from "@seylo/brand";
 import { LoadBalancerTlsSchema } from "@seylo/proto";
+import { eq } from "drizzle-orm";
+import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { DesiredContributor } from "../../desired";
 import { issueCertificate, newKeyPair, toPem } from "../../security/x509";
@@ -65,7 +70,7 @@ export function ensureNodeCertificate(deps: Pick<Deps, "db" | "secrets">, nodeId
   if (current && current.notAfter - now > renewBeforeDays * day) return false;
   const ca = ensureCa(deps, now);
   const caKey = deps.secrets.open(ca.keySealed, "lb.key");
-  if (!caKey) return false;
+  if (!caKey) throw new Error("the load balancer CA key cannot be opened with this master.key");
   const keys = newKeyPair();
   const notAfter = now + nodeCertDays * day;
   const certPem = toPem(
@@ -85,6 +90,47 @@ export function ensureNodeCertificate(deps: Pick<Deps, "db" | "secrets">, nodeId
   };
   setSetting(deps.db, "lbTlsNodes", all);
   return true;
+}
+
+/** Whether the node has a certificate whose key opens, so the desired state can carry it. */
+function hasUsableCertificate(deps: Pick<Deps, "db" | "secrets">, nodeId: string, now: number): boolean {
+  const mine = getSetting(deps.db, "lbTlsNodes")?.[nodeId];
+  return !!mine && mine.notAfter > now && deps.secrets.open(mine.keySealed, "lb.key") !== null;
+}
+
+const alertKey = (nodeId: string) => `lb-certificate:${nodeId}:`;
+
+/**
+ * ensureNodeCertificate for callers that run on their own (connect, the
+ * prune job): a failure raises one alert per incident naming the reason,
+ * and a usable certificate resolves it. True when the certificate changed.
+ */
+export function issueNodeCertificate(deps: Pick<Deps, "db" | "secrets" | "alerts" | "logger">, nodeId: string, now = Date.now()): boolean {
+  let changed = false;
+  let failure: string | null = null;
+  try {
+    changed = ensureNodeCertificate(deps, nodeId, now);
+    if (!hasUsableCertificate(deps, nodeId, now)) failure = "its stored certificate's key cannot be opened with this master.key";
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+  }
+  if (failure === null) {
+    deps.alerts.resolve(alertKey(nodeId));
+    return changed;
+  }
+  deps.logger.error({ nodeId, reason: failure }, "issuing the node's load balancer certificate failed");
+  if (!deps.alerts.isOpen(alertKey(nodeId))) {
+    const name = deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? "A node";
+    deps.alerts.raise({
+      event: "node_health_check_failed",
+      key: `${alertKey(nodeId)}${now}`,
+      title: `${name} has no load balancer certificate`,
+      message: `The panel could not issue the node's load balancer certificate: ${failure}. Other nodes do not balance traffic to it until it has one.`,
+      severity: "error",
+      nodeId,
+    });
+  }
+  return changed;
 }
 
 /** Drops a removed node's certificate. */

@@ -12,6 +12,7 @@ import { queueDeploy } from "../deployments/queue";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { openCredential } from "../git/credentials";
+import { assertGitTarget } from "../git/targets";
 import { githubRequest } from "../github/api";
 import { tokenForInstallation } from "../github/app";
 import { deleteServiceTree } from "../services/delete";
@@ -27,12 +28,13 @@ export type MemberPreview = Static<typeof composeOps.MemberPreview>;
 /** The compose file of a source: pasted text, or the file in the repo at a ref (default: the branch). */
 export async function fetchComposeFile(
   deps: Pick<Deps, "db" | "secrets" | "agents">,
+  projectId: string,
   source: ComposeSource,
   ref?: string,
   preferredNodeId?: string,
 ): Promise<string> {
   if (source.type === "inline") return source.yaml;
-  if (source.type === "git") return fetchGitComposeFile(deps, source, ref, preferredNodeId);
+  if (source.type === "git") return fetchGitComposeFile(deps, projectId, source, ref, preferredNodeId);
   const token = await tokenForInstallation(deps.db, deps.secrets, source.installationId);
   const path = (source.path || "docker-compose.yml").split("/").map(encodeURIComponent).join("/");
   try {
@@ -59,26 +61,28 @@ const maxComposeBytes = 1024 * 1024;
 /**
  * Generic git: an agent clones the repository (shallow, sparse, with the
  * stored credential, like a build) and returns the one file (FetchGitFile).
- * The panel itself never runs git against arbitrary hosts.
+ * The panel itself never runs git against arbitrary hosts, and the agent
+ * that does is the stack's own node (the one it is or will be placed on),
+ * with the URL vetted like a build's (git/targets.ts): a member cannot make
+ * another node read from its network.
  */
 async function fetchGitComposeFile(
   deps: Pick<Deps, "db" | "secrets" | "agents">,
+  projectId: string,
   source: Extract<ComposeSource, { type: "git" }>,
   ref: string | undefined,
-  preferredNodeId: string | undefined,
+  stackNodeId: string | undefined,
 ): Promise<string> {
-  const nodeId =
-    preferredNodeId && deps.agents.supports(preferredNodeId, "fetchGitFile")
-      ? preferredNodeId
-      : deps.agents.onlineNodeIds().find((id) => deps.agents.supports(id, "fetchGitFile"));
-  if (!nodeId) {
-    if (deps.agents.onlineNodeIds().length === 0) {
-      throw new OpError("UNAVAILABLE", "No node is online to read the repository.", { reason: "offline" });
-    }
-    throw new OpError("NOT_IMPLEMENTED", "No connected agent can read files from git repositories yet. Update the nodes.", {
+  if (!stackNodeId || !deps.agents.isOnline(stackNodeId)) {
+    throw new OpError("UNAVAILABLE", "The stack's node is offline, so it cannot read the repository.", { reason: "offline" });
+  }
+  if (!deps.agents.supports(stackNodeId, "fetchGitFile")) {
+    throw new OpError("NOT_IMPLEMENTED", "The stack's node cannot read files from git repositories yet. Update it.", {
       reason: "capability",
     });
   }
+  const nodeId = stackNodeId;
+  await assertGitTarget(deps.db, { projectId, url: source.url, caller: null });
   // The stored credential only ever goes to its own host, whoever saved the source.
   if (source.credentialId) assertCredentialHost(deps.db, source.credentialId, source.url, "source.credentialId");
   const auth = source.credentialId ? openCredential(deps.db, deps.secrets, source.credentialId) : null;

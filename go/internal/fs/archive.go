@@ -338,11 +338,7 @@ func (x *extractor) symlink(rel, target string) error {
 	if err := x.fs.root.Symlink(target, rel); err != nil {
 		return wrap(err)
 	}
-	if x.fs.chown {
-		if uid, gid, ok := x.fs.owner(path.Dir(rel)); ok {
-			_ = x.fs.root.Lchown(rel, uid, gid)
-		}
-	}
+	x.fs.chownLikeParent(rel)
 	return nil
 }
 

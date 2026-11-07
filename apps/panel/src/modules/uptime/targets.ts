@@ -1,7 +1,8 @@
 // Uptime checks (and other panel-side requests to URLs people type) must
 // not become a way into the panel's own network (SSRF): loopback, link
 // local, cloud metadata endpoints and private ranges are refused, unless
-// every address is a node's own public address or an admin turned on
+// every such address is a node's address as an admin set it (never what an
+// agent reports about itself) or an admin turned on
 // "allow internal targets" in Settings > General. A domain row proves
 // nothing about where its name resolves, so it is no exception. The check
 // runs when a check is saved and again before every probe, and returns the
@@ -11,7 +12,7 @@
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { or, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting } from "../../settings";
@@ -148,16 +149,23 @@ function blockedName(host: string): BlockReason | null {
   return null;
 }
 
-/** This panel's own targets: every address is a node's own public address. */
+/**
+ * This panel's own targets: every address that is not public is a node's
+ * address as an admin set it (nodes.public_address, for 1:1 NAT clouds and
+ * the panel node). The addresses agents report (public_ipv4/public_ipv6)
+ * never count here: a compromised agent could report a private address as
+ * its public one and open the panel's network to uptime checks.
+ */
 function ownTarget(deps: Pick<Deps, "db">, addresses: readonly string[]): boolean {
-  if (addresses.length === 0) return false;
-  const rows = deps.db
-    .select({ v4: nodes.publicIpv4, v6: nodes.publicIpv6 })
+  const internal = addresses.filter((a) => blockedReason(a) !== null).map((a) => a.toLowerCase());
+  if (internal.length === 0) return false;
+  const set = deps.db
+    .select({ address: nodes.publicAddress })
     .from(nodes)
-    .where(or(...addresses.map((a) => sql`${nodes.publicIpv4} = ${a} or ${nodes.publicIpv6} = ${a}`)))
-    .all();
-  const known = new Set(rows.flatMap((r) => [r.v4, r.v6]).filter((a): a is string => !!a));
-  return addresses.every((a) => known.has(a));
+    .where(inArray(sql`lower(${nodes.publicAddress})`, internal))
+    .all()
+    .flatMap((r) => (r.address ? [r.address.toLowerCase()] : []));
+  return internal.every((a) => set.includes(a));
 }
 
 /**
@@ -204,10 +212,15 @@ const reasonText: Record<BlockReason, string> = {
   unresolvable: "a name that does not resolve",
 };
 
+/** What a refused target is, for messages: "a private network address (10.0.0.7)". */
+export function blockedTarget(check: Extract<TargetCheck, { ok: false }>): string {
+  return `${reasonText[check.reason]} (${check.address})`;
+}
+
 /** Shown on the check and in BAD_REQUEST messages. */
 export function blockedMessage(check: Extract<TargetCheck, { ok: false }>): string {
   if (check.reason === "unresolvable") return `The name ${check.address} did not resolve.`;
-  return `The target is ${reasonText[check.reason]} (${check.address}). Only an admin can allow internal targets, in Settings > General.`;
+  return `The target is ${blockedTarget(check)}. Only an admin can allow internal targets, in Settings > General.`;
 }
 
 /**

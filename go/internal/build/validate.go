@@ -105,7 +105,7 @@ func validateRequest(req *agentv1.BuildRequest, pushPrefix string) error {
 }
 
 func validateGit(g *agentv1.GitSource) error {
-	if err := validateGitURL(g.GetUrl(), g.GetSshPrivateKey() != "", g.GetToken() != ""); err != nil {
+	if err := validateGitURL(g.GetUrl(), g.GetSshPrivateKey() != "", g.GetToken() != "", g.GetAllowPlainHttp()); err != nil {
 		return err
 	}
 	if r := g.GetRef(); r != "" && (!refRe.MatchString(r) || strings.HasPrefix(r, "-") || strings.Contains(r, "..")) {
@@ -123,10 +123,12 @@ func validateGit(g *agentv1.GitSource) error {
 	return nil
 }
 
-// validateGitURL allows https:// (and http:// for local test servers
-// without credentials), ssh:// and scp-like git@host:path addresses.
-// Everything else (file://, ext::, local paths) could read the node.
-func validateGitURL(raw string, ssh, token bool) error {
+// validateGitURL allows https://, ssh:// and scp-like git@host:path
+// addresses, and http:// only without credentials and when the panel says
+// an admin allowed it for this source (GitSource.allow_plain_http): plain
+// http lets anyone on the path change what is built. Everything else
+// (file://, ext::, local paths) could read the node.
+func validateGitURL(raw string, ssh, token, allowHTTP bool) error {
 	if strings.HasPrefix(raw, "-") || strings.ContainsAny(raw, "\n\r\t\x00") {
 		return invalid("%q is not a repository address", raw)
 	}
@@ -150,6 +152,9 @@ func validateGitURL(raw string, ssh, token bool) error {
 		}
 		if token && u.Scheme == "http" {
 			return invalid("an access token needs an https:// address: over http:// it would travel unencrypted")
+		}
+		if u.Scheme == "http" && !allowHTTP {
+			return invalid("%s is plain http://: use the https:// address, or have an admin allow plain HTTP for this source", redactURL(raw))
 		}
 	case "ssh":
 		if !ssh {

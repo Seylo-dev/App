@@ -1,19 +1,27 @@
 // The panel's side of PanelService (panel_service.proto), the calls agents
 // make to the panel:
 //
-//   ReportCrash, ReportEvent  durable reports from the agent's outbox. Stored
-//                             first (crash_reports, agent_reports), deduped by
-//                             (node, outbox id), then fanned out to modules
-//                             through hub.onCrash / hub.onEvent, then acked.
+//   ReportCrash, ReportEvent  durable reports from the agent's outbox. Fields
+//                             capped, stored first (crash_reports, a smaller
+//                             copy in agent_reports), deduped by (node, outbox
+//                             id), then fanned out to modules through
+//                             hub.onCrash / hub.onEvent, then acked. Past the
+//                             node's daily budget (report-budget.ts) a report
+//                             is acked but neither stored nor fanned out.
 //   GetDesiredState           the node's current DesiredState, unless the agent
 //                             already has that revision.
 //   RegistryTunnel            relays a Docker pull/push from the agent's
 //                             127.0.0.1:5755 to the registry container, through
 //                             the panel node's agent (Tunnel with RegistryTarget).
+//   CheckEdgeAccess           whether the user of an edge tool session (a Box or a
+//                             database web UI) may keep it; the agent asks about
+//                             each session at most once a minute.
 
-import { create, fromBinary, toBinary, toJson } from "@bufbuild/protobuf";
+import { clone, create, fromBinary, toBinary, toJson } from "@bufbuild/protobuf";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import {
+  CheckEdgeAccessRequestSchema,
+  CheckEdgeAccessResponseSchema,
   CrashAction,
   type DesiredState,
   EventSchema,
@@ -41,8 +49,10 @@ import {
 } from "../db/schema";
 import type { Logger } from "../logger";
 import { createRateLimiter } from "../ops/rate-limit";
+import { capFields, storedReportLimits } from "./field-caps";
 import type { AgentHub } from "./hub";
 import { type IncomingStream, PanelServiceError, type PanelServiceHandlers } from "./panel-service-types";
+import { createReportBudget, storedReportsSince } from "./report-budget";
 
 export interface PanelServiceDeps {
   db: PanelDb;
@@ -50,12 +60,16 @@ export interface PanelServiceDeps {
   logger: Logger;
   /** The node's current desired state, or null when `knownRevision` is already current. */
   desiredState(nodeId: string, knownRevision: bigint): DesiredState | null;
+  /** A node passed its daily report budget (report-budget.ts); called once per node and day. */
+  reportBudgetExceeded?(nodeId: string): void;
+  /** CheckEdgeAccess: whether the ticket's user may keep the tool session ("box:<id>", "db-ui:<id>") on this node. */
+  edgeAccessAllowed(nodeId: string, request: { subject: string; userId: string }): boolean;
 }
 
 const wire = (name: string) => `/${PanelService.typeName}/${name}`;
 
 /** Every PanelService method this panel serves, by capability. */
-export const panelCapabilities = ["panel.report.v1", "panel.desired.v1", "panel.registry-tunnel.v1"] as const;
+export const panelCapabilities = ["panel.report.v1", "panel.desired.v1", "panel.registry-tunnel.v1", "panel.edge-access.v1"] as const;
 
 const crashActions: Record<CrashAction, StoredCrashAction> = {
   [CrashAction.UNSPECIFIED]: "restarting",
@@ -75,15 +89,41 @@ const durableKinds = new Set(["deployProgress", "buildProgress", "cronRun", "bac
 export const maxReportBytes = 1 << 20;
 const maxCrashLines = 100;
 const maxCrashLineLength = 2000;
+/** Docker container ids are 64 hex characters. */
+const maxContainerIdLength = 128;
 /** Reports per node: a burst after an outage drains, a flood is told to back off. */
 const reportBurst = 600;
 const reportsPerSecond = 10;
+/** GetDesiredState per node: an agent asks once per connection (catching up after a fresh start). */
+const desiredBurst = 10;
+const desiredPerSecond = 0.1;
+/** CheckEdgeAccess per node: one a minute per open tool session; a few hundred sessions fit. */
+const edgeAccessBurst = 300;
+const edgeAccessPerSecond = 5;
 
 export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers {
   const { db, hub, logger } = deps;
   const reportLimiter = createRateLimiter({
     standard: { burst: reportBurst, refillPerSecond: reportsPerSecond },
     strict: { burst: reportBurst, refillPerSecond: reportsPerSecond },
+  });
+
+  const desiredLimiter = createRateLimiter({
+    standard: { burst: desiredBurst, refillPerSecond: desiredPerSecond },
+    strict: { burst: desiredBurst, refillPerSecond: desiredPerSecond },
+  });
+
+  const edgeAccessLimiter = createRateLimiter({
+    standard: { burst: edgeAccessBurst, refillPerSecond: edgeAccessPerSecond },
+    strict: { burst: edgeAccessBurst, refillPerSecond: edgeAccessPerSecond },
+  });
+
+  const budget = createReportBudget({
+    storedSince: (nodeId, since) => storedReportsSince(db, nodeId, since),
+    onExceeded: (nodeId) => {
+      logger.warn({ nodeId }, "node passed its daily report budget; further reports are acknowledged and dropped");
+      deps.reportBudgetExceeded?.(nodeId);
+    },
   });
 
   /** Size and rate limits shared by both Report calls. */
@@ -112,7 +152,12 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       // A node may report crashes of its own services only.
       throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "This service does not run on this node.");
     }
+    capFields(report);
     report.lastLines = report.lastLines.slice(-maxCrashLines).map((line) => line.slice(0, maxCrashLineLength));
+    report.containerId = report.containerId.slice(0, maxContainerIdLength);
+    const size = JSON.stringify(report.lastLines).length + report.containerId.length;
+    // Over the node's budget: acked (the agent drops it) but not stored or fanned out.
+    if (!budget.allows(nodeId, size)) return toBinary(ReportCrashResponseSchema, create(ReportCrashResponseSchema));
     const row = db
       .insert(crashReports)
       .values({
@@ -131,7 +176,10 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       .onConflictDoNothing()
       .returning({ id: crashReports.id })
       .get();
-    if (row) hub.emitCrash(nodeId, report, { outboxId, crashId: row.id });
+    if (row) {
+      budget.spend(nodeId, size);
+      hub.emitCrash(nodeId, report, { outboxId, crashId: row.id });
+    }
     return toBinary(ReportCrashResponseSchema, create(ReportCrashResponseSchema));
   };
 
@@ -149,27 +197,50 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "This service does not run on this node.");
     }
     const outboxId = request.outboxId.toString();
+    capFields(event);
+    // Nothing reads agent_reports back (it dedupes): a smaller copy is enough.
+    const stored = toJson(EventSchema, capFields(clone(EventSchema, event), storedReportLimits)) as Record<string, unknown>;
+    const size = JSON.stringify(stored).length;
+    // Over the node's budget: acked (the agent drops it) but not stored or fanned out.
+    if (!budget.allows(nodeId, size)) return toBinary(ReportEventResponseSchema, create(ReportEventResponseSchema));
     const row = db
       .insert(agentReports)
       .values({
         nodeId,
         outboxId,
         kind: event.payload.case ?? "unknown",
-        event: toJson(EventSchema, event) as Record<string, unknown>,
+        event: stored,
         occurredAt: event.time ? timestampDate(event.time) : new Date(),
       })
       .onConflictDoNothing()
       .returning({ id: agentReports.id })
       .get();
     // A retry of something already stored: ack again, tell nobody twice.
-    if (row) hub.emitEvent(nodeId, event, { durable: true, outboxId });
+    if (row) {
+      budget.spend(nodeId, size);
+      hub.emitEvent(nodeId, event, { durable: true, outboxId });
+    }
     return toBinary(ReportEventResponseSchema, create(ReportEventResponseSchema));
   };
 
   const getDesiredState = (nodeId: string, bytes: Uint8Array): Uint8Array => {
+    // Compiling a node's state reads every service placed on it; the agent needs it once per connection.
+    if (desiredLimiter.take(`node:${nodeId}`, "standard") > 0) {
+      throw new PanelServiceError(StatusCode.RESOURCE_EXHAUSTED, "Too many desired state requests. The panel sends changes on its own.");
+    }
     const request = fromBinary(GetDesiredStateRequestSchema, bytes);
     const state = deps.desiredState(nodeId, request.knownRevision);
     return toBinary(GetDesiredStateResponseSchema, create(GetDesiredStateResponseSchema, { state: state ?? undefined }));
+  };
+
+  const checkEdgeAccess = (nodeId: string, bytes: Uint8Array): Uint8Array => {
+    if (bytes.length > 4096) throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "The request is too large.");
+    if (edgeAccessLimiter.take(`node:${nodeId}`, "standard") > 0) {
+      throw new PanelServiceError(StatusCode.RESOURCE_EXHAUSTED, "Too many edge access checks. Retry later.");
+    }
+    const request = fromBinary(CheckEdgeAccessRequestSchema, bytes);
+    const allowed = deps.edgeAccessAllowed(nodeId, { subject: request.subject, userId: request.userId });
+    return toBinary(CheckEdgeAccessResponseSchema, create(CheckEdgeAccessResponseSchema, { allowed }));
   };
 
   const registryTunnel = async (nodeId: string, stream: IncomingStream): Promise<Uint8Array> => {
@@ -222,6 +293,8 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
           return reportEvent(nodeId, request);
         case wire("GetDesiredState"):
           return getDesiredState(nodeId, request);
+        case wire("CheckEdgeAccess"):
+          return checkEdgeAccess(nodeId, request);
         default:
           throw new PanelServiceError(StatusCode.UNIMPLEMENTED, `${method} is not a unary PanelService method of this panel.`);
       }

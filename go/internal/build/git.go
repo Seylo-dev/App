@@ -69,7 +69,8 @@ func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git,
 		args: []string{
 			"-c", "protocol.allow=never",
 			"-c", "protocol.https.allow=always",
-			// Plain http only without credentials (local test servers).
+			// Plain http only when an admin allowed it, never with
+			// credentials; otherwise not even through a redirect.
 			"-c", "protocol.http.allow=" + httpAllow(src),
 			"-c", "protocol.ssh.allow=always",
 			"-c", "core.hooksPath=/dev/null",
@@ -125,10 +126,12 @@ func gitUser(src *agentv1.GitSource) string {
 	return defaultGitUser
 }
 
-// httpAllow is git's protocol.http.allow for src: a token or key is never
-// sent over plain http (validateGitURL refuses that address too).
+// httpAllow is git's protocol.http.allow for src: "always" only for a
+// source the panel marks allow_plain_http (an admin's choice) without a
+// token or key; otherwise "never", which also stops an https:// server
+// redirecting the clone to http:// (validateGitURL refuses the address).
 func httpAllow(src *agentv1.GitSource) string {
-	if src.GetToken() != "" || src.GetSshPrivateKey() != "" {
+	if !src.GetAllowPlainHttp() || src.GetToken() != "" || src.GetSshPrivateKey() != "" {
 		return "never"
 	}
 	return "always"

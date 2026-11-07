@@ -12,6 +12,7 @@ import { assertSourceAllowed } from "../services/source-guard";
 import { blockedMessage, checkTarget } from "../uptime/targets";
 import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
 import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, targetUrl } from "./remote";
+import { seedInternalGitHosts } from "./targets";
 
 // Everyone signed in sees names and hosts for the source picker; the account
 // details stay with people who manage credentials (git.manage). Attaching one
@@ -149,4 +150,7 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
 export default defineModule({
   name: "git",
   ops: [listCredentials, createCredential, generateSshKey, updateCredential, deleteCredential, scan, branches],
+  start(deps) {
+    seedInternalGitHosts(deps.db);
+  },
 });

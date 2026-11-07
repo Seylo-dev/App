@@ -11,6 +11,7 @@ import type { Deps } from "../../deps";
 import { resolveServiceEnv } from "../env/desired";
 import { openCredential } from "../git/credentials";
 import { listRemoteRefs, targetUrl } from "../git/remote";
+import { assertGitTarget } from "../git/targets";
 import { githubCommit, tokenForInstallation } from "../github/app";
 import { type CommitInfo, clientFor } from "../gitProviders/client";
 import { loadProvider, openToken } from "../gitProviders/rows";
@@ -142,6 +143,8 @@ export async function resolveBuild(
     case "git": {
       // The stored credential only ever goes to its own host, whoever saved the source.
       if (source.credentialId) assertCredentialHost(deps.db, source.credentialId, source.url, "source.credentialId");
+      // The node clones in its own network: a public address, or an internal host an admin allowed for the project.
+      await assertGitTarget(deps.db, { projectId: service.projectId, url: source.url, caller: null });
       const auth = source.credentialId ? openCredential(deps.db, deps.secrets, source.credentialId) : null;
       let sha = input.commitSha;
       if (!sha) {

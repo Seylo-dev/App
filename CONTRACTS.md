@@ -79,7 +79,7 @@ packages use. "Built" means implemented and tested.
 | `logs` | Per-service log store on disk (text segments, size and age retention), capture from Docker across generations with a restart cursor, follow, search, build logs | Built (capture, follow and restarts verified in the VM) |
 | `metrics` | Node usage from /proc, per-service Docker stats (memory = usage - inactive_file), an hour of history, live watch | Built (verified in the VM) |
 | `console`, `shell` | Attach to the main process with history replay; PTY shells, database clients (via `dbtools`) and one-shot Exec through docker exec, with a marker-based process sweep; `ConsoleInfo` and the first `ShellResponse.info` carry user and working directory; `console/dockerapi` is the small Docker client the observe area shares (kept apart from `docker.Engine` on purpose, see Not built yet) | Built (verified in the VM) |
-| `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract | Built (escape fuzzing run as root in the VM) |
+| `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract. No write, chmod or extract leaves setuid/setgid (FsChmod and FsWrite keep the permission and sticky bits only; replacing or appending to a setuid file drops the bits first). New files and folders take their folder's owner, except that a root-owned (or unreadable) folder gives them to nobody (65534:65534), so the file manager never makes a root-owned entry; a replaced file keeps its owner | Built (escape fuzzing run as root in the VM) |
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
 | `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO (minio-go), `keep_last` retention, restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
@@ -168,7 +168,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   bytes in DATA, CLOSE carrying the response.
 - DATA is flow controlled per stream (initial window from OPEN, WINDOW
   grants). Control frames go first; DATA is chunked to 32 KiB and
-  round-robined across streams.
+  round-robined across streams. When Bun drops a frame because the agent
+  socket buffers past its backpressure limit (16 MiB; `send` returns 0),
+  the panel's `FrameWriter` stops writing and the session closes the
+  connection with 1011 ("the agent stopped reading"): calls in flight fail
+  as offline and the agent reconnects and resyncs, instead of CALLs,
+  WINDOWs, CLOSEs or RESULTs vanishing on an open socket.
 - Every RPC has a `capability` option; call a method only when the peer
   advertised its capability.
 - Durable reports (crashes, final deploy/build results, cron runs, backups,
@@ -176,20 +181,42 @@ Summary; the full rules are in `proto/README.md` and the comments of
   deduped by outbox id. Progress, state deltas and metrics are best-effort
   EVENT frames. The panel stores only the durable kinds (deployProgress,
   buildProgress, cronRun, backupResult, nodeAlert, updateResult, cleanupRun; others get
-  INVALID_ARGUMENT), at most 1 MiB per report (crash lines capped at 100 x
-  2000 chars), about 10 per second per node (RESOURCE_EXHAUSTED past a burst
-  of 600). A node may report only on services it runs (a placement, or a
+  INVALID_ARGUMENT), at most 1 MiB per report, about 10 per second per node
+  (RESOURCE_EXHAUSTED past a burst of 600). Before anything stores or fans
+  out a report its fields are capped (`agent-hub/report-budget.ts`): strings
+  4096 chars, lists 200 entries of 2000 chars (`lastLines` keeps the
+  newest), unknown fields dropped; crash lines 100 x 2000 chars, container
+  ids 128 chars. `agent_reports` stores a smaller copy (strings 1024 chars,
+  lists 20 entries), since nothing reads it back. Each node has a daily
+  budget for crash reports and durable events together (75,000 rows, 32 MiB
+  stored, counted from what panel.db already holds after a restart): past
+  it a report is acked (the agent drops it) but neither stored nor fanned
+  out, and one `node_health_check_failed` alert per node and day says so. A node may report only on services it runs (a placement, or a
   deployment in flight to or away from it; `agent-hub/service-scope.ts`):
   crash reports, durable events, deploy/health/cron events, state deltas,
   snapshots and metrics about other services are dropped, and an update
-  result finishes only a step of that node. Limits per connection
+  result finishes only a step of that node. Best-effort events reuse the
+  node's scope for a second (a service missing from it is looked up again
+  after 100 ms); durable reports and snapshots use a fresh one. A metrics
+  event keeps one entry per service, and a live series at most 600 points.
+  NodeFacts (hello and `nodeFacts` events) are capped (strings 256 chars,
+  256 capabilities of 128) and `nodes.facts` is written, and the node
+  published, at most every 2 s per node and only when they changed. Limits per connection
   (`agentLimits` in `agent-hub/session.ts`): ClientHello within 10 s,
   agent-opened stream windows clamped to 1 MiB, WINDOW grants past
   2^31-1 are a protocol error, 64 agent-opened streams and 256 calls in
-  flight (RESOURCE_EXHAUSTED beyond), 32 MiB unread on agent streams. One
-  GetStateSnapshot per node at a time. panel.db retention (daily,
+  flight (RESOURCE_EXHAUSTED beyond), stream-0 EVENT frames through a
+  token bucket (burst 2000, 200 per second; past it frames are dropped
+  before they are decoded, and a dropped state delta makes the panel fetch
+  a snapshot), GetDesiredState 10 per node then one per 10 s
+  (RESOURCE_EXHAUSTED; the agent only asks after a fresh start, and the
+  compiled state is reused for the same revision for 5 s), 32 MiB unread on agent streams (a running count, and
+  `DelimitedDecoder` copies each byte once when its message is complete, so
+  the sender's DATA frame sizes do not change the panel's work). One
+  GetStateSnapshot per node at a time. panel.db retention (hourly,
   `modules/nodes/retention.ts`): agent reports and crash reports 30 days
-  (newest 200 crashes per service always kept), webhook deliveries 30 days
+  (newest 200 crashes per service always kept), and per node at most the
+  newest 75,000 agent reports and 32 MiB in each of the two tables, webhook deliveries 30 days
   (rejected ones 1 day), notification deliveries 30 days, resolved alerts
   180 days, deploy log lines of failed/cancelled/superseded deployments
   after 30 days (newest 20 per service and the live one keep theirs); a
@@ -201,6 +228,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   provider's (`oauth2` for GitLab, the token's owner for Gitea,
   `x-token-auth` or the account for Bitbucket) and a git credential's
   user name. Older agents ignore it, so Bitbucket clones need a 0.2 agent.
+- `GitSource.allow_plain_http` (added in 0.2): agents clone and fetch
+  git sources with `protocol.http.allow=never` (so an https:// server
+  cannot redirect the clone to http:// either) and refuse http://
+  addresses with INVALID_ARGUMENT, unless the panel sets this field. The
+  panel sets it only for a source an owner or admin (`git.manage`)
+  explicitly allowed to use plain HTTP (an internal git server without
+  TLS), never with a token or SSH key (those still need https:// or
+  ssh://). Not built in the panel yet: until it is, http:// git sources
+  fail on 0.2 agents (older agents still clone them without credentials).
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -212,13 +248,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `--trust-on-first-use` records the first certificate's pin instead.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
   with jitter (half to full delay); 5 minutes after a rejection that needs
-  a person (bad token, unknown node, bad signature, disabled, too old) or a
-  pin mismatch; ALREADY_CONNECTED retries normally. AGENT_TOO_OLD also
+  a person (bad token, unknown node, bad signature, disabled, too old), a
+  pin mismatch or another panel (see "Panel identity"); ALREADY_CONNECTED
+  retries normally. AGENT_TOO_OLD also
   makes the agent install the latest signed release itself
   (`update.AgentUpdater.UpdateToLatest`: `<release base>/latest/download/
   manifest.json(.minisig)`, at least `min_agent_version`, at most once an
-  hour per version), since the panel cannot send UpdateAgent to an agent
-  it refuses. A WebSocket ping every
+  hour per version, and a release the update guard rolled back waits as
+  "Releases and updates" says), since the panel cannot send UpdateAgent
+  to an agent it refuses. A WebSocket ping every
   30 s (15 s timeout) drops a silent panel. The outbox drains in id order
   after every connect; UNIMPLEMENTED stops draining until the next
   connection, INVALID_ARGUMENT drops that one report, anything else
@@ -232,6 +270,36 @@ Summary; the full rules are in `proto/README.md` and the comments of
   already stored. After an accepted join the node id and
   pin are kept in memory even when config.yml cannot be written (the
   token is spent); the write is retried every 30 s.
+- Panel identity (`agent/panel_identity.go`): at its first accepted
+  handshake (the join, or the first connect of an agent from before this)
+  the agent records `panel_id` (ServerHello), `panel_key` (base64 of
+  HelloAccepted.edge_ticket_public_key, the panel's Ed25519 identity key)
+  and, when HelloAccepted carried a valid `panel_signature`,
+  `panel_proves: true` in config.yml; `seylo join` starts over. On every
+  connect, at any address (moves and fallbacks included): a ServerHello
+  naming another `panel_id` gets no ClientHello (nothing is signed for
+  it); a HelloAccepted naming another identity key, or with a
+  `panel_signature` that does not verify, or with none once
+  `panel_proves` is set, closes the connection before any call is served
+  or any `panel_url` is followed. Each counts as a failed connect to that
+  address (5 minutes, the standing fallback still applies) and, during a
+  move, a failed move with its PANEL_MOVE_FAILED alert. `panel_signature`
+  is Ed25519 with the identity key over `<slug>-panel-accept-v1` 0x00
+  panel_id 0x00 node_id 0x00 session_id 0x00 nonce 0x00 client signature
+  0x00 panel_url 0x00 panel_pin (`rpc.PanelAcceptSignedBytes`, test vector
+  in `go/internal/rpc/accept_test.go`, key from seed 0..31). The panel
+  sends it on every HelloAccepted (`agent-hub/signature.ts` `signAccept`,
+  the same vector in `apps/panel/test/fix-panel-accept-signature.test.ts`),
+  signed with the edge ticket key. It does not bind the TLS connection, so
+  a relay of a whole session to the real panel is not detected; the pinned
+  standing fallback is what keeps a node of a taken-over domain with its
+  panel. The panel's identity never changes on an existing data dir:
+  `ensurePanelId` and `ensureEdgeTicketKey` only create what is missing,
+  and a sealed key the master key cannot open stops the panel instead of
+  making a new one. Anything that drops `panelId` or `edgeTicketKey` from
+  the settings (a new data dir, a restore of another panel's panel.db, a
+  master key rotation that regenerates the edge ticket key) makes every
+  node refuse the panel until it is joined again (`seylo join --force`).
 - Moving to the panel's new address (`agent/move.go`): when
   HelloAccepted names a `panel_url` (https:// only; `panel_pin` empty =
   system roots) that differs from the address the agent dialed, the agent
@@ -551,7 +619,14 @@ local API, join and resume. The areas:
   `seylo-lb` from `seylo-lb.tls.yml` (client certificate from the panel's LB
   CA required, anchor router for the `server_name` SNI), and balancing nodes
   verify peers by `server_name` and present their own certificate instead of
-  `insecureSkipVerify`), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
+  `insecureSkipVerify`; without a complete `lb_tls` no route file has a
+  router on `seylo-lb`, so the entry point, published on every interface,
+  answers 404 to everyone instead of taking any client; the panel issues
+  each node's certificate on connect and renews it hourly
+  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`), and a node it cannot
+  issue one for, for example because the LB CA key does not open with this
+  master.key, gets one `node_health_check_failed` alert naming the reason,
+  resolved once it has a certificate), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
   directory; for a test CA, config.yml `acme_ca_certificates` (a PEM file,
   mounted as `LEGO_CA_CERTIFICATES`) and `acme_ca_server_name`, or the
   `SEYLO_ACME_CA_CERTIFICATES` / `SEYLO_ACME_CA_SERVER_NAME` env). Next to the Wings fork the files go to its
@@ -564,7 +639,26 @@ local API, join and resume. The areas:
   service's LB routers in its own `seylo-<id>.yml`); reconcile attaches it
   to project networks like the fork's Traefik. Tool session cookies are
   signed with `<datadir>/network/edge-session.key` (kept across agent
-  restarts). Route certificate failures come from the Traefik container's
+  restarts) and name the ticket's subject and user (`edge/session.go`; the
+  older subject-only format is refused, one more sign-in). The edge asks
+  the panel `PanelService.CheckEdgeAccess`
+  (`panel.edge-access.v1`) about each user on each tool in use at most
+  once a minute, open WebSockets included: `allowed: false` ends that
+  user's sessions on that tool opened before the answer and closes their
+  connections; a new ticket opens it again. While the panel gives no
+  answer (UNIMPLEMENTED, offline) a session lasts an hour past the panel's
+  last "yes" or its ticket; 12 hours caps every session. The panel
+  answers it in `databases/edge-ticket.ts` `edgeAccessAllowed`: the
+  subject must be `box:<id>` or `db-ui:<id>` of a service that runs on the
+  asking node, the user must exist and not be disabled, and must still pass
+  the permission of `boxes.open` / `databases.openWebUi` on that service
+  (`mayOpenEdgeTool`, the op contracts' own permission); a Box or a
+  database is checked to be one. 300 checks per node, then 5 a second
+  (RESOURCE_EXHAUSTED). A ticket's `uid` is the user's id for a browser
+  session and `key:<api key id>` for an API key (`edgeToolLink`), so a
+  session opened with a key is checked as that key: its action list,
+  projects and read-only flag, and it ends when the key is revoked or
+  expires. Route certificate failures come from the Traefik container's
   log (the last 24 h, kept until a certificate appears). RetryCertificate
   (`routing.certificate-retry.v1`, `proxy/certretry.go`) makes Traefik ask
   the CA again for an ACME route's hosts without a certificate, without a
@@ -887,8 +981,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   metadata (169.254.169.254, 100.100.100.200, fd00:ec2::254,
   `metadata.google.internal`, `*.internal`), private and reserved ranges
   (IPv4-mapped and NAT64 included) are refused on save (BAD_REQUEST `reason:
-  internalTarget`) and before every probe, unless every address is a node's
-  own public address, or `settings.general.uptimeAllowInternalTargets` is on
+  internalTarget`) and before every probe, unless every such address is a
+  node's address as an admin set it (`nodes.public_address`; the addresses
+  an agent reports, `public_ipv4`/`public_ipv6`, never count, since a
+  compromised agent could name a private one), or
+  `settings.general.uptimeAllowInternalTargets` is on
   (admins, `settings.updateGeneral`). A domain row is no exception (it says
   nothing about where the name resolves). `checkTarget` returns the vetted
   address and the request connects to it (`http/pinned-fetch.ts`: Host header
@@ -946,7 +1043,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `X-Request-UUID`), a body seen by the same hook under another id within
   3 days is a replay (`webhooks/replay.ts`, also used by GitHub, keyed per
   hook because providers post one body to the hook of every service of a
-  repository), a delivery id already handled for the hook's service is a
+  repository; the body hashes live in panel.db `webhook_bodies`, so a
+  panel restart forgets none, pruned to 3 days and the newest 10,000), a delivery id already handled for the hook's service is a
   duplicate (scoped to the service: GitLab before 17.4 sends sibling hooks
   of one push the same event UUID), rejected deliveries go to the
   service's delivery list with their own row id (20 an hour at most).
@@ -986,10 +1084,17 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   trailing `/` means everything below); for each changed file the last
   matching pattern decides, with only `!` patterns everything else
   counts; a push deploys when one file counts. Matching never backtracks
-  (`globMatches` runs the glob as a set of positions over the path once;
-  repeats such as `**/**/` collapse), so a pattern cannot stall the panel
-  on a deep path; a changed path longer than 4096 characters is not
-  matched and makes the list incomplete (which deploys). `webhooks/gate.ts`
+  and costs the same per character whatever the pattern (`globMatches`
+  runs the glob's automaton over the path once with all live states in a
+  bit set: one pass, a few operations per character and 32 glob steps;
+  repeats such as `**/**/` collapse). Patterns are tried from the last
+  one back, so the first match decides a file. A whole decision is
+  bounded: `matchWatchPaths` stops after `watchPathsWorkBudget` (8M word
+  steps, about 20 ms) and the push deploys ("too many changed files to
+  match"); a changed path longer than 4096 characters is not matched and
+  makes the list incomplete (which deploys); a `{ changedFiles }` body
+  keeps at most 20,000 entries (more counts as truncated, like the
+  commits path). `webhooks/gate.ts`
   `pushGate` runs on every push path (GitHub webhook and polling, provider
   webhooks and polling, the deploy trigger URL; stacks too): `[skip ci]`,
   `[ci skip]`, `[skip cd]`, `[cd skip]` in the head commit message skip;
@@ -1017,6 +1122,24 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   registries, channels or the GitHub device account get names and hosts
   only; webhook URLs show scheme and host only. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
+- Git addresses (`modules/git/targets.ts` `assertGitTarget`): a generic git
+  source (service, compose stack, clone) must resolve to public addresses
+  (`uptime/targets.ts` `checkTarget`, no "allow internal targets"), checked
+  on save and again right before a build or FetchGitFile goes to a node
+  (DNS may answer differently by then). An internal host (private,
+  loopback, link-local, reserved, or a name the panel cannot resolve) works
+  in a project once someone with `git.manage` saved a source with it
+  there: that records (project, host) in `git_internal_hosts`, and the
+  project's members may then use it too. Cloud metadata addresses never.
+  On the first start of 0.2 the hosts of git sources already stored are
+  recorded once (`gitInternalHostsSeeded`), so existing LAN git servers
+  keep building. FetchGitFile (compose files from git) runs only on the
+  stack's own node (the one it is or will be placed on), never on another
+  online node. Plain `http://` git is refused when saved (services,
+  compose stacks, provider connections and Box repositories take
+  `https://`, `ssh://` or `git@` only), so the panel never sets
+  `GitSource.allow_plain_http`. Moving a service to another project does not record its host
+  there: its next build needs the host allowed in the new project.
 - Env references (`modules/env/ops.ts` `checkEnvReferences`): a `${{svc.VAR}}`
   the caller may not read (env.view on the target, databases.credentials for
   database credentials; addresses are fine) is refused with FORBIDDEN
@@ -1133,6 +1256,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | `seylo panel start` and `seylo panel logs` on a node whose panel is not a managed service | NOT_IMPLEMENTED from `agent.PanelControl` only when nothing set it (`wire_node.go` sets it) |
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
+| An admin opt-in for plain-HTTP git servers: `GitSource.allow_plain_http` exists, but the panel stores no `http://` git source, so it never sets it | Saving an `http://` git URL is BAD_REQUEST; 0.2 agents refuse `http://` without the flag |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
@@ -1227,6 +1351,7 @@ or the method descriptor's options (TS). Current names:
 | `volume.transfer.v1` | ExportVolume, ImportVolume |
 | `panel.desired.v1` | GetDesiredState |
 | `panel.registry-tunnel.v1` | RegistryTunnel |
+| `panel.edge-access.v1` | CheckEdgeAccess |
 
 An agent advertises a capability only once every method in it works.
 
@@ -1276,7 +1401,15 @@ SHA-256, runs `<new> version`, keeps the old binary in
 The new agent confirms after its first accepted handshake; otherwise the
 guard restores the old binary and restarts it. Either way exactly one
 durable `UpdateResult` (target AGENT) reaches the panel. Failures before
-the swap are reported at once and returned as the RPC error.
+the swap are reported at once and returned as the RPC error. The guard
+also counts the rollback in `<dataDir>/update/agent-rollbacks.json`
+(by version, kept across restarts; `update/rollbacks.go`): automatic
+installs of that release (auto-update on connect, the AGENT_TOO_OLD
+self-update) wait an hour after its first rollback and a day after each
+later one, and the restored agent raises an `UPDATE_FAILED` node alert
+saying until when. `UpdateAgent` from the panel does not wait. A
+confirmed update, or an agent already at or past the release, drops its
+record and resolves the alert once none is left.
 
 Test-build overrides (the end-to-end tests only; release builds leave
 them empty and use brand.json): link the agent and `releasetool` with
@@ -1444,8 +1577,9 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   HTTPS probe also trusts `<panel data dir>/test-ca.pem` (the e2e's Pebble
   root); a shipped panel never reads it.
 - PanelService (`agent-hub/panel-service.ts`): ReportCrash stores
-  `crash_reports`, ReportEvent stores `agent_reports` (30 days), both
-  deduped by (node, outbox id), then fan out; GetDesiredState returns the
+  `crash_reports`, ReportEvent stores a capped copy in `agent_reports` (30
+  days), both with capped fields, deduped by (node, outbox id) and within
+  the node's daily report budget, then fan out; GetDesiredState returns the
   current state unless the agent has that revision; RegistryTunnel relays
   to `Tunnel(RegistryTarget)` on the node with `nodes.is_panel_node` (the
   first node that joins).
@@ -1786,11 +1920,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   JSON `{"v":1,"sub","uid","exp","jti"}` (`exp` in Unix seconds, 60 s
   after issue, single use by `jti`); signature is Ed25519 over the ASCII
   `<slug>-edge-ticket-v1`, a 0x00 byte, then the payload string. Subjects
-  `db-ui:<serviceId>` and `box:<serviceId>`. Links are
+  `db-ui:<serviceId>` and `box:<serviceId>`; `uid` is the user's id, or
+  `key:<api key id>` when an API key opened the tool. Links are
   `https://<slug>-db-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>` and
   `https://<slug>-box-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>`;
   without a wildcard domain on the node the ops answer CONFLICT
-  (`details.reason` `noWildcardDomain`).
+  (`details.reason` `noWildcardDomain`). An optional `&to=<path>` (and the
+  portgate handoff's target) is followed only when it is a plain absolute
+  path on the same host: no control bytes (browsers drop tabs and line
+  breaks), no backslash, no `//` (also after decoding), no scheme or host
+  (`edge.safeTarget`); anything else redirects to `/`.
 - Regenerate certificate (`domains.retryCertificate`,
   `modules/domains/certificate-retry.ts`): a mutation with `domains.edit`
   on the service (an API key needs that action and must not be read-only,

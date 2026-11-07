@@ -57,6 +57,8 @@ interface Counter {
 }
 
 export const liveWindowMs = 5 * 60 * 1000;
+/** Most live points per node or service series (two a second over the live window). */
+export const maxLivePoints = 600;
 export const retention: Record<Resolution, number> = {
   "1m": 26 * 3600 * 1000,
   "5m": 8 * 24 * 3600 * 1000,
@@ -439,6 +441,8 @@ function pushLive<P extends { t: number }>(map: Map<string, P[]>, key: string, p
   }
   points.push(point);
   while (points.length > 0 && (points[0] as P).t < now - liveWindowMs) points.shift();
+  // A node samples every few seconds; one that sends faster keeps no more than this.
+  if (points.length > maxLivePoints) points.splice(0, points.length - maxLivePoints);
 }
 
 const instances = new WeakMap<object, MetricsIngest>();

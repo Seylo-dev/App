@@ -121,4 +121,25 @@ func TestIntegrationLBMutualTLS(t *testing.T) {
 			t.Errorf("%s: got through B's LB entry point (%v)", c.what, err)
 		}
 	}
+
+	// Without lb_tls (the panel could not issue B's certificate) B's LB
+	// entry point routes nothing: no client reaches the copy there, with
+	// or without a certificate (runtime-2).
+	rb.SetSettings(&agentv1.NodeSettings{})
+	deadline = time.Now().Add(30 * time.Second)
+	for {
+		code, err := direct(host, nil)
+		if err == nil && code == http.StatusNotFound {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("B's LB entry point without lb_tls: %d %v, want 404\n%s", code, err, dockerLogs(e.prefix+"-traefik"))
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	for _, sni := range []string{host, name, ""} {
+		if code, err := direct(sni, nil); code == 200 {
+			t.Errorf("without lb_tls, SNI %q got through B's LB entry point (%v)", sni, err)
+		}
+	}
 }

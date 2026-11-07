@@ -387,3 +387,28 @@ func TestWireNetworkRetryCertificate(t *testing.T) {
 		}
 	}
 }
+
+// The edge asks the panel through PanelService.CheckEdgeAccess whether a
+// tool session's user still has access (runtime-1).
+func TestEdgeAccessAsksThePanel(t *testing.T) {
+	mux := rpc.NewPanelMux()
+	var asked []string
+	rpc.HandleUnary(mux, rpc.MethodCheckEdgeAccess, func(_ context.Context, req *agentv1.CheckEdgeAccessRequest) (*agentv1.CheckEdgeAccessResponse, error) {
+		asked = append(asked, req.GetSubject()+" "+req.GetUserId())
+		return &agentv1.CheckEdgeAccessResponse{Allowed: req.GetUserId() == "u1"}, nil
+	})
+	d := &Deps{Panel: rpc.NewPanelClient(rpctest.NewPeer(t, mux))}
+	check := edgeAccess(d)
+	for uid, want := range map[string]bool{"u1": true, "u2": false} {
+		got, err := check.CheckAccess(t.Context(), "box:b1", uid)
+		if err != nil || got != want {
+			t.Fatalf("%s: %v %v, want %v", uid, got, err, want)
+		}
+	}
+	if len(asked) != 2 {
+		t.Fatalf("asked %v", asked)
+	}
+	if edgeAccess(&Deps{}) != nil {
+		t.Fatal("a checker without a panel client")
+	}
+}

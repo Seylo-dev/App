@@ -305,7 +305,22 @@ func (u *AgentUpdater) reportConfirmed(ctx context.Context) error {
 		return fmt.Errorf("queueing the update result: %w", err)
 	}
 	u.opts.Logger.Info("agent update confirmed", "from", p.FromVersion, "to", p.ToVersion, "update_id", p.UpdateID)
+	u.forgetRolledBack(ctx)
 	return removeIfExists(u.path(agentConfirmed))
+}
+
+// forgetRolledBack drops the rollback records of releases this agent runs
+// or has passed, and resolves the UPDATE_FAILED alert once none is left.
+func (u *AgentUpdater) forgetRolledBack(ctx context.Context) {
+	dropped, left, err := u.forgetRollbacks(u.opts.CurrentVersion)
+	if err != nil {
+		u.opts.Logger.Warn("updating the rolled-back releases", "err", err)
+	}
+	if dropped && !left {
+		if err := u.opts.Report(ctx, rollbackResolved(u.opts.CurrentVersion)); err != nil {
+			u.opts.Logger.Error("queueing the update alert", "err", err)
+		}
+	}
 }
 
 // Resume runs once at start: it queues a result the guard left behind
@@ -319,6 +334,8 @@ func (u *AgentUpdater) Resume(ctx context.Context) error {
 			u.opts.Logger.Error("dropping an unreadable update result", "err", err)
 		} else if err := u.opts.Report(ctx, &ev); err != nil {
 			return fmt.Errorf("queueing the update result: %w", err)
+		} else if r := ev.GetUpdateResult(); r.GetRolledBack() && r.GetTarget() == agentv1.UpdateTarget_UPDATE_TARGET_AGENT {
+			u.alertRolledBack(ctx, r)
 		}
 		if err := removeIfExists(u.path(agentResult)); err != nil {
 			return err
@@ -326,12 +343,32 @@ func (u *AgentUpdater) Resume(ctx context.Context) error {
 	case !errors.Is(err, os.ErrNotExist):
 		return err
 	}
+	u.forgetRolledBack(ctx)
 	return u.reportConfirmed(ctx)
 }
 
+// alertRolledBack queues the UPDATE_FAILED node alert for a guard
+// rollback: automatic updates to that release wait now.
+func (u *AgentUpdater) alertRolledBack(ctx context.Context, r *agentv1.UpdateResult) {
+	f, err := readRollbacks(updateDir(u.opts.DataDir))
+	if err != nil {
+		u.opts.Logger.Warn("reading the rolled-back releases", "err", err)
+	}
+	rec, ok := f.Versions[versionKey(r.GetToVersion())]
+	if !ok {
+		return
+	}
+	u.opts.Logger.Warn("the last agent update was rolled back; automatic updates to it wait",
+		"version", r.GetToVersion(), "rollbacks", rec.Count, "retry_after", rec.retryAt())
+	if err := u.opts.Report(ctx, rollbackAlert(r, rec)); err != nil {
+		u.opts.Logger.Error("queueing the update alert", "err", err)
+	}
+}
+
 // CheckOnConnect updates this agent to the panel's release when
-// auto-update is on and the panel is newer. A failed target is not tried
-// again for an hour.
+// auto-update is on and the panel is newer. A target that failed before
+// the swap is not tried again for an hour; one the guard rolled back
+// waits as rollbacks.go says.
 func (u *AgentUpdater) CheckOnConnect(ctx context.Context, panelVersion string, autoUpdate bool) error {
 	if !autoUpdate || !IsRelease(u.opts.CurrentVersion) || !Newer(panelVersion, u.opts.CurrentVersion) {
 		return nil
@@ -341,6 +378,11 @@ func (u *AgentUpdater) CheckOnConnect(ctx context.Context, panelVersion string, 
 	last, failed := u.failedAuto[target]
 	u.mu.Unlock()
 	if failed && u.opts.Now().Sub(last) < time.Hour {
+		return nil
+	}
+	if rec, wait := u.rolledBack(target); wait {
+		u.opts.Logger.Warn("not updating automatically: this release was rolled back on this node",
+			"version", target, "rollbacks", rec.Count, "retry_after", rec.retryAt())
 		return nil
 	}
 	manifest, err := fetch(ctx, u.opts.HTTP, ReleaseURL(target, ManifestFile), 1<<20)
@@ -369,7 +411,8 @@ func (u *AgentUpdater) CheckOnConnect(ctx context.Context, panelVersion string, 
 // agent as too old (HELLO_REJECT_REASON_AGENT_TOO_OLD): the panel cannot
 // send UpdateAgent to an agent it does not accept, so the agent fetches
 // the signed manifest itself. The release must be at least minVersion. A
-// target that failed is not tried again for an hour.
+// target that failed is not tried again for an hour; one the guard rolled
+// back waits as rollbacks.go says.
 func (u *AgentUpdater) UpdateToLatest(ctx context.Context, minVersion string) error {
 	if _, err := ParsePublicKey(u.opts.PublicKey); err != nil {
 		return err
@@ -394,6 +437,10 @@ func (u *AgentUpdater) UpdateToLatest(ctx context.Context, minVersion string) er
 	u.mu.Unlock()
 	if failed && u.opts.Now().Sub(last) < time.Hour {
 		return fmt.Errorf("updating to %s failed less than an hour ago", m.Version)
+	}
+	if rec, wait := u.rolledBack(m.Version); wait {
+		return fmt.Errorf("%w: %s was rolled back %d time(s); the next automatic try is after %s",
+			ErrRolledBack, m.Version, rec.Count, rec.retryAt().UTC().Format(time.RFC3339))
 	}
 	err = u.Update(ctx, &agentv1.UpdateAgentRequest{
 		Manifest: manifest, ManifestSignature: sig, TargetVersion: m.Version, UpdateId: "too-old-" + m.Version,

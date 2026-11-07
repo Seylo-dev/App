@@ -14,30 +14,33 @@ import { nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { type DesiredFlusher, startDesiredFlusher } from "../../desired";
 import { defineJob } from "../../jobs/queue";
+import { edgeAccessAllowed } from "../databases/edge-ticket";
 import { defineModule } from "../module";
 import { manifestMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
 import { importInstallerJoinToken } from "./installer-join";
-import { ensureNodeCertificate, lbTlsContributor } from "./lb-tls";
+import { issueNodeCertificate, lbTlsContributor } from "./lb-tls";
 import { nodeHandlers, publishNode } from "./ops";
 import { ensurePanelService, panelContributor, panelServiceId } from "./panel-service";
 import { pruneTables } from "./retention";
 
 const flushers = new WeakMap<object, DesiredFlusher>();
+/** At most one nodes.facts write (and live publish) per node in this time. */
+const factsWriteMs = 2000;
 
 /** The panel's desired-state flusher (tests call flush() on it). */
 export function flusherFor(deps: Pick<Deps, "agents">): DesiredFlusher | undefined {
   return flushers.get(deps.agents);
 }
 
-/** Prunes what panel.db keeps (retention.ts); runs daily (schedule "nodes.pruneReports"). */
+/** Prunes what panel.db keeps (retention.ts); runs hourly (schedule "nodes.pruneReports"). */
 const pruneReports = defineJob<Record<string, never>>({
   type: "nodes.pruneReports",
   async run(_payload, ctx) {
     pruneTables(ctx.db);
     // Renew LB certificates with under 30 days left; the node gets them with its settings.
     for (const node of ctx.db.select({ id: nodes.id }).from(nodes).all()) {
-      if (ensureNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
+      if (issueNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
     }
   },
 });
@@ -69,20 +72,78 @@ function start(deps: Deps) {
       hub: deps.agents,
       logger: deps.logger.child({ component: "panel-service" }),
       desiredState: (nodeId, knownRevision) => flusher.currentState(nodeId, knownRevision),
+      edgeAccessAllowed: (nodeId, request) => edgeAccessAllowed(deps, nodeId, request),
+      reportBudgetExceeded: (nodeId) => {
+        const name = deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? "A node";
+        deps.alerts.raise({
+          event: "node_health_check_failed",
+          key: `report-budget:${nodeId}:${new Date().toISOString().slice(0, 10)}`,
+          title: `${name} sends more reports than the panel keeps`,
+          message:
+            "In the last day this node sent more durable reports (deploy, cron, backup and cleanup results, alerts, crashes) than the panel stores for one node. The panel acknowledges and drops the rest until the day is over. A healthy node does not get here: check what runs on it.",
+          severity: "warning",
+          nodeId,
+        });
+      },
     }),
   );
   deps.agents.setAgentVersionPolicy(() => minimumAgentVersion(deps.config.version, manifestMinAgent(deps.db)));
 
+  // Keep the last facts for when the node is offline: written and published at most once per
+  // factsWriteMs per node (a node may send facts events as fast as it likes), the newest at the end.
+  const writeFacts = (nodeId: string) => {
+    const facts = deps.agents.state.get(nodeId)?.facts;
+    if (!facts) return;
+    const json = toJson(NodeFactsSchema, facts) as Record<string, unknown>;
+    const text = JSON.stringify(json);
+    if (factsWriter.last.get(nodeId) === text) return;
+    factsWriter.last.set(nodeId, text);
+    deps.db
+      .update(nodes)
+      .set({
+        facts: json,
+        agentVersion: facts.agentVersion || undefined,
+        publicIpv4: facts.publicIpv4 || undefined,
+        publicIpv6: facts.publicIpv6 || undefined,
+      })
+      .where(eq(nodes.id, nodeId))
+      .run();
+    publishNode(deps, nodeId);
+  };
+  const factsWriter = {
+    last: new Map<string, string>(),
+    writtenAt: new Map<string, number>(),
+    waiting: new Map<string, ReturnType<typeof setTimeout>>(),
+    changed(nodeId: string) {
+      if (this.waiting.has(nodeId)) return;
+      const wait = (this.writtenAt.get(nodeId) ?? 0) + factsWriteMs - Date.now();
+      if (wait <= 0) {
+        this.flush(nodeId);
+        return;
+      }
+      const timer = setTimeout(() => this.flush(nodeId), wait);
+      timer.unref?.();
+      this.waiting.set(nodeId, timer);
+    },
+    flush(nodeId: string) {
+      clearTimeout(this.waiting.get(nodeId));
+      this.waiting.delete(nodeId);
+      this.writtenAt.set(nodeId, Date.now());
+      try {
+        writeFacts(nodeId);
+      } catch (error) {
+        nodesLogger.warn({ err: error, nodeId }, "recording the node's facts failed");
+      }
+    },
+  };
+
   deps.agents.onConnection((nodeId, online) => {
     // Its LB identity exists before the connect sync compiles the node's settings.
-    if (online) {
-      try {
-        ensureNodeCertificate(deps, nodeId);
-      } catch (error) {
-        nodesLogger.error({ err: error, nodeId }, "issuing the node's load balancer certificate failed");
-      }
+    if (online) issueNodeCertificate({ ...deps, logger: nodesLogger }, nodeId);
+    if (!online) {
+      if (factsWriter.waiting.has(nodeId)) factsWriter.flush(nodeId);
+      deps.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, nodeId)).run();
     }
-    if (!online) deps.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, nodeId)).run();
     // The installer's local agent just joined as the panel node: record the panel container it runs.
     else if (deps.config.image) ensure();
     if (online) seedPanelNodeAddress(deps.db);
@@ -91,24 +152,9 @@ function start(deps: Deps) {
 
   deps.agents.state.onChange((nodeId, change) => {
     switch (change.kind) {
-      case "facts": {
-        // Keep the last facts for when the node is offline.
-        const facts = deps.agents.state.get(nodeId)?.facts;
-        if (facts) {
-          deps.db
-            .update(nodes)
-            .set({
-              facts: toJson(NodeFactsSchema, facts) as Record<string, unknown>,
-              agentVersion: facts.agentVersion || undefined,
-              publicIpv4: facts.publicIpv4 || undefined,
-              publicIpv6: facts.publicIpv6 || undefined,
-            })
-            .where(eq(nodes.id, nodeId))
-            .run();
-        }
-        publishNode(deps, nodeId);
+      case "facts":
+        factsWriter.changed(nodeId);
         return;
-      }
       case "snapshot":
       case "applied":
         publishNode(deps, nodeId);
@@ -125,7 +171,7 @@ function start(deps: Deps) {
     }
   });
 
-  deps.schedules.ensure({ key: "nodes.pruneReports", jobType: "nodes.pruneReports", cron: "17 3 * * *" });
+  deps.schedules.ensure({ key: "nodes.pruneReports", jobType: "nodes.pruneReports", cron: "17 * * * *" });
 }
 
 export default defineModule({ name: "nodes", ops: nodeHandlers, jobs: [pruneReports], start });

@@ -18,7 +18,8 @@ func TestBuildLBOnly(t *testing.T) {
 	r.BasicAuth = &agentv1.BasicAuth{Users: []*agentv1.BasicAuthUser{{Username: "u", PasswordHash: "$2y$05$abcdefghijklmnopqrstuuxN0J7Zqf6g2b2b6ZJ1Q2YjY1Jj1Jj1W"}}}
 	spec := app("svc1", r)
 	spec.LoadBalancer = &agentv1.LoadBalancer{RemoteUpstreams: []*agentv1.RemoteUpstream{{NodeId: "n2", Url: "https://203.0.113.20:5757"}}}
-	in := BuildInput{Service: spec, Upstreams: ups("http://seylo-svc1-7:3000"), Edge: "http://172.30.0.1:5756", ProbeSecret: "s"}
+	in := BuildInput{Service: spec, Upstreams: ups("http://seylo-svc1-7:3000"), Edge: "http://172.30.0.1:5756", ProbeSecret: "s",
+		Settings: &agentv1.NodeSettings{LbTls: fakeLBTLS}}
 
 	in.LBOnly = true
 	lb, err := Build(in)
@@ -51,6 +52,7 @@ func TestFileRouterLBDir(t *testing.T) {
 	dir := t.TempDir()
 	main, lbDir := filepath.Join(dir, "wings"), filepath.Join(dir, "lb")
 	r := NewFileRouter(FileConfig{Dir: main, LBDir: lbDir, Containers: []string{"wings-traefik", LBTraefikContainer}})
+	r.SetSettings(&agentv1.NodeSettings{LbTls: newTestLBCA(t).issue(t, "lb.seylo.internal")})
 	ctx := context.Background()
 	if err := r.Apply(ctx, app("svc1", route("r1", "a.example.com")), ups("http://seylo-svc1-7:3000")); err != nil {
 		t.Fatal(err)

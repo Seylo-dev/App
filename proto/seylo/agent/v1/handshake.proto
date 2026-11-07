@@ -89,6 +89,21 @@ message HelloAccepted {
   // the join command's --pin. Empty means verify panel_url's certificate
   // with the node's system CA roots (a public certificate).
   string panel_pin = 5;
+  // The panel's proof that it holds its identity key, the private half of
+  // edge_ticket_public_key: Ed25519 over
+  //
+  //   "seylo-panel-accept-v1" 0x00 panel_id 0x00 node_id 0x00 session_id
+  //   0x00 nonce 0x00 client_signature 0x00 panel_url 0x00 panel_pin
+  //
+  // with panel_id and nonce from the ServerHello, node_id, session_id,
+  // panel_url and panel_pin from this message, and client_signature the
+  // ClientHello's join or resume signature (so it is fresh for every
+  // connection). Agents record panel_id and edge_ticket_public_key at
+  // their first accepted handshake and refuse a panel that names others;
+  // once they saw a valid panel_signature they require one on every
+  // connect, so a certificate for the panel's domain alone no longer makes
+  // a panel. Added in 0.2; older agents ignore it.
+  bytes panel_signature = 6;
 }
 
 message HelloRejected {
