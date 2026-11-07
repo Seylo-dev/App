@@ -113,10 +113,11 @@ Toolchain: Go 1.27, Bun 1.4, buf 1.75. Go tools (`protoc-gen-go`,
 |---|---|
 | `make install` | `bun install --frozen-lockfile` (needed before `gen` and TS tests) |
 | `make gen` | brandgen, `buf generate` + the `@seylo/proto` barrel, op and module indexes, `openapi.json`, the web route tree |
-| `make check-gen` | Fails if committed generated code is stale, or the Drizzle schema changed without a migration (CI) |
+| `make check-gen` | Fails if committed generated code is stale, the Drizzle schema changed without a migration, or SECURITY.md or README.md no longer show brand.json's `minisignPublicKey` (CI) |
 | `make build` | Static `bin/seylo` (`CGO_ENABLED=0`), then `bun run build` (web, then panel) |
-| `make test` | `go test -race` for `go/` and `tools/brandgen`, `bun test` in every workspace, `make test-installer` |
+| `make test` | `go test -race` for `go/` and `tools/brandgen`, `bun test` in every workspace, `make test-installer`, `make test-release` |
 | `make test-installer` | `installer/test/run.sh`: install.sh in `--root` mode against a fake signed release (curl, docker, systemctl shims; minisign and OpenSSL 3 verifiers, dash), plus `scripts/release-preflight.sh`; skips without minisign |
+| `make test-release` | `installer/test/release-sign.sh` and `installer/test/release-publish.sh`: `scripts/release-sign.sh` and `scripts/release-publish.sh` against fake draft releases (gh shim) and a fake ghcr.io; skip without minisign or jq |
 | `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` for every workspace |
 | `make breaking` | `buf breaking` against `main` |
 
