@@ -64,7 +64,7 @@ export const mine = defineOp({
   description: "Lists the signed-in person's grants, so the web app can hide what they cannot do. Empty for owners and admins.",
   input: Empty,
   output: Type.Object({ grants: Type.Array(Grant) }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: false,
 });

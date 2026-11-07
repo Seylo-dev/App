@@ -5,21 +5,23 @@
 
 import { approvals as approvalOps, OpError } from "@seylo/ops";
 import { and, count, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import { isNarrowedKey } from "../../auth/access";
 import { requireSession } from "../../auth/sign-in";
 import { approvals } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
 import { defineModule } from "../module";
-import { approve as approveRequest, canSee, deny as denyRequest, expireOverdue, toApproval } from "./queue";
+import { approve as approveRequest, canSee, deny as denyRequest, expireOverdue, keyApprovalScope, toApproval } from "./queue";
 
 const expireJobType = "approvals.expire";
 
 function scope(ctx: OpContext): SQL | undefined {
   const p = ctx.principal;
   if (p.type === "anonymous") return eq(approvals.id, "");
-  if (p.user.role === "owner" || p.user.role === "admin") return undefined;
-  return eq(approvals.requestedById, p.user.id);
+  const byRole = p.user.role === "owner" || p.user.role === "admin" ? undefined : eq(approvals.requestedById, p.user.id);
+  // A key limited to projects or actions reads its own requests and approvals inside its scope only.
+  return isNarrowedKey(p) ? and(byRole, keyApprovalScope(ctx.db, p)) : byRole;
 }
 
 const list = implement(approvalOps.list, (input, ctx) => {
@@ -64,7 +66,7 @@ const list = implement(approvalOps.list, (input, ctx) => {
 const get = implement(approvalOps.get, (input, ctx) => {
   expireOverdue(ctx);
   const row = ctx.db.select().from(approvals).where(eq(approvals.id, input.approvalId)).get();
-  if (!row || !canSee(ctx.principal, row)) throw new OpError("NOT_FOUND", "There is no such approval.");
+  if (!row || !canSee(ctx.db, ctx.principal, row)) throw new OpError("NOT_FOUND", "There is no such approval.");
   return toApproval(ctx.db, row);
 });
 

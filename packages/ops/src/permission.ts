@@ -16,9 +16,15 @@ export interface PublicPermission {
   readonly kind: "public";
 }
 
-/** Any signed-in principal, for ops that only touch the caller's own data. */
+/**
+ * Any signed-in principal, for ops that only touch the caller's own data.
+ * `account`: data that spans the whole account (assistant chats, the
+ * person's keys, security settings, preferences, grants), so API keys and
+ * MCP tokens limited to some projects or to a list of actions are refused.
+ */
 export interface SignedInPermission {
   readonly kind: "signedIn";
+  readonly account?: true;
 }
 
 /** Panel-wide action, held by owners, admins and keys scoped to it. */
@@ -51,6 +57,8 @@ export type AnyPermission = Permission<never>;
 export const permission = {
   public: (): PublicPermission => ({ kind: "public" }),
   signedIn: (): SignedInPermission => ({ kind: "signedIn" }),
+  /** signedIn for account-wide data: narrowed keys and tokens are refused. */
+  account: (): SignedInPermission => ({ kind: "signedIn", account: true }),
   global: (action: Action): GlobalPermission => ({ kind: "global", action }),
   project: <Input>(action: Action, resource: ResourceOf<Input>): ScopedPermission<Input> => ({
     kind: "project",
@@ -70,7 +78,7 @@ export function describePermission(p: AnyPermission): string {
     case "public":
       return "public";
     case "signedIn":
-      return "signed-in";
+      return p.account ? "signed-in, whole account" : "signed-in";
     case "global":
       return p.action;
     default:

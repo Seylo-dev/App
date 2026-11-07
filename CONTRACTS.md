@@ -663,7 +663,16 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   `mcp` (`<slug>_mcp_...`, from apiKeys.create or the MCP OAuth flow). A
   key acts as its owner, narrowed by its `actions` list (`*` = all of the
   owner's), its optional `projectIds` (then it holds no global actions)
-  and `readOnly` (queries only). MCP tokens are read-only by default.
+  and `readOnly` (queries only). MCP tokens are read-only by default. A
+  key narrowed by projects or actions (`isNarrowedKey` in
+  `src/auth/access.ts`) never runs account-wide ops
+  (`permission.account()`: the `ai.*` chats, `apiKeys.list`,
+  `auth.security`, `auth.preferences`, `auth.updatePreferences`,
+  `grants.mine`; FORBIDDEN `reason: narrowedKey`, and MCP tool lists leave
+  them out), reads `approvals.list`/`get` only for its own requests and
+  approvals of ops its actions cover aimed at its projects, and
+  `audit.list`/`get` only with `audit.view` in its action list and only
+  its projects' entries. Read-only alone does not narrow.
   Bearer wins over the cookie. Only sessions create keys, and account
   security ops (password, 2FA, passkeys, GitHub link, sessions, profile)
   refuse keys (`requireSession` in `src/auth/sign-in.ts`). A session lives

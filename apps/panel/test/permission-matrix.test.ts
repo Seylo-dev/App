@@ -97,7 +97,8 @@ const expected: Record<string, Outcome[]> = {
   "guest (one service)": ["deny", "deny", "deny", "deny", "deny", "deny", "allow", "deny", "allow", "deny", "allow", "allow", "deny"],
   "member (no grants)": ["deny", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "allow", "deny", "allow", "allow", "deny"],
   "key *": ["allow", "allow", "allow", "allow", "allow", "allow", "allow", "allow", "allow", "allow", "deny", "deny", "allow"],
-  "key users.view": ["allow", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "allow", "deny", "deny", "deny", "deny"],
+  // A key limited to actions reads the audit log only with audit.view in its list (scoped-keys.test.ts).
+  "key users.view": ["allow", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "deny", "deny"],
   "key read-only": ["allow", "deny", "deny", "allow", "deny", "allow", "allow", "deny", "allow", "allow", "deny", "deny", "deny"],
   "key project A": ["deny", "deny", "deny", "allow", "allow", "allow", "allow", "allow", "allow", "deny", "deny", "deny", "deny"],
   "mcp read-only": ["allow", "deny", "deny", "allow", "deny", "allow", "allow", "deny", "allow", "deny", "deny", "deny", "deny"],

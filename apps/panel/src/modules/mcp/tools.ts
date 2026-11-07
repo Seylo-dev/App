@@ -1,12 +1,13 @@
 // The MCP tool list and tool calls. Tools are the ops marked mcp: true
 // (buildMcpTools); a token sees only the tools it could use (read-only
-// tokens: queries only; narrowed tokens: their actions). Calls run through
+// tokens: queries only; narrowed tokens: their actions, and no account-wide
+// ops). Calls run through
 // the op pipeline with transport "mcp", so permissions, rate limits and
 // audit apply; a destructive op becomes an approval for a person.
 
-import { type AnyOpContract, allOps, OpError, redact } from "@seylo/ops";
+import { type AnyOpContract, actionAllowed, allOps, OpError, redact } from "@seylo/ops";
 import { buildMcpTools, type McpTool, mcpToolName } from "@seylo/ops/generators";
-import { createAccess } from "../../auth/access";
+import { createAccess, isNarrowedKey } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
 import type { Deps } from "../../deps";
 import { parseInput } from "../../ops/validate";
@@ -28,8 +29,10 @@ export function toolCounts() {
 function usable(principal: Extract<Principal, { type: "apiKey" }>, op: AnyOpContract): boolean {
   if (principal.readOnly && op.kind !== "query") return false;
   const p = op.permission;
-  if (p.kind === "public" || p.kind === "signedIn") return true;
-  if (!principal.actions.includes("*") && !principal.actions.includes(p.action)) return false;
+  if (p.kind === "public") return true;
+  // Account-wide ops are refused to tokens limited to projects or actions (auth/access.ts).
+  if (p.kind === "signedIn") return !(p.account && isNarrowedKey(principal));
+  if (!actionAllowed(principal.actions, p.action)) return false;
   // Project-limited keys never hold panel-wide actions.
   if (p.kind === "global" && principal.projectIds !== null) return false;
   // Members without the role cannot use global actions either.

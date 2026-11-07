@@ -2,7 +2,8 @@
 // do everything; members only what a grant on the project or service
 // allows. API keys are additionally narrowed to their own action list, and
 // read-only keys to queries; keys limited to projects only reach those
-// projects and their services. Action lists match with actionAllowed
+// projects and their services, and narrowed keys never reach account-wide
+// ops (permission.account()). Action lists match with actionAllowed
 // ("*", "<area>.*" or the exact action).
 
 import { type Action, type AnyPermission, actionAllowed, OpError, type OpKind } from "@seylo/ops";
@@ -32,6 +33,17 @@ export interface Access {
    * gets empty lists instead of the panel's catalogue.
    */
   canSomewhere(actions: readonly Action[]): boolean;
+}
+
+type KeyPrincipal = Extract<Principal, { type: "apiKey" }>;
+
+/**
+ * An API key or MCP token limited to some projects or to a list of actions.
+ * It never reaches account-wide data (permission.account() ops), and lists
+ * of the account's approvals and audit entries are cut to its scope.
+ */
+export function isNarrowedKey(principal: Principal): principal is KeyPrincipal {
+  return principal.type === "apiKey" && (principal.projectIds !== null || !principal.actions.includes("*"));
 }
 
 /** Who may pick a stored git credential, provider connection or registry login for a source. */
@@ -107,7 +119,16 @@ export function createAccess(db: PanelDb, principal: Principal): Access {
       if (principal.type === "apiKey" && principal.readOnly && kind !== "query") {
         throw new OpError("FORBIDDEN", "This key is read-only.");
       }
-      if (permission.kind === "signedIn") return undefined;
+      if (permission.kind === "signedIn") {
+        if (permission.account && isNarrowedKey(principal)) {
+          throw new OpError(
+            "FORBIDDEN",
+            "This key is limited to some projects or actions, so it cannot reach the whole account (assistant chats, keys, security settings, preferences).",
+            { reason: "narrowedKey" },
+          );
+        }
+        return undefined;
+      }
 
       const target = targetOf(permission, input);
       if (!can(permission.action, target)) {

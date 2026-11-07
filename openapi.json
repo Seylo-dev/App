@@ -59,7 +59,7 @@
           }
         },
         "x-op-kind": "mutation",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -346,7 +346,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -471,7 +471,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -528,7 +528,7 @@
           }
         },
         "x-op-kind": "destructive",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -996,7 +996,7 @@
           }
         },
         "x-op-kind": "mutation",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -2926,7 +2926,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -6265,7 +6265,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -6743,7 +6743,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -6995,7 +6995,7 @@
           }
         },
         "x-op-kind": "mutation",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -38255,7 +38255,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
