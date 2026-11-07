@@ -55,6 +55,7 @@ import { buildEnvGraph } from "../env/graph";
 import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
+import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { toDataCopy } from "./copies";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
 import { assertNode, insertService, writeSpec } from "./insert";
@@ -343,6 +344,8 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   }
   const spec = cloneSpecOf(plan.spec);
   assertSourceAllowed(ctx, plan.projectId, spec.source);
+  await assertGitSourceTarget(ctx.db, plan.projectId, spec.source, gitCaller(ctx));
+  if (spec.stack) await assertGitSourceTarget(ctx.db, plan.projectId, spec.stack.source, gitCaller(ctx), "source");
   // The copied .env resolves in the target project: the same rule as saving it there.
   if (plan.envCopied && plan.envText.trim()) checkEnvReferences(ctx, plan.projectId, [plan.name], plan.envText);
 

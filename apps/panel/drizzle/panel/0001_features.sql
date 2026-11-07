@@ -94,4 +94,15 @@ CREATE INDEX `service_copies_source_idx` ON `service_copies` (`source_service_id
 ALTER TABLE `deployments` ADD `project_move` text;--> statement-breakpoint
 ALTER TABLE `service_databases` ADD `variant` text;--> statement-breakpoint
 ALTER TABLE `nodes` ADD `cleanup_schedule` text;--> statement-breakpoint
-ALTER TABLE `nodes` ADD `host_shell` integer DEFAULT false NOT NULL;
+ALTER TABLE `nodes` ADD `host_shell` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE TABLE `git_internal_hosts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`host` text NOT NULL,
+	`approved_by` text,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`approved_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `git_internal_hosts_project_host_unique` ON `git_internal_hosts` (`project_id`,`host`);

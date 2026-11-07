@@ -5,7 +5,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createdAt, id, sealed, timestamp, updatedAt } from "./columns";
 import { users } from "./identity";
-import { services } from "./projects";
+import { projects, services } from "./projects";
 
 /** The GitHub App created for this panel with the manifest flow. */
 export const githubApps = sqliteTable("github_apps", {
@@ -217,3 +217,25 @@ export const sourcePolls = sqliteTable("source_polls", {
   etag: text("etag"),
   checkedAt: timestamp("checked_at"),
 });
+
+/**
+ * Internal git hosts (private, loopback or link-local addresses, or names
+ * the panel cannot resolve) a project's services may clone from. Nodes
+ * clone as root in their own network, so only an admin (git.manage) can
+ * add one, by saving a git source with that host in the project; members
+ * of the project may then use it too (modules/git/targets.ts).
+ */
+export const gitInternalHosts = sqliteTable(
+  "git_internal_hosts",
+  {
+    id: id(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** urlHost() of the git URL, lowercased: "10.0.0.7:3000", "gitea.lan". */
+    host: text("host").notNull(),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("git_internal_hosts_project_host_unique").on(t.projectId, t.host)],
+);

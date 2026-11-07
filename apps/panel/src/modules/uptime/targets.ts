@@ -204,10 +204,15 @@ const reasonText: Record<BlockReason, string> = {
   unresolvable: "a name that does not resolve",
 };
 
+/** What a refused target is, for messages: "a private network address (10.0.0.7)". */
+export function blockedTarget(check: Extract<TargetCheck, { ok: false }>): string {
+  return `${reasonText[check.reason]} (${check.address})`;
+}
+
 /** Shown on the check and in BAD_REQUEST messages. */
 export function blockedMessage(check: Extract<TargetCheck, { ok: false }>): string {
   if (check.reason === "unresolvable") return `The name ${check.address} did not resolve.`;
-  return `The target is ${reasonText[check.reason]} (${check.address}). Only an admin can allow internal targets, in Settings > General.`;
+  return `The target is ${blockedTarget(check)}. Only an admin can allow internal targets, in Settings > General.`;
 }
 
 /**

@@ -1051,6 +1051,21 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   registries, channels or the GitHub device account get names and hosts
   only; webhook URLs show scheme and host only. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
+- Git addresses (`modules/git/targets.ts` `assertGitTarget`): a generic git
+  source (service, compose stack, clone) must resolve to public addresses
+  (`uptime/targets.ts` `checkTarget`, no "allow internal targets"), checked
+  on save and again right before a build or FetchGitFile goes to a node
+  (DNS may answer differently by then). An internal host (private,
+  loopback, link-local, reserved, or a name the panel cannot resolve) works
+  in a project once someone with `git.manage` saved a source with it
+  there: that records (project, host) in `git_internal_hosts`, and the
+  project's members may then use it too. Cloud metadata addresses never.
+  On the first start of 0.2 the hosts of git sources already stored are
+  recorded once (`gitInternalHostsSeeded`), so existing LAN git servers
+  keep building. FetchGitFile (compose files from git) runs on the stack's
+  node or another node the project has services on, never on any online
+  node. Moving a service to another project does not record its host
+  there: its next build needs the host allowed in the new project.
 - Env references (`modules/env/ops.ts` `checkEnvReferences`): a `${{svc.VAR}}`
   the caller may not read (env.view on the target, databases.credentials for
   database credentials; addresses are fine) is refused with FORBIDDEN

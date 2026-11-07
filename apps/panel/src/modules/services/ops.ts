@@ -10,6 +10,7 @@ import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/c
 import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
+import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
 import { assertNoActiveCopy } from "./copies";
@@ -72,7 +73,7 @@ function cronSettings(cron: NonNullable<ServiceSpecJson["cron"]>): NonNullable<S
   return { ...cron, schedule };
 }
 
-const create = implement(serviceOps.create, (input, ctx) => {
+const create = implement(serviceOps.create, async (input, ctx) => {
   if (input.kind === "cron" && !input.cron) throw new OpError("BAD_REQUEST", "Cron services need a schedule.", { field: "cron" });
   if (input.source?.type === "github")
     throw new OpError("BAD_REQUEST", "Connect GitHub repositories with github.connectRepo after creating the service.", {
@@ -87,6 +88,7 @@ const create = implement(serviceOps.create, (input, ctx) => {
       },
     );
   if (input.source) assertSourceAllowed(ctx, input.projectId, input.source);
+  await assertGitSourceTarget(ctx.db, input.projectId, input.source, gitCaller(ctx));
   const spec: Partial<ServiceSpecJson> = {
     source: input.source ?? { type: "none" },
     build: { ...defaultBuild, ...input.build, ...(input.source?.type === "inline" ? { builder: "dockerfile" as const } : {}) },
@@ -142,7 +144,7 @@ const update = implement(serviceOps.update, (input, ctx) => {
   return toDetail(ctx.db, ctx.agents, next);
 });
 
-const setSource = implement(serviceOps.setSource, (input, ctx) => {
+const setSource = implement(serviceOps.setSource, async (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (input.source.type === "github")
     throw new OpError("BAD_REQUEST", "Use github.connectRepo for GitHub repositories.", { field: "source" });
@@ -151,6 +153,7 @@ const setSource = implement(serviceOps.setSource, (input, ctx) => {
   if (row.kind !== "app" && row.kind !== "cron") throw new OpError("CONFLICT", `The source of a ${row.kind} service cannot be changed.`);
   forbidMemberEdit(row, "source");
   assertSourceAllowed(ctx, row.projectId, input.source);
+  await assertGitSourceTarget(ctx.db, row.projectId, input.source, gitCaller(ctx));
   const next = updateSpec(ctx, row.id, (spec) => ({
     ...spec,
     source: input.source,

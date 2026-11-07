@@ -2902,6 +2902,87 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "git_internal_hosts": {
+      "name": "git_internal_hosts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "host": {
+          "name": "host",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "git_internal_hosts_project_host_unique": {
+          "name": "git_internal_hosts_project_host_unique",
+          "columns": [
+            "project_id",
+            "host"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "git_internal_hosts_project_id_projects_id_fk": {
+          "name": "git_internal_hosts_project_id_projects_id_fk",
+          "tableFrom": "git_internal_hosts",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "git_internal_hosts_approved_by_users_id_fk": {
+          "name": "git_internal_hosts_approved_by_users_id_fk",
+          "tableFrom": "git_internal_hosts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "approved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "git_provider_webhooks": {
       "name": "git_provider_webhooks",
       "columns": {
