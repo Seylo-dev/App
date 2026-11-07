@@ -7,6 +7,7 @@ import { isPlaceholder, oauthClientId } from "@seylo/brand";
 import { github as githubOps, OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { eq, lt, notInArray } from "drizzle-orm";
+import { sourcePickerActions } from "../../auth/access";
 import { userOf } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { gitCredentials, githubApps, githubDeviceFlows, githubInstallations, githubManifestFlows, sourcePolls } from "../../db/schema";
@@ -92,8 +93,17 @@ function deviceCredential(db: PanelDb) {
   return db.select().from(gitCredentials).where(eq(gitCredentials.origin, "device")).get();
 }
 
+/**
+ * Whether the caller may see the App and where it is installed (account
+ * and organisation logins): people who manage it, or who may set a source
+ * somewhere, like the other shared pickers. Everyone else sees no App.
+ */
+function maySeeApp(ctx: OpContext): boolean {
+  return ctx.access.can("github.manage") || ctx.access.canSomewhere(sourcePickerActions);
+}
+
 const status = implement(githubOps.status, (_input, ctx) => {
-  const row = appRow(ctx.db);
+  const row = maySeeApp(ctx) ? appRow(ctx.db) : undefined;
   const device = deviceCredential(ctx.db);
   return {
     app: row ? toApp(row) : null,
@@ -196,6 +206,7 @@ const deleteApp = implement(githubOps.deleteApp, (_input, ctx) => {
 });
 
 const installations = implement(githubOps.installations, (_input, ctx) => {
+  if (!maySeeApp(ctx)) return { installations: [], installUrl: null };
   const row = appRow(ctx.db);
   const rows = ctx.db.select().from(githubInstallations).orderBy(githubInstallations.accountLogin).all();
   return { installations: rows.map(toInstallation), installUrl: row ? installUrl(row) : null };

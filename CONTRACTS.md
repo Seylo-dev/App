@@ -1269,8 +1269,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   only (a registry's user name is null); webhook URLs show scheme and host
   only. The shared pickers are empty for an account that cannot use them
   anywhere (`Access.canSomewhere`): git credentials, git provider
-  connections and registry logins need `services.create` or
-  `services.update` on some project or service, notification channels and
+  connections, registry logins and the GitHub App with its installations
+  (`github.status` answers `app: null`, `github.installations` an empty
+  list and no install link; `github.manage` sees them too) need
+  `services.create` or `services.update` on some project or service,
+  notification channels and
   backup destination choices `services.view` (or the edit action) somewhere;
   a key counts only its own actions and projects. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
