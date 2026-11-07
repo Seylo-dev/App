@@ -259,8 +259,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `gitProviders.manage`). A refused connection fails the fetch with
   "the node refused to connect to <host:port>: ...". ssh is used only with
   the source's SSH key (`protocol.ssh.allow=never` otherwise), and ssh://
-  hosts must be plain names or IP addresses. A 0.2 agent behind a panel
-  that never sends the field clones from public addresses only.
+  hosts must be plain names or IP addresses. Since the ssh tunnel always
+  goes to the source's host, an ssh submodule on another host fails its
+  host key check. The agent's own `HTTP(S)_PROXY` no longer applies to
+  git: a node that reaches the internet only through an HTTP proxy cannot
+  clone (not built: chaining the fetch's proxy to it). A 0.2 agent behind
+  a panel that never sends the field clones from public addresses only.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -1292,7 +1296,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `approvals.approve` need a browser session (deny works with keys).
 - Git addresses (`modules/git/targets.ts` `assertGitTarget`): a generic git
   source (service, compose stack, clone) must resolve to public addresses
-  (`uptime/targets.ts` `checkTarget`, no "allow internal targets"), checked
+  (`uptime/targets.ts` `checkTarget`, no "allow internal targets", and a
+  node's own address on a private network is internal here, unlike for
+  uptime checks: `ownNodes: false`), checked
   on save and again right before a build or FetchGitFile goes to a node
   (DNS may answer differently by then). An internal host (private,
   loopback, link-local, reserved, or a name the panel cannot resolve) works
@@ -1307,7 +1313,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   marks with `GitSource.allow_internal_host` (exactly the hosts in
   `git_internal_hosts` for the project, plus git provider connections), so
   DNS rebinding and split-horizon DNS do not reach the node's network
-  either. `git.branches` (checking access to a generic git URL) reads the
+  either. A host is recorded only when the panel sees it as internal, so a
+  LAN git server whose name resolves publicly at the panel needs a URL the
+  panel sees as internal (its address or an internal-only name) when an
+  admin saves it. `git.branches` (checking access to a generic git URL) reads the
   repository from the panel under the same rule: public addresses, a host
   in `git_internal_hosts` for the project, or any internal host for a
   `git.manage` caller; never metadata, and the uptime "allow internal
