@@ -2246,6 +2246,8 @@ gitea_up() {
       -days 30 -extfile "$dir/ext.cnf" -out "$dir/cert.pem" 2>/dev/null || return 1
   fi
   if ! on "$E2E_A" "docker inspect -f '{{.State.Running}}' e2e-gitea 2>/dev/null | grep -q true"; then
+    # Pulled first, with a few tries: Docker Hub times out now and then.
+    wait_for 120 "the Gitea image" on "$E2E_A" "docker image inspect $GITEA_IMAGE >/dev/null 2>&1 || docker pull -q $GITEA_IMAGE" || return 1
     on "$E2E_A" "docker rm -fv e2e-gitea >/dev/null 2>&1; docker create --name e2e-gitea --restart unless-stopped -p $GITEA_PORT:3000 \
       -e USER_UID=1000 -e USER_GID=1000 -e GITEA__security__INSTALL_LOCK=true -e GITEA__database__DB_TYPE=sqlite3 \
       -e GITEA__server__PROTOCOL=https -e GITEA__server__HTTP_PORT=3000 -e GITEA__server__ROOT_URL=$(gitea_url)/ \
@@ -2307,6 +2309,10 @@ check_33() {
       git remote add origin "https://e2e:$(state_get gitea-token)@$(node_ip a):$GITEA_PORT/e2e/watch-app.git" &&
       GIT_SSL_CAINFO=$E2E_STATE/tls/ca.crt git push -q origin main
   ) >>"$RES/$CUR.log" 2>&1 || { bad "the first push to Gitea failed"; return 1; }
+  # Gitea records a new repository's first branch after the push returns; until then its branch API
+  # fails (a nil pointer in Gitea 1.24's GetBranch), and that is what the panel asks when connecting.
+  wait_for 60 "Gitea to serve the pushed branch" gitea_api GET /repos/e2e/watch-app/branches/main ||
+    { bad "Gitea does not serve e2e/watch-app's main branch"; return 1; }
   good "e2e/watch-app (private) pushed to Gitea: Dockerfile, app/index.html, docs/notes.md"
 
   provider=$(api gitProviders.list | jq -r '.items[] | select(.name=="e2e-gitea") | .id' | head -1)
@@ -2716,9 +2722,10 @@ check_37() {
   printf '%s\n' "$out" >>"$RES/$CUR.log"
   printf '%s' "$out" | grep -q FOUND && good "valkey-cli shell: SET and GET without a password" ||
     bad "the Valkey shell did not answer: $(printf '%s' "$out" | tail -3 | tr '\n' ' ' | head -c 200)"
-  out=$(db_shell "$ch" 'SELECT 40 + 2 AS e2e_answer;\n' '42' || true)
+  # Only the result reads e2e-42: the typed query says toString(40 + 2).
+  out=$(db_shell "$ch" "SELECT concat('e2e-', toString(40 + 2)) AS answer;\n" 'e2e-42' || true)
   printf '%s\n' "$out" >>"$RES/$CUR.log"
-  printf '%s' "$out" | grep -v 'SELECT 40' | grep -qE '(^|[^0-9+])42([^0-9]|$)' && good "clickhouse-client shell: SELECT 40 + 2 -> 42" ||
+  printf '%s' "$out" | grep -q FOUND && good "clickhouse-client shell: SELECT concat('e2e-', toString(40 + 2)) -> e2e-42" ||
     bad "the ClickHouse shell did not answer 42: $(printf '%s' "$out" | tail -3 | tr '\n' ' ' | head -c 200)"
 
   # An app of the same project reaches all three by references.

@@ -18,6 +18,20 @@ MINIO_PASSWORD=e2e-minio-test-only
 
 running() { on "$E2E_A" "docker inspect -f '{{.State.Running}}' $1 2>/dev/null | grep -q true"; }
 
+# pull <image>: pulls on A, trying again on a network error (registries time out now and then).
+pull() {
+  local i
+  for i in 1 2 3 4 5; do
+    on "$E2E_A" "docker image inspect $1 >/dev/null 2>&1 || docker pull -q $1 >/dev/null" && return 0
+    log "pulling $1 failed (try $i of 5)"
+    sleep $((i * 5))
+  done
+  return 1
+}
+for image in "$REGISTRY_IMAGE" "$MINIO_IMAGE" "$PEBBLE_IMAGE"; do
+  pull "$image" || fail "could not pull $image on $E2E_A"
+done
+
 if ! running e2e-registry; then
   log "starting e2e-registry"
   on "$E2E_A" "docker rm -f e2e-registry >/dev/null 2>&1; docker run -d --name e2e-registry --restart unless-stopped \
@@ -42,7 +56,7 @@ if ! running e2e-pebble || ! on "$E2E_A" "test -f /root/e2e-pebble/config.json";
     sed -i 's/\"httpPort\": 5002/\"httpPort\": 80/' /root/e2e-pebble/config.json &&
     docker run -d --name e2e-pebble --restart unless-stopped -v /root/e2e-pebble:/e2e:ro \
       -p 14000:14000 -p 15001:15000 -e PEBBLE_VA_NOSLEEP=1 $PEBBLE_IMAGE -config /e2e/config.json >/dev/null" ||
-    log "warning: Pebble did not start (only the stretch ACME check needs it)"
+    fail "Pebble did not start (checks 29 and 31 need it)"
 fi
 wait_for 30 "the registry" on "$E2E_A" "curl -fsS -o /dev/null http://127.0.0.1:$E2E_REG_PORT/v2/" || fail "registry did not start"
 state_set minio "http://$(vm_ip "$E2E_A"):19000 $MINIO_USER $MINIO_PASSWORD"
