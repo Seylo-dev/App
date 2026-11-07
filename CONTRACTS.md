@@ -176,9 +176,17 @@ Summary; the full rules are in `proto/README.md` and the comments of
   deduped by outbox id. Progress, state deltas and metrics are best-effort
   EVENT frames. The panel stores only the durable kinds (deployProgress,
   buildProgress, cronRun, backupResult, nodeAlert, updateResult, cleanupRun; others get
-  INVALID_ARGUMENT), at most 1 MiB per report (crash lines capped at 100 x
-  2000 chars), about 10 per second per node (RESOURCE_EXHAUSTED past a burst
-  of 600). A node may report only on services it runs (a placement, or a
+  INVALID_ARGUMENT), at most 1 MiB per report, about 10 per second per node
+  (RESOURCE_EXHAUSTED past a burst of 600). Before anything stores or fans
+  out a report its fields are capped (`agent-hub/report-budget.ts`): strings
+  4096 chars, lists 200 entries of 2000 chars (`lastLines` keeps the
+  newest), unknown fields dropped; crash lines 100 x 2000 chars, container
+  ids 128 chars. `agent_reports` stores a smaller copy (strings 1024 chars,
+  lists 20 entries), since nothing reads it back. Each node has a daily
+  budget for crash reports and durable events together (75,000 rows, 32 MiB
+  stored, counted from what panel.db already holds after a restart): past
+  it a report is acked (the agent drops it) but neither stored nor fanned
+  out, and one `node_health_check_failed` alert per node and day says so. A node may report only on services it runs (a placement, or a
   deployment in flight to or away from it; `agent-hub/service-scope.ts`):
   crash reports, durable events, deploy/health/cron events, state deltas,
   snapshots and metrics about other services are dropped, and an update
@@ -187,9 +195,10 @@ Summary; the full rules are in `proto/README.md` and the comments of
   agent-opened stream windows clamped to 1 MiB, WINDOW grants past
   2^31-1 are a protocol error, 64 agent-opened streams and 256 calls in
   flight (RESOURCE_EXHAUSTED beyond), 32 MiB unread on agent streams. One
-  GetStateSnapshot per node at a time. panel.db retention (daily,
+  GetStateSnapshot per node at a time. panel.db retention (hourly,
   `modules/nodes/retention.ts`): agent reports and crash reports 30 days
-  (newest 200 crashes per service always kept), webhook deliveries 30 days
+  (newest 200 crashes per service always kept), and per node at most the
+  newest 75,000 agent reports and 32 MiB in each of the two tables, webhook deliveries 30 days
   (rejected ones 1 day), notification deliveries 30 days, resolved alerts
   180 days, deploy log lines of failed/cancelled/superseded deployments
   after 30 days (newest 20 per service and the live one keep theirs); a
@@ -1451,8 +1460,9 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   HTTPS probe also trusts `<panel data dir>/test-ca.pem` (the e2e's Pebble
   root); a shipped panel never reads it.
 - PanelService (`agent-hub/panel-service.ts`): ReportCrash stores
-  `crash_reports`, ReportEvent stores `agent_reports` (30 days), both
-  deduped by (node, outbox id), then fan out; GetDesiredState returns the
+  `crash_reports`, ReportEvent stores a capped copy in `agent_reports` (30
+  days), both with capped fields, deduped by (node, outbox id) and within
+  the node's daily report budget, then fan out; GetDesiredState returns the
   current state unless the agent has that revision; RegistryTunnel relays
   to `Tunnel(RegistryTarget)` on the node with `nodes.is_panel_node` (the
   first node that joins).
