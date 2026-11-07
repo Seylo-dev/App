@@ -12,12 +12,18 @@ import { Elysia } from "elysia";
 
 export interface WebAppOptions {
   renderIndex?: (html: string) => string;
+  /** The Content-Security-Policy of the app's pages; without one they only refuse framing. */
+  contentSecurityPolicy?: string;
   /** A URL to send page loads to instead (the live panel domain), or null. */
   redirect?: (request: Request) => string | null;
 }
 
 export function webApp(webDist: string, options: WebAppOptions = {}) {
   const renderIndex = options.renderIndex ?? ((html: string) => html);
+  // The panel is never framed (panel.ts adds X-Frame-Options for older browsers).
+  const pageHeaders = { "content-security-policy": options.contentSecurityPolicy ?? "frame-ancestors 'none'" };
+  const indexResponse = (html: string) =>
+    new Response(html, { headers: { "cache-control": "no-cache", "content-type": "text/html; charset=utf-8", ...pageHeaders } });
   const root = resolve(webDist);
   const indexFile = join(root, "index.html");
   const built = existsSync(indexFile);
@@ -56,11 +62,4 @@ export function webApp(webDist: string, options: WebAppOptions = {}) {
     }
     return indexResponse(renderIndex(indexHtml));
   });
-}
-
-/** The panel is never framed (panel.ts adds X-Frame-Options for older browsers). */
-const pageHeaders = { "content-security-policy": "frame-ancestors 'none'" };
-
-function indexResponse(html: string): Response {
-  return new Response(html, { headers: { "cache-control": "no-cache", "content-type": "text/html; charset=utf-8", ...pageHeaders } });
 }

@@ -964,8 +964,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   panel domain) whatever `SECURE_COOKIES` says, and a plain one on IP:port
   (see Credentials); HTTPS responses carry
   `strict-transport-security: max-age=31536000`; every response carries
-  `x-frame-options: DENY`, nosniff and `referrer-policy: same-origin`, pages
-  `frame-ancestors 'none'`. Once `panelDomainStatus` is active, page loads on
+  `x-frame-options: DENY`, nosniff and `referrer-policy: same-origin`. The
+  web app's pages carry `appContentSecurityPolicy`
+  (`modules/settings/boot.ts`): scripts only from the panel's own files and
+  the inline theme script by its hash (never `'unsafe-inline'` or
+  `'unsafe-eval'` for scripts; the boot JSON is a data block), inline and
+  https styles and fonts, images from self, data:, blob: and https,
+  `connect-src 'self'`, workers from self and blob:, `object-src 'none'`,
+  `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. A new
+  inline script needs its hash there. Once `panelDomainStatus` is active, page loads on
   any other host (not loopback, not /api) answer 302 to `https://<domain>`. After a successful UpdatePanel the new panel records the
   release manifest's `panel { image, digest }` at generation + 1 before the
   flusher starts. Deploy, stop and setPlacements answer CONFLICT `reason: panel`.
