@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { type GitProviderKind, gitProviderWebhooks, services } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { bodyRefused } from "../../http/body";
 import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { readSpec } from "../services/spec";
 import { alreadyHandled, recordDelivery } from "../webhooks/deliveries";
@@ -64,8 +65,9 @@ export async function handleProviderDelivery(deps: Deps, kind: GitProviderKind, 
   if (!hook || !provider || provider.kind !== kind) return json(404, { error: { code: "NOT_FOUND", message: "Unknown webhook." } });
   const secret = deps.secrets.open(hook.secretSealed, "git.webhook");
   if (secret === null) return json(500, { error: { code: "INTERNAL", message: "The webhook secret cannot be read." } });
-  const raw = await readBodyText(request, maxBody);
-  if (raw === null) return json(413, { error: { code: "BAD_REQUEST", message: "Payload too large." } });
+  const read = await readBodyText(request, maxBody);
+  if (!read.ok) return bodyRefused(read.reason);
+  const raw = read.text;
   const event = eventNameOf(kind, request.headers);
   if (!verifyDelivery(kind, secret, raw, request.headers)) {
     recordRejected(deps.db, {

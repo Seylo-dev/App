@@ -7,6 +7,10 @@ import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { githubInstallations } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { bodyRefused } from "../../http/body";
+import { clientIp } from "../../http/client-ip";
+import { addressKey } from "../../http/ip-ranges";
+import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { changesFromPushPayload } from "../webhooks/changes";
 import { alreadyHandled, recordDelivery } from "../webhooks/deliveries";
 import { recordRejected, replayedBody } from "../webhooks/replay";
@@ -126,15 +130,43 @@ export async function handleGithubEvent(
   return { status: 200, body: { ok: true, ignored: event } };
 }
 
+/**
+ * Deliveries per sending address, counted before the body is read or its
+ * HMAC computed: anyone may post here, and each try costs up to 5 MiB and a
+ * hash of it. GitHub sends from a few addresses; a busy organisation stays
+ * far below a minute of bursts.
+ */
+const senderRules = { standard: { burst: 60, refillPerSecond: 1 }, strict: { burst: 60, refillPerSecond: 1 } };
+const senderLimiters = new WeakMap<object, RateLimiter>();
+
+function senderLimiter(deps: Pick<Deps, "db">): RateLimiter {
+  let limiter = senderLimiters.get(deps.db);
+  if (!limiter) {
+    limiter = createRateLimiter(senderRules);
+    senderLimiters.set(deps.db, limiter);
+  }
+  return limiter;
+}
+
 export function githubWebhookRoute(deps: Deps) {
   return new Elysia().post(
     githubWebhookPath,
-    async ({ request }) => {
+    async ({ request, server }) => {
       // Nothing is read for a panel without an App, and never more than maxBody.
       const secret = webhookSecret(deps.db, deps.secrets);
       if (!secret) return json(404, { error: { code: "NOT_FOUND", message: "This panel has no GitHub App." } });
-      const raw = await readBodyText(request, maxBody);
-      if (raw === null) return json(413, { error: { code: "BAD_REQUEST", message: "Payload too large." } });
+      const peer = server?.requestIP(request)?.address ?? null;
+      const sender = addressKey(clientIp(request, peer, deps.proxy.trusts(peer)));
+      const wait = senderLimiter(deps).take(`github-hook:${sender}`, "standard");
+      if (wait > 0) {
+        return new Response(
+          JSON.stringify({ error: { code: "RATE_LIMITED", message: `Too many deliveries. Try again in ${wait} seconds.` } }),
+          { status: 429, headers: { "content-type": "application/json", "retry-after": String(wait) } },
+        );
+      }
+      const read = await readBodyText(request, maxBody);
+      if (!read.ok) return bodyRefused(read.reason);
+      const raw = read.text;
       const deliveryId = (request.headers.get("x-github-delivery") ?? "").slice(0, 64);
       const event = (request.headers.get("x-github-event") ?? "unknown").slice(0, 64);
       if (!verifySignature(secret, raw, request.headers.get("x-hub-signature-256"))) {

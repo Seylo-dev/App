@@ -13,6 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { deployments, deployTriggers, services } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { bodyRefused } from "../../http/body";
 import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { hashToken } from "../../security/tokens";
 import { queueDeploy } from "../deployments/queue";
@@ -75,8 +76,9 @@ export function triggerRoute(deps: Deps) {
       const commitSha = commit && /^[0-9a-f]{7,64}$/.test(commit) ? commit : null;
       deps.db.update(deployTriggers).set({ lastUsedAt: new Date() }).where(eq(deployTriggers.id, trigger.id)).run();
 
-      const raw = await readBodyText(request, maxBodyBytes);
-      if (raw === null) return json(413, { error: { code: "BAD_REQUEST", message: "Payload too large." } });
+      const read = await readBodyText(request, maxBodyBytes);
+      if (!read.ok) return bodyRefused(read.reason);
+      const raw = read.text;
       let body: unknown = null;
       try {
         body = raw.trim() ? JSON.parse(raw) : null;

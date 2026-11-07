@@ -4,7 +4,7 @@
 // (the panel's op pipeline), which also runs MCP and AI tool calls.
 
 import { Elysia } from "elysia";
-import type { AnyOpContract } from "../define";
+import { type AnyOpContract, defaultOpBodyBytes } from "../define";
 import { OpError } from "../errors";
 import { opRoute } from "../registry";
 
@@ -39,8 +39,11 @@ export function opRoutes(ops: readonly AnyOpContract[], execute: ExecuteOpHttp) 
         path,
         async ({ request, server }) => {
           const socketIp = server?.requestIP(request)?.address ?? null;
-          const rawInput = await readJsonBody(request);
-          if (rawInput instanceof OpError) return errorResponse(rawInput);
+          const rawInput = await readJsonBody(request, op.maxBodyBytes ?? defaultOpBodyBytes);
+          if (rawInput instanceof OpError) {
+            const retryAfter = rawInput.details?.retryAfter;
+            return errorResponse(rawInput, retryAfter ? new Headers({ "retry-after": retryAfter }) : undefined);
+          }
           return execute({ op, rawInput, request, socketIp });
         },
         { parse: "none" },
@@ -50,46 +53,72 @@ export function opRoutes(ops: readonly AnyOpContract[], execute: ExecuteOpHttp) 
   return app;
 }
 
-/**
- * Largest JSON body an op takes. The biggest inputs (files.write content,
- * compose files, maintenance pages) stay well under it. Bodies are read
- * before authentication, so they are capped while reading, not afterwards.
- */
-export const maxOpBodyBytes = 4 * 1024 * 1024;
+export { defaultOpBodyBytes, maxOpBodyBytes } from "../define";
 
 /**
- * The body as text, or null when it is larger than `limit`: refused on its
- * Content-Length, and counted while streaming (chunked bodies, lying headers).
+ * Bodies are read before authentication, so besides each route's own cap
+ * the bytes buffered by all body reads at once are capped too: many slow
+ * uploads from anonymous callers cannot add up to unbounded memory. A read
+ * that would pass the budget is refused ("busy") and its bytes released.
+ * Tests change `maxBytes`.
  */
-export async function readBodyText(request: Request, limit: number): Promise<string | null> {
-  const declared = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(declared) && declared > limit) return null;
-  const reader = request.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel().catch(() => {});
-      return null;
-    }
-    chunks.push(value);
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks));
+export const bodyBudget = { maxBytes: 64 * 1024 * 1024 };
+let bufferedBytes = 0;
+
+/** Bytes currently held by unfinished body reads (for tests). */
+export function bufferedBodyBytes(): number {
+  return bufferedBytes;
 }
 
-async function readJsonBody(request: Request): Promise<unknown> {
-  const text = await readBodyText(request, maxOpBodyBytes);
-  if (text === null) return new OpError("BAD_REQUEST", `The request body is larger than ${maxOpBodyBytes / 1024 / 1024} MiB.`);
-  if (text.trim() === "") return {};
+export type BodyRead = { ok: true; text: string } | { ok: false; reason: "tooLarge" | "busy" };
+
+/**
+ * The body as text, refused when it is larger than `limit` (on its
+ * Content-Length, and counted while streaming: chunked bodies, lying
+ * headers) or when the panel already buffers bodyBudget.maxBytes of bodies.
+ */
+export async function readBodyText(request: Request, limit: number): Promise<BodyRead> {
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > limit) return { ok: false, reason: "tooLarge" };
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: true, text: "" };
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    return JSON.parse(text);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      bufferedBytes += value.byteLength;
+      if (size > limit || bufferedBytes > bodyBudget.maxBytes) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, reason: size > limit ? "tooLarge" : "busy" };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    bufferedBytes -= size;
+  }
+  return { ok: true, text: new TextDecoder().decode(Buffer.concat(chunks)) };
+}
+
+async function readJsonBody(request: Request, limit: number): Promise<unknown> {
+  const read = await readBodyText(request, limit);
+  if (!read.ok) {
+    return read.reason === "busy"
+      ? new OpError("UNAVAILABLE", "The panel is busy receiving other requests. Try again in a few seconds.", { retryAfter: "5" })
+      : new OpError("BAD_REQUEST", `The request body is larger than ${formatMiB(limit)}.`);
+  }
+  if (read.text.trim() === "") return {};
+  try {
+    return JSON.parse(read.text);
   } catch {
     return new OpError("BAD_REQUEST", "The request body is not valid JSON.");
   }
+}
+
+function formatMiB(bytes: number): string {
+  return `${Number((bytes / 1024 / 1024).toFixed(2))} MiB`;
 }
 
 export function errorResponse(error: OpError, headers?: Headers): Response {

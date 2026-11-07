@@ -64,6 +64,8 @@ export const setGlobal = defineOp({
   permission: permission.global("settings.edit"),
   mcp: true,
   audit: true,
+  // A page of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });
 
 export const get = defineOp({
@@ -94,6 +96,8 @@ export const set = defineOp({
   permission: serviceScope("services.edit"),
   mcp: true,
   audit: true,
+  // A page of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });
 
 export const preview = defineOp({

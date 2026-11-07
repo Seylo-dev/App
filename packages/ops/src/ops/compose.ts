@@ -79,6 +79,8 @@ export const preview = defineOp({
   sensitive: { input: ["source.yaml"] },
   mcp: true,
   audit: true,
+  // A compose file of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });
 
 export const create = defineOp({
@@ -99,6 +101,8 @@ export const create = defineOp({
   sensitive: { input: ["source.yaml"] },
   mcp: true,
   audit: true,
+  // A compose file of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });
 
 export const get = defineOp({
@@ -131,4 +135,6 @@ export const update = defineOp({
   sensitive: { input: ["source.yaml"] },
   mcp: true,
   audit: true,
+  // A compose file of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });

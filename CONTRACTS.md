@@ -1082,8 +1082,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   the panel stores it once), and `cron_failed` shows that line. Alert
   sizes use the web app's units (binary steps, "3 GB").
 - Bodies read before authentication are capped while streaming: op JSON
-  bodies at 4 MiB (`maxOpBodyBytes`, `readBodyText` in `@seylo/ops/elysia`),
-  the GitHub webhook at 5 MiB (after answering 404 without an App), git
+  bodies at 1 MiB (`defaultOpBodyBytes`), or the op's own `maxBodyBytes` (at
+  most 4 MiB, `maxOpBodyBytes`; `files.write` 4 MiB, `compose.preview`,
+  `compose.create`, `compose.update`, `maintenance.set` and
+  `maintenance.setGlobal` 2 MiB), read by `readBodyText` in
+  `@seylo/ops/elysia`; all body reads in flight share a budget of 64 MiB of
+  buffered bytes (`bodyBudget`), past which a read is refused with 503
+  UNAVAILABLE and `retry-after: 5`. The GitHub webhook allows 60 deliveries
+  per sending address (then one a second, 429) before it reads or hashes a
+  body, and takes 5 MiB (after answering 404 without an App), git
   provider webhooks at 5 MiB (after answering 404 for an unknown hook id)
   and deploy trigger URL bodies at 5 MiB. The
   webhook needs `X-GitHub-Delivery`, records at most 20 rejected deliveries

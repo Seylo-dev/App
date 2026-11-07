@@ -107,6 +107,14 @@ describe("defineOp", () => {
       defineOp({ ...base, id: "test.quiet", kind: "mutation", audit: false, input: Type.Object({}), permission: permission.global("a.b") }),
     ).toThrow(/must set audit: true/);
   });
+
+  test("a body limit stays within 4 MiB", () => {
+    const op = (maxBodyBytes: number) =>
+      defineOp({ ...base, id: "test.big", kind: "mutation", input: Type.Object({}), permission: permission.global("a.b"), maxBodyBytes });
+    expect(op(2 * 1024 * 1024).maxBodyBytes).toBe(2 * 1024 * 1024);
+    expect(() => op(5 * 1024 * 1024)).toThrow(/maxBodyBytes/);
+    expect(() => op(0)).toThrow(/maxBodyBytes/);
+  });
 });
 
 describe("collectOps", () => {
