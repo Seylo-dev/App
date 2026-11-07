@@ -14,9 +14,9 @@
 // resolve somewhere else by then. A host the panel sees as public (a
 // split-horizon name that is internal only at the nodes) is recorded only
 // when an admin asks for it explicitly (git.allowInternalHost). Hosts of git
-// sources that existed before this check, and that the panel sees as
-// internal on the first start of 0.2, count as approved once
-// (seedInternalGitHosts).
+// sources that existed before this check, and that the panel resolves to
+// internal addresses (or that are internal IP addresses) on the first start
+// of 0.2, count as approved once (seedInternalGitHosts).
 //
 // The node resolves the name again when it clones, so the panel's answer is
 // not the last word: a name can answer the panel with a public address and
@@ -25,24 +25,31 @@
 // source (go/internal/netguard) and allows internal addresses only for the
 // source's own host, only when the request says so: GitSource.
 // allow_internal_host, which the panel sets exactly when the host is in
-// git_internal_hosts for the project (or is a git provider connection's
-// host, which only gitProviders.manage sets).
+// git_internal_hosts for the project, or for a git provider connection
+// (whose host only gitProviders.manage sets) when the panel sees the host
+// as internal or it is recorded for the project (providerGitVerdict).
 
 import { OpError } from "@seylo/ops";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Access } from "../../auth/access";
 import { type Principal, userOf } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { gitInternalHosts, projects, services } from "../../db/schema";
 import type { Logger } from "../../logger";
-import { getSetting, setSetting } from "../../settings";
+import { deleteSetting, getSetting, setSetting } from "../../settings";
 import { blockedTarget, checkTarget, type TargetCheck } from "../uptime/targets";
 import { targetUrl, urlHost } from "./remote";
 
 declare module "../../settings" {
   interface SettingValues {
-    /** The hosts of git sources saved before internal git hosts needed an admin were recorded. */
+    /**
+     * Set by the first seed (features-1 dev panels only), which also recorded
+     * public hosts and names the panel could not resolve. Its rows are
+     * dropped once before the current seed runs; then the setting is deleted.
+     */
     gitInternalHostsSeeded: boolean;
+    /** The internal hosts of git sources saved before internal git hosts needed an admin were recorded. */
+    gitInternalHostsSeededV2: boolean;
   }
 }
 
@@ -124,6 +131,30 @@ export async function assertGitTarget(
   );
 }
 
+/** True when the host (urlHost form, lower case) is recorded for the project, once the seed is done. */
+export async function gitHostRecorded(db: PanelDb, projectId: string, host: string): Promise<boolean> {
+  await seeding.get(db);
+  return approved(db, projectId, host);
+}
+
+/**
+ * GitSource.allow_internal_host for a git provider connection's clone URL.
+ * The connection's address is set by gitProviders.manage (an admin), so a
+ * host the panel sees as internal (or cannot resolve) counts as allowed, as
+ * if an admin had saved a generic source with it; no row is written. A
+ * public host (github.com, a public GitLab) gets it only when it is
+ * recorded for the project (git.allowInternalHost, for split-horizon
+ * names), so a rebinding answer at the node is refused there. Metadata
+ * never.
+ */
+export async function providerGitVerdict(db: PanelDb, input: { projectId: string; url: string }): Promise<GitTargetVerdict> {
+  const host = hostOf(input.url, "source.providerId");
+  await seeding.get(db);
+  const target = await checkGitHost(db, input.url);
+  if (target.ok) return { allowInternalHost: approved(db, input.projectId, host) };
+  return { allowInternalHost: target.reason !== "metadata" };
+}
+
 /**
  * git.allowInternalHost: an admin allows the host of a git URL for a
  * project whatever the panel's own DNS answers for it, for a name that is
@@ -165,18 +196,25 @@ export async function assertGitSourceTarget(
  * address of a public host, or of an internal one that is allowed for the
  * project (git_internal_hosts) or asked about by an admin (git.manage).
  * The same rule as saving the source, not the uptime setting. Metadata
- * addresses and names the panel cannot resolve never.
+ * addresses never. A name the panel cannot resolve is read by name for an
+ * admin (who may save a source with it, and is root on the nodes anyway),
+ * never for anyone else: the request would ask DNS again, unchecked.
  */
 export async function gitReadTarget(
   db: PanelDb,
   input: { projectId: string; url: string; admin: boolean; field?: string },
-): Promise<{ ok: true; address: string } | { ok: false; check: Extract<TargetCheck, { ok: false }> }> {
+): Promise<
+  | { ok: true; address: string; byName: false }
+  | { ok: true; address: null; byName: true }
+  | { ok: false; check: Extract<TargetCheck, { ok: false }> }
+> {
   const host = hostOf(input.url, input.field ?? "url");
   await seeding.get(db);
   const target = await checkGitHost(db, input.url);
-  if (target.ok) return { ok: true, address: target.address as string };
+  if (target.ok) return { ok: true, address: target.address as string, byName: false };
+  if (target.reason === "unresolvable" && input.admin) return { ok: true, address: null, byName: true };
   if (target.reason !== "metadata" && target.reason !== "unresolvable" && (input.admin || approved(db, input.projectId, host)))
-    return { ok: true, address: target.address };
+    return { ok: true, address: target.address, byName: false };
   return { ok: false, check: target };
 }
 
@@ -186,24 +224,36 @@ const seedLookupMs = 20_000;
 /**
  * Once per panel, on the first start of 0.2: the hosts of git sources
  * stored before this check (service and compose stack sources) that the
- * panel sees as internal count as approved for their projects, so an update
- * does not stop builds an owner set up with a LAN git server. Hosts the
- * panel sees as public are not recorded: their sources keep building from
- * public addresses, and a member who saved a source on a name they control
- * gets no internal access for it from the node when the name is rebound
- * later. Names that do not exist in the panel's DNS (a LAN-only name) are
- * recorded; a lookup that fails otherwise (timeout, failing server) is not,
- * and is logged, since the panel cannot tell what the name is. An admin
- * records any of them with git.allowInternalHost.
+ * panel resolves to internal addresses, or that are internal IP addresses,
+ * count as approved for their projects, so an update does not stop builds
+ * an owner set up with a LAN git server. Nothing else is recorded. A host
+ * the panel sees as public keeps building from public addresses, and a
+ * member who saved a source on a name they control gets no internal access
+ * for it from the node when the name is rebound later. A name the panel
+ * cannot resolve (not found, or a lookup that failed) is not recorded
+ * either, since a member could point it at an internal address afterwards;
+ * it is logged, and an admin records it with git.allowInternalHost.
  *
  * The sources are read and every lookup starts in this call, before the
  * panel serves; the checks above wait for the answers. The setting is
  * written once all of them are in, so a panel stopped halfway seeds again.
+ * A panel that ran the first features-1 seed (gitInternalHostsSeeded) drops
+ * the rows nobody approved (approved_by null) first, once.
  */
-export function seedInternalGitHosts(db: PanelDb, log?: Pick<Logger, "warn" | "error">): Promise<void> {
-  if (getSetting(db, "gitInternalHostsSeeded") === true) return Promise.resolve();
+export function seedInternalGitHosts(db: PanelDb, log?: Pick<Logger, "info" | "warn" | "error">): Promise<void> {
+  if (getSetting(db, "gitInternalHostsSeededV2") === true) return Promise.resolve();
   const running = seeding.get(db);
   if (running) return running;
+  if (getSetting(db, "gitInternalHostsSeeded") === true) {
+    // A panel stopped right after this deletes again, which changes nothing: the seed below records what is left.
+    const removed = db
+      .delete(gitInternalHosts)
+      .where(isNull(gitInternalHosts.approvedBy))
+      .returning({ id: gitInternalHosts.id })
+      .all().length;
+    deleteSetting(db, "gitInternalHostsSeeded");
+    log?.info({ removed }, "dropped the git internal hosts the first seed recorded without an admin; recording the internal ones again");
+  }
   const rows = db
     .select({
       projectId: services.projectId,
@@ -245,17 +295,19 @@ export function seedInternalGitHosts(db: PanelDb, log?: Pick<Logger, "warn" | "e
       for (const { host, entry, check } of results) {
         // Public (the panel vouches for it) or metadata (never): nothing to record.
         if (check.ok || check.reason === "metadata") continue;
-        if (check.reason === "unresolvable" && !check.notFound) {
+        // Not found or a failed lookup: the panel cannot tell where the name points, and whoever
+        // controls it could point it inside later. Only an admin records it.
+        if (check.reason === "unresolvable") {
           log?.warn(
-            { host, projectIds: [...entry.projectIds] },
-            "could not look up a git host while recording the internal hosts of existing sources; an admin can allow it with git.allowInternalHost",
+            { host, projectIds: [...entry.projectIds], notFound: check.notFound === true },
+            "a git host of an existing source does not resolve at the panel, so it was not recorded as an internal host; an admin can allow it with git.allowInternalHost",
           );
           continue;
         }
         for (const projectId of entry.projectIds)
           db.insert(gitInternalHosts).values({ projectId, host, approvedBy: null }).onConflictDoNothing().run();
       }
-      setSetting(db, "gitInternalHostsSeeded", true);
+      setSetting(db, "gitInternalHostsSeededV2", true);
     })
     .catch((error: unknown) => log?.error({ err: error }, "recording the internal git hosts of existing sources failed"))
     .finally(() => seeding.delete(db));

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import {
   deployments as deploymentOps,
+  git as gitOps,
   previews as previewOps,
   projects,
   gitProviders as providerOps,
@@ -20,11 +21,15 @@ import { DeployStage } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
 import { freshSignInMs } from "../src/auth/fresh";
 import { deploymentLogs, deployments, gitProviderWebhooks, services, sessions, webhookDeliveries } from "../src/db/schema";
+import { resolveBuild } from "../src/modules/deployments/source";
 import { gitlabNeedsHttps, repairHooks } from "../src/modules/gitProviders/hooks";
 import { pollProviderBranches } from "../src/modules/gitProviders/poll";
+import { loadService } from "../src/modules/services/rows";
+import { readSpec } from "../src/modules/services/spec";
+import { setTargetResolver } from "../src/modules/uptime/targets";
 import { setSetting } from "../src/settings";
 import { FakeFleet } from "./fake-fleet";
-import { FakeProviders, payloadFixture, recorded } from "./git-provider-fakes";
+import { FakeProviders, fakeAddress, payloadFixture, recorded } from "./git-provider-fakes";
 import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -384,20 +389,56 @@ describe("Gitea pushes", () => {
       source: {
         source: {
           case: "git",
-          // The connection's host is an admin's choice: the node may reach it on an internal address
-          // (a LAN Gitea) and no other host (agentio-2).
+          // git.example.com is public at the panel: the node accepts no internal answer for it.
           value: {
             url: "https://git.example.com/acme/shop.git",
             commit: giteaHead,
             token: "gitea-token",
             username: "jdev",
-            allowInternalHost: true,
+            allowInternalHost: false,
           },
         },
       },
     });
     const list = await deliveriesOf(id);
     expect(list[0]).toMatchObject({ source: "gitea", outcome: "deployed" });
+  });
+
+  // agentio-2: every provider build went out with allow_internal_host=true, github.com and other public
+  // hosts included, so a rebinding answer at the node was accepted. The connection's host is an admin's
+  // choice: on a LAN address it is allowed, on a public one only when recorded for the project.
+  test("a provider build lets the node reach internal addresses only for a LAN host or a recorded one", async () => {
+    const { id } = await connectedService("gitea");
+    const built = async () => {
+      const service = loadService(panel.deps.db, id);
+      const resolved = await resolveBuild(panel.deps, {
+        service,
+        spec: readSpec(service.spec),
+        buildId: "b1",
+        generation: 1,
+        commitSha: giteaHead,
+        uploadId: null,
+      });
+      const git = resolved.request.source?.source;
+      if (git?.case !== "git") throw new Error("not a git build");
+      return git.value;
+    };
+    // Public at the panel. Before: true.
+    expect(await built()).toMatchObject({ url: "https://git.example.com/acme/shop.git", allowInternalHost: false });
+
+    // The same connection on a LAN address (a self-hosted Gitea) keeps building with the allowance.
+    setTargetResolver(async () => ["10.0.0.5"]);
+    expect(await built()).toMatchObject({ allowInternalHost: true });
+
+    // A public host an admin recorded for the project (split-horizon DNS at the nodes).
+    setTargetResolver(async () => [fakeAddress]);
+    expect(
+      (await callOp(panel, gitOps.allowInternalHost, { projectId, url: "https://git.example.com/acme/shop.git" }, { cookie })).status,
+    ).toBe(200);
+    expect(await built()).toMatchObject({ allowInternalHost: true });
+    // Cloud metadata never.
+    setTargetResolver(async () => ["169.254.169.254"]);
+    expect(await built()).toMatchObject({ allowInternalHost: false });
   });
 
   test("bad signatures are rejected and logged; a replayed body and a repeated delivery deploy nothing", async () => {

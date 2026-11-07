@@ -2,9 +2,21 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac, generateKeyPairSync } from "node:crypto";
 import { deployments as deploymentOps, github, previews as previewOps, projects, services as serviceOps, webhooks } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { deploymentLogs, deployments, githubApps, githubInstallations, previews, services, webhookDeliveries } from "../src/db/schema";
+import {
+  deploymentLogs,
+  deployments,
+  githubApps,
+  githubInstallations,
+  gitInternalHosts,
+  previews,
+  services,
+  webhookDeliveries,
+} from "../src/db/schema";
 import { engineFor } from "../src/modules/deployments/engine";
+import { resolveBuild } from "../src/modules/deployments/source";
 import { pollBranches } from "../src/modules/github/poll";
+import { loadService } from "../src/modules/services/rows";
+import { readSpec } from "../src/modules/services/spec";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
@@ -134,6 +146,28 @@ const push = (branch: string, sha: string) => ({
 });
 
 describe("GitHub webhooks", () => {
+  // github.com gets the node's internal-address allowance only when an admin recorded it for the
+  // project (git.allowInternalHost): a node behind a proxy that cannot resolve github.com itself
+  // refuses it otherwise (agentio-2 round 3).
+  test("a GitHub build carries allow_internal_host only for a recorded github.com", async () => {
+    const id = await githubService();
+    const built = async () => {
+      const service = loadService(panel.deps.db, id);
+      const resolved = await resolveBuild(panel.deps, {
+        service,
+        spec: readSpec(service.spec),
+        buildId: "b1",
+        generation: 1,
+        commitSha: "2222222222222222222222222222222222222222",
+        uploadId: null,
+      });
+      return resolved.request.source?.source;
+    };
+    expect(await built()).toMatchObject({ case: "git", value: { url: "https://github.com/acme/shop.git", allowInternalHost: false } });
+    panel.deps.db.insert(gitInternalHosts).values({ projectId, host: "github.com", approvedBy: null }).run();
+    expect(await built()).toMatchObject({ case: "git", value: { url: "https://github.com/acme/shop.git", allowInternalHost: true } });
+  });
+
   test("a signed push to the followed branch deploys that commit; other branches are ignored", async () => {
     const id = await githubService();
     const sha = "2222222222222222222222222222222222222222";

@@ -11,7 +11,7 @@ import type { Deps } from "../../deps";
 import { resolveServiceEnv } from "../env/desired";
 import { openCredential } from "../git/credentials";
 import { listRemoteRefs, targetUrl } from "../git/remote";
-import { assertGitTarget } from "../git/targets";
+import { assertGitTarget, gitHostRecorded, providerGitVerdict } from "../git/targets";
 import { githubCommit, tokenForInstallation } from "../github/app";
 import { type CommitInfo, clientFor } from "../gitProviders/client";
 import { loadProvider, openToken } from "../gitProviders/rows";
@@ -93,11 +93,17 @@ export async function resolveBuild(
     case "github": {
       const token = await tokenForInstallation(deps.db, deps.secrets, source.installationId);
       const commit = await githubCommit(token, source.repo, input.commitSha ?? source.branch);
+      // github.com is public: internal answers at the node only when an admin recorded it for the project
+      // (git.allowInternalHost), for example on a node behind a proxy that cannot resolve it itself.
+      const allowInternalHost = await gitHostRecorded(deps.db, service.projectId, "github.com");
       return {
         request: create(BuildRequestSchema, {
           ...base,
           source: {
-            source: { case: "git", value: { url: `https://github.com/${source.repo}.git`, ref: source.branch, commit: commit.sha, token } },
+            source: {
+              case: "git",
+              value: { url: `https://github.com/${source.repo}.git`, ref: source.branch, commit: commit.sha, token, allowInternalHost },
+            },
           },
         }),
         builderLabel: builderLabels[builder],
@@ -119,6 +125,8 @@ export async function resolveBuild(
         commit = { sha: input.commitSha, message: "", author: null };
       }
       if (!commit) throw new OpError("BAD_REQUEST", `${source.repo} has no branch ${source.branch}.`);
+      const cloneUrl = client.cloneUrl(source.repo);
+      const { allowInternalHost } = await providerGitVerdict(deps.db, { projectId: service.projectId, url: cloneUrl });
       return {
         request: create(BuildRequestSchema, {
           ...base,
@@ -126,14 +134,14 @@ export async function resolveBuild(
             source: {
               case: "git",
               value: {
-                url: client.cloneUrl(source.repo),
+                url: cloneUrl,
                 ref: source.branch,
                 commit: commit.sha,
                 token: openToken(deps.secrets, provider),
                 username: gitUser(client.gitUsername()),
-                // The connection's address is set by gitProviders.manage (an admin), like an allowed
-                // internal host: a self-hosted Gitea or GitLab on the LAN keeps building.
-                allowInternalHost: true,
+                // The connection's address is set by gitProviders.manage (an admin): a self-hosted Gitea
+                // or GitLab on the LAN keeps building; a public host only when recorded for the project.
+                allowInternalHost,
               },
             },
           },

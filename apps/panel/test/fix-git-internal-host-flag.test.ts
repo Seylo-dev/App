@@ -132,7 +132,7 @@ test("a seeded internal host builds with allowInternalHost", async () => {
   // As if it had been saved before the check existed.
   panel.deps.db.delete(gitInternalHosts).run();
   await expect(built(svc.body.id)).rejects.toThrow("Only an admin can use an internal git host");
-  setSetting(panel.deps.db, "gitInternalHostsSeeded", false);
+  setSetting(panel.deps.db, "gitInternalHostsSeededV2", false);
   await seedInternalGitHosts(panel.deps.db);
   // Before: allowInternalHost was never sent, so a 0.2 node refused a LAN git server an upgrade kept.
   expect((await built(svc.body.id)).allowInternalHost).toBe(true);
@@ -190,6 +190,36 @@ test("git.branches follows the project's internal hosts, not the uptime setting"
     const metadata = await branches("https://169.254.169.254/x.git", owner);
     expect(metadata.status).toBe(400);
     expect(seen.length).toBe(before);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
+// Round 3: an admin's "Check access" on a LAN-only name (one the panel's DNS does not know) failed
+// with "did not resolve", although the admin can save a source with it. Admins read it by name;
+// for anyone else the panel never asks DNS again unchecked.
+test("git.branches reads a name the panel cannot resolve by name for admins only", async () => {
+  const seen: string[] = [];
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (input: string | URL | Request) => {
+    seen.push(String(input instanceof Request ? input.url : input));
+    return advertisement();
+  }) as typeof fetch);
+  try {
+    const branches = (url: string, cookie: string) => callOp(panel, gitOps.branches, { projectId, url }, { cookie });
+    const byMember = await branches("https://git.home.arpa/a.git", member);
+    expect(byMember.body.error?.details?.reason).toBe("unresolvable");
+    expect(seen).toHaveLength(0);
+    const byOwner = await branches("https://git.home.arpa/a.git", owner);
+    // Before: 400 unresolvable.
+    expect(byOwner.status).toBe(200);
+    expect(byOwner.body).toEqual({ branches: ["main"], defaultBranch: "main" });
+    expect(seen).toEqual(["https://git.home.arpa/a.git/info/refs?service=git-upload-pack"]);
+    // A recorded host does not open the by-name read to members.
+    expect(
+      (await callOp(panel, gitOps.allowInternalHost, { projectId, url: "https://git.home.arpa/a.git" }, { cookie: owner })).status,
+    ).toBe(200);
+    expect((await branches("https://git.home.arpa/a.git", member)).body.error?.details?.reason).toBe("unresolvable");
+    expect(seen).toHaveLength(1);
   } finally {
     fetchSpy.mockRestore();
   }
