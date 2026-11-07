@@ -133,7 +133,7 @@ replicas, updates with rollback, the CLI, MCP, the panel domain with an
 ACME certificate from Pebble, uninstall, Docker Hub, a Gitea provider with
 watch paths, scheduled cleanup, host shells, clone and move, Valkey,
 ClickHouse and pgvector, and an upgrade from the last release (0.1.1,
-built from its tag) through the normal update. It takes about 75 minutes
+built from its tag) through the normal update. It takes about 50 minutes
 on an Apple silicon Mac and needs Colima, Lima, minisign, jq, python3,
 psql and Node.js (check 30 runs Playwright). The results and their evidence go to
 `test/e2e-colima/RESULTS.md`.

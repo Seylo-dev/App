@@ -10,15 +10,14 @@ WebSocket, so the panel never connects to a node and nodes need no inbound
 port for the agent. Apps keep running, restarting and routing while the
 panel is away.
 
-Documentation: https://docs.seylo.dev (not online yet: until it is, read the
-pages in [Seylo-dev/Website](https://github.com/Seylo-dev/Website/tree/main/apps/docs/content/docs),
-the docs app's `content/docs`)
+Documentation: https://docs.seylo.dev (its source is the docs app in
+[Seylo-dev/Website `apps/docs`](https://github.com/Seylo-dev/Website/tree/main/apps/docs))
 
-> Status: pre-release. The panel, the agent and the installer run end to end
-> on test VMs (`make e2e`, 31 of 31 checks, results in
-> [test/e2e-colima/RESULTS.md](test/e2e-colima/RESULTS.md)), but no release
-> has been published and seylo.dev is not online yet, so the install command
-> below works from v0.1.0 on and the docs site is not up.
+> Status: early (0.x). The panel, the agent and the installer run end to end
+> on test VMs (`make e2e`, 38 checks, including an update from the 0.1.1
+> release with real data; results in
+> [test/e2e-colima/RESULTS.md](test/e2e-colima/RESULTS.md)). Releases start
+> at v0.1.0, and the install command below installs the latest one.
 > [CONTRACTS.md](CONTRACTS.md) ("Not built yet") lists what is missing or
 > only tested against stand-ins (Let's Encrypt, real S3 buckets, the
 > Anthropic API and MCP hosts, a real Pelican Wings node).
