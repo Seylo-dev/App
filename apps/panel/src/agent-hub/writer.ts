@@ -3,11 +3,18 @@
 // drained round-robin while the socket has room, so a large upload never
 // delays a deploy call or another stream's terminal output. Mirrors
 // go/internal/conn/writer.go.
+//
+// Bun drops a message once a socket buffers more than its backpressure
+// limit (send returns 0) and keeps the socket open. A dropped CALL, WINDOW,
+// CLOSE or RESULT would leave that node's session silently wrong, so the
+// first drop closes the writer and tells the session, which closes the
+// connection: the agent reconnects and both sides resync.
 
 import { encodeFrame, type Frame, FrameKind } from "@seylo/proto";
 
 export interface WriterSocket {
-  send(bytes: Uint8Array): void;
+  /** Bun's send status: bytes sent, -1 queued under backpressure, 0 dropped. */
+  send(bytes: Uint8Array): number;
   /** Bytes the socket has queued but not sent. Without it DATA is written at once. */
   bufferedAmount?(): number;
 }
@@ -23,11 +30,15 @@ export class FrameWriter {
   private order: number[] = [];
   private closed = false;
 
-  constructor(private readonly socket: WriterSocket) {}
+  constructor(
+    private readonly socket: WriterSocket,
+    /** The socket dropped a frame; called once, after which nothing more is written. */
+    private readonly onDropped: () => void = () => {},
+  ) {}
 
   control(frame: Frame): void {
     if (this.closed) return;
-    this.socket.send(encodeFrame(frame));
+    this.write(encodeFrame(frame));
   }
 
   data(stream: number, payload: Uint8Array): void {
@@ -84,8 +95,15 @@ export class FrameWriter {
       }
       if (queue.length > 0) this.order.push(stream);
       else this.queues.delete(stream);
-      if ("data" in item) this.socket.send(encodeFrame({ kind: FrameKind.DATA, stream, payload: item.data }));
-      else this.socket.send(encodeFrame(item.frame));
+      if ("data" in item) this.write(encodeFrame({ kind: FrameKind.DATA, stream, payload: item.data }));
+      else this.write(encodeFrame(item.frame));
+      if (this.closed) return;
     }
+  }
+
+  private write(bytes: Uint8Array): void {
+    if (this.socket.send(bytes) !== 0) return;
+    this.close();
+    this.onDropped();
   }
 }

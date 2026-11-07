@@ -168,7 +168,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   bytes in DATA, CLOSE carrying the response.
 - DATA is flow controlled per stream (initial window from OPEN, WINDOW
   grants). Control frames go first; DATA is chunked to 32 KiB and
-  round-robined across streams.
+  round-robined across streams. When Bun drops a frame because the agent
+  socket buffers past its backpressure limit (16 MiB; `send` returns 0),
+  the panel's `FrameWriter` stops writing and the session closes the
+  connection with 1011 ("the agent stopped reading"): calls in flight fail
+  as offline and the agent reconnects and resyncs, instead of CALLs,
+  WINDOWs, CLOSEs or RESULTs vanishing on an open socket.
 - Every RPC has a `capability` option; call a method only when the peer
   advertised its capability.
 - Durable reports (crashes, final deploy/build results, cron runs, backups,

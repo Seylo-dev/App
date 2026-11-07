@@ -54,7 +54,8 @@ import { FrameWriter } from "./writer";
 
 /** The socket as the session needs it; the endpoint adapts Bun's. */
 export interface AgentSocket {
-  send(bytes: Uint8Array): void;
+  /** Bun's send status: bytes sent, -1 queued under backpressure, 0 dropped (FrameWriter closes on that). */
+  send(bytes: Uint8Array): number;
   close(code: number, reason: string): void;
   /** Bytes queued in the socket; lets the writer hold DATA back under backpressure. */
   bufferedAmount?(): number;
@@ -76,9 +77,10 @@ export interface SessionDeps {
 type HandshakeStep = NonNullable<MessageInitShape<typeof HandshakeSchema>["step"]>;
 type Settle = (result: { ok: true; bytes: Uint8Array } | { ok: false; error: Error }) => void;
 
-/** WebSocket close codes: 1002 protocol error, 1008 policy violation. */
+/** WebSocket close codes: 1002 protocol error, 1008 policy violation, 1011 the panel cannot go on. */
 const closeProtocolError = 1002;
 const closeRejected = 1008;
+const closeUnavailable = 1011;
 
 /**
  * Limits on what one agent may make the panel hold. A compromised node may
@@ -140,7 +142,7 @@ export class AgentSession {
     /** The panel base URL the agent dialed, for example "https://panel.example.com" (lowercased). */
     private readonly address: string | null = null,
   ) {
-    this.writer = new FrameWriter(socket);
+    this.writer = new FrameWriter(socket, () => queueMicrotask(() => this.backpressureClose()));
   }
 
   get nodeId(): string {
@@ -578,6 +580,17 @@ export class AgentSession {
     this.state = "closed";
     this.writer.close();
     this.socket.close(closeRejected, message.slice(0, 120));
+  }
+
+  /** The socket dropped a frame (the agent stopped reading): end the session so both sides start over. */
+  private backpressureClose(): void {
+    if (this.state === "closed") return;
+    this.deps.logger.warn(
+      { nodeId: this.nodeIdValue || undefined },
+      "agent socket dropped a frame under backpressure (the agent stopped reading); closing the connection",
+    );
+    this.closed();
+    this.socket.close(closeUnavailable, "the agent stopped reading");
   }
 
   private protocolError(reason: string): void {
