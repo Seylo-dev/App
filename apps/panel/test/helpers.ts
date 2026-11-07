@@ -8,7 +8,7 @@ import { loadConfig } from "../src/config";
 import { openDatabases } from "../src/db/client";
 import { apiKeys, grants, type Role, users } from "../src/db/schema";
 import type { ProxyTrust } from "../src/http/proxy-trust";
-import { silentLogger } from "../src/logger";
+import { type Logger, silentLogger } from "../src/logger";
 import type { PanelModule } from "../src/modules/module";
 import type { RateLimiter } from "../src/ops/rate-limit";
 import { createPanel, type Panel } from "../src/panel";
@@ -22,7 +22,7 @@ export interface TestPanel extends Panel {
 }
 
 export function testPanel(
-  options: { modules?: readonly PanelModule[]; rateLimiter?: RateLimiter; webDist?: string; proxy?: ProxyTrust } = {},
+  options: { modules?: readonly PanelModule[]; rateLimiter?: RateLimiter; webDist?: string; proxy?: ProxyTrust; logger?: Logger } = {},
 ): TestPanel {
   const config = {
     ...loadConfig({}, packageRoot),

@@ -15,10 +15,10 @@
 import { type AnyOpContract, OpError } from "@seylo/ops";
 import { type Access, createAccess, type Target, targetOf } from "../auth/access";
 import { authenticate, type Credentials } from "../auth/authenticate";
-import type { Principal, PrincipalUser } from "../auth/principal";
+import { describePrincipal, type Principal, type PrincipalUser } from "../auth/principal";
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
-import { targetLabel, targetProject, writeAudit } from "./audit";
+import { anonymousErrorRows, firstOverCapThisHour, takeAnonymousErrorRow, targetLabel, targetProject, writeAudit } from "./audit";
 import type { HttpEffects, OpContext, OpHandler } from "./implement";
 import type { RateLimiter } from "./rate-limit";
 import { checkOutput, parseInput } from "./validate";
@@ -107,6 +107,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       return { ok: true, output: checked.value };
     } catch (thrown) {
       const error = toOpError(thrown, deps, op);
+      logRefusal(deps, call, principal, actor.user, error);
       audit(deps, call, principal, actor.user, audited(), { target, label, projectId }, error.code, started);
       return { ok: false, error };
     }
@@ -173,6 +174,16 @@ function audit(
 ) {
   if (!call.op.audit) return;
   if (principal.type === "anonymous" && call.op.permission.kind !== "public") return;
+  // Failed anonymous attempts (sign-ins from rotating addresses) are capped per hour.
+  if (principal.type === "anonymous" && errorCode && !takeAnonymousErrorRow(deps.db)) {
+    if (firstOverCapThisHour(deps.db)) {
+      deps.logger.warn(
+        { opId: call.op.id, perHour: anonymousErrorRows.perHour },
+        "audit: anonymous failures over the hourly cap are not stored",
+      );
+    }
+    return;
+  }
   try {
     writeAudit(deps.db, {
       op: call.op,
@@ -195,6 +206,30 @@ function audit(
     // change into an error the caller would retry.
     deps.logger.error({ err: error, opId: call.op.id }, "writing the audit log failed");
   }
+}
+
+/**
+ * One warning in the process log per refusal that matters for security:
+ * a failed sign-in (UNAUTHENTICATED from a public op: a wrong password or
+ * code), a refused permission or re-auth (FORBIDDEN), a lock or limit
+ * (RATE_LIMITED). The audit table has the details; these lines are for
+ * `docker logs`, fail2ban and alerting. Never secrets: the op id, the
+ * address, the person (when known) and the panel's own safe message.
+ */
+function logRefusal(deps: Deps, call: OpCall, principal: Principal, standIn: PrincipalUser | undefined, error: OpError): void {
+  const signIn = error.code === "UNAUTHENTICATED" && call.op.permission.kind === "public";
+  if (!signIn && error.code !== "FORBIDDEN" && error.code !== "RATE_LIMITED") return;
+  const actor = principal.type === "anonymous" ? (standIn?.email ?? null) : describePrincipal(principal);
+  const fields = {
+    opId: call.op.id,
+    ip: call.ip,
+    actor,
+    transport: call.transport,
+    code: error.code,
+    ...(error.details?.reason ? { reason: error.details.reason } : {}),
+  };
+  const what = signIn ? "sign-in failed" : error.code === "FORBIDDEN" ? "op refused" : "op rate limited";
+  deps.logger.warn(fields, `${what}: ${error.message}`);
 }
 
 function toOpError(thrown: unknown, deps: Deps, op: AnyOpContract): OpError {

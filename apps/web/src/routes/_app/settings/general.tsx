@@ -1,5 +1,6 @@
-// Settings > General: panel name, panel domain (with its certificate state)
-// and the node new services go to by default.
+// Settings > General: panel name, panel domain (with its certificate state),
+// the node new services go to by default, uptime check targets and how long
+// the activity log keeps entries.
 
 import { nodes, type OpOutput, settings } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -106,6 +107,8 @@ function GeneralForm({ data }: { data: General }) {
 
       <UptimeTargets allowed={data.uptimeAllowInternalTargets} />
 
+      <AuditRetention days={data.auditRetentionDays} />
+
       <SectionCard title={t("settings.general.addressTitle")} description={t("settings.general.addressDescription")}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-medium text-ink-strong">{t("settings.general.domainState")}</span>
@@ -138,6 +141,9 @@ function GeneralSkeleton() {
       <SectionCardSkeleton titleWidth="w-28" description="w-96">
         <SettingRowSkeleton titleWidth="w-56" />
       </SectionCardSkeleton>
+      <SectionCardSkeleton titleWidth="w-24" description="w-80">
+        <SettingRowSkeleton titleWidth="w-40" />
+      </SectionCardSkeleton>
       <SectionCardSkeleton titleWidth="w-20" description="w-80">
         <SkeletonText className="w-28 text-[13px]" />
         <Skeleton className="h-[38px]" />
@@ -163,6 +169,49 @@ function UptimeTargets({ allowed }: { allowed: boolean }) {
             onCheckedChange={(on) => save.mutate({ uptimeAllowInternalTargets: on })}
             aria-label={t("settings.general.uptimeInternal")}
           />
+        }
+      />
+    </SectionCard>
+  );
+}
+
+/** Choices for how long the activity log keeps entries; "forever" is null. */
+const retentionChoices = [90, 180, 365, 730, 1825] as const;
+const keepForever = "forever";
+
+/** How long the audit log keeps entries. Saves on change. */
+function AuditRetention({ days }: { days: number | null }) {
+  const save = useSettingsMutation(settings.updateGeneral, { invalidates: [settings.general], success: t("settings.saved") });
+  const current = save.isPending && save.variables?.auditRetentionDays !== undefined ? save.variables.auditRetentionDays : days;
+  const value = current === null ? keepForever : String(current);
+  // A value set through the API that is not one of the choices still shows.
+  const choices =
+    current === null || (retentionChoices as readonly number[]).includes(current) ? retentionChoices : [...retentionChoices, current];
+  return (
+    <SectionCard title={t("settings.general.auditTitle")} description={t("settings.general.auditDescription")}>
+      <SettingRow
+        title={t("settings.general.auditRetention")}
+        description={t("settings.general.auditRetentionHint")}
+        control={
+          <Select
+            value={value}
+            disabled={save.isPending}
+            onValueChange={(next) => save.mutate({ auditRetentionDays: next === keepForever ? null : Number(next) })}
+          >
+            <SelectTrigger className="w-[160px]" aria-label={t("settings.general.auditRetention")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {choices.map((choice) => (
+                <SelectItem key={choice} value={String(choice)}>
+                  {choice % 365 === 0
+                    ? t("settings.general.auditYears", { count: choice / 365 })
+                    : t("settings.general.auditDays", { count: choice })}
+                </SelectItem>
+              ))}
+              <SelectItem value={keepForever}>{t("settings.general.auditForever")}</SelectItem>
+            </SelectContent>
+          </Select>
         }
       />
     </SectionCard>

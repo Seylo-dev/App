@@ -736,6 +736,22 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   the op runs (so deletes keep it); refused attempts keep the target id but
   no name. Public sign-in ops call `ctx.auditAs(user)` so the entry belongs
   to the person who signed in (or whose password was tried).
+  Failed anonymous calls are stored up to 200 an hour (`anonymousErrorRows`
+  in `src/ops/audit.ts`, in memory); past that only one log line says so.
+  The audit log keeps entries for `settings.general.auditRetentionDays`
+  (30 to 3650 days, default 365, null = forever; Settings > General >
+  Activity log; MCP tokens and the assistant may not change it), pruned daily by the `audit.prune` job
+  (`modules/audit/retention.ts`); successful entries of `auth.*`,
+  `apiKeys.*`, `users.*`, `invites.*`, `grants.*`, `cliLogin.*`,
+  `hostShell.*`, `mcp.*`, `setup.*` and `nodes.createJoinToken` are kept
+  whatever it says (`keptAuditOps`).
+- Security log lines: besides the audit table, the pipeline writes one pino
+  warning per failed sign-in (UNAUTHENTICATED from a public op, "sign-in
+  failed"), FORBIDDEN ("op refused", re-auth refusals carry `reason:
+  reauth`) and RATE_LIMITED ("op rate limited", locks carry `reason:
+  locked`, the per-email brake `accountBrake`), with `opId`, `ip`, `actor`
+  (the person when known), `transport` and `code`, never input. A rejected
+  agent hello logs `remoteIp` with its reason and node id.
 - Setup link: the installer writes a `<slug>_setup_...` token to
   `<dataDir>/setup-token` (one line, 0600) before the panel's first start
   and prints `<url>/setup?t=<token>`. While no owner exists the panel

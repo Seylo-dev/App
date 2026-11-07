@@ -61,7 +61,10 @@ export function assertNotLocked(db: PanelDb, key: string, now = Date.now()): voi
   const streak = streaks(db).get(key);
   if (streak && streak.lockedUntil > now) {
     const seconds = Math.ceil((streak.lockedUntil - now) / 1000);
-    throw new OpError("RATE_LIMITED", `Too many failed sign-ins. Try again in ${seconds} seconds.`, { retryAfter: String(seconds) });
+    throw new OpError("RATE_LIMITED", `Too many failed sign-ins. Try again in ${seconds} seconds.`, {
+      retryAfter: String(seconds),
+      reason: "locked",
+    });
   }
 }
 
@@ -173,6 +176,7 @@ export function beginPasswordCheck(db: PanelDb, email: string, ip: string | null
     const seconds = Math.max(1, Math.ceil((Math.max(streak.nextCheckAt, now + 1) - now) / 1000));
     throw new OpError("RATE_LIMITED", `Too many failed sign-ins for this email. Try again in ${seconds} seconds.`, {
       retryAfter: String(seconds),
+      reason: "accountBrake",
     });
   }
   streak.nextCheckAt = now + softThrottle.intervalMs;

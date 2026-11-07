@@ -7,9 +7,11 @@ import { slug } from "@seylo/brand";
 import { audit as auditOps, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog } from "../../db/schema";
+import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
 import { defineModule } from "../module";
 import { auditWhere, parseCursor, queryAudit, toCsv, toEntry, toJsonl } from "./query";
+import { pruneAudit } from "./retention";
 
 export const maxExportRows = 10_000;
 
@@ -60,7 +62,20 @@ const exportLog = implement(auditOps.exportLog, (input, ctx) => {
       };
 });
 
+/** Applies the retention setting once a day (retention.ts). */
+const prune = defineJob<Record<string, never>>({
+  type: "audit.prune",
+  async run(_payload, ctx) {
+    const removed = pruneAudit(ctx.db);
+    if (removed > 0) ctx.logger.info({ removed }, "old audit entries removed");
+  },
+});
+
 export default defineModule({
   name: "audit",
   ops: [list, get, exportLog],
+  jobs: [prune],
+  start(deps) {
+    deps.schedules.ensure({ key: "audit.prune", jobType: "audit.prune", cron: "47 3 * * *" });
+  },
 });

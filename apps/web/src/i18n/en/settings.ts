@@ -76,6 +76,13 @@ export default {
     uptimeInternal: "Allow checks of internal addresses",
     uptimeInternalHint:
       "Loopback, private and link-local addresses and cloud metadata. Domains of services here and the nodes' own addresses are always allowed.",
+    auditTitle: "Activity log",
+    auditDescription: "Older entries are removed once a day.",
+    auditRetention: "Keep entries for",
+    auditRetentionHint: "Sign-ins, API keys, people, grants and host shells are kept whatever you pick.",
+    auditDays: "{count} days",
+    auditYears: { one: "{count} year", other: "{count} years" },
+    auditForever: "Forever",
   },
 
   updates: {

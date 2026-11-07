@@ -32,6 +32,9 @@ export const DomainState = Type.Union([
   Type.Literal("error"),
 ]);
 
+/** How long the audit log keeps entries, in days. */
+export const AuditRetentionDays = Type.Integer({ minimum: 30, maximum: 3650 });
+
 export const GeneralSettings = Type.Object({
   name: PanelName,
   /** Panel domain; null while the panel is only reachable on IP:port. */
@@ -52,6 +55,12 @@ export const GeneralSettings = Type.Object({
    * always allowed.
    */
   uptimeAllowInternalTargets: Type.Boolean(),
+  /**
+   * Days the audit log keeps entries (pruned daily); null keeps them all.
+   * Successful security changes (sign-ins, keys, people, grants, host
+   * shells) are kept whatever this says.
+   */
+  auditRetentionDays: Type.Union([AuditRetentionDays, Type.Null()]),
 });
 
 export const general = defineOp({
@@ -71,12 +80,13 @@ export const updateGeneral = defineOp({
   kind: "mutation",
   summary: "Update general settings",
   description:
-    "Changes the panel name, the panel domain (null removes it and goes back to IP:port) or the default node. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect.",
+    "Changes the panel name, the panel domain (null removes it and goes back to IP:port), the default node or how long the audit log keeps entries. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect.",
   input: Type.Object({
     name: Type.Optional(PanelName),
     domain: Type.Optional(Type.Union([Hostname, Type.Null()])),
     defaultNodeId: Type.Optional(Type.Union([Id, Type.Null()])),
     uptimeAllowInternalTargets: Type.Optional(Type.Boolean()),
+    auditRetentionDays: Type.Optional(Type.Union([AuditRetentionDays, Type.Null()])),
   }),
   output: GeneralSettings,
   permission: permission.global("settings.manage"),

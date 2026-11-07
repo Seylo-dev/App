@@ -29,6 +29,43 @@ export interface AuditEntry {
   at: Date;
 }
 
+/**
+ * Failed anonymous calls (wrong passwords, unknown sign-in tickets) are
+ * stored up to this many per hour; past it they go to the process log
+ * only, so a campaign from rotating addresses cannot grow panel.db without
+ * bound. In memory per panel database; tests change it.
+ */
+export const anonymousErrorRows = { perHour: 200 };
+
+const hourMs = 3600 * 1000;
+const anonymousCounts = new WeakMap<PanelDb, { hour: number; count: number; warned: boolean }>();
+
+function hourCounter(db: PanelDb, now: number) {
+  const hour = Math.floor(now / hourMs);
+  let counter = anonymousCounts.get(db);
+  if (!counter || counter.hour !== hour) {
+    counter = { hour, count: 0, warned: false };
+    anonymousCounts.set(db, counter);
+  }
+  return counter;
+}
+
+/** Counts one stored anonymous failure; false once this hour's cap is used. */
+export function takeAnonymousErrorRow(db: PanelDb, now = Date.now()): boolean {
+  const counter = hourCounter(db, now);
+  if (counter.count >= anonymousErrorRows.perHour) return false;
+  counter.count++;
+  return true;
+}
+
+/** True the first time in an hour a failure is dropped (one log line, not one per attempt). */
+export function firstOverCapThisHour(db: PanelDb, now = Date.now()): boolean {
+  const counter = hourCounter(db, now);
+  if (counter.warned) return false;
+  counter.warned = true;
+  return true;
+}
+
 export function writeAudit(db: PanelDb, entry: AuditEntry): void {
   const { principal } = entry;
   const standIn = principal.type === "anonymous" ? entry.actor : undefined;
