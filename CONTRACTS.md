@@ -139,10 +139,13 @@ The generated indexes let features land without touching a shared list:
 | `go/gen/pb`, `packages/proto/src/gen` | `proto/` |
 | `openapi.json` | the op contracts |
 
-Migrations: `apps/panel/drizzle/panel` starts with one `0000_init.sql`
-(regenerated from scratch before the first release, so there is no
-upgrade history yet). After a schema change run `bun run db:generate` in
-apps/panel and commit the new migration with the change. Two people
+Migrations: `apps/panel/drizzle/panel` starts with `0000_init.sql`, frozen
+since the first release (0.1.0): installs out there have it applied, so it
+never changes again. Every schema change after it is a new, add-only
+migration (`0001_features` for 0.2), which the panel applies at start, also
+right after an update (e2e check 38 updates a 0.1.1 install). After a
+schema change run `bun run db:generate` in apps/panel and commit the new
+migration with the change. Two people
 generating migrations at the same time produce conflicting journals: if
 `drizzle/panel/meta/_journal.json` conflicts, drop your uncommitted
 migration, take theirs, and run `db:generate` again.
@@ -1110,10 +1113,10 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | `seylo panel start` and `seylo panel logs` on a node whose panel is not a managed service | NOT_IMPLEMENTED from `agent.PanelControl` only when nothing set it (`wire_node.go` sets it) |
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
-| `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
+| `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
-| Exposed database users through the real panel ran for Postgres only (e2e check 10: TLS-only user, `psql sslmode=require`, plain refused); MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
-| The engines added in 0.2 (Valkey, KeyDB, Dragonfly, ClickHouse, Postgres 18, pgvector) ran through the agent's VM package tests (create, client, web UI, exposure, backup and restore through MinIO; every offered version) and the panel's unit tests and Playwright, not yet through `make e2e`: the capability gate, exposure gating by `nodes.facts`, the edge ticket to the Play proxy and the Shell tab for valkey-cli/clickhouse-client are each tested on their own, not with a real panel driving a real agent | Unit, VM package and browser tests |
+| Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
+| The engines added in 0.2 ran through the agent's VM package tests (create, client, web UI, exposure, backup and restore through MinIO; every offered version), the panel's unit tests and Playwright; Valkey 9.1, ClickHouse 26.8 and Postgres 18 with pgvector also ran through `make e2e` (check 37: created by the panel, an app reaching them by references, the database shells, TLS exposure, backups to MinIO and restores). KeyDB and Dragonfly did not run through a real panel | Unit, VM package, browser and e2e tests |
 | Engine changes in place: a Postgres database cannot switch to or from pgvector (the pgvector images are Debian, the plain ones Alpine: a different collation library under the same data) or change major version; no engine changes major in place | Create a new database and restore a dump into it |
 | Dragonfly has no append-only file: it runs with `--dbfilename dump --df_snapshot_format=false --snapshot_cron "*/5 * * * *"`, so a crash loses up to five minutes of writes (a stop saves first). Only Dragonfly 2.0 is offered | Behaviour as described |
 | KeyDB publishes no multi-arch version tag and has had no release since 6.3.4 (2023): it is pinned by the digest of its `latest` index, which is `x86_64_v6.3.4` + `arm64_v6.3.4`. It gets no security fixes: the 2025 Redis Lua scripting advisories (CVE-2025-49844 use-after-free RCE, CVE-2025-46817, CVE-2025-46818, CVE-2025-46819; fixed in Redis 6.2.20 and Valkey) are unpatched in it, and its one `default` user may run scripts. The New database form, `databases.engines` (`notice`) and the op descriptions say so and point to Valkey; `databases.setExposure` refuses KeyDB without `allowedCidrs` (`exposure.needsAllowedCidrs`, reason `allowlistRequired`). Lua stays on (renaming EVAL would break clients such as BullMQ) | One KeyDB version, unmaintained, exposed only to listed addresses |
@@ -1147,7 +1150,7 @@ tests that run in a Linux VM (`scripts/dev/vm-gotest.sh`), git providers
 run against a real Gitea in that VM (`scripts/dev/it-gitea.sh`: the panel
 test `gitea.integration.test.ts` and the agent's `TestITGiteaPrivateClone`), the web app has
 Playwright suites (`test/playwright/run.sh`), and `make e2e` runs the real
-installer on three fresh VMs and 31 end-to-end checks against test-signed
+installer on three fresh VMs and 38 end-to-end checks against test-signed
 releases from a local mirror (`test/e2e-colima/README.md`; the evidence of
 the latest run is in `test/e2e-colima/RESULTS.md`). Every op contract has a
 handler.
@@ -1166,8 +1169,13 @@ address), dial A:443 only, come back on the domain after an agent restart
 return to `https://<A>:3443` by themselves within about 7 minutes (5 minutes
 of failed connects first). Kept VMs move to the working tree with
 `make e2e-refresh` (`test/e2e-colima/refresh.sh`: the next test release
-through the panel's own update; `schema-sync.ts` first adds the regenerated
-init migration's new columns to the kept databases).
+through the panel's own update, which applies new migrations like any
+update). Checks 32-38 cover the 0.2 features (Docker Hub against the real
+Docker Hub, a Gitea provider with watch paths and `[skip ci]`, the
+disk-triggered cleanup, host shells, clone and project move, Valkey,
+ClickHouse and pgvector) and the update from the 0.1.1 release, built from
+its tag, to this build with real rows (`0001_features` applies, rows and
+keys survive, a cron job saved with 7 for Sunday reads 0 and runs).
 
 ## Capabilities
 
