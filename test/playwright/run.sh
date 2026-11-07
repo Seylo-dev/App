@@ -53,7 +53,10 @@ wait_for() {
 (cd "$here" && bun install --frozen-lockfile >/dev/null)
 "$here/node_modules/.bin/playwright" install chromium >/dev/null
 
+# The specs stand in for GitHub where they need it, so this panel never talks
+# to it: a placeholder client id keeps GitHub off whatever brand.json holds.
 env "${prefix}DATA_DIR=$DATA_DIR" "${prefix}PORT=$panel_port" "${prefix}HOST=127.0.0.1" "${prefix}SECURE_COOKIES=false" \
+  "${prefix}GITHUB_CLIENT_ID=PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID" \
   bun "$root/apps/panel/src/main.ts" >"$shots/panel.log" 2>&1 &
 pids+=($!)
 wait_for "http://127.0.0.1:$panel_port/api/v1/settings.boot" "the panel"

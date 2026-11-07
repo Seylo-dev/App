@@ -245,7 +245,7 @@ test("the CLI approval asks first and then approves", async ({ page, playwright 
 
 test("linking GitHub asks first, then shows the device code", async ({ page }) => {
   const errors = trackErrors(page);
-  // This panel has no GitHub client id: pretend it has one and answer the link flow like the panel would.
+  // run.sh gives this panel no GitHub client id: pretend it has one and answer the link flow like the panel would.
   await page.route("**/api/v1/auth.security*", async (route) => {
     const response = await route.fetch();
     await route.fulfill({ response, json: { ...(await response.json()), githubAvailable: true } });

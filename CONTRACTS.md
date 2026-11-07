@@ -1125,7 +1125,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Runtime gaps: resource changes roll a new container instead of `docker update`; the portgate's `Resolve` may still pick an unhealthy replica (routes skip it); a brand slug with a dash would nest `<slug>.slice` under the systemd cgroup driver (`seylo` has none). The systemd driver path ran in a VM with `native.cgroupdriver=systemd` (docker, reconcile, wings incl. games-first CPU through systemctl, proxy, agent, jobrun, metrics, nodecheck packages) | Behaviour as described |
 | Observe Docker access goes through `console/dockerapi`, not `d.Docker`: kept on purpose. It needs raw multiplexed log frames with `until` (partial lines, the restart cursor), separate stdout/stderr for non-TTY exec, exec inspect for the process sweep, destroy events and one-shot stats, none of which `docker.Engine` exposes; moving it would mean five new Engine methods and re-verifying logs capture, console, shell and metrics for no user-visible change. It only reads, attaches and execs | Two Docker clients in the agent (both scoped to our containers) |
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent) | Logged errors / reopen links |
-| GitHub: device-flow sign-in needs a GitHub OAuth App client id (`brand.oauthClientId` is a placeholder); the App manifest flow, installations, webhooks and polling are tested only against a mocked api.github.com; a public git repo build was not run | `githubAvailable: false`; GitHub ops answer UNAVAILABLE |
+| GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
@@ -1541,9 +1541,9 @@ rates come from the cumulative counters of consecutive samples.
 
 ## Placeholders
 
-Values that are not set yet are `PLACEHOLDER_*` in `brand/brand.json`
-(`oauthClientId`, `minisignPublicKey`); code checks with
-`brand.PlaceholderPrefix` / `isPlaceholder()` and disables the feature
+`oauthClientId` and `minisignPublicKey` in `brand/brand.json` may be
+`PLACEHOLDER_*` (both are set here; a fork may leave them out); code checks
+with `brand.PlaceholderPrefix` / `isPlaceholder()` and disables the feature
 instead of failing. The site has its own brand file;
 `scripts/dev/check-site-brand.sh` checks that both name the same site, docs
 (`https://docs.seylo.dev`) and install URLs and GitHub repo.
