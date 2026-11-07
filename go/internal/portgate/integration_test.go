@@ -87,7 +87,16 @@ func TestIntegrationRelayToContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := ports["public-80"]
-	if code, body, _ := get(port); code != 200 || !strings.Contains(body, "Name: pg") {
+	// whoami listens a moment after its container starts; until then the relay's
+	// backend connection is refused and the client sees a reset.
+	var code int
+	var body string
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		if code, body, _ = get(port); code == 200 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if code != 200 || !strings.Contains(body, "Name: pg") {
 		t.Fatalf("first-run access: %d %q", code, body)
 	}
 
