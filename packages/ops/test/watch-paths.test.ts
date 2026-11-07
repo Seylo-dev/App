@@ -52,6 +52,20 @@ describe("globToRegExp", () => {
     ["aa", "aaa", false],
     ["src/**/*.ts", "src/a.tsx", false],
     ["src/**/*.ts", "lib/src/a.ts", false],
+    // So is the longest literal run in between, which must lie after the head and before the tail.
+    ["**/__tests__/**", "__tests__/a.ts", true],
+    ["**/__tests__/**", "src/__tests__/a.ts", true],
+    ["**/__tests__/**", "src/__tests__", false],
+    ["**/__tests__/**", "src/x__tests__/a.ts", false],
+    ["**/*.test.*", "src/a.test.ts", true],
+    ["**/*.test.*", "src/a.test", false],
+    ["ab*ab*ab", "abab", false],
+    ["ab*ab*ab", "ababab", true],
+    ["ab*cd*ab", "abcdab", true],
+    ["ab*cd*ab", "abcab", false],
+    ["ab*cd*ab", "acdab", false],
+    ["x*cdcd*y", "xcdcy", false],
+    ["x*cdcd*y", "xcdcdy", true],
   ];
   for (const [glob, path, matches] of cases) {
     test(`${glob} ${matches ? "matches" : "does not match"} ${path}`, () => {
@@ -117,6 +131,58 @@ describe("matching without backtracking", () => {
       }
     }
     expect(compared).toBe(16_000);
+  });
+
+  test("globs whose literal runs sit between stars agree with the first compiler (the middle short cut)", () => {
+    const next = random(1234);
+    // Common exclusion shapes with no literal head or tail, and runs that repeat or overlap.
+    const shapes = ["**/X/**", "!**/X/**", "**/*X*", "**/*X", "*X*", "**X**", "**/*X*/**", "?X?*", "a*X*a", "X*X", "*X*X*", "**/X?/**"];
+    const runs = [
+      "__tests__",
+      ".test.",
+      "node_modules",
+      "ab",
+      "aba",
+      "abab",
+      "a/b",
+      "/a/",
+      "é日",
+      "\u{1F600}x",
+      "a".repeat(40),
+      `${"ab".repeat(20)}c`,
+    ];
+    const noise = ["a", "b", "/", ".", "_", "é", "\u{1F600}"];
+    let compared = 0;
+    let matched = 0;
+    for (let g = 0; g < 600; g++) {
+      const run = runs[next(runs.length)] as string;
+      const pattern = (shapes[next(shapes.length)] as string).replaceAll("X", run);
+      const glob = pattern.replace(/^!/, "");
+      const reference = referenceRegExp(glob);
+      for (let p = 0; p < 30; p++) {
+        // Paths around the run: whole, cut short, cut at either end or with one character changed.
+        let path = "";
+        for (let k = 0, len = next(6); k < len; k++) {
+          const r = next(5);
+          if (r === 0) path += run;
+          else if (r === 1) path += run.slice(0, next(run.length));
+          else if (r === 2) path += run.slice(next(run.length));
+          else if (r === 3) {
+            const at = next(run.length);
+            path += `${run.slice(0, at)}${noise[next(noise.length)]}${run.slice(at + 1)}`;
+          } else path += noise[next(noise.length)];
+        }
+        const expected = reference.test(path);
+        if (expected) matched++;
+        expect({ glob, path, matches: globMatches(glob, path) }).toEqual({ glob, path, matches: expected });
+        // decideWatchFile drops a leading "./" or "/" first, like the repository's own paths.
+        const listed = reference.test(path.replace(/^(\.\/)+/, "").replace(/^\/+/, ""));
+        expect(decideWatchFile([pattern], path).included).toBe(pattern.startsWith("!") ? !listed : listed);
+        compared++;
+      }
+    }
+    expect(compared).toBe(18_000);
+    expect(matched).toBeGreaterThan(1000);
   });
 
   test("repeated groups collapse in the regex", () => {
@@ -250,6 +316,20 @@ describe("matching without backtracking", () => {
     expect(globCost(patterns[0] as string, files[0] as string)).toBe(16);
   });
 
+  test("patterns refused by their middle literal are charged for the search, so the slowest searches still stop within the budget", () => {
+    // 32-character middles that are all "a" but one "b", no literal head or tail: every pair searches a whole 4,096-character path.
+    const patterns = Array.from({ length: maxWatchPaths }, (_, i) => `*${"a".repeat(i % 32)}b${"a".repeat(31 - (i % 32))}*`);
+    const path = "a".repeat(maxChangedPathLength);
+    const files = Array.from({ length: 20_000 }, () => path);
+    const started = performance.now();
+    expect(matchWatchPaths(patterns, files)).toMatchObject({ deploy: true, reason: "tooMany", total: 20_000 });
+    expect(performance.now() - started).toBeLessThan(500);
+    // Half a unit per character searched after the head, and the fixed part of a refused pair.
+    expect(globCost(patterns[0] as string, path)).toBe(16 + maxChangedPathLength / 2);
+    // Only the first 32 characters of a longer run are searched for (43 steps: 2 words of state).
+    expect(globCost(`*${"a".repeat(40)}b*`, path)).toBe((path.length + 8) * (2 + 4) + maxChangedPathLength / 2);
+  });
+
   test("ordinary large pushes are decided in full: 50 realistic patterns against 5,000 and 20,000 changed files", () => {
     // Before: the budget ran out after 3,581 of 5,000 short paths (and 758 of 20,000 long ones), so the push deployed unfiltered.
     const patterns = [
@@ -270,6 +350,22 @@ describe("matching without backtracking", () => {
     expect(short.every((f) => f.length >= 30 && f.length <= 45)).toBe(true);
     expect(matchWatchPaths(patterns, short)).toEqual({ deploy: false, reason: "noMatch", checked: 5_000 });
     expect(matchWatchPaths(patterns, long)).toEqual({ deploy: false, reason: "noMatch", checked: 20_000 });
+    // Exclusions with no literal head or tail are refused by the literal run in their middle. Before: tooMany after 17,022.
+    const monorepo = [...patterns.slice(0, 9)];
+    monorepo.push("!**/__tests__/**", "!**/node_modules/**", "!**/fixtures/**", "!**/*.test.*", "!**/*.spec.*", "!**/testdata/**");
+    monorepo.push("!**/.storybook/**", "!**/*.stories.*", "!**/__snapshots__/**");
+    while (monorepo.length < maxWatchPaths) monorepo.push(`libs/lib${monorepo.length}/src/**/*.ts`);
+    const medium = Array.from(
+      { length: 20_000 },
+      (_, i) => `packages/service-${i % 40}/src/modules/feature-${i % 97}/components/widget-${i}.tsx`,
+    );
+    expect(medium.reduce((sum, f) => sum + f.length, 0) / medium.length).toBeGreaterThan(65);
+    expect(matchWatchPaths(monorepo, medium)).toEqual({ deploy: false, reason: "noMatch", checked: 20_000 });
+    // The exclusions still decide: a test file under apps/web is excluded, any other file there counts.
+    const excluded = [...medium.slice(0, 19_999), "apps/web/src/__tests__/a.ts"];
+    expect(matchWatchPaths(monorepo, excluded)).toEqual({ deploy: false, reason: "noMatch", checked: 20_000 });
+    const counted = [...medium.slice(0, 19_999), "apps/web/src/a.ts"];
+    expect(matchWatchPaths(monorepo, counted)).toMatchObject({ reason: "matched", pattern: "apps/web/**" });
     // One file that counts still deploys, wherever it is in the list.
     expect(matchWatchPaths(patterns, [...long.slice(0, 19_999), "apps/web/src/index.ts"])).toEqual({
       deploy: true,

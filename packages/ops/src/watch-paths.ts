@@ -19,12 +19,13 @@
 // steps of the glob, whatever the pattern ("a*a*a*..." and
 // "**/**/**/*.md" included). A path that does not start with the glob's
 // literal head or end with its literal tail ("apps/web/" of "apps/web/**",
-// ".md" of "**/*.md") is refused before the automaton runs, which is most
-// of what real pushes ask. A whole push is bounded too: matchWatchPaths
-// stops after watchPathsWorkBudget work units (well under a second at
-// worst) and deploys, like for an incomplete list. Changed paths longer
-// than maxChangedPathLength are not matched at all: they make the list
-// incomplete, which deploys.
+// ".md" of "**/*.md"), or does not contain the longest literal run in
+// between ("__tests__/" of "**/__tests__/**"), is refused before the
+// automaton runs, which is most of what real pushes ask. A whole push is
+// bounded too: matchWatchPaths stops after watchPathsWorkBudget work units
+// (well under a second at worst) and deploys, like for an incomplete
+// list. Changed paths longer than maxChangedPathLength are not matched at
+// all: they make the list incomplete, which deploys.
 
 /** Most patterns a service may have. */
 export const maxWatchPaths = 50;
@@ -34,10 +35,10 @@ export const maxWatchPathLength = 300;
 export const maxChangedPathLength = 4096;
 /**
  * Most work one push decision may take, in globCost units (measured at
- * 1 to 2.3 ns each on an Apple M-series core, so a whole budget is about
+ * 0.7 to 2.3 ns each on an Apple M-series core, so a whole budget is about
  * 150 ms at worst). A push of 20,000 files of 200 characters against 50
- * ordinary patterns uses about 37M; past the budget the push deploys and
- * says so.
+ * ordinary patterns, nine of them exclusions like "!**\/__tests__/**",
+ * uses about 42M; past the budget the push deploys and says so.
  */
 export const watchPathsWorkBudget = 64_000_000;
 /** Work counted per file and per match besides the characters (the fixed part of each call). */
@@ -50,6 +51,14 @@ const workPerCall = 8;
 const workPerCharacter = 4;
 /** Work counted for a pair refused by its literal head or tail (the automaton never runs). */
 const workPerLiteralCheck = 2 * workPerCall;
+/**
+ * Longest literal run searched for in the middle of a path. String
+ * indexOf in Bun 1.4 takes at most about 0.45 ns per character of the
+ * path for needles this short (measured up to 32 on 4,096-character paths
+ * built to be slow), so half a unit per character searched covers it;
+ * past about 250 characters it can take 70 ns per character.
+ */
+const maxMiddleLength = 32;
 
 /** Trims a pattern and drops a leading "./" or "/"; a trailing "/" means everything below. */
 export function normalizeWatchPattern(raw: string): string {
@@ -184,6 +193,12 @@ interface CompiledGlob {
   head: string;
   /** The literal characters it ends with after the head (".md" of "**\/*.md"): a matching path ends with them. */
   tail: string;
+  /**
+   * The longest run of literal characters between head and tail (at most
+   * maxMiddleLength of them, "__tests__/" of "**\/__tests__/**"), or "" when
+   * none has two: a matching path has it between its head and tail.
+   */
+  middle: string;
 }
 
 const compiledGlobs = new Map<string, CompiledGlob>();
@@ -243,6 +258,20 @@ function compileGlob(glob: string): CompiledGlob {
       .slice(from, to)
       .map((step) => literal(step))
       .join("");
+  // The same holds for every run of "char" steps in between: a match reads
+  // it as one piece somewhere after the head and before the tail.
+  let middle = "";
+  for (let i = headEnd; i < tailStart; ) {
+    if (literal(steps[i] as GlobStep) === null) {
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end < tailStart && literal(steps[end] as GlobStep) !== null) end++;
+    if (end - i > middle.length) middle = text(i, end);
+    i = end;
+  }
+  if (middle.length < 2) middle = "";
   const out: CompiledGlob = {
     words,
     finalWord: n >>> 5,
@@ -257,6 +286,7 @@ function compileGlob(glob: string): CompiledGlob {
     rounds,
     head: text(0, headEnd),
     tail: text(tailStart, n),
+    middle: middle.slice(0, maxMiddleLength),
   };
   if (compiledGlobs.size > 2000) compiledGlobs.clear();
   compiledGlobs.set(glob, out);
@@ -279,22 +309,33 @@ function scratchFor(words: number, rounds: number) {
   return scratch;
 }
 
-/** Whether a path can match at all given the glob's literal head and tail; false means it does not match. */
-function fitsLiterals(g: CompiledGlob, path: string): boolean {
-  return path.length >= g.head.length + g.tail.length && path.startsWith(g.head) && path.endsWith(g.tail);
+/**
+ * The glob's literal checks on a path: the work they took beyond what
+ * runCost counts, as a negative number when they rule the path out (the
+ * automaton need not run). Head and tail compare a few characters; the
+ * middle is searched for in the path after the head.
+ */
+function screen(g: CompiledGlob, path: string): number {
+  const { head, tail, middle } = g;
+  if (path.length < head.length + middle.length + tail.length || !path.startsWith(head) || !path.endsWith(tail))
+    return -workPerLiteralCheck;
+  if (middle === "") return 0;
+  const work = (path.length - head.length + 1) >>> 1;
+  const at = path.indexOf(middle, head.length);
+  return at >= 0 && at + middle.length <= path.length - tail.length ? work : -(workPerLiteralCheck + work);
 }
 
 /**
  * Whether a glob (without the "!") matches a whole path. A path without
- * the glob's literal head and tail is refused at once; otherwise the
- * glob's automaton runs over the path once with every live state in one
- * bit set (bit-parallel, no backtracking): each character costs the same
- * few operations per 32 steps of the glob however many states are live,
- * so a match takes at most globCost(glob, path) units.
+ * the glob's literal head, tail and middle is refused at once; otherwise
+ * the glob's automaton runs over the path once with every live state in
+ * one bit set (bit-parallel, no backtracking): each character costs the
+ * same few operations per 32 steps of the glob however many states are
+ * live, so a match takes at most globCost(glob, path) units.
  */
 export function globMatches(glob: string, path: string): boolean {
   const g = compileGlob(glob);
-  return fitsLiterals(g, path) && runGlob(g, path);
+  return screen(g, path) >= 0 && runGlob(g, path);
 }
 
 function runGlob(g: CompiledGlob, path: string): boolean {
@@ -362,7 +403,8 @@ function runGlob(g: CompiledGlob, path: string): boolean {
 /**
  * The most work globMatches does for a glob and a path, in units: a small
  * fixed amount when the literal head or tail already rules the path out,
- * else per character one unit per 32 steps of the glob plus the fixed
+ * half a unit per character searched for the middle, and when the automaton
+ * runs, per character one unit per 32 steps of the glob plus the fixed
  * part of reading a character.
  */
 export function globCost(glob: string, path: string): number {
@@ -375,7 +417,8 @@ function runCost(g: CompiledGlob, path: string): number {
 }
 
 function costOf(g: CompiledGlob, path: string): number {
-  return fitsLiterals(g, path) ? runCost(g, path) : workPerLiteralCheck;
+  const literals = screen(g, path);
+  return literals < 0 ? -literals : literals + runCost(g, path);
 }
 
 /** A changed file as the repository names it, without a leading "./" or "/". */
@@ -423,12 +466,12 @@ function decide(patterns: PreparedPatterns, path: string, budget: { left: number
   const { list } = patterns;
   for (let i = list.length - 1; i >= 0; i--) {
     const { pattern, negated, glob } = list[i] as PreparedPatterns["list"][number];
-    const fits = fitsLiterals(glob, path);
+    const literals = screen(glob, path);
     if (budget) {
-      budget.left -= fits ? runCost(glob, path) : workPerLiteralCheck;
+      budget.left -= literals < 0 ? -literals : literals + runCost(glob, path);
       if (budget.left < 0) return null;
     }
-    if (fits && runGlob(glob, path)) return { file: path, included: !negated, pattern };
+    if (literals >= 0 && runGlob(glob, path)) return { file: path, included: !negated, pattern };
   }
   return { file: path, included: patterns.onlyExclusions, pattern: null };
 }
