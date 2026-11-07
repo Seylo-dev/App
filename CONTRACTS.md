@@ -194,7 +194,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (`agentLimits` in `agent-hub/session.ts`): ClientHello within 10 s,
   agent-opened stream windows clamped to 1 MiB, WINDOW grants past
   2^31-1 are a protocol error, 64 agent-opened streams and 256 calls in
-  flight (RESOURCE_EXHAUSTED beyond), 32 MiB unread on agent streams. One
+  flight (RESOURCE_EXHAUSTED beyond), 32 MiB unread on agent streams (a running count, and
+  `DelimitedDecoder` copies each byte once when its message is complete, so
+  the sender's DATA frame sizes do not change the panel's work). One
   GetStateSnapshot per node at a time. panel.db retention (hourly,
   `modules/nodes/retention.ts`): agent reports and crash reports 30 days
   (newest 200 crashes per service always kept), and per node at most the

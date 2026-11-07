@@ -2,7 +2,7 @@
 // message decoder and stream tickets.
 
 import { describe, expect, test } from "bun:test";
-import { DelimitedDecoder, encodeDelimited } from "../src/agent-hub/channel";
+import { Channel, DelimitedDecoder, encodeDelimited, ProtocolViolation } from "../src/agent-hub/channel";
 import { createTicketStore } from "../src/agent-hub/relay";
 import { agentVersionAllowed, isNewer, minimumAgentVersion, parseVersion } from "../src/agent-hub/version";
 import { createUser, grant, testPanel } from "./helpers";
@@ -37,6 +37,70 @@ describe("DelimitedDecoder", () => {
     const out = [...decoder.push(wire.subarray(0, 1)), ...decoder.push(wire.subarray(1, 200)), ...decoder.push(wire.subarray(200))];
     expect(out.map((m) => m.length)).toEqual([300, 5]);
     expect(decoder.pending).toBe(false);
+  });
+
+  test("any chunking gives the same messages, empty ones and multi-byte prefixes included", () => {
+    let seed = 7;
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    const messages = [0, 1, 127, 128, 300, 16_384, 70_000, 3].map((n, i) => new Uint8Array(n).map((_, k) => (k + i) & 0xff));
+    const wire = new Uint8Array(messages.reduce((sum, m) => sum + encodeDelimited(m).length, 0));
+    let at = 0;
+    for (const m of messages) {
+      const e = encodeDelimited(m);
+      wire.set(e, at);
+      at += e.length;
+    }
+    for (let round = 0; round < 20; round++) {
+      const decoder = new DelimitedDecoder();
+      const out: Uint8Array[] = [];
+      for (let offset = 0; offset < wire.length; ) {
+        const size = round === 0 ? 1 : 1 + next(round * 50);
+        out.push(...decoder.push(wire.subarray(offset, offset + size)));
+        offset += size;
+      }
+      expect(out).toEqual(messages);
+      expect(decoder.pending).toBe(false);
+    }
+    const partial = new DelimitedDecoder();
+    expect(partial.push(encodeDelimited(new Uint8Array(200)).subarray(0, 1))).toEqual([]);
+    expect(partial.pending).toBe(true);
+  });
+
+  test("a 1 MiB message in 1-byte frames decodes in linear time (it took about 34 s)", () => {
+    const wire = encodeDelimited(new Uint8Array(1 << 20).fill(9));
+    const decoder = new DelimitedDecoder();
+    const started = performance.now();
+    let out: Uint8Array[] = [];
+    for (let i = 0; i < wire.length; i++) out = out.concat(decoder.push(wire.subarray(i, i + 1)));
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.length).toBe(1 << 20);
+  });
+
+  test("a bad or oversized length prefix is a protocol violation", () => {
+    expect(() => new DelimitedDecoder().push(new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff]))).toThrow(ProtocolViolation);
+    expect(new DelimitedDecoder().push(new Uint8Array([0x80, 0x80]))).toEqual([]);
+    const tooLarge = new Uint8Array([0x80, 0x80, 0x80, 0x10]); // 2^31
+    expect(() => new DelimitedDecoder().push(tooLarge)).toThrow("stream message too large");
+  });
+});
+
+describe("Channel", () => {
+  test("many tiny frames: reads and the buffered count stay cheap and exact", async () => {
+    const grants: number[] = [];
+    const channel = new Channel(1, 256 << 10, { data() {}, window: (_s, n) => grants.push(n) });
+    const started = performance.now();
+    for (let i = 0; i < 200_000; i++) channel.receive(new Uint8Array([i & 0xff]));
+    expect(channel.buffered).toBe(200_000);
+    let read = 0;
+    for (let i = 0; i < 200_000; i++) read += (await channel.read())?.length ?? 0;
+    expect(read).toBe(200_000);
+    expect(channel.buffered).toBe(0);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(grants.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
   });
 });
 
