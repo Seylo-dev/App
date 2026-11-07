@@ -34,6 +34,7 @@ import {
 import type { PanelDb } from "../db/client";
 import { newId } from "../ids";
 import type { Logger } from "../logger";
+import type { EdgeTicketKey } from "../security/edge-ticket-key";
 import {
   agentStatusError,
   type CallOptions,
@@ -48,6 +49,7 @@ import { capFields, factsLimits } from "./field-caps";
 import { decideHello } from "./handshake";
 import type { AgentHub, AgentTransport, ConnectedAgent } from "./hub";
 import { PanelServiceError } from "./panel-service-types";
+import { signAccept } from "./signature";
 import type { OpenedStream } from "./streams";
 import { agentVersionAllowed } from "./version";
 import { FrameWriter } from "./writer";
@@ -67,7 +69,8 @@ export interface SessionDeps {
   logger: Logger;
   panelId: string;
   panelVersion: string;
-  edgeTicketPublicKey: Uint8Array;
+  /** The panel's identity key: agents get the public half and verify HelloAccepted.panel_signature and edge tickets with it. */
+  edgeTicketKey: EdgeTicketKey;
   /** Only the installer's join token makes the panel node (the panel runs as the installer's managed service). */
   panelNodeFromInstallerOnly?: boolean;
   /** Where this node should dial from now on (HelloAccepted.panel_url/panel_pin); null keeps its address. */
@@ -356,14 +359,27 @@ export class AgentSession {
     }
     this.state = "ready";
     const move = this.moveTargetFor(decision.nodeId);
+    const panelUrl = move?.url ?? "";
+    const panelPin = move?.pin ?? "";
+    // Proves this panel holds the identity key the node recorded at its first connect (signature.ts).
+    const panelSignature = signAccept(this.deps.edgeTicketKey.privateKey, {
+      panelId: this.deps.panelId,
+      nodeId: decision.nodeId,
+      sessionId: this.sessionId,
+      nonce: this.nonce,
+      clientSignature: hello.credential.value?.signature ?? new Uint8Array(),
+      panelUrl,
+      panelPin,
+    });
     this.sendHandshake({
       case: "accepted",
       value: {
         nodeId: decision.nodeId,
         sessionId: this.sessionId,
-        edgeTicketPublicKey: this.deps.edgeTicketPublicKey,
-        panelUrl: move?.url ?? "",
-        panelPin: move?.pin ?? "",
+        edgeTicketPublicKey: this.deps.edgeTicketKey.publicKey,
+        panelUrl,
+        panelPin,
+        panelSignature,
       },
     });
     this.deps.logger.info({ nodeId: decision.nodeId, sessionId: this.sessionId, joined: decision.joined }, "agent connected");

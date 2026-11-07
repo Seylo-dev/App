@@ -5,7 +5,7 @@
 // reconnects and both sides resync.
 
 import { expect, test } from "bun:test";
-import { sign } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CONNECTION_STREAM, encodeFrame, FrameKind, HandshakeSchema, parseFrame } from "@seylo/proto";
 import { AgentSession } from "../src/agent-hub/session";
@@ -70,7 +70,7 @@ test("a session whose socket drops a frame closes the connection with 1011 and l
         logger: silentLogger(),
         panelId: panel.deps.panelId,
         panelVersion: "dev",
-        edgeTicketPublicKey: new Uint8Array(32),
+        edgeTicketKey: { publicKey: new Uint8Array(32), privateKey: generateKeyPairSync("ed25519").privateKey },
       },
     );
     session.start();

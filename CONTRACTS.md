@@ -287,12 +287,19 @@ Summary; the full rules are in `proto/README.md` and the comments of
   is Ed25519 with the identity key over `<slug>-panel-accept-v1` 0x00
   panel_id 0x00 node_id 0x00 session_id 0x00 nonce 0x00 client signature
   0x00 panel_url 0x00 panel_pin (`rpc.PanelAcceptSignedBytes`, test vector
-  in `go/internal/rpc/accept_test.go`, key from seed 0..31). Not sent by
-  the panel yet: until it is, only `panel_id` and the public key are
-  checked, which are not secret. Neither binds the TLS connection, so a
-  relay of a whole session to the real panel is not detected; the pinned
+  in `go/internal/rpc/accept_test.go`, key from seed 0..31). The panel
+  sends it on every HelloAccepted (`agent-hub/signature.ts` `signAccept`,
+  the same vector in `apps/panel/test/fix-panel-accept-signature.test.ts`),
+  signed with the edge ticket key. It does not bind the TLS connection, so
+  a relay of a whole session to the real panel is not detected; the pinned
   standing fallback is what keeps a node of a taken-over domain with its
-  panel.
+  panel. The panel's identity never changes on an existing data dir:
+  `ensurePanelId` and `ensureEdgeTicketKey` only create what is missing,
+  and a sealed key the master key cannot open stops the panel instead of
+  making a new one. Anything that drops `panelId` or `edgeTicketKey` from
+  the settings (a new data dir, a restore of another panel's panel.db, a
+  master key rotation that regenerates the edge ticket key) makes every
+  node refuse the panel until it is joined again (`seylo join --force`).
 - Moving to the panel's new address (`agent/move.go`): when
   HelloAccepted names a `panel_url` (https:// only; `panel_pin` empty =
   system roots) that differs from the address the agent dialed, the agent
@@ -1230,7 +1237,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | `seylo panel start` and `seylo panel logs` on a node whose panel is not a managed service | NOT_IMPLEMENTED from `agent.PanelControl` only when nothing set it (`wire_node.go` sets it) |
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
-| Panel side of the 0.2 agent security fixes (built and tested on the agent only): HelloAccepted.panel_signature (the agent records the panel's id and key and checks them, but verifies a signature only once the panel sends one), PanelService.CheckEdgeAccess (`panel.edge-access.v1`; without it edge tool sessions end an hour after their ticket or last confirmation), GitSource.allow_plain_http (without it 0.2 agents refuse http:// git sources) | Protocol section ("Panel identity", `GitSource.allow_plain_http`), Networking (tool sessions) |
+| Panel side of the 0.2 agent security fixes (built and tested on the agent only): PanelService.CheckEdgeAccess (`panel.edge-access.v1`; without it edge tool sessions end an hour after their ticket or last confirmation), GitSource.allow_plain_http (without it 0.2 agents refuse http:// git sources) | Protocol section ("Panel identity", `GitSource.allow_plain_http`), Networking (tool sessions) |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
