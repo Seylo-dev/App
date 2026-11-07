@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import {
   decideWatchFile,
   describeWatchPaths,
+  globCost,
   globMatches,
   globToRegExp,
   matchWatchPaths,
   maxChangedPathLength,
+  maxWatchPathLength,
+  maxWatchPaths,
   normalizeWatchPaths,
   normalizeWatchPattern,
   skipMarkerOf,
@@ -126,6 +129,114 @@ describe("matching without backtracking", () => {
     expect(matchWatchPaths(patterns, [deep, sameSegment])).toEqual({ deploy: false, reason: "noMatch", checked: 2 });
     expect(performance.now() - started).toBeLessThan(500);
     expect(globMatches("**/**/**/*.txt", deep)).toBe(true);
+  });
+
+  /**
+   * A second reference for long globs, where the first compiler's regex
+   * backtracks for seconds: the same tokens, decided by a memoized table
+   * over (token, position).
+   */
+  function referenceMatch(glob: string, path: string): boolean {
+    const tokens: string[] = [];
+    for (let i = 0; i < glob.length; i++) {
+      const c = glob[i] as string;
+      if (c === "*" && glob[i + 1] === "*") {
+        const atSegmentStart = i === 0 || glob[i - 1] === "/";
+        i++;
+        if (atSegmentStart && glob[i + 1] === "/") {
+          i++;
+          tokens.push("dirs");
+        } else tokens.push("any");
+      } else tokens.push(c === "*" ? "star" : c === "?" ? "one" : `=${c}`);
+    }
+    const memo = new Map<number, boolean>();
+    const at = (t: number, p: number, inDirs: boolean): boolean => {
+      const key = (t * (path.length + 1) + p) * 2 + (inDirs ? 1 : 0);
+      const hit = memo.get(key);
+      if (hit !== undefined) return hit;
+      let out: boolean;
+      if (inDirs) out = p < path.length && ((path[p] === "/" && at(t + 1, p + 1, false)) || at(t, p + 1, true));
+      else if (t === tokens.length) out = p === path.length;
+      else {
+        const token = tokens[t] as string;
+        const c = path[p];
+        if (token === "star") out = at(t + 1, p, false) || (c !== undefined && c !== "/" && at(t, p + 1, false));
+        else if (token === "any") out = at(t + 1, p, false) || (c !== undefined && at(t, p + 1, false));
+        else if (token === "dirs") out = at(t + 1, p, false) || at(t, p, true);
+        else if (token === "one") out = c !== undefined && c !== "/" && at(t + 1, p + 1, false);
+        else out = c === token.slice(1) && at(t + 1, p + 1, false);
+      }
+      memo.set(key, out);
+      return out;
+    };
+    return at(0, 0, false);
+  }
+
+  test("globs longer than 32 steps (several words per state set) agree with a reference", () => {
+    const next = random(7);
+    const longParts = ["a", "b", "/", "*", "**", "**/", "?", "ab", "a/", "*/", "a*", "?a"];
+    let compared = 0;
+    let matched = 0;
+    for (let g = 0; g < 200; g++) {
+      let glob = "";
+      while (glob.length < 34 + next(200)) glob += longParts[next(longParts.length)];
+      for (let p = 0; p < 30; p++) {
+        // Paths built from the glob itself, so that long globs match now and then.
+        let path = "";
+        for (const c of glob) {
+          if (c === "*") path += ["", "a", "ab", "a/b", "/"][next(5)];
+          else if (c === "?") path += ["a", "b", "/"][next(3)];
+          else path += next(40) === 0 ? "b" : c;
+        }
+        const expected = referenceMatch(glob, path);
+        if (expected) matched++;
+        expect({ glob, path, matches: globMatches(glob, path) }).toEqual({ glob, path, matches: expected });
+        compared++;
+      }
+    }
+    expect(compared).toBe(6000);
+    expect(matched).toBeGreaterThan(50);
+    // The reference agrees with the first compiler where that one is quick.
+    expect(referenceMatch("a/**/b*?.md", "a/x/y/bcd.md")).toBe(referenceRegExp("a/**/b*?.md").test("a/x/y/bcd.md"));
+  });
+
+  test("a glob full of stars costs the same few operations per character: no state-by-state walk", () => {
+    // Before: one live state per "*", 149 of them, about 9 ms per match.
+    const pattern = "a*".repeat(Math.floor(maxWatchPathLength / 2));
+    const path = `${"a".repeat(maxChangedPathLength - 1)}b`;
+    globMatches(pattern, path);
+    const started = performance.now();
+    for (let i = 0; i < 20; i++) expect(globMatches(pattern, path)).toBe(true);
+    expect(globMatches(`${pattern}c`, path)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(60);
+    expect(globCost(pattern, path)).toBe((path.length + 8) * 10);
+  });
+
+  test("a whole push is bounded: 50 star patterns against a 5 MiB list of long paths stop at the budget and deploy", () => {
+    const patterns = Array.from({ length: maxWatchPaths }, (_, i) => `${"a*".repeat(148)}a*${String.fromCharCode(99 + (i % 20))}`);
+    const files = Array.from({ length: 1280 }, () => `${"a".repeat(maxChangedPathLength - 1)}b`);
+    const started = performance.now();
+    const result = matchWatchPaths(patterns, files);
+    // Before: about 575 s of blocked event loop.
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(result).toMatchObject({ deploy: true, reason: "tooMany", total: 1280 });
+    expect(describeWatchPaths(result)).toContain("too many changed files to match");
+  });
+
+  test("the budget counts every pattern tried; a list that fits is decided in full", () => {
+    const patterns = ["src/**", "!src/**/*.md"];
+    const files = ["docs/a.md", "docs/b.md", "lib/x.md"];
+    const cost = (file: string) => 8 + patterns.reduce((sum, p) => sum + globCost(p.replace(/^!/, ""), file), 0);
+    const all = files.reduce((sum, f) => sum + cost(f), 0);
+    expect(matchWatchPaths(patterns, files, true, all)).toEqual({ deploy: false, reason: "noMatch", checked: 3 });
+    expect(matchWatchPaths(patterns, files, true, all - 1)).toEqual({ deploy: true, reason: "tooMany", checked: 2, total: 3 });
+  });
+
+  test("the last pattern is tried first and a match there ends the file", () => {
+    // "src/**" is never run for a file the last pattern decides: the budget covers only that one.
+    const file = "src/a.ts";
+    const last = 8 + globCost("src/*.ts", file);
+    expect(matchWatchPaths(["src/**", "!src/*.ts"], [file], true, last)).toEqual({ deploy: false, reason: "noMatch", checked: 1 });
   });
 
   test("a changed path past the length cap is not matched: the list counts as incomplete", () => {

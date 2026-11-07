@@ -986,10 +986,17 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   trailing `/` means everything below); for each changed file the last
   matching pattern decides, with only `!` patterns everything else
   counts; a push deploys when one file counts. Matching never backtracks
-  (`globMatches` runs the glob as a set of positions over the path once;
-  repeats such as `**/**/` collapse), so a pattern cannot stall the panel
-  on a deep path; a changed path longer than 4096 characters is not
-  matched and makes the list incomplete (which deploys). `webhooks/gate.ts`
+  and costs the same per character whatever the pattern (`globMatches`
+  runs the glob's automaton over the path once with all live states in a
+  bit set: one pass, a few operations per character and 32 glob steps;
+  repeats such as `**/**/` collapse). Patterns are tried from the last
+  one back, so the first match decides a file. A whole decision is
+  bounded: `matchWatchPaths` stops after `watchPathsWorkBudget` (8M word
+  steps, about 20 ms) and the push deploys ("too many changed files to
+  match"); a changed path longer than 4096 characters is not matched and
+  makes the list incomplete (which deploys); a `{ changedFiles }` body
+  keeps at most 20,000 entries (more counts as truncated, like the
+  commits path). `webhooks/gate.ts`
   `pushGate` runs on every push path (GitHub webhook and polling, provider
   webhooks and polling, the deploy trigger URL; stacks too): `[skip ci]`,
   `[ci skip]`, `[skip cd]`, `[cd skip]` in the head commit message skip;

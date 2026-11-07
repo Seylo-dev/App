@@ -60,7 +60,9 @@ export function filesFromCommits(commits: unknown): { files: string[] | null; ca
 export function changesFromPushPayload(payload: unknown): PushChanges | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const p = payload as Record<string, unknown>;
-  const explicit = Array.isArray(p.changedFiles) ? strings(p.changedFiles) : null;
+  // A CI body lists the files itself: at most maxFiles are kept, more makes the list truncated (which deploys).
+  const explicitAll = Array.isArray(p.changedFiles) ? (p.changedFiles as unknown[]) : null;
+  const explicit = explicitAll === null ? null : strings(explicitAll.slice(0, maxFiles));
   if (!Array.isArray(p.commits) && explicit === null) return null;
   const commits = Array.isArray(p.commits) ? (p.commits as PayloadCommit[]) : [];
   const after = sha(p.after) ?? sha(p.checkout_sha) ?? null;
@@ -76,7 +78,10 @@ export function changesFromPushPayload(payload: unknown): PushChanges | null {
   const files = explicit ?? fromCommits.files;
   return {
     files,
-    truncated: explicit === null && (fromCommits.capped || commits.length >= githubCommitCap || (total !== null && total > commits.length)),
+    truncated:
+      explicitAll !== null
+        ? explicitAll.length > maxFiles
+        : fromCommits.capped || commits.length >= githubCommitCap || (total !== null && total > commits.length),
     before: sha(p.before),
     after,
     headMessage: head && typeof head.message === "string" ? head.message : null,

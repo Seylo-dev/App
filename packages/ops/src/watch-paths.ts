@@ -14,11 +14,14 @@
 //
 // The panel runs this on every push and the web app runs it in the watch
 // paths tester, so both always agree. Matching never backtracks: a glob is
-// a small automaton run over the path once (time grows with the path
-// times the pattern, never with combinations of "**"), so a pattern like
-// "**/**/**/*.md" cannot stall the panel on a deep path. Changed paths
-// longer than maxChangedPathLength are not matched at all: they make the
-// list incomplete, which deploys.
+// a small automaton run over the path once with all its live states in a
+// bit set, so one match costs a fixed few operations per character and 32
+// steps of the glob, whatever the pattern ("a*a*a*..." and
+// "**/**/**/*.md" included). A whole push is bounded too: matchWatchPaths
+// stops after watchPathsWorkBudget word steps (about 20 ms) and deploys,
+// like for an incomplete list. Changed paths longer than
+// maxChangedPathLength are not matched at all: they make the list
+// incomplete, which deploys.
 
 /** Most patterns a service may have. */
 export const maxWatchPaths = 50;
@@ -26,6 +29,14 @@ export const maxWatchPaths = 50;
 export const maxWatchPathLength = 300;
 /** Longest changed path that is matched; git allows longer, no real repository has them. */
 export const maxChangedPathLength = 4096;
+/**
+ * Most work one push decision may take, in globCost word steps (one
+ * character against 32 steps of a glob; about 2 to 4 ns each). Real pushes
+ * stay far below; past it the push deploys and says so.
+ */
+export const watchPathsWorkBudget = 8_000_000;
+/** Work counted per file and per match besides the characters (the fixed part of each call). */
+const workPerCall = 8;
 
 /** Trims a pattern and drops a leading "./" or "/"; a trailing "/" means everything below. */
 export function normalizeWatchPattern(raw: string): string {
@@ -134,63 +145,180 @@ export function globToRegExp(glob: string): RegExp {
   return re;
 }
 
-/**
- * Whether a glob (without the "!") matches a whole path. Runs the glob as
- * a set of positions over the path's characters once: no backtracking.
- */
-export function globMatches(glob: string, path: string): boolean {
+/** A glob compiled to bit masks over its steps: bit i of a mask is step i (bit n is "the whole glob matched"). */
+interface CompiledGlob {
+  /** 32-bit words per state set: ceil((steps + 1) / 32). */
+  words: number;
+  /** The final state's word and bit. */
+  finalWord: number;
+  finalBit: number;
+  /** Per character code that a "char" step names: the steps that read it (with "?" unless it is "/"). */
+  reads: Map<number, Int32Array>;
+  /** Steps that read any other character except "/": the "?" steps. */
+  readsOther: Int32Array;
+  /** Steps that read "/" when no "char" step names it: none. */
+  readsNothing: Int32Array;
+  /** Steps that stay on a character except "/" ("*" and "**"), and on "/" ("**"). */
+  stay: Int32Array;
+  staySlash: Int32Array;
+  /** "**\/" steps: reaching one also enters its run (any characters up to a "/"). */
+  dirs: Int32Array;
+  /** Steps that may be passed without reading a character ("*", "**", "**\/"). */
+  skip: Int32Array;
+  /** The longest run of skippable steps in a row ("**\/" then "*": 2): how often a closure shifts. */
+  rounds: number;
+}
+
+const compiledGlobs = new Map<string, CompiledGlob>();
+const slash = 47;
+
+function compileGlob(glob: string): CompiledGlob {
+  const hit = compiledGlobs.get(glob);
+  if (hit) return hit;
   const steps = globSteps(glob);
   const n = steps.length;
-  // States 0..n: before step i (n: the whole glob matched); n + 1 + i: inside the run of the "**/" at step i.
-  const seenAt = new Int32Array(2 * n + 2).fill(-1);
-  const stack: number[] = [];
-  let current: number[] = [];
-  let next: number[] = [];
-  let round = 0;
-  // Adds a state and every state reachable from it without reading a character.
-  const add = (into: number[], state: number) => {
-    stack.push(state);
-    while (stack.length > 0) {
-      const s = stack.pop() as number;
-      if (seenAt[s] === round) continue;
-      seenAt[s] = round;
-      into.push(s);
-      if (s >= n) continue;
-      const kind = (steps[s] as GlobStep).kind;
-      if (kind === "star" || kind === "any") stack.push(s + 1);
-      else if (kind === "dirs") stack.push(s + 1, n + 1 + s);
-    }
+  const words = (n >>> 5) + 1;
+  const mask = () => new Int32Array(words);
+  const set = (m: Int32Array, i: number) => {
+    m[i >>> 5] = (m[i >>> 5] as number) | (1 << (i & 31));
   };
-  add(current, 0);
-  for (let p = 0; p < path.length; p++) {
-    const c = path[p] as string;
-    round++;
-    next.length = 0;
-    for (const s of current) {
-      if (s > n) {
-        // Inside "**/": any character stays inside, and a "/" may also end the run.
-        add(next, s);
-        if (c === "/") add(next, s - n);
-        continue;
+  const one = mask();
+  const chars = new Map<number, Int32Array>();
+  const stay = mask();
+  const staySlash = mask();
+  const dirs = mask();
+  const skip = mask();
+  let rounds = 0;
+  let run = 0;
+  steps.forEach((step, i) => {
+    run = step.kind === "star" || step.kind === "any" || step.kind === "dirs" ? run + 1 : 0;
+    rounds = Math.max(rounds, run);
+    if (step.kind === "char") {
+      const code = step.char.charCodeAt(0);
+      let m = chars.get(code);
+      if (!m) {
+        m = mask();
+        chars.set(code, m);
       }
-      if (s === n) continue;
-      const step = steps[s] as GlobStep;
-      if (step.kind === "char") {
-        if (c === step.char) add(next, s + 1);
-      } else if (step.kind === "one") {
-        if (c !== "/") add(next, s + 1);
-      } else if (step.kind === "star") {
-        if (c !== "/") add(next, s);
-      } else if (step.kind === "any") {
-        add(next, s);
-      }
+      set(m, i);
+    } else if (step.kind === "one") {
+      set(one, i);
+    } else {
+      set(skip, i);
+      if (step.kind === "dirs") set(dirs, i);
+      else set(stay, i);
+      if (step.kind === "any") set(staySlash, i);
     }
-    if (next.length === 0) return false;
+  });
+  const reads = new Map<number, Int32Array>();
+  for (const [code, m] of chars) reads.set(code, code === slash ? m : m.map((w, k) => w | (one[k] as number)));
+  const out: CompiledGlob = {
+    words,
+    finalWord: n >>> 5,
+    finalBit: 1 << (n & 31),
+    reads,
+    readsOther: one,
+    readsNothing: mask(),
+    stay,
+    staySlash,
+    dirs,
+    skip,
+    rounds,
+  };
+  if (compiledGlobs.size > 2000) compiledGlobs.clear();
+  compiledGlobs.set(glob, out);
+  return out;
+}
+
+/** Bit sets reused by every match (matching is synchronous, so one set is enough); grown for longer globs. */
+let scratch = { current: new Int32Array(16), next: new Int32Array(16), inside: new Int32Array(16), carries: new Int32Array(4) };
+
+function scratchFor(words: number, rounds: number) {
+  if (scratch.current.length < words || scratch.carries.length < rounds) {
+    const size = Math.max(words, scratch.current.length);
+    scratch = {
+      current: new Int32Array(size),
+      next: new Int32Array(size),
+      inside: new Int32Array(size),
+      carries: new Int32Array(Math.max(rounds, scratch.carries.length)),
+    };
+  }
+  return scratch;
+}
+
+/**
+ * Whether a glob (without the "!") matches a whole path. Runs the glob's
+ * automaton over the path once with every live state in one bit set
+ * (bit-parallel, no backtracking): each character costs the same few
+ * operations per 32 steps of the glob however many states are live, so
+ * a match takes at most globCost(glob, path) word steps.
+ */
+export function globMatches(glob: string, path: string): boolean {
+  const g = compileGlob(glob);
+  const { words, rounds, dirs, skip } = g;
+  const scratch = scratchFor(words, rounds);
+  let current = scratch.current;
+  let next = scratch.next;
+  // Bit i: inside the run of the "**\/" at step i (any characters; a "/" may end it). Only grows.
+  const inside = scratch.inside;
+  const carries = scratch.carries;
+  current.fill(0, 0, words);
+  inside.fill(0, 0, words);
+  carries.fill(0, 0, rounds);
+  // Start in state 0 and close over it: the same pass as below with nothing read.
+  current[0] = 1;
+  for (let k = 0; k < words; k++) {
+    let v = current[k] as number;
+    for (let r = 0; r < rounds; r++) {
+      const passed = v & (skip[k] as number);
+      v |= (passed << 1) | (carries[r] as number);
+      carries[r] = passed >>> 31;
+    }
+    current[k] = v;
+    inside[k] = v & (dirs[k] as number);
+  }
+  for (let p = 0; p < path.length; p++) {
+    const code = path.charCodeAt(p);
+    const isSlash = code === slash;
+    const reads = g.reads.get(code) ?? (isSlash ? g.readsNothing : g.readsOther);
+    const stay = isSlash ? g.staySlash : g.stay;
+    let carry = 0;
+    let insideCarry = 0;
+    let live = 0;
+    carries.fill(0, 0, rounds);
+    for (let k = 0; k < words; k++) {
+      const s = current[k] as number;
+      const read = s & (reads[k] as number);
+      let v = (read << 1) | carry | (s & (stay[k] as number));
+      carry = read >>> 31;
+      const d = inside[k] as number;
+      if (isSlash) {
+        // A "/" may end the run of a "**\/": go on after it.
+        v |= (d << 1) | insideCarry;
+        insideCarry = d >>> 31;
+      }
+      // Pass skippable steps: round r of word k needs round r - 1 of word k - 1, which came just before.
+      for (let r = 0; r < rounds; r++) {
+        const passed = v & (skip[k] as number);
+        v |= (passed << 1) | (carries[r] as number);
+        carries[r] = passed >>> 31;
+      }
+      next[k] = v;
+      const di = d | (v & (dirs[k] as number));
+      inside[k] = di;
+      live |= v | di;
+    }
+    if (live === 0) return false;
     const done = current;
     current = next;
     next = done;
   }
-  return current.includes(n);
+  return ((current[g.finalWord] as number) & g.finalBit) !== 0;
+}
+
+/** The most work globMatches does for a glob and a path, in word steps: one per character and 32 steps of the glob. */
+export function globCost(glob: string, path: string): number {
+  return (path.length + workPerCall) * compileGlob(glob).words;
 }
 
 /** A changed file as the repository names it, without a leading "./" or "/". */
@@ -208,20 +336,28 @@ export interface WatchFileDecision {
 
 /** What the patterns say about one changed file. */
 export function decideWatchFile(patterns: readonly string[], file: string): WatchFileDecision {
-  const path = normalizeChangedPath(file);
-  const onlyExclusions = patterns.length > 0 && patterns.every((p) => p.startsWith("!"));
-  let included = onlyExclusions;
-  let decidedBy: string | null = null;
-  for (const pattern of patterns) {
+  return decide(patterns, normalizeChangedPath(file), null) as WatchFileDecision;
+}
+
+/**
+ * The decision for one normalized path, or null when `budget` ran out
+ * first. The last matching pattern decides, so patterns are tried from
+ * the last one back and the first match ends it.
+ */
+function decide(patterns: readonly string[], path: string, budget: { left: number } | null): WatchFileDecision | null {
+  for (let i = patterns.length - 1; i >= 0; i--) {
+    const pattern = patterns[i] as string;
     const negated = pattern.startsWith("!");
     const body = negated ? pattern.slice(1) : pattern;
     if (body === "") continue;
-    if (globMatches(body, path)) {
-      included = !negated;
-      decidedBy = pattern;
+    if (budget) {
+      budget.left -= globCost(body, path);
+      if (budget.left < 0) return null;
     }
+    if (globMatches(body, path)) return { file: path, included: !negated, pattern };
   }
-  return { file: path, included, pattern: decidedBy };
+  const onlyExclusions = patterns.length > 0 && patterns.every((p) => p.startsWith("!"));
+  return { file: path, included: onlyExclusions, pattern: null };
 }
 
 export type WatchPathsResult =
@@ -233,24 +369,36 @@ export type WatchPathsResult =
   | { deploy: true; reason: "incomplete"; checked: number }
   /** The changed files are not known at all. */
   | { deploy: true; reason: "unknown" }
+  /** Matching every file would take more than watchPathsWorkBudget: deploy, as for an incomplete list. */
+  | { deploy: true; reason: "tooMany"; checked: number; total: number }
   /** The full list of changed files is known and none counts. */
   | { deploy: false; reason: "noMatch"; checked: number };
 
 /**
  * Decides a push. `files` null means the changed files are not known;
  * `complete` false means the list may be missing files (truncated
- * payloads, capped compare answers).
+ * payloads, capped compare answers). The work is bounded by `budget`
+ * (globCost word steps): past it the push deploys.
  */
-export function matchWatchPaths(patterns: readonly string[], files: readonly string[] | null, complete = true): WatchPathsResult {
+export function matchWatchPaths(
+  patterns: readonly string[],
+  files: readonly string[] | null,
+  complete = true,
+  budget = watchPathsWorkBudget,
+): WatchPathsResult {
   if (patterns.length === 0) return { deploy: true, reason: "off" };
   if (files === null) return { deploy: true, reason: "unknown" };
-  for (const file of files) {
+  const left = { left: budget };
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i] as string;
     // Not matched: the list counts as incomplete, so it never skips a push.
     if (file.length > maxChangedPathLength) {
       complete = false;
       continue;
     }
-    const decision = decideWatchFile(patterns, file);
+    left.left -= workPerCall;
+    const decision = left.left < 0 ? null : decide(patterns, normalizeChangedPath(file), left);
+    if (decision === null) return { deploy: true, reason: "tooMany", checked: i, total: files.length };
     if (decision.included) return { deploy: true, reason: "matched", file: decision.file, pattern: decision.pattern };
   }
   if (!complete) return { deploy: true, reason: "incomplete", checked: files.length };
@@ -270,6 +418,8 @@ export function describeWatchPaths(result: WatchPathsResult): string {
       return `Watch paths: none of the ${result.checked} changed files listed matches, but the list is incomplete, so this push deploys.`;
     case "unknown":
       return "Watch paths: the changed files are not known, so this push deploys.";
+    case "tooMany":
+      return `Watch paths: too many changed files to match (stopped after ${result.checked} of ${result.total}), so this push deploys.`;
     case "noMatch":
       return result.checked === 1
         ? "Skipped by watch paths: the one changed file matches no pattern."
