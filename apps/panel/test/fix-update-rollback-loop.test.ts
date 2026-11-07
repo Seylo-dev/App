@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { updates } from "@seylo/ops";
 import { ReportEventRequestSchema, ReportEventResponseSchema, UpdateTarget } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { nodes, updateRuns, updateSteps } from "../src/db/schema";
+import { alerts, nodes, updateRuns, updateSteps } from "../src/db/schema";
 import { releaseSource } from "../src/modules/updates/manifest";
 import { panelKey, wasRolledBack } from "../src/modules/updates/rollbacks";
 import { checkJob } from "../src/modules/updates/runs";
@@ -120,6 +120,11 @@ test("after a node rolled a release back, the automatic run leaves it out; Updat
   expect(panel.deps.db.select().from(updateSteps).where(eq(updateSteps.id, stepId)).get()?.status).toBe("rolled_back");
   expect(runs()[0]?.status).toBe("failed");
   expect(wasRolledBack(panel.deps.db, agent.nodeId, "0.9.0")).toBe(true);
+  // The update_failed alert says what the automatic runs do now.
+  const raised = panel.deps.db.select().from(alerts).where(eq(alerts.event, "update_failed")).all();
+  expect(raised.map((a) => a.message)).toEqual([
+    "the new agent did not reconnect within 3m0s Rolled back to 0.8.0. Automatic updates leave this node out until a newer release; Update now installs this one.",
+  ]);
 
   // The next checks (every 6 h) do not install it again. Before: a new run and a second UpdateAgent each time.
   await scheduledCheck();

@@ -4,7 +4,7 @@
 // alerts only when it is still offline a minute later, so agent restarts
 // and short network blips stay quiet.
 
-import { BuildStage, CrashAction, type CrashReport, DeployStage, HealthState, NodeAlertKind } from "@seylo/proto";
+import { BuildStage, CrashAction, type CrashReport, DeployStage, HealthState, NodeAlertKind, UpdateTarget } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { backupRuns, builds, deployments, nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
@@ -221,11 +221,17 @@ export function subscribeAgentEvents(deps: Deps): void {
   agents.onEvent("updateResult", (nodeId, result) => {
     if (result.success) return;
     const name = nodeName(deps, nodeId) ?? "A node";
+    // modules/updates/rollbacks.ts: automatic runs do not install a rolled-back release again.
+    const held = !result.rolledBack
+      ? ""
+      : result.target === UpdateTarget.PANEL
+        ? " Automatic updates wait for a newer release; updating the panel by hand installs this one."
+        : " Automatic updates leave this node out until a newer release; Update now installs this one.";
     deps.alerts.raise({
       event: "update_failed",
       key: `update-failed:${result.updateId || `${nodeId}:${Date.now()}`}`,
       title: `Update to ${result.toVersion || "the new version"} failed on ${name}`,
-      message: `${result.error || "No reason given."}${result.rolledBack ? ` Rolled back to ${result.fromVersion}.` : ""}`,
+      message: `${result.error || "No reason given."}${result.rolledBack ? ` Rolled back to ${result.fromVersion}.` : ""}${held}`,
       nodeId,
     });
   });
