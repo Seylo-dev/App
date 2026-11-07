@@ -237,6 +237,8 @@ func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSour
 		return nil, fmt.Errorf("preparing git credentials: %w", err)
 	}
 	defer g.close()
+	// The fetch's proxy writes to the log from its own goroutines: one lock for every write.
+	log = g.log
 	if err := g.do(ctx, "", "init", "-q", dir); err != nil {
 		return nil, fmt.Errorf("git init: %w", err)
 	}

@@ -3,6 +3,8 @@ package build
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/http/httpproxy"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/netguard"
@@ -32,8 +36,30 @@ import (
 // allowed only for the source's own host and port, and only when the panel
 // says an admin allowed that host for the project (allow_internal_host).
 // Metadata endpoints never.
+//
+// A node whose only way out is an HTTP proxy (the agent's HTTPS_PROXY,
+// HTTP_PROXY and NO_PROXY, which git used before) keeps cloning: https
+// tunnels and plain http requests go on to that proxy, the way curl sent
+// them. The node cannot see where the proxy connects, so then the check is
+// on the target before the request goes out (an IP address exactly; a name
+// by what it resolves to on the node, when it resolves), and the proxy's own
+// rules decide the rest. ssh connects directly, as it did before.
 
 const gitDialTimeout = 30 * time.Second
+
+// gitDialHeader marks git-dial's CONNECT (ssh), which never goes to the
+// agent's HTTP proxy.
+const gitDialHeader = "Git-Dial"
+
+// gitUpstream is the agent's own proxy settings (HTTPS_PROXY, HTTP_PROXY,
+// NO_PROXY), read for every fetch. Tests replace it.
+var gitUpstream = httpproxy.FromEnvironment
+
+// gitLookup resolves a name on the node before a request goes to the
+// agent's HTTP proxy. Tests replace it.
+var gitLookup = func(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
 
 // GitDialCommand is the hidden CLI command the ssh ProxyCommand runs.
 const GitDialCommand = "git-dial"
@@ -50,11 +76,16 @@ var ErrBlockedHost = errors.New("the node does not clone from this address")
 type BlockedHostError struct {
 	Target string
 	Reason string
+	// Hint is what can be done about it, if anything.
+	Hint string
 }
 
 func (e *BlockedHostError) Error() string {
-	return fmt.Sprintf("%s: the node refused to connect to %s: %s. Nodes clone from public addresses only, unless an admin allowed this host for the project",
-		ErrFetch, e.Target, e.Reason)
+	msg := fmt.Sprintf("%s: the node refused to connect to %s: %s", ErrFetch, e.Target, e.Reason)
+	if e.Hint != "" {
+		msg += ". " + e.Hint
+	}
+	return msg
 }
 
 // Is makes errors.Is(err, ErrFetch) and errors.Is(err, ErrBlockedHost) hold.
@@ -128,6 +159,10 @@ type gitProxy struct {
 	srv       *http.Server
 	fwd       *httputil.ReverseProxy
 	transport *http.Transport
+	// upstream is the agent's HTTP proxy for a request URL (nil: connect
+	// directly); viaUpstream forwards plain http requests to it.
+	upstream    func(*url.URL) (*url.URL, error)
+	viaUpstream *http.Transport
 
 	mu       sync.Mutex
 	conns    map[net.Conn]struct{}
@@ -155,7 +190,7 @@ func startGitProxy(policy gitPolicy, log io.Writer) (*gitProxy, error) {
 		return nil, fmt.Errorf("starting the git proxy: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &gitProxy{policy: policy, log: log, ctx: ctx, cancel: cancel, ln: ln, conns: map[net.Conn]struct{}{}}
+	p := &gitProxy{policy: policy, log: log, ctx: ctx, cancel: cancel, ln: ln, conns: map[net.Conn]struct{}{}, upstream: gitUpstream().ProxyFunc()}
 	p.transport = &http.Transport{
 		Proxy: nil,
 		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
@@ -167,12 +202,23 @@ func startGitProxy(policy gitPolicy, log io.Writer) (*gitProxy, error) {
 		},
 		ResponseHeaderTimeout: 2 * time.Minute,
 	}
+	// Plain http through the agent's HTTP proxy: the request goes to the
+	// proxy (dialed like the tunnels'), which connects to the target.
+	p.viaUpstream = &http.Transport{
+		Proxy: func(r *http.Request) (*url.URL, error) {
+			return p.upstreamFor("http", r.URL.Hostname(), portOr(r.URL.Port(), "80"))
+		},
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return p.dialProxyServer(ctx, addr)
+		},
+		ResponseHeaderTimeout: 2 * time.Minute,
+	}
 	p.fwd = &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL = r.In.URL
 			r.Out.Host = r.In.Host
 		},
-		Transport: p.transport,
+		Transport: forwardTransport{p},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			var blocked *BlockedHostError
 			if errors.As(err, &blocked) {
@@ -215,6 +261,7 @@ func (p *gitProxy) Close() {
 	p.cancel()
 	_ = p.srv.Close()
 	p.transport.CloseIdleConnections()
+	p.viaUpstream.CloseIdleConnections()
 	for c := range conns {
 		_ = c.Close()
 	}
@@ -253,19 +300,209 @@ func (p *gitProxy) dial(ctx context.Context, host, port string) (net.Conn, error
 	conn, err := netguard.DialContext(ctx, target, gitDialTimeout, p.policy.internalAllowed(host, port))
 	var blocked *netguard.BlockedError
 	if errors.As(err, &blocked) {
-		e := &BlockedHostError{Target: target, Reason: blocked.Error()}
-		if blocked.Addr.IsValid() && normHost(host) != blocked.Addr.String() {
-			e.Reason = fmt.Sprintf("%s resolves to %s, %s", host, blocked.Addr, blocked.What)
-		}
-		p.mu.Lock()
-		if p.refused == nil {
-			p.refused = e
-		}
-		p.mu.Unlock()
-		fmt.Fprintf(p.log, "Refused a git connection to %s: %s\n", target, e.Reason)
-		return nil, e
+		return nil, p.refuse(host, port, blocked)
 	}
 	return conn, err
+}
+
+// refuse records and logs a connection the policy does not allow.
+func (p *gitProxy) refuse(host, port string, blocked *netguard.BlockedError) *BlockedHostError {
+	target := net.JoinHostPort(strings.Trim(host, "[]"), port)
+	e := &BlockedHostError{Target: target, Reason: blocked.Error()}
+	if blocked.Addr.IsValid() && normHost(host) != blocked.Addr.String() {
+		e.Reason = fmt.Sprintf("%s resolves to %s, %s", host, blocked.Addr, blocked.What)
+	}
+	switch class, _ := netguard.Classify(blocked.Addr); {
+	case blocked.Addr.IsValid() && class == netguard.Metadata:
+		e.Hint = "Nodes never connect to cloud metadata addresses"
+	case normHost(host) == p.policy.source.host && port == p.policy.source.port:
+		e.Hint = "Nodes clone from public addresses only; an admin can allow internal addresses of this host for the project (git.allowInternalHost)"
+	default:
+		e.Hint = "Nodes clone from public addresses only, and from internal ones only for the source's own host when an admin allowed it, never for a redirect or submodule to another host"
+	}
+	p.mu.Lock()
+	if p.refused == nil {
+		p.refused = e
+	}
+	p.mu.Unlock()
+	fmt.Fprintf(p.log, "Refused a git connection to %s: %s\n", target, e.Reason)
+	return e
+}
+
+func portOr(port, def string) string {
+	if port == "" {
+		return def
+	}
+	return port
+}
+
+// upstreamFor is the agent's HTTP proxy for a connection git makes for
+// scheme ("https" or "http") to host:port, or nil to connect directly
+// (no proxy set, NO_PROXY, loopback).
+func (p *gitProxy) upstreamFor(scheme, host, port string) (*url.URL, error) {
+	shared, err := p.upstream(&url.URL{Scheme: scheme, Host: net.JoinHostPort(strings.Trim(host, "[]"), port)})
+	if err != nil || shared == nil {
+		return nil, err
+	}
+	// httpproxy hands out the same URL every time.
+	up := *shared
+	if shared.User != nil {
+		user := *shared.User
+		up.User = &user
+	}
+	switch up.Scheme {
+	case "http", "https":
+	default:
+		return nil, fmt.Errorf("the agent's proxy %s: git goes only through http:// or https:// proxies", up.Redacted())
+	}
+	if up.Port() == "" {
+		// curl's defaults, which git used before.
+		up.Host = net.JoinHostPort(up.Hostname(), map[string]string{"http": "1080", "https": "443"}[up.Scheme])
+	}
+	return &up, nil
+}
+
+// checkBeforeUpstream applies the fetch's policy to a target the agent's
+// HTTP proxy will connect to: an IP address exactly, a name by what it
+// resolves to on the node. A name the node cannot resolve goes on (behind a
+// proxy, often only the proxy can); the proxy resolves it again in any case.
+func (p *gitProxy) checkBeforeUpstream(ctx context.Context, host, port string) error {
+	allowed := p.policy.internalAllowed(host, port)
+	name := strings.Trim(host, "[]")
+	if a, err := netip.ParseAddr(name); err == nil {
+		var blocked *netguard.BlockedError
+		if errors.As(netguard.Check(net.JoinHostPort(a.String(), port), allowed), &blocked) {
+			return p.refuse(host, port, blocked)
+		}
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	addrs, err := gitLookup(ctx, name)
+	if err != nil {
+		return nil
+	}
+	for _, a := range addrs {
+		var blocked *netguard.BlockedError
+		if errors.As(netguard.Check(net.JoinHostPort(a.String(), port), allowed), &blocked) {
+			return p.refuse(host, port, blocked)
+		}
+	}
+	return nil
+}
+
+// dialProxyServer connects to the agent's HTTP proxy itself. The node's
+// operator set it (often on a private address), so internal addresses are
+// fine; metadata endpoints are not.
+func (p *gitProxy) dialProxyServer(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := netguard.DialContext(ctx, addr, gitDialTimeout, true)
+	if err != nil {
+		err = fmt.Errorf("connecting to the agent's proxy %s: %w", addr, err)
+		fmt.Fprintf(p.log, "The git connection could not reach the proxy: %v\n", err)
+	}
+	return conn, err
+}
+
+// dialVia opens a CONNECT tunnel to host:port through the agent's HTTP
+// proxy up.
+func (p *gitProxy) dialVia(ctx context.Context, up *url.URL, host, port string) (net.Conn, error) {
+	if err := p.checkBeforeUpstream(ctx, host, port); err != nil {
+		return nil, err
+	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	go func() {
+		select {
+		case <-p.ctx.Done():
+			stop()
+		case <-ctx.Done():
+		}
+	}()
+	conn, err := p.dialProxyServer(ctx, up.Host)
+	if err != nil {
+		return nil, err
+	}
+	target := net.JoinHostPort(strings.Trim(host, "[]"), port)
+	fail := func(err error) (net.Conn, error) {
+		_ = conn.Close()
+		err = fmt.Errorf("the tunnel to %s through the agent's proxy %s: %w", target, up.Redacted(), err)
+		fmt.Fprintf(p.log, "The git connection failed: %v\n", err)
+		return nil, err
+	}
+	// The handshake with the proxy has gitDialTimeout, and ends when the fetch does.
+	raw := conn
+	_ = raw.SetDeadline(time.Now().Add(gitDialTimeout))
+	done := context.AfterFunc(ctx, func() { _ = raw.SetDeadline(time.Unix(1, 0)) })
+	defer done()
+	if up.Scheme == "https" {
+		tc := tls.Client(conn, &tls.Config{ServerName: up.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tc.HandshakeContext(ctx); err != nil {
+			return fail(err)
+		}
+		conn = tc
+	}
+	req := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n"
+	if up.User != nil {
+		pass, _ := up.User.Password()
+		req += "Proxy-Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(up.User.Username()+":"+pass)) + "\r\n"
+	}
+	if _, err := io.WriteString(conn, req+"\r\n"); err != nil {
+		return fail(err)
+	}
+	br := bufio.NewReader(conn)
+	res, err := http.ReadResponse(br, &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		return fail(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		_ = res.Body.Close()
+		return fail(fmt.Errorf("the proxy answered %s", res.Status))
+	}
+	if !done() {
+		return fail(ctx.Err())
+	}
+	_ = conn.SetDeadline(time.Time{})
+	if br.Buffered() > 0 {
+		return &readAheadConn{Conn: conn, r: br}, nil
+	}
+	return conn, nil
+}
+
+// readAheadConn is a connection whose first bytes a bufio.Reader already
+// read.
+type readAheadConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *readAheadConn) Read(b []byte) (int, error) { return c.r.Read(b) }
+
+// CloseWrite half-closes the tunnel when the connection under it can.
+func (c *readAheadConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
+// forwardTransport sends plain http requests (only when git's
+// protocol.http.allow lets them) to their server, or to the agent's HTTP
+// proxy after the same check as a tunnel.
+type forwardTransport struct{ p *gitProxy }
+
+func (f forwardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	host, port := r.URL.Hostname(), portOr(r.URL.Port(), "80")
+	up, err := f.p.upstreamFor("http", host, port)
+	if err != nil {
+		return nil, err
+	}
+	if up == nil {
+		return f.p.transport.RoundTrip(r)
+	}
+	if err := f.p.checkBeforeUpstream(r.Context(), host, port); err != nil {
+		return nil, err
+	}
+	return f.p.viaUpstream.RoundTrip(r)
 }
 
 func (p *gitProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +532,17 @@ func (p *gitProxy) tunnel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "CONNECT needs host:port", http.StatusBadRequest)
 		return
 	}
-	upstream, err := p.dial(r.Context(), host, port)
+	var upstream net.Conn
+	// git's own https (curl) goes to the agent's HTTP proxy when one is set; ssh never did.
+	up, err := p.upstreamFor("https", host, port)
+	switch {
+	case err != nil:
+		fmt.Fprintf(p.log, "The git connection to %s failed: %v\n", r.Host, err)
+	case up != nil && r.Header.Get(gitDialHeader) == "":
+		upstream, err = p.dialVia(r.Context(), up, host, port)
+	default:
+		upstream, err = p.dial(r.Context(), host, port)
+	}
 	if err != nil {
 		var blocked *BlockedHostError
 		if errors.As(err, &blocked) {
@@ -375,7 +622,7 @@ func GitDial(ctx context.Context, proxy, target string, stdin io.Reader, stdout 
 		return fmt.Errorf("git-dial: %w", err)
 	}
 	defer conn.Close()
-	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target); err != nil {
+	if _, err := fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n%s: ssh\r\n\r\n", target, target, gitDialHeader); err != nil {
 		return fmt.Errorf("git-dial: %w", err)
 	}
 	br := bufio.NewReader(conn)

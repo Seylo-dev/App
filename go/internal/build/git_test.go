@@ -57,7 +57,7 @@ var testCert = sync.OnceValues(func() (tls.Certificate, []byte) {
 		Subject:               pkix.Name{CommonName: "seylo build test"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
-		DNSNames:              []string{"localhost", "example.com"},
+		DNSNames:              []string{"localhost", "example.com", "git.proxied.test"},
 		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
 		IsCA:                  true,
 		BasicConstraintsValid: true,
