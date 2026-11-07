@@ -917,8 +917,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   session; its one script, allowed by its CSP hash, posts the request back
   with the session key from the web app's localStorage, or goes to
   `/login?redirect=<back>` without one; that post answers the consent page
-  for a signed-in, fresh session (else 303 to `/login` or `/reauth`): read
-  only by default, or read and change; the Allow form carries the key back),
+  for a signed-in, fresh session (else 303 to `/login` or `/reauth`). The
+  consent page names the app by the host its answer goes to ("Connect an
+  app at <host>?"), marks the name the client registered as not verified
+  (anyone can register any name), shows the scope it asked for, and always
+  preselects read only: an Allow without a choice is read only, whatever
+  scope was requested; the Allow form carries the key back),
   `POST /oauth/token` (code + S256 PKCE,
   rotating refresh tokens, access tokens 24 h, a grant lives 90 days),
   `POST /oauth/revoke`. A token sees only the tools it could use;

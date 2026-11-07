@@ -318,9 +318,9 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
       redirectHost: redirectLabel(read.value.redirectUri),
       userLabel: principal.user.email,
       fields: authorizeFields(read.value),
+      requestedScope: read.value.scope,
       csrf: consentToken(deps, principal.sessionId, read.value),
       sessionKey: form.get(sessionKeyField) ?? "",
-      defaultWrite: read.value.scope.split(/\s+/).includes("mcp:write"),
     });
   }
 
@@ -349,6 +349,7 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
     target.searchParams.set("error_description", "The person declined.");
     return Response.redirect(target.toString(), 302);
   }
+  // Changes only when the person picked them: a missing choice is read only.
   const readOnly = form.get("access") !== "write";
   const code = randomToken();
   deps.db

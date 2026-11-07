@@ -98,7 +98,8 @@ async function connect(cookie: string, access: "read" | "write") {
   const html = await consent.text();
   expect(consent.status).toBe(200);
   expect(consent.headers.get("x-frame-options")).toBe("DENY");
-  expect(html).toContain("Connect Claude Code?");
+  expect(html).toContain("Connect an app at 127.0.0.1:33418?");
+  expect(html).toContain('Claude Code</strong><span class="tag">name not verified</span>');
 
   const form = consentForm(html);
   form.set("access", access);
@@ -182,7 +183,46 @@ test("a session signed in long ago confirms it's them on /reauth before the cons
   await callOp(panel, auth.reauth, { password }, { cookie });
   const consent = await review(query, cookie);
   expect(consent.status).toBe(200);
-  expect(await consent.text()).toContain("Connect Claude Code?");
+  expect(await consent.text()).toContain("Connect an app at 127.0.0.1:33418?");
+});
+
+test("the consent page never preselects changes, whatever scope the app asks for", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  const { cookie } = await createUser(panel, "owner");
+  const registered = await send("/oauth/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "Trusted Tool", redirect_uris: ["https://tool.example/callback"] }),
+  });
+  const client = (await registered.json()) as { client_id: string };
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: client.client_id,
+    redirect_uri: "https://tool.example/callback",
+    code_challenge: createHash("sha256").update("w".repeat(43)).digest("base64url"),
+    code_challenge_method: "S256",
+    scope: "mcp:read mcp:write",
+  });
+  const html = await (await review(query, cookie)).text();
+  expect(html).toContain('<input type="radio" name="access" value="read" checked />');
+  expect(html).toContain('<input type="radio" name="access" value="write" />');
+  expect(html).toContain("It asked for read and change access.");
+  // The address the answer goes to identifies the app; its self-chosen name is marked.
+  expect(html).toContain("Connect an app at tool.example?");
+  expect(html).toContain("name not verified");
+
+  // Allow without picking anything is read only.
+  const form = consentForm(html);
+  form.set("decision", "allow");
+  const allowed = await send("/oauth/authorize", { method: "POST", headers: { ...formHeaders, cookie }, body: form.toString() });
+  expect(allowed.status).toBe(302);
+  expect(
+    panel.deps.db
+      .select()
+      .from(mcpAuthCodes)
+      .all()
+      .map((row) => row.readOnly),
+  ).toEqual([true]);
 });
 
 test("the endpoint is off by default and asks for OAuth without a token", async () => {
