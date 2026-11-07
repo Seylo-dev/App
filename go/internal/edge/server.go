@@ -213,9 +213,25 @@ func secure(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// safeTarget keeps redirects on the same host: a path, never "//x" or a URL.
+// safeTarget keeps redirects on the same host: a path (with query), never
+// "//x", "/\x" or a URL; anything else becomes "/". Browsers drop tabs and
+// line breaks anywhere in a Location and read "\" as "/" (WHATWG URL), so
+// "/<TAB>/evil.example" would land on another host: control bytes and
+// backslashes are refused outright, then the parsed form must be a plain
+// absolute path. A value url.Parse refuses would also reach the Location
+// raw, since http.Redirect cleans only what parses.
 func safeTarget(to string) string {
-	if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") || strings.HasPrefix(to, "/\\") || strings.ContainsAny(to, "\r\n") {
+	if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
+		return "/"
+	}
+	for i := 0; i < len(to); i++ {
+		if c := to[i]; c < 0x20 || c == 0x7f || c == '\\' {
+			return "/"
+		}
+	}
+	u, err := url.Parse(to)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" ||
+		!strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") {
 		return "/"
 	}
 	return to

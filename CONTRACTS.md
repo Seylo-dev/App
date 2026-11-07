@@ -1790,7 +1790,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `https://<slug>-db-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>` and
   `https://<slug>-box-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>`;
   without a wildcard domain on the node the ops answer CONFLICT
-  (`details.reason` `noWildcardDomain`).
+  (`details.reason` `noWildcardDomain`). An optional `&to=<path>` (and the
+  portgate handoff's target) is followed only when it is a plain absolute
+  path on the same host: no control bytes (browsers drop tabs and line
+  breaks), no backslash, no `//` (also after decoding), no scheme or host
+  (`edge.safeTarget`); anything else redirects to `/`.
 - Regenerate certificate (`domains.retryCertificate`,
   `modules/domains/certificate-retry.ts`): a mutation with `domains.edit`
   on the service (an API key needs that action and must not be read-only,
