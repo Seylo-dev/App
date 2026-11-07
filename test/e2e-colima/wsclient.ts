@@ -6,7 +6,9 @@
 // Usage: bun wsclient.ts <ws-url> [--seconds N] [--wait-for TEXT]
 //          [--send-binary TEXT]... [--send-text JSON]... [--send-after-ready]
 // Sends happen once the socket opens (or after the first "ready" text frame
-// with --send-after-ready); \n in TEXT is a newline.
+// with --send-after-ready); \n in TEXT is a newline, \r a carriage return
+// (what a terminal sends for Enter; line editors such as valkey-cli's take
+// only that).
 
 const args = process.argv.slice(2);
 const url = args.shift();
@@ -23,7 +25,7 @@ for (let i = 0; i < args.length; i++) {
   const v = args[i + 1] ?? "";
   if (a === "--seconds") (seconds = Number(v)), i++;
   else if (a === "--wait-for") (waitFor = v), i++;
-  else if (a === "--send-binary") sends.push({ binary: true, data: v.replaceAll("\\n", "\n") }), i++;
+  else if (a === "--send-binary") sends.push({ binary: true, data: v.replaceAll("\\n", "\n").replaceAll("\\r", "\r") }), i++;
   else if (a === "--send-text") sends.push({ binary: false, data: v }), i++;
   else if (a === "--send-after-ready") afterReady = true;
 }

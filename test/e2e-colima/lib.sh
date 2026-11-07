@@ -29,10 +29,13 @@ E2E_PORT=${E2E_PORT:-3000}
 E2E_REL_PORT=${E2E_REL_PORT:-18555}
 # Registry for the panel images, a container on A (127.0.0.1 is trusted by Docker).
 E2E_REG_PORT=${E2E_REG_PORT:-15000}
-# Release versions: N is installed, N+1 is the update, N+2 has a broken panel.
-E2E_V1=${E2E_V1:-0.1.0}
-E2E_V2=${E2E_V2:-0.1.1}
-E2E_V3=${E2E_V3:-0.1.2}
+# Release versions, all built from the working tree: N is installed, N+1 is
+# the update, N+2 has a broken panel. E2E_BASE is the released version the
+# upgrade check (38) starts from, built from its git tag (build.sh base).
+E2E_V1=${E2E_V1:-0.2.0}
+E2E_V2=${E2E_V2:-0.2.1}
+E2E_V3=${E2E_V3:-0.2.2}
+E2E_BASE=${E2E_BASE:-0.1.1}
 # Build output and state shared between the steps. Outside dist/, which
 # goreleaser --clean wipes.
 E2E_OUT=${E2E_OUT:-$HOME/.cache/seylo-e2e}
@@ -116,7 +119,8 @@ release_base() { echo "http://$(host_ip):$E2E_REL_PORT"; }
 docker_a() { DOCKER_HOST="unix://$HOME/.colima/$E2E_A/docker.sock" docker "$@"; }
 docker_b() { DOCKER_HOST="unix://$HOME/.colima/$E2E_B/docker.sock" docker "$@"; }
 
-panel_url() { echo "http://$(vm_ip "$E2E_A"):$E2E_PORT"; }
+# panel_url: A's panel; E2E_PANEL_URL points api() at another one (check 38's panel on C).
+panel_url() { echo "${E2E_PANEL_URL:-http://$(vm_ip "$E2E_A"):$E2E_PORT}"; }
 
 # api <op> [json]: call a panel op with the e2e API key. Queries (GET) take
 # a JSON object that becomes the query string. Prints the body; returns 1 on

@@ -1,12 +1,12 @@
 # End-to-end harness (three VMs)
 
 `make e2e` (or `test/e2e-colima/run.sh`) builds test releases, installs Seylo on
-three VMs with the real installer and runs the 31-check checklist. Results go to
+three VMs with the real installer and runs the 38-check checklist. Results go to
 `RESULTS.md` here (PASS / FAIL / BLOCKED with evidence per check).
 
 | VM | What | Role |
 |---|---|---|
-| `seylo-e2e-a` | Colima (vz, `--network-address`), Docker | "panel + node here", can build; also the unlabeled infra containers `e2e-registry` (127.0.0.1:15000, panel images), `e2e-minio` (:19000, bucket `e2e-backups`), `e2e-pebble` (:14000) |
+| `seylo-e2e-a` | Colima (vz, `--network-address`), Docker | "panel + node here", can build; also the unlabeled infra containers `e2e-registry` (127.0.0.1:15000, panel images), `e2e-minio` (:19000, bucket `e2e-backups`), `e2e-pebble` (:14000) and, from check 33, `e2e-gitea` (:13000, HTTPS) |
 | `seylo-e2e-b` | Colima, Docker | joined node, most app checks |
 | `seylo-e2e-c` | plain Lima Ubuntu 24.04, no Docker | joined node; `install.sh --yes` installs Docker (systemd cgroup driver) |
 
@@ -17,13 +17,18 @@ On the Mac (`serve.sh`, at the vzNAT bridge address, normally 192.168.64.1):
 - `https://<mac>:18556/git/<app>.git` smart-HTTP git (the panel takes only `https://` URLs and the agent
   clones shallow). The certificate comes from a test-only CA that `serve.sh` adds to each VM's trust store.
 
-Releases: N (`0.1.0`, installed), N+1 (`0.1.1`, self-update target), N+2 (`0.1.2`, a panel image that
-exits at once, for the swap rollback). Agents, panel and installer are TEST builds: the agent's
+Releases: N (`0.2.0`, installed), N+1 (`0.2.1`, self-update target), N+2 (`0.2.2`, a panel image that
+exits at once, for the swap rollback), all from the working tree, and the base release (`0.1.1`,
+`E2E_BASE`) built from its git tag `v0.1.1` (build step `base`: the tag's agent, installer, panel
+image and releasetool), which the upgrade check (38) installs and updates. Agents, panel and installer are TEST builds: the agent's
 `-X .../internal/update.TestRelease{BaseURL,PublicKey}`, the panel's `bun build --define
 __TEST_RELEASE_{API_URL,PUBLIC_KEY}__` and `INSTALLER_TEST_PUBLIC_KEY` for `scripts/render-installer.sh`
 point them at the release server and the TEST-ONLY key in `keys/`. The installer checks the signed
 `manifest.json` like a real install and starts the panel image pinned by the digest in it (check 1).
-The panel's TypeScript is built inside VM A so no darwin `.node` files get in.
+The panel's TypeScript is built inside VM A so no darwin `.node` files get in. The working tree's
+panel images get one test layer on top of `deploy/panel.Dockerfile`: the e2e's test-only CA
+(`serve.sh`) and `NODE_EXTRA_CA_CERTS` pointing at it, so the panel trusts the Gitea of check 33,
+which serves HTTPS with a certificate from that CA (the agents trust it through the VMs' stores).
 
 ## Steps
 
@@ -31,21 +36,19 @@ The panel's TypeScript is built inside VM A so no darwin `.node` files get in.
 test/e2e-colima/up.sh          # create/start the VMs, routes between them
 test/e2e-colima/serve.sh       # release + git servers on the Mac (serve.sh stop)
 test/e2e-colima/infra.sh       # registry, MinIO, Pebble on A
-test/e2e-colima/build.sh       # agents panel release git (any subset)
-test/e2e-colima/publish.sh 0.1.1   # make a built release "latest"
+test/e2e-colima/build.sh       # agents panel release git base (any subset)
+test/e2e-colima/publish.sh 0.2.1   # make a built release "latest"
 test/e2e-colima/checks.sh 7 8  # rerun some checks (make e2e-checks CHECKS="7 8")
 test/e2e-colima/refresh.sh     # put the working tree on the kept VMs (make e2e-refresh)
 test/e2e-colima/down.sh        # delete the VMs and ~/.cache/seylo-e2e
 ```
 
-`refresh.sh` builds the next test release from the working tree (0.1.3, then 0.1.4, ...; `build.sh`
+`refresh.sh` builds the next test release from the working tree (0.2.3, then 0.2.4, ...; `build.sh`
 with `E2E_BUILD_VERSIONS`), publishes it and runs the panel's own update (panel first, then the
-nodes), so single checks can be rerun against new code without a fresh run. The repo keeps one
-regenerated `0000_init` migration whose journal time moves forward, which drizzle would run again
-over the kept databases: `schema-sync.ts` first adds the new tables, columns and indexes to the
-running panel's `panel.db` and `metrics.db` and marks the new migration applied (additive changes
-only; anything else stops the refresh and needs a fresh `make e2e`). After a refresh, check 22
-(N -> N+1) cannot be rerun alone.
+nodes), so single checks can be rerun against new code without a fresh run. New migrations apply as
+in any update: `0000_init` is frozen since the first release and schema changes are new, add-only
+migrations. After a refresh, check 22 (N -> N+1) cannot be rerun alone; check 38 upgrades to the
+refreshed version instead of N.
 
 `KEEP=1 make e2e` keeps the VMs. Build output and state (API key, owner password, ids, per-check logs in
 `state/results/NN.{status,evidence,log}`) live in `~/.cache/seylo-e2e`, outside `dist/` because
@@ -65,6 +68,7 @@ only; anything else stops the refresh and needs a fresh `make e2e`). After a ref
   another server is refused without `--insecure`.
 - The first-run port closes 24 h after its domain is live; check 4 moves that stored time into the past
   (one SQLite write in the panel container) and waits for the panel's minute sweep to close it.
+- The default order is 1..30, 32..38, then 31.
 - Check 31 (panel domain) runs last and puts everything back: it gives the panel a new
   `panel<time>.<A dashed>.sslip.io` name each run (so a certificate from an earlier Pebble never
   gets in the way), points A's ACME client at Pebble, adds Pebble's root (from its management port,
@@ -84,6 +88,29 @@ only; anything else stops the refresh and needs a fresh `make e2e`). After a ref
 - Some checks build on state from earlier ones. Check 5 recreates `node-app` with one deploy, and check 13
   searches its logs across two or more deploys, which check 7 adds: after rerunning 5, rerun 7 before 13
   (`make e2e-checks CHECKS="5 7 13"`).
+- Check 32 talks to the real Docker Hub through the panel (search, tags, a config read: one pull from
+  the anonymous rate limit at most).
+- Check 33 starts `e2e-gitea` (gitea/gitea, HTTPS on 13000 with a certificate from the e2e test CA,
+  admin `e2e` with a token in `state/gitea-token`), makes a private `e2e/watch-app` repository and
+  pushes to it from the Mac. Gitea posts its webhooks to the panel's IP:port (`insecure` in
+  `gitProviders.webhook`, as the panel has no domain then).
+- Check 34 fills B's disk past the scheduled cleanup's line with `fallocate` (no data written) and
+  restarts B's agent, which checks its disks when it starts and every 10 minutes; it waits up to 13
+  minutes for the disk-triggered run, then removes the file and turns the schedule off again.
+- Check 35 uses the owner's browser session (check 2's cookie jar, signed in again with the saved
+  password when it ended) with `auth.reauth`, as host shells need. To show the agent's own refusal it
+  writes the panel's `nodes.host_shell` back to on without telling the node (one SQLite write), so
+  only the node's setting says no, then puts it back.
+- Check 36 gives `whoami` a data volume with a marker file before cloning it.
+- Check 37 runs ClickHouse on B (about 550 MB; B uses about 1 of its 4 GB with everything else there).
+- Check 38 takes C out of A's panel (its services go first, like check 27), installs the base release
+  (`E2E_BASE`, 0.1.1) as a panel + node on C with that release's own installer, makes real rows
+  through its API (a project, an app with env, Postgres 17 with a row, a cron job saved with 7 for
+  Sunday, which 0.1 panels accepted), then publishes this build and runs the normal update
+  (`updates.updatePanel`, panel then node). C pulls the pinned panel images of A's registry through
+  two small Python TCP relays (`e2e-regfwd` units: A's address -> A's 127.0.0.1:15000, C's
+  127.0.0.1:15000 -> A), since Docker only pulls plain HTTP from 127.0.0.0/8. Afterwards it puts the
+  published release back, uninstalls C and joins it to A again.
 - Run nothing that edits `checks.sh` or `lib.sh` while a run is going: bash reads the script as it goes.
 - The scripts only take VM profiles named `seylo-e2e-*` (they create and delete them), so they never
   touch a VM you use for something else, such as the dev VM `seylo-a`.

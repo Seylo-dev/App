@@ -4,6 +4,8 @@
 #   N   ($E2E_V1)  installed by the checks
 #   N+1 ($E2E_V2)  the self-update target (check 22)
 #   N+2 ($E2E_V3)  a deliberately broken panel image (the swap must roll back)
+#   base ($E2E_BASE)  the released version the upgrade check (38) installs,
+#                     built from its git tag v$E2E_BASE (step "base")
 #
 # For each version: the static agent binary for the VMs' architecture, the
 # rendered install.sh (trusting the TEST-ONLY key in keys/), checksums.txt +
@@ -13,13 +15,15 @@
 # (127.0.0.1:$E2E_REG_PORT, see infra.sh); the manifest pins its digest.
 # Both the agents and the panel are TEST builds: linker flags (agent) and
 # bun --define overrides (panel) point them at the local release server and
-# the TEST-ONLY key.
+# the TEST-ONLY key. The working tree's panel images also trust the e2e's
+# test-only CA (serve.sh) through NODE_EXTRA_CA_CERTS, so the panel can talk
+# to the Gitea on A (check 33), which serves HTTPS with a certificate from it.
 # Finally the test apps under apps/ become HTTPS git repositories.
 #
 # E2E_BUILD_VERSIONS limits the versions built (refresh.sh builds one newer
 # test release from the working tree that way).
 #
-# Usage: test/e2e-colima/build.sh [agents|installer|panel|release|git ...]   (default: all but installer, which agents covers)
+# Usage: test/e2e-colima/build.sh [agents|installer|panel|release|git|base ...]   (default: all but installer, which agents covers)
 source "$(dirname "$0")/lib.sh"
 
 E2E_BUILD_VERSIONS=${E2E_BUILD_VERSIONS:-$E2E_V1 $E2E_V2 $E2E_V3}
@@ -84,12 +88,18 @@ build_panel() {
 
   local prefix v
   prefix=$(printf %s "$SLUG" | tr '[:lower:]-' '[:upper:]_')
+  [ -s "$E2E_STATE/tls/ca.crt" ] || fail "no e2e test CA in $E2E_STATE/tls (run serve.sh first)"
+  on "$E2E_A" "mkdir -p /root/e2e-ca-layer && cat >/root/e2e-ca-layer/ca.pem" <"$E2E_STATE/tls/ca.crt"
   for v in $E2E_BUILD_VERSIONS; do
     [ "$v" != "$E2E_V3" ] || continue
     log "panel image $IMAGE_REPO:$v"
     on "$E2E_A" "cd /root/e2e-src && docker build -q -f deploy/panel.Dockerfile --build-arg VERSION=$v \
-      --build-arg ENV_PREFIX=$prefix --build-arg DATA_DIR=$BRAND_DATA_DIR -t $IMAGE_REPO:$v . >/dev/null" ||
+      --build-arg ENV_PREFIX=$prefix --build-arg DATA_DIR=$BRAND_DATA_DIR -t $IMAGE_REPO:$v-release . >/dev/null" ||
       fail "docker build $v"
+    # The test layer: trust the e2e's test-only CA (Bun reads NODE_EXTRA_CA_CERTS at start).
+    on "$E2E_A" "printf '%s\n' 'FROM $IMAGE_REPO:$v-release' 'COPY ca.pem /etc/ssl/$SLUG-e2e-test-ca.pem' \
+      'ENV NODE_EXTRA_CA_CERTS=/etc/ssl/$SLUG-e2e-test-ca.pem' >/root/e2e-ca-layer/Dockerfile && \
+      docker build -q -t $IMAGE_REPO:$v /root/e2e-ca-layer >/dev/null" || fail "docker build $v (test CA layer)"
     push_digest "$v"
   done
   case " $E2E_BUILD_VERSIONS " in *" $E2E_V3 "*) ;; *) return 0 ;; esac
@@ -155,6 +165,53 @@ build_git() {
   tar -C "$E2E_DIR/apps/upload-app" -czf "$E2E_OUT/upload-app.tar.gz" .
 }
 
+# base: the released version E2E_BASE from its git tag, as the upgrade check
+# (38) installs it: the agent and install.sh built from the tag's tree, its
+# panel image built inside A from the same tree, and a manifest written and
+# signed with the tag's own releasetool. All test builds against the local
+# release server, like the others.
+build_base() {
+  local v=$E2E_BASE tag=v$E2E_BASE src out digest prefix
+  git -C "$E2E_ROOT" rev-parse -q --verify "refs/tags/$tag" >/dev/null || fail "no git tag $tag to build the upgrade base from"
+  src=$(mktemp -d)
+  git -C "$E2E_ROOT" archive "$tag" | tar -x -C "$src"
+  out=$(rel_dir "$v")
+  rm -rf "$out"
+  mkdir -p "$out"
+  log "base $v: agent for linux/$arch from $tag"
+  CGO_ENABLED=0 GOOS=linux GOARCH=$arch go -C "$src/go" build -trimpath \
+    -ldflags "-s -w -X $GO_MODULE/internal/version.Version=$v -X $GO_MODULE/internal/version.Commit=$tag $(go_ldflags_extra)" \
+    -o "$out/${SLUG}_linux_$arch" ./cmd/seylo || fail "agent build of $tag"
+  INSTALLER_TEST_PUBLIC_KEY=$PUBKEY "$src/scripts/render-installer.sh" "$v" "$out/install.sh" >/dev/null || fail "installer of $tag"
+
+  log "base $v: panel image from $tag, built in $E2E_A"
+  (cd "$src" && COPYFILE_DISABLE=1 tar -c --no-xattrs --no-mac-metadata -f - .) |
+    on "$E2E_A" "rm -rf /root/e2e-src-base && mkdir -p /root/e2e-src-base && tar -x -C /root/e2e-src-base"
+  on "$E2E_A" "docker run --rm -v /root/e2e-src-base:/src -v e2e-bun-cache:/root/.bun/install/cache -w /src oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d \
+    bash -c 'bun install --frozen-lockfile >/tmp/install.log 2>&1 || { cat /tmp/install.log; exit 1; }; bun run build && \
+      cd apps/panel && bun build src/main.ts --target bun --outdir dist --sourcemap=linked \
+        --define __TEST_RELEASE_API_URL__=\\\"$(release_base)/repos/$ORG/$REPO/releases/latest\\\" \
+        --define __TEST_RELEASE_PUBLIC_KEY__=\\\"$PUBKEY\\\" >/dev/null'" ||
+    fail "the $tag panel build failed in $E2E_A"
+  prefix=$(printf %s "$SLUG" | tr '[:lower:]-' '[:upper:]_')
+  on "$E2E_A" "cd /root/e2e-src-base && docker build -q -f deploy/panel.Dockerfile --build-arg VERSION=$v \
+    --build-arg ENV_PREFIX=$prefix --build-arg DATA_DIR=$BRAND_DATA_DIR -t $IMAGE_REPO:$v . >/dev/null" || fail "docker build $tag"
+  push_digest "$v"
+  digest=$(state_get "panel-digest-$v")
+
+  log "base $v: checksums and manifest (the tag's releasetool)"
+  (cd "$out" && shasum -a 256 "${SLUG}_linux_$arch" install.sh >checksums.txt)
+  minisign -S -s "$E2E_KEYS/e2e-test.key" -m "$out/checksums.txt" -x "$out/checksums.txt.minisig" \
+    -t "$SLUG $v checksums.txt" </dev/null >/dev/null
+  go -C "$src/go" run ./internal/update/releasetool \
+    -version "$v" -binaries "$out" -platforms "linux-$arch" -download-base "$(rel_url "$v")" \
+    -image "$IMAGE_REPO:$v" -digest "$digest" -installer "$out/install.sh" \
+    -changelog "$(release_base)/changelog-$v" -out "$out/manifest.json" >/dev/null || fail "manifest of $tag"
+  minisign -S -s "$E2E_KEYS/e2e-test.key" -m "$out/manifest.json" -x "$out/manifest.json.minisig" \
+    -t "$SLUG $v manifest.json" </dev/null >/dev/null
+  rm -rf "$src"
+}
+
 # installer: re-render install.sh for every version (then run "release").
 build_installer() {
   local v
@@ -164,7 +221,7 @@ build_installer() {
   done
 }
 
-steps=${*:-agents panel release git}
+steps=${*:-agents panel release git base}
 for s in $steps; do
   case $s in
   agents) build_agents ;;
@@ -172,6 +229,7 @@ for s in $steps; do
   panel) build_panel ;;
   release) release_files ;;
   git) build_git ;;
+  base) build_base ;;
   *) fail "unknown build step $s" ;;
   esac
 done

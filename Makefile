@@ -96,7 +96,7 @@ release: ## Publish from a v* tag (GITHUB_TOKEN, MINISIGN_SECRET_KEY, MINISIGN_P
 	$(BRAND_ENV) goreleaser release --clean
 	$(BRAND_ENV) scripts/release-manifest.sh
 
-e2e: ## Three VMs (Colima A/B, plain Lima C): install, join, the 31-check checklist -> test/e2e-colima/RESULTS.md (KEEP=1 keeps the VMs)
+e2e: ## Three VMs (Colima A/B, plain Lima C): install, join, the 38-check checklist -> test/e2e-colima/RESULTS.md (KEEP=1 keeps the VMs)
 	test/e2e-colima/run.sh
 
 e2e-checks: ## Rerun e2e checks on the kept VMs: make e2e-checks CHECKS="7 8"

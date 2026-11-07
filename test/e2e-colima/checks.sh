@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # The e2e checklist against the three VMs. One function per check
-# (check_01 .. check_31); each prints its sub-results with evidence and ends
+# (check_01 .. check_38); each prints its sub-results with evidence and ends
 # PASS, FAIL, BLOCKED (a precondition is missing, with the reason) or SKIP.
 # Results are kept per check in dist/e2e/state/results and RESULTS.md (next
 # to this file) is rewritten from them after every run, so a single check
 # can be rerun alone.
 #
-# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..31 in order)
+# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..38, then 31)
 #        test/e2e-colima/checks.sh report      rewrite RESULTS.md only
 #
 # Panel calls go through the REST op routes (/api/v1/<op id>) with the API
@@ -57,10 +57,19 @@ TITLES=(
   "(stretch) ACME certificate from a local Pebble CA"
   "Web smoke with Playwright against the e2e panel"
   "Panel domain: Pebble HTTPS, Secure cookie, HSTS, IP:port -> domain, nodes move to it, CLI"
+  "Docker Hub: search, tags, inspect traefik/whoami on the real Docker Hub; dockerHub.create on B live on its auto domain"
+  "Gitea provider on A: a push outside the watch path skips (reason logged), inside deploys, [skip ci] skips"
+  "Scheduled cleanup on B: a disk line triggers a run that removes only labelled resources and reports them"
+  "Host shell on B: owner turns it on with re-auth, hostname through the panel's socket, audited, agent refuses when off"
+  "Clone whoami with its data into another project on C; move a service between projects (impact list, keeps serving)"
+  "Valkey, ClickHouse, Postgres 18 + pgvector on B: app connects, TLS exposure, shell query, backup to MinIO, restore"
+  "Upgrade: a $E2E_BASE panel and node with real rows move to this build by the normal update; 0001 applies, data survives"
 )
-# The last check. Check 31 gives the panel a domain and puts everything back
-# afterwards; it runs last so a failed cleanup cannot spoil the others.
-LAST=31
+# The highest check number. Check 31 gives the panel a domain and puts
+# everything back afterwards; it runs last (after 32..38) so a failed
+# cleanup cannot spoil the others.
+LAST=38
+DOMAIN_CHECK=31
 
 CUR=
 CUR_FAILS=0
@@ -2158,6 +2167,869 @@ p31_cleanup() {
   expect "cleanup: 3 nodes online" online_ge 3
 }
 
+# ---------------------------------------------------------------- 32-37 0.2 features
+
+# json_ok <json> <jq filter>: the filter holds for the JSON (in this shell, so any text is fine).
+json_ok() { printf '%s' "$1" | jq -e "$2" >/dev/null; }
+
+# domain_of <service>: the host of the service's first domain.
+domain_of() { api domains.list "{\"serviceId\":\"$1\"}" | jq -r '(.domains // .)[0].host // empty'; }
+# plain_http <service> <domain host>: the domain over plain HTTP (no public CA reaches a private address, as in check 4).
+plain_http() {
+  local did
+  did=$(api domains.list "{\"serviceId\":\"$1\"}" | jq -r --arg h "$2" '(.domains // .)[] | select(.host==$h) | .id' | head -1)
+  [ -n "$did" ] && api domains.update "{\"serviceId\":\"$1\",\"domainId\":\"$did\",\"https\":\"off\",\"redirectToHttps\":false}" >/dev/null
+}
+deploy_count() { api deployments.list "{\"serviceId\":\"$1\",\"limit\":50}" | jq '.deployments | length'; }
+
+check_32() {
+  need_key || return 3
+  local nb pid out tag inspect svc st host
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  pid=$(project_id e2e)
+  # The real Docker Hub, through the panel (search v4 or v2, the tags API, the registry for the config).
+  out=$(api dockerHub.search '{"query":"traefik/whoami"}') || { bad "dockerHub.search failed"; return 1; }
+  ev "search traefik/whoami: $(printf '%s' "$out" | jq -c '[.results[0:3][] | {repository, publisher, badge, pullCount}]')"
+  expect "search finds traefik/whoami first" sh -c "printf '%s' '$(printf '%s' "$out" | jq -c '[.results[0].repository]')' | grep -q '\"traefik/whoami\"'"
+  out=$(api dockerHub.tags '{"repository":"traefik/whoami"}') || { bad "dockerHub.tags failed"; return 1; }
+  tag=$(printf '%s' "$out" | jq -r '.suggested // empty')
+  ev "tags: suggested $tag, newest $(printf '%s' "$out" | jq -c '[.tags[0:4][] | {name, platforms: [.platforms[].platform]}]')"
+  expect "tags lists versions with their platforms and suggests one ($tag)" sh -c \
+    "[ -n '$tag' ] && printf '%s' '$(printf '%s' "$out" | jq -c '[.tags[] | select(.platforms | length > 0)] | length')' | grep -qv '^0$'"
+  # v1.10.3 is the tag the other checks run (already on B); inspect reads its config for B's CPU.
+  inspect=$(api dockerHub.inspect "{\"repository\":\"traefik/whoami\",\"tag\":\"v1.10.3\",\"arch\":\"$arch\"}") || { bad "dockerHub.inspect failed"; return 1; }
+  ev "inspect v1.10.3: $(printf '%s' "$inspect" | jq -c '{digest, platform, ports, entrypoint, user, private}')"
+  expect "inspect reads port 80/tcp, the entrypoint and a digest for linux/$arch" json_ok "$(printf '%s' "$inspect" | jq -c .)" "(.ports | map(.port) | index(80)) != null and (.digest | startswith(\"sha256:\")) and (.platform | startswith(\"linux/$arch\")) and (.entrypoint | length > 0)"
+
+  delete_service e2e hub-whoami
+  svc=$(api dockerHub.create "$(jq -nc --arg p "$pid" --arg n "$nb" \
+    '{projectId:$p, name:"hub-whoami", nodeId:$n, repository:"traefik/whoami", tag:"v1.10.3", port:80, public:true, env:"WHOAMI_NAME=from-docker-hub\n"}')" | jq -r .id) ||
+    { bad "dockerHub.create failed"; return 1; }
+  state_set svc-hub-whoami "$svc"
+  ev "service: $(api services.get "{\"serviceId\":\"$svc\"}" | jq -c '{name, sourceConfig, ports: [.ports[] | .containerPort]}')"
+  st=$(wait_deploy "$svc" 300)
+  [ "$st" = live ] && good "dockerHub.create deployed traefik/whoami:v1.10.3 on B" || { bad "the deployment ended $st"; return 1; }
+  host=$(domain_of "$svc")
+  [ -n "$host" ] || { bad "no automatic domain on the new service (B's wildcard $(wildcard_of b))"; return 1; }
+  case $host in *".$(wildcard_of b)") good "it got B's automatic domain $host" ;; *) bad "the domain $host is not under B's wildcard $(wildcard_of b)" ;; esac
+  plain_http "$svc" "$host" || bad "domains.update https off failed"
+  if wait_for 120 "the Docker Hub app on its domain" sh -c "curl -fsS -m 5 -H 'Host: $host' http://$(node_ip b)/ | grep -q 'Hostname'"; then
+    good "http://$host answers through B's Traefik: $(curl_host b "$host" | grep -m1 Hostname)"
+  else
+    bad "http://$host does not answer through B's Traefik (code $(http_code -H "Host: $host" "http://$(node_ip b)/"))"
+  fi
+  expect "the .env from the create form reached the container (WHOAMI_NAME)" sh -c "curl -fsS -m 5 -H 'Host: $host' http://$(node_ip b)/ | grep -q from-docker-hub"
+}
+
+# ---- 33: a Gitea on A as a git provider
+
+GITEA_IMAGE=gitea/gitea:1.24.6
+GITEA_PORT=13000
+gitea_url() { echo "https://$(node_ip a):$GITEA_PORT"; }
+gitea_api() { # method path [json]
+  curl -fsS -m 30 --cacert "$E2E_STATE/tls/ca.crt" -X "$1" -H "authorization: token $(state_get gitea-token)" \
+    -H 'content-type: application/json' ${3:+--data "$3"} "$(gitea_url)/api/v1$2"
+}
+
+# gitea_up: the e2e-gitea container on A (unlabeled, like the other infra),
+# HTTPS with a certificate from the e2e's test-only CA, which the VMs and the
+# e2e panel image trust; an admin user "e2e" and a token in state.
+gitea_up() {
+  local dir=$E2E_STATE/gitea ip
+  ip=$(node_ip a)
+  mkdir -p "$dir"
+  if [ ! -s "$dir/cert.pem" ] || ! openssl x509 -in "$dir/cert.pem" -noout -ext subjectAltName 2>/dev/null | grep -q "$ip"; then
+    openssl req -newkey rsa:2048 -nodes -subj "/CN=e2e-gitea" -keyout "$dir/key.pem" -out "$dir/req.csr" 2>/dev/null
+    printf 'subjectAltName=IP:%s\nextendedKeyUsage=serverAuth\n' "$ip" >"$dir/ext.cnf"
+    openssl x509 -req -in "$dir/req.csr" -CA "$E2E_STATE/tls/ca.crt" -CAkey "$E2E_STATE/tls/ca.key" -CAcreateserial \
+      -days 30 -extfile "$dir/ext.cnf" -out "$dir/cert.pem" 2>/dev/null || return 1
+  fi
+  if ! on "$E2E_A" "docker inspect -f '{{.State.Running}}' e2e-gitea 2>/dev/null | grep -q true"; then
+    on "$E2E_A" "docker rm -fv e2e-gitea >/dev/null 2>&1; docker create --name e2e-gitea --restart unless-stopped -p $GITEA_PORT:3000 \
+      -e USER_UID=1000 -e USER_GID=1000 -e GITEA__security__INSTALL_LOCK=true -e GITEA__database__DB_TYPE=sqlite3 \
+      -e GITEA__server__PROTOCOL=https -e GITEA__server__HTTP_PORT=3000 -e GITEA__server__ROOT_URL=$(gitea_url)/ \
+      -e GITEA__server__CERT_FILE=/data/certs/cert.pem -e GITEA__server__KEY_FILE=/data/certs/key.pem \
+      -e GITEA__webhook__ALLOWED_HOST_LIST='*' -e GITEA__webhook__DELIVER_TIMEOUT=10 \
+      -e GITEA__service__DISABLE_REGISTRATION=true -e GITEA__log__LEVEL=Warn $GITEA_IMAGE >/dev/null" || return 1
+    COPYFILE_DISABLE=1 tar -c -C "$dir" -f - cert.pem key.pem | on "$E2E_A" "mkdir -p /root/e2e-gitea-certs && tar -x -C /root/e2e-gitea-certs && chmod 0644 /root/e2e-gitea-certs/*.pem && docker cp /root/e2e-gitea-certs e2e-gitea:/data/certs && docker start e2e-gitea >/dev/null" || return 1
+    state_set gitea-token ""
+  fi
+  wait_for 120 "Gitea" curl -fsS -m 5 --cacert "$E2E_STATE/tls/ca.crt" "$(gitea_url)/api/healthz" || return 1
+  if [ -z "$(state_get gitea-token)" ] || ! gitea_api GET /user >/dev/null 2>&1; then
+    on "$E2E_A" "docker exec -u git e2e-gitea gitea admin user create --username e2e --password e2e-$(openssl rand -hex 12) \
+      --email e2e@e2e.test --admin --must-change-password=false >/dev/null 2>&1 || true"
+    state_set gitea-token "$(on "$E2E_A" "docker exec -u git e2e-gitea gitea admin user generate-access-token --username e2e --token-name e2e-$(date +%s) --scopes all --raw")"
+  fi
+  gitea_api GET /user >/dev/null
+}
+
+# gitea_push <message> <file> <content>: one commit to e2e/watch-app's main from the Mac.
+gitea_push() {
+  local work=$E2E_STATE/gitea/work
+  if [ ! -d "$work/.git" ]; then
+    rm -rf "$work"
+    GIT_SSL_CAINFO=$E2E_STATE/tls/ca.crt git clone -q "https://e2e:$(state_get gitea-token)@$(node_ip a):$GITEA_PORT/e2e/watch-app.git" "$work" || return 1
+  fi
+  mkdir -p "$(dirname "$work/$2")"
+  printf '%s\n' "$3" >"$work/$2"
+  git -C "$work" add -A
+  git -C "$work" -c user.name=e2e -c user.email=e2e@e2e.test commit -qm "$1"
+  GIT_SSL_CAINFO=$E2E_STATE/tls/ca.crt git -C "$work" push -q origin HEAD:main
+}
+
+# deliveries_of <service>: the webhook deliveries the panel recorded, newest first.
+deliveries_of() { api webhooks.listDeliveries "{\"serviceId\":\"$1\"}" | jq -c '[.deliveries[] | {id, event, outcome, detail, deploymentId}]'; }
+# new_delivery <service> <count before>: a delivery newer than the ones counted.
+new_delivery() { [ "$(deliveries_of "$1" | jq 'length')" -gt "$2" ]; }
+
+check_33() {
+  need_key || return 3
+  local na nb pid provider svc before dep st n host addr list log
+  na=$(node_id a)
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  [ -s "$E2E_STATE/tls/ca.crt" ] || { blocked "no e2e test CA (serve.sh)"; return 3; }
+  pid=$(project_id e2e)
+  gitea_up >>"$RES/$CUR.log" 2>&1 || { bad "Gitea did not start on A"; return 1; }
+  good "Gitea $GITEA_IMAGE on A at $(gitea_url) (certificate from the e2e test CA)"
+
+  # A fresh repository each run: watch paths decide on what a push changes.
+  gitea_api DELETE /repos/e2e/watch-app >/dev/null 2>&1 || true
+  rm -rf "$E2E_STATE/gitea/work"
+  gitea_api POST /user/repos '{"name":"watch-app","private":true,"default_branch":"main"}' >/dev/null || { bad "creating the Gitea repository failed"; return 1; }
+  mkdir -p "$E2E_STATE/gitea/work"
+  (
+    cd "$E2E_STATE/gitea/work" && git init -q -b main &&
+      printf '%s\n' 'FROM busybox:1.37' 'COPY app/ /www/' 'EXPOSE 8080' 'CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]' >Dockerfile &&
+      mkdir -p app docs && echo 'watch-app v1' >app/index.html && echo 'notes v1' >docs/notes.md &&
+      git add -A && git -c user.name=e2e -c user.email=e2e@e2e.test commit -qm 'watch-app v1' &&
+      git remote add origin "https://e2e:$(state_get gitea-token)@$(node_ip a):$GITEA_PORT/e2e/watch-app.git" &&
+      GIT_SSL_CAINFO=$E2E_STATE/tls/ca.crt git push -q origin main
+  ) >>"$RES/$CUR.log" 2>&1 || { bad "the first push to Gitea failed"; return 1; }
+  good "e2e/watch-app (private) pushed to Gitea: Dockerfile, app/index.html, docs/notes.md"
+
+  provider=$(api gitProviders.list | jq -r '.items[] | select(.name=="e2e-gitea") | .id' | head -1)
+  if [ -n "$provider" ]; then
+    delete_service e2e watch-app
+    api gitProviders.delete "{\"providerId\":\"$provider\"}" >/dev/null || ev "note: gitProviders.delete of the old connection refused"
+  fi
+  provider=$(api gitProviders.create "$(jq -nc --arg u "$(gitea_url)" --arg t "$(state_get gitea-token)" '{kind:"gitea", name:"e2e-gitea", url:$u, token:$t}')" | jq -r .id) ||
+    { bad "gitProviders.create (Gitea) failed: the panel must trust the e2e CA (test image layer)"; return 1; }
+  ev "connection: $(api gitProviders.list | jq -c --arg id "$provider" '.items[] | select(.id==$id) | {kind, host, account}')"
+  list=$(api gitProviders.repos "{\"projectId\":\"$pid\",\"providerId\":\"$provider\"}" | jq -c '[.repos[].fullName]')
+  expect "the connection lists e2e/watch-app ($list)" sh -c "printf '%s' '$list' | grep -q e2e/watch-app"
+
+  delete_service e2e watch-app
+  svc=$(create_service "$(jq -nc --arg p "$pid" --arg nb "$nb" --arg na "$na" \
+    '{projectId:$p, name:"watch-app", kind:"app", nodeId:$nb, build:{builder:"dockerfile", dockerfilePath:"Dockerfile", buildNodeId:$na},
+      ports:[{containerPort:8080, protocol:"tcp"}], deployNow:false}')") || { bad "services.create watch-app failed"; return 1; }
+  state_set svc-watch-app "$svc"
+  api gitProviders.connectRepo "{\"serviceId\":\"$svc\",\"providerId\":\"$provider\",\"repo\":\"e2e/watch-app\",\"branch\":\"main\",\"deployOnPush\":true}" >/dev/null ||
+    { bad "gitProviders.connectRepo failed"; return 1; }
+  ev "webhook: $(api gitProviders.webhook "{\"serviceId\":\"$svc\"}" | jq -c '{created, url, error, insecure}')"
+  expect "the panel created the webhook on the Gitea repository" test "$(api gitProviders.webhook "{\"serviceId\":\"$svc\"}" | jq -r .created)" = true
+  api services.setWatchPaths "{\"serviceId\":\"$svc\",\"watchPaths\":[\"app/**\"]}" >/dev/null || bad "services.setWatchPaths failed"
+  dep=$(api deployments.deploy "{\"serviceId\":\"$svc\"}" | jq -r '.id // .deployment.id')
+  st=$(wait_deploy "$svc" 900 "$dep")
+  [ "$st" = live ] && good "the first deploy (Dockerfile from the private Gitea repository, built on A) is live" || {
+    bad "the first deploy ended $st: $(deploy_log_tail "$svc" "$dep" 8 | tr '\n' '|')"
+    return 1
+  }
+  wait_for 60 "watch-app first-run" has_first_run "$svc" || true
+  addr=$(first_run_addr "$svc")
+  expect "watch-app answers v1 on $addr" sh -c "curl -fsS -m 5 http://$addr/ | grep -q 'watch-app v1'"
+
+  # 1. Outside the watch path: no deploy, the delivery says why.
+  n=$(deliveries_of "$svc" | jq 'length')
+  before=$(deploy_count "$svc")
+  gitea_push "Update the notes" docs/notes.md "notes v2" >>"$RES/$CUR.log" 2>&1 || bad "push 1 failed"
+  wait_for 60 "the webhook delivery of push 1" new_delivery "$svc" "$n" || bad "no delivery recorded for push 1"
+  list=$(deliveries_of "$svc")
+  ev "push 1 (docs/notes.md): $(printf '%s' "$list" | jq -c '.[0] | {event, outcome, detail}')"
+  expect "push 1 is skipped by the watch path, with the reason" json_ok "$(printf '%s' "$list" | jq -c '.[0]')" '.outcome=="ignored" and (.detail | test("watch paths"; "i"))'
+  sleep 5
+  expect "push 1 started no deploy ($before deployments)" test "$(deploy_count "$svc")" = "$before"
+
+  # 2. Inside it: a deploy that names the matching file.
+  n=$(deliveries_of "$svc" | jq 'length')
+  gitea_push "Change the page" app/index.html "watch-app v2" >>"$RES/$CUR.log" 2>&1 || bad "push 2 failed"
+  wait_for 60 "the webhook delivery of push 2" new_delivery "$svc" "$n" || bad "no delivery recorded for push 2"
+  list=$(deliveries_of "$svc")
+  ev "push 2 (app/index.html): $(printf '%s' "$list" | jq -c '.[0] | {event, outcome, detail}')"
+  dep=$(printf '%s' "$list" | jq -r '.[0].deploymentId // empty')
+  if [ -n "$dep" ]; then
+    st=$(wait_deploy "$svc" 900 "$dep")
+    log=$(deploy_log_tail "$svc" "$dep" 400 | grep -m1 'Watch paths' || true)
+    ev "push 2 deploy: $st; log: $log"
+    expect "push 2 deployed (live)" test "$st" = live
+    expect "the deploy log names the file and the pattern" sh -c "printf '%s' '$log' | grep -q 'app/index.html matches app/'"
+    wait_for 60 "v2 on the first-run address" sh -c "curl -fsS -m 5 http://$(first_run_addr "$svc")/ | grep -q 'watch-app v2'" &&
+      good "watch-app now answers v2" || bad "watch-app does not answer v2"
+  else
+    bad "push 2 started no deploy: $(printf '%s' "$list" | jq -c '.[0]')"
+  fi
+
+  # 3. [skip ci] in the message: no deploy, even inside the watch path.
+  n=$(deliveries_of "$svc" | jq 'length')
+  before=$(deploy_count "$svc")
+  gitea_push "Small tweak [skip ci]" app/index.html "watch-app v3" >>"$RES/$CUR.log" 2>&1 || bad "push 3 failed"
+  wait_for 60 "the webhook delivery of push 3" new_delivery "$svc" "$n" || bad "no delivery recorded for push 3"
+  list=$(deliveries_of "$svc")
+  ev "push 3 ([skip ci]): $(printf '%s' "$list" | jq -c '.[0] | {event, outcome, detail}')"
+  expect "push 3 is skipped for [skip ci]" json_ok "$(printf '%s' "$list" | jq -c '.[0]')" '.outcome=="ignored" and (.detail | test("skip ci"))'
+  sleep 5
+  expect "push 3 started no deploy" test "$(deploy_count "$svc")" = "$before"
+  expect "watch-app still answers v2" sh -c "curl -fsS -m 5 http://$(first_run_addr "$svc")/ | grep -q 'watch-app v2'"
+}
+
+
+# ---- 34: scheduled cleanup on a disk line
+
+# disk_use <letter>: the fullest of the data dir's and Docker root's file systems, in percent (as the agent reads it).
+disk_use() {
+  on_node "$1" "df -P $BRAND_DATA_DIR /var/lib/docker | awk 'NR>1 {sub(\"%\",\"\",\$5); if (\$5>m) m=\$5} END {print m+0}'"
+}
+newest_cleanup() { api cleanup.runs "{\"nodeId\":\"$1\",\"limit\":5}" | jq -c '.runs[0] // empty'; }
+cleanup_since() { # node, epoch ms: a disk-triggered run that started after it
+  api cleanup.runs "{\"nodeId\":\"$1\",\"limit\":10}" | jq -e --argjson t "$2" \
+    '[.runs[] | select(.trigger=="disk" and ((.startedAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) * 1000 >= $t))] | length >= 1' >/dev/null
+}
+
+check_34() {
+  need_key || return 3
+  local nb use line fill since run lines garbage_id
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  garbage_id=cafecafecafecafe
+  # Labelled garbage of a service B no longer runs, next to unlabeled look-alikes (as in check 23).
+  on "$E2E_B" "docker rm -f e2e34-unlabeled-ctr >/dev/null 2>&1; docker volume rm e2e34-unlabeled-vol >/dev/null 2>&1;
+    docker run --name e2e34-unlabeled-ctr busybox:1.37 true >/dev/null && docker volume create e2e34-unlabeled-vol >/dev/null &&
+    docker tag busybox:1.37 e2e34-unlabeled-img:1 &&
+    docker volume create --label $SLUG.managed=true --label $SLUG.service=$garbage_id e2e34-labelled-vol >/dev/null &&
+    printf 'FROM busybox:1.37\nLABEL $SLUG.managed=true $SLUG.service=$garbage_id\n' | docker build -q -t e2e34-labelled-img:1 - >/dev/null" >>"$RES/$CUR.log" 2>&1 ||
+    { bad "could not make the test resources on B"; return 1; }
+  ev "made a labelled image and volume of a removed service, and an unlabeled stopped container, volume and image"
+
+  # A disk line a little above today's use, then fill the disk past it.
+  use=$(disk_use b)
+  line=$((use + 4))
+  [ "$line" -ge 50 ] || line=50
+  [ "$line" -le 95 ] || { blocked "B's disk is already ${use}% full"; return 3; }
+  api cleanup.setSchedule "{\"nodeId\":\"$nb\",\"schedule\":{\"enabled\":true,\"cron\":null,\"diskPercent\":$line,\"kinds\":{\"images\":true,\"buildCache\":false,\"stoppedContainers\":true,\"unusedVolumes\":true}}}" >>"$RES/$CUR.log" ||
+    { bad "cleanup.setSchedule failed"; return 1; }
+  ev "schedule: $(api cleanup.getSchedule "{\"nodeId\":\"$nb\"}" | jq -c '{schedule, supported}')"
+  expect "the schedule is saved and the node can run it" json_ok "$(api cleanup.getSchedule "{\"nodeId\":\"$nb\"}" | jq -c .)" ".schedule.enabled and .schedule.diskPercent == $line and .supported"
+  sleep 10
+  # The fullest of the two file systems, filled to 3 points over the line (fallocate: no data written).
+  fill=$(on "$E2E_B" "df -P -B1 $BRAND_DATA_DIR | awk 'NR==2 {t=\$3+\$4; want=int(t*($line+3)/100); print (want>\$3 ? want-\$3 : 0)}'")
+  on "$E2E_B" "rm -f $BRAND_DATA_DIR/e2e34-fill && fallocate -l $fill $BRAND_DATA_DIR/e2e34-fill" >>"$RES/$CUR.log" 2>&1 || { bad "could not fill B's disk"; return 1; }
+  ev "B's disk: ${use}% before, $(disk_use b)% after filling; the line is ${line}%"
+  # The agent checks its disks when it starts and every 10 minutes after.
+  since=$(($(date +%s) * 1000 - 5000))
+  on "$E2E_B" "systemctl restart $SLUG.service"
+  if wait_for 780 "a disk-triggered cleanup run" cleanup_since "$nb" "$since"; then
+    run=$(api cleanup.runs "{\"nodeId\":\"$nb\",\"limit\":10}" | jq -c '[.runs[] | select(.trigger=="disk")][0]')
+    printf '%s\n' "$run" >>"$RES/$CUR.log"
+    ev "run: $(printf '%s' "$run" | jq -c '{trigger, status, diskPercent, removedCount, bytesFreed, error}')"
+    ev "it reported: $(printf '%s' "$run" | jq -c '.lines[0:12]')"
+    good "the disk line started a cleanup run on B by itself"
+    lines=$(printf '%s' "$run" | jq -r '.lines[]')
+    expect "the run succeeded at ${line}% or more" json_ok "$run" ".status==\"succeeded\" and .diskPercent >= $line"
+    expect "it reports the labelled image and volume" sh -c "printf '%s' '$lines' | grep -q e2e34-labelled-img && printf '%s' '$lines' | grep -q e2e34-labelled-vol"
+    expect "it reports nothing unlabeled" sh -c "! printf '%s' '$lines' | grep -q e2e34-unlabeled"
+  else
+    run=$(api cleanup.runs "{\"nodeId\":\"$nb\",\"limit\":3}" | jq -c '[.runs[] | {trigger, status, startedAt}]')
+    bad "no disk-triggered run within 13 minutes (runs: $run)"
+  fi
+  on "$E2E_B" "rm -f $BRAND_DATA_DIR/e2e34-fill"
+  expect "the labelled image is gone" on "$E2E_B" "! docker image inspect e2e34-labelled-img:1 >/dev/null 2>&1"
+  expect "the labelled volume is gone" on "$E2E_B" "! docker volume inspect e2e34-labelled-vol >/dev/null 2>&1"
+  expect "the unlabeled container, volume and image survive" on "$E2E_B" \
+    "docker inspect e2e34-unlabeled-ctr >/dev/null && docker volume inspect e2e34-unlabeled-vol >/dev/null && docker image inspect e2e34-unlabeled-img:1 >/dev/null"
+  expect "running services are untouched (whoami answers)" sh -c "curl -fsS -m 5 -H 'Host: $(state_get host-whoami)' http://$(node_ip b)/ | grep -q Hostname"
+  api cleanup.setSchedule "{\"nodeId\":\"$nb\",\"schedule\":{\"enabled\":false,\"cron\":\"0 4 * * *\",\"diskPercent\":80,\"kinds\":{\"images\":true,\"buildCache\":true,\"stoppedContainers\":true,\"unusedVolumes\":false}}}" >/dev/null ||
+    ev "note: turning the schedule off again failed"
+  on "$E2E_B" "docker rm -f e2e34-unlabeled-ctr >/dev/null 2>&1; docker volume rm e2e34-unlabeled-vol >/dev/null 2>&1; docker rmi e2e34-unlabeled-img:1 >/dev/null 2>&1; true"
+}
+
+# ---- 35: host shell
+
+# session_op <op> <json>: an op with the owner's browser session (cookie jar from check 2), like the web app.
+session_op() {
+  local jar=$E2E_STATE/cookies
+  curl -sS -m 60 -c "$jar" -b "$jar" -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST --data "$2" "$(panel_url)/api/v1/$1"
+}
+# owner_session: a signed-in owner session in the jar (signs in again when it ended).
+owner_session() {
+  local jar=$E2E_STATE/cookies email pw
+  curl -fsS -m 10 -b "$jar" "$(panel_url)/api/v1/auth.whoami" >/dev/null 2>&1 && return 0
+  email=$(sed -n 1p "$E2E_STATE/owner")
+  pw=$(sed -n 2p "$E2E_STATE/owner")
+  session_op auth.login "$(jq -nc --arg e "$email" --arg p "$pw" '{email:$e, password:$p}')" >/dev/null &&
+    curl -fsS -m 10 -b "$jar" "$(panel_url)/api/v1/auth.whoami" >/dev/null
+}
+# host_shell <node id> <wsclient args...>: opens a host shell with the owner session and runs the ws client on it.
+host_shell() {
+  local nid=$1 out url
+  shift
+  out=$(session_op hostShell.open "{\"nodeId\":\"$nid\"}")
+  url=$(printf '%s' "$out" | jq -r '.url // empty' 2>/dev/null)
+  [ -n "$url" ] || { printf 'hostShell.open: %s\n' "$out"; return 2; }
+  ws "$(ws_url "$url")" "$@"
+}
+audit_has() { # op id [reason regex]: an audit entry for it about node B since the check began (with that close reason)
+  api audit.list "{\"opId\":\"$1\",\"limit\":20,\"from\":\"$C35_SINCE\"}" | jq -e --arg n "$(node_id b)" --arg r "${2:-}" \
+    '[.entries[] | select(((.target.id // "") == $n or ((.input.nodeId // "") == $n)) and ((.input.reason // "" | tostring) | test($r; "i")))] | length >= 1' >/dev/null
+}
+
+check_35() {
+  need_key || return 3
+  local nb out hostname_b
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  owner_session || { blocked "no owner browser session (check 2's cookie jar or the owner password)"; return 3; }
+  hostname_b=$(on "$E2E_B" hostname)
+  C35_SINCE=$(date -u -v-5S +%Y-%m-%dT%H:%M:%S.000Z)
+  session_op hostShell.setEnabled "{\"nodeId\":\"$nb\",\"enabled\":false}" >/dev/null
+  # Turning it on needs a sign-in or "Confirm it's you" from the last 15 minutes; an API key cannot.
+  out=$(api hostShell.setEnabled "{\"nodeId\":\"$nb\",\"enabled\":true}" 2>&1 || true)
+  expect "an API key cannot turn host shells on" sh -c "! printf '%s' '$(printf '%s' "$out" | tr -d "'")' | jq -e '.enabled == true' >/dev/null 2>&1"
+  reauth "$E2E_STATE/cookies"
+  out=$(session_op hostShell.setEnabled "{\"nodeId\":\"$nb\",\"enabled\":true}")
+  ev "hostShell.setEnabled (owner session after auth.reauth): $out"
+  expect "the owner turned host shells on for B" json_ok "$out" '.enabled == true'
+  ev "status: $(api hostShell.status "{\"nodeId\":\"$nb\"}" | jq -c '{enabled, available, maxSessions, idleTimeoutSeconds}')"
+  sleep 5
+
+  # The input says $(hostname); only a shell that ran it prints the name after "e2e-host=".
+  out=$(host_shell "$nb" --seconds 30 --send-after-ready --send-binary 'echo e2e-host=$(hostname)\n' --wait-for "e2e-host=$hostname_b" 2>&1 || true)
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  printf '%s' "$out" | grep -q "FOUND" &&
+    good "a root shell on B through the panel's host-shell socket ran hostname: $hostname_b ($(printf '%s' "$out" | grep -o 'uid=[^ ]*\|"user":"[^"]*"' | head -1))" ||
+    bad "the host shell did not run hostname: $(printf '%s' "$out" | tail -4 | tr '\n' ' ' | head -c 300)"
+  sleep 3
+  expect "hostShell.setEnabled is in the audit log" audit_has hostShell.setEnabled
+  expect "hostShell.open is in the audit log" audit_has hostShell.open
+  expect "the shell's close is in the audit log (hostShell.close)" audit_has hostShell.close
+  if api alerts.list '{}' | jq -e --arg h "$(api nodes.get "{\"nodeId\":\"$nb\"}" | jq -r .name)" '[.alerts[] | select(.event=="security_change" and (.title | contains("root shell")))] | length >= 1' >/dev/null; then
+    good "a security_change alert names the root shell"
+  else
+    bad "no security_change alert for the root shell"
+  fi
+
+  # Off again: the panel refuses, and so does the agent on its own. The panel
+  # row is put back to "on" without telling the node (one SQLite write), so
+  # only the node's own setting is left to say no.
+  out=$(session_op hostShell.setEnabled "{\"nodeId\":\"$nb\",\"enabled\":false}")
+  expect "host shells are off again" json_ok "$out" '.enabled == false'
+  sleep 10
+  out=$(session_op hostShell.open "{\"nodeId\":\"$nb\"}")
+  ev "hostShell.open while off: $(printf '%s' "$out" | jq -c '.error | {code, message}' 2>/dev/null || printf '%s' "$out" | head -c 200)"
+  expect "the panel refuses to open one while off" json_ok "$out" '.error.details.reason == "hostShellOff"'
+  panel_sql_write "update nodes set host_shell = 1 where id = '$nb'" >>"$RES/$CUR.log" || bad "could not write the panel row"
+  host_shell "$nb" --seconds 20 --send-after-ready --send-binary 'echo e2e-should-$((6 * 7))\n' >"$RES/$CUR.refused" 2>&1 || true
+  panel_sql_write "update nodes set host_shell = 0 where id = '$nb'" >>"$RES/$CUR.log" || bad "could not put the panel row back"
+  cat "$RES/$CUR.refused" >>"$RES/$CUR.log"
+  ev "with only the node saying no: $(grep -E '^T |CLOSE' "$RES/$CUR.refused" | tail -3 | tr '\n' ' ' | head -c 300)"
+  # The command echoes e2e-should-42 only when a shell ran it (the input itself says $((6 * 7))).
+  expect "the agent refused the shell: nothing ran" sh -c "! grep -q 'e2e-should-42' '$RES/$CUR.refused' && grep -qiE 'refused|turned off|are off|not allowed' '$RES/$CUR.refused'"
+  sleep 3
+  expect "the refused shell is audited as refused by the node (hostShell.close)" audit_has hostShell.close refused
+}
+
+
+# ---- 36: clone and move between projects
+
+clone_copy_done() { api services.get "{\"serviceId\":\"$1\"}" | jq -e '.dataCopy.status == "done" or .dataCopy.status == "failed"' >/dev/null; }
+loop_failures() { grep -cvx 200 "$1" || true; }
+
+check_36() {
+  need_key || return 3
+  local nc src clones moved marker preview out clone addr st ref impact dep loadpid fails total host
+  nc=$(node_id c)
+  [ -n "$nc" ] || { blocked "node C is not joined"; return 3; }
+  src=$(state_get svc-whoami)
+  host=$(state_get host-whoami)
+  [ -n "$src" ] || { blocked "no whoami service (check 4)"; return 3; }
+  clones=$(project_id e2e-clones)
+  moved=$(project_id e2e-moved)
+  for p in e2e-clones e2e-moved; do for s in whoami-clone ref-app; do delete_service "$p" "$s"; done; done
+
+  # whoami gets a data volume with a marker file, so there is data to copy.
+  if ! api services.get "{\"serviceId\":\"$src\"}" | jq -e '[.volumes[] | select(.name=="data")] | length == 1' >/dev/null; then
+    api services.setVolumes "{\"serviceId\":\"$src\",\"volumes\":[{\"name\":\"data\",\"mountPath\":\"/data\"}]}" >/dev/null || { bad "services.setVolumes on whoami failed"; return 1; }
+    api deployments.deploy "{\"serviceId\":\"$src\"}" >/dev/null || { bad "redeploying whoami failed"; return 1; }
+    [ "$(wait_deploy "$src" 300)" = live ] || { bad "whoami with a volume did not go live"; return 1; }
+  fi
+  marker=clone-marker-$(openssl rand -hex 4)
+  api files.write "$(jq -nc --arg s "$src" --arg m "$marker" '{serviceId:$s, volume:"data", path:"/marker.txt", content:$m, createParents:true}')" >/dev/null ||
+    { bad "files.write of the marker failed"; return 1; }
+  good "whoami on B has a data volume with /marker.txt ($marker)"
+
+  preview=$(api services.clonePreview "{\"serviceId\":\"$src\",\"projectId\":\"$clones\",\"nodeId\":\"$nc\"}") || { bad "services.clonePreview failed"; return 1; }
+  ev "clone preview: $(printf '%s' "$preview" | jq -c '{name, env, volumes, data, autoDomain}')"
+  expect "the preview offers a copy of the data volume" json_ok "$preview" '.data.available and (.volumes | map(.name) | index("data")) != null'
+
+  # The source keeps serving while its data is read (stopSource false).
+  load_loop 60 "http://$(node_ip b)/" "$host" "$RES/$CUR.load-clone" &
+  loadpid=$!
+  out=$(api services.clone "{\"serviceId\":\"$src\",\"projectId\":\"$clones\",\"nodeId\":\"$nc\",\"name\":\"whoami-clone\",\"data\":\"copy\",\"stopSource\":false,\"autoDomain\":false}") ||
+    { kill "$loadpid" 2>/dev/null; bad "services.clone failed"; return 1; }
+  clone=$(printf '%s' "$out" | jq -r .service.id)
+  state_set svc-whoami-clone "$clone"
+  ev "clone: $(printf '%s' "$out" | jq -c '{copied, dataCopy: (.dataCopy | {status, volumes})}')"
+  wait_for 240 "the data copy" clone_copy_done "$clone" || true
+  ev "data copy: $(api services.get "{\"serviceId\":\"$clone\"}" | jq -c '.dataCopy | {status, bytesCopied, error}')"
+  expect "the data copy finished" json_ok "$(api services.get "{\"serviceId\":\"$clone\"}" | jq -c .dataCopy)" '.status=="done"'
+  wait "$loadpid" 2>/dev/null || true
+  fails=$(loop_failures "$RES/$CUR.load-clone")
+  total=$(wc -l <"$RES/$CUR.load-clone" | tr -d ' ')
+  expect "whoami kept serving while it was cloned ($total requests, $fails failed)" test "$fails" = 0
+
+  api services.start "{\"serviceId\":\"$clone\"}" >/dev/null || bad "services.start (first deploy of the clone) failed"
+  st=$(wait_deploy "$clone" 300)
+  [ "$st" = live ] && good "the clone runs on C in project e2e-clones" || bad "the clone's first deploy ended $st"
+  wait_for 60 "the clone's first-run address" has_first_run "$clone" || true
+  addr=$(first_run_addr "$clone")
+  expect "the clone answers on C's IP:port ($addr)" sh -c "curl -fsS -m 5 http://$addr/ | grep -q Hostname"
+  out=$(api files.read "{\"serviceId\":\"$clone\",\"volume\":\"data\",\"path\":\"/marker.txt\"}" | jq -r '.content // empty' | tr -d '\n')
+  expect "the clone's volume has the copied marker ($out)" test "$out" = "$marker"
+
+  # Move it to another project: a service of the old project referencing it shows up in the impact.
+  ref=$(create_service "$(jq -nc --arg p "$clones" --arg n "$nc" \
+    '{projectId:$p, name:"ref-app", kind:"app", nodeId:$n, source:{type:"image", image:"busybox:1.37", registryId:null}, deployNow:false}')") ||
+    { bad "services.create ref-app failed"; return 1; }
+  # shellcheck disable=SC2016
+  api env.set "$(jq -nc --arg s "$ref" '{serviceId:$s, text:"WHO=${{whoami-clone.INTERNAL_URL}}\n"}')" >/dev/null || bad "env.set on ref-app failed"
+  impact=$(api services.moveProjectImpact "{\"serviceId\":\"$clone\",\"projectId\":\"$moved\"}") || { bad "services.moveProjectImpact failed"; return 1; }
+  ev "move impact: $(printf '%s' "$impact" | jq -c '{blockers, referencedBy, switches, grants, sharedLost}')"
+  expect "the impact lists ref-app (WHO) losing the reference and a running switch" json_ok "$impact" '(.blockers | length == 0) and .switches and ([.referencedBy[] | select(.name=="ref-app" and (.keys | index("WHO")) != null)] | length == 1)'
+  out=$(api services.moveProject "{\"serviceId\":\"$clone\",\"projectId\":\"$moved\"}" 2>&1 || true)
+  expect "moving without confirm is refused when the impact lists something" sh -c "! printf '%s' '$(printf '%s' "$out" | tr -d "'")' | jq -e '.deploymentId' >/dev/null 2>&1"
+  load_loop 90 "http://$addr/" "" "$RES/$CUR.load-move" &
+  loadpid=$!
+  sleep 3
+  out=$(api services.moveProject "{\"serviceId\":\"$clone\",\"projectId\":\"$moved\",\"confirm\":true}") || { kill "$loadpid" 2>/dev/null; bad "services.moveProject failed"; return 1; }
+  dep=$(printf '%s' "$out" | jq -r '.deploymentId // empty')
+  ev "moveProject: switch deployment $dep"
+  st=live
+  [ -z "$dep" ] || st=$(wait_deploy "$clone" 300 "$dep")
+  expect "the switch to the new project's network went live" test "$st" = live
+  wait "$loadpid" 2>/dev/null || true
+  fails=$(loop_failures "$RES/$CUR.load-move")
+  total=$(wc -l <"$RES/$CUR.load-move" | tr -d ' ')
+  expect "the clone kept serving through the move ($total requests, $fails failed)" test "$fails" = 0
+  expect "the clone now belongs to e2e-moved" test "$(api services.get "{\"serviceId\":\"$clone\"}" | jq -r .projectId)" = "$moved"
+  expect "its container is on e2e-moved's network only" on "$E2E_C" \
+    "docker inspect -f '{{range \$k, \$v := .NetworkSettings.Networks}}{{\$k}} {{end}}' \$(docker ps -q --filter label=$SLUG.service=$clone | head -1) | grep -q '$moved' && ! docker inspect -f '{{range \$k, \$v := .NetworkSettings.Networks}}{{\$k}} {{end}}' \$(docker ps -q --filter label=$SLUG.service=$clone | head -1) | grep -q '$clones'"
+  expect "whoami (the source) still answers on B" sh -c "curl -fsS -m 5 -H 'Host: $host' http://$(node_ip b)/ | grep -q Hostname"
+}
+
+# ---- 37: Valkey, ClickHouse and Postgres 18 with pgvector
+
+# db_exec <letter> <service> <command>: a command in the database's own container.
+db_exec() { on_node "$1" "docker exec -i \$(docker ps -q --filter label=$SLUG.service=$2 --filter name=^$SLUG-$2-[0-9] | head -1) $3"; }
+db_secret() { api databases.connection "{\"serviceId\":\"$1\"}" | jq -r "$2"; }
+# db_shell <service> <input> <wait-for>: the pre-logged-in shell through the panel's terminal socket.
+db_shell() {
+  local ticket
+  ticket=$(api databases.openShell "{\"serviceId\":\"$1\"}") || return 1
+  ws "$(ws_url "$(printf '%s' "$ticket" | jq -r '.url // .socketPath')")" --seconds 40 --send-after-ready --send-binary "$2" --wait-for "$3" 2>&1
+}
+# db_backup <service> <name> <destination>: runs a database backup now, prints the run id when it succeeded.
+db_backup() {
+  local policy run
+  policy=$(api backups.listPolicies "{\"serviceId\":\"$1\"}" | jq -r '(.policies // .)[]? | select(.target=="database") | .id' | head -1)
+  [ -n "$policy" ] || policy=$(api backups.createPolicy "{\"serviceId\":\"$1\",\"target\":\"database\",\"destinationId\":\"$3\",\"schedule\":\"0 3 * * *\",\"keepLast\":3,\"stopService\":false,\"enabled\":true}" | jq -r '.id // .policy.id') || return 1
+  run=$(api backups.runNow "{\"serviceId\":\"$1\",\"policyId\":\"$policy\"}" | jq -r .id) || return 1
+  wait_for 600 "the $2 backup" run_done "$1" "$run" || true
+  run_info "$1" "$run" | jq -e '.status=="succeeded"' >/dev/null || { run_info "$1" "$run" >&2; return 1; }
+  echo "$run"
+}
+db_restore() { # service name run
+  local rrun
+  rrun=$(api backups.restore "{\"serviceId\":\"$1\",\"runId\":\"$3\",\"confirmName\":\"$2\",\"backupFirst\":false}" | jq -r '.id // .run.id') || return 1
+  wait_for 600 "the $2 restore" run_done "$1" "$rrun" || true
+  run_info "$1" "$rrun" | jq -e '.status=="succeeded"' >/dev/null || { run_info "$1" "$rrun" >&2; return 1; }
+}
+minio_destination() {
+  local dest
+  read -r murl muser mpass <<<"$(state_get minio)"
+  dest=$(api backups.listDestinations | jq -r '.destinations[]? | select(.name=="e2e-minio") | .id' | head -1)
+  [ -n "$dest" ] || dest=$(api backups.createDestination "$(jq -nc --arg e "$murl" --arg k "$muser" --arg s "$mpass" \
+    '{name:"e2e-minio", provider:"minio", endpoint:$e, region:"us-east-1", bucket:"e2e-backups", pathPrefix:"e2e", pathStyle:true, accessKeyId:$k, secretAccessKey:$s}')" | jq -r .id)
+  echo "$dest"
+}
+
+# The probe app: one container of the project reaches all three by ${{name.VAR}} references.
+read -r -d '' data_probe_sh <<'EOS' || true
+for i in $(seq 1 100); do
+  vk=$(printf 'AUTH %s\r\nPING\r\n' "$VK_PASS" | nc -w 3 "$VK_HOST" "$VK_PORT" | tr -d '\r' | tr '\n' ' ')
+  ch=$(wget -qO- "${CH_URL%/*}/?query=SELECT%2040%2B2" 2>&1)
+  pg=$(psql "$PG_URL" -tAc "select extversion from pg_extension where extname = 'vector'" 2>&1)
+  echo "PROBE vk=[$vk] ch=[$ch] pg=[$pg]"
+  case "$vk $ch $pg" in *PONG*42*[0-9].[0-9]*) echo DATA-PROBE-OK; sleep 86400 ;; esac
+  sleep 3
+done
+sleep 86400
+EOS
+data_probe_cmd=$(jq -nc --arg s "$data_probe_sh" '["sh", "-c", $s]')
+
+check_37() {
+  need_key || return 3
+  local nb pid dest vk ch pg probe logs pass user out conn run exp url ip_b murl muser mpass
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  ip_b=$(node_ip b)
+  pid=$(project_id e2e-data)
+  read -r murl muser mpass <<<"$(state_get minio)"
+  dest=$(minio_destination)
+  [ -n "$dest" ] && [ "$dest" != null ] || { bad "no MinIO backup destination"; return 1; }
+  ev "engines: $(api databases.engines | jq -c '[.engines[] | select(.engine=="valkey" or .engine=="clickhouse" or .engine=="postgres") | {engine, versions: [.versions[].version], variants: [.variants[]?.id]}]')"
+
+  vk=$(service_id e2e-data vk)
+  [ -n "$vk" ] || vk=$(api databases.create "{\"projectId\":\"$pid\",\"name\":\"vk\",\"engine\":\"valkey\",\"version\":\"9.1\",\"nodeId\":\"$nb\"}" | jq -r .serviceId) ||
+    { bad "databases.create valkey failed"; return 1; }
+  ch=$(service_id e2e-data ch)
+  [ -n "$ch" ] || ch=$(api databases.create "{\"projectId\":\"$pid\",\"name\":\"ch\",\"engine\":\"clickhouse\",\"version\":\"26.8\",\"nodeId\":\"$nb\",\"database\":\"e2e\"}" | jq -r .serviceId) ||
+    { bad "databases.create clickhouse failed"; return 1; }
+  pg=$(service_id e2e-data pg18)
+  [ -n "$pg" ] || pg=$(api databases.create "{\"projectId\":\"$pid\",\"name\":\"pg18\",\"engine\":\"postgres\",\"version\":\"18\",\"variant\":\"pgvector\",\"nodeId\":\"$nb\",\"database\":\"app\",\"user\":\"app\"}" | jq -r .serviceId) ||
+    { bad "databases.create postgres 18 pgvector failed"; return 1; }
+  state_set svc-vk "$vk"
+  state_set svc-ch "$ch"
+  state_set svc-pg18 "$pg"
+  for s in "$vk" "$ch" "$pg"; do
+    wait_for 420 "$s running" svc_running "$s" || bad "$(api databases.get "{\"serviceId\":\"$s\"}" | jq -r .name) did not reach running ($(svc_status "$s"))"
+  done
+  ev "databases: $(for s in "$vk" "$ch" "$pg"; do api databases.get "{\"serviceId\":\"$s\"}" | jq -c '{name, engine, version, variant, internal, shellClient}'; done | tr '\n' ' ')"
+  good "Valkey 9.1, ClickHouse 26.8 and Postgres 18 (pgvector image) run on B"
+
+  # pgvector through the pre-logged-in psql: CREATE EXTENSION and a distance.
+  out=$(db_shell "$pg" "CREATE EXTENSION IF NOT EXISTS vector;\nSELECT 'e2e-' || ('[1,2,3]'::vector <-> '[1,2,5]'::vector)::text AS dist;\n" 'e2e-2' || true)
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  printf '%s' "$out" | grep -q FOUND && good "psql shell: CREATE EXTENSION vector, and [1,2,3] <-> [1,2,5] = 2" ||
+    bad "the Postgres shell did not create the extension: $(printf '%s' "$out" | tail -3 | tr '\n' ' ' | head -c 200)"
+  # valkey-cli prints a GET's value in quotes; the typed command has none. Its line editor takes Enter as \r only.
+  out=$(db_shell "$vk" 'SET e2e-shell ok-42\rGET e2e-shell\r' '"ok-42"' || true)
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  printf '%s' "$out" | grep -q FOUND && good "valkey-cli shell: SET and GET without a password" ||
+    bad "the Valkey shell did not answer: $(printf '%s' "$out" | tail -3 | tr '\n' ' ' | head -c 200)"
+  out=$(db_shell "$ch" 'SELECT 40 + 2 AS e2e_answer;\n' '42' || true)
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  printf '%s' "$out" | grep -v 'SELECT 40' | grep -qE '(^|[^0-9+])42([^0-9]|$)' && good "clickhouse-client shell: SELECT 40 + 2 -> 42" ||
+    bad "the ClickHouse shell did not answer 42: $(printf '%s' "$out" | tail -3 | tr '\n' ' ' | head -c 200)"
+
+  # An app of the same project reaches all three by references.
+  delete_service e2e-data data-probe
+  probe=$(image_service e2e-data data-probe b postgres:17.6-alpine "" "{\"container\":{\"command\":$data_probe_cmd},\"deployNow\":false}") ||
+    { bad "services.create data-probe failed"; return 1; }
+  # shellcheck disable=SC2016
+  api env.set "$(jq -nc --arg s "$probe" '{serviceId:$s, text:"VK_HOST=${{vk.INTERNAL_HOST}}\nVK_PORT=${{vk.INTERNAL_PORT}}\nVK_PASS=${{vk.PASSWORD}}\nCH_URL=${{ch.INTERNAL_HTTP_URL}}\nPG_URL=${{pg18.INTERNAL_URL}}\n"}')" >/dev/null ||
+    bad "env.set on data-probe failed"
+  api deployments.deploy "{\"serviceId\":\"$probe\"}" >/dev/null
+  wait_for 240 "the probe connects" sh -c "colima ssh -p $E2E_B -- sudo docker logs \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$probe | head -1) 2>&1 | grep -q DATA-PROBE-OK" || true
+  on "$E2E_B" "docker logs \$(docker ps -q --filter label=$SLUG.service=$probe | head -1) 2>&1 | grep -E '^(PROBE|DATA-PROBE-OK)' | tail -2" >"$RES/$CUR.probe"
+  ev "probe: $(tr '\n' ' ' <"$RES/$CUR.probe")"
+  expect "an app of the project reaches Valkey (PONG), ClickHouse over HTTP (42) and pgvector by references" sh -c \
+    "grep -qx DATA-PROBE-OK '$RES/$CUR.probe' && grep -q PONG '$RES/$CUR.probe' && grep -q 'ch=\\[42' '$RES/$CUR.probe' && grep -qE 'pg=\\[[0-9]+\\.[0-9]' '$RES/$CUR.probe'"
+
+  # TLS exposure: Valkey and ClickHouse from a container on A, Postgres from the Mac.
+  api databases.setExposure "{\"serviceId\":\"$vk\",\"enabled\":true,\"port\":26380,\"allowedCidrs\":[\"192.168.64.0/24\"]}" >/dev/null || bad "setExposure valkey failed"
+  api databases.setExposure "{\"serviceId\":\"$ch\",\"enabled\":true,\"port\":29440,\"allowedCidrs\":[\"192.168.64.0/24\"]}" >/dev/null || bad "setExposure clickhouse failed"
+  api databases.setExposure "{\"serviceId\":\"$pg\",\"enabled\":true,\"port\":25433,\"allowedCidrs\":[\"$(host_ip)/32\",\"192.168.64.0/24\"]}" >/dev/null || bad "setExposure postgres failed"
+  sleep 20
+  conn=$(api databases.connection "{\"serviceId\":\"$vk\"}" | jq -c .exposed)
+  ev "valkey exposed: $(printf '%s' "$conn" | jq -c '{host, port, user, tlsParams}')"
+  if wait_for 90 "valkey-cli --tls" on "$E2E_A" "docker run --rm --network host valkey/valkey:9.1.3-alpine valkey-cli --tls --insecure -h $ip_b -p 26380 \
+      --user $(printf '%s' "$conn" | jq -r .user) --pass $(printf '%s' "$conn" | jq -r .password) --no-auth-warning PING | grep -q PONG"; then
+    good "valkey-cli --tls from A reaches Valkey through B's TLS port 26380 (PONG)"
+  else
+    bad "valkey-cli --tls to $ip_b:26380 failed"
+  fi
+  expect "Valkey's exposed port refuses plain TCP clients" on "$E2E_A" \
+    "! docker run --rm --network host valkey/valkey:9.1.3-alpine valkey-cli -h $ip_b -p 26380 --pass x --no-auth-warning PING 2>&1 | grep -q PONG"
+  conn=$(api databases.connection "{\"serviceId\":\"$ch\"}" | jq -c .exposed)
+  ev "clickhouse exposed: $(printf '%s' "$conn" | jq -c '{host, port, user, tlsParams}')"
+  if wait_for 120 "clickhouse-client --secure" on "$E2E_A" "docker run --rm --network host clickhouse/clickhouse-server:26.8.36.3 clickhouse-client --host $ip_b --port 29440 --secure \
+      --accept-invalid-certificate --user $(printf '%s' "$conn" | jq -r .user) --password $(printf '%s' "$conn" | jq -r .password) --query 'SELECT 40 + 2' | grep -qx 42"; then
+    good "clickhouse-client --secure from A reaches ClickHouse's native port through B's TLS port 29440 (42)"
+  else
+    bad "clickhouse-client --secure to $ip_b:29440 failed"
+  fi
+  exp=$(api databases.connection "{\"serviceId\":\"$pg\"}" | jq -c .exposed)
+  url=$(printf '%s' "$exp" | jq -r '"postgresql://\(.user):\(.password)@'"$ip_b"':\(.port)/\(.database)"')
+  if wait_for 90 "psql sslmode=require" sh -c "psql '$url?sslmode=require' -tAc 'select ssl from pg_stat_ssl where pid = pg_backend_pid()' | grep -q t"; then
+    good "psql from the Mac reaches Postgres 18 over TLS ($(psql "$url?sslmode=require" -tAc 'show server_version' | cut -d' ' -f1))"
+  else
+    bad "psql sslmode=require to $ip_b:25433 failed: $(psql "$url?sslmode=require" -tAc 'select 1' 2>&1 | head -2 | tr '\n' ' ')"
+  fi
+  expect "Postgres' exposed user cannot log in without TLS" sh -c "! psql '$url?sslmode=disable' -tAc 'select 1' >/dev/null 2>&1"
+
+  # Backups to MinIO and restores.
+  pass=$(db_secret "$vk" .internal.password)
+  db_exec b "$vk" "valkey-cli -a $pass --no-auth-warning SET e2e-backup before-backup" >>"$RES/$CUR.log" 2>&1
+  if run=$(db_backup "$vk" vk "$dest" 2>>"$RES/$CUR.log"); then
+    db_exec b "$vk" "valkey-cli -a $pass --no-auth-warning SET e2e-backup after-backup" >>"$RES/$CUR.log" 2>&1
+    if db_restore "$vk" vk "$run" 2>>"$RES/$CUR.log"; then
+      wait_for 120 "valkey after the restore" sh -c "colima ssh -p $E2E_B -- sudo docker exec \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$vk --filter name=^$SLUG-$vk-[0-9] | head -1) valkey-cli -a $pass --no-auth-warning GET e2e-backup | grep -qx before-backup" &&
+        good "Valkey: backup to MinIO, then the restore brings back the value from before" || bad "Valkey after the restore: $(db_exec b "$vk" "valkey-cli -a $pass --no-auth-warning GET e2e-backup" 2>&1)"
+    else bad "the Valkey restore failed"; fi
+  else bad "the Valkey backup failed"; fi
+
+  user=$(db_secret "$ch" .internal.user)
+  pass=$(db_secret "$ch" .internal.password)
+  printf '%s\n' "DROP TABLE IF EXISTS e2e.backup_rows;" "CREATE TABLE e2e.backup_rows (v String) ENGINE = MergeTree ORDER BY v;" \
+    "INSERT INTO e2e.backup_rows VALUES ('before-backup');" | db_exec b "$ch" "clickhouse-client --user $user --password $pass --multiquery" >>"$RES/$CUR.log" 2>&1 ||
+    bad "could not write the ClickHouse rows"
+  if run=$(db_backup "$ch" ch "$dest" 2>>"$RES/$CUR.log"); then
+    db_exec b "$ch" "clickhouse-client --user $user --password $pass --query 'DROP TABLE e2e.backup_rows'" >>"$RES/$CUR.log" 2>&1
+    if db_restore "$ch" ch "$run" 2>>"$RES/$CUR.log"; then
+      out=$(db_exec b "$ch" "clickhouse-client --user $user --password $pass --query 'SELECT v FROM e2e.backup_rows'" 2>&1)
+      expect "ClickHouse: backup to MinIO, the dropped table is back after the restore ($out)" test "$out" = before-backup
+    else bad "the ClickHouse restore failed"; fi
+  else bad "the ClickHouse backup failed"; fi
+
+  printf '%s\n' "drop table if exists e2e_vectors;" "create table e2e_vectors (id int, v vector(3));" "insert into e2e_vectors values (1, '[1,2,3]');" |
+    db_exec b "$pg" "psql -v ON_ERROR_STOP=1 -U app -d app -tA" >>"$RES/$CUR.log" 2>&1 || bad "could not write the pgvector row"
+  if run=$(db_backup "$pg" pg18 "$dest" 2>>"$RES/$CUR.log"); then
+    db_exec b "$pg" "psql -U app -d app -tAc 'drop table e2e_vectors'" >>"$RES/$CUR.log" 2>&1
+    if db_restore "$pg" pg18 "$run" 2>>"$RES/$CUR.log"; then
+      wait_for 60 "postgres after the restore" db_exec b "$pg" "psql -U app -d app -tAc 'select 1'" || true
+      out=$(echo "select v::text from e2e_vectors where id = 1;" | db_exec b "$pg" "psql -U app -d app -tA" 2>&1)
+      expect "Postgres 18: backup to MinIO, the dropped vector table is back after the restore ($out)" test "$out" = "[1,2,3]"
+    else bad "the Postgres restore failed"; fi
+  else bad "the Postgres backup failed"; fi
+  expect "the backups are in MinIO" on "$E2E_A" "docker exec e2e-minio sh -c 'mc alias set e2e http://127.0.0.1:9000 $muser $mpass >/dev/null && mc ls -r e2e/e2e-backups' | grep -c . | grep -qv '^0$'"
+}
+
+
+# ---------------------------------------------------------------- 38 upgrade from the last release
+
+# The panel image of a release is pinned as 127.0.0.1:$E2E_REG_PORT/... (the
+# registry container on A). For a panel on C, a small TCP relay on A exposes
+# that registry on A's address and one on C serves it at C's own
+# 127.0.0.1:$E2E_REG_PORT (Docker trusts plain HTTP on 127.0.0.0/8), so C
+# pulls exactly the pinned image. Both run as transient systemd units.
+fwd_py='import socket, sys, threading
+lh, lp, rh, rp = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+def pipe(a, b):
+    try:
+        while True:
+            d = a.recv(65536)
+            if not d:
+                break
+            b.sendall(d)
+    except OSError:
+        pass
+    finally:
+        for s in (a, b):
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+def handle(c):
+    try:
+        r = socket.create_connection((rh, rp), timeout=10)
+        r.settimeout(None)
+    except OSError:
+        c.close()
+        return
+    threading.Thread(target=pipe, args=(c, r), daemon=True).start()
+    threading.Thread(target=pipe, args=(r, c), daemon=True).start()
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind((lh, lp))
+s.listen(64)
+while True:
+    c, _ = s.accept()
+    threading.Thread(target=handle, args=(c,), daemon=True).start()
+'
+E2E_FWD_PORT=${E2E_FWD_PORT:-15002}
+relay_start() { # vm listen-host listen-port remote-host remote-port
+  printf '%s' "$fwd_py" | on "$1" "cat >/root/e2e-fwd.py && (systemctl stop e2e-regfwd >/dev/null 2>&1; systemctl reset-failed e2e-regfwd >/dev/null 2>&1; true) &&
+    systemd-run --unit=e2e-regfwd --collect python3 /root/e2e-fwd.py $2 $3 $4 $5 >/dev/null"
+}
+relay_stop() { on "$1" "systemctl stop e2e-regfwd >/dev/null 2>&1; rm -f /root/e2e-fwd.py; true"; }
+
+# up_sql <sql>: read-only query on the panel database on C (the upgraded panel).
+up_sql() {
+  local c
+  c=$(on "$E2E_C" "docker ps -aq --filter label=$SLUG.service=panel00000000000 | head -1")
+  [ -n "$c" ] || return 1
+  printf '%s' "$1" | on "$E2E_C" "docker exec -i $c bun -e '
+    const { Database } = require(\"bun:sqlite\");
+    const db = new Database(\"$BRAND_DATA_DIR/panel/panel.db\", { readonly: true });
+    console.log(JSON.stringify(db.query(await Bun.stdin.text()).all()));
+  '"
+}
+
+# free_c: removes C from A's panel (its services first) and uninstalls it.
+free_c() {
+  local nc lb p s
+  nc=$(node_id c)
+  lb=$(state_get svc-lb)
+  [ -z "$lb" ] || api services.setPlacements "{\"serviceId\":\"$lb\",\"placements\":[{\"nodeId\":\"$(node_id b)\",\"replicas\":1}],\"stickySessions\":false,\"entryNodeId\":null}" >/dev/null 2>&1 || true
+  if [ -n "$nc" ]; then
+    for p in $(api projects.list | jq -r '.projects[].id'); do
+      api services.list "{\"projectId\":\"$p\"}" | jq -c --arg n "$nc" '.services[] | select(.protected | not) | select([.placements[]?.nodeId] | index($n)) | {id, name}' |
+        while read -r s; do
+          api services.delete "$(printf '%s' "$s" | jq -c '{serviceId: .id, confirmName: .name}')" >/dev/null 2>&1 || true
+        done
+    done
+    sleep 20
+  fi
+  on "$E2E_C" "$(installer_fetch) | sh -s -- uninstall --purge" >>"$RES/$CUR.log" 2>&1 || return 1
+  [ -z "$nc" ] || api nodes.remove "{\"nodeId\":\"$nc\",\"confirmName\":\"e2e-c\"}" >/dev/null 2>&1 || ev "note: nodes.remove of C refused"
+  state_set node-c ""
+}
+
+up_agent_at() { api nodes.list | jq -e --arg v "$1" '[.nodes[] | select((.agentVersion // "" | split(" ")[0]) != $v)] | length == 0' >/dev/null; }
+
+check_38() {
+  need_key || return 3
+  local base_dir to rc=0
+  base_dir=$E2E_REL/$ORG/$REPO/releases/download/v$E2E_BASE
+  [ -f "$base_dir/manifest.json.minisig" ] || { blocked "release $E2E_BASE is not built (build.sh base)"; return 3; }
+  # The newest working-tree release: a refreshed VM set runs one newer than N.
+  to=$(state_get refresh-version)
+  [ -n "$to" ] || to=$E2E_V1
+  [ -f "$E2E_REL/$ORG/$REPO/releases/download/v$to/manifest.json.minisig" ] || { blocked "release $to is not built"; return 3; }
+  local published
+  published=$(state_get published)
+  upgrade_body "$to" || rc=$?
+  # Back to A's panel, C back in its place as a node of A, the published release as it was.
+  unset E2E_PANEL_URL API_KEY
+  "$E2E_DIR/publish.sh" "${published:-$E2E_V2}" >>"$RES/$CUR.log" 2>&1 || true
+  on "$E2E_C" "$(installer_fetch) | sh -s -- uninstall --purge" >>"$RES/$CUR.log" 2>&1 || ev "note: uninstalling the upgraded panel from C failed"
+  relay_stop "$E2E_C"
+  relay_stop "$E2E_A"
+  if join_node "$E2E_C" c "--name e2e-c --yes" && wait_for 180 "C back on A's panel" online_ge 3 && map_nodes; then
+    ev "C joined A's panel again as $(node_id c)"
+  else
+    bad "C did not join A's panel again"
+  fi
+  return $rc
+}
+
+upgrade_body() {
+  local to=$1 out link token jar email pw key up nodeid pid web pg worker job addr st run before after n
+  up=http://$(node_ip c):$E2E_PORT
+
+  free_c || { bad "uninstalling C from A's panel failed"; return 1; }
+  good "C left A's panel and was uninstalled"
+  on "$E2E_A" "command -v python3 >/dev/null" && on "$E2E_C" "command -v python3 >/dev/null" || { blocked "python3 is missing on A or C (registry relay)"; return 3; }
+  relay_start "$E2E_A" "$(node_ip a)" "$E2E_FWD_PORT" 127.0.0.1 "$E2E_REG_PORT" || { bad "registry relay on A failed"; return 1; }
+  relay_start "$E2E_C" 127.0.0.1 "$E2E_REG_PORT" "$(node_ip a)" "$E2E_FWD_PORT" || { bad "registry relay on C failed"; return 1; }
+  wait_for 30 "the registry from C" on "$E2E_C" "curl -fsS -m 5 -o /dev/null http://127.0.0.1:$E2E_REG_PORT/v2/" || { bad "C cannot reach the panel image registry"; return 1; }
+
+  # 1. The released version's own installer: panel + node on C.
+  write_key_dropin "$E2E_C"
+  out=$(on "$E2E_C" "curl -fsSL $(release_base)/$ORG/$REPO/releases/download/v$E2E_BASE/install.sh | sh -s -- \
+    --release-url $(release_base)/$ORG/$REPO/releases --version $E2E_BASE --port $E2E_PORT" 2>&1) || {
+    printf '%s\n' "$out" >>"$RES/$CUR.log"
+    bad "the $E2E_BASE installer failed on C: $(printf '%s' "$out" | grep -i error | tail -2 | tr '\n' ' ')"
+    return 1
+  }
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  link=$(printf '%s\n' "$out" | grep -o 'https\?://[^ ]*/setup?t=[A-Za-z0-9_-]*' | head -1 || true)
+  token=${link##*t=}
+  [ -n "$token" ] || { bad "the $E2E_BASE installer printed no setup link"; return 1; }
+  wait_for 120 "the $E2E_BASE panel on C" curl -fsS "$up/api/health" || { bad "the panel on C did not answer"; return 1; }
+  expect "C runs panel $E2E_BASE ($(curl -fsS "$up/api/health" | jq -c .))" test "$(curl -fsS "$up/api/health" | jq -r .version)" = "$E2E_BASE"
+  out=$(on "$E2E_C" "docker inspect -f '{{.Config.Image}}' \$(docker ps -q --filter label=$SLUG.service=panel00000000000 | head -1)")
+  expect "the $E2E_BASE panel runs its release image by digest ($out)" test "$out" = "$REG/$SLUG:$E2E_BASE@$(state_get "panel-digest-$E2E_BASE")"
+
+  # 2. An owner and a key, through the old panel's own API.
+  jar=$E2E_STATE/up-cookies
+  rm -f "$jar"
+  email=owner@upgrade.test
+  pw=$(openssl rand -hex 16)
+  curl -fsS -c "$jar" -b "$jar" -H 'content-type: application/json' -H "origin: $up" -X POST \
+    --data "{\"token\":\"$token\",\"email\":\"$email\",\"name\":\"Upgrade Owner\",\"password\":\"$pw\"}" "$up/api/v1/setup.createOwner" >>"$RES/$CUR.log" ||
+    { bad "setup.createOwner on C failed"; return 1; }
+  curl -sS -o /dev/null -c "$jar" -b "$jar" -H 'content-type: application/json' -H "origin: $up" -X POST \
+    --data "$(jq -nc --arg p "$pw" '{password: $p}')" "$up/api/v1/auth.reauth" >/dev/null 2>&1 || true
+  key=$(curl -fsS -c "$jar" -b "$jar" -H 'content-type: application/json' -H "origin: $up" -X POST \
+    --data '{"kind":"api","name":"upgrade","actions":["*"],"readOnly":false,"expiresInDays":30}' "$up/api/v1/apiKeys.create" | jq -r .token)
+  [ -n "$key" ] && [ "$key" != null ] || { bad "apiKeys.create on C failed"; return 1; }
+  export E2E_PANEL_URL=$up API_KEY=$key
+  wait_for 120 "C's own node online" sh -c "curl -fsS -H 'authorization: Bearer $key' '$up/api/v1/nodes.list' | jq -e '[.nodes[] | select(.status==\"online\")] | length == 1' >/dev/null"
+  nodeid=$(api nodes.list | jq -r '.nodes[0].id')
+  good "owner, API key and C's own node on the $E2E_BASE panel"
+
+  # 3. Real rows on the old version: a project, an app with env, a Postgres with data, a cron job saved with 7 for Sunday.
+  pid=$(api projects.create '{"name":"upgrade"}' | jq -r '.project.id // .id') || { bad "projects.create on $E2E_BASE failed"; return 1; }
+  web=$(create_service "$(jq -nc --arg p "$pid" --arg n "$nodeid" '{projectId:$p, name:"web", kind:"app", nodeId:$n,
+    source:{type:"image", image:"traefik/whoami:v1.10.3", registryId:null}, ports:[{containerPort:80, protocol:"tcp"}], deployNow:false}')") || { bad "services.create web failed"; return 1; }
+  api env.set "{\"serviceId\":\"$web\",\"text\":\"WHOAMI_NAME=upgrade-web\\n\"}" >/dev/null || bad "env.set on web failed"
+  api deployments.deploy "{\"serviceId\":\"$web\"}" >/dev/null || bad "deploying web failed"
+  st=$(wait_deploy "$web" 300)
+  [ "$st" = live ] || { bad "web on $E2E_BASE ended $st"; return 1; }
+  wait_for 60 "web's first-run address" has_first_run "$web" || true
+  addr=$(first_run_addr "$web")
+  pg=$(api databases.create "{\"projectId\":\"$pid\",\"name\":\"pg\",\"engine\":\"postgres\",\"version\":\"17\",\"nodeId\":\"$nodeid\",\"database\":\"app\",\"user\":\"app\",\"password\":\"upgrade-pg-password-1\"}" | jq -r .serviceId) ||
+    { bad "databases.create on $E2E_BASE failed"; return 1; }
+  wait_for 300 "postgres on C" svc_running "$pg" || bad "postgres on $E2E_BASE did not run"
+  wait_for 90 "postgres accepting" pg_exec c "$pg" "select 1" || true
+  pg_exec c "$pg" "create table upgrade_rows (v text); insert into upgrade_rows values ('from-$E2E_BASE')" >/dev/null || bad "could not write the Postgres row"
+  worker=$(create_service "$(jq -nc --arg p "$pid" --arg n "$nodeid" '{projectId:$p, name:"worker", kind:"app", nodeId:$n,
+    source:{type:"image", image:"busybox:1.37", registryId:null}, deployNow:false}')") || { bad "services.create worker failed"; return 1; }
+  api services.update "{\"serviceId\":\"$worker\",\"container\":{\"command\":[\"sleep\",\"86400\"]}}" >/dev/null
+  api deployments.deploy "{\"serviceId\":\"$worker\"}" >/dev/null
+  [ "$(wait_deploy "$worker" 300)" = live ] || bad "worker on $E2E_BASE did not go live"
+  job=$(api cron.create "{\"serviceId\":\"$worker\",\"name\":\"sunday\",\"schedule\":\"0 4 * * 7\",\"command\":\"echo cron-ran-\$((6 * 7))\"}" | jq -r .id) ||
+    { bad "cron.create with 7 for Sunday failed on $E2E_BASE"; return 1; }
+  # A 0.1 node cannot read 7 and leaves the job out: its run-now finds no such job.
+  out=$(api cron.runNow "{\"serviceId\":\"$worker\",\"cronJobId\":\"$job\"}" 2>&1 | head -c 300)
+  ev "on $E2E_BASE: cron job saved as $(api cron.list "{\"serviceId\":\"$worker\"}" | jq -c '.jobs[0] | {schedule, nextRunAt}'); run now: $out"
+  before=$(api projects.list | jq -c '[.projects[].name] | sort')
+  n=$(up_sql "select count(*) as n from __drizzle_migrations" | jq -r '.[0].n')
+  ev "before: projects $before; services $(api services.list "{\"projectId\":\"$pid\"}" | jq -c '[.services[] | "\(.name)=\(.status)"]'); web deployments $(deploy_count "$web"); migrations applied $n"
+  good "rows on $E2E_BASE: project upgrade, web (whoami with env) on $addr, Postgres 17 with a row, worker with a cron job saved as 0 4 * * 7"
+
+  # 4. The normal update path to this build: the panel first, then the node.
+  "$E2E_DIR/publish.sh" "$to" >>"$RES/$CUR.log" 2>&1 || { bad "publishing $to failed"; return 1; }
+  api updates.check '{}' >/dev/null 2>&1 || true
+  ev "updates.status on $E2E_BASE: $(api updates.status | jq -c '{panel, checkError}')"
+  expect "the $E2E_BASE panel sees $to as its update" test "$(api updates.status | jq -r .panel.latestVersion)" = "$to"
+  api updates.updatePanel '{"panelOnly":false}' >/dev/null || { bad "updates.updatePanel failed"; return 1; }
+  wait_for 600 "the panel on C at $to" sh -c "[ \"\$(curl -fsS -m 5 '$up/api/health' | jq -r .version)\" = '$to' ]" &&
+    good "the panel on C runs $to" || { bad "the panel on C is at $(curl -fsS -m 5 "$up/api/health" | jq -r .version)"; return 1; }
+  wait_for 600 "C's agent at $to" up_agent_at "$to" && good "C's agent runs $to" || bad "C's agent is at $(api nodes.list | jq -r '.nodes[0].agentVersion')"
+  wait_for 300 "the update run" sh -c "curl -fsS -H 'authorization: Bearer $key' '$up/api/v1/updates.history?limit=1' | jq -e '.runs[0].status != \"running\"' >/dev/null" || true
+  run=$(api updates.history '{"limit":1}' | jq -c '.runs[0]')
+  ev "update run: $(printf '%s' "$run" | jq -c '{targetVersion, status, error, steps: [.steps[] | "\(.target):\(.status)"]}')"
+  expect "the update run succeeded" json_ok "$run" '.status=="succeeded"'
+
+  # 5. What survived, and the new migration.
+  n=$(up_sql "select count(*) as n from __drizzle_migrations" | jq -r '.[0].n')
+  expect "0001_features applied: 2 migrations recorded (now $n)" test "$n" = 2
+  out=$(up_sql "select name from sqlite_master where type = 'table' and name in ('git_providers', 'cleanup_runs', 'host_shell_sessions') order by name" | jq -c '[.[].name]')
+  expect "0001's tables exist ($out)" test "$out" = '["cleanup_runs","git_providers","host_shell_sessions"]'
+  after=$(api projects.list | jq -c '[.projects[].name] | sort')
+  expect "the projects are the same ($after)" test "$after" = "$before"
+  expect "the API key made on $E2E_BASE still works" sh -c "curl -fsS -m 5 -H 'authorization: Bearer $key' '$up/api/v1/auth.whoami' >/dev/null"
+  expect "web still answers on $addr with its env" sh -c "curl -fsS -m 5 http://$addr/ | grep -q upgrade-web"
+  expect "the Postgres row from $E2E_BASE is there" test "$(pg_exec c "$pg" "select v from upgrade_rows")" = "from-$E2E_BASE"
+  ev "cron job after the upgrade: $(api cron.list "{\"serviceId\":\"$worker\"}" | jq -c '.jobs[0] | {schedule, nextRunAt}')"
+  expect "the cron job saved with 7 now reads 0 4 * * 0 and has a next run" json_ok "$(api cron.list "{\"serviceId\":\"$worker\"}" | jq -c '.jobs[0]')" '.schedule == "0 4 * * 0" and .nextRunAt != null'
+  run=$(api cron.runNow "{\"serviceId\":\"$worker\",\"cronJobId\":\"$job\"}" | jq -r .id) || bad "cron.runNow after the upgrade failed"
+  if [ -n "$run" ] && wait_for 120 "the cron run" sh -c "curl -fsS -H 'authorization: Bearer $key' '$up/api/v1/cron.run?serviceId=$worker&runId=$run' | jq -e '.run.result != \"running\"' >/dev/null"; then
+    out=$(api cron.run "{\"serviceId\":\"$worker\",\"runId\":\"$run\"}" | jq -c '{result: .run.result, output}')
+    expect "the node schedules the job now and runs it ($out)" json_ok "$out" '.result=="succeeded" and (.output | contains("cron-ran-42"))'
+  else
+    bad "the cron run after the upgrade did not finish"
+  fi
+  # The agent and panel work: a redeploy, and a 0.2 feature end to end.
+  api deployments.deploy "{\"serviceId\":\"$web\"}" >/dev/null || bad "redeploying web failed"
+  expect "a redeploy of web after the upgrade goes live" test "$(wait_deploy "$web" 300)" = live
+  expect "web answers after the redeploy" sh -c "curl -fsS -m 5 http://$(first_run_addr "$web")/ | grep -q upgrade-web"
+  expect "the upgraded node runs scheduled cleanup (cleanup.getSchedule supported)" json_ok "$(api cleanup.getSchedule "{\"nodeId\":\"$nodeid\"}" | jq -c .)" '.supported'
+  expect "the upgraded node runs host shells (hostShell.status available)" json_ok "$(api hostShell.status "{\"nodeId\":\"$nodeid\"}" | jq -c .)" '.available'
+}
+
 # ---------------------------------------------------------------- main
 
 # The whole file is read before main runs, so editing it during a run is safe.
@@ -2167,7 +3039,7 @@ main() {
     return 0
   fi
   local list n
-  list=${*:-$(seq 1 "$LAST")}
+  list=${*:-$(seq 1 "$LAST" | grep -vx "$DOMAIN_CHECK") $DOMAIN_CHECK}
   for n in $list; do
     run_check "$n"
     write_report 2>/dev/null
