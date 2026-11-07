@@ -12,6 +12,16 @@
 // build or FetchGitFile is sent to a node (without one), since a name can
 // resolve somewhere else by then. Hosts of git sources that existed before
 // this check count as approved once (seedInternalGitHosts).
+//
+// The node resolves the name again when it clones, so the panel's answer is
+// not the last word: a name can answer the panel with a public address and
+// the node with an internal one (rebinding, split-horizon DNS). The agent
+// therefore checks the address of every connection it makes for a git
+// source (go/internal/netguard) and allows internal addresses only for the
+// source's own host, only when the request says so: GitSource.
+// allow_internal_host, which the panel sets exactly when the host is in
+// git_internal_hosts for the project (or is a git provider connection's
+// host, which only gitProviders.manage sets).
 
 import { OpError } from "@seylo/ops";
 import { and, eq, sql } from "drizzle-orm";
@@ -20,7 +30,7 @@ import { type Principal, userOf } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { gitInternalHosts, services } from "../../db/schema";
 import { getSetting, setSetting } from "../../settings";
-import { blockedTarget, checkTarget } from "../uptime/targets";
+import { blockedTarget, checkTarget, type TargetCheck } from "../uptime/targets";
 import { targetUrl, urlHost } from "./remote";
 
 declare module "../../settings" {
@@ -49,7 +59,8 @@ function hostOf(url: string, field: string): string {
   }
 }
 
-function approved(db: PanelDb, projectId: string, host: string): boolean {
+/** True when an admin allowed this git host (host[:port] as urlHost gives it, lower case) in the project. */
+export function approved(db: PanelDb, projectId: string, host: string): boolean {
   return (
     db
       .select({ id: gitInternalHosts.id })
@@ -59,23 +70,31 @@ function approved(db: PanelDb, projectId: string, host: string): boolean {
   );
 }
 
+/** Whether the node may connect to internal addresses of the source's host (GitSource.allow_internal_host). */
+export interface GitTargetVerdict {
+  allowInternalHost: boolean;
+}
+
 /**
  * BAD_REQUEST unless the project's nodes may clone from this git URL. With a
  * caller who has git.manage, an internal host is recorded for the project.
+ * allowInternalHost is true exactly when the host is recorded for the
+ * project: the node then accepts internal addresses for it (and only it),
+ * also when the panel sees a public one.
  */
 export async function assertGitTarget(
   db: PanelDb,
   input: { projectId: string; url: string; caller: GitCaller | null; field?: string },
-): Promise<void> {
+): Promise<GitTargetVerdict> {
   const field = input.field ?? "source.url";
   const host = hostOf(input.url, field);
   const target = await checkTarget({ db }, targetUrl(input.url), { allowInternal: false });
-  if (target.ok) return;
+  if (target.ok) return { allowInternalHost: approved(db, input.projectId, host) };
   if (target.reason !== "metadata") {
-    if (approved(db, input.projectId, host)) return;
+    if (approved(db, input.projectId, host)) return { allowInternalHost: true };
     if (input.caller?.access.can("git.manage")) {
       db.insert(gitInternalHosts).values({ projectId: input.projectId, host, approvedBy: input.caller.userId }).onConflictDoNothing().run();
-      return;
+      return { allowInternalHost: true };
     }
   }
   const what =
@@ -98,6 +117,25 @@ export async function assertGitSourceTarget(
   field = "source.url",
 ): Promise<void> {
   if (source?.type === "git" && typeof source.url === "string") await assertGitTarget(db, { projectId, url: source.url, caller, field });
+}
+
+/**
+ * Where the panel itself may read a git URL (git.branches): the vetted
+ * address of a public host, or of an internal one that is allowed for the
+ * project (git_internal_hosts) or asked about by an admin (git.manage).
+ * The same rule as saving the source, not the uptime setting. Metadata
+ * addresses and names the panel cannot resolve never.
+ */
+export async function gitReadTarget(
+  db: PanelDb,
+  input: { projectId: string; url: string; admin: boolean; field?: string },
+): Promise<{ ok: true; address: string } | { ok: false; check: Extract<TargetCheck, { ok: false }> }> {
+  const host = hostOf(input.url, input.field ?? "url");
+  const target = await checkTarget({ db }, targetUrl(input.url), { allowInternal: false });
+  if (target.ok) return { ok: true, address: target.address as string };
+  if (target.reason !== "metadata" && target.reason !== "unresolvable" && (input.admin || approved(db, input.projectId, host)))
+    return { ok: true, address: target.address };
+  return { ok: false, check: target };
 }
 
 /**

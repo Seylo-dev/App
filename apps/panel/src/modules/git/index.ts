@@ -10,10 +10,10 @@ import { gitCredentials } from "../../db/schema";
 import { implement } from "../../ops/implement";
 import { defineModule } from "../module";
 import { assertSourceAllowed } from "../services/source-guard";
-import { blockedMessage, checkTarget } from "../uptime/targets";
+import { blockedMessage, blockedTarget } from "../uptime/targets";
 import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
-import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, targetUrl } from "./remote";
-import { seedInternalGitHosts } from "./targets";
+import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys } from "./remote";
+import { gitReadTarget, seedInternalGitHosts } from "./targets";
 
 // People who may set a source somewhere see names and hosts for the source
 // picker (an account with no such grant gets an empty list); the account
@@ -137,16 +137,21 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
   // The same rules as saving the source: own host, and attachable in this project.
   if (input.credentialId) assertSourceAllowed(ctx, input.projectId, { type: "git", url: input.url, credentialId: input.credentialId }, "");
   const auth = input.credentialId ? openCredential(ctx.db, ctx.secrets, input.credentialId) : {};
-  // The panel itself makes this request: members cannot point it inside the panel's network.
-  // Admins (root on the nodes anyway) may list a git server on a private network.
-  const target = await checkTarget(ctx, targetUrl(input.url), ctx.access.can("git.manage") ? { allowInternal: true } : {});
+  // The panel itself makes this request, to the vetted address: members cannot point it inside the
+  // panel's network, except at a host an admin allowed for the project (the rule of saving the
+  // source, git/targets.ts). Admins (root on the nodes anyway) may list any internal git server.
+  const target = await gitReadTarget(ctx.db, { projectId: input.projectId, url: input.url, admin: ctx.access.can("git.manage") });
   if (!target.ok) {
-    throw new OpError("BAD_REQUEST", blockedMessage(target), {
-      field: "url",
-      reason: target.reason === "unresolvable" ? "unresolvable" : "internalTarget",
-    });
+    const check = target.check;
+    throw new OpError(
+      "BAD_REQUEST",
+      check.reason === "unresolvable"
+        ? blockedMessage(check)
+        : `The git host is ${blockedTarget(check)}.${check.reason === "metadata" ? "" : " Only an admin can use an internal git host; once an admin saves a source with it in this project, its members can use it too."}`,
+      { field: "url", reason: check.reason === "unresolvable" ? "unresolvable" : "internalTarget" },
+    );
   }
-  const refs = await listRemoteRefs(input.url, auth, { address: target.address, byName: target.byName });
+  const refs = await listRemoteRefs(input.url, auth, { address: target.address });
   return { branches: refs.branches.slice(0, 1000), defaultBranch: refs.defaultBranch };
 });
 
