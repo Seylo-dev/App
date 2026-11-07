@@ -133,7 +133,7 @@ test("a seeded internal host builds with allowInternalHost", async () => {
   panel.deps.db.delete(gitInternalHosts).run();
   await expect(built(svc.body.id)).rejects.toThrow("Only an admin can use an internal git host");
   setSetting(panel.deps.db, "gitInternalHostsSeeded", false);
-  seedInternalGitHosts(panel.deps.db);
+  await seedInternalGitHosts(panel.deps.db);
   // Before: allowInternalHost was never sent, so a 0.2 node refused a LAN git server an upgrade kept.
   expect((await built(svc.body.id)).allowInternalHost).toBe(true);
 });

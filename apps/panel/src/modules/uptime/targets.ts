@@ -35,7 +35,13 @@ export type BlockReason = "loopback" | "linkLocal" | "metadata" | "private" | "r
 export type TargetCheck =
   | { ok: true; address: string; byName: false }
   | { ok: true; address: null; byName: true }
-  | { ok: false; reason: BlockReason; address: string };
+  | {
+      ok: false;
+      reason: BlockReason;
+      address: string;
+      /** Only with reason unresolvable: DNS said the name does not exist (not a timeout or a failing server). */
+      notFound?: boolean;
+    };
 
 export type Resolver = (host: string) => Promise<string[]>;
 
@@ -194,12 +200,18 @@ export async function checkTarget(
   else {
     try {
       addresses = await resolver(host);
-    } catch {
+    } catch (error) {
       // NXDOMAIN, SERVFAIL or a timeout: the request would resolve the name again, and a
       // hostile name server could answer that one with an internal address.
-      return { ok: false, reason: "unresolvable", address: host };
+      const code = (error as { code?: unknown } | null)?.code;
+      return {
+        ok: false,
+        reason: "unresolvable",
+        address: host,
+        ...(code === "ENOTFOUND" || code === "ENODATA" ? { notFound: true } : {}),
+      };
     }
-    if (addresses.length === 0) return { ok: false, reason: "unresolvable", address: host };
+    if (addresses.length === 0) return { ok: false, reason: "unresolvable", address: host, notFound: true };
   }
   const blocked = addresses.map((address) => ({ address, reason: blockedReason(address) })).filter((a) => a.reason !== null);
   const pin = addresses[0] as string;

@@ -13,7 +13,7 @@ import { assertSourceAllowed } from "../services/source-guard";
 import { blockedMessage, blockedTarget } from "../uptime/targets";
 import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
 import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys } from "./remote";
-import { gitReadTarget, seedInternalGitHosts } from "./targets";
+import { allowInternalGitHost, gitReadTarget, seedInternalGitHosts } from "./targets";
 
 // People who may set a source somewhere see names and hosts for the source
 // picker (an account with no such grant gets an empty list); the account
@@ -147,7 +147,7 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
       "BAD_REQUEST",
       check.reason === "unresolvable"
         ? blockedMessage(check)
-        : `The git host is ${blockedTarget(check)}.${check.reason === "metadata" ? "" : " Only an admin can use an internal git host; once an admin saves a source with it in this project, its members can use it too."}`,
+        : `The git host is ${blockedTarget(check)}.${check.reason === "metadata" ? "" : " Only an admin can use an internal git host; once an admin saves a source with it in this project (or allows it with git.allowInternalHost), its members can use it too."}`,
       { field: "url", reason: check.reason === "unresolvable" ? "unresolvable" : "internalTarget" },
     );
   }
@@ -155,10 +155,17 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
   return { branches: refs.branches.slice(0, 1000), defaultBranch: refs.defaultBranch };
 });
 
+// For a git server whose name is public at the panel and internal at the nodes (split-horizon
+// DNS): saving the source records only hosts the panel itself sees as internal (git/targets.ts).
+const allowInternalHost = implement(gitOps.allowInternalHost, (input, ctx) =>
+  allowInternalGitHost(ctx.db, { projectId: input.projectId, url: input.url, userId: userOf(ctx.principal)?.id ?? null }),
+);
+
 export default defineModule({
   name: "git",
-  ops: [listCredentials, createCredential, generateSshKey, updateCredential, deleteCredential, scan, branches],
+  ops: [listCredentials, createCredential, generateSshKey, updateCredential, deleteCredential, scan, branches, allowInternalHost],
   start(deps) {
-    seedInternalGitHosts(deps.db);
+    // Lookups run in the background; builds and source checks wait for them (git/targets.ts).
+    void seedInternalGitHosts(deps.db, deps.logger);
   },
 });
