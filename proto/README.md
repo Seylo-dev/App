@@ -12,6 +12,7 @@ generated from it with `make gen` and committed.
 | `node.proto` | `NodeFacts`, capabilities, Wings detection |
 | `service.proto` | `ServiceSpec`: image, env, volumes, ports, health, crash policy, resources, kinds |
 | `routing.proto` | Routes, HTTPS, redirects, basic auth, rate limit, maintenance and status pages |
+| `certificate.proto` | RetryCertificate: Traefik asks the CA again for a route without a certificate |
 | `access.proto` | Timed exposes and Cloudflare tunnels |
 | `database.proto` | Database engines, tools and TLS exposure |
 | `desired.proto` | `DesiredState` and the requests that change it |

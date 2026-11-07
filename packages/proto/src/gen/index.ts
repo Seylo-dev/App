@@ -4,6 +4,7 @@ export * from "./seylo/agent/v1/access_pb";
 export * from "./seylo/agent/v1/agent_service_pb";
 export * from "./seylo/agent/v1/backup_pb";
 export * from "./seylo/agent/v1/build_pb";
+export * from "./seylo/agent/v1/certificate_pb";
 export * from "./seylo/agent/v1/compose_pb";
 export * from "./seylo/agent/v1/cron_pb";
 export * from "./seylo/agent/v1/database_pb";

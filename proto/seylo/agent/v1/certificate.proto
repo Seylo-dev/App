@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "seylo/agent/v1/state.proto";
+
+// Certificates of routes (added in 0.2).
+
+// RetryCertificateRequest makes Traefik ask the CA again for the hosts of
+// one HTTPS_MODE_ACME route that have no certificate (pending or failed),
+// without restarting Traefik: the agent forgets the hosts' last ACME
+// failure and renames the route's routers, so Traefik loads a changed
+// configuration and runs ACME for them again. Other routes keep serving.
+message RetryCertificateRequest {
+  string service_id = 1;
+  // Route.id (the panel's domain id).
+  string route_id = 2;
+}
+
+// RetryCertificateResponse answers once the new route file is written.
+// NOT_FOUND: the route is not on this node. FAILED_PRECONDITION: the route
+// does not use ACME, or every host already has a certificate.
+message RetryCertificateResponse {
+  // The route right after the retry: ROUTE_STATE_CERTIFICATE_PENDING until
+  // a certificate or a new failure appears (ServiceStatus.routes follows).
+  RouteStatus status = 1;
+  // Hosts Traefik asks the CA for again.
+  repeated string hosts = 2;
+}

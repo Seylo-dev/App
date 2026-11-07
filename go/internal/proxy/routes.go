@@ -58,6 +58,11 @@ type BuildInput struct {
 	// LB Traefik next to the Wings fork, whose own Traefik has no LB entry
 	// point. Implies LBEntryPoint.
 	LBOnly bool
+	// CertRetries renames the routers of ACME routes whose certificate was
+	// retried: route id -> name suffix ("c2"). A new name is a changed
+	// configuration, which makes Traefik run ACME again for the route's
+	// hosts without a certificate (see certretry.go).
+	CertRetries map[string]string
 }
 
 // Built is one rendered route file.
@@ -457,6 +462,9 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	}
 
 	name := b.n.route(r.GetId(), "")
+	if suffix := b.in.CertRetries[r.GetId()]; suffix != "" && https == agentv1.HttpsMode_HTTPS_MODE_ACME {
+		name = b.n.route(r.GetId(), suffix)
+	}
 	target, chain, err := b.chain(r, m)
 	if err != nil {
 		return err

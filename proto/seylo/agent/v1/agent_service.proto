@@ -4,6 +4,7 @@ package seylo.agent.v1;
 
 import "seylo/agent/v1/backup.proto";
 import "seylo/agent/v1/build.proto";
+import "seylo/agent/v1/certificate.proto";
 import "seylo/agent/v1/compose.proto";
 import "seylo/agent/v1/cron.proto";
 import "seylo/agent/v1/desired.proto";
@@ -187,5 +188,11 @@ service AgentService {
   // set no_host_shell; at most two at a time. added in 0.2 (nodeops)
   rpc HostShell(stream HostShellRequest) returns (stream HostShellResponse) {
     option (capability) = "node.host-shell.v1";
+  }
+
+  // Makes Traefik try ACME again for a route's hosts without a certificate,
+  // without restarting it. added in 0.2
+  rpc RetryCertificate(RetryCertificateRequest) returns (RetryCertificateResponse) {
+    option (capability) = "routing.certificate-retry.v1";
   }
 }

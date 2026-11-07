@@ -18,11 +18,16 @@ import (
 // CertFailures remembers the last ACME failure per host name, read from
 // Traefik's log: Traefik does not write failures to acme.json, so the log
 // is the only place they show up. A host's failure is reported until a
-// certificate for it appears or failureTTL passes.
+// certificate for it appears, failureTTL passes or someone retries it
+// (Retried): then only failures logged after the retry count.
 type CertFailures struct {
 	mu    sync.Mutex
 	hosts map[string]certFailure
-	now   func() time.Time
+	// retried is when each host's certificate was last retried; failure
+	// lines from before that (read late, while the follower catches up on
+	// the backlog) are old news.
+	retried map[string]time.Time
+	now     func() time.Time
 }
 
 type certFailure struct {
@@ -36,7 +41,7 @@ const failureTTL = 24 * time.Hour
 
 // NewCertFailures returns an empty tracker.
 func NewCertFailures() *CertFailures {
-	return &CertFailures{hosts: map[string]certFailure{}, now: time.Now}
+	return &CertFailures{hosts: map[string]certFailure{}, retried: map[string]time.Time{}, now: time.Now}
 }
 
 // Failure returns the last ACME error for host, if any is still current.
@@ -60,7 +65,34 @@ func (f *CertFailures) Forget(host string) {
 	}
 	f.mu.Lock()
 	delete(f.hosts, strings.ToLower(host))
+	delete(f.retried, strings.ToLower(host))
 	f.mu.Unlock()
+}
+
+// Retried drops the hosts' failures and ignores failure lines logged
+// before at: Traefik was just asked to try again, so the host is pending
+// until a certificate or a new failure appears.
+func (f *CertFailures) Retried(hosts []string, at time.Time) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.retried == nil {
+		f.retried = map[string]time.Time{}
+	}
+	for h, t := range f.retried {
+		if f.now().Sub(t) > failureTTL {
+			delete(f.retried, h)
+		}
+	}
+	for _, h := range hosts {
+		h = strings.ToLower(h)
+		delete(f.hosts, h)
+		if prev, ok := f.retried[h]; !ok || at.After(prev) {
+			f.retried[h] = at
+		}
+	}
 }
 
 // Observe reads one Traefik log line and records an ACME failure in it.
@@ -78,6 +110,11 @@ func (f *CertFailures) Observe(line string) bool {
 	for _, h := range hosts {
 		h = strings.ToLower(h)
 		if prev, ok := f.hosts[h]; ok && prev.at.After(at) {
+			continue
+		}
+		// Traefik's log has whole seconds: a failure in the second of the
+		// retry counts as new, one from an earlier second does not.
+		if retried, ok := f.retried[h]; ok && at.Before(retried.Truncate(time.Second)) {
 			continue
 		}
 		f.hosts[h] = certFailure{message: msg, at: at}
