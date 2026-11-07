@@ -190,11 +190,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   4096 chars, lists 200 entries of 2000 chars (`lastLines` keeps the
   newest), unknown fields dropped; crash lines 100 x 2000 chars, container
   ids 128 chars. `agent_reports` stores a smaller copy (strings 1024 chars,
-  lists 20 entries), since nothing reads it back. Each node has a daily
-  budget for crash reports and durable events together (75,000 rows, 32 MiB
-  stored, counted from what panel.db already holds after a restart): past
-  it a report is acked (the agent drops it) but neither stored nor fanned
-  out, and one `node_health_check_failed` alert per node and day says so. A node may report only on services it runs (a placement, or a
+  lists 20 entries), since nothing reads it back. Each node has daily
+  report budgets in three lanes, counted from what panel.db already holds
+  after a restart: crash reports, alerts, deploy and build results and
+  every other durable event (75,000 rows, 32 MiB stored); cron results
+  (75,000 rows, 32 MiB); backup, cleanup and update results (10,000 rows,
+  8 MiB). Past a lane's budget a report of that lane is acked (the agent
+  drops it) but neither stored nor fanned out, and one
+  `node_health_check_failed` alert per node, lane and day says so; crash
+  loops and alert floods never drop cron or backup results. A node may report only on services it runs (a placement, or a
   deployment in flight to or away from it; `agent-hub/service-scope.ts`):
   crash reports, durable events, deploy/health/cron events, state deltas,
   snapshots and metrics about other services are dropped, and an update
@@ -213,13 +217,18 @@ Summary; the full rules are in `proto/README.md` and the comments of
   before they are decoded, and a dropped state delta makes the panel fetch
   a snapshot), GetDesiredState 10 per node then one per 10 s
   (RESOURCE_EXHAUSTED; the agent only asks after a fresh start, and the
-  compiled state is reused for the same revision for 5 s), 32 MiB unread on agent streams (a running count, and
-  `DelimitedDecoder` copies each byte once when its message is complete, so
-  the sender's DATA frame sizes do not change the panel's work). One
+  compiled state is reused for the same revision for 5 s), 32 MiB unread on agent streams (a running count). The
+  sender's DATA frame sizes change neither the panel's work nor its memory:
+  a stream keeps unread bytes in one doubling buffer, not one object per
+  frame, and `DelimitedDecoder` collects a split message in one buffer
+  that doubles up to the announced length (16 MiB at most), so a pending
+  message costs about twice what arrived of it at most. One
   GetStateSnapshot per node at a time. panel.db retention (hourly,
   `modules/nodes/retention.ts`): agent reports and crash reports 30 days
   (newest 200 crashes per service always kept), and per node at most the
-  newest 75,000 agent reports and 32 MiB in each of the two tables, webhook deliveries 30 days
+  newest agent reports of each report lane up to its budget (75,000 and
+  32 MiB; 10,000 and 8 MiB for backup, cleanup and update results) and
+  32 MiB of crash reports, webhook deliveries 30 days
   (rejected ones 1 day), notification deliveries 30 days, resolved alerts
   180 days, deploy log lines of failed/cancelled/superseded deployments
   after 30 days (newest 20 per service and the live one keep theirs); a
@@ -1567,7 +1576,10 @@ self-update) wait an hour after its first rollback and a day after each
 later one, and the restored agent raises an `UPDATE_FAILED` node alert
 saying until when. `UpdateAgent` from the panel does not wait. A
 confirmed update, or an agent already at or past the release, drops its
-record and resolves the alert once none is left.
+record and resolves the alert once none is left. The panel keeps its own
+record from the rolled-back `UpdateResult`s (setting `updateRollbacks`,
+`modules/updates/rollbacks.ts`), so its automatic update runs do not
+reinstall the release either; see "Updates".
 
 Test-build overrides (the end-to-end tests only; release builds leave
 them empty and use brand.json): link the agent and `releasetool` with
@@ -1845,7 +1857,13 @@ agent step per older node (UpdateAgent with the verified bytes); a durable
 `UpdateResult` or the new version on reconnect finishes a step, 10 minutes
 without either fails it and the run. `nodes.updateDocker` is a one-step run
 finished by its `UpdateResult`. The release check runs every 6 hours
-(schedule `updates.check`) and starts a run when auto-update is on.
+(schedule `updates.check`) and starts a run when auto-update is on. That
+automatic run leaves out a node whose update to the release was rolled
+back (any rolled-back agent `UpdateResult`, also from the agent's own
+update on connect) and does not start when the panel's own update to it
+was; a newer release, or a run a person starts (Update now, update
+everything), installs it again and clears the record, and a successful
+update forgets it.
 
 Metrics: each `metrics` event feeds `modules/metrics/ingest.ts`: a 5-minute
 in-memory window (range `live`) and `metrics.db` buckets 1m (26 h), 5m
