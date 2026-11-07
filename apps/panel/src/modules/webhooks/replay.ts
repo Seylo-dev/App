@@ -1,8 +1,9 @@
 // Replay protection for signed webhooks. A provider's signature covers only
 // the body, so a captured delivery re-sent with a fresh delivery id would
 // pass the signature check and deploy that old commit again. Bodies are
-// remembered by hash for a few days (in memory, per panel); the same body
-// under another delivery id is a replay. A provider's own retries keep
+// remembered by hash for a few days in panel.db (webhook_bodies), so a
+// panel restart forgets nothing; the same body under another delivery id
+// is a replay. A provider's own retries keep
 // their delivery id and pass. GitLab, Gitea and Bitbucket post one body to
 // every hook of a repository, each under its own delivery id, so their
 // bodies are remembered per hook: two services of one repository both get
@@ -10,17 +11,18 @@
 // stream of bad requests cannot fill the database.
 
 import { createHash, randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import type { WebhookSource } from "../../db/schema";
+import { type WebhookSource, webhookBodies } from "../../db/schema";
 import { recordDelivery } from "./deliveries";
 
-/** How long a signed body is remembered (GitHub redelivers for 3 days). */
-const replayWindowMs = 3 * 24 * 3600 * 1000;
-const maxRemembered = 10_000;
+/** How long a signed body is remembered (GitHub redelivers for 3 days). retention.ts prunes the rows. */
+export const replayWindowMs = 3 * 24 * 3600 * 1000;
+/** Most bodies remembered; retention.ts drops the oldest past it. */
+export const maxRememberedBodies = 10_000;
 /** Rejected deliveries recorded per hour at most: enough to see a wrong secret, not a disk filler. */
 const rejectedPerHour = 20;
 
-const seenBodies = new WeakMap<object, Map<string, { deliveryId: string; at: number }>>();
 const rejectedCount = new WeakMap<object, { hour: number; n: number }>();
 
 /**
@@ -29,22 +31,21 @@ const rejectedCount = new WeakMap<object, { hour: number; n: number }>();
  * has one for the whole panel and passes none).
  */
 export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string, hookId?: string): boolean {
-  let seen = seenBodies.get(db);
-  if (!seen) {
-    seen = new Map();
-    seenBodies.set(db, seen);
-  }
   const now = Date.now();
-  // Oldest first: drop expired entries (and the oldest past the cap) until the first fresh one.
-  for (const [hash, entry] of seen) {
-    if (now - entry.at <= replayWindowMs && seen.size <= maxRemembered) break;
-    seen.delete(hash);
-  }
-  const digest = createHash("sha256").update(raw).digest("hex");
-  const hash = hookId ? `${source}:${hookId}:${digest}` : `${source}:${digest}`;
-  const before = seen.get(hash);
-  if (before && before.deliveryId !== deliveryId) return true;
-  seen.set(hash, { deliveryId, at: now });
+  const key = { source, hookId: hookId ?? "", bodyHash: createHash("sha256").update(raw).digest("hex") };
+  const before = db
+    .select({ deliveryId: webhookBodies.deliveryId, seenAt: webhookBodies.seenAt })
+    .from(webhookBodies)
+    .where(and(eq(webhookBodies.source, key.source), eq(webhookBodies.hookId, key.hookId), eq(webhookBodies.bodyHash, key.bodyHash)))
+    .get();
+  if (before && now - before.seenAt.getTime() <= replayWindowMs && before.deliveryId !== deliveryId) return true;
+  db.insert(webhookBodies)
+    .values({ ...key, deliveryId, seenAt: new Date(now) })
+    .onConflictDoUpdate({
+      target: [webhookBodies.source, webhookBodies.hookId, webhookBodies.bodyHash],
+      set: { deliveryId, seenAt: new Date(now) },
+    })
+    .run();
   return false;
 }
 

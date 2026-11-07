@@ -105,4 +105,14 @@ CREATE TABLE `git_internal_hosts` (
 	FOREIGN KEY (`approved_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `git_internal_hosts_project_host_unique` ON `git_internal_hosts` (`project_id`,`host`);
+CREATE UNIQUE INDEX `git_internal_hosts_project_host_unique` ON `git_internal_hosts` (`project_id`,`host`);--> statement-breakpoint
+CREATE TABLE `webhook_bodies` (
+	`source` text NOT NULL,
+	`hook_id` text NOT NULL,
+	`body_hash` text NOT NULL,
+	`delivery_id` text NOT NULL,
+	`seen_at` integer NOT NULL,
+	PRIMARY KEY(`source`, `hook_id`, `body_hash`)
+);
+--> statement-breakpoint
+CREATE INDEX `webhook_bodies_seen_idx` ON `webhook_bodies` (`seen_at`);

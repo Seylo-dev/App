@@ -2,7 +2,7 @@
 // flow), git and registry credentials, and the webhook deliveries that
 // trigger push-to-deploy and previews.
 
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createdAt, id, sealed, timestamp, updatedAt } from "./columns";
 import { users } from "./identity";
 import { projects, services } from "./projects";
@@ -201,6 +201,25 @@ export const webhookDeliveries = sqliteTable(
     index("webhook_deliveries_service_idx").on(t.serviceId, t.receivedAt),
     index("webhook_deliveries_received_idx").on(t.receivedAt),
   ],
+);
+
+/**
+ * Signed webhook bodies already handled, by hash, for replay protection
+ * (modules/webhooks/replay.ts): the same body under another delivery id
+ * is a replay. Kept 3 days (GitHub redelivers for 3), at most 10,000.
+ */
+export const webhookBodies = sqliteTable(
+  "webhook_bodies",
+  {
+    source: text("source").$type<WebhookSource>().notNull(),
+    /** The provider hook the body came to; "" for GitHub's one App hook. */
+    hookId: text("hook_id").notNull(),
+    /** sha256 of the raw body, hex. */
+    bodyHash: text("body_hash").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.hookId, t.bodyHash] }), index("webhook_bodies_seen_idx").on(t.seenAt)],
 );
 
 /**

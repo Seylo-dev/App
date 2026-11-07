@@ -3683,6 +3683,68 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "webhook_bodies": {
+      "name": "webhook_bodies",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hook_id": {
+          "name": "hook_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body_hash": {
+          "name": "body_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "delivery_id": {
+          "name": "delivery_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "webhook_bodies_seen_idx": {
+          "name": "webhook_bodies_seen_idx",
+          "columns": [
+            "seen_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "webhook_bodies_source_hook_id_body_hash_pk": {
+          "columns": [
+            "source",
+            "hook_id",
+            "body_hash"
+          ],
+          "name": "webhook_bodies_source_hook_id_body_hash_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "webhook_deliveries": {
       "name": "webhook_deliveries",
       "columns": {

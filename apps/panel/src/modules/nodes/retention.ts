@@ -18,8 +18,10 @@ import {
   deployments,
   notificationDeliveries,
   services,
+  webhookBodies,
   webhookDeliveries,
 } from "../../db/schema";
+import { maxRememberedBodies, replayWindowMs } from "../webhooks/replay";
 
 const day = 24 * 3600 * 1000;
 
@@ -85,6 +87,14 @@ export function pruneTables(db: PanelDb, now = Date.now()): void {
       ),
     )
     .run();
+  // Replay protection only needs the last 3 days of signed bodies, and at most the newest 10,000.
+  db.delete(webhookBodies)
+    .where(lt(webhookBodies.seenAt, before(replayWindowMs)))
+    .run();
+  db.run(sql`
+    delete from ${webhookBodies} where rowid in (
+      select rowid from ${webhookBodies} order by seen_at desc limit -1 offset ${maxRememberedBodies}
+    )`);
   db.delete(notificationDeliveries)
     .where(lt(notificationDeliveries.createdAt, before(retention.notificationDeliveriesMs)))
     .run();

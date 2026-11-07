@@ -973,7 +973,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `X-Request-UUID`), a body seen by the same hook under another id within
   3 days is a replay (`webhooks/replay.ts`, also used by GitHub, keyed per
   hook because providers post one body to the hook of every service of a
-  repository), a delivery id already handled for the hook's service is a
+  repository; the body hashes live in panel.db `webhook_bodies`, so a
+  panel restart forgets none, pruned to 3 days and the newest 10,000), a delivery id already handled for the hook's service is a
   duplicate (scoped to the service: GitLab before 17.4 sends sibling hooks
   of one push the same event UUID), rejected deliveries go to the
   service's delivery list with their own row id (20 an hour at most).
