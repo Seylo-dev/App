@@ -75,6 +75,7 @@ func newRetryEnv(t *testing.T, shared bool) *retryEnv {
 		cfg.LBDir = e.lbDir
 	}
 	e.router = NewFileRouter(cfg)
+	e.router.SetSettings(&agentv1.NodeSettings{LbTls: newTestLBCA(t).issue(t, "lb.seylo.internal")})
 	e.router.SetEdge(testEdge)
 	e.spec = app("svc1", route("bad", "bad.example.com"), route("ok", "ok.example.com"),
 		&agentv1.Route{Id: "plain", Hosts: []string{"plain.example.com"}, TargetPort: 3000, Https: agentv1.HttpsMode_HTTPS_MODE_OFF})
@@ -173,7 +174,12 @@ func TestRetryCertificateRenamesTheRouteAndClearsTheFailure(t *testing.T) {
 			if shared && read(t, filepath.Join(e.lbDir, "seylo-svc1.yml")) != lbBefore {
 				t.Error("the LB file changed")
 			}
-			if entries, _ := os.ReadDir(e.dynamic); len(entries) != 2 {
+			// The two route files, plus the LB TLS file on our own Traefik.
+			want := 2
+			if !shared {
+				want++
+			}
+			if entries, _ := os.ReadDir(e.dynamic); len(entries) != want {
 				t.Errorf("leftover files: %v", entries)
 			}
 

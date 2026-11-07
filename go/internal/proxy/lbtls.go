@@ -26,8 +26,9 @@ import (
 //   - the balancing node verifies the peer against the CA by server name
 //     and presents its own certificate (serversTransport).
 //
-// Without lb_tls (older panels) the entry point accepts any client, as
-// before.
+// Without lb_tls (a node whose certificate the panel could not issue yet)
+// no router uses the LB entry point: it answers 404 to everyone instead of
+// taking any client (routes.go, lbRouters).
 
 // LBTLSOptions names the TLS options of the LB routers.
 const LBTLSOptions = brand.Slug + "-lb"
@@ -126,12 +127,4 @@ func lbTransport(lb *agentv1.LoadBalancerTls) *serversTransport {
 		RootCAs:      []string{lb.GetCaPem()},
 		Certificates: []tlsCertificate{{CertFile: lb.GetCertPem(), KeyFile: lb.GetKeyPem()}},
 	}
-}
-
-// lbRouterTLS is the tls section of a router on the LB entry point.
-func lbRouterTLS(s *agentv1.NodeSettings) *routerTLS {
-	if lbTLSOf(s) == nil {
-		return &routerTLS{}
-	}
-	return &routerTLS{Options: LBTLSOptions}
 }

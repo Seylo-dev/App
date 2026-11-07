@@ -534,9 +534,24 @@ type HelloAccepted struct {
 	// Pin for panel_url: "sha256:<64 hex>" of the certificate's SPKI, as in
 	// the join command's --pin. Empty means verify panel_url's certificate
 	// with the node's system CA roots (a public certificate).
-	PanelPin      string `protobuf:"bytes,5,opt,name=panel_pin,json=panelPin,proto3" json:"panel_pin,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PanelPin string `protobuf:"bytes,5,opt,name=panel_pin,json=panelPin,proto3" json:"panel_pin,omitempty"`
+	// The panel's proof that it holds its identity key, the private half of
+	// edge_ticket_public_key: Ed25519 over
+	//
+	//   "seylo-panel-accept-v1" 0x00 panel_id 0x00 node_id 0x00 session_id
+	//   0x00 nonce 0x00 client_signature 0x00 panel_url 0x00 panel_pin
+	//
+	// with panel_id and nonce from the ServerHello, node_id, session_id,
+	// panel_url and panel_pin from this message, and client_signature the
+	// ClientHello's join or resume signature (so it is fresh for every
+	// connection). Agents record panel_id and edge_ticket_public_key at
+	// their first accepted handshake and refuse a panel that names others;
+	// once they saw a valid panel_signature they require one on every
+	// connect, so a certificate for the panel's domain alone no longer makes
+	// a panel. Added in 0.2; older agents ignore it.
+	PanelSignature []byte `protobuf:"bytes,6,opt,name=panel_signature,json=panelSignature,proto3" json:"panel_signature,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HelloAccepted) Reset() {
@@ -602,6 +617,13 @@ func (x *HelloAccepted) GetPanelPin() string {
 		return x.PanelPin
 	}
 	return ""
+}
+
+func (x *HelloAccepted) GetPanelSignature() []byte {
+	if x != nil {
+		return x.PanelSignature
+	}
+	return nil
 }
 
 type HelloRejected struct {
@@ -697,14 +719,15 @@ const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
 	"\x0erequested_name\x18\x04 \x01(\tR\rrequestedName\"I\n" +
 	"\x10ResumeCredential\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1c\n" +
-	"\tsignature\x18\x02 \x01(\fR\tsignature\"\xb6\x01\n" +
+	"\tsignature\x18\x02 \x01(\fR\tsignature\"\xdf\x01\n" +
 	"\rHelloAccepted\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x123\n" +
 	"\x16edge_ticket_public_key\x18\x03 \x01(\fR\x13edgeTicketPublicKey\x12\x1b\n" +
 	"\tpanel_url\x18\x04 \x01(\tR\bpanelUrl\x12\x1b\n" +
-	"\tpanel_pin\x18\x05 \x01(\tR\bpanelPin\"\x90\x01\n" +
+	"\tpanel_pin\x18\x05 \x01(\tR\bpanelPin\x12'\n" +
+	"\x0fpanel_signature\x18\x06 \x01(\fR\x0epanelSignature\"\x90\x01\n" +
 	"\rHelloRejected\x129\n" +
 	"\x06reason\x18\x01 \x01(\x0e2!.seylo.agent.v1.HelloRejectReasonR\x06reason\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12*\n" +

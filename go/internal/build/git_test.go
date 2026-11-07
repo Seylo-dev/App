@@ -303,8 +303,14 @@ func TestGitTokenNeedsHTTPS(t *testing.T) {
 	if err := validateGit(&agentv1.GitSource{Url: "http://git.example.com/a.git", Token: "t"}); err == nil {
 		t.Fatal("http:// with a token was accepted")
 	}
-	if err := validateGit(&agentv1.GitSource{Url: "http://git.example.com/a.git"}); err != nil {
-		t.Fatalf("http:// without credentials: %v", err)
+	if err := validateGit(&agentv1.GitSource{Url: "http://git.example.com/a.git"}); err == nil {
+		t.Fatal("http:// without the admin opt-in was accepted")
+	}
+	if err := validateGit(&agentv1.GitSource{Url: "http://git.example.com/a.git", AllowPlainHttp: true}); err != nil {
+		t.Fatalf("http:// with the admin opt-in: %v", err)
+	}
+	if err := validateGit(&agentv1.GitSource{Url: "http://git.example.com/a.git", Token: "t", AllowPlainHttp: true}); err == nil {
+		t.Fatal("http:// with a token and the opt-in was accepted")
 	}
 	if err := validateGit(&agentv1.GitSource{Url: "https://git.example.com/a.git", Token: "t"}); err != nil {
 		t.Fatalf("https:// with a token: %v", err)

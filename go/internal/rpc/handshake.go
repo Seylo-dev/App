@@ -44,9 +44,52 @@ func VerifyHello(pub ed25519.PublicKey, panelID, nodeID string, nonce, signature
 	return len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, HelloSignedBytes(panelID, nodeID, nonce), signature)
 }
 
+// PanelAcceptContext prefixes the panel's HelloAccepted.panel_signature
+// (handshake.proto).
+const PanelAcceptContext = brand.Slug + "-panel-accept-v1"
+
+// PanelAcceptSignedBytes returns what the panel signs with its identity
+// key (the edge ticket key) in HelloAccepted.panel_signature:
+//
+//	PanelAcceptContext 0x00 panel_id 0x00 node_id 0x00 session_id 0x00
+//	nonce 0x00 client_signature 0x00 panel_url 0x00 panel_pin
+func PanelAcceptSignedBytes(server *agentv1.ServerHello, client *agentv1.ClientHello, acc *agentv1.HelloAccepted) []byte {
+	var out []byte
+	out = append(out, PanelAcceptContext...)
+	for _, part := range [][]byte{
+		[]byte(server.GetPanelId()), []byte(acc.GetNodeId()), []byte(acc.GetSessionId()), server.GetNonce(),
+		clientSignature(client), []byte(acc.GetPanelUrl()), []byte(acc.GetPanelPin()),
+	} {
+		out = append(out, 0)
+		out = append(out, part...)
+	}
+	return out
+}
+
+// clientSignature is the ClientHello's join or resume signature.
+func clientSignature(c *agentv1.ClientHello) []byte {
+	if j := c.GetJoin(); j != nil {
+		return j.GetSignature()
+	}
+	return c.GetResume().GetSignature()
+}
+
+// SignPanelAccept makes HelloAccepted.panel_signature (fake panels in
+// tests; the real panel is TypeScript).
+func SignPanelAccept(key ed25519.PrivateKey, server *agentv1.ServerHello, client *agentv1.ClientHello, acc *agentv1.HelloAccepted) []byte {
+	return ed25519.Sign(key, PanelAcceptSignedBytes(server, client, acc))
+}
+
+// VerifyPanelAccept checks HelloAccepted.panel_signature against pub.
+func VerifyPanelAccept(pub ed25519.PublicKey, server *agentv1.ServerHello, client *agentv1.ClientHello, acc *agentv1.HelloAccepted) bool {
+	return len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, PanelAcceptSignedBytes(server, client, acc), acc.GetPanelSignature())
+}
+
 // HandshakeResult is what the agent learns from a successful handshake.
 type HandshakeResult struct {
-	Server   *agentv1.ServerHello
+	Server *agentv1.ServerHello
+	// Client is the ClientHello the agent sent.
+	Client   *agentv1.ClientHello
 	Accepted *agentv1.HelloAccepted
 }
 
@@ -91,7 +134,7 @@ func AgentHandshake(ctx context.Context, t conn.Transport, hello func(*agentv1.S
 	}
 	switch s := step.GetStep().(type) {
 	case *agentv1.Handshake_Accepted:
-		return &HandshakeResult{Server: server, Accepted: s.Accepted}, nil
+		return &HandshakeResult{Server: server, Client: client, Accepted: s.Accepted}, nil
 	case *agentv1.Handshake_Rejected:
 		return nil, &RejectedError{Rejected: s.Rejected}
 	default:

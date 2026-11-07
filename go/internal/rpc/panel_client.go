@@ -31,6 +31,7 @@ var (
 	MethodReportEvent     = panelMethod("ReportEvent")
 	MethodGetDesiredState = panelMethod("GetDesiredState")
 	MethodRegistryTunnel  = panelMethod("RegistryTunnel")
+	MethodCheckEdgeAccess = panelMethod("CheckEdgeAccess")
 )
 
 // ReportCrash delivers one outbox crash report. Components do not call it:
@@ -68,4 +69,15 @@ func (c *PanelClient) GetDesiredState(ctx context.Context, req *agentv1.GetDesir
 // a *agentv1.RegistryTunnelResponse.
 func (c *PanelClient) RegistryTunnel(ctx context.Context, req *agentv1.RegistryTunnelRequest) (Stream, error) {
 	return c.peer.Open(ctx, MethodRegistryTunnel, req)
+}
+
+// CheckEdgeAccess asks whether a user may still use an edge tool (Box,
+// database web UI). UNIMPLEMENTED from a panel without
+// panel.edge-access.v1, without a round trip.
+func (c *PanelClient) CheckEdgeAccess(ctx context.Context, req *agentv1.CheckEdgeAccessRequest) (*agentv1.CheckEdgeAccessResponse, error) {
+	resp := &agentv1.CheckEdgeAccessResponse{}
+	if err := c.peer.Call(ctx, MethodCheckEdgeAccess, req, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

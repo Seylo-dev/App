@@ -30,8 +30,12 @@ type FakePanel struct {
 	tb      testing.TB
 	Server  *httptest.Server
 	PanelID string
-	// EdgeKey is sent as HelloAccepted.edge_ticket_public_key.
-	EdgeKey ed25519.PublicKey
+	// EdgeKey is sent as HelloAccepted.edge_ticket_public_key, the panel's
+	// identity key; EdgePrivate is its private half, which signs
+	// HelloAccepted.panel_signature after SignAccepts(true). Set both
+	// before the first connection.
+	EdgeKey     ed25519.PublicKey
+	EdgePrivate ed25519.PrivateKey
 
 	mu       sync.Mutex
 	caps     []string
@@ -62,6 +66,8 @@ type FakePanel struct {
 	// drops counts DropConnections calls. A connection accepted before the
 	// latest one ends instead of registering its session.
 	drops uint64
+	// signAccepts adds HelloAccepted.panel_signature.
+	signAccepts bool
 }
 
 // Report is one delivered outbox report.
@@ -96,9 +102,9 @@ func NewFakePanel(tb testing.TB, opts ...FakePanelOption) *FakePanel {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	edge, _, _ := ed25519.GenerateKey(rand.Reader)
+	edge, edgePriv, _ := ed25519.GenerateKey(rand.Reader)
 	p := &FakePanel{
-		tb: tb, PanelID: "fakepanel", EdgeKey: edge, caps: cfg.caps,
+		tb: tb, PanelID: "fakepanel", EdgeKey: edge, EdgePrivate: edgePriv, caps: cfg.caps,
 		tokens: map[string]bool{}, nodes: map[string]ed25519.PublicKey{}, sessions: map[string]*rpc.Session{},
 		seen: map[uint64]bool{}, changed: make(chan struct{}),
 	}
@@ -135,6 +141,14 @@ func (p *FakePanel) ServeTLS() *httptest.Server {
 		srv.Close()
 	})
 	return srv
+}
+
+// SignAccepts makes every HelloAccepted carry panel_signature (a panel
+// that proves its identity key) or not.
+func (p *FakePanel) SignAccepts(sign bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.signAccepts = sign
 }
 
 // SetPanelAddress makes every HelloAccepted name this panel_url and
@@ -375,8 +389,12 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeID, drops = id, p.drops
 		p.hosts = append(p.hosts, r.Host)
-		return &agentv1.HelloAccepted{NodeId: id, SessionId: fmt.Sprintf("s%d", len(p.hellos)), EdgeTicketPublicKey: p.EdgeKey,
-			PanelUrl: p.moveURL, PanelPin: p.movePin}, nil
+		acc := &agentv1.HelloAccepted{NodeId: id, SessionId: fmt.Sprintf("s%d", len(p.hellos)), EdgeTicketPublicKey: p.EdgeKey,
+			PanelUrl: p.moveURL, PanelPin: p.movePin}
+		if p.signAccepts {
+			acc.PanelSignature = rpc.SignPanelAccept(p.EdgePrivate, server, h, acc)
+		}
+		return acc, nil
 	})
 	cancel()
 	if err != nil {

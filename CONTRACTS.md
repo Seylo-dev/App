@@ -79,7 +79,7 @@ packages use. "Built" means implemented and tested.
 | `logs` | Per-service log store on disk (text segments, size and age retention), capture from Docker across generations with a restart cursor, follow, search, build logs | Built (capture, follow and restarts verified in the VM) |
 | `metrics` | Node usage from /proc, per-service Docker stats (memory = usage - inactive_file), an hour of history, live watch | Built (verified in the VM) |
 | `console`, `shell` | Attach to the main process with history replay; PTY shells, database clients (via `dbtools`) and one-shot Exec through docker exec, with a marker-based process sweep; `ConsoleInfo` and the first `ShellResponse.info` carry user and working directory; `console/dockerapi` is the small Docker client the observe area shares (kept apart from `docker.Engine` on purpose, see Not built yet) | Built (verified in the VM) |
-| `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract | Built (escape fuzzing run as root in the VM) |
+| `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract. No write, chmod or extract leaves setuid/setgid (FsChmod and FsWrite keep the permission and sticky bits only; replacing or appending to a setuid file drops the bits first). New files and folders take their folder's owner, except that a root-owned (or unreadable) folder gives them to nobody (65534:65534), so the file manager never makes a root-owned entry; a replaced file keeps its owner | Built (escape fuzzing run as root in the VM) |
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
 | `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO (minio-go), `keep_last` retention, restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
@@ -228,6 +228,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   provider's (`oauth2` for GitLab, the token's owner for Gitea,
   `x-token-auth` or the account for Bitbucket) and a git credential's
   user name. Older agents ignore it, so Bitbucket clones need a 0.2 agent.
+- `GitSource.allow_plain_http` (added in 0.2): agents clone and fetch
+  git sources with `protocol.http.allow=never` (so an https:// server
+  cannot redirect the clone to http:// either) and refuse http://
+  addresses with INVALID_ARGUMENT, unless the panel sets this field. The
+  panel sets it only for a source an owner or admin (`git.manage`)
+  explicitly allowed to use plain HTTP (an internal git server without
+  TLS), never with a token or SSH key (those still need https:// or
+  ssh://). Not built in the panel yet: until it is, http:// git sources
+  fail on 0.2 agents (older agents still clone them without credentials).
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -239,13 +248,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `--trust-on-first-use` records the first certificate's pin instead.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
   with jitter (half to full delay); 5 minutes after a rejection that needs
-  a person (bad token, unknown node, bad signature, disabled, too old) or a
-  pin mismatch; ALREADY_CONNECTED retries normally. AGENT_TOO_OLD also
+  a person (bad token, unknown node, bad signature, disabled, too old), a
+  pin mismatch or another panel (see "Panel identity"); ALREADY_CONNECTED
+  retries normally. AGENT_TOO_OLD also
   makes the agent install the latest signed release itself
   (`update.AgentUpdater.UpdateToLatest`: `<release base>/latest/download/
   manifest.json(.minisig)`, at least `min_agent_version`, at most once an
-  hour per version), since the panel cannot send UpdateAgent to an agent
-  it refuses. A WebSocket ping every
+  hour per version, and a release the update guard rolled back waits as
+  "Releases and updates" says), since the panel cannot send UpdateAgent
+  to an agent it refuses. A WebSocket ping every
   30 s (15 s timeout) drops a silent panel. The outbox drains in id order
   after every connect; UNIMPLEMENTED stops draining until the next
   connection, INVALID_ARGUMENT drops that one report, anything else
@@ -259,6 +270,29 @@ Summary; the full rules are in `proto/README.md` and the comments of
   already stored. After an accepted join the node id and
   pin are kept in memory even when config.yml cannot be written (the
   token is spent); the write is retried every 30 s.
+- Panel identity (`agent/panel_identity.go`): at its first accepted
+  handshake (the join, or the first connect of an agent from before this)
+  the agent records `panel_id` (ServerHello), `panel_key` (base64 of
+  HelloAccepted.edge_ticket_public_key, the panel's Ed25519 identity key)
+  and, when HelloAccepted carried a valid `panel_signature`,
+  `panel_proves: true` in config.yml; `seylo join` starts over. On every
+  connect, at any address (moves and fallbacks included): a ServerHello
+  naming another `panel_id` gets no ClientHello (nothing is signed for
+  it); a HelloAccepted naming another identity key, or with a
+  `panel_signature` that does not verify, or with none once
+  `panel_proves` is set, closes the connection before any call is served
+  or any `panel_url` is followed. Each counts as a failed connect to that
+  address (5 minutes, the standing fallback still applies) and, during a
+  move, a failed move with its PANEL_MOVE_FAILED alert. `panel_signature`
+  is Ed25519 with the identity key over `<slug>-panel-accept-v1` 0x00
+  panel_id 0x00 node_id 0x00 session_id 0x00 nonce 0x00 client signature
+  0x00 panel_url 0x00 panel_pin (`rpc.PanelAcceptSignedBytes`, test vector
+  in `go/internal/rpc/accept_test.go`, key from seed 0..31). Not sent by
+  the panel yet: until it is, only `panel_id` and the public key are
+  checked, which are not secret. Neither binds the TLS connection, so a
+  relay of a whole session to the real panel is not detected; the pinned
+  standing fallback is what keeps a node of a taken-over domain with its
+  panel.
 - Moving to the panel's new address (`agent/move.go`): when
   HelloAccepted names a `panel_url` (https:// only; `panel_pin` empty =
   system roots) that differs from the address the agent dialed, the agent
@@ -578,7 +612,9 @@ local API, join and resume. The areas:
   `seylo-lb` from `seylo-lb.tls.yml` (client certificate from the panel's LB
   CA required, anchor router for the `server_name` SNI), and balancing nodes
   verify peers by `server_name` and present their own certificate instead of
-  `insecureSkipVerify`), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
+  `insecureSkipVerify`; without a complete `lb_tls` no route file has a
+  router on `seylo-lb`, so the entry point, published on every interface,
+  answers 404 to everyone instead of taking any client), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
   directory; for a test CA, config.yml `acme_ca_certificates` (a PEM file,
   mounted as `LEGO_CA_CERTIFICATES`) and `acme_ca_server_name`, or the
   `SEYLO_ACME_CA_CERTIFICATES` / `SEYLO_ACME_CA_SERVER_NAME` env). Next to the Wings fork the files go to its
@@ -591,7 +627,15 @@ local API, join and resume. The areas:
   service's LB routers in its own `seylo-<id>.yml`); reconcile attaches it
   to project networks like the fork's Traefik. Tool session cookies are
   signed with `<datadir>/network/edge-session.key` (kept across agent
-  restarts). Route certificate failures come from the Traefik container's
+  restarts) and name the ticket's subject and user (`edge/session.go`; the
+  older subject-only format is refused, one more sign-in). The edge asks
+  the panel `PanelService.CheckEdgeAccess`
+  (`panel.edge-access.v1`) about each user on each tool in use at most
+  once a minute, open WebSockets included: `allowed: false` ends that
+  user's sessions on that tool opened before the answer and closes their
+  connections; a new ticket opens it again. While the panel gives no
+  answer (UNIMPLEMENTED, offline) a session lasts an hour past the panel's
+  last "yes" or its ticket; 12 hours caps every session. Route certificate failures come from the Traefik container's
   log (the last 24 h, kept until a certificate appears). RetryCertificate
   (`routing.certificate-retry.v1`, `proxy/certretry.go`) makes Traefik ask
   the CA again for an ACME route's hosts without a certificate, without a
@@ -1186,6 +1230,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | `seylo panel start` and `seylo panel logs` on a node whose panel is not a managed service | NOT_IMPLEMENTED from `agent.PanelControl` only when nothing set it (`wire_node.go` sets it) |
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
+| Panel side of the 0.2 agent security fixes (built and tested on the agent only): HelloAccepted.panel_signature (the agent records the panel's id and key and checks them, but verifies a signature only once the panel sends one), PanelService.CheckEdgeAccess (`panel.edge-access.v1`; without it edge tool sessions end an hour after their ticket or last confirmation), GitSource.allow_plain_http (without it 0.2 agents refuse http:// git sources) | Protocol section ("Panel identity", `GitSource.allow_plain_http`), Networking (tool sessions) |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
@@ -1280,6 +1325,7 @@ or the method descriptor's options (TS). Current names:
 | `volume.transfer.v1` | ExportVolume, ImportVolume |
 | `panel.desired.v1` | GetDesiredState |
 | `panel.registry-tunnel.v1` | RegistryTunnel |
+| `panel.edge-access.v1` | CheckEdgeAccess (not built in the panel yet; agents fall back to an hour per confirmation) |
 
 An agent advertises a capability only once every method in it works.
 
@@ -1329,7 +1375,15 @@ SHA-256, runs `<new> version`, keeps the old binary in
 The new agent confirms after its first accepted handshake; otherwise the
 guard restores the old binary and restarts it. Either way exactly one
 durable `UpdateResult` (target AGENT) reaches the panel. Failures before
-the swap are reported at once and returned as the RPC error.
+the swap are reported at once and returned as the RPC error. The guard
+also counts the rollback in `<dataDir>/update/agent-rollbacks.json`
+(by version, kept across restarts; `update/rollbacks.go`): automatic
+installs of that release (auto-update on connect, the AGENT_TOO_OLD
+self-update) wait an hour after its first rollback and a day after each
+later one, and the restored agent raises an `UPDATE_FAILED` node alert
+saying until when. `UpdateAgent` from the panel does not wait. A
+confirmed update, or an agent already at or past the release, drops its
+record and resolves the alert once none is left.
 
 Test-build overrides (the end-to-end tests only; release builds leave
 them empty and use brand.json): link the agent and `releasetool` with
@@ -1844,7 +1898,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `https://<slug>-db-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>` and
   `https://<slug>-box-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>`;
   without a wildcard domain on the node the ops answer CONFLICT
-  (`details.reason` `noWildcardDomain`).
+  (`details.reason` `noWildcardDomain`). An optional `&to=<path>` (and the
+  portgate handoff's target) is followed only when it is a plain absolute
+  path on the same host: no control bytes (browsers drop tabs and line
+  breaks), no backslash, no `//` (also after decoding), no scheme or host
+  (`edge.safeTarget`); anything else redirects to `/`.
 - Regenerate certificate (`domains.retryCertificate`,
   `modules/domains/certificate-retry.ts`): a mutation with `domains.edit`
   on the service (an API key needs that action and must not be read-only,

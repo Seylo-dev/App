@@ -27,6 +27,19 @@ type FileConfig struct {
 	// When set it replaces CA verification (panels without a public
 	// certificate).
 	PanelPin string `yaml:"panel_pin,omitempty"`
+	// PanelID, PanelKey and PanelProves are the identity of the panel this
+	// node belongs to (panel_identity.go), recorded at the first accepted
+	// handshake (the join, or the first connect of an agent from before
+	// them). PanelID is ServerHello.panel_id: an address naming another is
+	// refused before anything is signed. PanelKey is the panel's Ed25519
+	// identity key (HelloAccepted.edge_ticket_public_key, base64): a
+	// session naming another is closed before it is used. PanelProves is
+	// set once a HelloAccepted carried a valid panel_signature; from then
+	// on every one must, so a certificate for the panel's domain alone
+	// does not make a panel. Written by the agent; `join` starts over.
+	PanelID     string `yaml:"panel_id,omitempty"`
+	PanelKey    string `yaml:"panel_key,omitempty"`
+	PanelProves bool   `yaml:"panel_proves,omitempty"`
 	// TrustOnFirstUse pins whatever certificate the panel presents on the
 	// next connection. Set only by `--join --trust-on-first-use`, cleared
 	// once the pin is recorded.
@@ -128,6 +141,11 @@ func (c *FileConfig) Validate() error {
 	}
 	if c.NodeID == "" && c.JoinToken == "" {
 		return errors.New("neither node_id nor join_token is set: join the node again")
+	}
+	if c.PanelKey != "" {
+		if _, err := decodePanelKey(c.PanelKey); err != nil {
+			return fmt.Errorf("panel_key: %w", err)
+		}
 	}
 	if f := c.Fallback; f != nil {
 		if _, err := AgentURL(f.PanelURL); err != nil {

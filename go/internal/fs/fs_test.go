@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -411,5 +412,122 @@ func TestCleanPaths(t *testing.T) {
 		if _, err := clean(bad); !errors.Is(err, ErrInvalidPath) {
 			t.Errorf("clean(%q) err = %v", bad, err)
 		}
+	}
+}
+
+// No write or chmod through the file manager leaves a setuid or setgid
+// bit: the agent writes as root, so the file would be a root-owned setuid
+// program in the volume (agentio-3). Permission and sticky bits stay.
+func TestNoSetuidOrSetgid(t *testing.T) {
+	f, vol, _ := setup(t)
+	special := os.ModeSetuid | os.ModeSetgid
+	modeOf := func(p string) os.FileMode {
+		t.Helper()
+		st, err := os.Lstat(filepath.Join(vol, p))
+		must(t, err)
+		return st.Mode()
+	}
+	write := func(req *agentv1.FsWriteRequest) {
+		t.Helper()
+		u, err := f.Create(ctx, req)
+		must(t, err)
+		_, err = u.Write([]byte("#!/bin/sh\nid\n"))
+		must(t, err)
+		_, err = u.Commit()
+		must(t, err)
+	}
+
+	write(&agentv1.FsWriteRequest{Path: "evil"})
+	must(t, f.Chmod(ctx, "evil", 0o4755))
+	if m := modeOf("evil"); m&special != 0 || m.Perm() != 0o755 {
+		t.Fatalf("chmod 4755: %v", m)
+	}
+	must(t, f.Chmod(ctx, "evil", 0o6777))
+	if m := modeOf("evil"); m&special != 0 || m.Perm() != 0o777 {
+		t.Fatalf("chmod 6777: %v", m)
+	}
+	write(&agentv1.FsWriteRequest{Path: "evil2", Mode: 0o6755})
+	if m := modeOf("evil2"); m&special != 0 || m.Perm() != 0o755 {
+		t.Fatalf("create 6755: %v", m)
+	}
+	write(&agentv1.FsWriteRequest{Path: "evil3", Mode: 0o4755, Append: true})
+	if m := modeOf("evil3"); m&special != 0 {
+		t.Fatalf("append-create 4755: %v", m)
+	}
+
+	// An existing setuid file (from the image or a container) loses the
+	// bits before a replacement or an append changes its content.
+	for _, appendTo := range []bool{false, true} {
+		name := fmt.Sprintf("suid-%v", appendTo)
+		must(t, os.WriteFile(filepath.Join(vol, name), []byte("old"), 0o755))
+		if err := os.Chmod(filepath.Join(vol, name), 0o755|special); err != nil {
+			t.Fatal(err)
+		}
+		if modeOf(name)&special == 0 {
+			t.Skip("this file system does not keep setuid bits")
+		}
+		write(&agentv1.FsWriteRequest{Path: name, Append: appendTo})
+		if m := modeOf(name); m&special != 0 || m.Perm() != 0o755 {
+			t.Fatalf("append=%v over a setuid file: %v", appendTo, m)
+		}
+	}
+
+	// The sticky bit on a folder is harmless and kept.
+	must(t, f.Mkdir(ctx, "shared", false))
+	must(t, f.Chmod(ctx, "shared", 0o1777))
+	if m := modeOf("shared"); m&os.ModeSticky == 0 || m.Perm() != 0o777 {
+		t.Fatalf("chmod 1777 on a folder: %v", m)
+	}
+}
+
+// New entries take their folder's owner, but never root: a folder the
+// agent made (root:root) gives them to nobody (agentio-3). Needs root.
+func TestNewEntriesNeverRootOwned(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("chown needs root")
+	}
+	f, vol, _ := setup(t)
+	must(t, os.Chown(vol, 0, 0))
+	must(t, os.MkdirAll(filepath.Join(vol, "home"), 0o755))
+	must(t, os.Chown(filepath.Join(vol, "home"), 1000, 1001))
+	owner := func(p string) (uint32, uint32) {
+		t.Helper()
+		st, err := os.Lstat(filepath.Join(vol, p))
+		must(t, err)
+		sys := st.Sys().(*syscall.Stat_t)
+		return sys.Uid, sys.Gid
+	}
+	upload := func(p string, appendTo bool) {
+		t.Helper()
+		u, err := f.Create(ctx, &agentv1.FsWriteRequest{Path: p, CreateParents: true, Append: appendTo})
+		must(t, err)
+		_, err = u.Write([]byte("x"))
+		must(t, err)
+		_, err = u.Commit()
+		must(t, err)
+	}
+	upload("top.bin", false)
+	upload("appended.bin", true)
+	upload("new/dir/deep.bin", false)
+	must(t, f.Mkdir(ctx, "made", false))
+	must(t, f.Mkdir(ctx, "made2/sub", true))
+	for _, p := range []string{"top.bin", "appended.bin", "new", "new/dir", "new/dir/deep.bin", "made", "made2", "made2/sub"} {
+		if uid, gid := owner(p); uid != nobodyID || gid != nobodyID {
+			t.Errorf("%s in a root-owned folder is %d:%d, want nobody", p, uid, gid)
+		}
+	}
+	upload("home/file", false)
+	must(t, f.Mkdir(ctx, "home/sub", false))
+	for _, p := range []string{"home/file", "home/sub"} {
+		if uid, gid := owner(p); uid != 1000 || gid != 1001 {
+			t.Errorf("%s is %d:%d, want its folder's 1000:1001", p, uid, gid)
+		}
+	}
+	// A replaced file keeps its owner, root included (it was not made here).
+	must(t, os.WriteFile(filepath.Join(vol, "rootfile"), []byte("old"), 0o644))
+	must(t, os.Chown(filepath.Join(vol, "rootfile"), 0, 0))
+	upload("rootfile", false)
+	if uid, _ := owner("rootfile"); uid != 0 {
+		t.Errorf("replaced rootfile is owned by %d, want it kept", uid)
 	}
 }

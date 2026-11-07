@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -186,6 +187,53 @@ func TestToolTicketCookieAndProxy(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("unregistered tool: %d", resp.StatusCode)
+	}
+}
+
+// Redirect targets after a ticket or a handoff stay on the tool host.
+// Browsers strip tabs and line breaks from a Location and read "\" as "/",
+// so "/<TAB>/evil" is "//evil" to them (scanners-2).
+func TestSafeTarget(t *testing.T) {
+	refused := []string{
+		"", "evil", "https://evil.example", "//evil.example", "/\\evil.example", "\\\\evil.example",
+		"/\t/evil.example", "/\x0b/evil.example", "/\n/evil.example", "/\r\n/evil.example", "/\x00/x", "/\x7f/x",
+		"/a\\b", " /x", "http:/evil.example", "/%zz",
+		// Harmless in browsers, refused anyway: it decodes to "//evil.example".
+		"/%2f%2fevil.example",
+	}
+	for _, to := range refused {
+		if got := safeTarget(to); got != "/" {
+			t.Errorf("safeTarget(%q) = %q, want /", to, got)
+		}
+	}
+	kept := []string{"/", "/workspace", "/workspace?x=1&y=/b", "/a/b#frag", "/sql?q=select%20*%20from%20t"}
+	for _, to := range kept {
+		if got := safeTarget(to); got != to {
+			t.Errorf("safeTarget(%q) = %q, want it kept", to, got)
+		}
+	}
+}
+
+// The ticket redirect with a tab after the first slash (scanners-2 PoC):
+// the Location must not leave the host.
+func TestTicketRedirectRefusesTab(t *testing.T) {
+	pub, priv := newKey(t)
+	v := NewVerifier("node1")
+	v.SetKey(pub)
+	s := NewHTTPServer(Config{Tickets: v})
+	front := httptest.NewServer(edgeBehindTraefik(s, "box:b1"))
+	defer front.Close()
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for i, to := range []string{"/\t/127.0.0.1:1/x", "/\x0b/evil", "https://evil", "//evil"} {
+		ticket := SignTicket(priv, "box:b1", "u1", "node1", fmt.Sprintf("jti-tab-%d", i), time.Now().Add(time.Minute))
+		resp, err := noFollow.Get(front.URL + proxy.TicketPath + "?t=" + url.QueryEscape(ticket) + "&to=" + url.QueryEscape(to))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusFound || loc != "/" {
+			t.Fatalf("to=%q: %d Location %q, want /", to, resp.StatusCode, loc)
+		}
 	}
 }
 

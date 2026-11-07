@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestSessionKeySurvivesRestart(t *testing.T) {
@@ -23,16 +22,17 @@ func TestSessionKeySurvivesRestart(t *testing.T) {
 		t.Fatalf("second load = %x, %v; want %x", k2, err, k1)
 	}
 
-	// A cookie from one agent process is valid in the next one.
+	// A cookie from one agent process is valid in the next one (within
+	// UnconfirmedTTL of its ticket, with no panel to ask).
 	before := NewHTTPServer(Config{SessionKey: k1})
-	cookie := before.session("box:svc1", time.Now().Add(time.Hour))
+	cookie := before.cookieValue(before.startSession("box:svc1", "u1"))
 	after := NewHTTPServer(Config{SessionKey: k2})
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Cookie", sessionCookie+"="+cookie)
-	if !after.validSession(req, "box:svc1") {
+	if x, ok := after.readSession(req, "box:svc1"); !ok || !after.authorized(t.Context(), x) || x.UserID != "u1" {
 		t.Fatal("session lost across restart")
 	}
-	if NewHTTPServer(Config{}).validSession(req, "box:svc1") {
+	if _, ok := NewHTTPServer(Config{}).readSession(req, "box:svc1"); ok {
 		t.Fatal("a random key accepted the cookie")
 	}
 

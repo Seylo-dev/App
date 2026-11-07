@@ -140,19 +140,24 @@ func unixMode(m iofs.FileMode) uint32 {
 	return u
 }
 
-// goMode is the reverse of unixMode.
-func goMode(u uint32) iofs.FileMode {
+// userMode is the mode a person may set through Chmod or a write: the
+// permission bits and the sticky bit. setuid and setgid are dropped, like
+// Extract does: the agent writes as root, so a kept setuid bit would make
+// a root-owned setuid program in a volume (container root for a guest
+// with a shell, host root for any local account that can reach the
+// folder, as volumes are not mounted nosuid).
+func userMode(u uint32) iofs.FileMode {
 	m := iofs.FileMode(u & 0o777)
-	if u&0o4000 != 0 {
-		m |= iofs.ModeSetuid
-	}
-	if u&0o2000 != 0 {
-		m |= iofs.ModeSetgid
-	}
 	if u&0o1000 != 0 {
 		m |= iofs.ModeSticky
 	}
 	return m
+}
+
+// keptMode is the part of an existing file's mode a replacement or an
+// append keeps: never setuid or setgid, for the same reason as userMode.
+func keptMode(m iofs.FileMode) iofs.FileMode {
+	return m & (iofs.ModePerm | iofs.ModeSticky)
 }
 
 // lstat returns the FileInfo of rel without following a final symlink.
@@ -274,14 +279,31 @@ func (f *rootFS) owner(rel string) (int, int, bool) {
 	return int(st.Uid), int(st.Gid), true
 }
 
-// chownLikeParent gives rel the owner of its folder.
+// nobodyID is the owner (uid and gid) of new entries whose folder belongs
+// to root or cannot be read.
+const nobodyID = 65534
+
+// newOwner is the owner for a new entry in dir: dir's owner, so uploads
+// into a volume used by a non-root container stay writable for it, but
+// never root. Volume folders the agent made are root:root, and a
+// root-owned upload is what a setuid program or a root-only file needs to
+// matter, so those entries go to nobody instead (root in the container
+// still reads and writes them).
+func (f *rootFS) newOwner(dir string) (uid, gid int) {
+	uid, gid, ok := f.owner(dir)
+	if !ok || uid == 0 {
+		return nobodyID, nobodyID
+	}
+	return uid, gid
+}
+
+// chownLikeParent gives rel the owner of its folder (newOwner).
 func (f *rootFS) chownLikeParent(rel string) {
 	if !f.chown {
 		return
 	}
-	if uid, gid, ok := f.owner(path.Dir(rel)); ok {
-		_ = f.root.Lchown(rel, uid, gid)
-	}
+	uid, gid := f.newOwner(path.Dir(rel))
+	_ = f.root.Lchown(rel, uid, gid)
 }
 
 // mkdirAll creates rel and missing parents, each owned like its parent.
@@ -383,7 +405,7 @@ func (f *rootFS) Chmod(_ context.Context, p string, mode uint32) error {
 		return wrap(err)
 	}
 	defer file.Close()
-	return file.Chmod(goMode(mode))
+	return file.Chmod(userMode(mode))
 }
 
 // freeBytes is the space available to unprivileged writers under dir.
@@ -426,7 +448,7 @@ func (f *rootFS) Create(_ context.Context, req *agentv1.FsWriteRequest) (Upload,
 	case err != nil && !errors.Is(err, iofs.ErrNotExist):
 		return nil, wrap(err)
 	}
-	mode := goMode(req.GetMode())
+	mode := userMode(req.GetMode())
 	if req.GetMode() == 0 {
 		mode = 0o644
 	}
@@ -437,6 +459,13 @@ func (f *rootFS) Create(_ context.Context, req *agentv1.FsWriteRequest) (Upload,
 		}
 		if existing == nil {
 			f.chownLikeParent(rel)
+		} else if m := existing.Mode(); m&(iofs.ModeSetuid|iofs.ModeSetgid) != 0 {
+			// Root writing keeps setuid and setgid: drop them before the
+			// content changes.
+			if err := file.Chmod(keptMode(m)); err != nil {
+				_ = file.Close()
+				return nil, wrap(err)
+			}
 		}
 		return &upload{fs: f, file: file, rel: rel}, nil
 	}
@@ -447,8 +476,9 @@ func (f *rootFS) Create(_ context.Context, req *agentv1.FsWriteRequest) (Upload,
 	}
 	u := &upload{fs: f, file: file, rel: rel, tmp: tmp, mode: mode}
 	if existing != nil {
-		// A replaced file keeps its mode and owner.
-		u.mode = existing.Mode() & (iofs.ModePerm | iofs.ModeSetuid | iofs.ModeSetgid | iofs.ModeSticky)
+		// A replaced file keeps its mode (without setuid and setgid) and
+		// its owner.
+		u.mode = keptMode(existing.Mode())
 		if st, ok := existing.Sys().(*syscall.Stat_t); ok {
 			u.uid, u.gid, u.keepOwner = int(st.Uid), int(st.Gid), true
 		}
