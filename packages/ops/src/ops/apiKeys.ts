@@ -70,7 +70,7 @@ export const list = defineOp({
     includeRevoked: Type.Boolean({ default: false }),
   }),
   output: Type.Object({ keys: Type.Array(ApiKey) }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: false,
 });

@@ -5,9 +5,14 @@ import { OpError } from "@seylo/ops";
 import { createOpClient } from "@seylo/ops/client";
 import { QueryClient } from "@tanstack/react-query";
 import { withReauth } from "./reauth";
+import { sessionFetch } from "./session-key";
 
-/** Changes the panel refuses for want of a recent sign-in open the re-auth dialog, then run again (lib/reauth.ts). */
-export const opClient = withReauth(createOpClient());
+/**
+ * Changes the panel refuses for want of a recent sign-in open the re-auth
+ * dialog, then run again (lib/reauth.ts). Every call carries the session key
+ * (lib/session-key.ts).
+ */
+export const opClient = withReauth(createOpClient({ fetch: sessionFetch as typeof fetch }));
 
 export const queryClient = new QueryClient({
   defaultOptions: {

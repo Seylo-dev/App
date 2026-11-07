@@ -5,7 +5,7 @@
 // signed in as the owner it created.
 
 import { expect, type Page, test } from "@playwright/test";
-import { stateFile, totp } from "./helpers";
+import { api, stateFile, totp } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/flows`;
 
@@ -97,14 +97,14 @@ test("an API key is created, listed and revoked", async ({ page }) => {
   await page.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("cell", { name: /pw-ci/ })).toBeVisible();
   await page.screenshot({ path: `${shots}/api-keys.png`, fullPage: true });
-  const keys = (await (await page.request.get("/api/v1/apiKeys.list?kind=api")).json()) as { keys: { name: string }[] };
+  const keys = (await (await api(page).get("/api/v1/apiKeys.list?kind=api")).json()) as { keys: { name: string }[] };
   expect(keys.keys.some((k) => k.name === "pw-ci")).toBe(true);
   expect(errors).toEqual([]);
 });
 
 test("an invite carries a project grant", async ({ page }) => {
   const errors = trackErrors(page);
-  await page.request.post("/api/v1/projects.create", { data: { name: "pw-shop" } });
+  await api(page).post("/api/v1/projects.create", { data: { name: "pw-shop" } });
   await page.goto("/settings/people");
   await page.getByRole("button", { name: "Invite" }).first().click();
   await page.getByLabel("Email", { exact: true }).fill("guest@example.com");
@@ -114,7 +114,7 @@ test("an invite carries a project grant", async ({ page }) => {
   await page.getByRole("button", { name: "Create invite" }).click();
   await expect(page.getByText("Invite created")).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
-  const invites = (await (await page.request.get("/api/v1/invites.list")).json()) as {
+  const invites = (await (await api(page).get("/api/v1/invites.list")).json()) as {
     invites: { email: string; grants: { scopeName: string }[] }[];
   };
   const invite = invites.invites.find((i) => i.email === "guest@example.com");
@@ -159,7 +159,7 @@ test("Appearance saves a dark preset with an accent that wins", async ({ page })
   const primary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--primary").trim());
   expect(primary.toUpperCase()).toBe("#0F8A6A");
   await page.screenshot({ path: `${shots}/appearance-midnight.png`, fullPage: true });
-  await page.request.post("/api/v1/settings.updateAppearance", { data: { preset: "seylo", colorMode: "system", accent: null } });
+  await api(page).post("/api/v1/settings.updateAppearance", { data: { preset: "seylo", colorMode: "system", accent: null } });
   expect(errors).toEqual([]);
 });
 
@@ -171,7 +171,7 @@ test("a webhook channel is saved and the activity log exports", async ({ page })
   await page.getByLabel("URL", { exact: true }).fill("https://hooks.example.invalid/panel");
   await page.getByRole("button", { name: "Save channel" }).click();
   await expect
-    .poll(async () => ((await (await page.request.get("/api/v1/notifications.channels")).json()) as { channels: { name: string }[] }).channels.map((c) => c.name))
+    .poll(async () => ((await (await api(page).get("/api/v1/notifications.channels")).json()) as { channels: { name: string }[] }).channels.map((c) => c.name))
     .toContain("pw hook");
 
   await page.goto("/activity");

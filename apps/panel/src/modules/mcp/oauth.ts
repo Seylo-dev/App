@@ -7,14 +7,16 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { slug } from "@seylo/brand";
-import { sessionCookie } from "@seylo/ops";
+import { readBodyText } from "@seylo/ops/elysia";
 import { and, asc, count, eq, gt, inArray, isNull, lt, notExists, or } from "drizzle-orm";
 import { authenticate, credentialsFrom } from "../../auth/authenticate";
 import { freshUntil } from "../../auth/fresh";
-import type { Principal } from "../../auth/principal";
 import { apiKeys, mcpAuthCodes, mcpClients } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { bodyRefused } from "../../http/body";
 import { clientIp } from "../../http/client-ip";
+import { secureSession } from "../../http/https";
+import { addressKey } from "../../http/ip-ranges";
 import { isSameOrigin } from "../../http/origin";
 import { requestOrigin } from "../../http/request-origin";
 import { writeAuditEvent } from "../../ops/audit";
@@ -22,7 +24,7 @@ import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { hashToken, prefixedToken, randomToken } from "../../security/tokens";
 import { readPanelName } from "../settings/keys";
 import { readMcpEnabled } from "./keys";
-import { consentPage, messagePage } from "./pages";
+import { bridgePage, consentPage, messagePage, sessionKeyField } from "./pages";
 import { mcpPath } from "./server";
 
 export const codeLifetimeMs = 5 * 60 * 1000;
@@ -114,11 +116,14 @@ export async function register(deps: Deps, request: Request, ip: string | null =
     limiter = createRateLimiter();
     registerLimiters.set(deps.db, limiter);
   }
-  const wait = limiter.take(`mcp-register:${clientIp(request, ip, deps.proxy.trusts(ip)) ?? "unknown"}`, "strict");
+  // An IPv6 /64 counts as one address, like the sign-in limits.
+  const wait = limiter.take(`mcp-register:${addressKey(clientIp(request, ip, deps.proxy.trusts(ip)))}`, "strict");
   if (wait > 0) return oauthError("invalid_client_metadata", `Too many registrations. Try again in ${wait} seconds.`, 429);
+  const text = await readOAuthBody(request);
+  if (typeof text !== "string") return text;
   let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as Record<string, unknown>;
+    body = JSON.parse(text) as Record<string, unknown>;
   } catch {
     return oauthError("invalid_client_metadata", "The body must be JSON.");
   }
@@ -231,39 +236,52 @@ function isFresh(deps: Deps, sessionId: string): boolean {
   return until !== null && until.getTime() > Date.now();
 }
 
-function sessionPrincipal(deps: Deps, request: Request): Extract<Principal, { type: "session" }> | null {
-  const credentials = credentialsFrom(request, sessionCookie);
+/**
+ * The browser session behind a consent form. The page is plain HTML, so the
+ * session key comes in the form (the bridge page's script copies it from
+ * the web app's storage) instead of a header; the cookie alone is not
+ * enough, as everywhere else.
+ */
+function sessionPrincipal(deps: Deps, request: Request, form: URLSearchParams, socketIp: string | null) {
+  const credentials = credentialsFrom(request, {
+    secure: secureSession(deps, request, socketIp),
+    sessionKey: form.get(sessionKeyField),
+  });
   if (!credentials.sessionToken) return null;
-  const principal = authenticate(deps.db, { sessionToken: credentials.sessionToken });
+  const principal = authenticate(deps.db, { ...credentials, bearerToken: undefined });
   return principal.type === "session" ? principal : null;
 }
 
-export function authorizePage(deps: Deps, request: Request, socketIp: string | null = null): Response {
+/** Hidden form fields that carry the authorize request through the bridge and the consent form. */
+function authorizeFields(params: AuthorizeParams): [string, string][] {
+  return [
+    ["client_id", params.clientId],
+    ["redirect_uri", params.redirectUri],
+    ["response_type", "code"],
+    ["code_challenge", params.codeChallenge],
+    ["code_challenge_method", "S256"],
+    ["scope", params.scope],
+    ...(params.state !== null ? [["state", params.state] as [string, string]] : []),
+  ];
+}
+
+/** The GET URL of this authorize request, for the sign-in and re-auth pages to come back to. */
+function authorizePath(params: AuthorizeParams): string {
+  return `/oauth/authorize?${new URLSearchParams(authorizeFields(params)).toString()}`;
+}
+
+/**
+ * GET /oauth/authorize: checks the request, then serves the bridge page,
+ * which posts it back with the session key from the web app's storage (or
+ * goes to sign-in when there is none). Nothing here reads the session, so
+ * a copied cookie learns nothing from this page.
+ */
+export function authorizePage(deps: Deps, request: Request): Response {
   const panelName = readPanelName(deps.db);
   if (!readMcpEnabled(deps.db)) return messagePage(panelName, "MCP is off", "The MCP server is turned off on this panel.", 403);
-  const url = new URL(request.url);
-  const read = readAuthorize(deps, url.searchParams);
+  const read = readAuthorize(deps, new URL(request.url).searchParams);
   if (!read.ok) return read.response;
-  const principal = sessionPrincipal(deps, request);
-  const back = `${url.pathname}${url.search}`;
-  if (!principal) {
-    return Response.redirect(`${requestOrigin(request, deps.proxy.trusts(socketIp))}/login?redirect=${encodeURIComponent(back)}`, 302);
-  }
-  // A token acting as this person is a new way in: a session left open
-  // confirms it's them on the web app's /reauth page first, then comes back here.
-  if (!isFresh(deps, principal.sessionId)) {
-    return Response.redirect(`${requestOrigin(request, deps.proxy.trusts(socketIp))}/reauth?redirect=${encodeURIComponent(back)}`, 302);
-  }
-  const wantsWrite = read.value.scope.split(/\s+/).includes("mcp:write");
-  return consentPage({
-    panelName,
-    clientName: read.clientName,
-    redirectHost: redirectLabel(read.value.redirectUri),
-    userLabel: principal.user.email,
-    params: read.value,
-    csrf: consentToken(deps, principal.sessionId, read.value),
-    defaultWrite: wantsWrite,
-  });
+  return bridgePage({ panelName, fields: authorizeFields(read.value), back: authorizePath(read.value) });
 }
 
 function redirectLabel(uri: string): string {
@@ -275,14 +293,45 @@ function redirectLabel(uri: string): string {
   }
 }
 
+/**
+ * POST /oauth/authorize: the bridge's post (no decision yet) renders the
+ * consent page for a signed-in, fresh session; the consent form's post
+ * (decision allow or deny) answers the client.
+ */
 export async function authorizeDecision(deps: Deps, request: Request, ip: string | null = null): Promise<Response> {
   const panelName = readPanelName(deps.db);
   if (!readMcpEnabled(deps.db)) return messagePage(panelName, "MCP is off", "The MCP server is turned off on this panel.", 403);
-  if (!isSameOrigin(request)) return messagePage(panelName, "Not allowed", "This form can only be sent from the panel itself.", 403);
-  const form = new URLSearchParams(await request.text());
+  if (!isSameOrigin(request, deps.proxy.trusts(ip))) {
+    return messagePage(panelName, "Not allowed", "This form can only be sent from the panel itself.", 403);
+  }
+  const text = await readOAuthBody(request);
+  if (typeof text !== "string") return text;
+  const form = new URLSearchParams(text);
   const read = readAuthorize(deps, form);
   if (!read.ok) return read.response;
-  const principal = sessionPrincipal(deps, request);
+  const principal = sessionPrincipal(deps, request, form, ip);
+  const origin = requestOrigin(request, deps.proxy.trusts(ip));
+  const back = encodeURIComponent(authorizePath(read.value));
+  const decision = form.get("decision");
+
+  if (decision === null) {
+    // The bridge's post: sign in, or confirm it's you, then come back to the GET.
+    if (!principal) return Response.redirect(`${origin}/login?redirect=${back}`, 303);
+    // A token acting as this person is a new way in: a session left open
+    // confirms it's them on the web app's /reauth page first.
+    if (!isFresh(deps, principal.sessionId)) return Response.redirect(`${origin}/reauth?redirect=${back}`, 303);
+    return consentPage({
+      panelName,
+      clientName: read.clientName,
+      redirectHost: redirectLabel(read.value.redirectUri),
+      userLabel: principal.user.email,
+      fields: authorizeFields(read.value),
+      requestedScope: read.value.scope,
+      csrf: consentToken(deps, principal.sessionId, read.value),
+      sessionKey: form.get(sessionKeyField) ?? "",
+    });
+  }
+
   if (!principal) return messagePage(panelName, "Signed out", "Sign in to the panel and start again from the app.", 401);
   if (!isFresh(deps, principal.sessionId)) {
     return messagePage(panelName, "Confirm it's you", "Your sign-in is too old to connect an app. Start again from the app.", 403);
@@ -292,7 +341,7 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
   }
   const target = new URL(read.value.redirectUri);
   if (read.value.state) target.searchParams.set("state", read.value.state);
-  target.searchParams.set("iss", requestOrigin(request, deps.proxy.trusts(ip)));
+  target.searchParams.set("iss", origin);
   const client = deps.db.select({ name: mcpClients.name }).from(mcpClients).where(eq(mcpClients.id, read.value.clientId)).get();
   const audit = (decision: "allow" | "deny", access: "read" | "write" | null) =>
     writeAuditEvent(deps.db, {
@@ -302,12 +351,13 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
       ip: clientIp(request, ip, deps.proxy.trusts(ip)),
       userAgent: request.headers.get("user-agent"),
     });
-  if (form.get("decision") !== "allow") {
+  if (decision !== "allow") {
     audit("deny", null);
     target.searchParams.set("error", "access_denied");
     target.searchParams.set("error_description", "The person declined.");
     return Response.redirect(target.toString(), 302);
   }
+  // Changes only when the person picked them: a missing choice is read only.
   const readOnly = form.get("access") !== "write";
   const code = randomToken();
   deps.db
@@ -329,13 +379,32 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
   return Response.redirect(target.toString(), 302);
 }
 
-async function readForm(request: Request): Promise<URLSearchParams> {
+/**
+ * The OAuth endpoints are public, so their bodies (small forms and JSON)
+ * go through the capped reader before anything else: at most
+ * oauthBodyBytes each, counted against the panel's shared body budget.
+ */
+export const oauthBodyBytes = 64 * 1024;
+
+async function readOAuthBody(request: Request): Promise<string | Response> {
+  const read = await readBodyText(request, oauthBodyBytes);
+  return read.ok ? read.text : bodyRefused(read.reason);
+}
+
+async function readForm(request: Request): Promise<URLSearchParams | Response> {
+  const text = await readOAuthBody(request);
+  if (typeof text !== "string") return text;
   const type = request.headers.get("content-type") ?? "";
   if (type.includes("application/json")) {
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    return new URLSearchParams(Object.entries(body).filter((e): e is [string, string] => typeof e[1] === "string"));
+    let body: Record<string, unknown> = {};
+    try {
+      body = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      // An unreadable body is an empty form: the checks below answer for it.
+    }
+    return new URLSearchParams(Object.entries(body ?? {}).filter((e): e is [string, string] => typeof e[1] === "string"));
   }
-  return new URLSearchParams(await request.text());
+  return new URLSearchParams(text);
 }
 
 function s256(verifier: string): string {
@@ -374,6 +443,7 @@ function tokenResponse(tokens: { access: string; refresh: string }, readOnly: bo
 export async function token(deps: Deps, request: Request): Promise<Response> {
   if (!readMcpEnabled(deps.db)) return oauthError("access_denied", "The MCP server is turned off on this panel.", 403);
   const form = await readForm(request);
+  if (form instanceof Response) return form;
   const clientId = form.get("client_id") ?? "";
   const grant = form.get("grant_type");
 
@@ -434,6 +504,7 @@ export async function token(deps: Deps, request: Request): Promise<Response> {
 
 export async function revoke(deps: Deps, request: Request): Promise<Response> {
   const form = await readForm(request);
+  if (form instanceof Response) return form;
   const hash = hashToken(form.get("token") ?? "");
   deps.db
     .update(apiKeys)

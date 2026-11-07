@@ -5,7 +5,7 @@ import { EventSchema } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../src/db/schema";
 import { runDueBackups } from "../src/modules/backups/schedule";
-import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
 
 // A tiny path-style S3: PUT, GET and DELETE on /<bucket>/<key>; access key "BADKEY" is refused.
@@ -82,7 +82,7 @@ function backupResult(nodeId: string, runId: string, ok = true, key = `seylo/x/$
 }
 
 describe("destinations", () => {
-  test("secret keys are sealed; members only get choices", async () => {
+  test("secret keys are sealed; members with a grant only get choices", async () => {
     const created = await callOp(panel, backupOps.createDestination, destinationInput(), { cookie });
     expect(created.status).toBe(200);
     expect(created.body).toMatchObject({ name: "R2 eu", bucket: "backups", pathPrefix: "seylo", policyCount: 0 });
@@ -91,6 +91,8 @@ describe("destinations", () => {
     expect(row?.secretAccessKeySealed).not.toContain("super-secret-key");
 
     const member = await createUser(panel, "member");
+    // An account with no grant gets nothing to pick from (picker-lists.test.ts).
+    grant(panel, member.user.id, "project", seedProject(panel).id, ["services.view"]);
     const list = await callOp(panel, backupOps.listDestinations, {}, { cookie: member.cookie });
     expect(list.body).toEqual({
       destinations: [],

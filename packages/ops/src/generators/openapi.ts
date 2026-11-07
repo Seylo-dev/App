@@ -15,13 +15,17 @@ export interface OpenApiOptions {
   description?: string;
   /** Name of the session cookie, documented as an auth scheme. */
   sessionCookie: string;
+  /** Header with the session key; a browser session needs it next to the cookie. */
+  sessionKeyHeader?: string;
 }
 
 export function buildOpenApi(ops: readonly AnyOpContract[], options: OpenApiOptions): JsonSchema {
   const paths: Record<string, JsonSchema> = {};
+  // Both halves of a browser session, or a bearer token.
+  const session: JsonSchema = options.sessionKeyHeader ? { session: [], sessionKey: [] } : { session: [] };
   for (const op of ops) {
     const { method, path } = opRoute(op);
-    paths[path] = { [method.toLowerCase()]: operation(op) };
+    paths[path] = { [method.toLowerCase()]: operation(op, session) };
   }
   return {
     openapi: "3.1.0",
@@ -30,7 +34,22 @@ export function buildOpenApi(ops: readonly AnyOpContract[], options: OpenApiOpti
     components: {
       schemas: { ErrorBody: toJsonSchema(ErrorBody) },
       securitySchemes: {
-        session: { type: "apiKey", in: "cookie", name: options.sessionCookie },
+        session: {
+          type: "apiKey",
+          in: "cookie",
+          name: options.sessionCookie,
+          description: "Browser session (`__Host-` prefixed over HTTPS); only valid together with the session key header.",
+        },
+        ...(options.sessionKeyHeader
+          ? {
+              sessionKey: {
+                type: "apiKey",
+                in: "header",
+                name: options.sessionKeyHeader,
+                description: "The key handed out with the session.",
+              },
+            }
+          : {}),
         apiKey: { type: "http", scheme: "bearer", description: "API key or MCP token." },
       },
       responses: {
@@ -43,14 +62,14 @@ export function buildOpenApi(ops: readonly AnyOpContract[], options: OpenApiOpti
   };
 }
 
-function operation(op: AnyOpContract): JsonSchema {
+function operation(op: AnyOpContract, session: JsonSchema): JsonSchema {
   const isQuery = op.kind === "query";
   return {
     operationId: op.id,
     summary: op.summary,
     description: op.description,
     tags: [moduleOf(op)],
-    security: op.permission.kind === "public" ? [] : [{ session: [] }, { apiKey: [] }],
+    security: op.permission.kind === "public" ? [] : [session, { apiKey: [] }],
     ...(isQuery ? { parameters: queryParameters(op) } : { requestBody: jsonBody(op) }),
     responses: {
       "200": { description: "Success.", content: { "application/json": { schema: toJsonSchema(op.output) } } },

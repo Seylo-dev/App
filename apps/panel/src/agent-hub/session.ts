@@ -591,7 +591,10 @@ export class AgentSession {
   // ---- errors and helpers ----
 
   private reject(reason: HelloRejectReason, message: string, minAgentVersion = ""): void {
-    this.deps.logger.warn({ reason: HelloRejectReason[reason], nodeId: this.nodeIdValue || undefined }, "agent rejected");
+    this.deps.logger.warn(
+      { reason: HelloRejectReason[reason], nodeId: this.nodeIdValue || undefined, remoteIp: this.remoteIp },
+      "agent rejected",
+    );
     this.sendHandshake({ case: "rejected", value: { reason, message, minAgentVersion } });
     this.state = "closed";
     this.writer.close();

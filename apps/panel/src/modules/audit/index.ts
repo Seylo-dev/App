@@ -1,15 +1,19 @@
 // Reading the audit log: filtered pages, single entries and exports.
 // Writing it is the op pipeline's job (src/ops/audit.ts). People without
-// audit.view see only their own entries.
+// audit.view see only their own entries; keys limited to projects only
+// those projects' entries.
 // Contracts: packages/ops/src/ops/audit.ts.
 
 import { slug } from "@seylo/brand";
-import { audit as auditOps, OpError } from "@seylo/ops";
-import { eq } from "drizzle-orm";
+import { actionAllowed, audit as auditOps, OpError } from "@seylo/ops";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { isNarrowedKey } from "../../auth/access";
 import { auditLog } from "../../db/schema";
+import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
 import { defineModule } from "../module";
 import { auditWhere, parseCursor, queryAudit, toCsv, toEntry, toJsonl } from "./query";
+import { pruneAudit } from "./retention";
 
 export const maxExportRows = 10_000;
 
@@ -19,8 +23,23 @@ function ownOnly(ctx: OpContext): string | null {
   return ctx.access.can("audit.view") ? null : ctx.principal.user.id;
 }
 
+/**
+ * A key limited to actions needs audit.view in its list to read the log at
+ * all (the entries span every area); a key limited to projects reads only
+ * entries of those projects. Unscoped keys and sessions read as before.
+ */
+function keyScope(ctx: OpContext): SQL[] {
+  const p = ctx.principal;
+  if (!isNarrowedKey(p)) return [];
+  if (!actionAllowed(p.actions, "audit.view")) {
+    throw new OpError("FORBIDDEN", "This key's actions do not include audit.view.", { action: "audit.view" });
+  }
+  if (p.projectIds === null) return [];
+  return [p.projectIds.length ? inArray(auditLog.projectId, [...p.projectIds]) : sql`0`];
+}
+
 const list = implement(auditOps.list, (input, ctx) => {
-  const where = auditWhere(input, ownOnly(ctx));
+  const where = [...auditWhere(input, ownOnly(ctx)), ...keyScope(ctx)];
   const rows = queryAudit(ctx.db, where, { beforeId: parseCursor(input.cursor), limit: input.limit + 1 });
   const page = rows.slice(0, input.limit);
   const last = page[page.length - 1];
@@ -32,7 +51,7 @@ const get = implement(auditOps.get, (input, ctx) => {
   const row = ctx.db
     .select()
     .from(auditLog)
-    .where(eq(auditLog.id, Number(input.entryId)))
+    .where(and(eq(auditLog.id, Number(input.entryId)), ...keyScope(ctx)))
     .get();
   if (!row || (only && row.actorId !== only)) throw new OpError("NOT_FOUND", "That audit entry does not exist.");
   return toEntry(row);
@@ -60,7 +79,20 @@ const exportLog = implement(auditOps.exportLog, (input, ctx) => {
       };
 });
 
+/** Applies the retention setting once a day (retention.ts). */
+const prune = defineJob<Record<string, never>>({
+  type: "audit.prune",
+  async run(_payload, ctx) {
+    const removed = pruneAudit(ctx.db);
+    if (removed > 0) ctx.logger.info({ removed }, "old audit entries removed");
+  },
+});
+
 export default defineModule({
   name: "audit",
   ops: [list, get, exportLog],
+  jobs: [prune],
+  start(deps) {
+    deps.schedules.ensure({ key: "audit.prune", jobType: "audit.prune", cron: "47 3 * * *" });
+  },
 });

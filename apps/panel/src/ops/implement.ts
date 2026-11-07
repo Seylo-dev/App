@@ -7,14 +7,16 @@ import type { Access } from "../auth/access";
 import type { Principal, PrincipalUser } from "../auth/principal";
 import type { Deps } from "../deps";
 
-export interface CookieOptions {
-  maxAgeSeconds?: number;
-}
-
-/** Response side effects that only make sense over HTTP (sign-in cookies). */
+/** Response side effects that only make sense over HTTP (the browser session). */
 export interface HttpEffects {
-  setCookie(name: string, value: string, options?: CookieOptions): void;
-  clearCookie(name: string): void;
+  /**
+   * Hands the browser a session: the token as the HttpOnly session cookie
+   * (`__Host-` on HTTPS) and the key in the session key response header,
+   * which the web app keeps in its origin's storage (auth/sessions.ts).
+   */
+  setSession(session: { token: string; key: string; maxAgeSeconds: number }): void;
+  /** Expires the session cookie and tells the web app to forget its key. */
+  clearSession(): void;
 }
 
 export interface OpContext extends Deps {

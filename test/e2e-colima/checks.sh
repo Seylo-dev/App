@@ -379,6 +379,32 @@ check_01() {
   state_set panel-container "$cid1"
 }
 
+# A browser session is the cookie plus the session key the panel hands out
+# next to it (header x-<slug>-session-key); the cookie alone signs nobody in.
+# The web app keeps the key in localStorage; these checks keep it in
+# <jar>.key next to the cookie jar.
+SESSION_KEY_HEADER=x-$SLUG-session-key
+
+# scurl <jar> <curl args...>: curl as that browser session: sends the jar's
+# cookie and key, and keeps a new cookie or key the answer hands out.
+scurl() {
+  local jar=$1 hdr rc key
+  shift
+  hdr=$(mktemp)
+  key=$(cat "$jar.key" 2>/dev/null || true)
+  if [ -n "$key" ]; then
+    curl -c "$jar" -b "$jar" -D "$hdr" -H "$SESSION_KEY_HEADER: $key" "$@"
+  else
+    curl -c "$jar" -b "$jar" -D "$hdr" "$@"
+  fi
+  rc=$?
+  if grep -qi "^$SESSION_KEY_HEADER:" "$hdr"; then
+    tr -d '\r' <"$hdr" | grep -i "^$SESSION_KEY_HEADER:" | tail -1 | sed 's/^[^:]*:[[:space:]]*//' >"$jar.key"
+  fi
+  rm -f "$hdr"
+  return $rc
+}
+
 # reauth <cookie jar>: confirms the owner's password on that browser session,
 # which then counts as a fresh sign-in for 15 minutes. apiKeys.create and
 # cliLogin.approve need one; a panel from before re-auth existed has no
@@ -387,7 +413,7 @@ reauth() {
   local pw
   pw=$(sed -n 2p "$E2E_STATE/owner" 2>/dev/null)
   [ -n "$pw" ] || return 0
-  curl -sS -m 30 -o /dev/null -c "$1" -b "$1" -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
+  scurl "$1" -sS -m 30 -o /dev/null -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
     --data "$(jq -nc --arg p "$pw" '{password: $p}')" "$(panel_url)/api/v1/auth.reauth" >/dev/null 2>&1 || true
 }
 
@@ -395,7 +421,7 @@ reauth() {
 create_key() {
   local key
   reauth "$1"
-  key=$(curl -fsS -c "$1" -b "$1" -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
+  key=$(scurl "$1" -fsS -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
     --data '{"kind":"api","name":"e2e","actions":["*"],"readOnly":false,"expiresInDays":30}' \
     "$(panel_url)/api/v1/apiKeys.create" | jq -r .token) || true
   [ -n "$key" ] && [ "$key" != null ] || { bad "apiKeys.create returned no token"; return 1; }
@@ -412,7 +438,7 @@ check_02() {
     ev "owner and API key exist from an earlier run"
   else
     if [ -s "$E2E_STATE/owner" ] && [ ! -s "$jar" ]; then rm -f "$jar"; fi
-    if [ -s "$jar" ] && curl -fsS -b "$jar" "$(panel_url)/api/v1/auth.whoami" >/dev/null 2>&1; then
+    if [ -s "$jar" ] && scurl "$jar" -fsS "$(panel_url)/api/v1/auth.whoami" >/dev/null 2>&1; then
       ev "owner exists; creating the API key with the saved session"
       create_key "$jar" || return 1
     else
@@ -422,8 +448,8 @@ check_02() {
     expect "the setup link is valid" test "$(printf '%s' "$status" | jq -r .link.valid)" = true
     password=$(openssl rand -hex 16)
     printf '%s\n%s\n' "$email" "$password" >"$E2E_STATE/owner"
-    rm -f "$jar"
-    curl -fsS -c "$jar" -b "$jar" -H 'content-type: application/json' -H "origin: $(panel_url)" \
+    rm -f "$jar" "$jar.key"
+    scurl "$jar" -fsS -H 'content-type: application/json' -H "origin: $(panel_url)" \
       -X POST --data "{\"token\":\"$token\",\"email\":\"$email\",\"name\":\"E2E Owner\",\"password\":\"$password\"}" \
       "$(panel_url)/api/v1/setup.createOwner" >>"$RES/$CUR.log" || { bad "setup.createOwner failed"; return 1; }
     good "owner $email created through setup.createOwner (session cookie)"
@@ -1627,13 +1653,13 @@ check_24() {
   code=$(sed -n 's/.*sign-in code: \([A-Z0-9-]*\).*/\1/p' "$blog" | head -1)
   ev "seylo login (browser): $(grep -E 'code|Approve' "$blog" | sed "s/$code/<code>/" | tr '\n' ' ')"
   if [ -n "$code" ]; then
-    curl -fsS -b "$E2E_STATE/cookies" -H 'content-type: application/json' -H "origin: $(panel_url)" \
+    scurl "$E2E_STATE/cookies" -fsS -H 'content-type: application/json' -H "origin: $(panel_url)" \
       "$(panel_url)/api/v1/cliLogin.get?userCode=$code" >>"$RES/$CUR.log" 2>&1 &&
-      good "the approval page's request shows the computer: $(curl -fsS -b "$E2E_STATE/cookies" "$(panel_url)/api/v1/cliLogin.get?userCode=$code" |
+      good "the approval page's request shows the computer: $(scurl "$E2E_STATE/cookies" -fsS "$(panel_url)/api/v1/cliLogin.get?userCode=$code" |
         jq -c --arg host "$(hostname)" '.request | {clientName: (.clientName | if startswith($host) then "<this computer>" + .[($host | length):] else . end), status}')" ||
       bad "cliLogin.get with the owner session failed"
     reauth "$E2E_STATE/cookies"
-    curl -fsS -b "$E2E_STATE/cookies" -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
+    scurl "$E2E_STATE/cookies" -fsS -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
       --data "{\"userCode\":\"$code\",\"readOnly\":true,\"expiresInDays\":1}" "$(panel_url)/api/v1/cliLogin.approve" >>"$RES/$CUR.log" 2>&1 ||
       bad "cliLogin.approve with the owner session failed"
   else
@@ -1665,7 +1691,7 @@ mcp_post() { # token json
 
 mcp_key() { # name readOnly
   reauth "$E2E_STATE/cookies"
-  curl -fsS -b "$E2E_STATE/cookies" -c "$E2E_STATE/cookies" -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
+  scurl "$E2E_STATE/cookies" -fsS -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST \
     --data "{\"kind\":\"mcp\",\"name\":\"$1\",\"actions\":[\"*\"],\"readOnly\":$2,\"expiresInDays\":1}" \
     "$(panel_url)/api/v1/apiKeys.create" 2>/dev/null | jq -r .token ||
     api apiKeys.create "{\"kind\":\"mcp\",\"name\":\"$1\",\"actions\":[\"*\"],\"readOnly\":$2,\"expiresInDays\":1}" | jq -r .token
@@ -1897,7 +1923,7 @@ check_31() {
 }
 
 p31_run() {
-  local ip_a l vm st out hfile pfile lfile jar cookie tls_port missing waited by_itself=
+  local ip_a l vm st out hfile pfile lfile jar cookie key tls_port missing waited by_itself=
   ip_a=$(node_ip a)
   [ -n "$(node_id b)" ] && [ -n "$(node_id c)" ] || { blocked "B and C are not joined (check 3)"; return 3; }
   [ -s "$E2E_STATE/owner" ] || { blocked "no owner credentials (check 2)"; return 3; }
@@ -1992,7 +2018,7 @@ p31_run() {
   expect "plain HTTP on IP:port carries no HSTS" p31_no_header "$pfile" '^strict-transport-security:'
   jar=$E2E_STATE/p31-cookies
   lfile=$RES/$CUR.login-headers
-  rm -f "$jar"
+  rm -f "$jar" "$jar.key"
   p31_curl -D "$lfile" -o "$RES/$CUR.login-body" -c "$jar" -H 'content-type: application/json' -H "origin: https://$P31_DOM" -X POST \
     --data "$(jq -nc --arg e "$(sed -n 1p "$E2E_STATE/owner")" --arg p "$(sed -n 2p "$E2E_STATE/owner")" '{email: $e, password: $p}')" \
     "https://$P31_DOM/api/v1/auth.login" 2>>"$RES/$CUR.log" || true
@@ -2000,10 +2026,14 @@ p31_run() {
   ev "auth.login over https://$P31_DOM: $(head -1 "$lfile" | tr -d '\r'); $cookie"
   expect "the session cookie set over HTTPS is Secure" p31_header "$lfile" '^set-cookie:.*;[[:space:]]*secure([[:space:]]*;|$)'
   expect "the session cookie is HttpOnly" p31_header "$lfile" '^set-cookie:.*;[[:space:]]*httponly([[:space:]]*;|$)'
-  expect "the HTTPS session works (auth.whoami)" p31_curl -f -o /dev/null -b "$jar" "https://$P31_DOM/api/v1/auth.whoami"
-  p31_curl -o /dev/null -b "$jar" -c "$jar" -H 'content-type: application/json' -H "origin: https://$P31_DOM" -X POST --data '{}' \
+  expect "the session cookie over HTTPS is __Host- prefixed" p31_header "$lfile" "^set-cookie:[[:space:]]*__Host-${SLUG}_session="
+  expect "the session cookie names no Domain" p31_no_header "$lfile" '^set-cookie:.*;[[:space:]]*domain='
+  key=$(tr -d '\r' <"$lfile" | grep -i "^$SESSION_KEY_HEADER:" | tail -1 | sed 's/^[^:]*:[[:space:]]*//')
+  expect "the HTTPS cookie alone is no session" sh -c "[ \"\$(curl -sS -m 10 --cacert '$P31_ROOT' -o /dev/null -w '%{http_code}' -b '$jar' 'https://$P31_DOM/api/v1/auth.whoami')\" = 401 ]"
+  expect "the HTTPS session works (auth.whoami with the session key)" p31_curl -f -o /dev/null -b "$jar" -H "$SESSION_KEY_HEADER: $key" "https://$P31_DOM/api/v1/auth.whoami"
+  p31_curl -o /dev/null -b "$jar" -c "$jar" -H "$SESSION_KEY_HEADER: $key" -H 'content-type: application/json' -H "origin: https://$P31_DOM" -X POST --data '{}' \
     "https://$P31_DOM/api/v1/auth.logout" 2>>"$RES/$CUR.log" || true
-  rm -f "$jar"
+  rm -f "$jar" "$jar.key"
 
   # IP:port pages go to the domain; the API, loopback and the domain itself do not.
   out=$(curl -s -o /dev/null -m 5 -w '%{http_code} %{redirect_url}' -H 'accept: text/html' "$(panel_url)/settings/general?e2e=31")
@@ -2464,16 +2494,16 @@ check_34() {
 # session_op <op> <json>: an op with the owner's browser session (cookie jar from check 2), like the web app.
 session_op() {
   local jar=$E2E_STATE/cookies
-  curl -sS -m 60 -c "$jar" -b "$jar" -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST --data "$2" "$(panel_url)/api/v1/$1"
+  scurl "$jar" -sS -m 60 -H 'content-type: application/json' -H "origin: $(panel_url)" -X POST --data "$2" "$(panel_url)/api/v1/$1"
 }
 # owner_session: a signed-in owner session in the jar (signs in again when it ended).
 owner_session() {
   local jar=$E2E_STATE/cookies email pw
-  curl -fsS -m 10 -b "$jar" "$(panel_url)/api/v1/auth.whoami" >/dev/null 2>&1 && return 0
+  scurl "$jar" -fsS -m 10 "$(panel_url)/api/v1/auth.whoami" >/dev/null 2>&1 && return 0
   email=$(sed -n 1p "$E2E_STATE/owner")
   pw=$(sed -n 2p "$E2E_STATE/owner")
   session_op auth.login "$(jq -nc --arg e "$email" --arg p "$pw" '{email:$e, password:$p}')" >/dev/null &&
-    curl -fsS -m 10 -b "$jar" "$(panel_url)/api/v1/auth.whoami" >/dev/null
+    scurl "$jar" -fsS -m 10 "$(panel_url)/api/v1/auth.whoami" >/dev/null
 }
 # host_shell <node id> <wsclient args...>: opens a host shell with the owner session and runs the ws client on it.
 host_shell() {

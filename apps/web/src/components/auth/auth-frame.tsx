@@ -1,5 +1,6 @@
 // The frame of the signed-out screens (sign-in, setup): the panel's mark
-// and name on top, the content, and "Powered by" unless white-labelled.
+// and name on top, the plain-HTTP warning when it applies, the content, and
+// "Powered by" unless white-labelled.
 
 import { displayName } from "@seylo/brand";
 import { cn } from "@seylo/ui/lib/utils";
@@ -7,6 +8,7 @@ import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import { useBoot } from "../../lib/theme";
 import { BrandMark } from "../brand-mark";
+import { PlainHttpWarning } from "./plain-http-warning";
 
 export function AuthFrame({ children, className }: { children: ReactNode; className?: string }) {
   const boot = useBoot();
@@ -18,6 +20,7 @@ export function AuthFrame({ children, className }: { children: ReactNode; classN
         <BrandMark size={32} />
         <span className="text-lg font-semibold tracking-[-0.015em]">{name}</span>
       </div>
+      <PlainHttpWarning className="max-w-[520px]" />
       {children}
       {showPoweredBy && boot && (
         <p className="m-0 mt-auto text-xs text-muted-foreground">{t("auth.poweredBy", { name: boot.productName })}</p>

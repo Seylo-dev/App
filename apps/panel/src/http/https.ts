@@ -14,6 +14,16 @@ export function servedOverHttps(deps: Pick<Deps, "db" | "proxy">, request: Reque
   return !!domain && request.headers.get("host")?.toLowerCase() === domain;
 }
 
+/**
+ * Whether the session cookie of this request is the Secure `__Host-` one:
+ * on every HTTPS request (so a session made on the panel domain is never
+ * sent over plain HTTP), or always with SECURE_COOKIES. IP:port sign-in
+ * keeps a plain cookie. Setting and reading the cookie use the same rule.
+ */
+export function secureSession(deps: Pick<Deps, "db" | "proxy" | "config">, request: Request, socketIp: string | null): boolean {
+  return deps.config.secureCookies || servedOverHttps(deps, request, socketIp);
+}
+
 /** Headers every panel response carries; HSTS only on HTTPS. */
 export function securityHeaders(https: boolean): Record<string, string> {
   return {

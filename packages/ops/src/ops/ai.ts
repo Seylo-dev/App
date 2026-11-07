@@ -170,7 +170,7 @@ export const conversations = defineOp({
     cursor: Type.Optional(Type.String({ maxLength: 64 })),
   }),
   output: Type.Object({ conversations: Type.Array(AiConversation), nextCursor: Type.Union([Type.String(), Type.Null()]) }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: false,
 });
@@ -182,7 +182,7 @@ export const conversation = defineOp({
   description: "Returns one of the caller's conversations with all its messages.",
   input: Type.Object({ conversationId: Id }),
   output: Type.Object({ conversation: AiConversation, messages: Type.Array(AiMessage) }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: false,
 });
@@ -207,7 +207,7 @@ export const send = defineOp({
     /** Empty, status streaming; filled by the live events. */
     assistantMessage: AiMessage,
   }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   rateLimit: "strict",
   mcp: false,
   audit: true,
@@ -220,7 +220,7 @@ export const cancel = defineOp({
   description: "Stops the reply that is streaming in a conversation. Text so far is kept; the message ends with status cancelled.",
   input: Type.Object({ conversationId: Id }),
   output: Empty,
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: true,
 });
@@ -232,7 +232,7 @@ export const deleteConversation = defineOp({
   description: "Deletes one of the caller's conversations and its messages. Usage records stay for the bill.",
   input: Type.Object({ conversationId: Id }),
   output: Empty,
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: true,
 });

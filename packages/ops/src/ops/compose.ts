@@ -7,7 +7,7 @@
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
-import { Id } from "../schemas";
+import { GitUrl, Id } from "../schemas";
 import { RepoPath } from "./builds";
 import { GitBranch, ServiceDetail, ServiceName, ServiceSummary } from "./services";
 
@@ -26,7 +26,7 @@ export const ComposeSource = Type.Union([
   }),
   Type.Object({
     type: Type.Literal("git"),
-    url: Type.String({ minLength: 1, maxLength: 500, pattern: "^(https://|ssh://|git@)\\S+$" }),
+    url: GitUrl,
     branch: GitBranch,
     path: RepoPath,
     credentialId: Type.Union([Id, Type.Null()]),
@@ -79,6 +79,8 @@ export const preview = defineOp({
   sensitive: { input: ["source.yaml"] },
   mcp: true,
   audit: true,
+  // A compose file of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });
 
 export const create = defineOp({
@@ -99,6 +101,8 @@ export const create = defineOp({
   sensitive: { input: ["source.yaml"] },
   mcp: true,
   audit: true,
+  // A compose file of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });
 
 export const get = defineOp({
@@ -131,4 +135,6 @@ export const update = defineOp({
   sensitive: { input: ["source.yaml"] },
   mcp: true,
   audit: true,
+  // A compose file of up to 512 Ki characters, escaped as JSON.
+  maxBodyBytes: 2 * 1024 * 1024,
 });

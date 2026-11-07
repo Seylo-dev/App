@@ -6,7 +6,7 @@
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
-import { Empty, Id, Timestamp } from "../schemas";
+import { Empty, GitUrl, Id, Timestamp } from "../schemas";
 
 export const GitHost = Type.String({
   minLength: 1,
@@ -43,10 +43,11 @@ export const listCredentials = defineOp({
   id: "git.listCredentials",
   kind: "query",
   summary: "List git credentials",
-  description: "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source.",
+  description:
+    "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source. Empty for callers who may create or edit services nowhere.",
   input: Type.Object({}),
   output: Type.Object({ items: Type.Array(GitCredential, { description: "The stored git credentials, without secrets." }) }),
-  // Names and hosts only; any signed-in person may pick one for a source they can edit.
+  // Names and hosts only, for people who may set a source somewhere (services.create or services.update).
   permission: permission.signedIn(),
   mcp: true,
   audit: false,
@@ -143,7 +144,7 @@ export const branches = defineOp({
     "Checks access to a git URL (with a stored credential for private repos, like git ls-remote) and lists its branches with the default one. Used to validate a generic git source before saving it.",
   input: Type.Object({
     projectId: Id,
-    url: Type.String({ minLength: 1, maxLength: 500, pattern: "^(https://|ssh://|git@)\\S+$" }),
+    url: GitUrl,
     credentialId: Type.Optional(Id),
   }),
   output: Type.Object({ branches: Type.Array(Type.String()), defaultBranch: Type.Union([Type.String(), Type.Null()]) }),

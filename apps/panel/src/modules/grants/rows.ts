@@ -101,6 +101,22 @@ export function checkGrantActions(access: Access, scopeType: ScopeKind, scopeId:
   return unique;
 }
 
+/**
+ * Whether a grant changed from `before` to `after` gives anything it did
+ * not: an action, or a wildcard that would also cover actions added later.
+ * Such changes hand someone lasting access, so a stale browser session must
+ * confirm it's the person first (grants.setOn*); narrowing never needs it.
+ */
+export function grantAdds(scopeType: ScopeKind, before: readonly string[], after: readonly string[]): boolean {
+  const known = grantableOn(scopeType);
+  const had = new Set(before.flatMap((entry) => expandActionEntry(entry, known)));
+  return after.some(
+    (entry) =>
+      expandActionEntry(entry, known).some((action) => !had.has(action)) ||
+      (entry.endsWith("*") && !before.includes("*") && !before.includes(entry)),
+  );
+}
+
 export function findGrant(db: PanelDb, userId: string, scopeType: ScopeKind, scopeId: string): GrantRow | undefined {
   return db
     .select()

@@ -23,6 +23,8 @@ export const fixtures: Record<string, unknown> = {
     domainStatus: { state: "active", message: "" },
     defaultNodeId: world.de,
     publicUrl: "https://panel.acme.dev",
+    uptimeAllowInternalTargets: false,
+    auditRetentionDays: 365,
   },
 
   "updates.history": {

@@ -9,7 +9,7 @@
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
-import { Empty, Id, Timestamp } from "../schemas";
+import { Empty, GitUrl, Id, Timestamp } from "../schemas";
 import { BuildSettings } from "./builds";
 
 export const ServiceName = Type.String({
@@ -103,7 +103,7 @@ export const Source = Type.Union([
   Type.Object({
     type: Type.Literal("git"),
     /** https://, ssh:// or git@host:path URL. */
-    url: Type.String({ minLength: 1, maxLength: 500, pattern: "^(https://|ssh://|git@)\\S+$" }),
+    url: GitUrl,
     branch: GitBranch,
     /** git_credentials.id for private repos; null for public ones. */
     credentialId: Type.Union([Id, Type.Null()]),

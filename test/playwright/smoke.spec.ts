@@ -7,9 +7,11 @@
 // crash or hang.
 
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { credentials, openDashboard, postPastRateLimit, signIn, stateFile, submitPastRateLimit, totp } from "./helpers";
+import { api, credentials, openDashboard, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, totp } from "./helpers";
 
 const shots = process.env.SHOTS_DIR ?? "shots";
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -78,8 +80,59 @@ test.describe("signed out", () => {
   });
 });
 
+test.describe("plain HTTP", () => {
+  /** Pages as a browser sees them on http://<public ip>:<port> (127.0.0.1 itself counts as secure). */
+  const insecure = () => Object.defineProperty(window, "isSecureContext", { get: () => false });
+
+  // One page load only: the sign-in page's setup.status shares the anonymous sign-in limit with the specs after this one.
+  test("signed-out pages warn that the connection is not encrypted", async ({ page }) => {
+    await page.addInitScript(insecure);
+    await page.goto("/login");
+    const warning = page.getByTestId("plain-http-warning");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("This connection is not encrypted");
+    await expect(warning).toContainText(/ssh -L \d+:localhost:\d+ 127\.0\.0\.1/);
+    await page.screenshot({ path: `${shots}/login-plain-http.png`, fullPage: true });
+  });
+});
+
 test.describe("signed in", () => {
   test.use({ storageState: stateFile });
+
+  test("the app shell warns on plain HTTP too, loopback does not", async ({ page, browser }) => {
+    await openDashboard(page);
+    await expect(page.getByTestId("plain-http-warning")).toHaveCount(0);
+    const context = await browser.newContext({ storageState: stateFile });
+    const other = await context.newPage();
+    await other.addInitScript(() => Object.defineProperty(window, "isSecureContext", { get: () => false }));
+    await openDashboard(other);
+    await expect(other.getByTestId("plain-http-warning")).toBeVisible();
+    await context.close();
+  });
+
+  test("the session cookie another port of the address receives signs nobody in", async ({ page, playwright }) => {
+    await openDashboard(page);
+    // A member's app on another port of the same address: the browser sends it the panel's cookie.
+    let seen = "";
+    const server = createServer((request, response) => {
+      seen = request.headers.cookie ?? "";
+      response.end("member app");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    await page.goto(`http://127.0.0.1:${port}/`);
+    server.close();
+    expect(seen).toMatch(/_session=/);
+
+    // That app replays the cookie to the panel: no session without the key the panel's own origin keeps.
+    await page.goto("/");
+    const key = await page.evaluate((name) => window.localStorage.getItem(name), sessionKey.storage);
+    expect(key).toBeTruthy();
+    const replay = await playwright.request.newContext({ baseURL: test.info().project.use.baseURL });
+    expect((await replay.get("/api/v1/auth.whoami", { headers: { cookie: seen } })).status()).toBe(401);
+    expect((await replay.get("/api/v1/auth.whoami", { headers: { cookie: seen, [sessionKey.header]: key as string } })).status()).toBe(200);
+    await replay.dispose();
+  });
 
   test("the dashboard renders nodes, projects, deploys and alerts", async ({ page }) => {
     const errors = trackErrors(page);
@@ -169,7 +222,7 @@ test.describe("signed in", () => {
   test("an invite link creates a member account", async ({ page, browser }) => {
     // Accepting is rate limited together with sign-in, so this may wait out a window.
     test.setTimeout(120_000);
-    const created = await page.request.post("/api/v1/invites.create", {
+    const created = await api(page).post("/api/v1/invites.create", {
       data: { email: "member@example.com", role: "member", grants: [], sendEmail: false },
     });
     test.skip(created.status() === 501, "invites.create is not built yet");
@@ -181,7 +234,12 @@ test.describe("signed in", () => {
     const other = await fresh.newPage();
     const errors = trackErrors(other);
     await other.goto(url.pathname + url.search);
-    await expect(other.getByRole("heading", { level: 1, name: "You are invited" })).toBeVisible();
+    // Reading the invite shares the anonymous sign-in limit: wait out a window when the page says so.
+    const invited = other.getByRole("heading", { level: 1, name: "You are invited" });
+    const retry = other.getByRole("button", { name: "Try again" });
+    await expect(invited.or(retry)).toBeVisible();
+    if (await retry.isVisible()) await submitPastRateLimit(other, retry, invited);
+    await expect(invited).toBeVisible();
     await expect(other.getByText(/member@example.com/)).toBeVisible();
     await other.screenshot({ path: `${shots}/invite.png`, fullPage: true });
     await other.getByLabel("Password").fill("member-password-123");
@@ -199,11 +257,11 @@ test.describe("signed in", () => {
     // Two waits for a fresh 30 s code plus rate-limit pauses.
     test.setTimeout(240_000);
     // Adding an authenticator needs a fresh sign-in; this session may be older than 15 minutes.
-    expect((await postPastRateLimit(page.request, page, "auth.reauth", { password: credentials.password })).ok()).toBe(true);
-    const enroll = await page.request.post("/api/v1/auth.totpEnroll", { data: {} });
+    expect((await postPastRateLimit(api(page), page, "auth.reauth", { password: credentials.password })).ok()).toBe(true);
+    const enroll = await api(page).post("/api/v1/auth.totpEnroll", { data: {} });
     test.skip(enroll.status() === 501, "auth.totpEnroll is not built yet");
     const { secret } = (await enroll.json()) as { secret: string };
-    const confirm = await page.request.post("/api/v1/auth.totpConfirm", { data: { code: totp(secret) } });
+    const confirm = await api(page).post("/api/v1/auth.totpConfirm", { data: { code: totp(secret) } });
     expect(confirm.ok()).toBe(true);
 
     // A code is accepted once; wait for the next 30 s step so sign-in gets a fresh one.
@@ -224,7 +282,7 @@ test.describe("signed in", () => {
     await submitPastRateLimit(other, other.getByRole("button", { name: "Verify" }), other.getByRole("heading", { level: 1, name: "Dashboard" }));
     // Turn it off again (with the next code) so the specs after this one start from a plain account.
     await other.waitForTimeout(30_000 - (Date.now() % 30_000) + 500);
-    const off = await other.request.post("/api/v1/auth.totpDisable", { data: { code: totp(secret) } });
+    const off = await api(other).post("/api/v1/auth.totpDisable", { data: { code: totp(secret) } });
     expect(off.ok(), await off.text()).toBe(true);
     // Turning 2FA off may end the other sessions; sign in again if this one went too.
     await signIn(other);

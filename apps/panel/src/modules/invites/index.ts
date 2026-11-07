@@ -49,9 +49,9 @@ const create = implement(inviteOps.create, async (input, ctx) => {
     requireScope(ctx.db, g.scopeType, g.scopeId);
     return { scopeType: g.scopeType, scopeId: g.scopeId, actions: checkGrantActions(ctx.access, g.scopeType, g.scopeId, g.actions) };
   });
-  // An admin invite is a full account for whoever holds the link: a session
-  // left open must not mint one.
-  if (input.role === "admin") requireFreshIfSession(ctx);
+  // An invite is an account (an admin's, or a member's with these grants)
+  // for whoever holds the link: a session left open must not mint one.
+  requireFreshIfSession(ctx);
 
   const token = prefixedToken("invite");
   const now = new Date();

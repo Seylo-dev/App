@@ -301,6 +301,9 @@ func TestPanelBootstrap(t *testing.T) {
 	if strings.TrimSpace(string(joinFile)) != cfg.JoinToken || !strings.Contains(out.String(), ":3000/setup?t="+strings.TrimSpace(string(setupFile))) {
 		t.Fatalf("token files %q %q, output %s", joinFile, setupFile, out.String())
 	}
+	if !strings.Contains(out.String(), "This link is plain HTTP") || !strings.Contains(out.String(), "ssh -L 3000:localhost:3000") {
+		t.Fatalf("the bootstrap output has no plain-HTTP warning:\n%s", out.String())
+	}
 	if info, _ := os.Stat(filepath.Join(h.dataDir, "panel", "setup-token")); info.Mode().Perm() != 0o600 {
 		t.Fatalf("setup-token mode = %v", info.Mode())
 	}
@@ -366,6 +369,10 @@ func TestPanelSetupLink(t *testing.T) {
 	token, _ := os.ReadFile(filepath.Join(h.dataDir, "panel", "setup-token"))
 	if !strings.Contains(out, ":38117/setup?t="+strings.TrimSpace(string(token))) || strings.Contains(out, "127.0.0.1") {
 		t.Fatalf("output = %s", out)
+	}
+	// A plain-HTTP link says so, with the tunnel for its port.
+	if !strings.Contains(out, "This link is plain HTTP") || !strings.Contains(out, "ssh -L 38117:localhost:38117") {
+		t.Fatalf("no plain-HTTP warning in:\n%s", out)
 	}
 	if h.cmds[len(h.cmds)-1] != "docker restart seylo-panel00000000000-3" {
 		t.Fatalf("commands = %v", h.cmds)

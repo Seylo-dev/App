@@ -1,15 +1,25 @@
-// The two server-rendered pages of the OAuth flow: consent and messages.
-// They are plain HTML (no web app bundle) so they work before the SPA
-// loads; colors follow the default light theme. They refuse to be framed.
+// The server-rendered pages of the OAuth flow: the bridge, consent and
+// messages. They are plain HTML (no web app bundle) so they work before the
+// SPA loads; colors follow the default light theme. They refuse to be
+// framed. The only script is the bridge's, allowed by its hash.
+
+import { createHash } from "node:crypto";
+import { sessionKeyStorage } from "@seylo/ops";
+
+/** Form field carrying the session key (the consent page has no headers to put it in). */
+export const sessionKeyField = "session_key";
 
 interface ConsentPage {
   panelName: string;
   clientName: string;
   redirectHost: string;
   userLabel: string;
-  params: { clientId: string; redirectUri: string; state: string | null; codeChallenge: string; scope: string };
+  /** The authorize request as hidden fields. */
+  fields: [string, string][];
+  /** The scope the client asked for; shown, never used to preselect a choice. */
+  requestedScope: string;
   csrf: string;
-  defaultWrite: boolean;
+  sessionKey: string;
 }
 
 function escapeHtml(text: string): string {
@@ -28,20 +38,48 @@ label.choice span{display:block;font-size:13px;color:var(--muted)}
 .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
 button{font:inherit;border-radius:8px;padding:8px 14px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer}
 button.primary{background:var(--primary);border-color:var(--primary);color:#fff}
-.note{font-size:13px;margin-top:14px}`;
+.note{font-size:13px;margin-top:14px}
+.tag{display:inline-block;font-size:12px;line-height:1.4;padding:1px 6px;border-radius:6px;background:var(--danger-bg);color:#b91c1c;margin-left:4px}`;
 
-function page(title: string, body: string, status = 200): Response {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="referrer" content="no-referrer" /><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><main>${body}</main></body></html>`;
+function page(title: string, body: string, status = 200, script?: { source: string; hash: string }): Response {
+  const scriptTag = script ? `<script>${script.source}</script>` : "";
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="referrer" content="no-referrer" /><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><main>${body}</main>${scriptTag}</body></html>`;
+  const scripts = script ? `; script-src '${script.hash}'` : "";
   return new Response(html, {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
       "x-frame-options": "DENY",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
+      "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'${scripts}; frame-ancestors 'none'; base-uri 'none'`,
       "referrer-policy": "no-referrer",
     },
   });
+}
+
+function hiddenFields(fields: [string, string][]): string {
+  return fields.map(([name, value]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`).join("");
+}
+
+/**
+ * Copies the session key from the web app's storage into the form and posts
+ * it; without a key the person is not signed in on this origin, so it goes
+ * to sign-in. Static text, so its CSP hash is fixed.
+ */
+const bridgeSource = `(function(){var f=document.getElementById("bridge");var k=null;try{k=window.localStorage.getItem(${JSON.stringify(sessionKeyStorage)})}catch(e){}if(!k){window.location.replace(f.getAttribute("data-login"));return}f.elements.namedItem(${JSON.stringify(sessionKeyField)}).value=k;f.submit()})();`;
+const bridgeScript = { source: bridgeSource, hash: `sha256-${createHash("sha256").update(bridgeSource).digest("base64")}` };
+
+/** GET /oauth/authorize: posts the request back with the session key (oauth.ts authorizeDecision). */
+export function bridgePage(input: { panelName: string; fields: [string, string][]; back: string }): Response {
+  const login = `/login?redirect=${encodeURIComponent(input.back)}`;
+  const body = `
+<div class="brand">${escapeHtml(input.panelName)}</div>
+<h1>Connecting an app</h1>
+<noscript><p>Turn on JavaScript for this panel to continue.</p></noscript>
+<form id="bridge" method="post" action="/oauth/authorize" data-login="${escapeHtml(login)}">
+${hiddenFields([...input.fields, [sessionKeyField, ""]])}
+</form>`;
+  return page("Connecting an app", body, 200, bridgeScript);
 }
 
 export function messagePage(panelName: string, title: string, message: string, status: number): Response {
@@ -49,28 +87,22 @@ export function messagePage(panelName: string, title: string, message: string, s
 }
 
 export function consentPage(input: ConsentPage): Response {
-  const hidden = [
-    ["client_id", input.params.clientId],
-    ["redirect_uri", input.params.redirectUri],
-    ["response_type", "code"],
-    ["code_challenge", input.params.codeChallenge],
-    ["code_challenge_method", "S256"],
-    ["scope", input.params.scope],
-    ["csrf", input.csrf],
-    ...(input.params.state !== null ? [["state", input.params.state]] : []),
-  ]
-    .map(([name, value]) => `<input type="hidden" name="${escapeHtml(name as string)}" value="${escapeHtml(value as string)}" />`)
-    .join("");
+  const hidden = hiddenFields([...input.fields, ["csrf", input.csrf], [sessionKeyField, input.sessionKey]]);
+  const asksWrite = input.requestedScope.split(/\s+/).includes("mcp:write");
+  // Anyone can register a client under any name, so the name is marked as
+  // unverified and the address the answer goes to is what identifies it.
+  // Read only is always the preselected choice, whatever the app asked for.
   const body = `
 <div class="brand">${escapeHtml(input.panelName)}</div>
-<h1>Connect ${escapeHtml(input.clientName)}?</h1>
-<p><strong>${escapeHtml(input.clientName)}</strong> wants to use this panel's tools as <strong>${escapeHtml(input.userLabel)}</strong>. After you allow it, you return to <strong>${escapeHtml(input.redirectHost)}</strong>.</p>
+<h1>Connect an app at ${escapeHtml(input.redirectHost)}?</h1>
+<p>An app that calls itself <strong>${escapeHtml(input.clientName)}</strong><span class="tag">name not verified</span> wants to use this panel's tools as <strong>${escapeHtml(input.userLabel)}</strong>. After you answer, you return to <strong>${escapeHtml(input.redirectHost)}</strong>. Allow it only if you just started this from an app there.</p>
+<p class="note">It asked for ${asksWrite ? "read and change access" : "read only access"}.</p>
 <form method="post" action="/oauth/authorize">
 ${hidden}
-<label class="choice"><input type="radio" name="access" value="read" ${input.defaultWrite ? "" : "checked"} /><div><strong>Read only</strong><span>Look at projects, services, logs and settings. Nothing can be changed.</span></div></label>
-<label class="choice"><input type="radio" name="access" value="write" ${input.defaultWrite ? "checked" : ""} /><div><strong>Read and change</strong><span>Also deploy, restart and edit. Deleting anything still waits for your approval.</span></div></label>
+<label class="choice"><input type="radio" name="access" value="read" checked /><div><strong>Read only</strong><span>Look at projects, services, logs and settings. Nothing can be changed.</span></div></label>
+<label class="choice"><input type="radio" name="access" value="write" /><div><strong>Read and change</strong><span>Also deploy, restart and edit. Deleting anything still waits for your approval.</span></div></label>
 <p class="note">It never gets more than your own permissions. You can revoke it any time in Settings.</p>
 <div class="actions"><button type="submit" name="decision" value="deny">Deny</button><button class="primary" type="submit" name="decision" value="allow">Allow</button></div>
 </form>`;
-  return page(`Connect ${input.clientName}`, body);
+  return page("Connect an app", body);
 }

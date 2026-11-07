@@ -11,6 +11,12 @@ import { Deployment, LogLine } from "./ops/deployments";
 export const livePath = "/api/live";
 
 /**
+ * Query parameter carrying the session key on the live socket (browsers
+ * cannot add headers to a WebSocket); see sessionKeyHeader in registry.ts.
+ */
+export const liveSessionKeyParam = "key";
+
+/**
  * Topics: "panel" (dashboard-wide: projects, nodes), "project:<id>",
  * "service:<id>", "node:<id>", "deployment:<id>" (build and deploy log
  * lines of one deployment, and its status as it changes) and "ai:<conversationId>" (assistant replies, owner only).

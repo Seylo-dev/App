@@ -4,6 +4,7 @@
 
 import { git as gitOps, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
+import { sourcePickerActions } from "../../auth/access";
 import { userOf } from "../../auth/principal";
 import { gitCredentials } from "../../db/schema";
 import { implement } from "../../ops/implement";
@@ -14,13 +15,15 @@ import { credentialUsage, loadCredential, openCredential, toCredential } from ".
 import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, targetUrl } from "./remote";
 import { seedInternalGitHosts } from "./targets";
 
-// Everyone signed in sees names and hosts for the source picker; the account
+// People who may set a source somewhere see names and hosts for the source
+// picker (an account with no such grant gets an empty list); the account
 // details stay with people who manage credentials (git.manage). Attaching one
 // is checked separately (services/source-guard.ts).
 const listCredentials = implement(gitOps.listCredentials, (_input, ctx) => {
+  const full = ctx.access.can("git.manage");
+  if (!full && !ctx.access.canSomewhere(sourcePickerActions)) return { items: [] };
   const usage = credentialUsage(ctx.db);
   const rows = ctx.db.select().from(gitCredentials).orderBy(gitCredentials.name).all();
-  const full = ctx.access.can("git.manage");
   return {
     items: rows.map((r) => {
       const item = toCredential(r, usage.get(r.id) ?? 0);

@@ -1,6 +1,6 @@
 // Listing and ending the signed-in person's own browser sessions.
 
-import { auth, OpError, sessionCookie } from "@seylo/ops";
+import { auth, OpError } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
 import { listSessions as listUserSessions } from "../../auth/sessions";
 import { requireSession } from "../../auth/sign-in";
@@ -32,7 +32,7 @@ export const revokeSession = implement(auth.revokeSession, (input, ctx) => {
     .get();
   if (!row) throw new OpError("NOT_FOUND", "That session does not exist or already ended.");
   endSession(ctx, row.id);
-  if (row.id === sessionId) ctx.http?.clearCookie(sessionCookie);
+  if (row.id === sessionId) ctx.http?.clearSession();
   return {};
 });
 

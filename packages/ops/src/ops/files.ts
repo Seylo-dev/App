@@ -89,6 +89,8 @@ export const write = defineOp({
   sensitive: { input: ["content"] },
   mcp: true,
   audit: true,
+  // Up to 1 MiB of content, which JSON may escape to several times that.
+  maxBodyBytes: 4 * 1024 * 1024,
 });
 
 export const mkdir = defineOp({

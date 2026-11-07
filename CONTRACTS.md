@@ -751,18 +751,46 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   Anyone with `grants.manage` on a resource can share it, but only with
   actions they hold there. Invites carry the same grant list and turn into
   grants on accept.
-- Credentials: browser sessions (HttpOnly cookie `<slug>_session`, hashed
-  opaque token, 30-day sliding) or `Authorization: Bearer <token>`. A
+- Credentials: browser sessions or `Authorization: Bearer <token>`. A
+  browser session has two halves, both stored hashed (`sessions.token_hash`,
+  `sessions.key_hash`; `src/auth/sessions.ts`), and works only with both: an
+  opaque token in an HttpOnly, SameSite=Lax, Path=/ cookie without Domain,
+  named `__Host-<slug>_session` (and Secure) on HTTPS, `<slug>_session` on
+  plain HTTP (`sessionCookieName` in `@seylo/ops`; set and read by the same
+  rule, `secureSession` in `src/http/https.ts`); and a session key the
+  sign-in answer hands out in the `x-<slug>-session-key` response header
+  (`sessionKeyHeader`). The web app keeps the key in its origin's
+  localStorage (`<slug>.sessionKey`, `apps/web/src/lib/session-key.ts`) and
+  sends it in that header on every call; the live socket takes it as the
+  `key` query parameter, the MCP consent form as a field. Cookies have no
+  port, so on a plain-HTTP IP:port panel the browser also sends the cookie
+  to every other port of the address (a member's first-run app); the key
+  is per scheme, host and port, so such a copy signs nobody in. Over HTTPS
+  only the `__Host-` cookie is read, so a cookie a sibling subdomain sets for
+  the parent domain is ignored, and a request carrying the read cookie name
+  twice is refused (UNAUTHENTICATED `reason: duplicateSession`; the sign-in
+  page says to clear the site's cookies). 30-day sliding. Sessions without
+  a key (made before keys existed) sign nobody in. Sign-out answers an
+  empty key header (the web app forgets its key). A
   bearer token is an `api_keys` row: kind `api` (`<slug>_key_...`) or
   `mcp` (`<slug>_mcp_...`, from apiKeys.create or the MCP OAuth flow). A
   key acts as its owner, narrowed by its `actions` list (`*` = all of the
   owner's), its optional `projectIds` (then it holds no global actions)
-  and `readOnly` (queries only). MCP tokens are read-only by default.
+  and `readOnly` (queries only). MCP tokens are read-only by default. A
+  key narrowed by projects or actions (`isNarrowedKey` in
+  `src/auth/access.ts`) never runs account-wide ops
+  (`permission.account()`: the `ai.*` chats, `apiKeys.list`,
+  `auth.security`, `auth.preferences`, `auth.updatePreferences`,
+  `grants.mine`; FORBIDDEN `reason: narrowedKey`, and MCP tool lists leave
+  them out), reads `approvals.list`/`get` only for its own requests and
+  approvals of ops its actions cover aimed at its projects, and
+  `audit.list`/`get` only with `audit.view` in its action list and only
+  its projects' entries. Read-only alone does not narrow.
   Bearer wins over the cookie. Only sessions create keys, and account
   security ops (password, 2FA, passkeys, GitHub link, sessions, profile)
   refuse keys (`requireSession` in `src/auth/sign-in.ts`). A session lives
-  at most 90 days from sign-in and its token rotates on password and 2FA
-  changes. Ops that add a way in (`auth.passkeyRegisterBegin`,
+  at most 90 days from sign-in and its token and key rotate on password and
+  2FA changes. Ops that add a way in (`auth.passkeyRegisterBegin`,
   `auth.githubLinkStart`, `auth.totpEnroll`, `apiKeys.create`,
   `cliLogin.approve`, a first password in `auth.changePassword`) also need
   a fresh session: signed in or confirmed with `auth.reauth` (password, an
@@ -771,16 +799,20 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   in `src/auth/fresh.ts`, `sessions.reauth_at`); otherwise FORBIDDEN with
   `details.reason: "reauth"`, which the web turns into a re-auth dialog
   and a retry. Wrong answers count toward the per-address lock. The MCP
-  OAuth consent page (`/oauth/authorize`) sends a stale session to the web
+  OAuth consent (`/oauth/authorize`) sends a stale session to the web
   app's `/reauth?redirect=<back>` page first and refuses a stale Allow.
-  Admin ops that hand someone else lasting access need the same fresh
-  session when a browser session runs them, while API keys pass
+  Ops that hand someone else lasting access need the same fresh session
+  when a browser session runs them, while API keys pass
   (`requireFreshIfSession`; every key was made under a fresh sign-in):
-  `invites.create` with role admin, `users.updateRole` to a higher role
-  (admin or owner), `nodes.createJoinToken`, `gitProviders.create` and
-  `gitProviders.update` with a new token or user name (a token with write
-  access to repositories and webhooks). Member invites, grants and
-  demotions are not gated.
+  `invites.create` (every role: a member invite carries its grants),
+  `grants.setOnProject` and `grants.setOnService` when the new action list
+  gives anything the person's grant there did not (a new grant, an action,
+  or a wildcard that also covers later actions: `grants/rows.ts`
+  `grantAdds`), `users.updateRole` to a higher role (admin or owner),
+  `nodes.createJoinToken`, `gitProviders.create` and `gitProviders.update`
+  with a new token or user name (a token with write access to
+  repositories and webhooks). Removing or narrowing a grant and demotions
+  are not gated.
 - Host shells (`modules/hostShell`): `hostShell.setEnabled` takes
   `nodes.manage`, but turning host shells on needs the owner role and a
   fresh browser session (`requireFreshSignIn`); turning them off works for
@@ -813,19 +845,46 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   never tells which emails exist) or account for that address for 30 s,
   doubling up to 15 minutes; 15 quiet minutes forgive the streak, and
   `users.enable` clears every address's streak (`src/auth/lockout.ts`,
-  in memory). A soft brake per typed email counts wrong passwords from
-  every address: past 50 within the same forgiveness window each sign-in
-  for that email waits 2.5 s first and the account gets one
-  `security_change` alert per streak (never a lock; `users.enable` clears
-  it too). Recovery codes are stored as HMACs (`secrets.sign(code,
+  in memory). Addresses are grouped for locks and the anonymous rate-limit
+  bucket by `addressKey` (`src/http/ip-ranges.ts`): IPv4 exact, IPv6 by its
+  /64. A brake per typed email counts wrong passwords from every address:
+  past 50 within the same forgiveness window the email gets one password
+  check every 2.5 s and one at a time, whatever the number of addresses
+  (the rest answer RATE_LIMITED with `retryAfter`, nothing sleeps in the
+  panel), and the account gets one `security_change` alert per streak.
+  Address groups that gave the right password for that email in the last
+  30 days skip the brake, so a campaign does not keep the owner out
+  (`users.enable` clears the brake too). At most 4 password verifications
+  (argon2id, about 64 MiB each) run at once, 32 wait, and the rest answer
+  RATE_LIMITED (`src/security/password.ts` `verifyLimits`). Recovery codes are stored as HMACs (`secrets.sign(code,
   "recovery-code")`), not bare SHA-256: they carry only 50 bits.
 - Audit: the pipeline records the permission's target and its name before
   the op runs (so deletes keep it); refused attempts keep the target id but
   no name. Public sign-in ops call `ctx.auditAs(user)` so the entry belongs
   to the person who signed in (or whose password was tried).
+  Failed anonymous calls are stored up to 200 an hour (`anonymousErrorRows`
+  in `src/ops/audit.ts`, in memory); past that only one log line says so.
+  The audit log keeps entries for `settings.general.auditRetentionDays`
+  (30 to 3650 days, default 365, null = forever; Settings > General >
+  Activity log; MCP tokens and the assistant may not change it), pruned daily by the `audit.prune` job
+  (`modules/audit/retention.ts`); successful entries of `auth.*`,
+  `apiKeys.*`, `users.*`, `invites.*`, `grants.*`, `cliLogin.*`,
+  `hostShell.*`, `mcp.*`, `setup.*` and `nodes.createJoinToken` are kept
+  whatever it says (`keptAuditOps`).
+- Security log lines: besides the audit table, the pipeline writes one pino
+  warning per failed sign-in (UNAUTHENTICATED from a public op, "sign-in
+  failed"), FORBIDDEN ("op refused", re-auth refusals carry `reason:
+  reauth`) and RATE_LIMITED ("op rate limited", locks carry `reason:
+  locked`, the per-email brake `accountBrake`), with `opId`, `ip`, `actor`
+  (the person when known), `transport` and `code`, never input. A rejected
+  agent hello logs `remoteIp` with its reason and node id.
 - Setup link: the installer writes a `<slug>_setup_...` token to
   `<dataDir>/setup-token` (one line, 0600) before the panel's first start
-  and prints `<url>/setup?t=<token>`. While no owner exists the panel
+  and prints `<url>/setup?t=<token>`; an http:// link comes with a warning
+  that the token, the password and the session cross the network
+  unencrypted and the SSH tunnel command for its port
+  (`go/internal/cli/panel.go` `plainHTTPWarning`, also under
+  `seylo panel setup-link`). While no owner exists the panel
   imports it on start (valid one hour) or writes a fresh one there;
   `bun scripts/setup-link.ts [baseUrl]` in apps/panel prints a new link.
   Creating the owner burns the token and deletes the file.
@@ -851,7 +910,32 @@ Panel:
   `services.spec`: use a `*_sealed` column or `service_secrets`.
 - Secrets are sealed with `deps.secrets.seal(value, purpose)` (AES-256-GCM,
   HKDF key per purpose from `master.key`); add new purposes to
-  `SealPurpose`. Tokens are stored as SHA-256 hashes only.
+  `sealPurposes`. Tokens are stored as SHA-256 hashes only. After a leak,
+  `bun scripts/rotate-master-key.ts` in apps/panel (panel stopped) seals
+  every sealed value of panel.db again under a new `master.key` in one
+  transaction (sealed columns and sealed strings inside JSON such as
+  settings, each purpose found by trying them all; a value no purpose opens
+  aborts with nothing changed), deletes recovery codes (HMACs under the old
+  key) and lists their owners, and replaces `master.key` only after the
+  commit (`master.key.new` until then; a later run finishes or undoes an
+  interrupted one). It refuses to run without exactly one of two flags,
+  because the edge ticket key is also the panel's identity to its nodes
+  (they pin it on the first connect and refuse a panel with another one):
+  `--new-panel-identity` (panel.db leaked, as in a copy of the data dir)
+  drops the edge ticket key and the LB CA and node certificates so the
+  next start makes new ones, keeps `panelId`, and prints every enabled node
+  (name, address) with the re-join steps: a token from Nodes > Add node per
+  node, then that dialog's command with `--force` added, or
+  `sudo seylo join '<url>' --token '<token>' [--pin '<pin>'] --force`
+  on the node; until then the node refuses the panel.
+  `--keep-panel-identity` (only `master.key` leaked, panel.db never did)
+  seals the edge ticket key and the LB CA again like every other value, so
+  nodes keep working. The agents' TLS key stays in both (nodes pin it, and
+  it is not sealed). The panel build also writes it as
+  `apps/panel/dist/rotate-master-key.js`, so on an install it runs from the
+  panel image (`bun apps/panel/dist/rotate-master-key.js` with the panel
+  data dir mounted and `SEYLO_DATA_DIR` set, panel container stopped); the
+  node CLI has no command for it yet.
 - Logging: pino JSON with camelCase keys (`opId`, `nodeId`); take the
   logger from deps. Never log secrets, tokens or env values.
 - Config comes from `<SLUG>_*` environment variables (`src/config.ts`);
@@ -926,18 +1010,36 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (`modules/approvals/run-as.ts`) runs one as a person. Models (MCP, AI)
   never set `approvalId`; only `approvals.approve` does.
 - Live sockets are re-checked every 15 s and on each subscribe and closed
-  (code 4401) when their session ended; `deps.live.disconnect({ sessionId }
+  (code 4401) when their session ended (a socket needs the session key in
+  its `key` query parameter); `deps.live.disconnect({ sessionId }
   | { userId })` closes them at once. The re-check also drops topics the
   fresh access no longer allows (an `error` FORBIDDEN per topic);
   `deps.live.recheck({ userId })` does it at once (grants and role changes). `ai:<id>` is for the conversation's
   owner only; `deployment:<id>` needs `services.view` on its service.
+  Messages bypass the op pipeline, so the endpoint limits them itself
+  (`src/live/endpoint.ts`), before parsing or any database work: a token
+  bucket per person over all their sockets (`liveMessageRule`, 300 then 30
+  a second); a socket past it is closed with 1008 (the web app reconnects
+  with backoff, it is not a sign-out). One socket follows at most 200 topics
+  (`maxTopicsPerSocket`); a subscribe past that answers an `error`
+  BAD_REQUEST for the topic.
 - MCP: `POST /mcp` (Streamable HTTP, stateless JSON replies, protocol
   2025-03-26 to 2025-11-25), MCP tokens only (`api_keys.kind = "mcp"`).
   OAuth: `/.well-known/oauth-authorization-server`,
   `/.well-known/oauth-protected-resource[/mcp]`, `POST /oauth/register`
   (public clients, https / loopback http / app-scheme redirects),
-  `GET|POST /oauth/authorize` (server-rendered consent: read only by
-  default, or read and change), `POST /oauth/token` (code + S256 PKCE,
+  `GET|POST /oauth/authorize` (server-rendered, `modules/mcp/pages.ts`:
+  the GET checks the request and serves a bridge page that reads no
+  session; its one script, allowed by its CSP hash, posts the request back
+  with the session key from the web app's localStorage, or goes to
+  `/login?redirect=<back>` without one; that post answers the consent page
+  for a signed-in, fresh session (else 303 to `/login` or `/reauth`). The
+  consent page names the app by the host its answer goes to ("Connect an
+  app at <host>?"), marks the name the client registered as not verified
+  (anyone can register any name), shows the scope it asked for, and always
+  preselects read only: an Allow without a choice is read only, whatever
+  scope was requested; the Allow form carries the key back),
+  `POST /oauth/token` (code + S256 PKCE,
   rotating refresh tokens, access tokens 24 h, a grant lives 90 days),
   `POST /oauth/revoke`. A token sees only the tools it could use;
   destructive calls become approvals.
@@ -954,12 +1056,28 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   adds the route. Proxy trust and HTTPS (`src/http/proxy-trust.ts`, `https.ts`,
   `domain-redirect.ts`): X-Forwarded-For/-Proto/-Host count only from the
   addresses of `SEYLO_TRUSTED_PROXIES` (default `<slug>-traefik`, resolved
-  through Docker DNS every 30 s), never from the published IP:port; cookies get
-  Secure on every HTTPS request (trusted X-Forwarded-Proto, or Host equal to
-  the panel domain) whatever `SECURE_COOKIES` says; HTTPS responses carry
+  through Docker DNS every 30 s), never from the published IP:port (the
+  cross-site check `isSameOrigin(request, trusted)` too: an untrusted
+  client's X-Forwarded-Host is ignored and the Host header compared).
+  `clientIp` (`src/http/client-ip.ts`) normalises addresses and, behind
+  Cloudflare, takes the visitor from `CF-Connecting-IP` only when the address
+  the trusted proxy vouches for (the last X-Forwarded-For entry) is in
+  Cloudflare's published ranges (`src/http/cloudflare.ts`, a list in code);
+  otherwise that header is ignored. The session cookie is the Secure
+  `__Host-` one on every HTTPS request (trusted X-Forwarded-Proto, so behind
+  Traefik and a Cloudflare proxy in Full mode too, or Host equal to the
+  panel domain) whatever `SECURE_COOKIES` says, and a plain one on IP:port
+  (see Credentials); HTTPS responses carry
   `strict-transport-security: max-age=31536000`; every response carries
-  `x-frame-options: DENY`, nosniff and `referrer-policy: same-origin`, pages
-  `frame-ancestors 'none'`. Once `panelDomainStatus` is active, page loads on
+  `x-frame-options: DENY`, nosniff and `referrer-policy: same-origin`. The
+  web app's pages carry `appContentSecurityPolicy`
+  (`modules/settings/boot.ts`): scripts only from the panel's own files and
+  the inline theme script by its hash (never `'unsafe-inline'` or
+  `'unsafe-eval'` for scripts; the boot JSON is a data block), inline and
+  https styles and fonts, images from self, data:, blob: and https,
+  `connect-src 'self'`, workers from self and blob:, `object-src 'none'`,
+  `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. A new
+  inline script needs its hash there. Once `panelDomainStatus` is active, page loads on
   any other host (not loopback, not /api) answer 302 to `https://<domain>`. After a successful UpdatePanel the new panel records the
   release manifest's `panel { image, digest }` at generation + 1 before the
   flusher starts. Deploy, stop and setPlacements answer CONFLICT `reason: panel`.
@@ -969,6 +1087,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `poll` creates the API key ("CLI on <name>") on the first poll after approval
   and returns it once. Requests live 10 minutes (`cli_login_requests`, swept on
   `start`); only the device code's hash and the chosen scope are stored.
+  Besides the per-address strict limit, `start` has a strict bucket per
+  (computer name, address group): names are guessable, so a name alone would
+  let anyone block someone else's computer.
   The web page (`/cli/approve`) never opens a request from `?code=`: the person
   types the code their terminal shows (kept in page state, not the URL), and
   nothing is preselected (read only or everything, some or all projects must be
@@ -1110,17 +1231,40 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   the files between the live deployment's commit and that one come from
   the source's compare API (`webhooks/compare.ts`). The web app's tester
   runs the same matcher.
-- Sources and credentials (`modules/services/source-guard.ts`): a git
+- Sources and credentials (`modules/services/source-guard.ts`): git URLs
+  never carry a secret: the `GitUrl` schema (`@seylo/ops` schemas.ts, every
+  git and compose source and `git.branches`) refuses a user name or token
+  in an https:// URL and a password in an ssh:// URL (`ssh://git@host`
+  stays) with BAD_REQUEST pointing at git credentials, before the input
+  reaches a spec or the audit log; the stored spec schema still loads
+  sources saved before (`services/spec.ts` `StoredGitUrl`) and every
+  answer that shows one drops it (`services/git-url.ts`: `toDetail`,
+  `compose.get`, compose read errors). Input errors inside a union name
+  the field of the variant the caller picked (`ops/validate.ts`). A git
   credential only goes to its own host and a registry login to its own
   registry (checked on save and again before the token leaves the panel at
   deploy time); attaching a credential, registry login or GitHub App
   installation (or git provider connection) to a project needs
   `git.manage`/`registries.manage`/`github.manage`/`gitProviders.manage`
-  unless a service of that project already uses it. Image
+  unless a service of that project already uses it for the same target:
+  the same git URL (`normalizeGitUrl`: case, trailing `/` and `.git`
+  aside), image repository (`imageRepository`: any tag or digest) or
+  repository (`source-guard.ts` `sharedTargets`), so sharing a token that
+  reaches every repository of the owner shares one repository.
+  `github.repos` and `gitProviders.repos` list only those repositories to
+  non-managers; `github.branches`, `gitProviders.branches`,
+  `git.branches`, `connectRepo` and saving a source refuse others
+  (FORBIDDEN) before the provider is called. Image
   sources (also compose members and templates) may not name loopback hosts
   or port 5755 (the registry relay). Non-managers listing credentials,
   registries, channels or the GitHub device account get names and hosts
-  only; webhook URLs show scheme and host only. `apiKeys.list all` and
+  only (a registry's user name is null); webhook URLs show scheme and host
+  only. The shared pickers are empty for an account that cannot use them
+  anywhere (`Access.canSomewhere`): git credentials, git provider
+  connections and registry logins need `services.create` or
+  `services.update` on some project or service, notification channels and
+  backup destination choices `services.view` (or the edit action) somewhere;
+  a key counts only its own actions and projects. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
 - Git addresses (`modules/git/targets.ts` `assertGitTarget`): a generic git
   source (service, compose stack, clone) must resolve to public addresses
@@ -1158,7 +1302,7 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   the next panel start writes the close of those a restart or crash ended,
   with reason `the panel restarted`, `lastSeenAt` and the duration up to it. Anonymous
   client registration only goes to the panel log; `/oauth/register` is
-  rate limited per address (strict class), clients nobody authorized are
+  rate limited per address (strict class; an IPv6 /64 counts as one), clients nobody authorized are
   forgotten after 24 h, and at the 500-client cap the oldest unused one
   (older than 10 minutes) makes room.
 - MCP tool results go through `redact(output, op.sensitive.output)` like the
@@ -1188,10 +1332,19 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   the panel stores it once), and `cron_failed` shows that line. Alert
   sizes use the web app's units (binary steps, "3 GB").
 - Bodies read before authentication are capped while streaming: op JSON
-  bodies at 4 MiB (`maxOpBodyBytes`, `readBodyText` in `@seylo/ops/elysia`),
-  the GitHub webhook at 5 MiB (after answering 404 without an App), git
-  provider webhooks at 5 MiB (after answering 404 for an unknown hook id)
-  and deploy trigger URL bodies at 5 MiB. The
+  bodies at 1 MiB (`defaultOpBodyBytes`), or the op's own `maxBodyBytes` (at
+  most 4 MiB, `maxOpBodyBytes`; `files.write` 4 MiB, `compose.preview`,
+  `compose.create`, `compose.update`, `maintenance.set` and
+  `maintenance.setGlobal` 2 MiB), read by `readBodyText` in
+  `@seylo/ops/elysia`; all body reads in flight share a budget of 64 MiB of
+  buffered bytes (`bodyBudget`), past which a read is refused with 503
+  UNAVAILABLE and `retry-after: 5`. The GitHub webhook allows 60 deliveries
+  per sending address (then one a second, 429) before it reads or hashes a
+  body, and takes 5 MiB (after answering 404 without an App), git
+  provider webhooks at 5 MiB (after answering 404 for an unknown hook id),
+  deploy trigger URL bodies at 5 MiB and the public OAuth endpoints
+  (`/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`)
+  at 64 KiB (`oauthBodyBytes`), all through `readBodyText`. The
   webhook needs `X-GitHub-Delivery`, records at most 20 rejected deliveries
   an hour, and answers `duplicate` for a signed body already handled under
   another delivery id within 3 days (in memory). The App's hook is created
@@ -1277,14 +1430,14 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of other nodes: a dead node's share is retried on the balancing node's own copies per request (GET/HEAD/OPTIONS only; a POST to a copy that just died fails once) | Covered by unit, fake-agent and VM package tests |
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
 | Removing or changing the panel domain after nodes moved to it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node whose address before the move was an unpinned https:// address (another domain) has no fallback after the first cycle and cannot reach the panel until it rejoins (`seylo join --force`). Plain-HTTP nodes never move, so this does not reach them | Those nodes go offline after a domain removal or change; the node offline alert fires |
-| Re-auth scope: member invites, project and service grants and demotions are not gated (scoped access only), and API keys never are (admin keys may invite admins, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
+| Re-auth scope: demotions and grants that only take actions away are not gated, and API keys never are (admin keys may invite, widen grants, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
-| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
+| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled by `bun scripts/rotate-master-key.ts --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key and LB CA, so every node is joined again with `seylo join --force`; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
 
 ### Verification
@@ -1303,7 +1456,8 @@ The first-run port's automatic close (24 h after the domain is live) is
 checked by moving the stored `closeAt` into the past and waiting for the
 panel's own sweep. Check 31 (panel domain, runs last and undoes itself)
 gives the panel an sslip.io name of A with a Pebble certificate: HTTPS, HSTS
-only on HTTPS, a Secure HttpOnly session cookie from a sign-in over HTTPS,
+only on HTTPS, a Secure HttpOnly `__Host-` session cookie with no Domain from
+a sign-in over HTTPS that signs nobody in without its session key,
 IP:port pages 302 to the domain (API and loopback not), the macOS CLI
 against the domain, and nodes moving to it: the panel turns the domain
 active itself (a test build trusts `<data dir>/panel/test-ca.pem`), closes
@@ -2015,6 +2169,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
+- Session key: the op client's fetch (`lib/session-key.ts` `sessionFetch`)
+  sends the key from localStorage on every call and keeps the one an
+  answer hands out (an empty one clears it); the live socket and the
+  archive upload (`sessionKeyHeaders()`) send it too. Any new way to call
+  the panel with the session must do the same (see Credentials).
+- Plain HTTP: `components/auth/plain-http-warning.tsx` shows "This
+  connection is not encrypted", with the SSH tunnel command for this port,
+  on every signed-out screen (`AuthFrame`) and at the top of the app shell
+  whenever the page is not a secure context (`lib/plain-http.ts`; loopback
+  counts as secure, so the tunnel itself does not warn).
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the

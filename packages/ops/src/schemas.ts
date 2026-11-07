@@ -11,3 +11,17 @@ export const Timestamp = Type.String({ format: "date-time" });
 
 /** An empty object, for ops that take no input or return nothing. */
 export const Empty = Type.Object({});
+
+/**
+ * A git remote: https://, ssh:// or git@host:path. No user name or token in
+ * an https URL and no password in an ssh URL (ssh://git@host is fine): a
+ * token there would be stored in the service spec and the audit log and
+ * shown to everyone who can view the service. Tokens go in git credentials.
+ */
+export const GitUrl = Type.String({
+  minLength: 1,
+  maxLength: 500,
+  pattern: "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+  description: "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+  errorMessage: "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
+});

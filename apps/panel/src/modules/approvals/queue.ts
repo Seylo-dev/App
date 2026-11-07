@@ -4,9 +4,9 @@
 // may run the op, then replays it through the normal pipeline with
 // approvalId set (the only way a destructive op runs for a model).
 
-import { type AnyOpContract, allOps, OpError, redact } from "@seylo/ops";
-import { and, eq, isNull, lt } from "drizzle-orm";
-import { createAccess, type Target } from "../../auth/access";
+import { type AnyOpContract, actionAllowed, allOps, OpError, redact } from "@seylo/ops";
+import { and, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { createAccess, isNarrowedKey, type Target } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { apiKeys, approvals, projects, services, users } from "../../db/schema";
@@ -100,11 +100,63 @@ function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
-/** Who may see (and decide) an approval: owners and admins all of them; others the ones asked for them. */
-export function canSee(principal: Principal, row: ApprovalRow): boolean {
+/**
+ * Who may see (and decide) an approval: owners and admins all of them;
+ * others the ones asked for them. A key limited to projects or actions sees
+ * the approvals it asked for itself, and others only inside its scope.
+ */
+export function canSee(db: PanelDb, principal: Principal, row: ApprovalRow): boolean {
   if (principal.type === "anonymous") return false;
-  if (principal.user.role === "owner" || principal.user.role === "admin") return true;
-  return row.requestedById === principal.user.id;
+  const byRole = principal.user.role === "owner" || principal.user.role === "admin" || row.requestedById === principal.user.id;
+  if (!byRole) return false;
+  if (!isNarrowedKey(principal) || row.requestedVia === principal.keyId) return true;
+  const sql = keyApprovalScope(db, principal);
+  return (
+    db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(and(eq(approvals.id, row.id), sql))
+      .get() !== undefined
+  );
+}
+
+/** Approval ops whose action a key's list allows (ops without an action need "*"). */
+function opsAllowedBy(actions: readonly string[]): string[] {
+  return allOps
+    .filter((op) => {
+      const p = op.permission;
+      return p.kind !== "public" && p.kind !== "signedIn" && actionAllowed(actions, p.action);
+    })
+    .map((op) => op.id);
+}
+
+/**
+ * The approvals a key limited to projects or actions may read besides its
+ * own requests: ops its action list covers, aimed at its projects (a
+ * project-limited key never sees approvals without a project).
+ */
+export function keyApprovalScope(db: PanelDb, key: Extract<Principal, { type: "apiKey" }>): SQL {
+  const parts: SQL[] = [];
+  if (!key.actions.includes("*")) parts.push(inList(approvals.opId, opsAllowedBy(key.actions)));
+  if (key.projectIds !== null) {
+    const ids = [...key.projectIds];
+    const inProjects =
+      ids.length === 0
+        ? sql`0`
+        : or(
+            and(eq(approvals.targetType, "project"), inArray(approvals.targetId, ids)),
+            and(
+              eq(approvals.targetType, "service"),
+              inArray(approvals.targetId, db.select({ id: services.id }).from(services).where(inArray(services.projectId, ids))),
+            ),
+          );
+    parts.push(inProjects as SQL);
+  }
+  return or(eq(approvals.requestedVia, key.keyId), and(...parts)) as SQL;
+}
+
+function inList(column: typeof approvals.opId, values: string[]): SQL {
+  return values.length === 0 ? sql`0` : inArray(column, values);
 }
 
 /** The principal the request was made as, rebuilt from the database (null when it no longer may act). */
@@ -158,7 +210,7 @@ export function expireOverdue(deps: Pick<Deps, "db" | "live" | "logger">, now = 
 function pending(deps: Pick<Deps, "db" | "live" | "logger">, approvalId: string, principal: Principal): ApprovalRow {
   expireOverdue(deps);
   const row = deps.db.select().from(approvals).where(eq(approvals.id, approvalId)).get();
-  if (!row || !canSee(principal, row)) throw new OpError("NOT_FOUND", "There is no such approval.");
+  if (!row || !canSee(deps.db, principal, row)) throw new OpError("NOT_FOUND", "There is no such approval.");
   if (row.status !== "pending") throw new OpError("CONFLICT", `This approval is already ${row.status}.`, { status: row.status });
   if (principal.type !== "session") throw new OpError("FORBIDDEN", "Approvals are decided by people in the panel, not with keys.");
   return row;

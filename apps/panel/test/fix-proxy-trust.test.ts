@@ -92,7 +92,7 @@ describe("cookies and headers", () => {
 
     const index = await get("/");
     expect(index.status).toBe(200);
-    expect(index.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    expect(index.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(index.headers.get("x-frame-options")).toBe("DENY");
     expect((await get("/%")).status).toBe(200);
     expect((await get("/p/%E0%A4%A")).status).toBe(200);

@@ -63,7 +63,8 @@ export async function handleMcp(deps: Deps, request: Request, socketIp: string |
     return Response.json(rpcError(null, -32600, `Unsupported MCP protocol version ${version}.`), { status: 400 });
   }
 
-  const credentials = credentialsFrom(request, "");
+  // Bearer tokens only: the MCP endpoint never reads the session cookie.
+  const credentials = credentialsFrom(request, { secure: false });
   if (!credentials.bearerToken) return unauthorized(origin, "Sign in through OAuth or send an MCP token.");
   const principal = authenticate(deps.db, { bearerToken: credentials.bearerToken });
   if (principal.type !== "apiKey" || principal.keyKind !== "mcp") {

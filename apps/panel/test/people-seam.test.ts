@@ -14,7 +14,7 @@ import { modules } from "../src/modules/index.gen";
 import { defineModule } from "../src/modules/module";
 import { implement } from "../src/ops/implement";
 import { hashToken, prefixedToken } from "../src/security/tokens";
-import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { callOp, createUser, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
@@ -145,7 +145,7 @@ test("people sessions run destructive ops without an approval", async () => {
   const result = await panel.execute({
     op: wipe,
     rawInput: {},
-    credentials: { sessionToken },
+    credentials: { sessionToken, sessionKey: sessionKeyOf(cookie) },
     transport: "http",
     coerce: false,
     ip: null,

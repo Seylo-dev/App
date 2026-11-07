@@ -52,6 +52,13 @@ export interface OpDefinition<Kind extends OpKind, Input extends TObject, Output
   /** Written to the audit log. Every mutation and destructive op must audit. */
   readonly audit: boolean;
   readonly rateLimit?: RateLimitClass;
+  /**
+   * Largest JSON body the HTTP route reads, in bytes. Bodies are read before
+   * authentication, so most ops keep the default (1 MiB, `defaultOpBodyBytes`
+   * in ./server/elysia.ts); only ops whose input really is large (file
+   * contents, compose files, maintenance pages) raise it, up to 4 MiB.
+   */
+  readonly maxBodyBytes?: number;
 }
 
 const contractBrand: unique symbol = Symbol("seylo.op");
@@ -70,6 +77,11 @@ export type OpOutput<C extends AnyOpContract> = Static<C["output"]>;
 
 export const opIdPattern = /^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*$/;
 
+/** The JSON body an op's HTTP route reads when the contract says nothing (OpDefinition.maxBodyBytes). */
+export const defaultOpBodyBytes = 1024 * 1024;
+/** The most any op may raise it to. */
+export const maxOpBodyBytes = 4 * 1024 * 1024;
+
 export function defineOp<Kind extends OpKind, Input extends TObject, Output extends TSchema>(
   definition: OpDefinition<Kind, Input, Output>,
 ): OpContract<Kind, Input, Output> {
@@ -78,6 +90,9 @@ export function defineOp<Kind extends OpKind, Input extends TObject, Output exte
   }
   if (definition.kind !== "query" && !definition.audit) {
     throw new Error(`op ${definition.id}: ${definition.kind} ops must set audit: true`);
+  }
+  if (definition.maxBodyBytes !== undefined && !(definition.maxBodyBytes > 0 && definition.maxBodyBytes <= maxOpBodyBytes)) {
+    throw new Error(`op ${definition.id}: maxBodyBytes must be between 1 and ${maxOpBodyBytes}`);
   }
   return Object.freeze({ ...definition, [contractBrand]: true as const });
 }

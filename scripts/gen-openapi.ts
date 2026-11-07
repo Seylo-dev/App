@@ -5,7 +5,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { displayName, docsUrl } from "@seylo/brand";
-import { allOps, sessionCookie } from "@seylo/ops";
+import { allOps, sessionCookie, sessionKeyHeader } from "@seylo/ops";
 import { buildOpenApi } from "@seylo/ops/generators";
 import panelPackage from "../apps/panel/package.json";
 
@@ -14,6 +14,7 @@ const document = buildOpenApi(allOps, {
   version: panelPackage.version,
   description: `Every action in the ${displayName} panel. Queries are GET requests with query parameters; everything else is a POST with a JSON body. Docs: ${docsUrl}`,
   sessionCookie,
+  sessionKeyHeader,
 });
 
 writeFileSync(join(import.meta.dir, "..", "openapi.json"), `${JSON.stringify(document, null, 2)}\n`);

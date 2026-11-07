@@ -20,7 +20,8 @@ export const Registry = Type.Object({
   id: Id,
   name: RegistryName,
   server: Server,
-  username: Username,
+  /** Null for people without registries.manage: they pick logins by name only. */
+  username: Type.Union([Username, Type.Null()]),
   /** Services whose image source uses it. */
   usedBy: Type.Integer({ minimum: 0 }),
   createdAt: Timestamp,
@@ -32,10 +33,10 @@ export const list = defineOp({
   kind: "query",
   summary: "List registry logins",
   description:
-    "Lists stored registry logins by name, server and user name (never the password), so people can pick one for an image source.",
+    "Lists stored registry logins by name and server (never the password), so people can pick one for an image source. The user name is null unless the caller manages registries. Empty for callers who may create or edit services nowhere.",
   input: Type.Object({}),
   output: Type.Object({ registries: Type.Array(Registry) }),
-  // Names only; any signed-in person may pick one for a source they can edit.
+  // Names only, for people who may set a source somewhere (services.create or services.update).
   permission: permission.signedIn(),
   mcp: true,
   audit: false,

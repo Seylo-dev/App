@@ -2,7 +2,7 @@
 // stored credential for private repos. "Check access" lists the branches
 // the way git ls-remote would, before anything is saved.
 
-import { git, services } from "@seylo/ops";
+import { GitUrl, git, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Input } from "@seylo/ui/components/input";
@@ -18,7 +18,9 @@ import { MutationError, OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
 
 const publicRepo = "__public__";
-const urlPattern = /^(https:\/\/|ssh:\/\/|git@)\S+$/;
+// The panel's own rule: no user name, token or password in the URL (they go in a git credential).
+const urlPattern = new RegExp(GitUrl.pattern as string);
+const anyGitUrl = /^(https:\/\/|ssh:\/\/|git@)\S+$/;
 
 export function GitForm({ service }: { service: ServiceDetail }) {
   const src = service.sourceConfig.type === "git" ? service.sourceConfig : null;
@@ -41,6 +43,7 @@ export function GitForm({ service }: { service: ServiceDetail }) {
     },
   });
   const validUrl = urlPattern.test(url.trim());
+  const hasCredentials = !validUrl && anyGitUrl.test(url.trim());
 
   return (
     <form
@@ -50,7 +53,17 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         save.mutate({ serviceId: service.id, source: { type: "git", url: url.trim(), branch: branch.trim(), credentialId, deployOnPush } });
       }}
     >
-      <Field label={t("serviceSource.git.url")} htmlFor="git-url" hint={t("serviceSource.git.urlHint")}>
+      <Field
+        label={t("serviceSource.git.url")}
+        htmlFor="git-url"
+        hint={
+          hasCredentials ? (
+            <span className="text-destructive">{t("serviceSource.git.urlHasCredentials")}</span>
+          ) : (
+            t("serviceSource.git.urlHint")
+          )
+        }
+      >
         <div className="flex gap-2">
           <Input
             id="git-url"

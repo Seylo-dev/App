@@ -8,9 +8,10 @@
   "scripts": {
     "dev": "bun --watch src/main.ts",
     "start": "bun src/main.ts",
-    "build": "bun build src/main.ts --target bun --outdir dist --sourcemap=linked",
+    "build": "bun build src/main.ts --target bun --outdir dist --sourcemap=linked && bun build scripts/rotate-master-key.ts --target bun --outdir dist",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts && drizzle-kit generate --config drizzle.metrics.config.ts",
     "create-owner": "bun scripts/create-owner.ts",
+    "rotate-master-key": "bun scripts/rotate-master-key.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

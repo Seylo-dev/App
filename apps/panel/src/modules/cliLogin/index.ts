@@ -11,6 +11,7 @@ import { requireFreshSignIn } from "../../auth/fresh";
 import { requireSession } from "../../auth/sign-in";
 import type { PanelDb } from "../../db/client";
 import { cliLoginRequests, users } from "../../db/schema";
+import { addressKey } from "../../http/ip-ranges";
 import { implement } from "../../ops/implement";
 import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { hashToken, prefixedToken } from "../../security/tokens";
@@ -66,14 +67,17 @@ function findByCode(db: PanelDb, userCode: string): RequestRow {
 }
 
 const start = implement(cliOps.start, (input, ctx) => {
-  // Public: the per-address strict limit applies; a computer name cannot be used in a loop either.
+  // Public: the per-address strict limit applies, and one computer name from
+  // one address cannot be used in a loop either. Keyed by both: names are
+  // guessable ("<hostname> (linux/amd64)"), so a name alone would let anyone
+  // keep someone else's computer out of browser sign-in.
   const clientName = input.clientName.trim().slice(0, 100);
   let limiter = startLimiters.get(ctx.db);
   if (!limiter) {
     limiter = createRateLimiter();
     startLimiters.set(ctx.db, limiter);
   }
-  const wait = limiter.take(`cli-name:${clientName.toLowerCase()}`, "strict");
+  const wait = limiter.take(`cli-name:${clientName.toLowerCase()}|${addressKey(ctx.ip)}`, "strict");
   if (wait > 0)
     throw new OpError("RATE_LIMITED", `Too many sign-ins for this computer. Try again in ${wait} seconds.`, { retryAfter: String(wait) });
   const now = new Date();

@@ -41,6 +41,12 @@ export const sessions = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(),
+    /**
+     * SHA-256 of the session key, the half the web app keeps in its origin's
+     * storage and sends in a header (auth/sessions.ts). Null on sessions made
+     * before keys existed, which no longer sign anyone in.
+     */
+    keyHash: text("key_hash"),
     // Sessions only exist once every factor passed; a pending second factor
     // lives in auth_challenges instead.
     ip: text("ip"),

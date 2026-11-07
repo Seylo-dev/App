@@ -77,6 +77,33 @@ function themeScript(dom: typeof settingOps.bootDom): string {
   );
 }
 
+/** CSP source for the theme script, which is the same text on every page. */
+const themeScriptSource = `'sha256-${createHash("sha256").update(themeScript(settingOps.bootDom)).digest("base64")}'`;
+
+/**
+ * The web app's Content-Security-Policy. Scripts run only from the panel's
+ * own files plus the inline theme script (by its hash); the boot JSON is a
+ * data block, which never runs. Styles allow inline CSS (the accent, the
+ * owner's custom CSS, React and Monaco style attributes) and https sheets
+ * and fonts (sandboxed previews of maintenance pages inherit this policy).
+ * Calls and sockets stay on the panel's origin; Monaco's editor worker is a
+ * file of the build. No plugins, no <base>, forms post to the panel only,
+ * and the panel is never framed.
+ */
+export const appContentSecurityPolicy = [
+  "default-src 'self'",
+  `script-src 'self' ${themeScriptSource}`,
+  "style-src 'self' 'unsafe-inline' https:",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 /**
  * Rewrites index.html: <html> gets data-theme (resolved for light, or by the
  * inline script for "system") and data-color-mode; <title> and the icon

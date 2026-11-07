@@ -3,21 +3,29 @@
 // WebAuthn authenticator that produces real ES256 signatures.
 
 import { createHash, createPrivateKey, generateKeyPairSync, type KeyObject, sign } from "node:crypto";
-import { type AnyOpContract, type OpInput, sessionCookie } from "@seylo/ops";
+import { type AnyOpContract, type OpInput, secureSessionCookie, sessionCookie, sessionKeyHeader } from "@seylo/ops";
 import { overrideGithubEndpoints } from "../src/auth/github-device";
 import { projects, services } from "../src/db/schema";
 import type { RateLimiter } from "../src/ops/rate-limit";
 import type { Panel } from "../src/panel";
-import { type CallOptions, callOp } from "./helpers";
+import { type CallOptions, callOp, sessionCookieFor } from "./helpers";
 
 /** A limiter that never limits, for tests that sign in many times. */
 export const noLimits: RateLimiter = { take: () => 0 };
 
-/** The session cookie a response set, as a Cookie header value; undefined when none. */
+/**
+ * The session cookie a response set, as a Cookie header value; undefined
+ * when none. Remembers the session key the response handed out, so callOp
+ * sends it along like the web app.
+ */
 export function cookieFrom(headers: Headers): string | undefined {
   for (const line of headers.getSetCookie()) {
     const pair = line.split(";")[0] as string;
-    if (pair.startsWith(`${sessionCookie}=`) && pair.length > sessionCookie.length + 1) return pair;
+    for (const name of [sessionCookie, secureSessionCookie]) {
+      if (pair.startsWith(`${name}=`) && pair.length > name.length + 1) {
+        return sessionCookieFor(pair.slice(name.length + 1), headers.get(sessionKeyHeader) ?? "", name === secureSessionCookie);
+      }
+    }
   }
   return undefined;
 }

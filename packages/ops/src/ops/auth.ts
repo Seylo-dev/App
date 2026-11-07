@@ -126,7 +126,7 @@ export const preferences = defineOp({
   description: "Returns the signed-in person's UI preferences (collapsed projects, color mode and similar).",
   input: Empty,
   output: Type.Object({ preferences: Preferences }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: false,
 });
@@ -138,7 +138,7 @@ export const updatePreferences = defineOp({
   description: "Merges the given keys into the signed-in person's preferences; a key set to null is removed. At most 16 KB in total.",
   input: Type.Object({ preferences: Preferences }),
   output: Type.Object({ preferences: Preferences }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: true,
 });
@@ -231,7 +231,7 @@ export const security = defineOp({
     /** False while the GitHub OAuth client id is still a placeholder. */
     githubAvailable: Type.Boolean(),
   }),
-  permission: permission.signedIn(),
+  permission: permission.account(),
   mcp: false,
   audit: false,
 });

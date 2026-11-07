@@ -4,7 +4,16 @@
 import { auth, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { deleteChallenge, failChallenge, findChallenge } from "../../auth/challenges";
-import { accountDelayMs, assertNotLocked, emailKey, recordAccountFailure, recordFailure, softThrottle, userKey } from "../../auth/lockout";
+import {
+  assertNotLocked,
+  beginPasswordCheck,
+  emailKey,
+  recordAccountFailure,
+  recordFailure,
+  rememberGoodAddress,
+  softThrottle,
+  userKey,
+} from "../../auth/lockout";
 import { checkTotpCode, recoveryCodesLeft, useRecoveryCode } from "../../auth/second-factor";
 import { finishSignIn, startSession, toViewer } from "../../auth/sign-in";
 import { users } from "../../db/schema";
@@ -22,12 +31,19 @@ export const login = implement(auth.login, async (input, ctx) => {
   // says nothing about which emails exist (auth/lockout.ts).
   const lockKey = emailKey(email, ctx.ip);
   assertNotLocked(ctx.db, lockKey);
-  // Many addresses guessing at one email: every try waits (soft, never a lock).
-  const delay = accountDelayMs(ctx.db, email);
-  if (delay > 0) await Bun.sleep(delay);
+  // Many addresses guessing at one email: one check at a time, one every
+  // few seconds, refused rather than queued (addresses that signed in
+  // before skip it).
+  const done = beginPasswordCheck(ctx.db, email, ctx.ip);
   const user = ctx.db.select().from(users).where(eq(users.email, email)).get();
-  // verifyPassword spends the same time when the user does not exist.
-  const passwordOk = await verifyPassword(input.password, user?.passwordHash);
+  let passwordOk: boolean;
+  try {
+    // verifyPassword spends the same time when the user does not exist.
+    passwordOk = await verifyPassword(input.password, user?.passwordHash);
+  } finally {
+    done();
+  }
+  if (passwordOk && user && !user.disabledAt) rememberGoodAddress(ctx.db, email, ctx.ip);
   if (!user || user.disabledAt || !passwordOk) {
     // Logged against the account, so its owner sees attempts on their password.
     if (user && !user.disabledAt) ctx.auditAs?.(user);
@@ -37,7 +53,7 @@ export const login = implement(auth.login, async (input, ctx) => {
         ctx,
         user,
         "many wrong passwords",
-        `More than ${softThrottle.failures} sign-ins with a wrong password in 15 minutes, from several addresses; each try now waits a few seconds.`,
+        `More than ${softThrottle.failures} sign-ins with a wrong password in 15 minutes, from several addresses; password checks for it are now limited to one every few seconds, except from addresses that signed in before.`,
       );
     }
     throw wrongCredentials();

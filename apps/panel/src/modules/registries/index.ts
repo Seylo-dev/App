@@ -4,6 +4,7 @@
 import { OpError, registries as registryOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { eq, sql } from "drizzle-orm";
+import { sourcePickerActions } from "../../auth/access";
 import { userOf } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { registryCredentials, services } from "../../db/schema";
@@ -48,18 +49,20 @@ export function openRegistryLogin(db: PanelDb, secrets: SecretBox, registryId: s
   return password === null ? null : { server: row.server, username: row.username, password };
 }
 
-// Everyone signed in sees names and servers for the image picker; user names
-// stay with people who manage registries.
+// People who may set an image source somewhere see names and servers for the
+// picker; user names stay with people who manage registries (null for
+// everyone else). An account with no such grant gets an empty list.
 const list = implement(registryOps.list, (_input, ctx) => {
   const used = usage(ctx.db);
   const full = ctx.access.can("registries.manage");
+  if (!full && !ctx.access.canSomewhere(sourcePickerActions)) return { registries: [] };
   return {
     registries: ctx.db
       .select()
       .from(registryCredentials)
       .orderBy(registryCredentials.name)
       .all()
-      .map((r) => ({ ...toRegistry(r, used.get(r.id) ?? 0), ...(full ? {} : { username: "" }) })),
+      .map((r) => ({ ...toRegistry(r, used.get(r.id) ?? 0), ...(full ? {} : { username: null }) })),
   };
 });
 

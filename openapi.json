@@ -16,7 +16,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -59,7 +60,7 @@
           }
         },
         "x-op-kind": "mutation",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -73,7 +74,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -346,7 +348,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -360,7 +362,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -471,7 +474,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -485,7 +488,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -528,7 +532,7 @@
           }
         },
         "x-op-kind": "destructive",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -542,7 +546,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -996,7 +1001,7 @@
           }
         },
         "x-op-kind": "mutation",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -1010,7 +1015,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -1121,7 +1127,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -1314,7 +1321,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -1508,7 +1516,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -1833,7 +1842,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -2195,7 +2205,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -2425,7 +2436,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -2482,7 +2494,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -2726,7 +2739,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -2926,7 +2940,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -2940,7 +2954,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -2997,7 +3012,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -3257,7 +3273,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -3521,7 +3538,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -3773,7 +3791,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -4103,7 +4122,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -4314,7 +4334,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -4565,7 +4586,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -4979,7 +5001,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -5050,7 +5073,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -5143,7 +5167,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -5476,7 +5501,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -5524,7 +5550,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -5769,7 +5796,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6021,7 +6049,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6084,7 +6113,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6173,7 +6203,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6230,7 +6261,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6265,7 +6297,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -6279,7 +6311,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6367,7 +6400,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6430,7 +6464,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6496,7 +6531,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6552,7 +6588,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6609,7 +6646,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6743,7 +6781,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -6757,7 +6795,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6823,7 +6862,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6880,7 +6920,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6939,7 +6980,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -6995,7 +7037,7 @@
           }
         },
         "x-op-kind": "mutation",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -7009,7 +7051,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -7229,7 +7272,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -7325,7 +7369,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -7538,7 +7583,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -7774,7 +7820,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -7831,7 +7878,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -7894,7 +7942,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -8124,13 +8173,14 @@
       "get": {
         "operationId": "backups.listDestinations",
         "summary": "List backup destinations",
-        "description": "Lists the panel's S3/R2 backup destinations. Owners and admins get every field; other signed-in people get only id, name, provider and bucket in the choices list, for picking one in a schedule.",
+        "description": "Lists the panel's S3/R2 backup destinations. Owners and admins get every field; other signed-in people with a grant (services.view or backups.edit somewhere) get only id, name, provider and bucket in the choices list, for picking one in a schedule; an account with no grant gets empty lists.",
         "tags": [
           "backups"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -8315,7 +8365,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -8512,7 +8563,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -8778,7 +8830,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -9022,7 +9075,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -9279,7 +9333,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -9445,7 +9500,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -9655,7 +9711,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -9877,7 +9934,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10046,7 +10104,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10183,7 +10242,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10252,7 +10312,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10397,7 +10458,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10565,7 +10627,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10766,7 +10829,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -10965,7 +11029,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11118,7 +11183,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11224,7 +11290,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11318,7 +11385,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11501,7 +11569,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11715,7 +11784,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11809,7 +11879,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -11865,7 +11936,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -12181,7 +12253,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -12296,7 +12369,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -13129,7 +13204,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -13612,7 +13688,9 @@
                                 "url": {
                                   "minLength": 1,
                                   "maxLength": 500,
-                                  "pattern": "^(https://|ssh://|git@)\\S+$",
+                                  "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                                  "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                                  "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                                   "type": "string"
                                 },
                                 "branch": {
@@ -14548,7 +14626,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -14984,7 +15064,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -15099,7 +15180,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -15279,7 +15362,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -15380,7 +15464,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -15564,7 +15650,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -15887,7 +15974,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -15950,7 +16038,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -16224,7 +16313,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -16413,7 +16503,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -16586,7 +16677,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -16797,7 +16889,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -17123,7 +17216,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -17253,7 +17347,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -17679,7 +17774,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -17874,7 +17970,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -18208,7 +18305,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -18285,7 +18383,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -18354,7 +18453,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -18446,7 +18546,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -18818,7 +18919,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -19327,7 +19429,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -19837,7 +19940,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -20354,7 +20458,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -20896,7 +21001,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -21037,7 +21143,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -21564,7 +21671,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -22073,7 +22181,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -22652,7 +22761,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -23531,7 +23642,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -23861,7 +23973,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -24009,7 +24122,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -24173,7 +24287,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -24785,7 +24900,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -25182,7 +25298,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -25390,7 +25507,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -25793,7 +25911,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -25856,7 +25975,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -26247,7 +26367,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -26651,7 +26772,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -27151,7 +27273,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -27542,7 +27665,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -27997,7 +28121,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -28330,7 +28455,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -28429,7 +28555,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -28523,7 +28650,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -28774,7 +28902,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -29141,7 +29270,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -29513,7 +29643,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -29576,7 +29707,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -29755,7 +29887,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30052,7 +30185,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30253,7 +30387,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30408,7 +30543,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30578,7 +30714,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30658,7 +30795,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30737,7 +30875,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30832,7 +30971,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -30912,7 +31052,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31070,7 +31211,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31148,7 +31290,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31316,7 +31459,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31396,7 +31540,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31494,7 +31639,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31662,7 +31808,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31686,7 +31833,9 @@
             "schema": {
               "minLength": 1,
               "maxLength": 500,
-              "pattern": "^(https://|ssh://|git@)\\S+$",
+              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
               "type": "string"
             }
           },
@@ -31753,7 +31902,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -31956,7 +32106,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -32013,7 +32164,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -32182,13 +32334,14 @@
       "get": {
         "operationId": "git.listCredentials",
         "summary": "List git credentials",
-        "description": "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source.",
+        "description": "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source. Empty for callers who may create or edit services nowhere.",
         "tags": [
           "git"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -32343,7 +32496,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -32411,7 +32565,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -32605,7 +32760,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -32696,7 +32852,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -33206,7 +33363,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -34085,7 +34244,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34141,7 +34301,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34189,7 +34350,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34294,7 +34456,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34369,7 +34532,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34470,7 +34634,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34580,13 +34745,14 @@
       "get": {
         "operationId": "github.repos",
         "summary": "List repositories",
-        "description": "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for.",
+        "description": "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation is already used for in that project.",
         "tags": [
           "github"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34707,7 +34873,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34782,7 +34949,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -34925,7 +35093,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -35040,7 +35209,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -35140,7 +35310,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -35211,7 +35382,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -35723,7 +35895,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -36602,7 +36776,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -36822,7 +36997,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -36873,13 +37049,14 @@
       "get": {
         "operationId": "gitProviders.list",
         "summary": "List git provider connections",
-        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only.",
+        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only. Empty for callers who may create or edit services nowhere.",
         "tags": [
           "gitProviders"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37034,7 +37211,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37182,13 +37360,14 @@
       "get": {
         "operationId": "gitProviders.repos",
         "summary": "List a provider's repositories",
-        "description": "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for.",
+        "description": "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for; people without gitProviders.manage see only the repositories the connection is already used for in that project.",
         "tags": [
           "gitProviders"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37316,7 +37495,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37498,7 +37678,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37644,7 +37825,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37817,7 +37999,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -37994,7 +38177,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38137,7 +38321,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38255,7 +38440,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "signed-in",
+        "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
     },
@@ -38269,7 +38454,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38332,7 +38518,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38395,7 +38582,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38553,7 +38741,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38711,7 +38900,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38812,7 +39002,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -38886,7 +39077,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -39158,7 +39350,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -39443,7 +39636,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -39812,7 +40006,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40010,7 +40205,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40115,7 +40311,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40306,7 +40503,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40418,7 +40616,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40492,7 +40691,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40548,7 +40748,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40688,7 +40889,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40793,7 +40995,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40884,7 +41087,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -40969,7 +41173,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -41026,7 +41231,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -41128,7 +41334,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -41374,7 +41581,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -41613,7 +41821,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -41831,7 +42040,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -41899,7 +42109,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -42013,7 +42224,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -42087,7 +42299,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -42667,7 +42880,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -42815,7 +43029,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -43253,7 +43468,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -43334,7 +43550,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -43404,7 +43621,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -43466,7 +43684,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -43920,7 +44139,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -43977,7 +44197,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -44133,7 +44354,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -44583,7 +44805,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -45033,7 +45256,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -45491,7 +45715,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -45580,7 +45805,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -46223,13 +46449,14 @@
       "get": {
         "operationId": "notifications.channels",
         "summary": "List notification channels",
-        "description": "Lists every notification channel with a redacted target, which services use it and its last delivery. Secrets are never returned.",
+        "description": "Lists every notification channel with a redacted target, which services use it and its last delivery. Secrets are never returned. Empty for callers with no grant (services.view or services.alerts) anywhere.",
         "tags": [
           "notifications"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -46579,7 +46806,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -47163,7 +47391,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -47311,7 +47540,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -47368,7 +47598,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -47638,7 +47869,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -47934,7 +48166,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -48522,7 +48755,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -48790,7 +49024,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49178,7 +49413,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49241,7 +49477,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49331,7 +49568,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49505,7 +49743,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49595,7 +49834,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49729,7 +49969,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49791,7 +50032,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -49911,7 +50153,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50031,7 +50274,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50105,7 +50349,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50179,7 +50424,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50318,7 +50564,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50400,9 +50647,16 @@
                       "type": "string"
                     },
                     "username": {
-                      "minLength": 1,
-                      "maxLength": 200,
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "usedBy": {
                       "minimum": 0,
@@ -50440,7 +50694,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50491,13 +50746,14 @@
       "get": {
         "operationId": "registries.list",
         "summary": "List registry logins",
-        "description": "Lists stored registry logins by name, server and user name (never the password), so people can pick one for an image source.",
+        "description": "Lists stored registry logins by name and server (never the password), so people can pick one for an image source. The user name is null unless the caller manages registries. Empty for callers who may create or edit services nowhere.",
         "tags": [
           "registries"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50547,9 +50803,16 @@
                             "type": "string"
                           },
                           "username": {
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "usedBy": {
                             "minimum": 0,
@@ -50590,7 +50853,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50657,7 +50921,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -50741,9 +51006,16 @@
                       "type": "string"
                     },
                     "username": {
-                      "minLength": 1,
-                      "maxLength": 200,
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "usedBy": {
                       "minimum": 0,
@@ -50781,7 +51053,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -51310,7 +51583,9 @@
                                 "url": {
                                   "minLength": 1,
                                   "maxLength": 500,
-                                  "pattern": "^(https://|ssh://|git@)\\S+$",
+                                  "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                                  "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                                  "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                                   "type": "string"
                                 },
                                 "branch": {
@@ -52317,7 +52592,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -52623,7 +52899,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -52724,7 +53001,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -53502,7 +53781,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -54381,7 +54662,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -54443,7 +54725,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -54918,7 +55201,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -55797,7 +56082,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -56229,7 +56515,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -56301,7 +56588,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -56623,7 +56911,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -56917,7 +57206,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -56974,7 +57264,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -57069,7 +57360,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -57422,7 +57714,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -57496,7 +57789,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -57640,7 +57934,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -57800,7 +58095,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -57875,7 +58171,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -58498,7 +58796,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -59377,7 +59677,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -59534,7 +59835,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -59616,7 +59918,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -59673,7 +59976,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -59730,7 +60034,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -60340,7 +60645,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -61219,7 +61526,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -61464,7 +61772,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -61557,7 +61866,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -61577,7 +61887,8 @@
                     "domainStatus",
                     "defaultNodeId",
                     "publicUrl",
-                    "uptimeAllowInternalTargets"
+                    "uptimeAllowInternalTargets",
+                    "auditRetentionDays"
                   ],
                   "properties": {
                     "name": {
@@ -61652,6 +61963,18 @@
                     },
                     "uptimeAllowInternalTargets": {
                       "type": "boolean"
+                    },
+                    "auditRetentionDays": {
+                      "anyOf": [
+                        {
+                          "minimum": 30,
+                          "maximum": 3650,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -61677,7 +62000,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -61800,7 +62124,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -61861,7 +62186,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -62021,7 +62347,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -62132,13 +62459,14 @@
       "post": {
         "operationId": "settings.updateGeneral",
         "summary": "Update general settings",
-        "description": "Changes the panel name, the panel domain (null removes it and goes back to IP:port) or the default node. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect.",
+        "description": "Changes the panel name, the panel domain (null removes it and goes back to IP:port), the default node or how long the audit log keeps entries. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect.",
         "tags": [
           "settings"
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -62184,6 +62512,18 @@
                   },
                   "uptimeAllowInternalTargets": {
                     "type": "boolean"
+                  },
+                  "auditRetentionDays": {
+                    "anyOf": [
+                      {
+                        "minimum": 30,
+                        "maximum": 3650,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -62203,7 +62543,8 @@
                     "domainStatus",
                     "defaultNodeId",
                     "publicUrl",
-                    "uptimeAllowInternalTargets"
+                    "uptimeAllowInternalTargets",
+                    "auditRetentionDays"
                   ],
                   "properties": {
                     "name": {
@@ -62278,6 +62619,18 @@
                     },
                     "uptimeAllowInternalTargets": {
                       "type": "boolean"
+                    },
+                    "auditRetentionDays": {
+                      "anyOf": [
+                        {
+                          "minimum": 30,
+                          "maximum": 3650,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -62303,7 +62656,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -62381,7 +62735,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -62623,7 +62978,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63027,7 +63383,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63164,7 +63521,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63242,7 +63600,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63321,7 +63680,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63416,7 +63776,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63901,7 +64262,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -63959,7 +64321,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -64185,7 +64548,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -64308,7 +64672,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -64547,7 +64912,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -64793,7 +65159,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -64858,7 +65225,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -64993,7 +65361,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -65150,7 +65519,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -65319,7 +65689,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -65376,7 +65747,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -65606,7 +65978,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -65689,7 +66062,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -66097,7 +66471,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -66411,7 +66786,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -66826,7 +67202,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -67224,7 +67601,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -67521,7 +67899,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -67814,7 +68193,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -68144,7 +68524,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -68207,7 +68588,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -68422,7 +68804,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -68684,7 +69067,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -68745,7 +69129,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -69079,7 +69464,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -69228,7 +69614,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -69377,7 +69764,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -69617,7 +70005,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -69808,7 +70197,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -69871,7 +70261,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70029,7 +70420,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70196,7 +70588,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70253,7 +70646,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70344,7 +70738,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70500,7 +70895,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70570,7 +70966,8 @@
         ],
         "security": [
           {
-            "session": []
+            "session": [],
+            "sessionKey": []
           },
           {
             "apiKey": []
@@ -70715,7 +71112,14 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "seylo_session"
+        "name": "seylo_session",
+        "description": "Browser session (`__Host-` prefixed over HTTPS); only valid together with the session key header."
+      },
+      "sessionKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-seylo-session-key",
+        "description": "The key handed out with the session."
       },
       "apiKey": {
         "type": "http",

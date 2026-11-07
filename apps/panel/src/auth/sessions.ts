@@ -1,10 +1,18 @@
-// Browser sessions: an opaque random token in an HttpOnly cookie, stored
-// hashed. Sessions slide: each use (at most once a minute) pushes the
-// expiry out again, so active people stay signed in and idle ones do not.
-// No session lives longer than maxSessionAgeMs, however active. The token
-// is rotated when the account's security changes (rotateSession), so a
-// token copied before a password change stops working.
+// Browser sessions: an opaque random token in an HttpOnly cookie plus a
+// session key, both stored hashed. The key reaches the web app in a
+// response header and lives in its origin's localStorage; the web app sends
+// it back in a header on every call, and a token without its key signs
+// nobody in. Cookies have no port, so on a plain-HTTP IP:port panel the
+// browser hands the cookie to every other port of that address (a member's
+// app); the key never leaves the panel's own origin (scheme, host and port),
+// so that copy is useless. An HttpOnly cookie still keeps the token out of
+// reach of scripts. Sessions slide: each use (at most once a minute) pushes
+// the expiry out again, so active people stay signed in and idle ones do not.
+// No session lives longer than maxSessionAgeMs, however active. Token and
+// key are rotated when the account's security changes (rotateSession), so a
+// copy made before a password change stops working.
 
+import { timingSafeEqual } from "node:crypto";
 import { and, desc, eq, gt, lte, ne } from "drizzle-orm";
 import type { PanelDb } from "../db/client";
 import { sessions, users } from "../db/schema";
@@ -22,12 +30,14 @@ export function createSession(db: PanelDb, userId: string, meta: { ip: string | 
     .where(and(eq(sessions.userId, userId), lte(sessions.expiresAt, now)))
     .run();
   const token = randomToken();
+  const key = randomToken();
   const expiresAt = new Date(now.getTime() + sessionLifetimeMs);
   const row = db
     .insert(sessions)
     .values({
       userId,
       tokenHash: hashToken(token),
+      keyHash: hashToken(key),
       ip: meta.ip,
       userAgent: meta.userAgent?.slice(0, 400) ?? null,
       expiresAt,
@@ -36,14 +46,24 @@ export function createSession(db: PanelDb, userId: string, meta: { ip: string | 
     })
     .returning({ id: sessions.id })
     .get();
-  return { token, sessionId: row.id, expiresAt };
+  return { token, key, sessionId: row.id, expiresAt };
 }
 
-/** The session's user, or undefined when the token is unknown, expired or the user is disabled. */
-export function lookupSession(db: PanelDb, token: string, now = new Date()): { sessionId: string; user: PrincipalUser } | undefined {
+/**
+ * The session's user, or undefined when the token is unknown or expired, the
+ * key does not belong to it (or the session predates keys), or the user is
+ * disabled.
+ */
+export function lookupSession(
+  db: PanelDb,
+  token: string,
+  key: string,
+  now = new Date(),
+): { sessionId: string; user: PrincipalUser } | undefined {
   const row = db
     .select({
       sessionId: sessions.id,
+      keyHash: sessions.keyHash,
       lastSeenAt: sessions.lastSeenAt,
       createdAt: sessions.createdAt,
       user: { id: users.id, email: users.email, name: users.name, role: users.role, disabledAt: users.disabledAt },
@@ -52,7 +72,7 @@ export function lookupSession(db: PanelDb, token: string, now = new Date()): { s
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, now)))
     .get();
-  if (!row || row.user.disabledAt) return undefined;
+  if (!row || row.user.disabledAt || !sameHash(row.keyHash, hashToken(key))) return undefined;
   const hardExpiry = row.createdAt.getTime() + maxSessionAgeMs;
   if (now.getTime() >= hardExpiry) {
     deleteSession(db, row.sessionId);
@@ -69,14 +89,22 @@ export function lookupSession(db: PanelDb, token: string, now = new Date()): { s
   return { sessionId: row.sessionId, user };
 }
 
-/** Gives the session a new token (same id and expiry); the old token stops working. */
-export function rotateSession(db: PanelDb, sessionId: string): string {
+/** Gives the session a new token and key (same id and expiry); the old ones stop working. */
+export function rotateSession(db: PanelDb, sessionId: string): { token: string; key: string } {
   const token = randomToken();
+  const key = randomToken();
   db.update(sessions)
-    .set({ tokenHash: hashToken(token) })
+    .set({ tokenHash: hashToken(token), keyHash: hashToken(key) })
     .where(eq(sessions.id, sessionId))
     .run();
-  return token;
+  return { token, key };
+}
+
+function sameHash(stored: string | null, given: string): boolean {
+  if (!stored) return false;
+  const a = Buffer.from(stored);
+  const b = Buffer.from(given);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export function listSessions(db: PanelDb, userId: string, now = new Date()) {

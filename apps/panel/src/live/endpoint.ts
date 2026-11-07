@@ -6,14 +6,29 @@
 // whose session was signed out, revoked, expired or whose person was
 // disabled (close code liveUnauthorizedCloseCode). deps.live.disconnect()
 // closes them at once, for code that knows a session just ended.
+//
+// The cookie alone signs nobody in: the web app adds the session key as the
+// `key` query parameter (browsers cannot set headers on a WebSocket).
+// Messages bypass the op pipeline, so they have their own limits: a token
+// bucket per person (each subscribe re-reads the session and maybe a row)
+// and a cap on topics per socket.
 
-import { LiveClientMessage, type LiveServerMessage, type LiveTopic, livePath, liveUnauthorizedCloseCode, sessionCookie } from "@seylo/ops";
+import {
+  LiveClientMessage,
+  type LiveServerMessage,
+  type LiveTopic,
+  livePath,
+  liveSessionKeyParam,
+  liveUnauthorizedCloseCode,
+} from "@seylo/ops";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { Elysia } from "elysia";
 import { type Access, createAccess } from "../auth/access";
 import { authenticate, type Credentials, credentialsFrom } from "../auth/authenticate";
 import type { Deps } from "../deps";
+import { secureSession } from "../http/https";
 import { isSameOrigin } from "../http/origin";
+import { createRateLimiter, type RateLimiter } from "../ops/rate-limit";
 import type { LiveSocket } from "./hub";
 import { maySubscribe } from "./topics";
 
@@ -22,22 +37,39 @@ const clientMessage = TypeCompiler.Compile(LiveClientMessage);
 /** How often open sockets are checked against their session. */
 export const revalidateMs = 15_000;
 
+/** Topics one socket may follow at once; a tab needs a handful per screen. */
+export const maxTopicsPerSocket = 200;
+
+/**
+ * Messages per person over all their sockets: a burst covers several tabs
+ * resubscribing after a reconnect. A socket past it is closed (the web app
+ * reconnects with backoff).
+ */
+export const liveMessageRule = { burst: 300, refillPerSecond: 30 };
+
+/** Close code for a socket that sent more messages than its person's budget. */
+export const liveFloodCloseCode = 1008;
+
 interface Connection {
   socket: LiveSocket;
   access: Access;
   credentials: Credentials;
-  close(reason: string): void;
+  close(reason: string, code?: number): void;
 }
 
-export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger">, options: { revalidateMs?: number } = {}) {
+export function liveEndpoint(
+  deps: Pick<Deps, "db" | "live" | "logger" | "config" | "proxy">,
+  options: { revalidateMs?: number; limiter?: RateLimiter } = {},
+) {
   const connections = new Map<string, Connection>();
+  const limiter = options.limiter ?? createRateLimiter({ standard: liveMessageRule, strict: liveMessageRule });
 
-  const drop = (id: string, reason: string) => {
+  const drop = (id: string, reason: string, code = liveUnauthorizedCloseCode) => {
     const connection = connections.get(id);
     if (!connection) return;
     connections.delete(id);
     deps.live.drop(connection.socket);
-    connection.close(reason);
+    connection.close(reason, code);
   };
 
   /**
@@ -101,9 +133,18 @@ export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger">, options
       }
     },
     open(ws) {
-      const all = credentialsFrom(ws.data.request, sessionCookie);
+      const request = ws.data.request;
+      const socketIp = (ws.raw as unknown as { remoteAddress?: string }).remoteAddress ?? null;
+      const all = credentialsFrom(request, {
+        secure: secureSession(deps, request, socketIp),
+        sessionKey: new URL(request.url).searchParams.get(liveSessionKeyParam),
+      });
       // Live sockets belong to browser sessions; keys and tokens use the API.
-      const credentials: Credentials = { sessionToken: all.sessionToken };
+      const credentials: Credentials = {
+        sessionToken: all.sessionToken,
+        sessionKey: all.sessionKey,
+        duplicateSession: all.duplicateSession,
+      };
       const principal = authenticate(deps.db, credentials);
       if (principal.type === "anonymous") {
         ws.close(liveUnauthorizedCloseCode, "sign in first");
@@ -114,13 +155,20 @@ export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger">, options
         socket,
         access: createAccess(deps.db, principal),
         credentials,
-        close: (reason) => ws.close(liveUnauthorizedCloseCode, reason),
+        close: (reason, code = liveUnauthorizedCloseCode) => ws.close(code, reason),
       });
       ensureTimer();
     },
     message(ws, raw) {
       const connection = connections.get(ws.id);
       if (!connection) return;
+      // Checked before any parsing or database work.
+      const principal = connection.access.principal;
+      const who = principal.type === "anonymous" ? `socket:${ws.id}` : `user:${principal.user.id}`;
+      if (limiter.take(who, "standard") > 0) {
+        drop(ws.id, "too many messages", liveFloodCloseCode);
+        return;
+      }
       const message = typeof raw === "string" ? safeParse(raw) : raw;
       if (!clientMessage.Check(message)) {
         connection.socket.send({ type: "error", code: "BAD_REQUEST", message: "Unknown message." });
@@ -134,6 +182,11 @@ export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger">, options
       // A subscribe re-checks the session too, so a signed-out tab learns it at once.
       if (authenticate(deps.db, connection.credentials).type === "anonymous") {
         drop(ws.id, "signed out");
+        return;
+      }
+      const following = deps.live.topics(connection.socket);
+      if (!following.includes(topic) && following.length >= maxTopicsPerSocket) {
+        connection.socket.send({ type: "error", topic, code: "BAD_REQUEST", message: "This connection follows too many topics." });
         return;
       }
       if (maySubscribe(connection.access, topic, deps.db)) {

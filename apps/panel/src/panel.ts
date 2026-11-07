@@ -27,7 +27,7 @@ import { createAlertSink } from "./modules/alerts/sink";
 import { modules } from "./modules/index.gen";
 import type { PanelModule } from "./modules/module";
 import { createNotifier } from "./modules/notifications/email";
-import { injectBoot, readBoot } from "./modules/settings/boot";
+import { appContentSecurityPolicy, injectBoot, readBoot } from "./modules/settings/boot";
 import { collectHandlers } from "./ops/handlers";
 import { createOpExecutor, type ExecuteOp } from "./ops/pipeline";
 import { createRateLimiter, type RateLimiter } from "./ops/rate-limit";
@@ -130,6 +130,7 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
     .use(
       webApp(deps.config.webDist, {
         renderIndex: (html) => injectBoot(html, readBoot(deps.db)),
+        contentSecurityPolicy: appContentSecurityPolicy,
         redirect: (request) => domainRedirect(deps, request),
       }),
     );

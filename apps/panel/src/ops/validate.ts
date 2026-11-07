@@ -3,7 +3,7 @@
 
 import { OpError } from "@seylo/ops";
 import type { TSchema } from "@sinclair/typebox";
-import { type TypeCheck, TypeCompiler } from "@sinclair/typebox/compiler";
+import { type TypeCheck, TypeCompiler, type ValueError, ValueErrorType } from "@sinclair/typebox/compiler";
 import { Value } from "@sinclair/typebox/value";
 
 const compiled = new WeakMap<TSchema, TypeCheck<TSchema>>();
@@ -29,10 +29,25 @@ export function parseInput(schema: TSchema, raw: unknown, coerce: boolean): unkn
   const check = checker(schema);
   if (!check.Check(value)) {
     const first = check.Errors(value).First();
-    const field = first?.path.replace(/^\//, "").replaceAll("/", ".") || "(input)";
-    throw new OpError("BAD_REQUEST", `Invalid ${field}: ${first?.message ?? "does not match the schema"}.`, { field });
+    const error = first && inChosenVariant(first);
+    const field = error?.path.replace(/^\//, "").replaceAll("/", ".") || "(input)";
+    const message = (error?.schema as { errorMessage?: string } | undefined)?.errorMessage ?? error?.message;
+    throw new OpError("BAD_REQUEST", `Invalid ${field}: ${message ?? "does not match the schema"}.`, { field });
   }
   return value;
+}
+
+/**
+ * A union (a source's "git" or "image" shape) only says "Expected union
+ * value". When exactly one variant's literals matched (the `type` the caller
+ * picked), its own first error names the real field instead.
+ */
+function inChosenVariant(error: ValueError): ValueError {
+  if (error.type !== ValueErrorType.Union) return error;
+  const variants = error.errors.map((iterator) => [...iterator]);
+  const chosen = variants.filter((errors) => errors.length > 0 && !errors.some((e) => e.type === ValueErrorType.Literal));
+  const first = chosen.length === 1 ? chosen[0]?.[0] : undefined;
+  return first ? inChosenVariant(first) : error;
 }
 
 /**

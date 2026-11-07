@@ -10,6 +10,7 @@ import { OpError, settings } from "@seylo/ops";
 import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
 import { deleteSetting, getSetting, setSetting } from "../../settings";
+import { readAuditRetentionDays, writeAuditRetentionDays } from "../audit/retention";
 import { assertHostUnclaimed } from "../domains/ownership";
 import { syncWebhookConfig } from "../github/app";
 import { readTelemetry, syncTelemetrySchedule } from "../telemetry";
@@ -30,6 +31,7 @@ function general(deps: Pick<Deps, "db" | "config">) {
     defaultNodeId: getSetting(deps.db, "defaultNodeId") ?? null,
     publicUrl: panelPublicUrl(deps),
     uptimeAllowInternalTargets: getSetting(deps.db, "uptimeAllowInternalTargets") === true,
+    auditRetentionDays: readAuditRetentionDays(deps.db),
   };
 }
 
@@ -65,6 +67,13 @@ export const updateGeneral = implement(settings.updateGeneral, (input, ctx) => {
   if (input.name !== undefined) setSetting(ctx.db, "panelName", input.name);
   if (input.defaultNodeId !== undefined) setSetting(ctx.db, "defaultNodeId", input.defaultNodeId);
   if (input.uptimeAllowInternalTargets !== undefined) setSetting(ctx.db, "uptimeAllowInternalTargets", input.uptimeAllowInternalTargets);
+  if (input.auditRetentionDays !== undefined) {
+    // A shorter retention deletes history: not something a model may do on its own.
+    const fromModel = (ctx.transport ?? "http") !== "http" || (ctx.principal.type === "apiKey" && ctx.principal.keyKind === "mcp");
+    if (fromModel)
+      throw new OpError("FORBIDDEN", "Change how long the activity log keeps entries in the panel, not through MCP or the assistant.");
+    writeAuditRetentionDays(ctx.db, input.auditRetentionDays);
+  }
   if (input.domain !== undefined && input.domain !== (getSetting(ctx.db, "panelDomain") ?? null)) {
     // A service routing the same host would share (and fight over) the panel's route.
     if (input.domain) assertHostUnclaimed(ctx.db, input.domain, { field: "domain", panel: true });

@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
+import { bodyBudget, bufferedBodyBytes } from "@seylo/ops/elysia";
 import { githubApps, webhookDeliveries } from "../src/db/schema";
 import { type TestPanel, testPanel } from "./helpers";
 
@@ -25,6 +26,52 @@ test("op bodies over the cap are refused before parsing", async () => {
   );
   expect(res.status).toBe(400);
   expect(((await res.json()) as { error: { message: string } }).error.message).toContain("larger than");
+});
+
+const post = (path: string, body: string | ReadableStream<Uint8Array>, headers: Record<string, string> = {}) =>
+  panel.app.handle(
+    new Request(`http://panel.test${path}`, {
+      method: "POST",
+      headers: { host: "panel.test", "content-type": "application/json", ...headers },
+      body,
+    }),
+  );
+
+test("most ops take 1 MiB before authentication; the few with large inputs take more", async () => {
+  const body = JSON.stringify({ name: "x".repeat(1536 * 1024) });
+  const small = await post("/api/v1/projects.create", body);
+  expect(small.status).toBe(400);
+  expect(((await small.json()) as { error: { message: string } }).error.message).toContain("larger than 1 MiB");
+  // files.write reads it (and then wants a sign-in).
+  const large = await post("/api/v1/files.write", JSON.stringify({ content: "x".repeat(1536 * 1024) }));
+  expect(large.status).toBe(401);
+});
+
+test("bodies being read at once share one budget; past it a read is refused as busy", async () => {
+  const saved = bodyBudget.maxBytes;
+  bodyBudget.maxBytes = 100_000;
+  try {
+    let push: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const slow = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = controller;
+      },
+    });
+    if (!push) throw new Error("the stream did not start");
+    push.enqueue(new Uint8Array(80_000).fill(0x20));
+    const pending = post("/api/v1/auth.login", slow);
+    await Bun.sleep(20);
+    expect(bufferedBodyBytes()).toBe(80_000);
+    const refused = await post("/api/v1/auth.login", " ".repeat(50_000));
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("retry-after")).toBe("5");
+    push.close();
+    await pending;
+    expect(bufferedBodyBytes()).toBe(0);
+    expect((await post("/api/v1/auth.login", " ".repeat(50_000))).status).not.toBe(503);
+  } finally {
+    bodyBudget.maxBytes = saved;
+  }
 });
 
 test("webhook: rejected rows are capped, a replayed body under a new id is not handled again", async () => {
@@ -59,4 +106,32 @@ test("webhook: rejected rows are capped, a replayed body under a new id is not h
   expect(await replay.json()).toMatchObject({ duplicate: true });
   const noId = await post(body, { "x-github-event": "meta", "x-hub-signature-256": signature });
   expect(noId.status).toBe(400);
+});
+
+test("webhook: one sender gets 60 deliveries, then 429 before the body is read", async () => {
+  panel.deps.db
+    .insert(githubApps)
+    .values({
+      appId: 1,
+      slug: "s",
+      name: "s",
+      htmlUrl: "https://github.com/apps/s",
+      ownerLogin: "o",
+      clientId: "c",
+      clientSecretSealed: panel.deps.secrets.seal("cs", "github.app"),
+      privateKeySealed: panel.deps.secrets.seal("not used", "github.app"),
+      webhookSecretSealed: panel.deps.secrets.seal(secret, "github.app"),
+    })
+    .run();
+  const statuses: number[] = [];
+  for (let i = 0; i < 61; i++) {
+    const res = await post("/api/hooks/github", "{}", {
+      "x-github-delivery": `d-${i}`,
+      "x-github-event": "push",
+      "x-hub-signature-256": "sha256=00",
+    });
+    statuses.push(res.status);
+  }
+  expect(statuses.slice(0, 60).every((s) => s === 401)).toBe(true);
+  expect(statuses[60]).toBe(429);
 });

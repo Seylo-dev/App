@@ -11,7 +11,7 @@ import { approvals, auditLog, mcpAuthCodes, mcpClients, nodes, projects, service
 import { enginesCapability } from "../src/modules/databases/engines";
 import { writeServiceEnv } from "../src/modules/env/store";
 import { setSetting } from "../src/settings";
-import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { callOp, createUser, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
 import { seedNode, seedProject, settleDeploys } from "./seed-helpers";
 
 let panel: TestPanel;
@@ -27,6 +27,31 @@ const origin = "http://panel.test";
 
 async function send(path: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
   return panel.app.handle(new Request(`${origin}${path}`, { ...init, headers: { host: "panel.test", ...init.headers } }));
+}
+
+const formHeaders = { origin, "content-type": "application/x-www-form-urlencoded" };
+
+/** What the bridge page's script posts: the authorize request plus the session key from the web app's storage. */
+function review(query: URLSearchParams, cookie?: string, key = cookie ? (sessionKeyOf(cookie) ?? "") : "") {
+  const form = new URLSearchParams(query);
+  form.set("session_key", key);
+  return send("/oauth/authorize", { method: "POST", headers: { ...formHeaders, ...(cookie ? { cookie } : {}) }, body: form.toString() });
+}
+
+/** The consent page's own form, as Allow posts it. */
+function consentForm(html: string): URLSearchParams {
+  const form = new URLSearchParams();
+  for (const [, name, value] of html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g)) {
+    form.set(name as string, (value as string).replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#39;", "'"));
+  }
+  return form;
+}
+
+/** Same authorize request, whatever the order of its parameters. */
+function sameRequest(path: string | null, query: URLSearchParams): boolean {
+  const url = new URL(path ?? "", origin);
+  if (url.pathname !== "/oauth/authorize") return false;
+  return [...query].every(([name, value]) => url.searchParams.get(name) === value);
 }
 
 async function rpc(token: string, method: string, params?: unknown, id: number | null = 1) {
@@ -58,29 +83,41 @@ async function connect(cookie: string, access: "read" | "write") {
     state: "xyz",
   });
 
-  const signedOut = await send(`/oauth/authorize?${query}`);
-  expect(signedOut.status).toBe(302);
+  // The GET serves the bridge page whoever asks: it reads no session.
+  const bridge = await send(`/oauth/authorize?${query}`, { headers: { cookie } });
+  expect(bridge.status).toBe(200);
+  expect(bridge.headers.get("content-security-policy")).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'/);
+  expect(await bridge.text()).not.toContain("@example.com");
+  const signedOut = await review(query);
+  expect(signedOut.status).toBe(303);
   expect(signedOut.headers.get("location")).toStartWith(`${origin}/login?redirect=%2Foauth%2Fauthorize`);
+  // The cookie without the session key from the web app's storage is no session.
+  expect((await review(query, cookie, "")).status).toBe(303);
 
-  const consent = await send(`/oauth/authorize?${query}`, { headers: { cookie } });
+  const consent = await review(query, cookie);
   const html = await consent.text();
+  expect(consent.status).toBe(200);
   expect(consent.headers.get("x-frame-options")).toBe("DENY");
-  expect(html).toContain("Connect Claude Code?");
-  const csrf = /name="csrf" value="([^"]+)"/.exec(html)?.[1] ?? "";
+  expect(html).toContain("Connect an app at 127.0.0.1:33418?");
+  expect(html).toContain('Claude Code</strong><span class="tag">name not verified</span>');
 
-  const form = new URLSearchParams(query);
-  form.set("csrf", csrf);
+  const form = consentForm(html);
   form.set("access", access);
   form.set("decision", "allow");
   const crossSite = await send("/oauth/authorize", {
     method: "POST",
-    headers: { cookie, origin: "https://evil.example", "content-type": "application/x-www-form-urlencoded" },
+    headers: { ...formHeaders, cookie, origin: "https://evil.example" },
     body: form.toString(),
   });
   expect(crossSite.status).toBe(403);
+  const withoutKey = new URLSearchParams(form);
+  withoutKey.delete("session_key");
+  expect(
+    (await send("/oauth/authorize", { method: "POST", headers: { ...formHeaders, cookie }, body: withoutKey.toString() })).status,
+  ).toBe(401);
   const allowed = await send("/oauth/authorize", {
     method: "POST",
-    headers: { cookie, origin, "content-type": "application/x-www-form-urlencoded" },
+    headers: { ...formHeaders, cookie },
     body: form.toString(),
   });
   expect(allowed.status).toBe(302);
@@ -129,27 +166,63 @@ test("a session signed in long ago confirms it's them on /reauth before the cons
     code_challenge_method: "S256",
     state: "xyz",
   });
-  const stale = await send(`/oauth/authorize?${query}`, { headers: { cookie } });
-  expect(stale.status).toBe(302);
+  const stale = await review(query, cookie);
+  expect(stale.status).toBe(303);
   const next = new URL(stale.headers.get("location") ?? "");
   expect(next.pathname).toBe("/reauth");
-  expect(next.searchParams.get("redirect")).toBe(`/oauth/authorize?${query}`);
+  expect(sameRequest(next.searchParams.get("redirect"), query)).toBe(true);
   // An Allow posted from a page opened earlier is refused too.
   const form = new URLSearchParams(query);
   form.set("decision", "allow");
   form.set("csrf", "x");
-  const posted = await send("/oauth/authorize", {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/x-www-form-urlencoded" },
-    body: form.toString(),
-  });
+  form.set("session_key", sessionKeyOf(cookie) ?? "");
+  const posted = await send("/oauth/authorize", { method: "POST", headers: { ...formHeaders, cookie }, body: form.toString() });
   expect(posted.status).toBe(403);
   expect(panel.deps.db.select().from(mcpAuthCodes).all()).toHaveLength(0);
 
   await callOp(panel, auth.reauth, { password }, { cookie });
-  const consent = await send(`/oauth/authorize?${query}`, { headers: { cookie } });
+  const consent = await review(query, cookie);
   expect(consent.status).toBe(200);
-  expect(await consent.text()).toContain("Connect Claude Code?");
+  expect(await consent.text()).toContain("Connect an app at 127.0.0.1:33418?");
+});
+
+test("the consent page never preselects changes, whatever scope the app asks for", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  const { cookie } = await createUser(panel, "owner");
+  const registered = await send("/oauth/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "Trusted Tool", redirect_uris: ["https://tool.example/callback"] }),
+  });
+  const client = (await registered.json()) as { client_id: string };
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: client.client_id,
+    redirect_uri: "https://tool.example/callback",
+    code_challenge: createHash("sha256").update("w".repeat(43)).digest("base64url"),
+    code_challenge_method: "S256",
+    scope: "mcp:read mcp:write",
+  });
+  const html = await (await review(query, cookie)).text();
+  expect(html).toContain('<input type="radio" name="access" value="read" checked />');
+  expect(html).toContain('<input type="radio" name="access" value="write" />');
+  expect(html).toContain("It asked for read and change access.");
+  // The address the answer goes to identifies the app; its self-chosen name is marked.
+  expect(html).toContain("Connect an app at tool.example?");
+  expect(html).toContain("name not verified");
+
+  // Allow without picking anything is read only.
+  const form = consentForm(html);
+  form.set("decision", "allow");
+  const allowed = await send("/oauth/authorize", { method: "POST", headers: { ...formHeaders, cookie }, body: form.toString() });
+  expect(allowed.status).toBe(302);
+  expect(
+    panel.deps.db
+      .select()
+      .from(mcpAuthCodes)
+      .all()
+      .map((row) => row.readOnly),
+  ).toEqual([true]);
 });
 
 test("the endpoint is off by default and asks for OAuth without a token", async () => {

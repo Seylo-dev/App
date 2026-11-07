@@ -3,7 +3,7 @@
 // short ticket instead of a session; the second step takes an
 // authenticator code or a recovery code (auth.verifySecondFactor).
 
-import { auth, type OpOutput, setup } from "@seylo/ops";
+import { auth, OpError, type OpOutput, setup } from "@seylo/ops";
 import { opQueryKey, useOp, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -51,6 +51,9 @@ function LoginPage() {
   const [device, setDevice] = useState<DeviceCodeView | null>(null);
   const [githubError, setGithubError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The panel refused this browser's session because it sent two cookies (another site on the address set one).
+  const whoamiError = queryClient.getQueryState(opQueryKey(auth.whoami, {}))?.error;
+  const duplicateSession = whoamiError instanceof OpError && whoamiError.details?.reason === "duplicateSession";
 
   const finish = (result: LoginResult) => {
     if (result.status === "secondFactor" && result.challenge) {
@@ -125,6 +128,7 @@ function LoginPage() {
             <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em]">{t("auth.title", { name: boot?.name ?? "" })}</h1>
             {boot?.loginMessage && <p className="m-0 text-[13.5px] whitespace-pre-line text-ink-strong">{boot.loginMessage}</p>}
             {status.data && !status.data.ownerExists && <Alert tone="info">{t("auth.noOwner")}</Alert>}
+            {duplicateSession && <Alert tone="warning">{t("auth.duplicateSession")}</Alert>}
             {notice && <Alert tone="warning">{notice}</Alert>}
             <PasswordForm onResult={finish} />
             <OtherWays

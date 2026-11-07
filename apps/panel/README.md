@@ -8,7 +8,7 @@ built web app.
 
 ```sh
 export SEYLO_DATA_DIR=$HOME/.seylo-dev SEYLO_SECURE_COOKIES=false
-bun run create-owner you@example.com 'a long password'   # once
+bun run create-owner you@example.com                     # once; asks for the password
 bun run dev                                               # http://localhost:3000
 ```
 

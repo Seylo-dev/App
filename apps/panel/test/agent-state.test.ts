@@ -121,11 +121,11 @@ describe("desired dirty queue", () => {
 
 describe("node ops behind the pipeline", () => {
   test("nodes.list answers signed-in owners and refuses anonymous callers", async () => {
-    const { testPanel, createUser } = await import("./helpers");
+    const { testPanel, createUser, sessionHeaders } = await import("./helpers");
     const panel = testPanel();
     try {
       const owner = await createUser(panel, "owner");
-      const response = await panel.app.handle(new Request("http://localhost/api/v1/nodes.list", { headers: { cookie: owner.cookie } }));
+      const response = await panel.app.handle(new Request("http://localhost/api/v1/nodes.list", { headers: sessionHeaders(owner.cookie) }));
       expect(response.status).toBe(200);
       expect(((await response.json()) as { nodes: unknown[] }).nodes).toEqual([]);
       const anonymous = await panel.app.handle(new Request("http://localhost/api/v1/nodes.list"));

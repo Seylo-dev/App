@@ -6,11 +6,19 @@
 // AI replies) are read with listen(), which also says whether the panel
 // accepted the subscription, so a screen can fall back to polling when not.
 
-import { type LiveEvent, type LiveServerMessage, type LiveTopic, livePath, liveUnauthorizedCloseCode } from "@seylo/ops";
+import {
+  type LiveEvent,
+  type LiveServerMessage,
+  type LiveTopic,
+  livePath,
+  liveSessionKeyParam,
+  liveUnauthorizedCloseCode,
+} from "@seylo/ops";
 import { opQueryKey } from "@seylo/ops/react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
 import { queryClient } from "./api";
+import { readSessionKey } from "./session-key";
 
 /** What a listener hears on its topic. */
 export type LiveSignal =
@@ -63,6 +71,9 @@ export function createLiveClient(cache: QueryClient): LiveClient {
   const open = (onUnauthorized: () => void) => {
     const url = new URL(livePath, window.location.href);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    // Browsers cannot add headers to a WebSocket, so the session key goes in the query.
+    const key = readSessionKey();
+    if (key) url.searchParams.set(liveSessionKeyParam, key);
     const ws = new WebSocket(url);
     socket = ws;
     ws.onopen = () => {

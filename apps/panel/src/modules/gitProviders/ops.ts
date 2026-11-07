@@ -5,13 +5,14 @@
 import { gitProviders as contracts, OpError, type gitProviders as providerOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { eq } from "drizzle-orm";
+import { sourcePickerActions } from "../../auth/access";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { userOf } from "../../auth/principal";
 import { gitProviders, sourcePolls } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { updateSpec } from "../services/ops";
 import { loadService, toDetail } from "../services/rows";
-import { assertSourceAllowed } from "../services/source-guard";
+import { assertMayUseSomewhere, assertSourceAllowed } from "../services/source-guard";
 import { readSpec } from "../services/spec";
 import { clientFor } from "./client";
 import { ensureHook, type WebhookRow, webhookOf } from "./hooks";
@@ -52,9 +53,12 @@ async function verifyToken(ctx: OpContext, row: ProviderRow): Promise<string> {
   }
 }
 
+// People who may set a source somewhere pick connections by name and host;
+// an account with no such grant gets an empty list.
 const list = implement(contracts.list, (_input, ctx) => {
-  const usage = providerUsage(ctx.db);
   const full = canManage(ctx);
+  if (!full && !ctx.access.canSomewhere(sourcePickerActions)) return { items: [] };
+  const usage = providerUsage(ctx.db);
   const rows = ctx.db.select().from(gitProviders).orderBy(gitProviders.name).all();
   return { items: rows.map((r) => toProvider(r, usage.get(r.id) ?? 0, full)) };
 });
@@ -162,11 +166,23 @@ const check = implement(contracts.check, async (input, ctx) => {
   }
 });
 
-function providerFor(ctx: OpContext, projectId: string, providerId: string): ProviderRow {
+/**
+ * The same rules as saving the source: attaching a connection to a new
+ * project is for its managers, and others use it only for the repositories
+ * it is shared for there (`repo`; without one, for listing those).
+ */
+function providerFor(
+  ctx: OpContext,
+  projectId: string,
+  providerId: string,
+  repo?: string,
+): { row: ProviderRow; shared: Set<string> | null } {
   const row = loadProvider(ctx.db, providerId);
-  // The same rules as saving the source: attaching a connection to a new project is for its managers.
-  assertSourceAllowed(ctx, projectId, { type: "provider", providerId }, "");
-  return row;
+  if (repo !== undefined) {
+    assertSourceAllowed(ctx, projectId, { type: "provider", providerId, repo }, "");
+    return { row, shared: null };
+  }
+  return { row, shared: assertMayUseSomewhere(ctx, projectId, "provider", providerId, "providerId") };
 }
 
 /** Turns a provider failure into a message for the person. */
@@ -180,8 +196,16 @@ function asOpError(error: unknown, field?: string): never {
 }
 
 const repos = implement(contracts.repos, async (input, ctx) => {
-  const row = providerFor(ctx, input.projectId, input.providerId);
+  const { row, shared } = providerFor(ctx, input.projectId, input.providerId);
   try {
+    if (shared !== null) {
+      // Only what the connection is shared for in this project, read one by one (a short list).
+      const q = input.query?.toLowerCase().trim() ?? "";
+      const client = clientFor(ctx, row);
+      const wanted = [...shared].filter((repo) => !q || repo.includes(q)).sort();
+      const found = await Promise.all(wanted.map((repo) => client.repo(repo).catch(() => null)));
+      return { repos: found.filter((r) => r !== null), hasMore: false };
+    }
     const page = input.page ?? 1;
     const out = await clientFor(ctx, row).repos(input.query?.trim() ?? "", page, pageSize);
     return { repos: out.repos, hasMore: out.hasMore };
@@ -191,7 +215,7 @@ const repos = implement(contracts.repos, async (input, ctx) => {
 });
 
 const branches = implement(contracts.branches, async (input, ctx) => {
-  const row = providerFor(ctx, input.projectId, input.providerId);
+  const { row } = providerFor(ctx, input.projectId, input.providerId, input.repo);
   try {
     const client = clientFor(ctx, row);
     const [repo, names] = await Promise.all([client.repo(input.repo), client.branches(input.repo, input.query?.trim() ?? "")]);
@@ -209,7 +233,7 @@ const connectRepo = implement(contracts.connectRepo, async (input, ctx) => {
   if (svc.kind !== "app" && svc.kind !== "cron") throw new OpError("CONFLICT", `A ${svc.kind} service cannot build from a repository.`);
   if (svc.parentId) throw new OpError("CONFLICT", "Compose members build from their stack's repository.");
   if (readSpec(svc.spec).preview) throw new OpError("CONFLICT", "A preview follows its merge or pull request.");
-  const provider = providerFor(ctx, svc.projectId, input.providerId);
+  const { row: provider } = providerFor(ctx, svc.projectId, input.providerId, input.repo);
   const client = clientFor(ctx, provider);
   let head: Awaited<ReturnType<typeof client.branchHead>>;
   try {

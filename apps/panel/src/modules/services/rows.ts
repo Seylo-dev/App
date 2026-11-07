@@ -10,6 +10,7 @@ import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
 import { latestCopy } from "./copies";
+import { displaySource } from "./git-url";
 import { readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
 import { serviceStatus, serviceUsage } from "./status";
 
@@ -217,7 +218,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     ...summary,
     stopped: row.stopped,
     generation: Math.max(1, row.generation),
-    sourceConfig: spec.source,
+    sourceConfig: displaySource(spec.source),
     build: spec.build,
     container: spec.container,
     ports: spec.ports,
