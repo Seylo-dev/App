@@ -146,7 +146,7 @@ test("a build is refused when the stored address is internal and not allowed, al
   expect(panel.deps.db.select().from(deployments).all()).toHaveLength(0);
 });
 
-test("FetchGitFile runs on the stack's node or another node of the project, never on any online node", async () => {
+test("FetchGitFile runs on the stack's own node, never on another online node", async () => {
   // node-b runs a service of the other project only.
   await callOp(
     panel,
@@ -158,7 +158,7 @@ test("FetchGitFile runs on the stack's node or another node of the project, neve
   const res = await callOp(panel, compose.preview, { projectId, name: "stack", nodeId: nodeA, source }, { cookie: member });
   expect(res.status).toBe(200);
   expect(fleet.calls.filter((c) => c.method === "fetchGitFile").map((c) => c.nodeId)).toEqual([nodeA]);
-  // The preferred node cannot read git: before, any online node that could (node-b) was used.
+  // A node that is not online (or does not exist): before, any online node that could (node-b) was used.
   fleet.calls.length = 0;
   const unknownNode = await callOp(
     panel,
@@ -166,8 +166,34 @@ test("FetchGitFile runs on the stack's node or another node of the project, neve
     { projectId, name: "stack", nodeId: "n".repeat(16), source },
     { cookie: member },
   );
-  expect(unknownNode.status).not.toBe(200);
-  expect(fleet.calls.filter((c) => c.method === "fetchGitFile" && c.nodeId === nodeB)).toHaveLength(0);
+  expect(unknownNode.body.error?.details?.reason).toBe("offline");
+  expect(fleet.calls.filter((c) => c.method === "fetchGitFile")).toHaveLength(0);
+});
+
+test("plain http:// git is refused at save and never sent: allow_plain_http stays off", async () => {
+  // Every git source the panel can store is https://, ssh:// or git@ (services, compose stacks, providers, Boxes).
+  const plain = await callOp(panel, serviceOps.create, gitService("http://git.example.com/x.git"), { cookie: owner });
+  expect(plain.status).toBe(400);
+  const stack = await callOp(
+    panel,
+    compose.preview,
+    { projectId, name: "stack", nodeId: nodeA, source: composeSource("http://git.example.com/x.git") },
+    { cookie: owner },
+  );
+  expect(stack.status).toBe(400);
+  const created = await callOp(panel, serviceOps.create, gitService("https://git.example.com/x.git"), { cookie: owner });
+  const service = loadService(panel.deps.db, created.body.id);
+  const resolved = await resolveBuild(panel.deps, {
+    service,
+    spec: readSpec(service.spec),
+    buildId: "b1",
+    generation: 1,
+    commitSha: "a".repeat(40),
+    uploadId: null,
+  });
+  const git = resolved.request.source?.source;
+  expect(git?.case).toBe("git");
+  expect(git?.case === "git" && git.value.allowPlainHttp).toBe(false);
 });
 
 test("hosts of git sources saved before the check count as allowed once", () => {

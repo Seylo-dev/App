@@ -6,7 +6,7 @@ import type { compose as composeOps } from "@seylo/ops";
 import { OpError } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, eq } from "drizzle-orm";
-import { servicePlacements, services, volumes } from "../../db/schema";
+import { services, volumes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { queueDeploy } from "../deployments/queue";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
@@ -62,34 +62,26 @@ const maxComposeBytes = 1024 * 1024;
  * Generic git: an agent clones the repository (shallow, sparse, with the
  * stored credential, like a build) and returns the one file (FetchGitFile).
  * The panel itself never runs git against arbitrary hosts, and the agent
- * that does is the stack's node or another node of the same project, with
- * the URL vetted like a build's (git/targets.ts): a member cannot make any
- * node read from its own network.
+ * that does is the stack's own node (the one it is or will be placed on),
+ * with the URL vetted like a build's (git/targets.ts): a member cannot make
+ * another node read from its network.
  */
 async function fetchGitComposeFile(
   deps: Pick<Deps, "db" | "secrets" | "agents">,
   projectId: string,
   source: Extract<ComposeSource, { type: "git" }>,
   ref: string | undefined,
-  preferredNodeId: string | undefined,
+  stackNodeId: string | undefined,
 ): Promise<string> {
-  const projectNodes = deps.db
-    .selectDistinct({ nodeId: servicePlacements.nodeId })
-    .from(servicePlacements)
-    .innerJoin(services, eq(services.id, servicePlacements.serviceId))
-    .where(eq(services.projectId, projectId))
-    .all()
-    .map((r) => r.nodeId);
-  const candidates = [...new Set([...(preferredNodeId ? [preferredNodeId] : []), ...projectNodes])];
-  const nodeId = candidates.find((id) => deps.agents.supports(id, "fetchGitFile"));
-  if (!nodeId) {
-    if (!candidates.some((id) => deps.agents.isOnline(id))) {
-      throw new OpError("UNAVAILABLE", "No node of this project is online to read the repository.", { reason: "offline" });
-    }
-    throw new OpError("NOT_IMPLEMENTED", "The nodes of this project cannot read files from git repositories yet. Update them.", {
+  if (!stackNodeId || !deps.agents.isOnline(stackNodeId)) {
+    throw new OpError("UNAVAILABLE", "The stack's node is offline, so it cannot read the repository.", { reason: "offline" });
+  }
+  if (!deps.agents.supports(stackNodeId, "fetchGitFile")) {
+    throw new OpError("NOT_IMPLEMENTED", "The stack's node cannot read files from git repositories yet. Update it.", {
       reason: "capability",
     });
   }
+  const nodeId = stackNodeId;
   await assertGitTarget(deps.db, { projectId, url: source.url, caller: null });
   // The stored credential only ever goes to its own host, whoever saved the source.
   if (source.credentialId) assertCredentialHost(deps.db, source.credentialId, source.url, "source.credentialId");
