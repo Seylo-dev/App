@@ -15,7 +15,8 @@ http:
       middlewares:
         - seylo-svc9-unreachable
       service: seylo-svc9-local-p9000
-      tls: {}
+      tls:
+        options: seylo-lb
     seylo-svc9-r-web:
       entryPoints:
         - web
@@ -30,7 +31,8 @@ http:
       middlewares:
         - seylo-svc9-unreachable
       service: seylo-svc9-local
-      tls: {}
+      tls:
+        options: seylo-lb
   middlewares:
     seylo-svc9-unreachable:
       errors:

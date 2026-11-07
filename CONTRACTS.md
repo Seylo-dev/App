@@ -551,7 +551,9 @@ local API, join and resume. The areas:
   `seylo-lb` from `seylo-lb.tls.yml` (client certificate from the panel's LB
   CA required, anchor router for the `server_name` SNI), and balancing nodes
   verify peers by `server_name` and present their own certificate instead of
-  `insecureSkipVerify`), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
+  `insecureSkipVerify`; without a complete `lb_tls` no route file has a
+  router on `seylo-lb`, so the entry point, published on every interface,
+  answers 404 to everyone instead of taking any client), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
   directory; for a test CA, config.yml `acme_ca_certificates` (a PEM file,
   mounted as `LEGO_CA_CERTIFICATES`) and `acme_ca_server_name`, or the
   `SEYLO_ACME_CA_CERTIFICATES` / `SEYLO_ACME_CA_SERVER_NAME` env). Next to the Wings fork the files go to its
