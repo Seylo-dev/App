@@ -1172,10 +1172,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   duplicate (scoped to the service: GitLab before 17.4 sends sibling hooks
   of one push the same event UUID), rejected deliveries go to the
   service's delivery list with their own row id (20 an hour at most).
-  Checked deliveries are rate limited per hook (120, then one a second;
-  429 with `Retry-After`, logged as rejected), far above a busy
-  repository, because providers do not retry and GitLab turns off a hook
-  that keeps failing; unchecked ones do not use the budget. A push never builds a sha from the payload alone:
+  Checked deliveries are limited per hook (120, then one a second), far
+  above a busy repository, against a loop with a leaked GitLab token;
+  unchecked ones do not use the budget. Past the limit a delivery is
+  never refused (providers do not retry, and GitLab turns a hook off
+  after 4 failures in a row, a 429 included): it is answered 200
+  `{ ok: true, deferred: true }`, not handled (no API lookup), logged as
+  ignored, and the next branch poll reads the head whatever the hook's
+  cadence (`markPollDue`, in memory), so a push in it deploys about a
+  minute late; a merge request event in it is lost. A push never builds a sha from the payload alone:
   the branch head the provider's API reports is deployed (a payload sha
   is used only when the API cannot say and the body is signed, never for
   GitLab's token). Every push path (provider and GitHub webhooks, both

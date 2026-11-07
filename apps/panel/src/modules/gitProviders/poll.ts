@@ -3,7 +3,8 @@
 // refused to create) the panel reads the head of each followed branch. How
 // often depends on the service's webhook, not on the panel: once a minute
 // while it has none that works, every 5 minutes as a safety net while it
-// does, and not at all while it delivered within that window. Providers
+// does, and not at all while it delivered within that window (unless the
+// webhook route left a delivery unhandled, markPollDue). Providers
 // count API calls per token (Bitbucket Cloud about 1000 an hour), so
 // services with working webhooks must not spend them every minute. A new
 // head is a push the panel missed: its files come from the compare API
@@ -27,6 +28,24 @@ const safetyNetMs = 5 * everyMs;
 /** The schedule fires about every minute; a check a little early still counts as due. */
 const slackMs = 5_000;
 
+/** Per panel database: services whose webhook left a delivery unhandled (over its limit). */
+const dueServices = new WeakMap<object, Set<string>>();
+
+/**
+ * Has the next turn read this service's branch whatever its cadence: the
+ * webhook route answered a delivery without handling it, so a push in it
+ * is found by the head moving. Kept in memory; after a restart the safety
+ * net (5 minutes after the last delivery) finds it.
+ */
+export function markPollDue(deps: Pick<Deps, "db">, serviceId: string): void {
+  let due = dueServices.get(deps.db);
+  if (!due) {
+    due = new Set();
+    dueServices.set(deps.db, due);
+  }
+  due.add(serviceId);
+}
+
 /** How often this service's branch is read, or null when its webhook just proved it works. */
 function cadenceFor(deps: Pick<Deps, "db">, serviceId: string, now: number): number | null {
   const hook = webhookOf(deps, serviceId);
@@ -49,9 +68,12 @@ export async function pollProviderBranches(deps: Deps, now = Date.now()): Promis
     const source = spec.source;
     if (source.type !== "provider" || spec.preview) continue;
     const poll = deps.db.select().from(sourcePolls).where(eq(sourcePolls.serviceId, svc.id)).get();
-    const cadence = cadenceFor(deps, svc.id, now);
-    if (cadence === null) continue;
-    if (poll?.checkedAt && now - poll.checkedAt.getTime() < cadence - slackMs) continue;
+    const due = dueServices.get(deps.db)?.delete(svc.id) ?? false;
+    if (!due) {
+      const cadence = cadenceFor(deps, svc.id, now);
+      if (cadence === null) continue;
+      if (poll?.checkedAt && now - poll.checkedAt.getTime() < cadence - slackMs) continue;
+    }
     const sameBranch = poll?.branch === source.branch;
     const checkedAt = new Date(now);
     // Failed looks count too: a provider that refuses is not asked again before the next turn.

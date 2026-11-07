@@ -62,12 +62,13 @@ export function bodySeen(db: PanelDb, source: WebhookSource, deliveryId: string,
 
 /**
  * Logs a refused delivery (bad signature, replay) for a service's delivery
- * list. The row gets its own id: a delivery id from an unverified request
- * must never overwrite the row of a real delivery.
+ * list, or one that was not handled ("ignored", over a hook's limit). The
+ * row gets its own id: a delivery id from an unverified request must never
+ * overwrite the row of a real delivery.
  */
 export function recordRejected(
   db: PanelDb,
-  input: { source: WebhookSource; event: string; serviceId: string | null; detail: string },
+  input: { source: WebhookSource; event: string; serviceId: string | null; detail: string; outcome?: "rejected" | "ignored" },
 ): void {
   const hour = Math.floor(Date.now() / 3_600_000);
   const count = rejectedCount.get(db);
@@ -80,7 +81,7 @@ export function recordRejected(
     deliveryId: `rejected-${randomUUID()}`,
     event: input.event,
     serviceId: input.serviceId,
-    outcome: "rejected",
+    outcome: input.outcome ?? "rejected",
     detail: input.detail,
   });
 }

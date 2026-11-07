@@ -4,7 +4,8 @@
 // before anything is parsed, needs the provider's delivery id, and a signed
 // body seen before by this hook under another delivery id is a replay.
 // Checked deliveries are rate limited per hook (a leaked GitLab token signs
-// nothing, so it could otherwise post pushes in a loop). Each delivery is
+// nothing, so it could otherwise post pushes in a loop); past the limit a
+// delivery is answered 200 and left to branch polling. Each delivery is
 // logged in the service's delivery list.
 
 import { readBodyText } from "@seylo/ops/elysia";
@@ -20,6 +21,7 @@ import { recordRejected, replayedBody } from "../webhooks/replay";
 import { clientFor } from "./client";
 import { normalizeEvent } from "./events";
 import { dropHook, hookPathPrefix } from "./hooks";
+import { markPollDue } from "./poll";
 import { deployProviderPush, handleProviderMergeRequest } from "./push";
 import { loadProvider } from "./rows";
 import { deliveryIdOf, eventNameOf, signsBody, verifyDelivery } from "./signatures";
@@ -28,12 +30,16 @@ const maxBody = 5 * 1024 * 1024;
 const kinds: GitProviderKind[] = ["gitlab", "gitea", "bitbucket"];
 
 /**
- * Checked deliveries per hook. A provider does not retry a refused
- * delivery and GitLab turns off a hook that keeps failing, so the limit
- * sits far above a busy repository (a bot rebasing a hundred merge
- * requests, pushes from a whole team) and only stops a loop with a leaked
- * GitLab token: each push asks the provider for the head, and at most one
- * push deploy waits behind the running one however many arrive.
+ * Checked deliveries per hook that get handled. The limit sits far above a
+ * busy repository (a bot rebasing a hundred merge requests, pushes from a
+ * whole team) and only stops a loop with a leaked GitLab token: each push
+ * asks the provider for the head, and at most one push deploy waits behind
+ * the running one however many arrive. Past it a delivery is not refused:
+ * no provider retries one, and GitLab turns a hook off after 4 failures in
+ * a row (a 429 counts), after which every push would be missed. It is
+ * answered 200 and not handled, and the next poll reads the branch head
+ * (markPollDue), so a push in it deploys about a minute late; a merge
+ * request event in it is lost.
  */
 const hookRules = { standard: { burst: 120, refillPerSecond: 1 }, strict: { burst: 120, refillPerSecond: 1 } };
 const limiters = new WeakMap<object, RateLimiter>();
@@ -83,21 +89,16 @@ export async function handleProviderDelivery(deps: Deps, kind: GitProviderKind, 
   const deliveryId = deliveryIdOf(kind, request.headers);
   if (!deliveryId) return json(400, { error: { code: "BAD_REQUEST", message: "The delivery id header is missing." } });
   // Only checked deliveries count: someone who knows the address but not the secret cannot use up the hook's budget.
-  const wait = limiterFor(deps).take(`hook:${hook.id}`, "standard");
-  if (wait > 0) {
+  if (limiterFor(deps).take(`hook:${hook.id}`, "standard") > 0) {
+    markPollDue(deps, hook.serviceId);
     recordRejected(deps.db, {
       source: kind,
       event,
       serviceId: hook.serviceId,
-      detail: "Too many deliveries to this webhook (rate limited).",
+      outcome: "ignored",
+      detail: "Too many deliveries to this webhook: not handled; the branch head is read again within a minute.",
     });
-    return new Response(
-      JSON.stringify({ error: { code: "RATE_LIMITED", message: `Too many deliveries. Try again in ${wait} seconds.` } }),
-      {
-        status: 429,
-        headers: { "content-type": "application/json", "retry-after": String(wait) },
-      },
-    );
+    return json(200, { ok: true, deferred: true });
   }
   // A signed body under a new id is a replay; GitLab's token signs nothing, but a repeated body is still one.
   // Per hook: the provider posts the same body to the hook of every service of the repository.
