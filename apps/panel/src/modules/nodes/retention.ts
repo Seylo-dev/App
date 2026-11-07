@@ -9,6 +9,7 @@
 // the rollback targets); only their log lines go.
 
 import { and, desc, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { reportLaneSql } from "../../agent-hub/report-budget";
 import type { PanelDb } from "../../db/client";
 import {
   agentReports,
@@ -30,10 +31,13 @@ export const retention = {
   crashReportsMs: 30 * day,
   /** Newest crash reports kept per service, whatever their age. */
   crashReportsPerService: 200,
-  /** Newest durable events kept per node. */
+  /** Newest durable events kept per node and report lane (general, cron; see agent-hub/report-budget.ts). */
   agentReportsPerNode: 75_000,
-  /** Stored bytes kept per node, newest first: event JSON in agent_reports, crash lines in crash_reports (each). */
+  /** Stored bytes kept per node, newest first: event JSON in agent_reports (per lane), crash lines in crash_reports. */
   reportBytesPerNode: 32 * 1024 * 1024,
+  /** The same for the results lane (backup, cleanup and update results). */
+  resultReportsPerNode: 10_000,
+  resultReportBytesPerNode: 8 * 1024 * 1024,
   webhookDeliveriesMs: 30 * day,
   /** Unsigned or unknown requests are kept a day, to see that something knocked. */
   rejectedDeliveriesMs: day,
@@ -59,16 +63,20 @@ export function pruneTables(db: PanelDb, now = Date.now()): void {
         select id, row_number() over (partition by service_id order by occurred_at desc) as n from ${crashReports}
       ) where n > ${retention.crashReportsPerService}
     )`);
-  // Per node: the newest rows up to a count and a size, so one node's reports stay bounded.
+  // Per node and lane: the newest rows up to a count and a size, so one node's reports stay
+  // bounded and a flood in one lane (crash loops, alerts) does not push out another's rows.
   db.run(sql`
     delete from ${agentReports} where ${agentReports.id} in (
       select id from (
-        select id,
+        select id, lane,
           row_number() over newest as n,
-          sum(length(event)) over newest as total
-        from ${agentReports}
-        window newest as (partition by node_id order by created_at desc, id desc rows unbounded preceding)
-      ) where n > ${retention.agentReportsPerNode} or total > ${retention.reportBytesPerNode}
+          sum(size) over newest as total
+        from (select id, node_id, created_at, length(event) as size, ${reportLaneSql(agentReports.kind)} as lane from ${agentReports})
+        window newest as (partition by node_id, lane order by created_at desc, id desc rows unbounded preceding)
+      ) where case lane
+        when 'results' then n > ${retention.resultReportsPerNode} or total > ${retention.resultReportBytesPerNode}
+        else n > ${retention.agentReportsPerNode} or total > ${retention.reportBytesPerNode}
+      end
     )`);
   db.run(sql`
     delete from ${crashReports} where ${crashReports.id} in (

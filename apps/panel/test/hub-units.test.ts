@@ -95,9 +95,15 @@ describe("Channel", () => {
     const started = performance.now();
     for (let i = 0; i < 200_000; i++) channel.receive(new Uint8Array([i & 0xff]));
     expect(channel.buffered).toBe(200_000);
+    // However many frames brought them, a read returns what is buffered.
     let read = 0;
-    for (let i = 0; i < 200_000; i++) read += (await channel.read())?.length ?? 0;
+    let reads = 0;
+    while (read < 200_000) {
+      read += (await channel.read())?.length ?? 0;
+      reads++;
+    }
     expect(read).toBe(200_000);
+    expect(reads).toBe(1);
     expect(channel.buffered).toBe(0);
     expect(performance.now() - started).toBeLessThan(2000);
     expect(grants.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);

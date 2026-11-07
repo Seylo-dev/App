@@ -26,6 +26,7 @@ import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { enqueueNext } from "../nodes/recurring";
 import { fetchLatestRelease, ReleaseError } from "./manifest";
+import { forgetRollback, noteUpdateResult, panelKey, panelNodeId, wasRolledBack } from "./rollbacks";
 import "./settings";
 
 /** A step not finished in this long fails the run. */
@@ -164,6 +165,12 @@ function storedRelease(db: PanelDb) {
  * panel is older, then one agent step per node whose agent is older (or
  * just `onlyNodeId`). Fails with CONFLICT while another run is active or
  * when there is nothing to update.
+ *
+ * An automatic run leaves out a node whose update to this release was
+ * rolled back, and does not start at all when the panel's own update to it
+ * was (rollbacks.ts): UpdateAgent and UpdatePanel install what they are
+ * asked for, so retrying would loop install / roll back every check. A run
+ * a person starts includes them and clears those records.
  */
 export function startRun(
   deps: Pick<Deps, "db" | "agents" | "config" | "jobs">,
@@ -171,8 +178,16 @@ export function startRun(
 ): RunRow {
   const release = storedRelease(deps.db);
   if (activeRun(deps.db)) throw new OpError("CONFLICT", "Another update is running. Wait for it to finish.");
+  const auto = options.trigger === "auto";
   const steps: Omit<typeof updateSteps.$inferInsert, "runId">[] = [];
   if (!options.onlyNodeId && isNewer(release.version, deps.config.version)) {
+    if (auto && wasRolledBack(deps.db, panelKey, release.version)) {
+      // Nodes go after the panel; they wait with it.
+      throw new OpError(
+        "CONFLICT",
+        `The panel's update to ${release.version} was rolled back. Update it by hand or wait for a newer release.`,
+      );
+    }
     steps.push({ position: 0, target: "panel", fromVersion: deps.config.version, toVersion: release.version });
   }
   if (!options.panelOnly) {
@@ -182,11 +197,16 @@ export function startRun(
       if (row.disabledAt) continue;
       const version = agentVersion(deps, row);
       if (!options.onlyNodeId && !isNewer(release.version, version)) continue;
+      if (auto && wasRolledBack(deps.db, row.id, release.version)) continue;
       steps.push({ position: steps.length, target: "agent", nodeId: row.id, fromVersion: version, toVersion: release.version });
     }
     if (options.onlyNodeId && steps.length === 0) throw new OpError("NOT_FOUND", "No node with this id.");
   }
   if (steps.length === 0) throw new OpError("CONFLICT", "Everything already runs the latest version.");
+  if (!auto) {
+    // A person asked for this release here: it may be retried automatically again.
+    for (const step of steps) forgetRollback(deps.db, step.target === "panel" ? panelKey : (step.nodeId as string), release.version);
+  }
   const run = deps.db.transaction((tx) => {
     const created = tx
       .insert(updateRuns)
@@ -390,6 +410,8 @@ export const checkJob = defineJob<Record<string, never>>({
  * panel step on the panel's node); another node cannot finish it.
  */
 export function applyUpdateResult(deps: Pick<Deps, "db" | "jobs" | "live">, nodeId: string, result: UpdateResult): void {
+  // Also results no step names (the agent updating itself on connect).
+  noteUpdateResult(deps.db, nodeId, result, panelNodeId(deps.db));
   const step = deps.db.select().from(updateSteps).where(eq(updateSteps.id, result.updateId)).get();
   if (!step || !["pending", "running"].includes(step.status)) return;
   const runsOn = step.nodeId ?? deps.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get()?.id ?? null;

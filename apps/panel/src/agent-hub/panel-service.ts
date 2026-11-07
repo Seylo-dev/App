@@ -52,7 +52,7 @@ import { createRateLimiter } from "../ops/rate-limit";
 import { capFields, storedReportLimits } from "./field-caps";
 import type { AgentHub } from "./hub";
 import { type IncomingStream, PanelServiceError, type PanelServiceHandlers } from "./panel-service-types";
-import { createReportBudget, storedReportsSince } from "./report-budget";
+import { createReportBudget, type ReportLane, reportLane, storedReportsSince } from "./report-budget";
 
 export interface PanelServiceDeps {
   db: PanelDb;
@@ -60,8 +60,8 @@ export interface PanelServiceDeps {
   logger: Logger;
   /** The node's current desired state, or null when `knownRevision` is already current. */
   desiredState(nodeId: string, knownRevision: bigint): DesiredState | null;
-  /** A node passed its daily report budget (report-budget.ts); called once per node and day. */
-  reportBudgetExceeded?(nodeId: string): void;
+  /** A node passed its daily report budget in a lane (report-budget.ts); called once per node, lane and day. */
+  reportBudgetExceeded?(nodeId: string, lane: ReportLane): void;
   /** CheckEdgeAccess: whether the ticket's user may keep the tool session ("box:<id>", "db-ui:<id>") on this node. */
   edgeAccessAllowed(nodeId: string, request: { subject: string; userId: string }): boolean;
 }
@@ -119,10 +119,10 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
   });
 
   const budget = createReportBudget({
-    storedSince: (nodeId, since) => storedReportsSince(db, nodeId, since),
-    onExceeded: (nodeId) => {
-      logger.warn({ nodeId }, "node passed its daily report budget; further reports are acknowledged and dropped");
-      deps.reportBudgetExceeded?.(nodeId);
+    storedSince: (nodeId, lane, since) => storedReportsSince(db, nodeId, lane, since),
+    onExceeded: (nodeId, lane) => {
+      logger.warn({ nodeId, lane }, "node passed its daily report budget; further reports of this lane are acknowledged and dropped");
+      deps.reportBudgetExceeded?.(nodeId, lane);
     },
   });
 
@@ -157,7 +157,7 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
     report.containerId = report.containerId.slice(0, maxContainerIdLength);
     const size = JSON.stringify(report.lastLines).length + report.containerId.length;
     // Over the node's budget: acked (the agent drops it) but not stored or fanned out.
-    if (!budget.allows(nodeId, size)) return toBinary(ReportCrashResponseSchema, create(ReportCrashResponseSchema));
+    if (!budget.allows(nodeId, "general", size)) return toBinary(ReportCrashResponseSchema, create(ReportCrashResponseSchema));
     const row = db
       .insert(crashReports)
       .values({
@@ -177,7 +177,7 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       .returning({ id: crashReports.id })
       .get();
     if (row) {
-      budget.spend(nodeId, size);
+      budget.spend(nodeId, "general", size);
       hub.emitCrash(nodeId, report, { outboxId, crashId: row.id });
     }
     return toBinary(ReportCrashResponseSchema, create(ReportCrashResponseSchema));
@@ -201,8 +201,10 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
     // Nothing reads agent_reports back (it dedupes): a smaller copy is enough.
     const stored = toJson(EventSchema, capFields(clone(EventSchema, event), storedReportLimits)) as Record<string, unknown>;
     const size = JSON.stringify(stored).length;
+    // Cron, backup and cleanup results have budgets of their own: a crash or alert flood cannot starve them.
+    const lane = reportLane(event.payload.case ?? "");
     // Over the node's budget: acked (the agent drops it) but not stored or fanned out.
-    if (!budget.allows(nodeId, size)) return toBinary(ReportEventResponseSchema, create(ReportEventResponseSchema));
+    if (!budget.allows(nodeId, lane, size)) return toBinary(ReportEventResponseSchema, create(ReportEventResponseSchema));
     const row = db
       .insert(agentReports)
       .values({
@@ -217,7 +219,7 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       .get();
     // A retry of something already stored: ack again, tell nobody twice.
     if (row) {
-      budget.spend(nodeId, size);
+      budget.spend(nodeId, lane, size);
       hub.emitEvent(nodeId, event, { durable: true, outboxId });
     }
     return toBinary(ReportEventResponseSchema, create(ReportEventResponseSchema));

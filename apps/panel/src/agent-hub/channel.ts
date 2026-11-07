@@ -37,9 +37,13 @@ export class Channel {
   /** What the agent may still send us. */
   private peerCredit: number;
   private unacked = 0;
-  /** Chunks received and not read; entries before `inboundHead` were read. A head index, not shift(): the agent picks the frame sizes. */
-  private inbound: Uint8Array[] = [];
-  private inboundHead = 0;
+  /**
+   * Bytes received and not read, at the start of one buffer that doubles as
+   * it fills, not one object per DATA frame: the agent picks the frame
+   * sizes, and a million 1-byte frames as a million objects hold about
+   * 100 MiB. read() hands the buffer over and the next frame starts a new one.
+   */
+  private inbound: Uint8Array = empty;
   private inboundBytes = 0;
   private readWaiters: (() => void)[] = [];
   private endValue: ChannelEnd | null = null;
@@ -69,20 +73,25 @@ export class Channel {
     if (this.endValue) return;
     if (bytes.length > this.peerCredit) throw new ProtocolViolation(`stream ${this.id} exceeded its flow-control window`);
     this.peerCredit -= bytes.length;
-    // The frame payload is a view into the socket buffer; keep a copy.
-    this.inbound.push(bytes.slice());
+    if (bytes.length === 0) return;
+    // The frame payload is a view into the socket buffer; this copies it.
+    this.inbound = reserve(this.inbound, this.inboundBytes, this.inboundBytes + bytes.length);
+    this.inbound.set(bytes, this.inboundBytes);
     this.inboundBytes += bytes.length;
     this.wakeReaders();
   }
 
   /**
-   * Next chunk of received bytes, or null once the stream ended and the
-   * queue is empty. Rejects with the end error after the queue drains.
+   * Every byte received and not read yet (however many frames brought
+   * them), or null once the stream ended and nothing is left. Rejects with
+   * the end error after the queue drains.
    */
   async read(): Promise<Uint8Array | null> {
     for (;;) {
-      const chunk = this.nextInbound();
-      if (chunk) {
+      if (this.inboundBytes > 0) {
+        const chunk = this.inbound.subarray(0, this.inboundBytes);
+        this.inbound = empty;
+        this.inboundBytes = 0;
         this.consumed(chunk.length);
         return chunk;
       }
@@ -98,22 +107,6 @@ export class Channel {
   /** Bytes buffered and not read yet. */
   get buffered(): number {
     return this.inboundBytes;
-  }
-
-  private nextInbound(): Uint8Array | undefined {
-    if (this.inboundHead >= this.inbound.length) return undefined;
-    const chunk = this.inbound[this.inboundHead] as Uint8Array;
-    this.inbound[this.inboundHead] = empty;
-    this.inboundHead++;
-    this.inboundBytes -= chunk.length;
-    if (this.inboundHead === this.inbound.length) {
-      this.inbound = [];
-      this.inboundHead = 0;
-    } else if (this.inboundHead >= 1024 && this.inboundHead * 2 >= this.inbound.length) {
-      this.inbound = this.inbound.slice(this.inboundHead);
-      this.inboundHead = 0;
-    }
-    return chunk;
   }
 
   private consumed(n: number): void {
@@ -188,114 +181,93 @@ export class Channel {
 }
 
 /**
+ * `buffer` with room for `size` bytes and its first `used` bytes kept: the
+ * same buffer when it is large enough, else a new one at least twice as
+ * large (and at least `floor`, at most `limit`). Filling a buffer this way
+ * copies each byte about twice in all, and it is never larger than twice
+ * what it holds or `floor`, whichever is more.
+ */
+function reserve(buffer: Uint8Array, used: number, size: number, floor = 0, limit = Number.POSITIVE_INFINITY): Uint8Array {
+  if (size <= buffer.length) return buffer;
+  const grown = new Uint8Array(Math.min(limit, Math.max(size, buffer.length * 2, floor)));
+  grown.set(buffer.subarray(0, used));
+  return grown;
+}
+
+/** First buffer for a message body split across chunks (messages up to this size get one allocation). */
+const bodyFloor = 64 << 10;
+
+/**
  * Incremental decoder for size-delimited protobuf messages (varint length,
  * then the message), which may span DATA frames. The sender picks the
- * frame sizes, so the work must not depend on them: chunks are kept as they
- * came and every byte is copied once, into its message, when the whole
- * message is there (a 1 MiB message in 1-byte frames costs what it costs in
- * one frame, plus a little per frame).
+ * frame sizes, so neither time nor memory may depend on them: the prefix is
+ * read byte by byte into two numbers, and a body split across chunks is
+ * collected in one buffer that doubles up to the announced length. A
+ * message costs about twice its size at most while it is pending, in 1-byte
+ * frames as in one, and each byte is copied about twice.
  */
 export class DelimitedDecoder {
-  /** Received bytes not returned yet, as they came; chunks before `first` and `head` bytes of `chunks[first]` are used. */
-  private chunks: Uint8Array[] = [];
-  private first = 0;
-  private head = 0;
-  private available = 0;
+  /** Varint length prefix read so far. */
+  private prefixValue = 0;
+  private prefixBytes = 0;
   /** Body length of the message being collected once its prefix was read, else -1. */
   private need = -1;
+  /** The first `filled` bytes of the body being collected. */
+  private body: Uint8Array = empty;
+  private filled = 0;
 
   push(bytes: Uint8Array): Uint8Array[] {
-    if (bytes.length > 0) {
-      this.chunks.push(bytes);
-      this.available += bytes.length;
-    }
     const out: Uint8Array[] = [];
-    for (;;) {
+    let at = 0;
+    while (at < bytes.length) {
       if (this.need < 0) {
-        const length = this.readPrefix();
-        if (length === null) break;
-        this.need = length;
+        const byte = bytes[at] as number;
+        at++;
+        this.prefixValue += (byte & 0x7f) * 2 ** (7 * this.prefixBytes);
+        this.prefixBytes++;
+        if ((byte & 0x80) !== 0) {
+          if (this.prefixBytes >= 5) throw new ProtocolViolation("bad message length prefix");
+          continue;
+        }
+        if (this.prefixValue > maxMessageSize) throw new ProtocolViolation("stream message too large");
+        this.need = this.prefixValue;
+        this.prefixValue = 0;
+        this.prefixBytes = 0;
+        if (this.need === 0) {
+          out.push(new Uint8Array(0));
+          this.need = -1;
+        }
+        continue;
       }
-      if (this.available < this.need) break;
-      out.push(this.take(this.need));
-      this.need = -1;
+      const count = Math.min(this.need - this.filled, bytes.length - at);
+      if (this.filled === 0 && count === this.need) {
+        // The whole body is in this chunk: one copy, no buffer.
+        out.push(bytes.slice(at, at + count));
+        this.need = -1;
+      } else {
+        this.body = reserve(this.body, this.filled, this.filled + count, bodyFloor, this.need);
+        this.body.set(bytes.subarray(at, at + count), this.filled);
+        this.filled += count;
+        if (this.filled === this.need) {
+          out.push(this.body.length === this.need ? this.body : this.body.slice(0, this.need));
+          this.body = empty;
+          this.filled = 0;
+          this.need = -1;
+        }
+      }
+      at += count;
     }
     return out;
   }
 
   /** True when a partial message is left over. */
   get pending(): boolean {
-    return this.available > 0 || this.need >= 0;
+    return this.prefixBytes > 0 || this.need >= 0;
   }
 
-  /** Reads and consumes the varint length prefix when all of it arrived; null when more bytes are needed. */
-  private readPrefix(): number | null {
-    let value = 0;
-    let shift = 0;
-    let read = 0;
-    let index = this.first;
-    let offset = this.head;
-    while (read < 5 && read < this.available) {
-      const chunk = this.chunks[index] as Uint8Array;
-      if (offset >= chunk.length) {
-        index++;
-        offset = 0;
-        continue;
-      }
-      const byte = chunk[offset] as number;
-      offset++;
-      read++;
-      value += (byte & 0x7f) * 2 ** shift;
-      if ((byte & 0x80) === 0) {
-        if (value > maxMessageSize) throw new ProtocolViolation("stream message too large");
-        this.skip(read);
-        return value;
-      }
-      shift += 7;
-    }
-    if (read >= 5) throw new ProtocolViolation("bad message length prefix");
-    return null;
-  }
-
-  /** Copies the next n bytes out (n <= available) and drops the chunks they used up. */
-  private take(n: number): Uint8Array {
-    const out = new Uint8Array(n);
-    let written = 0;
-    while (written < n) {
-      const chunk = this.chunks[this.first] as Uint8Array;
-      const count = Math.min(chunk.length - this.head, n - written);
-      out.set(chunk.subarray(this.head, this.head + count), written);
-      written += count;
-      this.advance(count, chunk.length);
-    }
-    this.available -= n;
-    return out;
-  }
-
-  private skip(n: number): void {
-    let left = n;
-    while (left > 0) {
-      const chunk = this.chunks[this.first] as Uint8Array;
-      const count = Math.min(chunk.length - this.head, left);
-      left -= count;
-      this.advance(count, chunk.length);
-    }
-    this.available -= n;
-  }
-
-  private advance(count: number, chunkLength: number): void {
-    this.head += count;
-    if (this.head < chunkLength) return;
-    this.head = 0;
-    this.first++;
-    // Drop used chunks now and then rather than shifting the array per chunk.
-    if (this.first === this.chunks.length) {
-      this.chunks = [];
-      this.first = 0;
-    } else if (this.first >= 1024 && this.first * 2 >= this.chunks.length) {
-      this.chunks = this.chunks.slice(this.first);
-      this.first = 0;
-    }
+  /** Bytes this decoder holds for the message it is collecting (its buffer's size). */
+  get held(): number {
+    return this.body.length;
   }
 }
 
