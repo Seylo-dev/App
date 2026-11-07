@@ -50400,9 +50400,16 @@
                       "type": "string"
                     },
                     "username": {
-                      "minLength": 1,
-                      "maxLength": 200,
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "usedBy": {
                       "minimum": 0,
@@ -50491,7 +50498,7 @@
       "get": {
         "operationId": "registries.list",
         "summary": "List registry logins",
-        "description": "Lists stored registry logins by name, server and user name (never the password), so people can pick one for an image source.",
+        "description": "Lists stored registry logins by name and server (never the password), so people can pick one for an image source. The user name is null unless the caller manages registries.",
         "tags": [
           "registries"
         ],
@@ -50547,9 +50554,16 @@
                             "type": "string"
                           },
                           "username": {
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "usedBy": {
                             "minimum": 0,
@@ -50741,9 +50755,16 @@
                       "type": "string"
                     },
                     "username": {
-                      "minLength": 1,
-                      "maxLength": 200,
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "usedBy": {
                       "minimum": 0,

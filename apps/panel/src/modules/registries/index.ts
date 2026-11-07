@@ -49,7 +49,7 @@ export function openRegistryLogin(db: PanelDb, secrets: SecretBox, registryId: s
 }
 
 // Everyone signed in sees names and servers for the image picker; user names
-// stay with people who manage registries.
+// stay with people who manage registries (null for everyone else).
 const list = implement(registryOps.list, (_input, ctx) => {
   const used = usage(ctx.db);
   const full = ctx.access.can("registries.manage");
@@ -59,7 +59,7 @@ const list = implement(registryOps.list, (_input, ctx) => {
       .from(registryCredentials)
       .orderBy(registryCredentials.name)
       .all()
-      .map((r) => ({ ...toRegistry(r, used.get(r.id) ?? 0), ...(full ? {} : { username: "" }) })),
+      .map((r) => ({ ...toRegistry(r, used.get(r.id) ?? 0), ...(full ? {} : { username: null }) })),
   };
 });
 
