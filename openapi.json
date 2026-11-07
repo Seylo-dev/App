@@ -34596,7 +34596,7 @@
       "get": {
         "operationId": "github.repos",
         "summary": "List repositories",
-        "description": "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for.",
+        "description": "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation is already used for in that project.",
         "tags": [
           "github"
         ],
@@ -37200,7 +37200,7 @@
       "get": {
         "operationId": "gitProviders.repos",
         "summary": "List a provider's repositories",
-        "description": "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for.",
+        "description": "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for; people without gitProviders.manage see only the repositories the connection is already used for in that project.",
         "tags": [
           "gitProviders"
         ],

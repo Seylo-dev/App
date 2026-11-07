@@ -164,7 +164,7 @@ export const repos = defineOp({
   kind: "query",
   summary: "List repositories",
   description:
-    "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for.",
+    "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation is already used for in that project.",
   input: Type.Object({
     projectId: Id,
     installationId: Id,

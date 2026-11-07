@@ -1066,7 +1066,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   deploy time); attaching a credential, registry login or GitHub App
   installation (or git provider connection) to a project needs
   `git.manage`/`registries.manage`/`github.manage`/`gitProviders.manage`
-  unless a service of that project already uses it. Image
+  unless a service of that project already uses it for the same target:
+  the same git URL (`normalizeGitUrl`: case, trailing `/` and `.git`
+  aside), image repository (`imageRepository`: any tag or digest) or
+  repository (`source-guard.ts` `sharedTargets`), so sharing a token that
+  reaches every repository of the owner shares one repository.
+  `github.repos` and `gitProviders.repos` list only those repositories to
+  non-managers; `github.branches`, `gitProviders.branches`,
+  `git.branches`, `connectRepo` and saving a source refuse others
+  (FORBIDDEN) before the provider is called. Image
   sources (also compose members and templates) may not name loopback hosts
   or port 5755 (the registry relay). Non-managers listing credentials,
   registries, channels or the GitHub device account get names and hosts

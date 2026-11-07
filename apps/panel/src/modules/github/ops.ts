@@ -13,7 +13,7 @@ import { gitCredentials, githubApps, githubDeviceFlows, githubInstallations, git
 import { implement, type OpContext } from "../../ops/implement";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService, toDetail } from "../services/rows";
-import { assertSourceAllowed } from "../services/source-guard";
+import { assertMayUseSomewhere, assertSourceAllowed } from "../services/source-guard";
 import { readPanelName } from "../settings/keys";
 import { githubPages, githubRequest } from "./api";
 import {
@@ -254,10 +254,12 @@ async function installationRepos(ctx: OpContext, installationRowId: string): Pro
 const pageSize = 30;
 
 const repos = implement(githubOps.repos, async (input, ctx) => {
-  assertSourceAllowed(ctx, input.projectId, { type: "github", installationId: input.installationId });
+  // People who do not manage GitHub see only the repositories the installation is shared for in this project.
+  const shared = assertMayUseSomewhere(ctx, input.projectId, "github", input.installationId, "installationId");
   const all = await installationRepos(ctx, input.installationId);
   const q = input.query?.toLowerCase().trim() ?? "";
   const filtered = all
+    .filter((r) => shared === null || shared.has(r.full_name.toLowerCase()))
     .filter((r) => !q || r.full_name.toLowerCase().includes(q))
     .sort((a, b) => (b.pushed_at ?? "").localeCompare(a.pushed_at ?? ""));
   const page = input.page ?? 1;
@@ -284,7 +286,7 @@ export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, insta
 }
 
 const branches = implement(githubOps.branches, async (input, ctx) => {
-  assertSourceAllowed(ctx, input.projectId, { type: "github", installationId: input.installationId });
+  assertSourceAllowed(ctx, input.projectId, { type: "github", installationId: input.installationId, repo: input.repo }, "");
   const { defaultBranch, branches: all } = await repoBranches(ctx, input.installationId, input.repo);
   const q = input.query?.toLowerCase().trim() ?? "";
   return { defaultBranch, branches: all.filter((b) => !q || b.toLowerCase().includes(q)).slice(0, 500) };
@@ -295,7 +297,7 @@ const connectRepo = implement(githubOps.connectRepo, async (input, ctx) => {
   if (row.kind !== "app" && row.kind !== "cron") throw new OpError("CONFLICT", `A ${row.kind} service cannot build from a repository.`);
   if (row.parentId) throw new OpError("CONFLICT", "Compose members build from their stack's repository.");
   installationById(ctx.db, input.installationId);
-  assertSourceAllowed(ctx, row.projectId, { type: "github", installationId: input.installationId });
+  assertSourceAllowed(ctx, row.projectId, { type: "github", installationId: input.installationId, repo: input.repo }, "");
   const token = await tokenForInstallation(ctx.db, ctx.secrets, input.installationId);
   try {
     await githubRequest(`/repos/${input.repo}/branches/${encodeURIComponent(input.branch)}`, { auth: token });

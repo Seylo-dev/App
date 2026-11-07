@@ -7,14 +7,16 @@
 //   never to another registry);
 // - attaching one to a project needs the global manage action for it
 //   (git.manage, registries.manage, github.manage, gitProviders.manage)
-//   unless a service of the same project already uses it, which is how an
-//   admin shares it there;
+//   unless a service of the same project already uses it for the same
+//   repository, git URL or image repository, which is how an admin shares
+//   it there: sharing a token that reaches every repository of the owner
+//   shares that one repository, not the token;
 // - an image may not come from the panel's registry relay
 //   (127.0.0.1:5755/<service id>): those images belong to their services
 //   and only deployments reference them.
 
 import { OpError } from "@seylo/ops";
-import { and, eq, or, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Access } from "../../auth/access";
 import type { PanelDb } from "../../db/client";
 import { gitCredentials, registryCredentials, services } from "../../db/schema";
@@ -55,35 +57,96 @@ export function assertImageAllowed(image: string, field = "source.image"): void 
   }
 }
 
-/** Whether a service of this project uses the credential in its source or compose source. */
-type AttachPath = "credentialId" | "registryId" | "installationId" | "providerId";
+/** The kinds of shared credential and what each one is shared for. */
+const attachKinds = {
+  git: { action: "git.manage", path: "credentialId", target: "url", normalize: (v: string) => normalizeGitUrl(v), what: "git credential" },
+  registry: {
+    action: "registries.manage",
+    path: "registryId",
+    target: "image",
+    normalize: (v: string) => imageRepository(v),
+    what: "registry login",
+  },
+  github: {
+    action: "github.manage",
+    path: "installationId",
+    target: "repo",
+    normalize: (v: string) => v.toLowerCase(),
+    what: "GitHub installation",
+  },
+  provider: {
+    action: "gitProviders.manage",
+    path: "providerId",
+    target: "repo",
+    normalize: (v: string) => v.toLowerCase().replace(/\/+$/, ""),
+    what: "git provider connection",
+  },
+} as const;
+export type AttachKind = keyof typeof attachKinds;
 
-function usedInProject(db: PanelDb, projectId: string, path: AttachPath, id: string): boolean {
-  const source = sql`json_extract(${services.spec}, ${`$.source.${path}`})`;
-  const stack = sql`json_extract(${services.spec}, ${`$.stack.source.${path}`})`;
-  return (
-    db
-      .select({ id: services.id })
-      .from(services)
-      .where(and(eq(services.projectId, projectId), or(sql`${source} = ${id}`, sql`${stack} = ${id}`)))
-      .get() !== undefined
-  );
+/** "https://Git.Example.com/a/b.git/" and "https://git.example.com/a/b" are the same repository. */
+export function normalizeGitUrl(url: string): string {
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "");
 }
 
-function assertMayAttach(
-  caller: Caller,
-  projectId: string,
-  action: "git.manage" | "registries.manage" | "github.manage" | "gitProviders.manage",
-  path: AttachPath,
-  id: string,
-  field: string,
-  what: string,
-): void {
-  if (caller.access.can(action) || usedInProject(caller.db, projectId, path, id)) return;
-  throw new OpError("FORBIDDEN", `Only admins can use this ${what} in a new project. Ask one to set up the first service with it.`, {
-    action,
-    field,
-  });
+/** "ghcr.io/acme/app:1.2@sha256:..." -> "ghcr.io/acme/app"; Docker Hub names get docker.io/(library/). */
+export function imageRepository(image: string): string {
+  const withoutDigest = image.trim().toLowerCase().split("@")[0] ?? "";
+  const slash = withoutDigest.lastIndexOf("/");
+  const colon = withoutDigest.lastIndexOf(":");
+  const name = colon > slash ? withoutDigest.slice(0, colon) : withoutDigest;
+  const registry = imageRegistry(name);
+  if (registry !== "docker.io") return name;
+  const path = name.replace(/^(docker\.io|index\.docker\.io|registry-1\.docker\.io)\//, "");
+  return `docker.io/${path.includes("/") ? path : `library/${path}`}`;
+}
+
+/**
+ * What a credential is already used for in a project (normalized), from its
+ * services' sources and compose stacks; null when the caller manages that
+ * kind and may use it for anything.
+ */
+export function sharedTargets(caller: Caller, projectId: string, kind: AttachKind, id: string): Set<string> | null {
+  const rule = attachKinds[kind];
+  if (caller.access.can(rule.action)) return null;
+  const out = new Set<string>();
+  const rows = caller.db.select({ spec: services.spec }).from(services).where(eq(services.projectId, projectId)).all();
+  for (const { spec } of rows) {
+    const record = spec as { source?: Record<string, unknown>; stack?: { source?: Record<string, unknown> } | null } | null;
+    for (const source of [record?.source, record?.stack?.source]) {
+      const target = source?.[rule.target];
+      if (source?.[rule.path] === id && typeof target === "string") out.add(rule.normalize(target));
+    }
+  }
+  return out;
+}
+
+function assertMayAttach(caller: Caller, projectId: string, kind: AttachKind, id: string, target: string, field: string): void {
+  const shared = sharedTargets(caller, projectId, kind, id);
+  if (shared === null || shared.has(attachKinds[kind].normalize(target))) return;
+  const { action, what } = attachKinds[kind];
+  const message =
+    shared.size === 0
+      ? `Only admins can use this ${what} in a new project. Ask one to set up the first service with it.`
+      : `In this project the ${what} is shared for ${[...shared].join(", ")} only. Ask an admin to set up a service with it for another one.`;
+  throw new OpError("FORBIDDEN", message, { action, field });
+}
+
+/** FORBIDDEN unless the caller may use the credential in this project at all (pickers before a repository is chosen). */
+export function assertMayUseSomewhere(caller: Caller, projectId: string, kind: AttachKind, id: string, field: string): Set<string> | null {
+  const shared = sharedTargets(caller, projectId, kind, id);
+  if (shared !== null && shared.size === 0) {
+    const { action, what } = attachKinds[kind];
+    throw new OpError("FORBIDDEN", `Only admins can use this ${what} in a new project. Ask one to set up the first service with it.`, {
+      action,
+      field,
+    });
+  }
+  return shared;
 }
 
 /** BAD_REQUEST unless the git credential is for the URL's host. */
@@ -122,8 +185,8 @@ export function registryMatches(server: string, image: string): boolean {
 export type GuardedSource =
   | { type: "git"; url: string; credentialId?: string | null }
   | { type: "image"; image: string; registryId?: string | null }
-  | { type: "github"; installationId: string }
-  | { type: "provider"; providerId: string }
+  | { type: "github"; installationId: string; repo: string }
+  | { type: "provider"; providerId: string; repo: string }
   | { type: string };
 
 /** Checks a source (service or compose stack) before it is stored for a service of `projectId`. */
@@ -131,27 +194,19 @@ export function assertSourceAllowed(caller: Caller, projectId: string, source: G
   const at = (name: string) => (field ? `${field}.${name}` : name);
   if (source.type === "git" && "url" in source && source.credentialId) {
     assertCredentialHost(caller.db, source.credentialId, source.url, at("credentialId"));
-    assertMayAttach(caller, projectId, "git.manage", "credentialId", source.credentialId, at("credentialId"), "git credential");
+    assertMayAttach(caller, projectId, "git", source.credentialId, source.url, at("credentialId"));
   }
   if (source.type === "image" && "image" in source) {
     assertImageAllowed(source.image, at("image"));
     if (source.registryId) {
       assertRegistryHost(caller.db, source.registryId, source.image, at("registryId"));
-      assertMayAttach(caller, projectId, "registries.manage", "registryId", source.registryId, at("registryId"), "registry login");
+      assertMayAttach(caller, projectId, "registry", source.registryId, source.image, at("registryId"));
     }
   }
   if (source.type === "provider" && "providerId" in source) {
-    assertMayAttach(caller, projectId, "gitProviders.manage", "providerId", source.providerId, at("providerId"), "git provider connection");
+    assertMayAttach(caller, projectId, "provider", source.providerId, "repo" in source ? source.repo : "", at("providerId"));
   }
   if (source.type === "github" && "installationId" in source) {
-    assertMayAttach(
-      caller,
-      projectId,
-      "github.manage",
-      "installationId",
-      source.installationId,
-      at("installationId"),
-      "GitHub installation",
-    );
+    assertMayAttach(caller, projectId, "github", source.installationId, "repo" in source ? source.repo : "", at("installationId"));
   }
 }

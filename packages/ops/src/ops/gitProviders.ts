@@ -174,7 +174,7 @@ export const repos = defineOp({
   kind: "query",
   summary: "List a provider's repositories",
   description:
-    "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for.",
+    "Lists the repositories a connection's token can read, most recently active first, optionally filtered by name. Needs the right to create services in the project the repository is picked for; people without gitProviders.manage see only the repositories the connection is already used for in that project.",
   input: Type.Object({
     projectId: Id,
     providerId: Id,
