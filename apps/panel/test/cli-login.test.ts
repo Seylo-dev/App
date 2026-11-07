@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { auth, cliLogin, projects as projectOps, users as userOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { alerts, apiKeys, auditLog, cliLoginRequests } from "../src/db/schema";
+import { createProxyTrust } from "../src/http/proxy-trust";
 import { newUserCode } from "../src/modules/cliLogin";
 import { createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
 import { call, noLimits, ok, seedProject } from "./people-helpers";
@@ -102,8 +103,18 @@ test("user codes use only unambiguous letters", () => {
   for (let i = 0; i < 200; i++) expect(newUserCode()).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ2-9]{8}$/);
 });
 
-test("one computer name cannot start sign-ins in a loop", async () => {
-  const statuses: number[] = [];
-  for (let i = 0; i < 12; i++) statuses.push((await call(panel, cliLogin.start, { clientName: "loop (linux/amd64)" })).status);
-  expect(statuses).toContain(429);
+test("one computer name cannot start sign-ins in a loop from one address, and does not block other addresses", async () => {
+  const proxied = testPanel({ rateLimiter: noLimits, proxy: createProxyTrust({ always: true, proxies: [] }) });
+  try {
+    const from = (ip: string) => ({ headers: { "x-forwarded-for": ip } });
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++)
+      statuses.push((await call(proxied, cliLogin.start, { clientName: "loop (linux/amd64)" }, from("198.51.100.4"))).status);
+    expect(statuses).toContain(429);
+    // The same, guessable name from the person's own address still works.
+    expect((await call(proxied, cliLogin.start, { clientName: "loop (linux/amd64)" }, from("203.0.113.8"))).status).toBe(200);
+    expect((await call(proxied, cliLogin.start, { clientName: "loop (linux/amd64)" }, from("198.51.100.4"))).status).toBe(429);
+  } finally {
+    proxied.close();
+  }
 });

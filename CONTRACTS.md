@@ -889,6 +889,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `poll` creates the API key ("CLI on <name>") on the first poll after approval
   and returns it once. Requests live 10 minutes (`cli_login_requests`, swept on
   `start`); only the device code's hash and the chosen scope are stored.
+  Besides the per-address strict limit, `start` has a strict bucket per
+  (computer name, address group): names are guessable, so a name alone would
+  let anyone block someone else's computer.
   The web page (`/cli/approve`) never opens a request from `?code=`: the person
   types the code their terminal shows (kept in page state, not the URL), and
   nothing is preselected (read only or everything, some or all projects must be
