@@ -109,7 +109,8 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	}
 	target := "FETCH_HEAD"
 	if err := fetch(want, true); err != nil {
-		if src.GetCommit() == "" || ctx.Err() != nil {
+		// A refused address stays refused: no second try for the branch.
+		if src.GetCommit() == "" || ctx.Err() != nil || g.proxy.Refused() != nil {
 			return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
 		}
 		// The server does not serve commits by id: fetch the branch.

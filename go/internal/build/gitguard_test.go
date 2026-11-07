@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -56,6 +58,49 @@ func TestNodeRefusesInternalGitAddresses(t *testing.T) {
 	var log bytes.Buffer
 	if _, err := fetchGit(ctx, run, &log, &agentv1.GitSource{Url: url, Ref: "main", AllowInternalHost: true}, filepath.Join(work, "src"), work, false); err != nil {
 		t.Fatalf("allowed host, build fetch: %v\n%s", err, log.String())
+	}
+}
+
+// fetchCounter counts the git fetch commands it runs.
+type fetchCounter struct {
+	Runner
+	fetches atomic.Int32
+}
+
+func (r *fetchCounter) Run(ctx context.Context, c Cmd) error {
+	if slices.Contains(c.Args, "fetch") {
+		r.fetches.Add(1)
+	}
+	return r.Runner.Run(ctx, c)
+}
+
+// A fetch by commit id that the node refused is not retried as a branch
+// fetch "because the server does not serve commits by id": the address is
+// the same, and the build log would blame the server.
+func TestRefusedCommitFetchIsNotRetried(t *testing.T) {
+	url, work, run, hits := gitServerHits(t, defaultGitUser, "", nil)
+	byName := strings.Replace(url, "127.0.0.1", "localhost", 1)
+	src := &agentv1.GitSource{Url: byName, Ref: "main", Commit: headOf(t, work, "main")}
+	ctx := context.Background()
+
+	count := &fetchCounter{Runner: run}
+	s := New(Options{Dir: t.TempDir(), Runner: count})
+	defer s.Close()
+	res, err := s.FetchFile(ctx, &agentv1.FetchGitFileRequest{Source: src, Path: "a.txt"})
+	// Before: a second fetch of main through the same refused address.
+	if !errors.Is(err, ErrBlockedHost) || count.fetches.Load() != 1 {
+		t.Fatalf("FetchGitFile: %v %q after %d fetches", err, res.GetContent(), count.fetches.Load())
+	}
+
+	count = &fetchCounter{Runner: run}
+	dir := t.TempDir()
+	var log bytes.Buffer
+	_, err = fetchGit(ctx, count, &log, src, filepath.Join(dir, "src"), dir, false)
+	if !errors.Is(err, ErrBlockedHost) || count.fetches.Load() != 1 || strings.Contains(log.String(), "does not serve commits by id") {
+		t.Fatalf("build fetch: %v after %d fetches\n%s", err, count.fetches.Load(), log.String())
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("the internal git server got %d requests", n)
 	}
 }
 
