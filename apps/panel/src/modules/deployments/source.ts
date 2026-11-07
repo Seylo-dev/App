@@ -131,6 +131,9 @@ export async function resolveBuild(
                 commit: commit.sha,
                 token: openToken(deps.secrets, provider),
                 username: gitUser(client.gitUsername()),
+                // The connection's address is set by gitProviders.manage (an admin), like an allowed
+                // internal host: a self-hosted Gitea or GitLab on the LAN keeps building.
+                allowInternalHost: true,
               },
             },
           },
@@ -144,14 +147,14 @@ export async function resolveBuild(
       // The stored credential only ever goes to its own host, whoever saved the source.
       if (source.credentialId) assertCredentialHost(deps.db, source.credentialId, source.url, "source.credentialId");
       // The node clones in its own network: a public address, or an internal host an admin allowed for the project.
-      await assertGitTarget(deps.db, { projectId: service.projectId, url: source.url, caller: null });
+      const { allowInternalHost } = await assertGitTarget(deps.db, { projectId: service.projectId, url: source.url, caller: null });
       const auth = source.credentialId ? openCredential(deps.db, deps.secrets, source.credentialId) : null;
       let sha = input.commitSha;
       if (!sha) {
         // Best effort: the node resolves the branch itself when the panel cannot reach the host.
         try {
           // Only public addresses: the node resolves the commit itself otherwise.
-          const target = await checkTarget(deps, targetUrl(source.url), { allowInternal: false });
+          const target = await checkTarget(deps, targetUrl(source.url), { allowInternal: false, ownNodes: false });
           sha = target.ok
             ? ((await listRemoteRefs(source.url, auth ?? {}, { address: target.address, byName: target.byName })).heads.get(
                 source.branch,
@@ -176,6 +179,8 @@ export async function resolveBuild(
                 username: auth?.token ? gitUser(auth.username) : "",
                 sshPrivateKey: auth?.sshPrivateKey ?? "",
                 sshKnownHosts: auth?.knownHosts ?? "",
+                // The node checks every address it connects to; internal ones only for an allowed host.
+                allowInternalHost,
               },
             },
           },

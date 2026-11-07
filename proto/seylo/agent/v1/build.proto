@@ -102,6 +102,15 @@ message GitSource {
   // with token or ssh_private_key (those need https:// or ssh://). Agents
   // before this field allow http:// without credentials.
   bool allow_plain_http = 8; // added in 0.2 (security)
+  // The panel allows internal addresses (private, loopback, link-local,
+  // reserved) for this source's own host and port: an admin approved the
+  // host for the project (git_internal_hosts) or it is a git provider
+  // connection's host. Without it the agent connects only to public
+  // addresses, checked on the address each connection actually goes to
+  // (after DNS, for redirects and submodules too). Cloud metadata
+  // addresses are refused either way. Agents before this field do not
+  // check addresses on the node.
+  bool allow_internal_host = 9; // added in 0.2 (security)
 }
 
 enum Builder {

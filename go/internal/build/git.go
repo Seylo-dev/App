@@ -41,23 +41,41 @@ const credentialHelper = `!f() { test "$1" = get || exit 0; h=; while IFS= read 
 var ErrFetch = errors.New("fetching the source failed")
 
 // git runs git commands for one checkout with the build's credentials.
+// Every connection goes through proxy (gitproxy.go); close stops it.
 type git struct {
-	run  Runner
-	log  io.Writer
-	env  []string
-	args []string
+	run   Runner
+	log   io.Writer
+	env   []string
+	args  []string
+	proxy *gitProxy
 }
 
-// newGit prepares credentials in work (a private folder of the build).
+// proxyEnv clears the proxy variables the agent passes to commands
+// (exec.go passEnv): git must use the fetch's own proxy, and NO_PROXY
+// would let a host skip it.
+var proxyEnv = []string{"HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=", "http_proxy=", "https_proxy=", "all_proxy=", "no_proxy="}
+
+// newGit prepares credentials in work (a private folder of the build) and
+// starts the fetch's proxy. The caller closes it.
 func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git, error) {
+	policy, err := gitPolicyFor(src)
+	if err != nil {
+		return nil, err
+	}
 	home := filepath.Join(work, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, err
 	}
+	log = &syncWriter{w: log}
+	proxy, err := startGitProxy(policy, log)
+	if err != nil {
+		return nil, err
+	}
 	g := &git{
-		run: r,
-		log: log,
-		env: []string{
+		run:   r,
+		log:   log,
+		proxy: proxy,
+		env: append([]string{
 			"HOME=" + home,
 			"GIT_TERMINAL_PROMPT=0",
 			"GIT_CONFIG_NOSYSTEM=1",
@@ -65,19 +83,29 @@ func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git,
 			"GIT_ASKPASS=/bin/false",
 			"SSH_ASKPASS=/bin/false",
 			"LC_ALL=C",
-		},
+		}, proxyEnv...),
 		args: []string{
 			"-c", "protocol.allow=never",
 			"-c", "protocol.https.allow=always",
 			// Plain http only when an admin allowed it, never with
 			// credentials; otherwise not even through a redirect.
 			"-c", "protocol.http.allow=" + httpAllow(src),
-			"-c", "protocol.ssh.allow=always",
+			// ssh only with the source's key: without one, ssh would use
+			// whatever keys and config the node's root user has.
+			"-c", "protocol.ssh.allow=" + sshAllow(src),
 			"-c", "core.hooksPath=/dev/null",
 			"-c", "advice.detachedHead=false",
 			"-c", "credential.helper=",
+			// http and https, redirects and submodules included.
+			"-c", "http.proxy=" + proxy.URL(),
 		},
 	}
+	ok := false
+	defer func() {
+		if !ok {
+			g.close()
+		}
+	}()
 	if src.GetToken() != "" {
 		origin, host, err := gitOrigin(src.GetUrl())
 		if err != nil {
@@ -106,11 +134,51 @@ func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git,
 		if err := os.WriteFile(hostsFile, []byte(hosts+"\n"), 0o600); err != nil {
 			return nil, err
 		}
+		dial, err := gitDialProxyCommand(proxy.Addr(), policy.source.String())
+		if err != nil {
+			return nil, err
+		}
 		g.env = append(g.env, "GIT_SSH_COMMAND=ssh -F /dev/null -i "+shellQuote(keyFile)+
 			" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes"+
-			" -o UserKnownHostsFile="+shellQuote(hostsFile)+" -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=30")
+			" -o UserKnownHostsFile="+shellQuote(hostsFile)+" -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=30"+
+			" -o CheckHostIP=no -o "+shellQuote("ProxyCommand="+dial))
 	}
+	ok = true
 	return g, nil
+}
+
+// gitDialProxyCommand is ssh's ProxyCommand: this binary's git-dial with
+// the proxy and the source's own host:port spelled out (no %h: ssh puts
+// that into a shell command line, and a submodule URL could hold shell
+// syntax).
+func gitDialProxyCommand(proxy, target string) (string, error) {
+	exe, err := gitDialProgram()
+	if err != nil {
+		return "", fmt.Errorf("finding the agent binary for ssh: %w", err)
+	}
+	// ssh expands %-tokens in the whole command before the shell sees it.
+	for _, part := range []string{exe, proxy, target} {
+		if strings.ContainsAny(part, "%\n\r\x00") {
+			return "", fmt.Errorf("%q cannot be used in an ssh ProxyCommand", part)
+		}
+	}
+	return shellQuote(exe) + " " + GitDialCommand + " " + shellQuote(proxy) + " " + shellQuote(target), nil
+}
+
+// close stops the fetch's proxy.
+func (g *git) close() {
+	if g.proxy != nil {
+		g.proxy.Close()
+	}
+}
+
+// sshAllow is git's protocol.ssh.allow: only a source with an SSH key
+// uses ssh.
+func sshAllow(src *agentv1.GitSource) string {
+	if src.GetSshPrivateKey() == "" {
+		return "never"
+	}
+	return "always"
 }
 
 // defaultGitUser is the HTTPS user name sent with a token when the panel
@@ -168,6 +236,9 @@ func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSour
 	if err != nil {
 		return nil, fmt.Errorf("preparing git credentials: %w", err)
 	}
+	defer g.close()
+	// The fetch's proxy writes to the log from its own goroutines: one lock for every write.
+	log = g.log
 	if err := g.do(ctx, "", "init", "-q", dir); err != nil {
 		return nil, fmt.Errorf("git init: %w", err)
 	}
@@ -185,7 +256,7 @@ func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSour
 	switch {
 	case commit == "":
 		if err := g.do(ctx, dir, "fetch", "-q", "--depth", "1", "--no-tags", "origin", ref); err != nil {
-			return nil, fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
+			return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
 		}
 	default:
 		target = commit
@@ -194,18 +265,21 @@ func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSour
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			if refused := g.proxy.Refused(); refused != nil {
+				return nil, refused
+			}
 			fmt.Fprintf(log, "The server does not serve commits by id, fetching %s instead\n", ref)
 			if err := g.do(ctx, dir, "fetch", "-q", "--no-tags", "origin", ref); err != nil {
-				return nil, fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
+				return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
 			}
 		}
 	}
 	if err := g.do(ctx, dir, "checkout", "-q", "--detach", target); err != nil {
-		return nil, fetchErr(ctx, err, "commit %s is not on %s", short(commit), ref)
+		return nil, g.fetchErr(ctx, err, "commit %s is not on %s", short(commit), ref)
 	}
 	if submodules {
 		if err := g.do(ctx, dir, "submodule", "update", "-q", "--init", "--recursive", "--depth", "1"); err != nil {
-			return nil, fetchErr(ctx, err, "could not fetch the submodules")
+			return nil, g.fetchErr(ctx, err, "could not fetch the submodules")
 		}
 	}
 
@@ -225,9 +299,14 @@ func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSour
 	return info, nil
 }
 
-func fetchErr(ctx context.Context, err error, format string, args ...any) error {
+// fetchErr is a failed git command: the connection the proxy refused when
+// there was one (that is why it failed), else what the command was for.
+func (g *git) fetchErr(ctx context.Context, err error, format string, args ...any) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if refused := g.proxy.Refused(); refused != nil {
+		return refused
 	}
 	return fmt.Errorf("%w: %s (%v)", ErrFetch, fmt.Sprintf(format, args...), err)
 }

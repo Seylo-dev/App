@@ -384,7 +384,15 @@ describe("Gitea pushes", () => {
       source: {
         source: {
           case: "git",
-          value: { url: "https://git.example.com/acme/shop.git", commit: giteaHead, token: "gitea-token", username: "jdev" },
+          // The connection's host is an admin's choice: the node may reach it on an internal address
+          // (a LAN Gitea) and no other host (agentio-2).
+          value: {
+            url: "https://git.example.com/acme/shop.git",
+            commit: giteaHead,
+            token: "gitea-token",
+            username: "jdev",
+            allowInternalHost: true,
+          },
         },
       },
     });

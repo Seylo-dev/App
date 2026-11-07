@@ -3,8 +3,16 @@ package build
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/cgi"
 	"net/http/httptest"
@@ -13,7 +21,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 )
@@ -29,6 +40,56 @@ func gitServer(t *testing.T, token string) (url string, repo string, runner Runn
 // gitServerFor is gitServer for a host that wants a given HTTPS user name
 // with the token (Bitbucket: "x-token-auth" or the account).
 func gitServerFor(t *testing.T, user, token string) (url string, repo string, runner Runner) {
+	t.Helper()
+	url, repo, runner, _ = gitServerHits(t, user, token, nil)
+	return url, repo, runner
+}
+
+// testCert is one self-signed certificate for localhost, 127.0.0.1 and ::1
+// that every test server shares, so one CA file trusts them all.
+var testCert = sync.OnceValues(func() (tls.Certificate, []byte) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "seylo build test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		DNSNames:              []string{"localhost", "example.com", "git.proxied.test"},
+		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+})
+
+// testTLSServer is an httptest TLS server with testCert, and the runner
+// that makes git trust it.
+func testTLSServer(t *testing.T, h http.Handler) (*httptest.Server, Runner) {
+	t.Helper()
+	cert, caPEM := testCert()
+	srv := httptest.NewUnstartedServer(h)
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, caPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return srv, caRunner{ca: ca}
+}
+
+// gitServerHits is gitServerFor that counts the requests it gets; wrap
+// (may be nil) sees every request first and may answer it itself.
+func gitServerHits(t *testing.T, user, token string, wrap func(w http.ResponseWriter, r *http.Request) bool) (url string, repo string, runner Runner, hits *atomic.Int32) {
 	t.Helper()
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
@@ -74,7 +135,12 @@ func gitServerFor(t *testing.T, user, token string) (url string, repo string, ru
 		Args: []string{"http-backend"},
 		Env:  []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1", "GIT_CONFIG_NOSYSTEM=1"},
 	}
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hits = &atomic.Int32{}
+	srv, runner := testTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if wrap != nil && wrap(w, r) {
+			return
+		}
 		if token != "" {
 			name, pass, ok := r.BasicAuth()
 			if !ok || name != user || pass != token {
@@ -85,12 +151,7 @@ func gitServerFor(t *testing.T, user, token string) (url string, repo string, ru
 		}
 		backend.ServeHTTP(w, r)
 	}))
-	t.Cleanup(srv.Close)
-	ca := filepath.Join(root, "ca.pem")
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return srv.URL + "/repo.git", work, caRunner{ca: ca}
+	return srv.URL + "/repo.git", work, runner, hits
 }
 
 // caRunner runs commands like ExecRunner with git trusting one CA file.
@@ -126,7 +187,7 @@ func TestFetchGitWithToken(t *testing.T) {
 			work := t.TempDir()
 			dir := filepath.Join(work, "src")
 			var log bytes.Buffer
-			src := &agentv1.GitSource{Url: url, Ref: c.ref, Commit: c.commit, Token: "s3cret-token"}
+			src := &agentv1.GitSource{Url: url, Ref: c.ref, Commit: c.commit, Token: "s3cret-token", AllowInternalHost: true}
 			if err := validateGit(src); err != nil {
 				t.Fatal(err)
 			}
@@ -166,7 +227,7 @@ func TestFetchGitWithUsername(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			work := t.TempDir()
 			var log bytes.Buffer
-			src := &agentv1.GitSource{Url: url, Ref: "main", Token: "bb-token", Username: c.user}
+			src := &agentv1.GitSource{Url: url, Ref: "main", Token: "bb-token", Username: c.user, AllowInternalHost: true}
 			if err := validateGit(src); err != nil {
 				t.Fatal(err)
 			}
@@ -200,8 +261,8 @@ func TestFetchGitWrongToken(t *testing.T) {
 	url, _, run := gitServer(t, "right")
 	work := t.TempDir()
 	var log bytes.Buffer
-	_, err := fetchGit(context.Background(), run, &log, &agentv1.GitSource{Url: url, Ref: "main", Token: "wrong"}, filepath.Join(work, "src"), work, false)
-	if !errors.Is(err, ErrFetch) {
+	_, err := fetchGit(context.Background(), run, &log, &agentv1.GitSource{Url: url, Ref: "main", Token: "wrong", AllowInternalHost: true}, filepath.Join(work, "src"), work, false)
+	if !errors.Is(err, ErrFetch) || errors.Is(err, ErrBlockedHost) {
 		t.Fatalf("got %v, want ErrFetch\n%s", err, log.String())
 	}
 }
@@ -224,6 +285,7 @@ func TestGitSSHKeyHandling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer g.close()
 	key := filepath.Join(work, "ssh", "id")
 	fi, err := os.Stat(key)
 	if err != nil || fi.Mode().Perm() != 0o600 {
@@ -249,9 +311,11 @@ func TestGitSSHKeyHandling(t *testing.T) {
 	}
 
 	custom := t.TempDir()
-	if _, err := newGit(ExecRunner{}, &bytes.Buffer{}, &agentv1.GitSource{SshPrivateKey: "k", SshKnownHosts: "git.example.com ssh-ed25519 AAAA"}, custom); err != nil {
+	g2, err := newGit(ExecRunner{}, &bytes.Buffer{}, &agentv1.GitSource{Url: "git@git.example.com:a.git", SshPrivateKey: "k", SshKnownHosts: "git.example.com ssh-ed25519 AAAA"}, custom)
+	if err != nil {
 		t.Fatal(err)
 	}
+	g2.close()
 	if b, _ := os.ReadFile(filepath.Join(custom, "ssh", "known_hosts")); strings.Contains(string(b), "github.com") || !strings.Contains(string(b), "git.example.com") {
 		t.Fatalf("custom known_hosts: %q", b)
 	}
@@ -291,6 +355,7 @@ func TestCredentialHelperAnswersOnlyItsHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer g.close()
 	args := strings.Join(g.args, " ")
 	if !strings.Contains(args, "credential.https://git.example.com:8443.helper=!f()") || strings.Contains(args, "credential.helper=!") ||
 		!strings.Contains(args, "protocol.http.allow=never") || !slices.Contains(g.env, "BUILD_GIT_HOST=git.example.com:8443") {

@@ -196,7 +196,7 @@ test("plain http:// git is refused at save and never sent: allow_plain_http stay
   expect(git?.case === "git" && git.value.allowPlainHttp).toBe(false);
 });
 
-test("hosts of git sources saved before the check count as allowed once", () => {
+test("hosts of git sources saved before the check count as allowed once", async () => {
   const row = panel.deps.db
     .insert(services)
     .values({
@@ -209,12 +209,13 @@ test("hosts of git sources saved before the check count as allowed once", () => 
     .returning()
     .get();
   setSetting(panel.deps.db, "gitInternalHostsSeeded", false);
-  seedInternalGitHosts(panel.deps.db);
+  // The seed looks the hosts up in the background (an address here, a private one: recorded).
+  await seedInternalGitHosts(panel.deps.db);
   expect(panel.deps.db.select().from(gitInternalHosts).where(eq(gitInternalHosts.projectId, row.projectId)).all()).toMatchObject([
     { host: "10.9.9.9:3000" },
   ]);
   // Only once: later sources are vetted when saved.
   panel.deps.db.delete(gitInternalHosts).run();
-  seedInternalGitHosts(panel.deps.db);
+  await seedInternalGitHosts(panel.deps.db);
   expect(panel.deps.db.select().from(gitInternalHosts).all()).toHaveLength(0);
 });

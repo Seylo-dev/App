@@ -18,7 +18,8 @@ import (
 // (started by scripts/dev/it-gitea.sh) the way the panel sends a Gitea
 // source: the connection's token through the credential helper, with the
 // token owner as the user name, over HTTPS with the test server's CA. A
-// clone without the token is refused.
+// clone without the token is refused, and so is any clone of this private
+// address without allow_internal_host.
 func TestITGiteaPrivateClone(t *testing.T) {
 	repo := os.Getenv("SEYLO_IT_GITEA_REPO")
 	if os.Getenv("SEYLO_IT") != "1" || repo == "" {
@@ -31,7 +32,8 @@ func TestITGiteaPrivateClone(t *testing.T) {
 	work := t.TempDir()
 	dir := filepath.Join(work, "src")
 	var log bytes.Buffer
-	src := &agentv1.GitSource{Url: repo, Ref: "main", Commit: head, Token: token, Username: user}
+	// The VM's own address: a host an admin allowed for the project.
+	src := &agentv1.GitSource{Url: repo, Ref: "main", Commit: head, Token: token, Username: user, AllowInternalHost: true}
 	if err := validateGit(src); err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +52,17 @@ func TestITGiteaPrivateClone(t *testing.T) {
 	}
 
 	anon := t.TempDir()
-	_, err = fetchGit(ctx, run, &log, &agentv1.GitSource{Url: repo, Ref: "main"}, filepath.Join(anon, "src"), anon, false)
-	if !errors.Is(err, ErrFetch) {
+	_, err = fetchGit(ctx, run, &log, &agentv1.GitSource{Url: repo, Ref: "main", AllowInternalHost: true}, filepath.Join(anon, "src"), anon, false)
+	if !errors.Is(err, ErrFetch) || errors.Is(err, ErrBlockedHost) {
 		t.Fatalf("a clone without the token: got %v, want ErrFetch", err)
+	}
+
+	// Without the panel's allow_internal_host the node does not connect to
+	// the VM's private address at all, token or not.
+	refused := t.TempDir()
+	blocked := &agentv1.GitSource{Url: repo, Ref: "main", Commit: head, Token: token, Username: user}
+	_, err = fetchGit(ctx, run, &log, blocked, filepath.Join(refused, "src"), refused, false)
+	if !errors.Is(err, ErrBlockedHost) || !strings.Contains(err.Error(), "private address") {
+		t.Fatalf("an internal Gitea without allow_internal_host: got %v", err)
 	}
 }

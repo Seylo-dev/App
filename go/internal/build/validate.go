@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"path"
 	"regexp"
@@ -28,6 +29,8 @@ var (
 	imageRefRe = regexp.MustCompile(`^(?:[a-zA-Z0-9.-]+(?::[0-9]+)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[0-9a-f]{64})?$`)
 	stageRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 	sha256Re   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// SSH host names (IP addresses are checked with net.ParseIP).
+	sshHostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252})$`)
 )
 
 // InvalidError is a request the agent refuses before doing anything. Its
@@ -159,6 +162,10 @@ func validateGitURL(raw string, ssh, token, allowHTTP bool) error {
 	case "ssh":
 		if !ssh {
 			return invalid("%s is an SSH address: add an SSH key or use the https:// address", raw)
+		}
+		// The host goes into ssh's command line; names and IP addresses only.
+		if h := u.Hostname(); !sshHostRe.MatchString(h) && net.ParseIP(h) == nil {
+			return invalid("%q is not a host name", h)
 		}
 	default:
 		return invalid("repository addresses start with https:// or ssh://")

@@ -474,8 +474,17 @@ type GitSource struct {
 	// with token or ssh_private_key (those need https:// or ssh://). Agents
 	// before this field allow http:// without credentials.
 	AllowPlainHttp bool `protobuf:"varint,8,opt,name=allow_plain_http,json=allowPlainHttp,proto3" json:"allow_plain_http,omitempty"` // added in 0.2 (security)
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The panel allows internal addresses (private, loopback, link-local,
+	// reserved) for this source's own host and port: an admin approved the
+	// host for the project (git_internal_hosts) or it is a git provider
+	// connection's host. Without it the agent connects only to public
+	// addresses, checked on the address each connection actually goes to
+	// (after DNS, for redirects and submodules too). Cloud metadata
+	// addresses are refused either way. Agents before this field do not
+	// check addresses on the node.
+	AllowInternalHost bool `protobuf:"varint,9,opt,name=allow_internal_host,json=allowInternalHost,proto3" json:"allow_internal_host,omitempty"` // added in 0.2 (security)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GitSource) Reset() {
@@ -560,6 +569,13 @@ func (x *GitSource) GetUsername() string {
 func (x *GitSource) GetAllowPlainHttp() bool {
 	if x != nil {
 		return x.AllowPlainHttp
+	}
+	return false
+}
+
+func (x *GitSource) GetAllowInternalHost() bool {
+	if x != nil {
+		return x.AllowInternalHost
 	}
 	return false
 }
@@ -1075,7 +1091,7 @@ const file_seylo_agent_v1_build_proto_rawDesc = "" +
 	"\x06source\"]\n" +
 	"\vImageSource\x12\x1c\n" +
 	"\treference\x18\x01 \x01(\tR\treference\x120\n" +
-	"\x04auth\x18\x02 \x01(\v2\x1c.seylo.agent.v1.RegistryAuthR\x04auth\"\xf3\x01\n" +
+	"\x04auth\x18\x02 \x01(\v2\x1c.seylo.agent.v1.RegistryAuthR\x04auth\"\xa3\x02\n" +
 	"\tGitSource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x16\n" +
@@ -1084,7 +1100,8 @@ const file_seylo_agent_v1_build_proto_rawDesc = "" +
 	"\x0fssh_private_key\x18\x05 \x01(\tR\rsshPrivateKey\x12&\n" +
 	"\x0fssh_known_hosts\x18\x06 \x01(\tR\rsshKnownHosts\x12\x1a\n" +
 	"\busername\x18\a \x01(\tR\busername\x12(\n" +
-	"\x10allow_plain_http\x18\b \x01(\bR\x0eallowPlainHttp\"\xae\x01\n" +
+	"\x10allow_plain_http\x18\b \x01(\bR\x0eallowPlainHttp\x12.\n" +
+	"\x13allow_internal_host\x18\t \x01(\bR\x11allowInternalHost\"\xae\x01\n" +
 	"\rBuildResponse\x12\x12\n" +
 	"\x03log\x18\x01 \x01(\fH\x00R\x03log\x12;\n" +
 	"\bprogress\x18\x02 \x01(\v2\x1d.seylo.agent.v1.BuildProgressH\x00R\bprogress\x12B\n" +

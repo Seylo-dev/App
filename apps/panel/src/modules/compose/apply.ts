@@ -83,7 +83,7 @@ async function fetchGitComposeFile(
     });
   }
   const nodeId = stackNodeId;
-  await assertGitTarget(deps.db, { projectId, url: source.url, caller: null });
+  const { allowInternalHost } = await assertGitTarget(deps.db, { projectId, url: source.url, caller: null });
   // The stored credential only ever goes to its own host, whoever saved the source.
   if (source.credentialId) assertCredentialHost(deps.db, source.credentialId, source.url, "source.credentialId");
   const auth = source.credentialId ? openCredential(deps.db, deps.secrets, source.credentialId) : null;
@@ -99,6 +99,8 @@ async function fetchGitComposeFile(
         token: auth?.token ?? "",
         sshPrivateKey: auth?.sshPrivateKey ?? "",
         sshKnownHosts: auth?.knownHosts ?? "",
+        // The node checks every address it connects to; internal ones only for an allowed host.
+        allowInternalHost,
       },
       path,
       maxBytes: BigInt(maxComposeBytes),

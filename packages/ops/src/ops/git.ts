@@ -141,7 +141,7 @@ export const branches = defineOp({
   kind: "query",
   summary: "List a git repository's branches",
   description:
-    "Checks access to a git URL (with a stored credential for private repos, like git ls-remote) and lists its branches with the default one. Used to validate a generic git source before saving it.",
+    "Checks access to a git URL (with a stored credential for private repos, like git ls-remote) and lists its branches with the default one. Used to validate a generic git source before saving it. The host follows the rule for saving a source: a public address, an internal host an admin already saved a source with in this project, or any internal host for a git.manage caller; never a cloud metadata address (BAD_REQUEST internalTarget otherwise).",
   input: Type.Object({
     projectId: Id,
     url: GitUrl,
@@ -151,4 +151,19 @@ export const branches = defineOp({
   permission: permission.project("services.create", (input: { projectId: string }) => input.projectId),
   mcp: true,
   audit: false,
+});
+
+export const allowInternalHost = defineOp({
+  id: "git.allowInternalHost",
+  kind: "mutation",
+  summary: "Allow an internal git host in a project",
+  description:
+    "Lets the project's nodes clone from internal addresses (private, loopback, link-local and the like) of the host of this git URL, whatever the panel's own DNS answers for it: for a git server whose name is public at the panel and internal at the nodes (split-horizon DNS). Saving a source as an admin does this by itself only when the panel sees the host as internal. The project's members may then use the host in their sources and git.branches. Nodes still clone only that host and port from an internal address, never a redirect or submodule to another one, and never a cloud metadata address (BAD_REQUEST internalTarget).",
+  input: Type.Object({ projectId: Id, url: GitUrl }),
+  output: Type.Object({
+    host: Type.String({ description: 'The host as recorded for the project, for example "gitea.lan" or "10.0.0.7:3000".' }),
+  }),
+  permission: permission.global("git.manage"),
+  mcp: true,
+  audit: true,
 });

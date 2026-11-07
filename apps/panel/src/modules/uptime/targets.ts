@@ -35,7 +35,13 @@ export type BlockReason = "loopback" | "linkLocal" | "metadata" | "private" | "r
 export type TargetCheck =
   | { ok: true; address: string; byName: false }
   | { ok: true; address: null; byName: true }
-  | { ok: false; reason: BlockReason; address: string };
+  | {
+      ok: false;
+      reason: BlockReason;
+      address: string;
+      /** Only with reason unresolvable: DNS said the name does not exist (not a timeout or a failing server). */
+      notFound?: boolean;
+    };
 
 export type Resolver = (host: string) => Promise<string[]>;
 
@@ -171,8 +177,15 @@ function ownTarget(deps: Pick<Deps, "db">, addresses: readonly string[]): boolea
 /**
  * Decides whether an uptime check may request this URL. Hostnames are
  * resolved; every address must be public (or the panel's own).
+ * `ownNodes: false` drops the "panel's own" exception: a node's address on
+ * a private network then counts like any other internal address (git
+ * sources, where such a host needs an admin's approval per project).
  */
-export async function checkTarget(deps: Pick<Deps, "db">, url: string, options: { allowInternal?: boolean } = {}): Promise<TargetCheck> {
+export async function checkTarget(
+  deps: Pick<Deps, "db">,
+  url: string,
+  options: { allowInternal?: boolean; ownNodes?: boolean } = {},
+): Promise<TargetCheck> {
   if (options.allowInternal ?? getSetting(deps.db, "uptimeAllowInternalTargets") === true) return { ok: true, address: null, byName: true };
   let host: string;
   try {
@@ -187,19 +200,26 @@ export async function checkTarget(deps: Pick<Deps, "db">, url: string, options: 
   else {
     try {
       addresses = await resolver(host);
-    } catch {
+    } catch (error) {
       // NXDOMAIN, SERVFAIL or a timeout: the request would resolve the name again, and a
       // hostile name server could answer that one with an internal address.
-      return { ok: false, reason: "unresolvable", address: host };
+      const code = (error as { code?: unknown } | null)?.code;
+      return {
+        ok: false,
+        reason: "unresolvable",
+        address: host,
+        ...(code === "ENOTFOUND" || code === "ENODATA" ? { notFound: true } : {}),
+      };
     }
-    if (addresses.length === 0) return { ok: false, reason: "unresolvable", address: host };
+    if (addresses.length === 0) return { ok: false, reason: "unresolvable", address: host, notFound: true };
   }
   const blocked = addresses.map((address) => ({ address, reason: blockedReason(address) })).filter((a) => a.reason !== null);
   const pin = addresses[0] as string;
   if (blocked.length === 0) return { ok: true, address: pin, byName: false };
   // The metadata service is never one of ours, even on a node's own address.
   const first = blocked.find((b) => b.reason === "metadata") ?? (blocked[0] as { address: string; reason: BlockReason });
-  if (first.reason !== "metadata" && ownTarget(deps, addresses)) return { ok: true, address: pin, byName: false };
+  if (first.reason !== "metadata" && options.ownNodes !== false && ownTarget(deps, addresses))
+    return { ok: true, address: pin, byName: false };
   return { ok: false, reason: first.reason as BlockReason, address: first.address };
 }
 
