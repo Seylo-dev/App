@@ -190,11 +190,20 @@ Summary; the full rules are in `proto/README.md` and the comments of
   deployment in flight to or away from it; `agent-hub/service-scope.ts`):
   crash reports, durable events, deploy/health/cron events, state deltas,
   snapshots and metrics about other services are dropped, and an update
-  result finishes only a step of that node. Limits per connection
+  result finishes only a step of that node. Best-effort events reuse the
+  node's scope for a second (a service missing from it is looked up again
+  after 100 ms); durable reports and snapshots use a fresh one. A metrics
+  event keeps one entry per service, and a live series at most 600 points.
+  NodeFacts (hello and `nodeFacts` events) are capped (strings 256 chars,
+  256 capabilities of 128) and `nodes.facts` is written, and the node
+  published, at most every 2 s per node and only when they changed. Limits per connection
   (`agentLimits` in `agent-hub/session.ts`): ClientHello within 10 s,
   agent-opened stream windows clamped to 1 MiB, WINDOW grants past
   2^31-1 are a protocol error, 64 agent-opened streams and 256 calls in
-  flight (RESOURCE_EXHAUSTED beyond), 32 MiB unread on agent streams (a running count, and
+  flight (RESOURCE_EXHAUSTED beyond), stream-0 EVENT frames through a
+  token bucket (burst 2000, 200 per second; past it frames are dropped
+  before they are decoded, and a dropped state delta makes the panel fetch
+  a snapshot), 32 MiB unread on agent streams (a running count, and
   `DelimitedDecoder` copies each byte once when its message is complete, so
   the sender's DATA frame sizes do not change the panel's work). One
   GetStateSnapshot per node at a time. panel.db retention (hourly,

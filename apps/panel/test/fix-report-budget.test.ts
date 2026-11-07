@@ -7,7 +7,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { ReportCrashRequestSchema, ReportCrashResponseSchema, ReportEventRequestSchema, ReportEventResponseSchema } from "@seylo/proto";
 import { eq, sql } from "drizzle-orm";
-import { capReportFields, createReportBudget, reportBudget } from "../src/agent-hub/report-budget";
+import { capFields } from "../src/agent-hub/field-caps";
+import { createReportBudget, reportBudget } from "../src/agent-hub/report-budget";
 import { agentReports, alerts, crashReports } from "../src/db/schema";
 import { pruneTables, retention } from "../src/modules/nodes/retention";
 import type { FakeAgent } from "./fake-agent";
@@ -134,7 +135,7 @@ test("field caps cut strings, lists (output tails keep their end) and unknown fi
     nested: { error: "e".repeat(5000) },
     $unknown: [{ no: 99, wireType: 2, data: new Uint8Array(1 << 20) }],
   };
-  capReportFields(message);
+  capFields(message);
   expect(message.message).toHaveLength(4096);
   expect(message.lastLines).toHaveLength(200);
   expect(message.lastLines.at(-1)).toBe("line 299");

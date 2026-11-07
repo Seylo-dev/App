@@ -44,9 +44,10 @@ import {
 } from "../db/schema";
 import type { Logger } from "../logger";
 import { createRateLimiter } from "../ops/rate-limit";
+import { capFields, storedReportLimits } from "./field-caps";
 import type { AgentHub } from "./hub";
 import { type IncomingStream, PanelServiceError, type PanelServiceHandlers } from "./panel-service-types";
-import { capReportFields, createReportBudget, storedReportLimits, storedReportsSince } from "./report-budget";
+import { createReportBudget, storedReportsSince } from "./report-budget";
 
 export interface PanelServiceDeps {
   db: PanelDb;
@@ -128,7 +129,7 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       // A node may report crashes of its own services only.
       throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "This service does not run on this node.");
     }
-    capReportFields(report);
+    capFields(report);
     report.lastLines = report.lastLines.slice(-maxCrashLines).map((line) => line.slice(0, maxCrashLineLength));
     report.containerId = report.containerId.slice(0, maxContainerIdLength);
     const size = JSON.stringify(report.lastLines).length + report.containerId.length;
@@ -173,9 +174,9 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
       throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "This service does not run on this node.");
     }
     const outboxId = request.outboxId.toString();
-    capReportFields(event);
+    capFields(event);
     // Nothing reads agent_reports back (it dedupes): a smaller copy is enough.
-    const stored = toJson(EventSchema, capReportFields(clone(EventSchema, event), storedReportLimits)) as Record<string, unknown>;
+    const stored = toJson(EventSchema, capFields(clone(EventSchema, event), storedReportLimits)) as Record<string, unknown>;
     const size = JSON.stringify(stored).length;
     // Over the node's budget: acked (the agent drops it) but not stored or fanned out.
     if (!budget.allows(nodeId, size)) return toBinary(ReportEventResponseSchema, create(ReportEventResponseSchema));

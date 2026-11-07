@@ -39,6 +39,12 @@ import { createNodeStateStore, type NodeStateStore } from "./node-state";
 import type { PanelServiceHandlers } from "./panel-service-types";
 import { isRawMethod, isStreamingMethod, messageStream, type OpenedStream, rawStream } from "./streams";
 
+/** How long a node's service scope is reused for best-effort events, and after how long a miss looks again. */
+const scopeCacheMs = 1000;
+const scopeRecheckMs = 100;
+/** Most service entries a metrics event keeps (once each) when no scope is set. */
+const maxMetricsServices = 1000;
+
 /** Byte-level transport of one session; AgentSession implements it. Hub-internal. */
 export interface AgentTransport {
   /** Sends CALL and resolves with the RESULT's response bytes; rejects with an OpError (calls.ts). */
@@ -178,6 +184,25 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
       return null;
     }
   };
+  /**
+   * Scopes for best-effort events, cached: the scope costs two queries and a
+   * node may send hundreds of events a second. A service missing from a
+   * cached scope is looked up again once the entry is scopeRecheckMs old,
+   * so a new placement counts within that time. Durable reports and
+   * snapshots always use a fresh scope.
+   */
+  const scopeCache = new Map<string, { at: number; scope: ReadonlySet<string> | null }>();
+  const cachedScopeOf = (nodeId: string, wanted: readonly string[]): ReadonlySet<string> | null => {
+    const now = performance.now();
+    const hit = scopeCache.get(nodeId);
+    const fresh = hit && now - hit.at < scopeCacheMs;
+    const complete = hit?.scope ? wanted.every((id) => hit.scope?.has(id)) : true;
+    if (hit && fresh && (complete || now - hit.at < scopeRecheckMs)) return hit.scope;
+    const scope = scopeOf(nodeId);
+    if (scopeCache.size > 10_000) scopeCache.clear();
+    scopeCache.set(nodeId, { at: now, scope });
+    return scope;
+  };
   const dropped = (nodeId: string, serviceId: string, what: string) => {
     const key = `${nodeId}|${serviceId}`;
     if (dropLogged.has(key)) return;
@@ -190,9 +215,7 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
    * The event with only what the node may say: null when it is about a
    * service the node does not run; metrics keep the node's own services.
    */
-  const scoped = (nodeId: string, event: Event): Event | null => {
-    const scope = scopeOf(nodeId);
-    if (!scope) return event;
+  const scoped = (nodeId: string, event: Event, durable: boolean): Event | null => {
     const payload = event.payload;
     const single =
       payload.case === "deployProgress" || payload.case === "healthChanged" || payload.case === "cronRun"
@@ -200,13 +223,21 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
         : payload.case === "stateDelta" && payload.value.change.case === "serviceUpdated"
           ? payload.value.change.value.serviceId
           : null;
+    const wanted = single !== null ? [single] : payload.case === "metrics" ? payload.value.services.map((s) => s.serviceId) : [];
+    const scope = wanted.length === 0 ? null : durable ? scopeOf(nodeId) : cachedScopeOf(nodeId, wanted);
     if (single !== null) {
-      if (scope.has(single)) return event;
+      if (!scope || scope.has(single)) return event;
       dropped(nodeId, single, payload.case ?? "an event");
       return null;
     }
     if (payload.case === "metrics") {
-      const kept = payload.value.services.filter((s) => scope.has(s.serviceId));
+      // One entry per service the node runs: repeats would each keep a live point.
+      const seen = new Set<string>();
+      const kept = payload.value.services.filter((s) => {
+        if (seen.has(s.serviceId) || seen.size >= maxMetricsServices || (scope && !scope.has(s.serviceId))) return false;
+        seen.add(s.serviceId);
+        return true;
+      });
       if (kept.length === payload.value.services.length) return event;
       return { ...event, payload: { case: "metrics", value: { ...payload.value, services: kept } } } as Event;
     }
@@ -250,7 +281,7 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
       for (const listener of connectionListeners) safely(() => listener(agent.nodeId, false));
     },
     emitEvent(nodeId, original, meta = { durable: false, outboxId: null }) {
-      const event = scoped(nodeId, original);
+      const event = scoped(nodeId, original, meta.durable);
       if (!event) return;
       safely(() => track(nodeId, event));
       for (const listener of listeners) safely(() => listener(nodeId, event, meta));

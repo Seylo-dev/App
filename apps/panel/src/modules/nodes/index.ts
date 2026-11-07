@@ -24,6 +24,8 @@ import { ensurePanelService, panelContributor, panelServiceId } from "./panel-se
 import { pruneTables } from "./retention";
 
 const flushers = new WeakMap<object, DesiredFlusher>();
+/** At most one nodes.facts write (and live publish) per node in this time. */
+const factsWriteMs = 2000;
 
 /** The panel's desired-state flusher (tests call flush() on it). */
 export function flusherFor(deps: Pick<Deps, "agents">): DesiredFlusher | undefined {
@@ -85,6 +87,54 @@ function start(deps: Deps) {
   );
   deps.agents.setAgentVersionPolicy(() => minimumAgentVersion(deps.config.version, manifestMinAgent(deps.db)));
 
+  // Keep the last facts for when the node is offline: written and published at most once per
+  // factsWriteMs per node (a node may send facts events as fast as it likes), the newest at the end.
+  const writeFacts = (nodeId: string) => {
+    const facts = deps.agents.state.get(nodeId)?.facts;
+    if (!facts) return;
+    const json = toJson(NodeFactsSchema, facts) as Record<string, unknown>;
+    const text = JSON.stringify(json);
+    if (factsWriter.last.get(nodeId) === text) return;
+    factsWriter.last.set(nodeId, text);
+    deps.db
+      .update(nodes)
+      .set({
+        facts: json,
+        agentVersion: facts.agentVersion || undefined,
+        publicIpv4: facts.publicIpv4 || undefined,
+        publicIpv6: facts.publicIpv6 || undefined,
+      })
+      .where(eq(nodes.id, nodeId))
+      .run();
+    publishNode(deps, nodeId);
+  };
+  const factsWriter = {
+    last: new Map<string, string>(),
+    writtenAt: new Map<string, number>(),
+    waiting: new Map<string, ReturnType<typeof setTimeout>>(),
+    changed(nodeId: string) {
+      if (this.waiting.has(nodeId)) return;
+      const wait = (this.writtenAt.get(nodeId) ?? 0) + factsWriteMs - Date.now();
+      if (wait <= 0) {
+        this.flush(nodeId);
+        return;
+      }
+      const timer = setTimeout(() => this.flush(nodeId), wait);
+      timer.unref?.();
+      this.waiting.set(nodeId, timer);
+    },
+    flush(nodeId: string) {
+      clearTimeout(this.waiting.get(nodeId));
+      this.waiting.delete(nodeId);
+      this.writtenAt.set(nodeId, Date.now());
+      try {
+        writeFacts(nodeId);
+      } catch (error) {
+        nodesLogger.warn({ err: error, nodeId }, "recording the node's facts failed");
+      }
+    },
+  };
+
   deps.agents.onConnection((nodeId, online) => {
     // Its LB identity exists before the connect sync compiles the node's settings.
     if (online) {
@@ -94,7 +144,10 @@ function start(deps: Deps) {
         nodesLogger.error({ err: error, nodeId }, "issuing the node's load balancer certificate failed");
       }
     }
-    if (!online) deps.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, nodeId)).run();
+    if (!online) {
+      if (factsWriter.waiting.has(nodeId)) factsWriter.flush(nodeId);
+      deps.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, nodeId)).run();
+    }
     // The installer's local agent just joined as the panel node: record the panel container it runs.
     else if (deps.config.image) ensure();
     if (online) seedPanelNodeAddress(deps.db);
@@ -103,24 +156,9 @@ function start(deps: Deps) {
 
   deps.agents.state.onChange((nodeId, change) => {
     switch (change.kind) {
-      case "facts": {
-        // Keep the last facts for when the node is offline.
-        const facts = deps.agents.state.get(nodeId)?.facts;
-        if (facts) {
-          deps.db
-            .update(nodes)
-            .set({
-              facts: toJson(NodeFactsSchema, facts) as Record<string, unknown>,
-              agentVersion: facts.agentVersion || undefined,
-              publicIpv4: facts.publicIpv4 || undefined,
-              publicIpv6: facts.publicIpv6 || undefined,
-            })
-            .where(eq(nodes.id, nodeId))
-            .run();
-        }
-        publishNode(deps, nodeId);
+      case "facts":
+        factsWriter.changed(nodeId);
         return;
-      }
       case "snapshot":
       case "applied":
         publishNode(deps, nodeId);

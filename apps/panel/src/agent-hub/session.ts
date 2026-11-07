@@ -44,6 +44,7 @@ import {
   type StreamOptions,
 } from "./calls";
 import { Channel, ProtocolViolation } from "./channel";
+import { capFields, factsLimits } from "./field-caps";
 import { decideHello } from "./handshake";
 import type { AgentHub, AgentTransport, ConnectedAgent } from "./hub";
 import { PanelServiceError } from "./panel-service-types";
@@ -94,6 +95,13 @@ export const agentLimits = {
   maxPendingCalls: 256,
   /** Bytes received on agent-opened streams and not read yet, summed. */
   maxBufferedBytes: 32 << 20,
+  /**
+   * Stream-0 EVENT frames (best-effort progress, state deltas, metrics,
+   * facts): a token bucket per connection. Past it frames are dropped before
+   * they are decoded; a dropped state delta makes the panel fetch a snapshot.
+   */
+  eventBurst: 2000,
+  eventsPerSecond: 200,
 };
 
 export class AgentSession {
@@ -116,6 +124,11 @@ export class AgentSession {
   /** Agent-opened streams and calls in flight, for the caps. */
   private agentStreams = 0;
   private agentCalls = 0;
+  /** EVENT token bucket (agentLimits.eventBurst / eventsPerSecond). */
+  private eventTokens = agentLimits.eventBurst;
+  private eventsRefilledAt = performance.now();
+  private eventsDropped = 0;
+  private eventsDropLoggedAt = 0;
 
   constructor(
     private readonly socket: AgentSocket,
@@ -322,6 +335,8 @@ export class AgentSession {
       return;
     }
 
+    // Facts are stored (nodes.facts) and shown; they are not signed, so cut them first.
+    if (hello.facts) capFields(hello.facts, factsLimits);
     const decision = decideHello(this.deps.db, this.deps.panelId, this.nonce, hello, {
       remoteIp: this.remoteIp,
       panelNodeFromInstallerOnly: this.deps.panelNodeFromInstallerOnly ?? false,
@@ -367,11 +382,37 @@ export class AgentSession {
   private receiveReady(frame: Frame): void {
     if (frame.stream === CONNECTION_STREAM) {
       if (frame.kind !== FrameKind.EVENT) throw new ProtocolViolation(`${FrameKind[frame.kind]} on stream 0`);
-      this.deps.hub.emitEvent(this.nodeId, fromBinary(EventSchema, frame.payload));
+      if (!this.takeEventToken()) return;
+      const event = fromBinary(EventSchema, frame.payload);
+      if (event.payload.case === "nodeFacts") capFields(event.payload.value, factsLimits);
+      this.deps.hub.emitEvent(this.nodeId, event);
       return;
     }
     if (frame.stream % 2 === 0) this.receivePanelStream(frame);
     else this.receiveAgentStream(frame);
+  }
+
+  /** Whether one more EVENT fits the bucket; a drop is logged once a minute with the count. */
+  private takeEventToken(): boolean {
+    const now = performance.now();
+    this.eventTokens = Math.min(
+      agentLimits.eventBurst,
+      this.eventTokens + ((now - this.eventsRefilledAt) / 1000) * agentLimits.eventsPerSecond,
+    );
+    this.eventsRefilledAt = now;
+    if (this.eventTokens >= 1) {
+      this.eventTokens -= 1;
+      return true;
+    }
+    this.eventsDropped += 1;
+    if (now - this.eventsDropLoggedAt >= 60_000) {
+      this.eventsDropLoggedAt = now;
+      this.deps.logger.warn(
+        { nodeId: this.nodeIdValue, dropped: this.eventsDropped, perSecond: agentLimits.eventsPerSecond },
+        "agent sends events faster than the panel takes them; dropping the excess",
+      );
+    }
+    return false;
   }
 
   /** Frames on streams the panel opened (even ids). */
