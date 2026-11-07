@@ -860,7 +860,14 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   adds the route. Proxy trust and HTTPS (`src/http/proxy-trust.ts`, `https.ts`,
   `domain-redirect.ts`): X-Forwarded-For/-Proto/-Host count only from the
   addresses of `SEYLO_TRUSTED_PROXIES` (default `<slug>-traefik`, resolved
-  through Docker DNS every 30 s), never from the published IP:port; cookies get
+  through Docker DNS every 30 s), never from the published IP:port (the
+  cross-site check `isSameOrigin(request, trusted)` too: an untrusted
+  client's X-Forwarded-Host is ignored and the Host header compared).
+  `clientIp` (`src/http/client-ip.ts`) normalises addresses and, behind
+  Cloudflare, takes the visitor from `CF-Connecting-IP` only when the address
+  the trusted proxy vouches for (the last X-Forwarded-For entry) is in
+  Cloudflare's published ranges (`src/http/cloudflare.ts`, a list in code);
+  otherwise that header is ignored. Cookies get
   Secure on every HTTPS request (trusted X-Forwarded-Proto, or Host equal to
   the panel domain) whatever `SECURE_COOKIES` says; HTTPS responses carry
   `strict-transport-security: max-age=31536000`; every response carries

@@ -17,7 +17,7 @@ export function httpOpHandler(execute: ExecuteOp, deps: Pick<Deps, "config" | "d
     const headers = new Headers({ "cache-control": "no-store" });
     const trusted = deps.proxy.trusts(socketIp);
     const credentials = credentialsFrom(request, sessionCookie);
-    if (!credentials.bearerToken && op.kind !== "query" && !isSameOrigin(request)) {
+    if (!credentials.bearerToken && op.kind !== "query" && !isSameOrigin(request, trusted)) {
       return errorResponse(new OpError("FORBIDDEN", "Cross-site requests cannot change anything."), headers);
     }
     const outcome = await execute({
