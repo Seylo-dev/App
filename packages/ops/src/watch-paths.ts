@@ -17,10 +17,13 @@
 // a small automaton run over the path once with all its live states in a
 // bit set, so one match costs a fixed few operations per character and 32
 // steps of the glob, whatever the pattern ("a*a*a*..." and
-// "**/**/**/*.md" included). A whole push is bounded too: matchWatchPaths
-// stops after watchPathsWorkBudget word steps (about 20 ms) and deploys,
-// like for an incomplete list. Changed paths longer than
-// maxChangedPathLength are not matched at all: they make the list
+// "**/**/**/*.md" included). A path that does not start with the glob's
+// literal head or end with its literal tail ("apps/web/" of "apps/web/**",
+// ".md" of "**/*.md") is refused before the automaton runs, which is most
+// of what real pushes ask. A whole push is bounded too: matchWatchPaths
+// stops after watchPathsWorkBudget work units (well under a second at
+// worst) and deploys, like for an incomplete list. Changed paths longer
+// than maxChangedPathLength are not matched at all: they make the list
 // incomplete, which deploys.
 
 /** Most patterns a service may have. */
@@ -30,13 +33,23 @@ export const maxWatchPathLength = 300;
 /** Longest changed path that is matched; git allows longer, no real repository has them. */
 export const maxChangedPathLength = 4096;
 /**
- * Most work one push decision may take, in globCost word steps (one
- * character against 32 steps of a glob; about 2 to 4 ns each). Real pushes
- * stay far below; past it the push deploys and says so.
+ * Most work one push decision may take, in globCost units (measured at
+ * 1 to 2.3 ns each on an Apple M-series core, so a whole budget is about
+ * 150 ms at worst). A push of 20,000 files of 200 characters against 50
+ * ordinary patterns uses about 37M; past the budget the push deploys and
+ * says so.
  */
-export const watchPathsWorkBudget = 8_000_000;
+export const watchPathsWorkBudget = 64_000_000;
 /** Work counted per file and per match besides the characters (the fixed part of each call). */
 const workPerCall = 8;
+/**
+ * Work per character besides the words of the state set: the character's
+ * mask lookup and the loop around the words. Without it a one-word glob
+ * would cost 10 ns per counted unit instead of 2.
+ */
+const workPerCharacter = 4;
+/** Work counted for a pair refused by its literal head or tail (the automaton never runs). */
+const workPerLiteralCheck = 2 * workPerCall;
 
 /** Trims a pattern and drops a leading "./" or "/"; a trailing "/" means everything below. */
 export function normalizeWatchPattern(raw: string): string {
@@ -167,6 +180,10 @@ interface CompiledGlob {
   skip: Int32Array;
   /** The longest run of skippable steps in a row ("**\/" then "*": 2): how often a closure shifts. */
   rounds: number;
+  /** The literal characters the glob starts with ("apps/web/" of "apps/web/**"): a matching path starts with them. */
+  head: string;
+  /** The literal characters it ends with after the head (".md" of "**\/*.md"): a matching path ends with them. */
+  tail: string;
 }
 
 const compiledGlobs = new Map<string, CompiledGlob>();
@@ -212,6 +229,20 @@ function compileGlob(glob: string): CompiledGlob {
   });
   const reads = new Map<number, Int32Array>();
   for (const [code, m] of chars) reads.set(code, code === slash ? m : m.map((w, k) => w | (one[k] as number)));
+  // "char" steps read exactly their character and nothing can be skipped
+  // between them, so the first ones read the path's first characters and
+  // the last ones its last. The tail stops at the head, so the two never
+  // claim the same step.
+  const literal = (step: GlobStep) => (step.kind === "char" ? step.char : null);
+  let headEnd = 0;
+  while (headEnd < n && literal(steps[headEnd] as GlobStep) !== null) headEnd++;
+  let tailStart = n;
+  while (tailStart > headEnd && literal(steps[tailStart - 1] as GlobStep) !== null) tailStart--;
+  const text = (from: number, to: number) =>
+    steps
+      .slice(from, to)
+      .map((step) => literal(step))
+      .join("");
   const out: CompiledGlob = {
     words,
     finalWord: n >>> 5,
@@ -224,6 +255,8 @@ function compileGlob(glob: string): CompiledGlob {
     dirs,
     skip,
     rounds,
+    head: text(0, headEnd),
+    tail: text(tailStart, n),
   };
   if (compiledGlobs.size > 2000) compiledGlobs.clear();
   compiledGlobs.set(glob, out);
@@ -246,15 +279,25 @@ function scratchFor(words: number, rounds: number) {
   return scratch;
 }
 
+/** Whether a path can match at all given the glob's literal head and tail; false means it does not match. */
+function fitsLiterals(g: CompiledGlob, path: string): boolean {
+  return path.length >= g.head.length + g.tail.length && path.startsWith(g.head) && path.endsWith(g.tail);
+}
+
 /**
- * Whether a glob (without the "!") matches a whole path. Runs the glob's
- * automaton over the path once with every live state in one bit set
- * (bit-parallel, no backtracking): each character costs the same few
- * operations per 32 steps of the glob however many states are live, so
- * a match takes at most globCost(glob, path) word steps.
+ * Whether a glob (without the "!") matches a whole path. A path without
+ * the glob's literal head and tail is refused at once; otherwise the
+ * glob's automaton runs over the path once with every live state in one
+ * bit set (bit-parallel, no backtracking): each character costs the same
+ * few operations per 32 steps of the glob however many states are live,
+ * so a match takes at most globCost(glob, path) units.
  */
 export function globMatches(glob: string, path: string): boolean {
   const g = compileGlob(glob);
+  return fitsLiterals(g, path) && runGlob(g, path);
+}
+
+function runGlob(g: CompiledGlob, path: string): boolean {
   const { words, rounds, dirs, skip } = g;
   const scratch = scratchFor(words, rounds);
   let current = scratch.current;
@@ -316,9 +359,16 @@ export function globMatches(glob: string, path: string): boolean {
   return ((current[g.finalWord] as number) & g.finalBit) !== 0;
 }
 
-/** The most work globMatches does for a glob and a path, in word steps: one per character and 32 steps of the glob. */
+/**
+ * The most work globMatches does for a glob and a path, in units: a small
+ * fixed amount when the literal head or tail already rules the path out,
+ * else per character one unit per 32 steps of the glob plus the fixed
+ * part of reading a character.
+ */
 export function globCost(glob: string, path: string): number {
-  return (path.length + workPerCall) * compileGlob(glob).words;
+  const g = compileGlob(glob);
+  if (!fitsLiterals(g, path)) return workPerLiteralCheck;
+  return (path.length + workPerCall) * (g.words + workPerCharacter);
 }
 
 /** A changed file as the repository names it, without a leading "./" or "/". */
@@ -378,7 +428,7 @@ export type WatchPathsResult =
  * Decides a push. `files` null means the changed files are not known;
  * `complete` false means the list may be missing files (truncated
  * payloads, capped compare answers). The work is bounded by `budget`
- * (globCost word steps): past it the push deploys.
+ * (globCost units): past it the push deploys.
  */
 export function matchWatchPaths(
   patterns: readonly string[],

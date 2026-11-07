@@ -17,9 +17,9 @@ test("a trigger call with 50 star patterns and a 5 MiB list of long paths answer
   const panel = testPanel();
   try {
     const service = seedService(panel, { projectId: seedProject(panel).id, name: "api" });
-    // 299 characters each: "a*" x 149 and a last letter no path has.
+    // 300 characters each: "a*" x 149, a letter no path has and a last "*", so no literal tail lets the matcher refuse a path early.
     const star = "a*".repeat(Math.floor((maxWatchPathLength - 1) / 2));
-    const watchPaths = Array.from({ length: maxWatchPaths }, (_, i) => `${star}${String.fromCharCode(99 + (i % 20))}`);
+    const watchPaths = Array.from({ length: maxWatchPaths }, (_, i) => `${star}${String.fromCharCode(99 + (i % 20))}*`);
     expect(watchPaths.every((p) => p.length <= maxWatchPathLength)).toBe(true);
     panel.deps.db
       .update(services)

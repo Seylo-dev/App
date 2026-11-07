@@ -44,6 +44,14 @@ describe("globToRegExp", () => {
     ["a/**/b", "a/b", true],
     ["a/**/b", "a/x/y/b", true],
     ["a/**b", "a/x/yb", true],
+    // The literal head and tail are checked before the automaton runs; they never claim the same character.
+    ["a*a", "a", false],
+    ["a*a", "aa", true],
+    ["ab*ba", "aba", false],
+    ["ab*ba", "abba", true],
+    ["aa", "aaa", false],
+    ["src/**/*.ts", "src/a.tsx", false],
+    ["src/**/*.ts", "lib/src/a.ts", false],
   ];
   for (const [glob, path, matches] of cases) {
     test(`${glob} ${matches ? "matches" : "does not match"} ${path}`, () => {
@@ -209,18 +217,66 @@ describe("matching without backtracking", () => {
     for (let i = 0; i < 20; i++) expect(globMatches(pattern, path)).toBe(true);
     expect(globMatches(`${pattern}c`, path)).toBe(false);
     expect(performance.now() - started).toBeLessThan(60);
-    expect(globCost(pattern, path)).toBe((path.length + 8) * 10);
+    // 10 words of state, plus the fixed part of reading a character.
+    expect(globCost(pattern, path)).toBe((path.length + 8) * (10 + 4));
   });
 
   test("a whole push is bounded: 50 star patterns against a 5 MiB list of long paths stop at the budget and deploy", () => {
-    const patterns = Array.from({ length: maxWatchPaths }, (_, i) => `${"a*".repeat(148)}a*${String.fromCharCode(99 + (i % 20))}`);
+    // Ending in "*" and starting with the paths' letter, so the literal head and tail let every path through to the automaton.
+    const patterns = Array.from({ length: maxWatchPaths }, (_, i) => `${"a*".repeat(148)}${String.fromCharCode(99 + (i % 20))}*`);
     const files = Array.from({ length: 1280 }, () => `${"a".repeat(maxChangedPathLength - 1)}b`);
     const started = performance.now();
     const result = matchWatchPaths(patterns, files);
-    // Before: about 575 s of blocked event loop.
+    // Before: about 575 s of blocked event loop. A full budget is about 110 to 150 ms on a current CPU.
     expect(performance.now() - started).toBeLessThan(500);
     expect(result).toMatchObject({ deploy: true, reason: "tooMany", total: 1280 });
     expect(describeWatchPaths(result)).toContain("too many changed files to match");
+  });
+
+  test("the worst glob shape per unit (one word, two skip rounds) on the most files still stops within the budget", () => {
+    const patterns = Array.from({ length: maxWatchPaths }, (_, i) => `**/*${"a*".repeat(13)}${String.fromCharCode(99 + (i % 20))}*`);
+    const files = Array.from({ length: 20_000 }, () => `${"a".repeat(maxChangedPathLength - 1)}b`);
+    const started = performance.now();
+    expect(matchWatchPaths(patterns, files)).toMatchObject({ deploy: true, reason: "tooMany", total: 20_000 });
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  test("star patterns with a literal tail no path has are refused pair by pair at once and decided in full", () => {
+    const patterns = Array.from({ length: maxWatchPaths }, (_, i) => `${"a*".repeat(148)}a*${String.fromCharCode(99 + (i % 20))}`);
+    const files = Array.from({ length: 1280 }, () => `${"a".repeat(maxChangedPathLength - 1)}b`);
+    const started = performance.now();
+    expect(matchWatchPaths(patterns, files)).toEqual({ deploy: false, reason: "noMatch", checked: 1280 });
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(globCost(patterns[0] as string, files[0] as string)).toBe(16);
+  });
+
+  test("ordinary large pushes are decided in full: 50 realistic patterns against 5,000 and 20,000 changed files", () => {
+    // Before: the budget ran out after 3,581 of 5,000 short paths (and 758 of 20,000 long ones), so the push deployed unfiltered.
+    const patterns = [
+      "apps/web/**",
+      "apps/api/**",
+      "packages/ui/src/**/*.tsx",
+      "!**/*.md",
+      "!**/*.test.ts",
+      "docs/**",
+      "infra/terraform/**/*.tf",
+      "services/*/Dockerfile",
+      "**/package.json",
+      "!**/__snapshots__/**",
+    ];
+    while (patterns.length < maxWatchPaths) patterns.push(`libs/lib${patterns.length}/src/**/*.ts`);
+    const short = Array.from({ length: 5_000 }, (_, i) => `tools/gen/out/dir${i % 37}/sub${i % 11}/file-${i}.go`);
+    const long = Array.from({ length: 20_000 }, (_, i) => `${"segment/".repeat(24)}file-${i}.ts`);
+    expect(short.every((f) => f.length >= 30 && f.length <= 45)).toBe(true);
+    expect(matchWatchPaths(patterns, short)).toEqual({ deploy: false, reason: "noMatch", checked: 5_000 });
+    expect(matchWatchPaths(patterns, long)).toEqual({ deploy: false, reason: "noMatch", checked: 20_000 });
+    // One file that counts still deploys, wherever it is in the list.
+    expect(matchWatchPaths(patterns, [...long.slice(0, 19_999), "apps/web/src/index.ts"])).toEqual({
+      deploy: true,
+      reason: "matched",
+      file: "apps/web/src/index.ts",
+      pattern: "apps/web/**",
+    });
   });
 
   test("the budget counts every pattern tried; a list that fits is decided in full", () => {

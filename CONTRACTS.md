@@ -1211,11 +1211,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   and costs the same per character whatever the pattern (`globMatches`
   runs the glob's automaton over the path once with all live states in a
   bit set: one pass, a few operations per character and 32 glob steps;
-  repeats such as `**/**/` collapse). Patterns are tried from the last
+  repeats such as `**/**/` collapse); a path without the glob's literal
+  head or tail (`apps/web/` of `apps/web/**`, `.md` of `**/*.md`) is
+  refused before the automaton runs. Patterns are tried from the last
   one back, so the first match decides a file. A whole decision is
-  bounded: `matchWatchPaths` stops after `watchPathsWorkBudget` (8M word
-  steps, about 20 ms) and the push deploys ("too many changed files to
-  match"); a changed path longer than 4096 characters is not matched and
+  bounded: `matchWatchPaths` stops after `watchPathsWorkBudget` (64M
+  units, `globCost`: about 110 to 150 ms at worst; 20,000 files of 200
+  characters against 50 ordinary patterns use about 37M) and the push
+  deploys ("too many changed files to match"); a changed path longer
+  than 4096 characters is not matched and
   makes the list incomplete (which deploys); a `{ changedFiles }` body
   keeps at most 20,000 entries (more counts as truncated, like the
   commits path). `webhooks/gate.ts`
