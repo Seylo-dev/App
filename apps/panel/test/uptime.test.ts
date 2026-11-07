@@ -219,10 +219,15 @@ test("internal targets are refused unless they are this panel's or an admin allo
   expect((await checkTarget(panel.deps, "https://shop.example.com/")).ok).toBe(false);
   // The vetted address is what the probe connects to, so DNS cannot change its mind in between.
   expect(await checkTarget(panel.deps, "https://public.example.com/")).toEqual({ ok: true, address: "93.184.215.14", byName: false });
-  panel.deps.db
+  // What an agent reports as its public address proves nothing (a compromised one reports any address);
+  // the address an admin set for the node does.
+  const vm = panel.deps.db
     .insert(nodes)
     .values({ name: "vm", publicKey: Buffer.from(crypto.getRandomValues(new Uint8Array(32))), publicIpv4: "192.168.64.9" })
-    .run();
+    .returning()
+    .get();
+  expect((await checkTarget(panel.deps, "http://192.168.64.9:3000/")).ok).toBe(false);
+  panel.deps.db.update(nodes).set({ publicAddress: "192.168.64.9" }).where(eq(nodes.id, vm.id)).run();
   expect((await checkTarget(panel.deps, "http://192.168.64.9:3000/")).ok).toBe(true);
   expect((await checkTarget(panel.deps, "http://192.168.64.10:3000/")).ok).toBe(false);
 

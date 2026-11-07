@@ -914,8 +914,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   metadata (169.254.169.254, 100.100.100.200, fd00:ec2::254,
   `metadata.google.internal`, `*.internal`), private and reserved ranges
   (IPv4-mapped and NAT64 included) are refused on save (BAD_REQUEST `reason:
-  internalTarget`) and before every probe, unless every address is a node's
-  own public address, or `settings.general.uptimeAllowInternalTargets` is on
+  internalTarget`) and before every probe, unless every such address is a
+  node's address as an admin set it (`nodes.public_address`; the addresses
+  an agent reports, `public_ipv4`/`public_ipv6`, never count, since a
+  compromised agent could name a private one), or
+  `settings.general.uptimeAllowInternalTargets` is on
   (admins, `settings.updateGeneral`). A domain row is no exception (it says
   nothing about where the name resolves). `checkTarget` returns the vetted
   address and the request connects to it (`http/pinned-fetch.ts`: Host header
