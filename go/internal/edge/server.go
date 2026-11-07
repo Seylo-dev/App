@@ -2,10 +2,7 @@ package edge
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,12 +10,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/proxy"
 )
@@ -48,12 +43,6 @@ type Tools interface {
 // The registry relay has 5755 and the LB entry point 5757.
 const DefaultPort = 5756
 
-// SessionTTL is how long a tool cookie lasts after a ticket opened it.
-const SessionTTL = 12 * time.Hour
-
-// sessionCookie is the edge's own cookie on tool hosts.
-const sessionCookie = brand.Slug + "_edge"
-
 // Config configures the edge HTTP listener.
 type Config struct {
 	Tickets TicketVerifier
@@ -63,7 +52,14 @@ type Config struct {
 	// (LoadSessionKey) so people stay signed in to Boxes and database UIs;
 	// nil uses a random key for this process only.
 	SessionKey []byte
-	Logger     *slog.Logger
+	// Access rechecks tool sessions with the panel (session.go); nil keeps
+	// a session until UnconfirmedTTL after its ticket.
+	Access AccessChecker
+	// RecheckEvery and UnconfirmedTTL default to the constants; Now to
+	// time.Now. Tests shorten them.
+	RecheckEvery, UnconfirmedTTL time.Duration
+	Now                          func() time.Time
+	Logger                       *slog.Logger
 }
 
 // HTTPServer is the edge listener. It serves:
@@ -81,6 +77,7 @@ type HTTPServer struct {
 	log        *slog.Logger
 	pages      pages
 	sessionKey []byte
+	sess       sessions
 
 	mu     sync.RWMutex
 	tools  map[string]registered
@@ -261,7 +258,7 @@ func (s *HTTPServer) serveTool(w http.ResponseWriter, r *http.Request, subject s
 			return
 		}
 		http.SetCookie(w, &http.Cookie{
-			Name: sessionCookie, Value: s.session(subject, time.Now().Add(SessionTTL)), Path: "/",
+			Name: sessionCookie, Value: s.cookieValue(s.startSession(subject, ticket.UserID)), Path: "/",
 			HttpOnly: true, Secure: secure(r), SameSite: http.SameSiteLaxMode, MaxAge: int(SessionTTL / time.Second),
 		})
 		s.log.Info("edge tool opened", "subject", subject, "user_id", ticket.UserID)
@@ -269,7 +266,8 @@ func (s *HTTPServer) serveTool(w http.ResponseWriter, r *http.Request, subject s
 		http.Redirect(w, r, safeTarget(r.URL.Query().Get("to")), http.StatusFound)
 		return
 	}
-	if !s.validSession(r, subject) {
+	sess, ok := s.readSession(r, subject)
+	if !ok || !s.authorized(r.Context(), sess) {
 		s.page(w, http.StatusUnauthorized, "", signInText)
 		return
 	}
@@ -302,38 +300,12 @@ func (s *HTTPServer) serveTool(w http.ResponseWriter, r *http.Request, subject s
 			s.page(w, http.StatusBadGateway, "", toolDownText)
 		},
 	}
-	rp.ServeHTTP(w, r)
-}
-
-// session is "<subject>|<exp>" signed with the agent's key.
-func (s *HTTPServer) session(subject string, exp time.Time) string {
-	body := subject + "|" + strconv.FormatInt(exp.Unix(), 10)
-	return base64.RawURLEncoding.EncodeToString([]byte(body)) + "." + base64.RawURLEncoding.EncodeToString(s.mac(body))
-}
-
-func (s *HTTPServer) mac(body string) []byte {
-	m := hmac.New(sha256.New, s.sessionKey)
-	m.Write([]byte(body))
-	return m.Sum(nil)
-}
-
-func (s *HTTPServer) validSession(r *http.Request, subject string) bool {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return false
-	}
-	bodyB64, macB64, ok := strings.Cut(c.Value, ".")
-	if !ok {
-		return false
-	}
-	body, err1 := base64.RawURLEncoding.DecodeString(bodyB64)
-	mac, err2 := base64.RawURLEncoding.DecodeString(macB64)
-	if err1 != nil || err2 != nil || !hmac.Equal(mac, s.mac(string(body))) {
-		return false
-	}
-	sub, expText, ok := strings.Cut(string(body), "|")
-	exp, err := strconv.ParseInt(expText, 10, 64)
-	return ok && err == nil && sub == subject && time.Unix(exp, 0).After(time.Now())
+	// Revoked or expired while in use (an open WebSocket, a long poll):
+	// cancelling the request closes the proxied connection.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go s.watch(ctx, cancel, sess)
+	rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // stripCookie removes one cookie from an outgoing request.

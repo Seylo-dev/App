@@ -576,7 +576,15 @@ local API, join and resume. The areas:
   service's LB routers in its own `seylo-<id>.yml`); reconcile attaches it
   to project networks like the fork's Traefik. Tool session cookies are
   signed with `<datadir>/network/edge-session.key` (kept across agent
-  restarts). Route certificate failures come from the Traefik container's
+  restarts) and name the ticket's subject and user (`edge/session.go`; the
+  older subject-only format is refused, one more sign-in). The edge asks
+  the panel `PanelService.CheckEdgeAccess`
+  (`panel.edge-access.v1`) about each user on each tool in use at most
+  once a minute, open WebSockets included: `allowed: false` ends that
+  user's sessions on that tool opened before the answer and closes their
+  connections; a new ticket opens it again. While the panel gives no
+  answer (UNIMPLEMENTED, offline) a session lasts an hour past the panel's
+  last "yes" or its ticket; 12 hours caps every session. Route certificate failures come from the Traefik container's
   log (the last 24 h, kept until a certificate appears). RetryCertificate
   (`routing.certificate-retry.v1`, `proxy/certretry.go`) makes Traefik ask
   the CA again for an ACME route's hosts without a certificate, without a
@@ -1239,6 +1247,7 @@ or the method descriptor's options (TS). Current names:
 | `volume.transfer.v1` | ExportVolume, ImportVolume |
 | `panel.desired.v1` | GetDesiredState |
 | `panel.registry-tunnel.v1` | RegistryTunnel |
+| `panel.edge-access.v1` | CheckEdgeAccess (not built in the panel yet; agents fall back to an hour per confirmation) |
 
 An agent advertises a capability only once every method in it works.
 

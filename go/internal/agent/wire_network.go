@@ -157,7 +157,7 @@ func provideNetwork(d *Deps) error {
 	if err != nil {
 		log.Warn("edge session key not kept; tool sessions end on restart", "err", err)
 	}
-	p.edge = edge.NewHTTPServer(edge.Config{Tickets: verifier, Handoffs: handoffs, SessionKey: sessionKey, Logger: log})
+	p.edge = edge.NewHTTPServer(edge.Config{Tickets: verifier, Handoffs: handoffs, SessionKey: sessionKey, Access: edgeAccess(d), Logger: log})
 
 	p.Manager = portgate.New(portgate.Config{
 		Resolve: func(ctx context.Context, serviceID string, port uint32) (string, error) {
@@ -189,6 +189,21 @@ func provideNetwork(d *Deps) error {
 	d.Wings = detector
 	d.CPU = p.cpu
 	return nil
+}
+
+// edgeAccess rechecks edge tool sessions with the panel
+// (PanelService.CheckEdgeAccess); nil without a panel client.
+func edgeAccess(d *Deps) edge.AccessChecker {
+	if d.Panel == nil {
+		return nil
+	}
+	return edge.AccessFunc(func(ctx context.Context, subject, userID string) (bool, error) {
+		resp, err := d.Panel.CheckEdgeAccess(ctx, &agentv1.CheckEdgeAccessRequest{Subject: subject, UserId: userID})
+		if err != nil {
+			return false, err
+		}
+		return resp.GetAllowed(), nil
+	})
 }
 
 // acmeCACertFile returns path when it is a readable file. A missing file
