@@ -140,9 +140,16 @@ export const installations = defineOp({
   kind: "query",
   summary: "List GitHub App installations",
   description:
-    "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one. Empty for people who neither manage the App nor may create or update a service anywhere.",
+    "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one. Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
   input: Type.Object({}),
-  output: Type.Object({ installations: Type.Array(Installation), installUrl: Type.Union([Type.String(), Type.Null()]) }),
+  output: Type.Object({
+    installations: Type.Array(Installation),
+    installUrl: Type.Union([Type.String(), Type.Null()]),
+    hidden: Type.Boolean({
+      description:
+        "True when the caller may not see the App or its installations: the list is then empty whatever is installed, and says nothing about whether there is an App.",
+    }),
+  }),
   permission: permission.signedIn(),
   mcp: true,
   audit: false,

@@ -1280,7 +1280,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   anywhere (`Access.canSomewhere`): git credentials, git provider
   connections, registry logins and the GitHub App with its installations
   (`github.status` answers `app: null`, `github.installations` an empty
-  list and no install link; `github.manage` sees them too) need
+  list, no install link and `hidden: true`, so the Source tab shows a
+  GitHub-connected service's repository and branch read-only instead of
+  "Connect GitHub first"; `github.manage` sees them too) need
   `services.create` or `services.update` on some project or service,
   notification channels and
   backup destination choices `services.view` (or the edit action) somewhere;

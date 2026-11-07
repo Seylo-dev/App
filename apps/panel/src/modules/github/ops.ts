@@ -206,10 +206,10 @@ const deleteApp = implement(githubOps.deleteApp, (_input, ctx) => {
 });
 
 const installations = implement(githubOps.installations, (_input, ctx) => {
-  if (!maySeeApp(ctx)) return { installations: [], installUrl: null };
+  if (!maySeeApp(ctx)) return { installations: [], installUrl: null, hidden: true };
   const row = appRow(ctx.db);
   const rows = ctx.db.select().from(githubInstallations).orderBy(githubInstallations.accountLogin).all();
-  return { installations: rows.map(toInstallation), installUrl: row ? installUrl(row) : null };
+  return { installations: rows.map(toInstallation), installUrl: row ? installUrl(row) : null, hidden: false };
 });
 
 /** Reads the App's installations from GitHub and makes the table match. */

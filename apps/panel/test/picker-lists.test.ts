@@ -105,15 +105,22 @@ const everything = {
 test("an account with no grants gets empty pickers", async () => {
   const nobody = await createUser(panel, "member");
   expect(await lists({ cookie: nobody.cookie })).toEqual(none);
-  // Not even the install link, which names the App.
-  expect((await callOp(panel, github.installations, {}, { cookie: nobody.cookie })).body.installUrl).toBeNull();
+  // Not even the install link, which names the App; the web app shows the connected repository read-only instead.
+  expect((await callOp(panel, github.installations, {}, { cookie: nobody.cookie })).body).toEqual({
+    installations: [],
+    installUrl: null,
+    hidden: true,
+  });
 });
 
 test("owners and admins see the GitHub App and its installations", async () => {
   expect(await lists({ cookie: owner })).toEqual(everything);
   const admin = await createUser(panel, "admin");
   expect(await lists({ cookie: admin.cookie })).toEqual(everything);
-  expect((await callOp(panel, github.installations, {}, { cookie: admin.cookie })).body.installUrl).toContain("acme-seylo");
+  expect((await callOp(panel, github.installations, {}, { cookie: admin.cookie })).body).toMatchObject({
+    installUrl: expect.stringContaining("acme-seylo"),
+    hidden: false,
+  });
 });
 
 test("a viewer reads channel and destination names; source pickers need a source edit right", async () => {
