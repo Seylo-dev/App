@@ -793,7 +793,21 @@ Panel:
   `services.spec`: use a `*_sealed` column or `service_secrets`.
 - Secrets are sealed with `deps.secrets.seal(value, purpose)` (AES-256-GCM,
   HKDF key per purpose from `master.key`); add new purposes to
-  `SealPurpose`. Tokens are stored as SHA-256 hashes only.
+  `sealPurposes`. Tokens are stored as SHA-256 hashes only. After a leak
+  of the data dir, `bun scripts/rotate-master-key.ts` in apps/panel (panel
+  stopped) seals every sealed value of panel.db again under a new
+  `master.key` in one transaction (sealed columns and sealed strings inside
+  JSON such as settings, each purpose found by trying them all; a value no
+  purpose opens aborts with nothing changed), drops the edge ticket key and
+  the LB CA and node certificates so the next start makes new ones, deletes
+  recovery codes (HMACs under the old key) and lists their owners, and
+  replaces `master.key` only after the commit (`master.key.new` until then;
+  a later run finishes or undoes an interrupted one). The agents' TLS key
+  stays (nodes pin it). The panel build also writes it as
+  `apps/panel/dist/rotate-master-key.js`, so on an install it runs from the
+  panel image (`bun apps/panel/dist/rotate-master-key.js` with the panel
+  data dir mounted and `SEYLO_DATA_DIR` set, panel container stopped); the
+  node CLI has no command for it yet.
 - Logging: pino JSON with camelCase keys (`opId`, `nodeId`); take the
   logger from deps. Never log secrets, tokens or env values.
 - Config comes from `<SLUG>_*` environment variables (`src/config.ts`);
@@ -1236,7 +1250,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
-| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only) | Docs say to copy `/var/lib/seylo/panel/` |
+| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled by `bun scripts/rotate-master-key.ts` (new `master.key`, every secret sealed again, new edge ticket key and LB CA; recovery codes must be made again), not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
 
 ### Verification

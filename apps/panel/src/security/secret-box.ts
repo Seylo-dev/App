@@ -8,32 +8,35 @@ import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } f
 
 /**
  * Every purpose in use. Adding one is fine (append a line, keep the list
- * sorted); renaming one breaks existing values.
+ * sorted); renaming one breaks existing values. scripts/rotate-master-key.ts
+ * tries each one to re-seal values it finds.
  */
-export type SealPurpose =
-  | "ai.anthropic-key"
-  | "approval.input"
-  | "auth.challenge"
-  | "backup.destination"
-  | "cloudflare.tunnel"
-  | "compose.file"
-  | "deployment.env"
-  | "domain.certificate"
-  | "edge.ticket-key"
-  | "git.credential"
-  | "git.provider"
-  | "git.webhook"
-  | "lb.key"
-  | "agent-tls.key"
-  | "github.account"
-  | "github.app"
-  | "notification.channel"
-  | "project.env"
-  | "registry.credential"
-  | "service.env"
-  | "service.secret"
-  | "totp.secret"
-  | "volume.file";
+export const sealPurposes = [
+  "ai.anthropic-key",
+  "approval.input",
+  "auth.challenge",
+  "backup.destination",
+  "cloudflare.tunnel",
+  "compose.file",
+  "deployment.env",
+  "domain.certificate",
+  "edge.ticket-key",
+  "git.credential",
+  "git.provider",
+  "git.webhook",
+  "lb.key",
+  "agent-tls.key",
+  "github.account",
+  "github.app",
+  "notification.channel",
+  "project.env",
+  "registry.credential",
+  "service.env",
+  "service.secret",
+  "totp.secret",
+  "volume.file",
+] as const;
+export type SealPurpose = (typeof sealPurposes)[number];
 
 const version = "v1";
 // Fixed, not derived from the brand: renaming the product must not change keys.
