@@ -6,54 +6,51 @@ Lima Ubuntu 24.04, Docker installed by install.sh). Release server and git serve
 
 | # | Check | Status | When |
 |---|---|---|---|
-| 1 | install.sh panel + node on A (signed manifest, image by digest); setup link; panel adopted as protected service | PASS | 50s, 2026-11-07 04:13, panel 0.2.0 |
-| 2 | Owner through the setup link; API key; REST op routes | PASS | 1s, 2026-11-07 04:13, panel 0.2.0 |
-| 3 | Join B and C (C gets Docker from install.sh); 3 nodes online; health checks | PASS | 27s, 2026-11-07 04:14, panel 0.2.0 |
-| 4 | Image service on B with an auto domain; first-run IP:port -> 308 -> closed | PASS | 47s, 2026-11-07 04:14, panel 0.2.0 |
-| 5 | Railpack git build on A, run on B through the 127.0.0.1:5755 relay | PASS | 59s, 2026-11-07 04:15, panel 0.2.0 |
-| 6 | Dockerfile from git, inline Dockerfile and uploaded archive deploy | PASS | 19s, 2026-11-07 04:16, panel 0.2.0 |
-| 7 | Zero downtime redeploy; failing health check keeps old; rollback | PASS | 122s, 2026-11-07 04:18, panel 0.2.0 |
-| 8 | Crash policy: 5s restart, stop after N, crash report + one alert per streak | PASS | 112s, 2026-11-07 04:20, panel 0.2.0 |
-| 9 | Env references across services; env.analyze flags cross-node address | PASS | 7s, 2026-11-07 04:20, panel 0.2.0 |
-| 10 | Postgres: internal URL, project isolation, TLS exposure, web UI, DB shell | PASS | 59s, 2026-11-07 04:21, panel 0.2.0 |
-| 11 | Backup Postgres and a volume to MinIO, restore both | PASS | 30s, 2026-11-07 04:21, panel 0.2.0 |
-| 12 | Cron: schedule, run-now, history, keeps running while the panel is down | PASS | 218s, 2026-11-07 04:25, panel 0.2.0 |
-| 13 | Logs search/follow across deploys; console stdin; shell PTY; files | PASS | 10s, 2026-11-07 04:25, panel 0.2.0 |
-| 14 | Metrics: node and service series have samples | PASS | 1s, 2026-11-07 04:25, panel 0.2.0 |
-| 15 | Move a service with a volume B -> C; data intact; domain follows | PASS | 24s, 2026-11-07 04:26, panel 0.2.0 |
-| 16 | Replicas on B and C, entry on B; failover when one container dies | PASS | 35s, 2026-11-07 04:26, panel 0.2.0 |
-| 17 | Compose stack from pasted YAML (two services, shared volume) | PASS | 18s, 2026-11-07 04:26, panel 0.2.0 |
-| 18 | A template from the catalog creates and runs | PASS | 9s, 2026-11-07 04:27, panel 0.2.0 |
-| 19 | Global and per-service maintenance pages; timed expose locked to an IP | PASS | 320s, 2026-11-07 04:32, panel 0.2.0 |
-| 20 | Panel down: apps, routes, crash restarts, cron keep working; outbox delivers | PASS | 248s, 2026-11-07 04:36, panel 0.2.0 |
-| 21 | Agent restart adopts running services without restarting them | PASS | 47s, 2026-11-07 04:37, panel 0.2.0 |
-| 22 | Self-update N -> N+1 (panel first, then nodes); broken N+2 panel rolls back | PASS | 39s, 2026-11-07 04:37, panel 0.2.1 |
-| 23 | Cleanup preview + run removes only seylo-labeled garbage | PASS | 18s, 2026-11-07 04:38, panel 0.2.1 |
-| 24 | Laptop CLI: login, deploy, env set/list, logs -f | PASS | 49s, 2026-11-07 04:39, panel 0.2.1 |
-| 25 | MCP: read-only token lists tools and runs a query; destructive call -> approval | PASS | 1s, 2026-11-07 04:39, panel 0.2.1 |
-| 26 | seylo troubleshoot --dry-run redacts; seylo status shows the connection | PASS | 1s, 2026-11-07 04:39, panel 0.2.1 |
-| 27 | Uninstall on C leaves nothing behind | PASS | 29s, 2026-11-07 04:39, panel 0.2.1 |
-| 28 | C (systemd cgroup driver) runs containers under seylo.slice | PASS | 1s, 2026-11-07 04:39, panel 0.2.1 |
-| 29 | (stretch) ACME certificate from a local Pebble CA | PASS | 12s, 2026-11-07 04:39, panel 0.2.1 |
-| 30 | Web smoke with Playwright against the e2e panel | PASS | 3s, 2026-11-07 04:39, panel 0.2.1 |
-| 31 | Panel domain: Pebble HTTPS, Secure cookie, HSTS, IP:port -> domain, nodes move to it, CLI | PASS | 395s, 2026-11-07 05:46, panel 0.2.1 |
-| 32 | Docker Hub: search, tags, inspect traefik/whoami on the real Docker Hub; dockerHub.create on B live on its auto domain | PASS | 8s, 2026-11-07 04:40, panel 0.2.1 |
-| 33 | Gitea provider on A: a push outside the watch path skips (reason logged), inside deploys, [skip ci] skips | PASS | 48s, 2026-11-07 04:40, panel 0.2.1 |
-| 34 | Scheduled cleanup on B: a disk line triggers a run that removes only labelled resources and reports them | PASS | 16s, 2026-11-07 04:41, panel 0.2.1 |
-| 35 | Host shell on B: owner turns it on with re-auth, hostname through the panel's socket, audited, agent refuses when off | PASS | 24s, 2026-11-07 04:41, panel 0.2.1 |
-| 36 | Clone whoami with its data into another project on C; move a service between projects (impact list, keeps serving) | PASS | 157s, 2026-11-07 04:44, panel 0.2.1 |
-| 37 | Valkey, ClickHouse, Postgres 18 + pgvector on B: app connects, TLS exposure, shell query, backup to MinIO, restore | PASS | 61s, 2026-11-07 05:39, panel 0.2.1 |
-| 38 | Upgrade: a 0.1.1 panel and node with real rows move to this build by the normal update; 0001 applies, data survives | PASS | 51s, 2026-11-07 05:40, panel 0.2.1 |
+| 1 | install.sh panel + node on A (signed manifest, image by digest); setup link; panel adopted as protected service | PASS | 50s, 2026-11-07 06:22, panel 0.2.0 |
+| 2 | Owner through the setup link; API key; REST op routes | PASS | 0s, 2026-11-07 06:22, panel 0.2.0 |
+| 3 | Join B and C (C gets Docker from install.sh); 3 nodes online; health checks | PASS | 26s, 2026-11-07 06:23, panel 0.2.0 |
+| 4 | Image service on B with an auto domain; first-run IP:port -> 308 -> closed | PASS | 45s, 2026-11-07 06:23, panel 0.2.0 |
+| 5 | Railpack git build on A, run on B through the 127.0.0.1:5755 relay | PASS | 53s, 2026-11-07 06:24, panel 0.2.0 |
+| 6 | Dockerfile from git, inline Dockerfile and uploaded archive deploy | PASS | 20s, 2026-11-07 06:25, panel 0.2.0 |
+| 7 | Zero downtime redeploy; failing health check keeps old; rollback | PASS | 123s, 2026-11-07 06:27, panel 0.2.0 |
+| 8 | Crash policy: 5s restart, stop after N, crash report + one alert per streak | PASS | 113s, 2026-11-07 06:29, panel 0.2.0 |
+| 9 | Env references across services; env.analyze flags cross-node address | PASS | 7s, 2026-11-07 06:29, panel 0.2.0 |
+| 10 | Postgres: internal URL, project isolation, TLS exposure, web UI, DB shell | PASS | 60s, 2026-11-07 06:30, panel 0.2.0 |
+| 11 | Backup Postgres and a volume to MinIO, restore both | PASS | 30s, 2026-11-07 06:30, panel 0.2.0 |
+| 12 | Cron: schedule, run-now, history, keeps running while the panel is down | PASS | 222s, 2026-11-07 06:34, panel 0.2.0 |
+| 13 | Logs search/follow across deploys; console stdin; shell PTY; files | PASS | 10s, 2026-11-07 06:34, panel 0.2.0 |
+| 14 | Metrics: node and service series have samples | PASS | 0s, 2026-11-07 06:34, panel 0.2.0 |
+| 15 | Move a service with a volume B -> C; data intact; domain follows | PASS | 22s, 2026-11-07 06:34, panel 0.2.0 |
+| 16 | Replicas on B and C, entry on B; failover when one container dies | PASS | 34s, 2026-11-07 06:35, panel 0.2.0 |
+| 17 | Compose stack from pasted YAML (two services, shared volume) | PASS | 18s, 2026-11-07 06:35, panel 0.2.0 |
+| 18 | A template from the catalog creates and runs | PASS | 12s, 2026-11-07 06:36, panel 0.2.0 |
+| 19 | Global and per-service maintenance pages; timed expose locked to an IP | PASS | 320s, 2026-11-07 06:41, panel 0.2.0 |
+| 20 | Panel down: apps, routes, crash restarts, cron keep working; outbox delivers | PASS | 236s, 2026-11-07 06:45, panel 0.2.0 |
+| 21 | Agent restart adopts running services without restarting them | PASS | 46s, 2026-11-07 06:46, panel 0.2.0 |
+| 22 | Self-update N -> N+1 (panel first, then nodes); broken N+2 panel rolls back | PASS | 41s, 2026-11-07 06:46, panel 0.2.1 |
+| 23 | Cleanup preview + run removes only seylo-labeled garbage | PASS | 18s, 2026-11-07 06:47, panel 0.2.1 |
+| 24 | Laptop CLI: login, deploy, env set/list, logs -f | PASS | 49s, 2026-11-07 06:47, panel 0.2.1 |
+| 25 | MCP: read-only token lists tools and runs a query; destructive call -> approval | PASS | 1s, 2026-11-07 06:47, panel 0.2.1 |
+| 26 | seylo troubleshoot --dry-run redacts; seylo status shows the connection | PASS | 1s, 2026-11-07 06:47, panel 0.2.1 |
+| 27 | Uninstall on C leaves nothing behind | PASS | 28s, 2026-11-07 06:48, panel 0.2.1 |
+| 28 | C (systemd cgroup driver) runs containers under seylo.slice | PASS | 0s, 2026-11-07 06:48, panel 0.2.1 |
+| 29 | (stretch) ACME certificate from a local Pebble CA | PASS | 9s, 2026-11-07 06:48, panel 0.2.1 |
+| 30 | Web smoke with Playwright against the e2e panel | PASS | 3s, 2026-11-07 06:48, panel 0.2.1 |
+| 31 | Panel domain: Pebble HTTPS, Secure cookie, HSTS, IP:port -> domain, nodes move to it, CLI | PASS | 415s, 2026-11-07 07:02, panel 0.2.1 |
+| 32 | Docker Hub: search, tags, inspect traefik/whoami on the real Docker Hub; dockerHub.create on B live on its auto domain | PASS | 8s, 2026-11-07 06:48, panel 0.2.1 |
+| 33 | Gitea provider on A: a push outside the watch path skips (reason logged), inside deploys, [skip ci] skips | PASS | 46s, 2026-11-07 06:49, panel 0.2.1 |
+| 34 | Scheduled cleanup on B: a disk line triggers a run that removes only labelled resources and reports them | PASS | 16s, 2026-11-07 06:49, panel 0.2.1 |
+| 35 | Host shell on B: owner turns it on with re-auth, hostname through the panel's socket, audited, agent refuses when off | PASS | 23s, 2026-11-07 06:50, panel 0.2.1 |
+| 36 | Clone whoami with its data into another project on C; move a service between projects (impact list, keeps serving) | PASS | 157s, 2026-11-07 06:52, panel 0.2.1 |
+| 37 | Valkey, ClickHouse, Postgres 18 + pgvector on B: app connects, TLS exposure, shell query, backup to MinIO, restore | PASS | 81s, 2026-11-07 06:54, panel 0.2.1 |
+| 38 | Upgrade: a 0.1.1 panel and node with real rows move to this build by the normal update; 0001 applies, data survives | PASS | 52s, 2026-11-07 06:55, panel 0.2.1 |
 
 38 passed, 0 failed, 0 blocked/skipped/not run.
 
-Run: one fresh `KEEP=1 make e2e` of `79730c5` on 2026-11-07. The VMs came up at 04:06,
-releases 0.2.0, 0.2.1 and 0.2.2 were built from that tree and 0.1.1 from its tag by 04:12, and checks
-1-30 and 32-36 ran in the default order from 04:12 to 04:44. The session driving the run ended during
-check 37, with the VMs and the state in `~/.cache/seylo-e2e` left up, so checks 37, 38 and 31 (31 last,
-as in the default order) ran on the same VMs with `make e2e-checks CHECKS="37 38 31"` from 05:38 to
-05:46. Check 37 found the Valkey, ClickHouse and Postgres 18 databases the interrupted pass had created
-at 04:44 (it reuses existing ones) and ran all its other steps. About 48 minutes of run time in all.
+Run: one fresh `KEEP=1 make e2e` (after `test/e2e-colima/down.sh`) of `8a3a7a5` on 2026-11-07, from 06:15
+to 07:02 (46 minutes). The VMs were created 06:15-06:18, releases 0.2.0, 0.2.1 and 0.2.2 were built from
+that tree and 0.1.1 from its tag by 06:22, then the checks ran in the default order (1-30, 32-38, then 31)
+from 06:22 to 07:02.
 
 ## Evidence
 
@@ -66,24 +63,24 @@ ok   panel answers on http://192.168.64.3:3000/api/health
 ok   seylo.service is active on A
 ok   A's agent joined its own panel: Panel: http://127.0.0.1:3000 (connected, version 0.2.0)
 ok   install.sh checked the signed release manifest
-ok   the panel runs the release's image pinned by digest (127.0.0.1:15000/seylo:0.2.0@sha256:e16e47faf609f36457075461b74680defec00884cce4fac7092b67de8782ea0c)
-panel container 429a060df73f: {"seylo.generation":"1","seylo.kind":"app","seylo.managed":"true","seylo.project":"panelproject0000","seylo.protected":"true","seylo.replica":"0","seylo.service":"panel00000000000"}
+ok   the panel runs the release's image pinned by digest (127.0.0.1:15000/seylo:0.2.0@sha256:a4759139fc61501fcd26cc5be3722b6fdbf3a61fb457e8ec3d9338aa830a64f0)
+panel container 881072ed5d5f: {"seylo.generation":"1","seylo.kind":"app","seylo.managed":"true","seylo.project":"panelproject0000","seylo.protected":"true","seylo.replica":"0","seylo.service":"panel00000000000"}
 ok   panel container is in project panelproject0000
 ok   panel container is protected
-ok   no roll after the join: same container 429a060df73f (now 429a060df73f)
+ok   no roll after the join: same container 881072ed5d5f (now 881072ed5d5f)
 seylo panel status: Panel running (running), version 0.2.0, http://127.0.0.1:3000 
 ok   the agent manages the panel service
-ok   panel container survives an agent restart (same id, StartedAt 2026-11-07T02:12:50.505645433Z)
+ok   panel container survives an agent restart (same id, StartedAt 2026-11-07T04:21:56.121661048Z)
 ok   panel still answers after the agent restart
 ```
 
 ### 2. Owner through the setup link; API key; REST op routes: PASS
 
 ```
-setup.status: {"ownerExists":false,"link":{"valid":true,"expiresAt":"2026-11-07T03:12:50.764Z"}}
+setup.status: {"ownerExists":false,"link":{"valid":true,"expiresAt":"2026-11-07T05:21:56.406Z"}}
 ok   the setup link is valid
 ok   owner owner@e2e.test created through setup.createOwner (session cookie)
-ok   API key created with the owner session (prefix seylo_key_kN...)
+ok   API key created with the owner session (prefix seylo_key_H4...)
 ok   auth.whoami with the API key: {"email":"owner@e2e.test","kind":null}
 ok   Panel project: {"id":"panelproject0000","name":"Panel","protected":true,"serviceCount":1}
 ok   Panel project is protected
@@ -93,33 +90,33 @@ ok   panel service: {"id":"panel00000000000","name":"panel","status":"running","
 ### 3. Join B and C (C gets Docker from install.sh); 3 nodes online; health checks: PASS
 
 ```
-join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9'
+join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863'
 ok   the join command uses the agents' TLS port with --pin (insecureTransport false)
 ok   the join command needs no --insecure
 ok   installer join on seylo-e2e-b finished: ==> Docker;Docker 29.5.2 is running;Turning on Docker live-restore: containers keep running while Docker restarts;==> Joining https://192.168.64.3:3443;The agent is starting and joins the panel; the node shows up there in a few seconds.;
 ok   C had no Docker before its first join
-join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9'
+join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863'
 ok   the join command uses the agents' TLS port with --pin (insecureTransport false)
 ok   the join command needs no --insecure
 ok   installer join on seylo-e2e-c finished: ==> Docker;Installing Docker with get.docker.com;Using systemd to manage Docker service;INFO: Docker daemon enabled and started;Client: Docker Engine - Community;Server: Docker Engine - Community;To run Docker as a non-privileged user, consider setting up the;Docker daemon in rootless mode for your 
 ok   3 nodes online
-node a: {"id":"7048sn7j1pjj0l7y","name":"colima-seylo-e2e-a","status":"online","publicIpv4":null,"agentVersion":"0.2.0","canBuild":true,"facts":{"hostname":"colima-seylo-e2e-a","os":"ubuntu 24.04","arch":"arm64","cpuCores":4,"dockerVersion":"29.5.2","cgroupVersion":2}}
+node a: {"id":"dj5bu16mlpllthkn","name":"colima-seylo-e2e-a","status":"online","publicIpv4":null,"agentVersion":"0.2.0","canBuild":true,"facts":{"hostname":"colima-seylo-e2e-a","os":"ubuntu 24.04","arch":"arm64","cpuCores":4,"dockerVersion":"29.5.2","cgroupVersion":2}}
 ok   node a has facts
 health a: {"pass":17,"warn":0,"fail":0,"skipped":0} not passing: []
 ok   health check on a has no fail
-node b: {"id":"vc8oruyijtkcltfs","name":"e2e-b","status":"online","publicIpv4":null,"agentVersion":"0.2.0","canBuild":false,"facts":{"hostname":"colima-seylo-e2e-b","os":"ubuntu 24.04","arch":"arm64","cpuCores":2,"dockerVersion":"29.5.2","cgroupVersion":2}}
+node b: {"id":"ku73g6zzmsobz50m","name":"e2e-b","status":"online","publicIpv4":null,"agentVersion":"0.2.0","canBuild":false,"facts":{"hostname":"colima-seylo-e2e-b","os":"ubuntu 24.04","arch":"arm64","cpuCores":2,"dockerVersion":"29.5.2","cgroupVersion":2}}
 ok   node b has facts
 health b: {"pass":16,"warn":1,"fail":0,"skipped":0} not passing: ["network.publicAddress=warn: No public address is known, so IP:port links, exposed databases and load balancing use the"]
 ok   health check on b has no fail
-node c: {"id":"zu83yn0yio4u7n49","name":"e2e-c","status":"online","publicIpv4":null,"agentVersion":"0.2.0","canBuild":false,"facts":{"hostname":"lima-seylo-e2e-c","os":"ubuntu 24.04","arch":"arm64","cpuCores":2,"dockerVersion":"29.9.3","cgroupVersion":2}}
+node c: {"id":"971jlndtnsagxk45","name":"e2e-c","status":"online","publicIpv4":null,"agentVersion":"0.2.0","canBuild":false,"facts":{"hostname":"lima-seylo-e2e-c","os":"ubuntu 24.04","arch":"arm64","cpuCores":2,"dockerVersion":"29.9.3","cgroupVersion":2}}
 ok   node c has facts
 health c: {"pass":15,"warn":2,"fail":0,"skipped":0} not passing: ["proxy.running=warn: the proxy container does not exist yet","network.publicAddress=warn: No public address is known, so IP:port links, exposed databases and load balancing use the"]
 ok   health check on c has no fail
-b config.yml: panel_url: https://192.168.64.3:3443 panel_pin: sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9 
+b config.yml: panel_url: https://192.168.64.3:3443 panel_pin: sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863 
 ok   b joined over https:// with the panel's key pinned (panel_pin, no insecure_transport)
-c config.yml: panel_url: https://192.168.64.3:3443 panel_pin: sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9 
+c config.yml: panel_url: https://192.168.64.3:3443 panel_pin: sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863 
 ok   c joined over https:// with the panel's key pinned (panel_pin, no insecure_transport)
-plain join refused: time="2026-11-07T04:14:06+02:00" level=fatal msg="exit status 1"
+plain join refused: time="2026-11-07T06:23:11+02:00" level=fatal msg="exit status 1"
 ok   the agent refuses a plain-HTTP join to another server without --insecure (and writes nothing)
 C Docker after install.sh: 29.9.3 cgroup driver systemd v2 
 ```
@@ -129,26 +126,26 @@ C Docker after install.sh: 29.9.3 cgroup driver systemd v2
 ```
 ok   B's wildcard domain: 192-168-64-4.sslip.io (sslip.io resolves it to B's address)
 ok   whoami deployed on B (deployment live)
-ok   first-run IP:port 192.168.64.4:37129 answers 200 before any domain
+ok   first-run IP:port 192.168.64.4:34055 answers 200 before any domain
 auto domain whoami.192-168-64-4.sslip.io (https acme)
 ok   http://whoami.192-168-64-4.sslip.io answers through B's Traefik: Hostname: whoami
-ok   first-run 192.168.64.4:37129 now redirects: 308 -> http://whoami.192-168-64-4.sslip.io/
-firstRun after the domain went live: {"domainLiveAt":"2026-11-07T02:14:11.408Z","closeWhenDomainLive":true,"redirectToPrimary":true,"status":"redirecting","address":"192.168.64.4:37129","redirectTo":"http://whoami.192-168-64-4.sslip.io","closeAt":"2026-11-08T02:14:11.408Z","firewallHint":null}
-the redirect closes by itself at 2026-11-08T02:14:11.408Z (too far to wait); moving that time 1 minute into the past in the panel database
-ok   first-run 192.168.64.4:37129 closed by itself once closeAt passed (connection refused; exposures.get: {"status":"closed","address":null})
+ok   first-run 192.168.64.4:34055 now redirects: 308 -> http://whoami.192-168-64-4.sslip.io/
+firstRun after the domain went live: {"domainLiveAt":"2026-11-07T04:23:16.145Z","closeWhenDomainLive":true,"redirectToPrimary":true,"status":"redirecting","address":"192.168.64.4:34055","redirectTo":"http://whoami.192-168-64-4.sslip.io","closeAt":"2026-11-08T04:23:16.145Z","firewallHint":null}
+the redirect closes by itself at 2026-11-08T04:23:16.145Z (too far to wait); moving that time 1 minute into the past in the panel database
+ok   first-run 192.168.64.4:34055 closed by itself once closeAt passed (connection refused; exposures.get: {"status":"closed","address":null})
 ```
 
 ### 5. Railpack git build on A, run on B through the 127.0.0.1:5755 relay: PASS
 
 ```
-deployment: {"status":"live","builder":"railpack","builtOn":"colima-seylo-e2e-a","shippedTo":["e2e-b"],"image":"127.0.0.1:5755/x980f54wq78ujfih:1","digest":"sha256:98eab986f949ce800373c08bac03cfd61f5f8da410e05aaa1c7f42664339f4ca","steps":["clone=ok","build=ok","ship=ok","health=ok","switch=ok"],"error":null}
+deployment: {"status":"live","builder":"railpack","builtOn":"colima-seylo-e2e-a","shippedTo":["e2e-b"],"image":"127.0.0.1:5755/08ial7drr434ja9x:1","digest":"sha256:68c2419451a9339a23d03070494a2e85836a6ce2909bc7b7101af7230c4c2271","steps":["clone=ok","build=ok","ship=ok","health=ok","switch=ok"],"error":null}
 ok   Railpack build from https://192.168.64.1:18556/git/node-app.git is live
 ok   built on A (can-build): builtOn=colima-seylo-e2e-a
 ok   shipped to B
-deploy log says: Building on colima-seylo-e2e-a.|#1 pulling image moby/buildkit:buildx-stable-1 5.2s done|#1 creating container buildx_buildkit_seylo-builder-g88xogq3fmy36t4k-2c-3g0 0.3s done|
-container on B runs image 127.0.0.1:5755/x980f54wq78ujfih@sha256:98eab986f949ce800373c08bac03cfd61f5f8da410e05aaa1c7f42664339f4ca
+deploy log says: Building on colima-seylo-e2e-a.|#1 pulling image moby/buildkit:buildx-stable-1 4.9s done|#1 creating container buildx_buildkit_seylo-builder-0z0s6pbh1c16w77g-2c-3g0 0.5s done|
+container on B runs image 127.0.0.1:5755/08ial7drr434ja9x@sha256:68c2419451a9339a23d03070494a2e85836a6ce2909bc7b7101af7230c4c2271
 ok   B pulled it through the 127.0.0.1:5755 relay by digest
-ok   the app answers on its first-run address 192.168.64.4:38929
+ok   the app answers on its first-run address 192.168.64.4:42535
 ```
 
 ### 6. Dockerfile from git, inline Dockerfile and uploaded archive deploy: PASS
@@ -158,7 +155,7 @@ ok   Dockerfile build from git (go-app) is live
 ok   go-app answers: go-app dockerfile on go-app
 ok   inline Dockerfile service is live
 ok   inline-app answers inline-ok
-POST /api/uploads/services/<id> -> 200 {"uploadId":"q2xmj0hu7op09t2p","sizeBytes":639,"deployment":{"id":"ki89d391e10072mz","serviceId":"s84he54rvxb7foer","generation":1,"status":"queued","live":false,"trigger":"api","actor":"owner@e2e.tes
+POST /api/uploads/services/<id> -> 200 {"uploadId":"e0cu7pufsna6ytpy","sizeBytes":639,"deployment":{"id":"ev2vqhahtlrxdxdx","serviceId":"86feg5ijzrdy9ifo","generation":1,"status":"queued","live":false,"trigger":"api","actor":"owner@e2e.tes
 ok   uploaded archive service is live
 ok   upload-app answers upload-app ok
 ```
@@ -166,25 +163,25 @@ ok   upload-app answers upload-app ok
 ### 7. Zero downtime redeploy; failing health check keeps old; rollback: PASS
 
 ```
-redeploy v1 -> v2 ended live; 651 requests during it, 0 not 200 ( 651 200 )
+redeploy v1 -> v2 ended live; 647 requests during it, 0 not 200 ( 647 200 )
 ok   zero downtime: no failed request during the redeploy
 ok   v2 serves after the redeploy (Name: v2)
-deploy with a failing health check ended failed: {"error":"e2e-b: not healthy after 30s: health check never passed: http check GET /: status 200\nlast output:\n2026/11/07 02:17:33 Starting up on port 80 The previous version stayed live.","steps":["clone=skipped","build=skipped","ship=ok","health=failed","switch=skipped"]}
+deploy with a failing health check ended failed: {"error":"e2e-b: not healthy after 30s: health check never passed: http check GET /: status 200\nlast output:\n2026/11/07 04:26:30 Starting up on port 80 The previous version stayed live.","steps":["clone=skipped","build=skipped","ship=ok","health=failed","switch=skipped"]}
 ok   the failing deploy is marked failed
 ok   the old version keeps serving (Name: v2)
 node-app redeploy of the new commit ended live: {"app":"node-app","version":"v2","host":"node-app","greeting":null,"upstream":null}
 ok   node-app v2 is live
-rollback to iqg5xspf6y65hbvx ended live ({"trigger":"rollback","rollbackOf":"iqg5xspf6y65hbvx","image":"127.0.0.1:5755/x980f54wq78ujfih:1"}): {"app":"node-app","version":"v1","host":"node-app","greeting":null,"upstream":null}
+rollback to y8on11m72vcunkq6 ended live ({"trigger":"rollback","rollbackOf":"y8on11m72vcunkq6","image":"127.0.0.1:5755/08ial7drr434ja9x:1"}): {"app":"node-app","version":"v1","host":"node-app","greeting":null,"upstream":null}
 ok   rollback serves v1 again
 ```
 
 ### 8. Crash policy: 5s restart, stop after N, crash report + one alert per streak: PASS
 
 ```
-restart on: 3 crashes in 45s; die -> next start gaps: 5 5 6 s
+restart on: 3 crashes in 45s; die -> next start gaps: 5 6 5 s
 ok   the service is restarted after each crash
-ok   the wait before a restart is the fixed 5s (gaps 5 5 6 )
-crash reports in the panel: 3 ([{"streak":1,"action":"restarting","exit_code":3},{"streak":2,"action":"restarting","exit_code":3},{"streak":3,"action":"restarting","exit_code":3}])
+ok   the wait before a restart is the fixed 5s (gaps 5 6 5 )
+crash reports in the panel: 4 ([{"streak":1,"action":"restarting","exit_code":3},{"streak":2,"action":"restarting","exit_code":3},{"streak":3,"action":"restarting","exit_code":3},{"streak":4,"action":"restarting","exit_code":3}])
 ok   a crash report carries the last log lines (crash-line)
 crash alerts: [{"title":"crasher crashed","message":"Exit code 3, restarting in a few seconds."}]
 ok   one alert for the whole streak (3 crashes)
@@ -216,8 +213,8 @@ ok   an app in ANOTHER project cannot reach it (PG-FAILED-11 PG-FAILED-12)
 exposed: {"host":"192.168.64.4","port":25432,"user":"external","tlsParams":"sslmode=require"}
 ok   psql from the Mac over TLS (sslmode=require): tls=true TLSv1.3
 ok   the exposed user cannot log in without TLS
-web UI ticket URL: https://seylo-db-3k7nhl82p84tyi9d.192-168-64-4.sslip.io/_seylo/ticket?t=<redacted>
-ok   the web UI ticket opens pgweb through B's edge (seylo-db-3k7nhl82p84tyi9d.192-168-64-4.sslip.io, 200)
+web UI ticket URL: https://seylo-db-agi693mzqav04d54.192-168-64-4.sslip.io/_seylo/ticket?t=<redacted>
+ok   the web UI ticket opens pgweb through B's edge (seylo-db-agi693mzqav04d54.192-168-64-4.sslip.io, 200)
 ok   the DB shell ran a query without a password (select 40+2 -> 42)
 ```
 
@@ -225,13 +222,13 @@ ok   the DB shell ran a query without a password (select 40+2 -> 42)
 
 ```
 ok   MinIO destination http://192.168.64.3:19000/e2e-backups
-database backup run: {"kind":"backup","status":"succeeded","objectKey":"e2e/3k7nhl82p84tyi9d/bf43eb2f42dujunz/20261107T022116Z-bpweyfcvy8lu373x.sql.gz","sizeBytes":1635,"error":null}
+database backup run: {"kind":"backup","status":"succeeded","objectKey":"e2e/agi693mzqav04d54/ltha5w0egxw2dbdz/20261107T043013Z-h4filorf59ff4fo9.sql.gz","sizeBytes":1641,"error":null}
 ok   the Postgres backup succeeded
 ok   the backup object is in MinIO
-restore run: {"kind":"restore","status":"succeeded","objectKey":"e2e/3k7nhl82p84tyi9d/bf43eb2f42dujunz/20261107T022116Z-bpweyfcvy8lu373x.sql.gz","sizeBytes":1635,"error":null}
+restore run: {"kind":"restore","status":"succeeded","objectKey":"e2e/agi693mzqav04d54/ltha5w0egxw2dbdz/20261107T043013Z-h4filorf59ff4fo9.sql.gz","sizeBytes":1641,"error":null}
 ok   the restored database has the marker row
-volume backup run: {"kind":"backup","status":"succeeded","objectKey":"e2e/ipogwm6nfm3f20ky/r09bq5mkxyb3kn3i/20261107T022130Z-brpr87x5ee54jt5q.tar.gz","sizeBytes":262,"error":null}
-volume restore run: {"kind":"restore","status":"succeeded","objectKey":"e2e/ipogwm6nfm3f20ky/r09bq5mkxyb3kn3i/20261107T022130Z-brpr87x5ee54jt5q.tar.gz","sizeBytes":262,"error":null}
+volume backup run: {"kind":"backup","status":"succeeded","objectKey":"e2e/ldsk6zz2l4i3lxxc/cdgq7fju8hglkbbj/20261107T043027Z-5gxfl9ez51xxblwf.tar.gz","sizeBytes":260,"error":null}
+volume restore run: {"kind":"restore","status":"succeeded","objectKey":"e2e/ldsk6zz2l4i3lxxc/cdgq7fju8hglkbbj/20261107T043027Z-5gxfl9ez51xxblwf.tar.gz","sizeBytes":260,"error":null}
 ok   the restored volume has marker.txt
 ```
 
@@ -239,10 +236,10 @@ ok   the restored volume has marker.txt
 
 ```
 ok   run-now result in the history ([{"result":"succeeded","exitCode":0}])
-ok   a scheduled run in the history ([{"result":"succeeded","startedAt":"2026-11-07T02:22:00.000Z"}])
-panel paused at 2026-11-07T02:22:00Z
-panel back at 2026-11-07T02:24:31Z
-runs that started while the panel was down: 2 ([{"startedAt":"2026-11-07T02:24:00.000Z","result":"succeeded"},{"startedAt":"2026-11-07T02:23:00.001Z","result":"succeeded"}])
+ok   a scheduled run in the history ([{"result":"succeeded","startedAt":"2026-11-07T04:31:00.003Z"}])
+panel paused at 2026-11-07T04:31:02Z
+panel back at 2026-11-07T04:33:32Z
+runs that started while the panel was down: 2 ([{"startedAt":"2026-11-07T04:33:00.004Z","result":"succeeded"},{"startedAt":"2026-11-07T04:32:00.005Z","result":"succeeded"}])
 ok   cron kept running while the panel was down (2 or more runs in 150s)
 ```
 
@@ -252,7 +249,7 @@ ok   cron kept running while the panel was down (2 or more runs in 150s)
 logs.search 'listening': 3 lines across generations [1,2,3]
 ok   search finds lines from two or more deploys
 ok   logs.follow streamed lines (tail, then the restart's 'listening on')
-ok   Console echoed stdin (echo:hello-e2e); ready: {"type":"ready","containerId":"fd1c1f4b560a742dd70645d74ac84c72dcc7b8d9ab4bd3ac97f1026e2bc62c0a","generation":1,"user":"root","workdir":"/"}
+ok   Console echoed stdin (echo:hello-e2e); ready: {"type":"ready","containerId":"a17a4ff03454b3c49b8b5af6b7662e30d9926ed996aa42c96f22213ad4e6b309","generation":1,"user":"root","workdir":"/"}
 ok   Shell PTY ran a command (shell-42; tty: )
 ok   files.write created /e2e/hello.txt
 ok   files.list shows it (["hello.txt:22"])
@@ -265,16 +262,16 @@ ok   the container sees the edited file
 ### 14. Metrics: node and service series have samples: PASS
 
 ```
-node a: {"points":11,"latest":{"cpuPercent":25.619214410808112,"memoryUsedBytes":931958784}}
+node a: {"points":11,"latest":{"cpuPercent":25.556946182728414,"memoryUsedBytes":924577792}}
 ok   node a has samples
-node b: {"points":11,"latest":{"cpuPercent":1.2054244098443023,"memoryUsedBytes":634142720}}
+node b: {"points":10,"latest":{"cpuPercent":4.128902316213489,"memoryUsedBytes":625025024}}
 ok   node b has samples
-node c: {"points":9,"latest":{"cpuPercent":0.10010010010009784,"memoryUsedBytes":473829376}}
+node c: {"points":10,"latest":{"cpuPercent":0.10000000000000009,"memoryUsedBytes":450502656}}
 ok   node c has samples
-service 8qw75gw3jku0ells: {"points":10,"current":[{"cpuPercent":0.007652086475615887,"memoryBytes":2826240}]}
-ok   service 8qw75gw3jku0ells has samples
-service x980f54wq78ujfih: {"points":8,"current":[{"cpuPercent":0.0031171442936148816,"memoryBytes":23416832}]}
-ok   service x980f54wq78ujfih has samples
+service erpl9msi1h7flz6e: {"points":9,"current":[{"cpuPercent":0.009772841998990409,"memoryBytes":2887680}]}
+ok   service erpl9msi1h7flz6e has samples
+service 08ial7drr434ja9x: {"points":8,"current":[{"cpuPercent":0,"memoryBytes":26329088}]}
+ok   service 08ial7drr434ja9x has samples
 ```
 
 ### 15. Move a service with a volume B -> C; data intact; domain follows: PASS
@@ -291,22 +288,22 @@ ok   no container of the service is left on B
 ### 16. Replicas on B and C, entry on B; failover when one container dies: PASS
 
 ```
-30 requests to the entry node B answered from (traefik/replica):  15 8e8f0fc29c73
-/172.19.0.14 15 cbf5c89f8499
-/172.19.0.4 
-B's route for lb.e2e.test:  - url: http://seylo-gau0hrvgwdenjaa1-1:80 - url: https://192.168.64.5:5757 - url: http://172.18.0.1:5756 - url: http://seylo-gau0hrvgwdenjaa1-1:80 
+30 requests to the entry node B answered from (traefik/replica):  15 5e7189309f22
+/172.19.0.4 15 aa1d2af93354
+/172.19.0.14 
+B's route for lb.e2e.test:  - url: http://seylo-yurw20t6w8h52t76-1:80 - url: https://192.168.64.5:5757 - url: http://172.18.0.1:5756 - url: http://seylo-yurw20t6w8h52t76-1:80 
 ok   both replicas (B and C) answer through the entry node
-killed the replica on C (6f5c72c2de2b) during the load
-210 requests during the failover, 0 not 200 ( 210 200 )
+killed the replica on C (6f818cb2d53c) during the load
+212 requests during the failover, 0 not 200 ( 212 200 )
 ok   requests keep succeeding when one replica dies
 ```
 
 ### 17. Compose stack from pasted YAML (two services, shared volume): PASS
 
 ```
-stack 07546i9fqnvfbqj5 with members ["stack-reader","stack-writer"]
-member oci2w8ig55dmdqnj container 9f6d998915fd: read-1794018408 read-1794018410 
-member glf6m52cszp2h2pd container d33d07739c1c: wrote wrote 
+stack sp643mg772wu3n1z with members ["stack-reader","stack-writer"]
+member mrrwea3a95ev48m2 container 37bc14c6264b: read-1794026145 read-1794026149 
+member vuljulyrt8uu82hz container 567237392ad4: wrote wrote 
 ok   the reader sees the writer's file through the shared volume
 ```
 
@@ -322,23 +319,23 @@ ok   it-tools answers through B's Traefik
 ### 19. Global and per-service maintenance pages; timed expose locked to an IP: PASS
 
 ```
-timed expose: {"host":"192.168.64.4","port":null,"allowedCidrs":["192.168.64.1/32"],"expiresAt":"2026-11-07T02:32:03.747Z"}
-ok   the Mac (192.168.64.1) reaches 192.168.64.4:37885
+timed expose: {"host":"192.168.64.4","port":null,"allowedCidrs":["192.168.64.1/32"],"expiresAt":"2026-11-07T04:41:05.475Z"}
+ok   the Mac (192.168.64.1) reaches 192.168.64.4:39055
 ok   VM A (192.168.64.3) is refused (got 000)
 ok   global maintenance page on whoami.192-168-64-4.sslip.io (HTTP )
 ok   per-service maintenance page on whoami.192-168-64-4.sslip.io
 ok   another service (lb.e2e.test) is not in maintenance
-waiting 306s for the expose to expire at 2026-11-07T02:32:03.747Z
+waiting 306s for the expose to expire at 2026-11-07T04:41:05.475Z
 ok   the timed expose closed by itself on time (got 000)
 ```
 
 ### 20. Panel down: apps, routes, crash restarts, cron keep working; outbox delivers: PASS
 
 ```
-panel paused at 2026-11-07T02:32:44Z
+panel paused at 2026-11-07T04:41:46Z
 ok   the app and its route kept serving while the panel was down (30 ok, 0 failed)
 ok   crash restarts kept working while the panel was down (11 crashes, 11 restarts)
-panel back at 2026-11-07T02:35:15Z
+panel back at 2026-11-07T04:44:17Z
 ok   all 3 nodes resynced and online
 crash reports for the downtime in the panel: 11 (node saw 11 crashes)
 ok   the outbox delivered every crash report from the downtime
@@ -364,19 +361,19 @@ ok   every node runs 0.2.1: ["colima-seylo-e2e-a=0.2.1","e2e-b=0.2.1","e2e-c=0.2
 update run: {"targetVersion":"0.2.1","trigger":"manual","status":"succeeded","error":null,"steps":["0:panel:panel:succeeded","1:agent:colima-seylo-e2e-a:succeeded","2:agent:e2e-b:succeeded","3:agent:e2e-c:succeeded"]}
 ok   the panel step comes first, then the nodes one by one
 ok   the update run succeeded
-panel container image now: 127.0.0.1:15000/seylo@sha256:4a5dd31504e32ee32a0132a7983da8ec65016a01bbbf7b84dcdaf46b02dafadc
+panel container image now: 127.0.0.1:15000/seylo@sha256:34dfc81bda78c09d3b15022d51c40531f5b9fc18ef8d19012733a1bc590afcdb
 broken update run: {"targetVersion":"0.2.2","status":"failed","error":"the new panel did not become healthy: the panel is SERVICE_PHASE_FAILED: deploy failed: seylo-panel00000000000-3 exited right after starting","steps":["panel:rolledBack:the new panel did not become healthy: the panel is SERVICE_PHASE_FAILED: deploy "]}
 ok   the 0.2.2 run is marked failed or rolled back
 ok   the panel still runs 0.2.1 after the rollback (now 0.2.1)
 ok   the restored database is intact (the API key works, projects are there)
-ok   the old image runs again (127.0.0.1:15000/seylo@sha256:4a5dd31504e32ee32a0132a7983da8ec65016a01bbbf7b84dcdaf46b02dafadc)
+ok   the old image runs again (127.0.0.1:15000/seylo@sha256:34dfc81bda78c09d3b15022d51c40531f5b9fc18ef8d19012733a1bc590afcdb)
 ```
 
 ### 23. Cleanup preview + run removes only seylo-labeled garbage: PASS
 
 ```
 made an unlabeled stopped container, volume and image, plus a labelled image, volume and data folder of a removed service
-preview: {"bytes":3070,"count":3,"items":["image e2e-seylo-garbage-img:1 (38a4cc31fd0b) (3.0 KiB): service removed from this node","volume e2e-seylo-garbage-vol: service removed from this node","data deadbeefdeadbeef (8 B): service removed from this node"]}
+preview: {"bytes":3070,"count":3,"items":["image e2e-seylo-garbage-img:1 (b5a43e7fe0aa) (3.0 KiB): service removed from this node","volume e2e-seylo-garbage-vol: service removed from this node","data deadbeefdeadbeef (8 B): service removed from this node"]}
 ok   the preview never lists the unlabeled resources
 ok   the preview lists the removed service's image, volume and data
 ok   the unlabeled container survives
@@ -412,8 +409,8 @@ read-only token sees 95 tools, destructive ones: []
 ok   the read-only token lists tools
 ok   the read-only token sees no destructive tool
 ok   a query tool (nodes_list) runs and returns the nodes
-destructive call (services_delete) answered: This action needs a person's approval before it runs. Approval 6s3orawffqjux13u is waiting in the panel's Approvals page (it expires at 2026-11-08T02:39:07.862Z). Call approvals_get with {"approvalId":"6s3orawffqjux13u"}
-ok   the destructive call created a pending approval ([{"id":"6s3orawffqjux13u","status":"pending"}])
+destructive call (services_delete) answered: This action needs a person's approval before it runs. Approval wgir77bv1bcky44i is waiting in the panel's Approvals page (it expires at 2026-11-08T04:47:57.100Z). Call approvals_get with {"approvalId":"wgir77bv1bcky44i"}
+ok   the destructive call created a pending approval ([{"id":"wgir77bv1bcky44i","status":"pending"}])
 ok   the service still exists while the approval waits
 ```
 
@@ -423,7 +420,7 @@ ok   the service still exists while the approval waits
 troubleshoot --dry-run on B: 306 lines, 1 redaction markers
 ok   the report is redacted (markers present)
 ok   no join token, API key or private key in the report
-seylo status on B: Node: e2e-b (vc8oruyijtkcltfs) Agent: 0.2.1 (commit e2e, built unknown) Panel: https://192.168.64.3:3443 (connected, version 0.2.1) PROJECT SERVICE PHASE g88xogq3fmy36t4k crasher stopped 
+seylo status on B: Node: e2e-b (ku73g6zzmsobz50m) Agent: 0.2.1 (commit e2e, built unknown) Panel: https://192.168.64.3:3443 (connected, version 0.2.1) PROJECT SERVICE PHASE 0z0s6pbh1c16w77g node-app running 
 ok   seylo status shows the connection
 ```
 
@@ -436,9 +433,9 @@ systemd units named seylo.* still loaded:
 ok   no seylo unit files or drop-ins left
 ok   systemd no longer knows seylo.service
 ok   /var/lib/seylo and the binary are gone
-join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9'
+join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863'
 ok   installer join on seylo-e2e-c finished: ==> Docker;Docker 29.9.3 is running;==> Joining https://192.168.64.3:3443;The agent is starting and joins the panel; the node shows up there in a few seconds.;
-C joined again as j2qkyl63331n7wcf
+C joined again as 3mwp41ipiuicmo9a
 ```
 
 ### 28. C (systemd cgroup driver) runs containers under seylo.slice: PASS
@@ -446,7 +443,7 @@ C joined again as j2qkyl63331n7wcf
 ```
 C Docker cgroup driver: systemd
 ok   C uses the systemd cgroup driver
-container bfaa60936df6: CgroupParent=seylo.slice, /proc cgroup=0::/seylo.slice/docker-bfaa60936df61a051de0d58cecb69d4d3272e17844a1ce18db683a8569b45ed1.scope
+container 7cecb9a90932: CgroupParent=seylo.slice, /proc cgroup=0::/seylo.slice/docker-7cecb9a909323f72fd95e530b8629874686d82bcfb1d1cf3619fdc522a50bccb.scope
 ok   the container's cgroup parent is seylo.slice
 ok   the process runs under seylo.slice
 ok   systemd shows it in seylo.slice
@@ -462,64 +459,64 @@ ok   acme.192-168-64-4.sslip.io serves a certificate issued by Pebble
 
 ```
 service tabs visited: deployments, source, environment, domains, logs, console, shell, metrics, storage, settings
- 1 passed (2.7s)
+ 1 passed (3.0s)
 ok   Playwright: dashboard shows the nodes, services and every tab load, console echoes, no page errors
 ```
 
 ### 31. Panel domain: Pebble HTTPS, Secure cookie, HSTS, IP:port -> domain, nodes move to it, CLI: PASS
 
 ```
-ok   A, B and C trust Pebble's root (/CN=Pebble Root CA 76e769); on the Mac only this check's curl and CLI calls do
+ok   A, B and C trust Pebble's root (/CN=Pebble Root CA 7e9a13); on the Mac only this check's curl and CLI calls do
 B's and C's agents restarted to read the new trust store
 A's agent restarted with Pebble (https://192.168.64.3:14000/dir) as its ACME CA
-ok   panel domain panel054019.192-168-64-3.sslip.io set (sslip.io answers 192.168.64.3, A's address)
-ok   https://panel054019.192-168-64-3.sslip.io answers with a certificate Pebble's root verifies: issuer= /CN=Pebble Intermediate CA 6a4cc2 notAfter=Nov 13 03:40:20 2026 GMT 
-ok   http://panel054019.192-168-64-3.sslip.io goes to HTTPS (301 https://panel054019.192-168-64-3.sslip.io/)
+ok   panel domain panel065513.192-168-64-3.sslip.io set (sslip.io answers 192.168.64.3, A's address)
+ok   https://panel065513.192-168-64-3.sslip.io answers with a certificate Pebble's root verifies: issuer= /CN=Pebble Intermediate CA 448ef2 notAfter=Feb  5 04:55:13 2027 GMT 
+ok   http://panel065513.192-168-64-3.sslip.io goes to HTTPS (301 https://panel065513.192-168-64-3.sslip.io/)
 the panel's domain check after 0s: {"state":"active","message":""}
-ok   the panel's own probe found panel054019.192-168-64-3.sslip.io active (it trusts the test CA in a test build)
+ok   the panel's own probe found panel065513.192-168-64-3.sslip.io active (it trusts the test CA in a test build)
 ok   settings.general reports the domain active
 ok   HTTPS answers carry HSTS (strict-transport-security: max-age=31536000)
 ok   plain HTTP on IP:port carries no HSTS
-auth.login over https://panel054019.192-168-64-3.sslip.io: HTTP/2 200 ; set-cookie: seylo_session=<redacted>; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax
+auth.login over https://panel065513.192-168-64-3.sslip.io: HTTP/2 200 ; set-cookie: seylo_session=<redacted>; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax
 ok   the session cookie set over HTTPS is Secure
 ok   the session cookie is HttpOnly
 ok   the HTTPS session works (auth.whoami)
-ok   a page load on IP:port answers 302 to the domain (302 https://panel054019.192-168-64-3.sslip.io/settings/general?e2e=31)
+ok   a page load on IP:port answers 302 to the domain (302 https://panel065513.192-168-64-3.sslip.io/settings/general?e2e=31)
 ok   the panel's pages answer on the domain
 ok   the API on IP:port is not redirected (scripts, CLI and agents keep working)
 ok   pages on A's loopback are not redirected (the way back in over SSH)
-ok   seylo login https://panel054019.192-168-64-3.sslip.io (macOS CLI, API key): Signed in to https://panel054019.192-168-64-3.sslip.io as owner@e2e.test (profile "default").
+ok   seylo login https://panel065513.192-168-64-3.sslip.io (macOS CLI, API key): Signed in to https://panel065513.192-168-64-3.sslip.io as owner@e2e.test (profile "default").
 ok   seylo env set e2e/whoami over the domain: Saved. The new values apply on the next deploy.
 ok   seylo env list over the domain shows E2E_DOMAIN_CLI
 ok   the panel asked B and C to reconnect and both moved without a restart
-ok   b moved to the domain: panel_url: https://panel054019.192-168-64-3.sslip.io 
-ok   c moved to the domain: panel_url: https://panel054019.192-168-64-3.sslip.io 
+ok   b moved to the domain: panel_url: https://panel065513.192-168-64-3.sslip.io 
+ok   c moved to the domain: panel_url: https://panel065513.192-168-64-3.sslip.io 
 ok   A (the panel's node) keeps dialing loopback
 ok   b has no panel_pin (the domain's certificate is checked with system roots)
 ok   b dropped insecure_transport
-ok   b keeps the old address as a fallback for one cycle (fallback: panel_url: https://192.168.64.3:3443 panel_pin: sha256:...08166fe9 )
-b agent log: time=2026-11-07T05:40:22.984+02:00 level=INFO msg="moved to the panel's new address; the old one stays as a fallback until a reconnect there works" panel_url=https://panel054019.192-168-64-3.sslip.io fallback=https://192.168.64.3:3443
-ok   b is connected through the domain: Panel: https://panel054019.192-168-64-3.sslip.io (connected, version 0.2.1)
+ok   b keeps the old address as a fallback for one cycle (fallback: panel_url: https://192.168.64.3:3443 panel_pin: sha256:...a85f3863 )
+b agent log: time=2026-11-07T06:55:16.572+02:00 level=INFO msg="moved to the panel's new address; the old one stays as a fallback until a reconnect there works" panel_url=https://panel065513.192-168-64-3.sslip.io fallback=https://192.168.64.3:3443
+ok   b is connected through the domain: Panel: https://panel065513.192-168-64-3.sslip.io (connected, version 0.2.1)
 ok   b's agent talks to A:443, not to the agents' TLS port 3443 (ports on A it holds: 443 )
 ok   c has no panel_pin (the domain's certificate is checked with system roots)
 ok   c dropped insecure_transport
-ok   c keeps the old address as a fallback for one cycle (fallback: panel_url: https://192.168.64.3:3443 panel_pin: sha256:...08166fe9 )
-c agent log: time=2026-11-07T03:40:23.374Z level=INFO msg="moved to the panel's new address; the old one stays as a fallback until a reconnect there works" panel_url=https://panel054019.192-168-64-3.sslip.io fallback=https://192.168.64.3:3443
-ok   c is connected through the domain: Panel: https://panel054019.192-168-64-3.sslip.io (connected, version 0.2.1)
+ok   c keeps the old address as a fallback for one cycle (fallback: panel_url: https://192.168.64.3:3443 panel_pin: sha256:...a85f3863 )
+c agent log: time=2026-11-07T04:55:16.420Z level=INFO msg="moved to the panel's new address; the old one stays as a fallback until a reconnect there works" panel_url=https://panel065513.192-168-64-3.sslip.io fallback=https://192.168.64.3:3443
+ok   c is connected through the domain: Panel: https://panel065513.192-168-64-3.sslip.io (connected, version 0.2.1)
 ok   c's agent talks to A:443, not to the agents' TLS port 3443 (ports on A it holds: 443 )
 ok   3 nodes online after the move
-ok   b reconnects through the domain after an agent restart: Panel: https://panel054019.192-168-64-3.sslip.io (connected, version 0.2.1)
+ok   b reconnects through the domain after an agent restart: Panel: https://panel065513.192-168-64-3.sslip.io (connected, version 0.2.1)
 ok   b still dials the domain
-ok   b keeps its pinned old address as a standing fallback ("the panel's new address works after a reconnect; keeping the previous pinned one for when it stops answering" panel_url=https://panel054019.192-168-64-3.sslip.)
+ok   b keeps its pinned old address as a standing fallback ("the panel's new address works after a reconnect; keeping the previous pinned one for when it stops answering" panel_url=https://panel065513.192-168-64-3.sslip.)
 ok   b holds no connection to the agents' TLS port (ports on A: 443 )
-ok   c reconnects through the domain after an agent restart: Panel: https://panel054019.192-168-64-3.sslip.io (connected, version 0.2.1)
+ok   c reconnects through the domain after an agent restart: Panel: https://panel065513.192-168-64-3.sslip.io (connected, version 0.2.1)
 ok   c still dials the domain
-ok   c keeps its pinned old address as a standing fallback ("the panel's new address works after a reconnect; keeping the previous pinned one for when it stops answering" panel_url=https://panel054019.192-168-64-3.sslip.)
+ok   c keeps its pinned old address as a standing fallback ("the panel's new address works after a reconnect; keeping the previous pinned one for when it stops answering" panel_url=https://panel065513.192-168-64-3.sslip.)
 ok   c holds no connection to the agents' TLS port (ports on A: 443 )
 ok   3 nodes online after restarting B's and C's agents
 ok   panel domain removed (settings.updateGeneral {domain: null})
 ok   IP:port pages are served again
-ok   B and C came back to https://192.168.64.3:3443 by themselves 369s after the restart: b panel_pin: sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9 panel_url: https://192.168.64.3:3443 , c panel_pin: sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9 panel_url: https://192.168.64.3:3443 
+ok   B and C came back to https://192.168.64.3:3443 by themselves 388s after the restart: b panel_pin: sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863 panel_url: https://192.168.64.3:3443 , c panel_pin: sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863 panel_url: https://192.168.64.3:3443 
 cleanup: A's agent restarted without the Pebble ACME settings
 ok   cleanup: b is back on the agents' TLS port with the pin, no fallback, connected (Panel: https://192.168.64.3:3443 (connected, version 0.2.1))
 ok   cleanup: c is back on the agents' TLS port with the pin, no fallback, connected (Panel: https://192.168.64.3:3443 (connected, version 0.2.1))
@@ -549,14 +546,14 @@ ok   Gitea gitea/gitea:1.24.6 on A at https://192.168.64.3:13000 (certificate fr
 ok   e2e/watch-app (private) pushed to Gitea: Dockerfile, app/index.html, docs/notes.md
 connection: {"kind":"gitea","host":"192.168.64.3:13000","account":"e2e"}
 ok   the connection lists e2e/watch-app (["e2e/watch-app"])
-webhook: {"created":true,"url":"http://192.168.64.3:3000/api/hooks/gitea/qb91p1cn753734ne","error":null,"insecure":true}
+webhook: {"created":true,"url":"http://192.168.64.3:3000/api/hooks/gitea/88qjvxirw2otlk05","error":null,"insecure":true}
 ok   the panel created the webhook on the Gitea repository
 ok   the first deploy (Dockerfile from the private Gitea repository, built on A) is live
-ok   watch-app answers v1 on 192.168.64.4:42687
+ok   watch-app answers v1 on 192.168.64.4:34467
 push 1 (docs/notes.md): {"event":"push","outcome":"ignored","detail":"Skipped by watch paths: the one changed file matches no pattern."}
 ok   push 1 is skipped by the watch path, with the reason
 ok   push 1 started no deploy (1 deployments)
-push 2 (app/index.html): {"event":"push","outcome":"deployed","detail":"Deploying 506afc7 from main."}
+push 2 (app/index.html): {"event":"push","outcome":"deployed","detail":"Deploying 95c6790 from main."}
 push 2 deploy: live; log: Watch paths: app/index.html matches app/**.
 ok   push 2 deployed (live)
 ok   the deploy log names the file and the pattern
@@ -575,7 +572,7 @@ schedule: {"schedule":{"enabled":true,"cron":null,"diskPercent":50,"kinds":{"ima
 ok   the schedule is saved and the node can run it
 B's disk: 7% before, 54% after filling; the line is 50%
 run: {"trigger":"disk","status":"succeeded","diskPercent":53,"removedCount":2,"bytesFreed":3059,"error":null}
-it reported: ["image e2e34-labelled-img:1 (47521bd94d58) (3.0 KiB): service removed from this node","volume e2e34-labelled-vol: service removed from this node"]
+it reported: ["image e2e34-labelled-img:1 (e9166d8d4490) (3.0 KiB): service removed from this node","volume e2e34-labelled-vol: service removed from this node"]
 ok   the disk line started a cleanup run on B by itself
 ok   the run succeeded at 50% or more
 ok   it reports the labelled image and volume
@@ -590,7 +587,7 @@ ok   running services are untouched (whoami answers)
 
 ```
 ok   an API key cannot turn host shells on
-hostShell.setEnabled (owner session after auth.reauth): {"nodeId":"vc8oruyijtkcltfs","enabled":true}
+hostShell.setEnabled (owner session after auth.reauth): {"nodeId":"ku73g6zzmsobz50m","enabled":true}
 ok   the owner turned host shells on for B
 status: {"enabled":true,"available":true,"maxSessions":2,"idleTimeoutSeconds":900}
 ok   a root shell on B through the panel's host-shell socket ran hostname: colima-seylo-e2e-b ("user":"root")
@@ -609,22 +606,22 @@ ok   the refused shell is audited as refused by the node (hostShell.close)
 ### 36. Clone whoami with its data into another project on C; move a service between projects (impact list, keeps serving): PASS
 
 ```
-ok   whoami on B has a data volume with /marker.txt (clone-marker-29fd2b2c)
+ok   whoami on B has a data volume with /marker.txt (clone-marker-5c09f753)
 clone preview: {"name":"whoami-copy","env":"copied","volumes":[{"name":"data","mountPath":"/data"}],"data":{"available":true,"blockedBy":null,"alwaysStops":false},"autoDomain":null}
 ok   the preview offers a copy of the data volume
 clone: {"copied":{"env":true,"fileMounts":false,"databaseLogins":false,"middlewares":false,"autoDomain":null},"dataCopy":{"status":"queued","volumes":["data"]}}
 data copy: {"status":"done","bytesCopied":21,"error":null}
 ok   the data copy finished
-ok   whoami kept serving while it was cloned (508 requests, 0 failed)
+ok   whoami kept serving while it was cloned (512 requests, 0 failed)
 ok   the clone runs on C in project e2e-clones
-ok   the clone answers on C's IP:port (192.168.64.5:36319)
-ok   the clone's volume has the copied marker (clone-marker-29fd2b2c)
-move impact: {"blockers":[],"referencedBy":[{"serviceId":"7zxijfbe2rkf1p4l","name":"ref-app","keys":["WHO"]}],"switches":true,"grants":{"count":0,"names":[]},"sharedLost":{"count":0,"names":[]}}
+ok   the clone answers on C's IP:port (192.168.64.5:36061)
+ok   the clone's volume has the copied marker (clone-marker-5c09f753)
+move impact: {"blockers":[],"referencedBy":[{"serviceId":"0wb4tkbxnpqxts0h","name":"ref-app","keys":["WHO"]}],"switches":true,"grants":{"count":0,"names":[]},"sharedLost":{"count":0,"names":[]}}
 ok   the impact lists ref-app (WHO) losing the reference and a running switch
 ok   moving without confirm is refused when the impact lists something
-moveProject: switch deployment l6kdiqt1w2qge5wb
+moveProject: switch deployment da10qpzctfx36s8h
 ok   the switch to the new project's network went live
-ok   the clone kept serving through the move (773 requests, 0 failed)
+ok   the clone kept serving through the move (771 requests, 0 failed)
 ok   the clone now belongs to e2e-moved
 ok   its container is on e2e-moved's network only
 ok   whoami (the source) still answers on B
@@ -634,7 +631,7 @@ ok   whoami (the source) still answers on B
 
 ```
 engines: [{"engine":"postgres","versions":["18","17","16","15"],"variants":["pgvector"]},{"engine":"valkey","versions":["9.1","9.0","8.1"],"variants":[]},{"engine":"clickhouse","versions":["26.8","26.3"],"variants":[]}]
-databases: {"name":"vk","engine":"valkey","version":"9.1","variant":null,"internal":{"host":"vk","port":6379,"database":"","user":"default","httpPort":null},"shellClient":"valkey-cli"} {"name":"ch","engine":"clickhouse","version":"26.8","variant":null,"internal":{"host":"ch","port":9000,"database":"e2e","user":"ch_sgkdfkzh09","httpPort":8123},"shellClient":"clickhouse-client"} {"name":"pg18","engine":"postgres","version":"18","variant":"pgvector","internal":{"host":"pg18","port":5432,"database":"app","user":"app","httpPort":null},"shellClient":"psql"} 
+databases: {"name":"vk","engine":"valkey","version":"9.1","variant":null,"internal":{"host":"vk","port":6379,"database":"","user":"default","httpPort":null},"shellClient":"valkey-cli"} {"name":"ch","engine":"clickhouse","version":"26.8","variant":null,"internal":{"host":"ch","port":9000,"database":"e2e","user":"ch_ttm40y36yx","httpPort":8123},"shellClient":"clickhouse-client"} {"name":"pg18","engine":"postgres","version":"18","variant":"pgvector","internal":{"host":"pg18","port":5432,"database":"app","user":"app","httpPort":null},"shellClient":"psql"} 
 ok   Valkey 9.1, ClickHouse 26.8 and Postgres 18 (pgvector image) run on B
 ok   psql shell: CREATE EXTENSION vector, and [1,2,3] <-> [1,2,5] = 2
 ok   valkey-cli shell: SET and GET without a password
@@ -659,11 +656,11 @@ ok   the backups are in MinIO
 ```
 ok   C left A's panel and was uninstalled
 ok   C runs panel 0.1.1 ({"status":"ok","version":"0.1.1"})
-ok   the 0.1.1 panel runs its release image by digest (127.0.0.1:15000/seylo:0.1.1@sha256:021b1d607affee17fe09e25df55b82286f5947e3faf3b94e458c181c16b376dc)
+ok   the 0.1.1 panel runs its release image by digest (127.0.0.1:15000/seylo:0.1.1@sha256:325ada273d18c5861a4abd6edb2467e101e391609d89b4dea0ff5f2908f2256b)
 ok   owner, API key and C's own node on the 0.1.1 panel
-on 0.1.1: cron job saved as {"schedule":"0 4 * * 7","nextRunAt":"2026-11-08T04:00:00.000Z"}; run now:   api cron.runNow {"serviceId":"lhovy1fmwwlofyxp","cronJobId":"ft0mw4wh2aspkvg2"} -> 404 {"error":{"code":"NOT_FOUND","message":"no such cron job on this node: service lhovy1fmwwlofyxp job \"ft0mw4wh2aspkvg2\"","details":{"reason":"agent","nodeId":"4ku633doupqmihfa","agentStatus":"NOT_FOUND"}}}
+on 0.1.1: cron job saved as {"schedule":"0 4 * * 7","nextRunAt":"2026-11-08T04:00:00.000Z"}; run now:   api cron.runNow {"serviceId":"eyncm9b9a40ct7m4","cronJobId":"o6mtrj62rbi7wd5l"} -> 404 {"error":{"code":"NOT_FOUND","message":"no such cron job on this node: service eyncm9b9a40ct7m4 job \"o6mtrj62rbi7wd5l\"","details":{"reason":"agent","nodeId":"g5oi54bgr954zr3n","agentStatus":"NOT_FOUND"}}}
 before: projects ["Panel","upgrade"]; services ["pg=running","web=running","worker=running"]; web deployments 1; migrations applied 1
-ok   rows on 0.1.1: project upgrade, web (whoami with env) on 192.168.64.5:44397, Postgres 17 with a row, worker with a cron job saved as 0 4 * * 7
+ok   rows on 0.1.1: project upgrade, web (whoami with env) on 192.168.64.5:35227, Postgres 17 with a row, worker with a cron job saved as 0 4 * * 7
 updates.status on 0.1.1: {"panel":{"currentVersion":"0.1.1","latestVersion":"0.2.0","updateAvailable":true,"changelogUrl":"http://192.168.64.1:18555/changelog-0.2.0"},"checkError":null}
 ok   the 0.1.1 panel sees 0.2.0 as its update
 ok   the panel on C runs 0.2.0
@@ -674,7 +671,7 @@ ok   0001_features applied: 2 migrations recorded (now 2)
 ok   0001's tables exist (["cleanup_runs","git_providers","host_shell_sessions"])
 ok   the projects are the same (["Panel","upgrade"])
 ok   the API key made on 0.1.1 still works
-ok   web still answers on 192.168.64.5:44397 with its env
+ok   web still answers on 192.168.64.5:35227 with its env
 ok   the Postgres row from 0.1.1 is there
 cron job after the upgrade: {"schedule":"0 4 * * 0","nextRunAt":"2026-11-08T04:00:00.000Z"}
 ok   the cron job saved with 7 now reads 0 4 * * 0 and has a next run
@@ -683,7 +680,7 @@ ok   a redeploy of web after the upgrade goes live
 ok   web answers after the redeploy
 ok   the upgraded node runs scheduled cleanup (cleanup.getSchedule supported)
 ok   the upgraded node runs host shells (hostShell.status available)
-join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:9db1b5ed365b042e9cb236eecf90f0153963a074b915293421b5bc1408166fe9'
+join command from the panel: curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://192.168.64.3:3443' --token <redacted> --pin 'sha256:715c5c745158ce60b14a0b8b12834c3f7d420d5c2c50071e16c604bba85f3863'
 ok   installer join on seylo-e2e-c finished: ==> Docker;Docker 29.9.3 is running;==> Joining https://192.168.64.3:3443;The agent is starting and joins the panel; the node shows up there in a few seconds.;
-C joined A's panel again as z0spiwj5y2zs5f3b
+C joined A's panel again as autyieybli29cw66
 ```
