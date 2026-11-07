@@ -467,9 +467,15 @@ type GitSource struct {
 	// "x-access-token" (GitHub; GitLab and Gitea take any name). Bitbucket
 	// needs "x-token-auth" for access tokens or the account's user name for
 	// app passwords. Older agents ignore it.
-	Username      string `protobuf:"bytes,7,opt,name=username,proto3" json:"username,omitempty"` // added in 0.2 (gitproviders)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Username string `protobuf:"bytes,7,opt,name=username,proto3" json:"username,omitempty"` // added in 0.2 (gitproviders)
+	// The panel's owner or an admin allowed plain http:// for this source
+	// (an internal git server without TLS). Without it the agent refuses
+	// http:// addresses and git follows no redirect to http://. Never sent
+	// with token or ssh_private_key (those need https:// or ssh://). Agents
+	// before this field allow http:// without credentials.
+	AllowPlainHttp bool `protobuf:"varint,8,opt,name=allow_plain_http,json=allowPlainHttp,proto3" json:"allow_plain_http,omitempty"` // added in 0.2 (security)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GitSource) Reset() {
@@ -549,6 +555,13 @@ func (x *GitSource) GetUsername() string {
 		return x.Username
 	}
 	return ""
+}
+
+func (x *GitSource) GetAllowPlainHttp() bool {
+	if x != nil {
+		return x.AllowPlainHttp
+	}
+	return false
 }
 
 // BuildResponse is one message of the build stream. The stream ends with a
@@ -1062,7 +1075,7 @@ const file_seylo_agent_v1_build_proto_rawDesc = "" +
 	"\x06source\"]\n" +
 	"\vImageSource\x12\x1c\n" +
 	"\treference\x18\x01 \x01(\tR\treference\x120\n" +
-	"\x04auth\x18\x02 \x01(\v2\x1c.seylo.agent.v1.RegistryAuthR\x04auth\"\xc9\x01\n" +
+	"\x04auth\x18\x02 \x01(\v2\x1c.seylo.agent.v1.RegistryAuthR\x04auth\"\xf3\x01\n" +
 	"\tGitSource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x16\n" +
@@ -1070,7 +1083,8 @@ const file_seylo_agent_v1_build_proto_rawDesc = "" +
 	"\x05token\x18\x04 \x01(\tR\x05token\x12&\n" +
 	"\x0fssh_private_key\x18\x05 \x01(\tR\rsshPrivateKey\x12&\n" +
 	"\x0fssh_known_hosts\x18\x06 \x01(\tR\rsshKnownHosts\x12\x1a\n" +
-	"\busername\x18\a \x01(\tR\busername\"\xae\x01\n" +
+	"\busername\x18\a \x01(\tR\busername\x12(\n" +
+	"\x10allow_plain_http\x18\b \x01(\bR\x0eallowPlainHttp\"\xae\x01\n" +
 	"\rBuildResponse\x12\x12\n" +
 	"\x03log\x18\x01 \x01(\fH\x00R\x03log\x12;\n" +
 	"\bprogress\x18\x02 \x01(\v2\x1d.seylo.agent.v1.BuildProgressH\x00R\bprogress\x12B\n" +

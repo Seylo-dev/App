@@ -201,6 +201,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   provider's (`oauth2` for GitLab, the token's owner for Gitea,
   `x-token-auth` or the account for Bitbucket) and a git credential's
   user name. Older agents ignore it, so Bitbucket clones need a 0.2 agent.
+- `GitSource.allow_plain_http` (added in 0.2): agents clone and fetch
+  git sources with `protocol.http.allow=never` (so an https:// server
+  cannot redirect the clone to http:// either) and refuse http://
+  addresses with INVALID_ARGUMENT, unless the panel sets this field. The
+  panel sets it only for a source an owner or admin (`git.manage`)
+  explicitly allowed to use plain HTTP (an internal git server without
+  TLS), never with a token or SSH key (those still need https:// or
+  ssh://). Not built in the panel yet: until it is, http:// git sources
+  fail on 0.2 agents (older agents still clone them without credentials).
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
