@@ -11,6 +11,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { setStackRefresher } from "../github/push";
 import { defineModule } from "../module";
 import { deleteServiceTree } from "../services/delete";
+import { displaySource } from "../services/git-url";
 import { insertService } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
 import { loadService, projectServiceRows, type ServiceRow, toDetail, toSummaries } from "../services/rows";
@@ -75,7 +76,7 @@ const get = implement(composeOps.get, (input, ctx) => {
   const rows = projectServiceRows(ctx.db, stack.projectId).filter((r) => r.parentId === stack.id);
   return {
     stack: toDetail(ctx.db, ctx.agents, stack),
-    source: loadStackSource(ctx, stack),
+    source: displaySource(loadStackSource(ctx, stack)),
     members: toSummaries(ctx.db, ctx.agents, rows),
   };
 });

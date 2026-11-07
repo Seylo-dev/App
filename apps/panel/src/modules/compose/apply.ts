@@ -15,6 +15,7 @@ import { openCredential } from "../git/credentials";
 import { githubRequest } from "../github/api";
 import { tokenForInstallation } from "../github/app";
 import { deleteServiceTree } from "../services/delete";
+import { withoutCredentials } from "../services/git-url";
 import { insertService, writeSpec } from "../services/insert";
 import { publishService } from "../services/ops";
 import { nameKey, type ServiceRow } from "../services/rows";
@@ -102,9 +103,13 @@ async function fetchGitComposeFile(
   } catch (error) {
     if (error instanceof OpError && (error.details as { reason?: string } | undefined)?.reason === "agent") {
       // The agent's own words: the file is missing, too large, the ref or the credentials are wrong.
-      throw new OpError("BAD_REQUEST", `Could not read ${path} from ${source.url} at ${ref ?? source.branch}: ${error.message}`, {
-        field: "source.path",
-      });
+      throw new OpError(
+        "BAD_REQUEST",
+        `Could not read ${path} from ${withoutCredentials(source.url)} at ${ref ?? source.branch}: ${error.message}`,
+        {
+          field: "source.path",
+        },
+      );
     }
     throw error;
   }

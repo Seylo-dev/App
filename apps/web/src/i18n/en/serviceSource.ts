@@ -94,6 +94,7 @@ export default {
   git: {
     url: "Repository URL",
     urlHint: "https://, ssh:// or git@host:path.",
+    urlHasCredentials: "Take the user name and token out of the URL: add them as a git credential and pick it below.",
     check: "Check access",
     checking: "Checking access…",
     reachable: { one: "Reachable: {count} branch, default {branch}.", other: "Reachable: {count} branches, default {branch}." },

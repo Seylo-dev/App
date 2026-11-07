@@ -8,7 +8,7 @@
 // holds. Crash policy, stopped and replicas apply right away.
 
 import { builds, compose, previews, services } from "@seylo/ops";
-import { type Static, Type } from "@sinclair/typebox";
+import { type Static, type TLiteral, type TObject, type TSchema, type TString, type TUnion, Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
 export type Source = Static<typeof services.Source>;
@@ -22,6 +22,21 @@ export type DeployStrategy = Static<typeof services.DeployStrategy>;
 export type CronSettings = Static<typeof services.CronSettings>;
 export type PreviewSettings = Static<typeof previews.PreviewSettings>;
 export type ComposeSource = Static<typeof compose.ComposeSource>;
+
+/**
+ * Stored rows keep the old git URL rule: ops refuse a token in a git URL
+ * (GitUrl), but a source saved before that must still load and deploy, so
+ * the spec schema takes any https://, ssh:// or git@ URL. Every answer that
+ * shows a source drops the token (git-url.ts).
+ */
+const StoredGitUrl = Type.String({ minLength: 1, maxLength: 500, pattern: "^(https://|ssh://|git@)\\S+$" });
+
+function withStoredGitUrl<T extends TSchema>(variants: readonly T[]): TSchema[] {
+  return variants.map((variant) => {
+    const object = variant as unknown as TObject;
+    return object.properties?.type?.const === "git" ? Type.Object({ ...object.properties, url: StoredGitUrl }) : variant;
+  });
+}
 
 /** A compose member: which service of the stack's file it is and what it waits for. */
 export const MemberSettings = Type.Object({
@@ -41,13 +56,13 @@ export type MemberSettings = Static<typeof MemberSettings>;
 export const StackSettings = Type.Object({
   source: Type.Union([
     Type.Object({ type: Type.Literal("inline"), yaml: Type.String({ maxLength: 0 }) }),
-    ...compose.ComposeSource.anyOf.filter((s) => s.properties.type.const !== "inline"),
-  ]),
+    ...withStoredGitUrl(compose.ComposeSource.anyOf.filter((s) => s.properties.type.const !== "inline")),
+  ]) as unknown as TUnion<[TObject<{ type: TLiteral<"inline">; yaml: TString }>, ...typeof compose.ComposeSource.anyOf]>,
 });
 export type StackSettings = Static<typeof StackSettings>;
 
 export const ServiceSpecJson = Type.Object({
-  source: services.Source,
+  source: Type.Union(withStoredGitUrl(services.Source.anyOf)) as unknown as typeof services.Source,
   build: builds.BuildSettings,
   container: services.ContainerSettings,
   ports: Type.Array(services.Port),

@@ -12296,7 +12296,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -13612,7 +13614,9 @@
                                 "url": {
                                   "minLength": 1,
                                   "maxLength": 500,
-                                  "pattern": "^(https://|ssh://|git@)\\S+$",
+                                  "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                                  "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                                  "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                                   "type": "string"
                                 },
                                 "branch": {
@@ -14548,7 +14552,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -15099,7 +15105,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -15380,7 +15388,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -22652,7 +22662,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -31686,7 +31698,9 @@
             "schema": {
               "minLength": 1,
               "maxLength": 500,
-              "pattern": "^(https://|ssh://|git@)\\S+$",
+              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
               "type": "string"
             }
           },
@@ -33206,7 +33220,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -35723,7 +35739,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -51331,7 +51349,9 @@
                                 "url": {
                                   "minLength": 1,
                                   "maxLength": 500,
-                                  "pattern": "^(https://|ssh://|git@)\\S+$",
+                                  "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                                  "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                                  "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                                   "type": "string"
                                 },
                                 "branch": {
@@ -52745,7 +52765,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -53523,7 +53545,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -54939,7 +54963,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -57896,7 +57922,9 @@
                           "url": {
                             "minLength": 1,
                             "maxLength": 500,
-                            "pattern": "^(https://|ssh://|git@)\\S+$",
+                            "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                            "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                            "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                             "type": "string"
                           },
                           "branch": {
@@ -58519,7 +58547,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {
@@ -60361,7 +60391,9 @@
                             "url": {
                               "minLength": 1,
                               "maxLength": 500,
-                              "pattern": "^(https://|ssh://|git@)\\S+$",
+                              "pattern": "^(https://[^/@\\s]+(/\\S*)?|ssh://([^/:@\\s]+@)?[^/@\\s]+(/\\S*)?|git@\\S+)$",
+                              "description": "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
+                              "errorMessage": "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
                               "type": "string"
                             },
                             "branch": {

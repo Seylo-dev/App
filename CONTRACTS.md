@@ -1051,7 +1051,16 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   the files between the live deployment's commit and that one come from
   the source's compare API (`webhooks/compare.ts`). The web app's tester
   runs the same matcher.
-- Sources and credentials (`modules/services/source-guard.ts`): a git
+- Sources and credentials (`modules/services/source-guard.ts`): git URLs
+  never carry a secret: the `GitUrl` schema (`@seylo/ops` schemas.ts, every
+  git and compose source and `git.branches`) refuses a user name or token
+  in an https:// URL and a password in an ssh:// URL (`ssh://git@host`
+  stays) with BAD_REQUEST pointing at git credentials, before the input
+  reaches a spec or the audit log; the stored spec schema still loads
+  sources saved before (`services/spec.ts` `StoredGitUrl`) and every
+  answer that shows one drops it (`services/git-url.ts`: `toDetail`,
+  `compose.get`, compose read errors). Input errors inside a union name
+  the field of the variant the caller picked (`ops/validate.ts`). A git
   credential only goes to its own host and a registry login to its own
   registry (checked on save and again before the token leaves the panel at
   deploy time); attaching a credential, registry login or GitHub App

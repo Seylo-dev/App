@@ -7,7 +7,7 @@
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
-import { Id } from "../schemas";
+import { GitUrl, Id } from "../schemas";
 import { RepoPath } from "./builds";
 import { GitBranch, ServiceDetail, ServiceName, ServiceSummary } from "./services";
 
@@ -26,7 +26,7 @@ export const ComposeSource = Type.Union([
   }),
   Type.Object({
     type: Type.Literal("git"),
-    url: Type.String({ minLength: 1, maxLength: 500, pattern: "^(https://|ssh://|git@)\\S+$" }),
+    url: GitUrl,
     branch: GitBranch,
     path: RepoPath,
     credentialId: Type.Union([Id, Type.Null()]),
