@@ -786,7 +786,11 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   agent hello logs `remoteIp` with its reason and node id.
 - Setup link: the installer writes a `<slug>_setup_...` token to
   `<dataDir>/setup-token` (one line, 0600) before the panel's first start
-  and prints `<url>/setup?t=<token>`. While no owner exists the panel
+  and prints `<url>/setup?t=<token>`; an http:// link comes with a warning
+  that the token, the password and the session cross the network
+  unencrypted and the SSH tunnel command for its port
+  (`go/internal/cli/panel.go` `plainHTTPWarning`, also under
+  `seylo panel setup-link`). While no owner exists the panel
   imports it on start (valid one hour) or writes a fresh one there;
   `bun scripts/setup-link.ts [baseUrl]` in apps/panel prints a new link.
   Creating the owner burns the token and deletes the file.
@@ -2011,6 +2015,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   answer hands out (an empty one clears it); the live socket and the
   archive upload (`sessionKeyHeaders()`) send it too. Any new way to call
   the panel with the session must do the same (see Credentials).
+- Plain HTTP: `components/auth/plain-http-warning.tsx` shows "This
+  connection is not encrypted", with the SSH tunnel command for this port,
+  on every signed-out screen (`AuthFrame`) and at the top of the app shell
+  whenever the page is not a secure context (`lib/plain-http.ts`; loopback
+  counts as secure, so the tunnel itself does not warn).
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the

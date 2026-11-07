@@ -80,8 +80,36 @@ test.describe("signed out", () => {
   });
 });
 
+test.describe("plain HTTP", () => {
+  /** Pages as a browser sees them on http://<public ip>:<port> (127.0.0.1 itself counts as secure). */
+  const insecure = () => Object.defineProperty(window, "isSecureContext", { get: () => false });
+
+  test("signed-out pages warn that the connection is not encrypted, loopback does not", async ({ page, browser }) => {
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { level: 1, name: /Sign in to/ })).toBeVisible();
+    await expect(page.getByTestId("plain-http-warning")).toHaveCount(0);
+
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const other = await context.newPage();
+    await other.addInitScript(insecure);
+    await other.goto("/login");
+    const warning = other.getByTestId("plain-http-warning");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("This connection is not encrypted");
+    await expect(warning).toContainText(/ssh -L \d+:localhost:\d+ 127\.0\.0\.1/);
+    await other.screenshot({ path: `${shots}/login-plain-http.png`, fullPage: true });
+    await context.close();
+  });
+});
+
 test.describe("signed in", () => {
   test.use({ storageState: stateFile });
+
+  test("the app shell warns on plain HTTP too", async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(window, "isSecureContext", { get: () => false }));
+    await openDashboard(page);
+    await expect(page.getByTestId("plain-http-warning")).toBeVisible();
+  });
 
   test("the session cookie another port of the address receives signs nobody in", async ({ page, playwright }) => {
     await openDashboard(page);
