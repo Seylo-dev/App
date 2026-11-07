@@ -119,10 +119,10 @@ export const channels = defineOp({
   kind: "query",
   summary: "List notification channels",
   description:
-    "Lists every notification channel with a redacted target, which services use it and its last delivery. Secrets are never returned.",
+    "Lists every notification channel with a redacted target, which services use it and its last delivery. Secrets are never returned. Empty for callers with no grant (services.view or services.alerts) anywhere.",
   input: Empty,
   output: Type.Object({ channels: Type.Array(Channel) }),
-  // Members pick channels on their services' Alerts tab, so any signed-in person may list them.
+  // Members pick channels on their services' Alerts tab; accounts with no grant get an empty list.
   permission: permission.signedIn(),
   mcp: true,
   audit: false,

@@ -1048,7 +1048,13 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   sources (also compose members and templates) may not name loopback hosts
   or port 5755 (the registry relay). Non-managers listing credentials,
   registries, channels or the GitHub device account get names and hosts
-  only; webhook URLs show scheme and host only. `apiKeys.list all` and
+  only (a registry's user name is null); webhook URLs show scheme and host
+  only. The shared pickers are empty for an account that cannot use them
+  anywhere (`Access.canSomewhere`): git credentials, git provider
+  connections and registry logins need `services.create` or
+  `services.update` on some project or service, notification channels and
+  backup destination choices `services.view` (or the edit action) somewhere;
+  a key counts only its own actions and projects. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
 - Env references (`modules/env/ops.ts` `checkEnvReferences`): a `${{svc.VAR}}`
   the caller may not read (env.view on the target, databases.credentials for

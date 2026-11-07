@@ -150,6 +150,8 @@ describe("connections", () => {
     expect(JSON.stringify(list.body)).not.toContain("glpat-token");
 
     const member = await createUser(panel, "member");
+    // People who may set a source somewhere pick connections (picker-lists.test.ts).
+    grant(panel, member.user.id, "project", projectId, ["services.create"]);
     const seen = await callOp(panel, providerOps.list, {}, { cookie: member.cookie });
     expect(seen.body.items[0]).toMatchObject({ id, account: null, username: null });
     const denied = await callOp(panel, providerOps.create, { kind: "gitlab", name: "x", token: "t" }, { cookie: member.cookie });

@@ -43,10 +43,11 @@ export const listCredentials = defineOp({
   id: "git.listCredentials",
   kind: "query",
   summary: "List git credentials",
-  description: "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source.",
+  description:
+    "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source. Empty for callers who may create or edit services nowhere.",
   input: Type.Object({}),
   output: Type.Object({ items: Type.Array(GitCredential, { description: "The stored git credentials, without secrets." }) }),
-  // Names and hosts only; any signed-in person may pick one for a source they can edit.
+  // Names and hosts only, for people who may set a source somewhere (services.create or services.update).
   permission: permission.signedIn(),
   mcp: true,
   audit: false,

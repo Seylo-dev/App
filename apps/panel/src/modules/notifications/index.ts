@@ -16,10 +16,12 @@ import { forgetChannel, readDefaults, readServiceRules, serviceDefaults, updateD
 const invalidateChannels = (ctx: OpContext) =>
   ctx.live.publish("panel", { type: "invalidate", ops: ["notifications.channels", "notifications.defaults", "system.features"] });
 
-// Members pick channels for their services' alert rules, so everyone signed
-// in may list them; only people who manage channels see where they point.
+// Members pick channels for their services' alert rules (and read them on
+// the Alerts tab), so anyone with a grant may list them; only people who
+// manage channels see where they point. An account with no grant gets none.
 const channels = implement(notifications.channels, (_input, ctx) => {
   const full = ctx.access.can("notifications.manage");
+  if (!full && !ctx.access.canSomewhere(["services.view", "services.alerts"])) return { channels: [] };
   return {
     channels: ctx.db
       .select()

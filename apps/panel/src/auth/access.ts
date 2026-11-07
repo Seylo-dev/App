@@ -25,7 +25,17 @@ export interface Access {
   require(permission: AnyPermission, kind: OpKind, input: unknown): Target | undefined;
   /** Whether the principal holds `action`, panel-wide or on `target`. */
   can(action: Action, target?: Target): boolean;
+  /**
+   * Whether the principal holds any of `actions` on at least one project or
+   * service (admins: anywhere their key reaches). For the shared pickers
+   * (registries, git credentials, channels ...): an account with no grants
+   * gets empty lists instead of the panel's catalogue.
+   */
+  canSomewhere(actions: readonly Action[]): boolean;
 }
+
+/** Who may pick a stored git credential, provider connection or registry login for a source. */
+export const sourcePickerActions: readonly Action[] = ["services.create", "services.update"];
 
 export function createAccess(db: PanelDb, principal: Principal): Access {
   const user = userOf(principal);
@@ -68,9 +78,29 @@ export function createAccess(db: PanelDb, principal: Principal): Access {
     return target !== undefined && grantAllows(action, target);
   };
 
+  const canSomewhere = (actions: readonly Action[]): boolean => {
+    if (!user) return false;
+    const wanted = principal.type === "apiKey" ? actions.filter((a) => actionAllowed(principal.actions, a)) : actions;
+    if (wanted.length === 0) return false;
+    const keyProjects = principal.type === "apiKey" ? principal.projectIds : null;
+    if (isAdmin) return keyProjects === null || keyProjects.length > 0;
+    const rows = db
+      .select({ scopeType: grants.scopeType, scopeId: grants.scopeId, actions: grants.actions })
+      .from(grants)
+      .where(eq(grants.userId, user.id))
+      .all();
+    return rows.some((row) => {
+      if (!wanted.some((action) => actionAllowed(row.actions, action))) return false;
+      if (keyProjects === null) return true;
+      const projectId = projectOf({ type: row.scopeType, id: row.scopeId });
+      return projectId !== undefined && keyProjects.includes(projectId);
+    });
+  };
+
   return {
     principal,
     can,
+    canSomewhere,
     require(permission, kind, input) {
       if (permission.kind === "public") return undefined;
       if (!user) throw new OpError("UNAUTHENTICATED", "Sign in or use a valid API key.");

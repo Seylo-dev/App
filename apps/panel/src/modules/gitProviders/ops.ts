@@ -5,6 +5,7 @@
 import { gitProviders as contracts, OpError, type gitProviders as providerOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { eq } from "drizzle-orm";
+import { sourcePickerActions } from "../../auth/access";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { userOf } from "../../auth/principal";
 import { gitProviders, sourcePolls } from "../../db/schema";
@@ -52,9 +53,12 @@ async function verifyToken(ctx: OpContext, row: ProviderRow): Promise<string> {
   }
 }
 
+// People who may set a source somewhere pick connections by name and host;
+// an account with no such grant gets an empty list.
 const list = implement(contracts.list, (_input, ctx) => {
-  const usage = providerUsage(ctx.db);
   const full = canManage(ctx);
+  if (!full && !ctx.access.canSomewhere(sourcePickerActions)) return { items: [] };
+  const usage = providerUsage(ctx.db);
   const rows = ctx.db.select().from(gitProviders).orderBy(gitProviders.name).all();
   return { items: rows.map((r) => toProvider(r, usage.get(r.id) ?? 0, full)) };
 });

@@ -97,7 +97,7 @@ export const listDestinations = defineOp({
   kind: "query",
   summary: "List backup destinations",
   description:
-    "Lists the panel's S3/R2 backup destinations. Owners and admins get every field; other signed-in people get only id, name, provider and bucket in the choices list, for picking one in a schedule.",
+    "Lists the panel's S3/R2 backup destinations. Owners and admins get every field; other signed-in people with a grant (services.view or backups.edit somewhere) get only id, name, provider and bucket in the choices list, for picking one in a schedule; an account with no grant gets empty lists.",
   input: Type.Object({}),
   output: Type.Object({
     /** Empty for callers without backups.destinations. */

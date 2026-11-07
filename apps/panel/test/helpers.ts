@@ -55,7 +55,11 @@ export function grant(panel: Panel, userId: string, scopeType: "project" | "serv
   panel.deps.db.insert(grants).values({ userId, scopeType, scopeId, actions }).run();
 }
 
-export function createApiKey(panel: Panel, userId: string, options: { actions?: string[]; readOnly?: boolean } = {}) {
+export function createApiKey(
+  panel: Panel,
+  userId: string,
+  options: { actions?: string[]; readOnly?: boolean; projectIds?: string[] | null; kind?: "api" | "mcp" } = {},
+) {
   const token = prefixedToken("key");
   panel.deps.db
     .insert(apiKeys)
@@ -66,6 +70,8 @@ export function createApiKey(panel: Panel, userId: string, options: { actions?: 
       tokenHash: hashToken(token),
       actions: options.actions ?? ["*"],
       readOnly: options.readOnly ?? false,
+      projectIds: options.projectIds ?? null,
+      ...(options.kind ? { kind: options.kind } : {}),
     })
     .run();
   return token;

@@ -8124,7 +8124,7 @@
       "get": {
         "operationId": "backups.listDestinations",
         "summary": "List backup destinations",
-        "description": "Lists the panel's S3/R2 backup destinations. Owners and admins get every field; other signed-in people get only id, name, provider and bucket in the choices list, for picking one in a schedule.",
+        "description": "Lists the panel's S3/R2 backup destinations. Owners and admins get every field; other signed-in people with a grant (services.view or backups.edit somewhere) get only id, name, provider and bucket in the choices list, for picking one in a schedule; an account with no grant gets empty lists.",
         "tags": [
           "backups"
         ],
@@ -32182,7 +32182,7 @@
       "get": {
         "operationId": "git.listCredentials",
         "summary": "List git credentials",
-        "description": "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source.",
+        "description": "Lists stored git credentials by name, host and kind (never the secret), so people can pick one for a service's source. Empty for callers who may create or edit services nowhere.",
         "tags": [
           "git"
         ],
@@ -36873,7 +36873,7 @@
       "get": {
         "operationId": "gitProviders.list",
         "summary": "List git provider connections",
-        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only.",
+        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only. Empty for callers who may create or edit services nowhere.",
         "tags": [
           "gitProviders"
         ],
@@ -46223,7 +46223,7 @@
       "get": {
         "operationId": "notifications.channels",
         "summary": "List notification channels",
-        "description": "Lists every notification channel with a redacted target, which services use it and its last delivery. Secrets are never returned.",
+        "description": "Lists every notification channel with a redacted target, which services use it and its last delivery. Secrets are never returned. Empty for callers with no grant (services.view or services.alerts) anywhere.",
         "tags": [
           "notifications"
         ],
@@ -50498,7 +50498,7 @@
       "get": {
         "operationId": "registries.list",
         "summary": "List registry logins",
-        "description": "Lists stored registry logins by name and server (never the password), so people can pick one for an image source. The user name is null unless the caller manages registries.",
+        "description": "Lists stored registry logins by name and server (never the password), so people can pick one for an image source. The user name is null unless the caller manages registries. Empty for callers who may create or edit services nowhere.",
         "tags": [
           "registries"
         ],

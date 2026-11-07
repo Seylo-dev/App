@@ -52,9 +52,12 @@ function cleanPrefix(prefix: string | undefined): string | undefined {
   return prefix === undefined ? undefined : prefix.replace(/^\/+|\/+$/g, "");
 }
 
+// Choices are for the service Backups tab (picking and reading a policy's
+// destination): an account with no grant gets none.
 export const listDestinations = implement(backupOps.listDestinations, (_input, ctx) => {
-  const rows = ctx.db.select().from(backupDestinations).orderBy(backupDestinations.name).all();
   const full = ctx.access.can("backups.destinations");
+  if (!full && !ctx.access.canSomewhere(["services.view", "backups.edit"])) return { destinations: [], choices: [] };
+  const rows = ctx.db.select().from(backupDestinations).orderBy(backupDestinations.name).all();
   const counts = full ? policyCounts(ctx) : new Map<string, number>();
   return {
     destinations: full ? rows.map((r) => toDestination(r, counts.get(r.id) ?? 0)) : [],
