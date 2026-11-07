@@ -156,8 +156,11 @@ func gitDialProxyCommand(proxy, target string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("finding the agent binary for ssh: %w", err)
 	}
-	if strings.ContainsAny(exe, "%\n\r\x00") {
-		return "", fmt.Errorf("the agent binary path %q cannot be used in an ssh ProxyCommand", exe)
+	// ssh expands %-tokens in the whole command before the shell sees it.
+	for _, part := range []string{exe, proxy, target} {
+		if strings.ContainsAny(part, "%\n\r\x00") {
+			return "", fmt.Errorf("%q cannot be used in an ssh ProxyCommand", part)
+		}
 	}
 	return shellQuote(exe) + " " + GitDialCommand + " " + shellQuote(proxy) + " " + shellQuote(target), nil
 }
@@ -259,6 +262,9 @@ func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSour
 		if err := g.do(ctx, dir, "fetch", "-q", "--depth", "1", "--no-tags", "origin", commit); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
+			}
+			if refused := g.proxy.Refused(); refused != nil {
+				return nil, refused
 			}
 			fmt.Fprintf(log, "The server does not serve commits by id, fetching %s instead\n", ref)
 			if err := g.do(ctx, dir, "fetch", "-q", "--no-tags", "origin", ref); err != nil {

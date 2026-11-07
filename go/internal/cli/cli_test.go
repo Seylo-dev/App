@@ -3,11 +3,13 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -423,5 +425,44 @@ func TestSetupLinkAddresses(t *testing.T) {
 	out, err := h.run("panel", "setup-link")
 	if err != nil || !strings.Contains(out, "http://[2001:db8::7]:38117/setup?t=") {
 		t.Fatalf("output = %s, %v", out, err)
+	}
+}
+
+// `seylo git-dial` is what ssh runs as the ProxyCommand of git fetches
+// (internal/build gitproxy.go): it asks the fetch's proxy on loopback for a
+// tunnel to the fixed host:port and pipes stdin and stdout through it.
+func TestGitDialCommand(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	asked := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		br := bufio.NewReader(c)
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			return
+		}
+		asked <- req.Method + " " + req.Host
+		_, _ = io.WriteString(c, "HTTP/1.1 200 Connection established\r\n\r\n")
+		_, _ = io.Copy(c, br)
+	}()
+	h := newHarness(t)
+	h.in = "ping\n"
+	out, err := h.run("git-dial", ln.Addr().String(), "gitea.lan:2222")
+	if err != nil || out != "ping\n" {
+		t.Fatalf("git-dial = %q, %v", out, err)
+	}
+	if got := <-asked; got != "CONNECT gitea.lan:2222" {
+		t.Fatalf("the proxy was asked %q", got)
+	}
+	if _, err := h.run("git-dial", "203.0.113.9:8080", "gitea.lan:22"); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("a proxy off loopback: %v", err)
 	}
 }
