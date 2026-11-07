@@ -621,7 +621,12 @@ local API, join and resume. The areas:
   verify peers by `server_name` and present their own certificate instead of
   `insecureSkipVerify`; without a complete `lb_tls` no route file has a
   router on `seylo-lb`, so the entry point, published on every interface,
-  answers 404 to everyone instead of taking any client), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
+  answers 404 to everyone instead of taking any client; the panel issues
+  each node's certificate on connect and renews it hourly
+  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`), and a node it cannot
+  issue one for, for example because the LB CA key does not open with this
+  master.key, gets one `node_health_check_failed` alert naming the reason,
+  resolved once it has a certificate), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
   directory; for a test CA, config.yml `acme_ca_certificates` (a PEM file,
   mounted as `LEGO_CA_CERTIFICATES`) and `acme_ca_server_name`, or the
   `SEYLO_ACME_CA_CERTIFICATES` / `SEYLO_ACME_CA_SERVER_NAME` env). Next to the Wings fork the files go to its

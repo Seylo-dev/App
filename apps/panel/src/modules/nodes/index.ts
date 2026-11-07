@@ -19,7 +19,7 @@ import { defineModule } from "../module";
 import { manifestMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
 import { importInstallerJoinToken } from "./installer-join";
-import { ensureNodeCertificate, lbTlsContributor } from "./lb-tls";
+import { issueNodeCertificate, lbTlsContributor } from "./lb-tls";
 import { nodeHandlers, publishNode } from "./ops";
 import { ensurePanelService, panelContributor, panelServiceId } from "./panel-service";
 import { pruneTables } from "./retention";
@@ -40,7 +40,7 @@ const pruneReports = defineJob<Record<string, never>>({
     pruneTables(ctx.db);
     // Renew LB certificates with under 30 days left; the node gets them with its settings.
     for (const node of ctx.db.select({ id: nodes.id }).from(nodes).all()) {
-      if (ensureNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
+      if (issueNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
     }
   },
 });
@@ -139,13 +139,7 @@ function start(deps: Deps) {
 
   deps.agents.onConnection((nodeId, online) => {
     // Its LB identity exists before the connect sync compiles the node's settings.
-    if (online) {
-      try {
-        ensureNodeCertificate(deps, nodeId);
-      } catch (error) {
-        nodesLogger.error({ err: error, nodeId }, "issuing the node's load balancer certificate failed");
-      }
-    }
+    if (online) issueNodeCertificate({ ...deps, logger: nodesLogger }, nodeId);
     if (!online) {
       if (factsWriter.waiting.has(nodeId)) factsWriter.flush(nodeId);
       deps.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, nodeId)).run();
