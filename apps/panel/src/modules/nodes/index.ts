@@ -14,6 +14,7 @@ import { nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { type DesiredFlusher, startDesiredFlusher } from "../../desired";
 import { defineJob } from "../../jobs/queue";
+import { edgeAccessAllowed } from "../databases/edge-ticket";
 import { defineModule } from "../module";
 import { manifestMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
@@ -71,6 +72,7 @@ function start(deps: Deps) {
       hub: deps.agents,
       logger: deps.logger.child({ component: "panel-service" }),
       desiredState: (nodeId, knownRevision) => flusher.currentState(nodeId, knownRevision),
+      edgeAccessAllowed: (nodeId, request) => edgeAccessAllowed(deps, nodeId, request),
       reportBudgetExceeded: (nodeId) => {
         const name = deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? "A node";
         deps.alerts.raise({

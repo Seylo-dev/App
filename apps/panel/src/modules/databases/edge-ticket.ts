@@ -9,9 +9,14 @@
 
 import { createPublicKey, randomBytes, sign, verify } from "node:crypto";
 import { slug } from "@seylo/brand";
-import { OpError } from "@seylo/ops";
+import { boxes as boxOps, databases as dbOps, OpError } from "@seylo/ops";
+import { eq } from "drizzle-orm";
+import { createAccess } from "../../auth/access";
+import type { Principal } from "../../auth/principal";
+import { serviceBoxes, users } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { ensureEdgeTicketKey } from "../../security/edge-ticket-key";
+import { findDatabase } from "./info";
 
 export const edgeTicketContext = `${slug}-edge-ticket-v1`;
 export const edgeTicketTtlSeconds = 60;
@@ -71,14 +76,26 @@ export function edgeToolHost(tool: EdgeTool, serviceId: string, wildcardDomain: 
   return `${slug}-${tool}-${serviceId}.${wildcardDomain}`;
 }
 
-/** One-time sign-in link to a tool on a node; CONFLICT when the node has no wildcard domain. */
+/**
+ * One-time sign-in link to a tool on a node; CONFLICT when the node has no
+ * wildcard domain. Only for browser sessions: the node asks the panel about
+ * every tool session once a minute (CheckEdgeAccess, edgeAccessAllowed) as
+ * the ticket's user, and an API key's narrower rights could not be checked
+ * that way, so keys get FORBIDDEN.
+ */
 export function edgeToolLink(
   deps: Pick<Deps, "db" | "secrets">,
   tool: EdgeTool,
   serviceId: string,
   node: { name: string; wildcardDomain: string | null },
-  userId: string,
+  principal: Principal,
 ): { url: string; expiresAt: Date } {
+  if (principal.type !== "session") {
+    throw new OpError("FORBIDDEN", "Opening a tool in the browser needs a signed-in browser session, not an API key.", {
+      reason: "browserOnly",
+    });
+  }
+  const userId = principal.user.id;
   if (!node.wildcardDomain) {
     throw new OpError(
       "CONFLICT",
@@ -89,4 +106,41 @@ export function edgeToolLink(
   const { token, expiresAt } = signEdgeTicket(deps, { sub: edgeSubject(tool, serviceId), uid: userId });
   const host = edgeToolHost(tool, serviceId, node.wildcardDomain);
   return { url: `https://${host}/_${slug}/ticket?t=${encodeURIComponent(token)}`, expiresAt };
+}
+
+/** The op whose rights a tool needs: opening it and every later check use the same contract. */
+const toolOps = { box: boxOps.open, db: dbOps.openWebUi } as const;
+
+/** Whether `principal` may still open `tool` on the service: the op's permission, and the service is that kind of tool. */
+export function mayOpenEdgeTool(db: Deps["db"], principal: Principal, tool: EdgeTool, serviceId: string): boolean {
+  const op = toolOps[tool];
+  try {
+    createAccess(db, principal).require(op.permission, op.kind, { serviceId });
+  } catch {
+    return false;
+  }
+  if (tool === "db") return findDatabase(db, serviceId) !== undefined;
+  return db.select({ id: serviceBoxes.serviceId }).from(serviceBoxes).where(eq(serviceBoxes.serviceId, serviceId)).get() !== undefined;
+}
+
+/**
+ * PanelService.CheckEdgeAccess: whether the user a node's edge opened a tool
+ * session for (ticket subject "box:<id>" or "db-ui:<id>", uid) may keep it.
+ * False when the subject is unknown, the service does not run on the asking
+ * node, the user is gone or disabled, or no longer has the tool's right.
+ */
+export function edgeAccessAllowed(deps: Pick<Deps, "db" | "agents">, nodeId: string, input: { subject: string; userId: string }): boolean {
+  const match = /^(box|db-ui):([A-Za-z0-9_-]{1,64})$/.exec(input.subject);
+  if (!match || !input.userId) return false;
+  const tool: EdgeTool = match[1] === "box" ? "box" : "db";
+  const serviceId = match[2] as string;
+  const user = deps.db
+    .select({ id: users.id, email: users.email, name: users.name, role: users.role, disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, input.userId))
+    .get();
+  if (!user || user.disabledAt) return false;
+  if (!deps.agents.runsService(nodeId, serviceId)) return false;
+  const { disabledAt: _, ...person } = user;
+  return mayOpenEdgeTool(deps.db, { type: "session", user: person, sessionId: "" }, tool, serviceId);
 }

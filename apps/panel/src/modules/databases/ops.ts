@@ -282,8 +282,7 @@ export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) =
 export const openWebUi = implement(dbOps.openWebUi, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
   if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
-  const user = userOf(ctx.principal);
-  const link = edgeToolLink(ctx, "db", info.service.id, info.node, user?.id ?? "");
+  const link = edgeToolLink(ctx, "db", info.service.id, info.node, ctx.principal);
   return { url: link.url, expiresAt: link.expiresAt.toISOString() };
 });
 

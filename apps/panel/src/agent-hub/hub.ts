@@ -125,6 +125,8 @@ export interface AgentHub {
   setServiceScope(scope: (nodeId: string) => ReadonlySet<string>): void;
   /** Whether the node may report on the service (true while no scope is set). */
   mayReport(nodeId: string, serviceId: string): boolean;
+  /** Whether the service runs on the node by its scope (false while no scope is set). */
+  runsService(nodeId: string, serviceId: string): boolean;
 
   isOnline(nodeId: string): boolean;
   onlineNodeIds(): string[];
@@ -329,6 +331,9 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
     mayReport(nodeId, serviceId) {
       const scope = scopeOf(nodeId);
       return !scope || scope.has(serviceId);
+    },
+    runsService(nodeId, serviceId) {
+      return scopeOf(nodeId)?.has(serviceId) ?? false;
     },
 
     isOnline: (nodeId) => agents.has(nodeId),

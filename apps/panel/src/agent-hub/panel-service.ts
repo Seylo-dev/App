@@ -13,10 +13,15 @@
 //   RegistryTunnel            relays a Docker pull/push from the agent's
 //                             127.0.0.1:5755 to the registry container, through
 //                             the panel node's agent (Tunnel with RegistryTarget).
+//   CheckEdgeAccess           whether the user of an edge tool session (a Box or a
+//                             database web UI) may keep it; the agent asks about
+//                             each session at most once a minute.
 
 import { clone, create, fromBinary, toBinary, toJson } from "@bufbuild/protobuf";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import {
+  CheckEdgeAccessRequestSchema,
+  CheckEdgeAccessResponseSchema,
   CrashAction,
   type DesiredState,
   EventSchema,
@@ -57,12 +62,14 @@ export interface PanelServiceDeps {
   desiredState(nodeId: string, knownRevision: bigint): DesiredState | null;
   /** A node passed its daily report budget (report-budget.ts); called once per node and day. */
   reportBudgetExceeded?(nodeId: string): void;
+  /** CheckEdgeAccess: whether the ticket's user may keep the tool session ("box:<id>", "db-ui:<id>") on this node. */
+  edgeAccessAllowed(nodeId: string, request: { subject: string; userId: string }): boolean;
 }
 
 const wire = (name: string) => `/${PanelService.typeName}/${name}`;
 
 /** Every PanelService method this panel serves, by capability. */
-export const panelCapabilities = ["panel.report.v1", "panel.desired.v1", "panel.registry-tunnel.v1"] as const;
+export const panelCapabilities = ["panel.report.v1", "panel.desired.v1", "panel.registry-tunnel.v1", "panel.edge-access.v1"] as const;
 
 const crashActions: Record<CrashAction, StoredCrashAction> = {
   [CrashAction.UNSPECIFIED]: "restarting",
@@ -90,6 +97,9 @@ const reportsPerSecond = 10;
 /** GetDesiredState per node: an agent asks once per connection (catching up after a fresh start). */
 const desiredBurst = 10;
 const desiredPerSecond = 0.1;
+/** CheckEdgeAccess per node: one a minute per open tool session; a few hundred sessions fit. */
+const edgeAccessBurst = 300;
+const edgeAccessPerSecond = 5;
 
 export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers {
   const { db, hub, logger } = deps;
@@ -101,6 +111,11 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
   const desiredLimiter = createRateLimiter({
     standard: { burst: desiredBurst, refillPerSecond: desiredPerSecond },
     strict: { burst: desiredBurst, refillPerSecond: desiredPerSecond },
+  });
+
+  const edgeAccessLimiter = createRateLimiter({
+    standard: { burst: edgeAccessBurst, refillPerSecond: edgeAccessPerSecond },
+    strict: { burst: edgeAccessBurst, refillPerSecond: edgeAccessPerSecond },
   });
 
   const budget = createReportBudget({
@@ -218,6 +233,16 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
     return toBinary(GetDesiredStateResponseSchema, create(GetDesiredStateResponseSchema, { state: state ?? undefined }));
   };
 
+  const checkEdgeAccess = (nodeId: string, bytes: Uint8Array): Uint8Array => {
+    if (bytes.length > 4096) throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "The request is too large.");
+    if (edgeAccessLimiter.take(`node:${nodeId}`, "standard") > 0) {
+      throw new PanelServiceError(StatusCode.RESOURCE_EXHAUSTED, "Too many edge access checks. Retry later.");
+    }
+    const request = fromBinary(CheckEdgeAccessRequestSchema, bytes);
+    const allowed = deps.edgeAccessAllowed(nodeId, { subject: request.subject, userId: request.userId });
+    return toBinary(CheckEdgeAccessResponseSchema, create(CheckEdgeAccessResponseSchema, { allowed }));
+  };
+
   const registryTunnel = async (nodeId: string, stream: IncomingStream): Promise<Uint8Array> => {
     const panelNode = db.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get();
     if (!panelNode || !hub.isOnline(panelNode.id)) {
@@ -268,6 +293,8 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
           return reportEvent(nodeId, request);
         case wire("GetDesiredState"):
           return getDesiredState(nodeId, request);
+        case wire("CheckEdgeAccess"):
+          return checkEdgeAccess(nodeId, request);
         default:
           throw new PanelServiceError(StatusCode.UNIMPLEMENTED, `${method} is not a unary PanelService method of this panel.`);
       }

@@ -642,7 +642,17 @@ local API, join and resume. The areas:
   user's sessions on that tool opened before the answer and closes their
   connections; a new ticket opens it again. While the panel gives no
   answer (UNIMPLEMENTED, offline) a session lasts an hour past the panel's
-  last "yes" or its ticket; 12 hours caps every session. Route certificate failures come from the Traefik container's
+  last "yes" or its ticket; 12 hours caps every session. The panel
+  answers it in `databases/edge-ticket.ts` `edgeAccessAllowed`: the
+  subject must be `box:<id>` or `db-ui:<id>` of a service that runs on the
+  asking node, the user must exist and not be disabled, and must still pass
+  the permission of `boxes.open` / `databases.openWebUi` on that service
+  (`mayOpenEdgeTool`, the op contracts' own permission); a Box or a
+  database is checked to be one. 300 checks per node, then 5 a second
+  (RESOURCE_EXHAUSTED). Tool tickets are minted only for browser sessions
+  (`edgeToolLink` refuses API keys with FORBIDDEN `browserOnly`; both ops
+  are `mcp: false`), so a ticket's `uid` is always a person whose rights
+  can be checked again. Route certificate failures come from the Traefik container's
   log (the last 24 h, kept until a certificate appears). RetryCertificate
   (`routing.certificate-retry.v1`, `proxy/certretry.go`) makes Traefik ask
   the CA again for an ACME route's hosts without a certificate, without a
@@ -1237,7 +1247,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | `seylo panel start` and `seylo panel logs` on a node whose panel is not a managed service | NOT_IMPLEMENTED from `agent.PanelControl` only when nothing set it (`wire_node.go` sets it) |
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
-| Panel side of the 0.2 agent security fixes (built and tested on the agent only): PanelService.CheckEdgeAccess (`panel.edge-access.v1`; without it edge tool sessions end an hour after their ticket or last confirmation), GitSource.allow_plain_http (without it 0.2 agents refuse http:// git sources) | Protocol section ("Panel identity", `GitSource.allow_plain_http`), Networking (tool sessions) |
+| Panel side of the 0.2 agent security fixes (built and tested on the agent only): GitSource.allow_plain_http (without it 0.2 agents refuse http:// git sources) | Protocol section (`GitSource.allow_plain_http`) |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
@@ -1332,7 +1342,7 @@ or the method descriptor's options (TS). Current names:
 | `volume.transfer.v1` | ExportVolume, ImportVolume |
 | `panel.desired.v1` | GetDesiredState |
 | `panel.registry-tunnel.v1` | RegistryTunnel |
-| `panel.edge-access.v1` | CheckEdgeAccess (not built in the panel yet; agents fall back to an hour per confirmation) |
+| `panel.edge-access.v1` | CheckEdgeAccess |
 
 An agent advertises a capability only once every method in it works.
 

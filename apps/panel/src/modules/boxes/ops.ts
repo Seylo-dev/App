@@ -100,7 +100,7 @@ export const open = implement(boxOps.open, (input, ctx) => {
   assertNoActiveCopy(ctx.db, service.id);
   const node = serviceNodes(ctx.db, input.serviceId)[0];
   if (!node) throw new OpError("CONFLICT", "The Box is not placed on a node.", { reason: "noNode" });
-  const link = edgeToolLink(ctx, "box", box.serviceId, node, userOf(ctx.principal)?.id ?? "");
+  const link = edgeToolLink(ctx, "box", box.serviceId, node, ctx.principal);
   ctx.db.update(serviceBoxes).set({ lastUsedAt: new Date() }).where(eq(serviceBoxes.serviceId, box.serviceId)).run();
   if (service.stopped) {
     // Opening a stopped Box starts it again; a sleeping one wakes on the request itself.
