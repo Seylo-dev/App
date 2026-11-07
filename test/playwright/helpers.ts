@@ -2,7 +2,48 @@
 // creates through /setup, and signing in through the real form.
 
 import { createHmac } from "node:crypto";
-import { type APIRequestContext, type APIResponse, expect, type Locator, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { type APIResponse, expect, type Locator, type Page } from "@playwright/test";
+
+const slug = /^BRAND_SLUG='([^']+)'$/m.exec(readFileSync(new URL("../../installer/brand.env", import.meta.url), "utf8"))?.[1] ?? "";
+
+/**
+ * The browser half of a session (apps/web/src/lib/session-key.ts): the web
+ * app keeps it in localStorage and sends it in a header; the cookie alone
+ * signs nobody in.
+ */
+export const sessionKey = { storage: `${slug}.sessionKey`, header: `x-${slug}-session-key` };
+
+/** Something that posts like page.request: api(page) or a bare request context. */
+interface Poster {
+  post(path: string, options: { data: unknown }): Promise<APIResponse>;
+}
+
+/**
+ * page.request the way the web app calls the op API: with the session key
+ * from the page's localStorage. A key the answer hands out (a new or
+ * rotated session) goes back into localStorage, like the app does.
+ */
+export function api(page: Page) {
+  const send = async (path: string, options: { method: "GET" | "POST"; data?: unknown }) => {
+    const key = await page.evaluate((name) => window.localStorage.getItem(name), sessionKey.storage);
+    const headers = key ? { [sessionKey.header]: key } : undefined;
+    const response =
+      options.method === "GET" ? await page.request.get(path, { headers }) : await page.request.post(path, { data: options.data, headers });
+    const next = response.headers()[sessionKey.header];
+    if (next !== undefined) {
+      await page.evaluate(([name, value]) => (value ? window.localStorage.setItem(name, value) : window.localStorage.removeItem(name)), [
+        sessionKey.storage,
+        next,
+      ] as const);
+    }
+    return response;
+  };
+  return {
+    get: (path: string) => send(path, { method: "GET" }),
+    post: (path: string, options: { data: unknown }) => send(path, { method: "POST", data: options.data }),
+  };
+}
 
 export const credentials = {
   email: process.env.OWNER_EMAIL ?? "owner@example.com",
@@ -57,7 +98,7 @@ export async function waitOut(response: { json: () => Promise<unknown> }, page: 
 }
 
 /** Posts an op until the answer is not 429 (at most 6 tries). Returns the last answer. */
-export async function postPastRateLimit(request: APIRequestContext, page: Page, op: string, data: unknown): Promise<APIResponse> {
+export async function postPastRateLimit(request: Poster, page: Page, op: string, data: unknown): Promise<APIResponse> {
   for (let attempt = 0; ; attempt++) {
     const response = await request.post(`/api/v1/${op}`, { data });
     if (response.status() !== 429 || attempt === 5) return response;

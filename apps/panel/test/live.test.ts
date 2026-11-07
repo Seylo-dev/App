@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { auth, grants as grantOps, type LiveServerMessage, livePath, liveUnauthorizedCloseCode, projects } from "@seylo/ops";
+import {
+  auth,
+  grants as grantOps,
+  type LiveServerMessage,
+  livePath,
+  liveSessionKeyParam,
+  liveUnauthorizedCloseCode,
+  projects,
+} from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { aiConversations, sessions } from "../src/db/schema";
-import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
+import { callOp, createUser, grant, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
@@ -15,7 +23,10 @@ afterEach(async () => {
 });
 
 function openLive(cookie?: string) {
-  const ws = new WebSocket(`ws://127.0.0.1:${panel.app.server!.port}${livePath}`, { headers: cookie ? { cookie } : {} } as never);
+  // The web app adds the session key it keeps in localStorage as a query parameter.
+  const key = cookie ? sessionKeyOf(cookie) : undefined;
+  const query = key ? `?${liveSessionKeyParam}=${key}` : "";
+  const ws = new WebSocket(`ws://127.0.0.1:${panel.app.server!.port}${livePath}${query}`, { headers: cookie ? { cookie } : {} } as never);
   const messages: LiveServerMessage[] = [];
   const waiters: (() => void)[] = [];
   ws.onmessage = (event) => {

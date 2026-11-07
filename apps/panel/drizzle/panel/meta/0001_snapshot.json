@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "010ae754-4e2f-40b3-861d-d9b86550d926",
+  "id": "35e93472-1a03-4331-9602-a8c7c9896de6",
   "prevId": "9c000edb-4c92-49d8-9da1-0b0f297dea61",
   "tables": {
     "audit_log": {
@@ -4678,6 +4678,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "key_hash": {
+          "name": "key_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "ip": {

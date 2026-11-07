@@ -11,7 +11,6 @@ import {
   invites as inviteOps,
   apiKeys as keyOps,
   nodes as nodeOps,
-  sessionCookie,
   users as userOps,
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
@@ -21,7 +20,7 @@ import { createSession } from "../src/auth/sessions";
 import { sessions, totpSecrets, users } from "../src/db/schema";
 import { base32Decode, hotp, totpStep } from "../src/security/totp";
 import { setSetting } from "../src/settings";
-import { createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
+import { createApiKey, createUser, grant, sessionCookieFor, type TestPanel, testPanel } from "./helpers";
 import { call, cookieFrom, mockGithub, noLimits, ok, seedProject, seedService, VirtualAuthenticator } from "./people-helpers";
 
 let panel: TestPanel;
@@ -101,7 +100,8 @@ test("a fresh sign-in needs no re-auth, and the window closes after 15 minutes",
 
 test("a re-auth counts for its own session only", async () => {
   const first = await createUser(panel, "member");
-  const other = `${sessionCookie}=${createSession(panel.deps.db, first.user.id, { ip: null, userAgent: null }).token}`;
+  const session = createSession(panel.deps.db, first.user.id, { ip: null, userAgent: null });
+  const other = sessionCookieFor(session.token, session.key);
   age(first.user.id, 60 * 60 * 1000);
   await ok(panel, auth.reauth, { password: first.password }, { cookie: first.cookie });
   expect((await call(panel, auth.totpEnroll, {}, { cookie: first.cookie })).status).toBe(200);

@@ -7,14 +7,15 @@
 import { createHash } from "node:crypto";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { OpError, sessionCookie } from "@seylo/ops";
+import { OpError } from "@seylo/ops";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { createAccess } from "../../auth/access";
-import { authenticate, credentialsFrom } from "../../auth/authenticate";
+import { authenticate, credentialsFrom, signedOutError } from "../../auth/authenticate";
 import { userOf } from "../../auth/principal";
 import { deployments, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { secureSession } from "../../http/https";
 import { isSameOrigin } from "../../http/origin";
 import { newId } from "../../ids";
 import { queueDeploy } from "../deployments/queue";
@@ -33,13 +34,15 @@ function fail(error: OpError) {
 }
 
 export function uploadRoutes(deps: Deps) {
-  return new Elysia().post(`${uploadPath}/:serviceId`, async ({ request, params }) => {
+  return new Elysia().post(`${uploadPath}/:serviceId`, async ({ request, params, server }) => {
     try {
-      if (!isSameOrigin(request)) throw new OpError("FORBIDDEN", "Cross-site requests are not allowed.");
-      const principal = authenticate(deps.db, credentialsFrom(request, sessionCookie));
+      const socketIp = server?.requestIP(request)?.address ?? null;
+      if (!isSameOrigin(request, deps.proxy.trusts(socketIp))) throw new OpError("FORBIDDEN", "Cross-site requests are not allowed.");
+      const credentials = credentialsFrom(request, { secure: secureSession(deps, request, socketIp) });
+      const principal = authenticate(deps.db, credentials);
       const access = createAccess(deps.db, principal);
       const user = userOf(principal);
-      if (!user) throw new OpError("UNAUTHENTICATED", "Sign in or use a valid API key.");
+      if (!user) throw signedOutError(credentials);
       if (principal.type === "apiKey" && principal.readOnly) throw new OpError("FORBIDDEN", "This key is read-only.");
       const svc = loadService(deps.db, params.serviceId);
       if (

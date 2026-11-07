@@ -3,6 +3,7 @@ import { auth, projects, sessionCookie } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog } from "../src/db/schema";
 import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
+import { cookieFrom } from "./people-helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
@@ -19,7 +20,7 @@ test("sign-in sets an HttpOnly session cookie that whoami accepts", async () => 
   const setCookie = login.headers.get("set-cookie") ?? "";
   expect(setCookie).toContain(`${sessionCookie}=`);
   expect(setCookie.toLowerCase()).toContain("httponly");
-  const cookie = setCookie.split(";")[0] as string;
+  const cookie = cookieFrom(login.headers) as string;
 
   const me = await callOp(panel, auth.whoami, {}, { cookie });
   expect(me.body).toEqual({ viewer: login.body.viewer, via: "session" });

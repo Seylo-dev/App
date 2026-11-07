@@ -17,6 +17,15 @@ test("public ops need no auth and others accept a session or API key", () => {
   expect(doc.paths["/api/v1/projects.create"]?.post?.security).toEqual([{ session: [] }, { apiKey: [] }]);
 });
 
+test("a browser session is documented as the cookie and the session key header together", () => {
+  const withKey = buildOpenApi(allOps, { title: "Test", version: "0.0.0", sessionCookie: "sid", sessionKeyHeader: "x-key" }) as {
+    paths: Record<string, Record<string, Record<string, unknown>>>;
+    components: { securitySchemes: Record<string, Record<string, unknown>> };
+  };
+  expect(withKey.paths["/api/v1/projects.create"]?.post?.security).toEqual([{ session: [], sessionKey: [] }, { apiKey: [] }]);
+  expect(withKey.components.securitySchemes.sessionKey).toMatchObject({ type: "apiKey", in: "header", name: "x-key" });
+});
+
 test("OpenAPI is plain JSON", () => {
   expect(JSON.parse(JSON.stringify(doc))).toEqual(doc);
 });

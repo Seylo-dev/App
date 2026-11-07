@@ -9,6 +9,7 @@ import { IconUpload } from "@tabler/icons-react";
 import { useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { formatBytes } from "../../../lib/format";
+import { sessionKeyHeaders } from "../../../lib/session-key";
 import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
 import type { ServiceDetail } from "../use-service";
@@ -74,6 +75,7 @@ function postArchive(url: string, file: File, onProgress: (percent: number) => v
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.setRequestHeader("x-file-name", file.name);
+    for (const [name, value] of Object.entries(sessionKeyHeaders())) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
     xhr.onload = () => {
       if (xhr.status < 300) return resolve();

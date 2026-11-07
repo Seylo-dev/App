@@ -3,7 +3,7 @@
 // authenticator app, hand out a 5-minute second-factor ticket instead.
 // The brute-force guard for passwords and codes is auth/lockout.ts.
 
-import { OpError, sessionCookie } from "@seylo/ops";
+import { OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { users } from "../db/schema";
 import type { OpContext } from "../ops/implement";
@@ -55,7 +55,7 @@ export function startSession(ctx: OpContext, userId: string): void {
   ctx.db.update(users).set({ lastLoginAt: new Date(), failedLogins: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
   clearFailures(ctx.db, userKey(userId, ctx.ip));
   if (user) clearFailures(ctx.db, emailKey(user.email, ctx.ip));
-  ctx.http.setCookie(sessionCookie, session.token, { maxAgeSeconds: sessionLifetimeMs / 1000 });
+  ctx.http.setSession({ token: session.token, key: session.key, maxAgeSeconds: sessionLifetimeMs / 1000 });
 }
 
 /** Account-security ops must come from a browser session, never from an API key or MCP token. */

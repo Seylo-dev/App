@@ -116,7 +116,7 @@ function routes(deps: Deps) {
     .options("/oauth/token", preflight)
     .options("/oauth/revoke", preflight)
     .post("/oauth/register", ({ request, server }) => withCors(register(deps, request, server?.requestIP(request)?.address ?? null)))
-    .get("/oauth/authorize", ({ request, server }) => authorizePage(deps, request, peer(request, server)))
+    .get("/oauth/authorize", ({ request }) => authorizePage(deps, request))
     .post("/oauth/authorize", ({ request, server }) => authorizeDecision(deps, request, server?.requestIP(request)?.address ?? null))
     .post("/oauth/token", ({ request }) => withCors(token(deps, request)))
     .post("/oauth/revoke", ({ request }) => withCors(revoke(deps, request)));

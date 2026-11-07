@@ -13,6 +13,8 @@ export default {
   noOwner: "This panel has no owner yet. Open the one-time setup link the installer printed.",
   backToSignIn: "Back to sign-in",
   poweredBy: "Powered by {name}",
+  duplicateSession:
+    "This browser sent two session cookies for this address, so the panel used neither. Another site on the same address may have set one. Clear this site's cookies and sign in again.",
   github: {
     continue: "Continue with GitHub",
     title: "Enter this code on GitHub",

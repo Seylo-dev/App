@@ -10,7 +10,7 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type APIRequestContext, expect, type Locator, type Page, type Response, test } from "@playwright/test";
-import { credentials, postPastRateLimit, signIn, stateFile, submitPastRateLimit, totp, waitOut } from "./helpers";
+import { api, credentials, postPastRateLimit, signIn, stateFile, submitPastRateLimit, totp, waitOut } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/reauth`;
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -107,7 +107,7 @@ test("an old session confirms with the password, then the API key is created", a
   // The refused create ran again by itself.
   await expect(page.getByText("API key created")).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
-  const keys = (await (await page.request.get("/api/v1/apiKeys.list?kind=api")).json()) as { keys: { name: string }[] };
+  const keys = (await (await api(page).get("/api/v1/apiKeys.list?kind=api")).json()) as { keys: { name: string }[] };
   expect(keys.keys.filter((k) => k.name === "pw-reauth")).toHaveLength(1);
   expect(errors).toEqual([]);
 });
@@ -133,7 +133,7 @@ test("an old session confirms before a git provider connection is saved, then th
   // The save ran again by itself and reached the token check.
   expect(answer.status()).toBe(400);
   expect(((await answer.json()) as { error: { details?: { field?: string } } }).error.details?.field).toBe("url");
-  const list = (await (await page.request.get("/api/v1/gitProviders.list")).json()) as { items: { name: string }[] };
+  const list = (await (await api(page).get("/api/v1/gitProviders.list")).json()) as { items: { name: string }[] };
   expect(list.items.filter((p) => p.name === "pw-forge")).toHaveLength(0);
   expect(errors).toEqual([]);
 });
@@ -174,11 +174,11 @@ test("closing the dialog changes nothing and says nothing; confirming starts the
 test("with two-factor on, a recovery code confirms it's you", async ({ page }) => {
   const errors = trackErrors(page);
   // Turn 2FA on through the API (fresh for that first), keeping its recovery codes.
-  expect((await postPastRateLimit(page.request, page, "auth.reauth", { password: credentials.password })).ok()).toBe(true);
-  const enroll = await postPastRateLimit(page.request, page, "auth.totpEnroll", {});
+  expect((await postPastRateLimit(api(page), page, "auth.reauth", { password: credentials.password })).ok()).toBe(true);
+  const enroll = await postPastRateLimit(api(page), page, "auth.totpEnroll", {});
   expect(enroll.ok(), await enroll.text()).toBe(true);
   const { secret } = (await enroll.json()) as { secret: string };
-  const confirmed = await postPastRateLimit(page.request, page, "auth.totpConfirm", { code: totp(secret) });
+  const confirmed = await postPastRateLimit(api(page), page, "auth.totpConfirm", { code: totp(secret) });
   expect(confirmed.ok(), await confirmed.text()).toBe(true);
   const { recoveryCodes } = (await confirmed.json()) as { recoveryCodes: string[] };
   ageSessions();
@@ -207,7 +207,7 @@ test("with two-factor on, a recovery code confirms it's you", async ({ page }) =
   await page.getByRole("button", { name: "Done" }).click();
 
   // Back to a plain account for the specs after this one (turning 2FA off renews the cookie).
-  const off = await postPastRateLimit(page.request, page, "auth.totpDisable", { code: recoveryCodes[1] });
+  const off = await postPastRateLimit(api(page), page, "auth.totpDisable", { code: recoveryCodes[1] });
   expect(off.ok(), await off.text()).toBe(true);
   await page.context().storageState({ path: stateFile });
   expect(errors).toEqual([]);

@@ -14,7 +14,7 @@
 
 import { type AnyOpContract, OpError } from "@seylo/ops";
 import { type Access, createAccess, type Target, targetOf } from "../auth/access";
-import { authenticate, type Credentials } from "../auth/authenticate";
+import { authenticate, type Credentials, signedOutError } from "../auth/authenticate";
 import { describePrincipal, type Principal, type PrincipalUser } from "../auth/principal";
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
@@ -70,7 +70,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       const handler = handlers.get(op.id);
       if (!handler) throw new OpError("NOT_IMPLEMENTED", `${op.id} is not implemented yet.`);
       if (op.permission.kind !== "public" && principal.type === "anonymous") {
-        throw new OpError("UNAUTHENTICATED", "Sign in or use a valid API key.");
+        throw signedOutError(call.credentials);
       }
 
       if (!op.mcp && fromModel(call, principal)) {

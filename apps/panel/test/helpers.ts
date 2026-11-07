@@ -2,7 +2,15 @@
 // people and credentials most tests need.
 
 import { join } from "node:path";
-import { type AnyOpContract, type OpInput, opRoute, sessionCookie } from "@seylo/ops";
+import {
+  type AnyOpContract,
+  type OpInput,
+  opRoute,
+  secureSessionCookie,
+  sessionCookie,
+  sessionCookieName,
+  sessionKeyHeader,
+} from "@seylo/ops";
 import { createSession } from "../src/auth/sessions";
 import { loadConfig } from "../src/config";
 import { openDatabases } from "../src/db/client";
@@ -14,6 +22,7 @@ import type { RateLimiter } from "../src/ops/rate-limit";
 import { createPanel, type Panel } from "../src/panel";
 import { hashPassword } from "../src/security/password";
 import { hashToken, prefixedToken } from "../src/security/tokens";
+import { getSetting } from "../src/settings";
 
 const packageRoot = join(import.meta.dir, "..");
 
@@ -47,8 +56,38 @@ export async function createUser(
     .values({ email, name: role, role, passwordHash: await hashPassword(password) })
     .returning()
     .get();
-  const { token } = createSession(panel.deps.db, user.id, { ip: null, userAgent: null });
-  return { user, password, cookie: `${sessionCookie}=${token}` };
+  const { token, key } = createSession(panel.deps.db, user.id, { ip: null, userAgent: null });
+  // callOp talks to host panel.test: when that is the panel domain, the panel serves it as HTTPS and reads the __Host- cookie.
+  const secure = getSetting(panel.deps.db, "panelDomain") === "panel.test";
+  return { user, password, cookie: sessionCookieFor(token, key, secure) };
+}
+
+/**
+ * Session keys of the cookies tests hold, by token. A browser session is the
+ * cookie plus its key header (src/auth/sessions.ts); tests pass the cookie
+ * around and callOp / sessionHeaders add the key, as the web app does.
+ */
+const sessionKeys = new Map<string, string>();
+
+/** The Cookie header value for a session, remembering its key for callOp. */
+export function sessionCookieFor(token: string, key: string, secure = false): string {
+  sessionKeys.set(token, key);
+  return `${sessionCookieName(secure)}=${token}`;
+}
+
+/** The key of the session in a Cookie header value, when a test made or saw it. */
+export function sessionKeyOf(cookie: string): string | undefined {
+  for (const pair of cookie.split(";")) {
+    const [name, value] = pair.trim().split("=");
+    if (name === sessionCookie || name === secureSessionCookie) return sessionKeys.get(value ?? "");
+  }
+  return undefined;
+}
+
+/** Cookie and session key headers for a request a test builds by hand. */
+export function sessionHeaders(cookie: string): Record<string, string> {
+  const key = sessionKeyOf(cookie);
+  return { cookie, ...(key ? { [sessionKeyHeader]: key } : {}) };
 }
 
 export function grant(panel: Panel, userId: string, scopeType: "project" | "service", scopeId: string, actions: string[]) {
@@ -89,7 +128,12 @@ export async function callOp<C extends AnyOpContract>(panel: Panel, op: C, input
   const { method, path } = opRoute(op);
   const url = new URL(`http://panel.test${path}`);
   const headers: Record<string, string> = { host: "panel.test", ...options.headers };
-  if (options.cookie) headers.cookie = options.cookie;
+  if (options.cookie) {
+    headers.cookie = options.cookie;
+    // The web app sends the session key with every call; a test can send its own (or none) in headers.
+    const key = sessionKeyOf(options.cookie);
+    if (key && !Object.keys(headers).some((name) => name.toLowerCase() === sessionKeyHeader)) headers[sessionKeyHeader] = key;
+  }
   if (options.bearer) headers.authorization = `Bearer ${options.bearer}`;
   if (options.origin) headers.origin = options.origin;
   let body: string | undefined;

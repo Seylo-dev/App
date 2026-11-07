@@ -657,8 +657,27 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   Anyone with `grants.manage` on a resource can share it, but only with
   actions they hold there. Invites carry the same grant list and turn into
   grants on accept.
-- Credentials: browser sessions (HttpOnly cookie `<slug>_session`, hashed
-  opaque token, 30-day sliding) or `Authorization: Bearer <token>`. A
+- Credentials: browser sessions or `Authorization: Bearer <token>`. A
+  browser session has two halves, both stored hashed (`sessions.token_hash`,
+  `sessions.key_hash`; `src/auth/sessions.ts`), and works only with both: an
+  opaque token in an HttpOnly, SameSite=Lax, Path=/ cookie without Domain,
+  named `__Host-<slug>_session` (and Secure) on HTTPS, `<slug>_session` on
+  plain HTTP (`sessionCookieName` in `@seylo/ops`; set and read by the same
+  rule, `secureSession` in `src/http/https.ts`); and a session key the
+  sign-in answer hands out in the `x-<slug>-session-key` response header
+  (`sessionKeyHeader`). The web app keeps the key in its origin's
+  localStorage (`<slug>.sessionKey`, `apps/web/src/lib/session-key.ts`) and
+  sends it in that header on every call; the live socket takes it as the
+  `key` query parameter, the MCP consent form as a field. Cookies have no
+  port, so on a plain-HTTP IP:port panel the browser also sends the cookie
+  to every other port of the address (a member's first-run app); the key
+  is per scheme, host and port, so such a copy signs nobody in. Over HTTPS
+  only the `__Host-` cookie is read, so a cookie a sibling subdomain sets for
+  the parent domain is ignored, and a request carrying the read cookie name
+  twice is refused (UNAUTHENTICATED `reason: duplicateSession`; the sign-in
+  page says to clear the site's cookies). 30-day sliding. Sessions without
+  a key (made before keys existed) sign nobody in. Sign-out answers an
+  empty key header (the web app forgets its key). A
   bearer token is an `api_keys` row: kind `api` (`<slug>_key_...`) or
   `mcp` (`<slug>_mcp_...`, from apiKeys.create or the MCP OAuth flow). A
   key acts as its owner, narrowed by its `actions` list (`*` = all of the
@@ -676,8 +695,8 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   Bearer wins over the cookie. Only sessions create keys, and account
   security ops (password, 2FA, passkeys, GitHub link, sessions, profile)
   refuse keys (`requireSession` in `src/auth/sign-in.ts`). A session lives
-  at most 90 days from sign-in and its token rotates on password and 2FA
-  changes. Ops that add a way in (`auth.passkeyRegisterBegin`,
+  at most 90 days from sign-in and its token and key rotate on password and
+  2FA changes. Ops that add a way in (`auth.passkeyRegisterBegin`,
   `auth.githubLinkStart`, `auth.totpEnroll`, `apiKeys.create`,
   `cliLogin.approve`, a first password in `auth.changePassword`) also need
   a fresh session: signed in or confirmed with `auth.reauth` (password, an
@@ -686,7 +705,7 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   in `src/auth/fresh.ts`, `sessions.reauth_at`); otherwise FORBIDDEN with
   `details.reason: "reauth"`, which the web turns into a re-auth dialog
   and a retry. Wrong answers count toward the per-address lock. The MCP
-  OAuth consent page (`/oauth/authorize`) sends a stale session to the web
+  OAuth consent (`/oauth/authorize`) sends a stale session to the web
   app's `/reauth?redirect=<back>` page first and refuses a stale Allow.
   Ops that hand someone else lasting access need the same fresh session
   when a browser session runs them, while API keys pass
@@ -882,7 +901,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (`modules/approvals/run-as.ts`) runs one as a person. Models (MCP, AI)
   never set `approvalId`; only `approvals.approve` does.
 - Live sockets are re-checked every 15 s and on each subscribe and closed
-  (code 4401) when their session ended; `deps.live.disconnect({ sessionId }
+  (code 4401) when their session ended (a socket needs the session key in
+  its `key` query parameter); `deps.live.disconnect({ sessionId }
   | { userId })` closes them at once. The re-check also drops topics the
   fresh access no longer allows (an `error` FORBIDDEN per topic);
   `deps.live.recheck({ userId })` does it at once (grants and role changes). `ai:<id>` is for the conversation's
@@ -892,8 +912,14 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   OAuth: `/.well-known/oauth-authorization-server`,
   `/.well-known/oauth-protected-resource[/mcp]`, `POST /oauth/register`
   (public clients, https / loopback http / app-scheme redirects),
-  `GET|POST /oauth/authorize` (server-rendered consent: read only by
-  default, or read and change), `POST /oauth/token` (code + S256 PKCE,
+  `GET|POST /oauth/authorize` (server-rendered, `modules/mcp/pages.ts`:
+  the GET checks the request and serves a bridge page that reads no
+  session; its one script, allowed by its CSP hash, posts the request back
+  with the session key from the web app's localStorage, or goes to
+  `/login?redirect=<back>` without one; that post answers the consent page
+  for a signed-in, fresh session (else 303 to `/login` or `/reauth`): read
+  only by default, or read and change; the Allow form carries the key back),
+  `POST /oauth/token` (code + S256 PKCE,
   rotating refresh tokens, access tokens 24 h, a grant lives 90 days),
   `POST /oauth/revoke`. A token sees only the tools it could use;
   destructive calls become approvals.
@@ -917,9 +943,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   Cloudflare, takes the visitor from `CF-Connecting-IP` only when the address
   the trusted proxy vouches for (the last X-Forwarded-For entry) is in
   Cloudflare's published ranges (`src/http/cloudflare.ts`, a list in code);
-  otherwise that header is ignored. Cookies get
-  Secure on every HTTPS request (trusted X-Forwarded-Proto, or Host equal to
-  the panel domain) whatever `SECURE_COOKIES` says; HTTPS responses carry
+  otherwise that header is ignored. The session cookie is the Secure
+  `__Host-` one on every HTTPS request (trusted X-Forwarded-Proto, so behind
+  Traefik and a Cloudflare proxy in Full mode too, or Host equal to the
+  panel domain) whatever `SECURE_COOKIES` says, and a plain one on IP:port
+  (see Credentials); HTTPS responses carry
   `strict-transport-security: max-age=31536000`; every response carries
   `x-frame-options: DENY`, nosniff and `referrer-policy: same-origin`, pages
   `frame-ancestors 'none'`. Once `panelDomainStatus` is active, page loads on
@@ -1269,7 +1297,8 @@ The first-run port's automatic close (24 h after the domain is live) is
 checked by moving the stored `closeAt` into the past and waiting for the
 panel's own sweep. Check 31 (panel domain, runs last and undoes itself)
 gives the panel an sslip.io name of A with a Pebble certificate: HTTPS, HSTS
-only on HTTPS, a Secure HttpOnly session cookie from a sign-in over HTTPS,
+only on HTTPS, a Secure HttpOnly `__Host-` session cookie with no Domain from
+a sign-in over HTTPS that signs nobody in without its session key,
 IP:port pages 302 to the domain (API and loopback not), the macOS CLI
 against the domain, and nodes moving to it: the panel turns the domain
 active itself (a test build trusts `<data dir>/panel/test-ca.pem`), closes
@@ -1966,6 +1995,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
+- Session key: the op client's fetch (`lib/session-key.ts` `sessionFetch`)
+  sends the key from localStorage on every call and keeps the one an
+  answer hands out (an empty one clears it); the live socket and the
+  archive upload (`sessionKeyHeaders()`) send it too. Any new way to call
+  the panel with the session must do the same (see Credentials).
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the

@@ -2,7 +2,7 @@
 // recovery codes. Passkeys and GitHub have their own files.
 
 import { displayName } from "@seylo/brand";
-import { auth, OpError, sessionCookie } from "@seylo/ops";
+import { auth, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { requireFreshSignIn } from "../../auth/fresh";
 import { githubAvailable } from "../../auth/github-device";
@@ -50,8 +50,8 @@ export const security = implement(auth.security, (_input, ctx) => {
 
 /** After a security change: new token for this browser, so a copied cookie stops working. */
 function rotateCurrent(ctx: OpContext, sessionId: string): void {
-  const token = rotateSession(ctx.db, sessionId);
-  ctx.http?.setCookie(sessionCookie, token, { maxAgeSeconds: sessionLifetimeMs / 1000 });
+  const { token, key } = rotateSession(ctx.db, sessionId);
+  ctx.http?.setSession({ token, key, maxAgeSeconds: sessionLifetimeMs / 1000 });
 }
 
 export const changePassword = implement(auth.changePassword, async (input, ctx) => {

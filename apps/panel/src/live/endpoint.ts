@@ -6,13 +6,24 @@
 // whose session was signed out, revoked, expired or whose person was
 // disabled (close code liveUnauthorizedCloseCode). deps.live.disconnect()
 // closes them at once, for code that knows a session just ended.
+//
+// The cookie alone signs nobody in: the web app adds the session key as the
+// `key` query parameter (browsers cannot set headers on a WebSocket).
 
-import { LiveClientMessage, type LiveServerMessage, type LiveTopic, livePath, liveUnauthorizedCloseCode, sessionCookie } from "@seylo/ops";
+import {
+  LiveClientMessage,
+  type LiveServerMessage,
+  type LiveTopic,
+  livePath,
+  liveSessionKeyParam,
+  liveUnauthorizedCloseCode,
+} from "@seylo/ops";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { Elysia } from "elysia";
 import { type Access, createAccess } from "../auth/access";
 import { authenticate, type Credentials, credentialsFrom } from "../auth/authenticate";
 import type { Deps } from "../deps";
+import { secureSession } from "../http/https";
 import { isSameOrigin } from "../http/origin";
 import type { LiveSocket } from "./hub";
 import { maySubscribe } from "./topics";
@@ -29,7 +40,7 @@ interface Connection {
   close(reason: string): void;
 }
 
-export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger">, options: { revalidateMs?: number } = {}) {
+export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger" | "config" | "proxy">, options: { revalidateMs?: number } = {}) {
   const connections = new Map<string, Connection>();
 
   const drop = (id: string, reason: string) => {
@@ -101,9 +112,18 @@ export function liveEndpoint(deps: Pick<Deps, "db" | "live" | "logger">, options
       }
     },
     open(ws) {
-      const all = credentialsFrom(ws.data.request, sessionCookie);
+      const request = ws.data.request;
+      const socketIp = (ws.raw as unknown as { remoteAddress?: string }).remoteAddress ?? null;
+      const all = credentialsFrom(request, {
+        secure: secureSession(deps, request, socketIp),
+        sessionKey: new URL(request.url).searchParams.get(liveSessionKeyParam),
+      });
       // Live sockets belong to browser sessions; keys and tokens use the API.
-      const credentials: Credentials = { sessionToken: all.sessionToken };
+      const credentials: Credentials = {
+        sessionToken: all.sessionToken,
+        sessionKey: all.sessionKey,
+        duplicateSession: all.duplicateSession,
+      };
       const principal = authenticate(deps.db, credentials);
       if (principal.type === "anonymous") {
         ws.close(liveUnauthorizedCloseCode, "sign in first");
