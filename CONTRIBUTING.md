@@ -34,7 +34,7 @@ The panel and the web app run on macOS or Linux:
 ```sh
 cd apps/panel
 export SEYLO_DATA_DIR=$HOME/.seylo-dev SEYLO_SECURE_COOKIES=false
-bun run create-owner you@example.com 'a long password'   # once
+bun run create-owner you@example.com                     # once; asks for the password
 bun run dev                                               # API on :3000
 cd ../web && bun run dev                                  # Vite on :5173, proxies /api to :3000
 ```
