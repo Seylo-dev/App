@@ -7,13 +7,16 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { slug } from "@seylo/brand";
+import { readBodyText } from "@seylo/ops/elysia";
 import { and, asc, count, eq, gt, inArray, isNull, lt, notExists, or } from "drizzle-orm";
 import { authenticate, credentialsFrom } from "../../auth/authenticate";
 import { freshUntil } from "../../auth/fresh";
 import { apiKeys, mcpAuthCodes, mcpClients } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { bodyRefused } from "../../http/body";
 import { clientIp } from "../../http/client-ip";
 import { secureSession } from "../../http/https";
+import { addressKey } from "../../http/ip-ranges";
 import { isSameOrigin } from "../../http/origin";
 import { requestOrigin } from "../../http/request-origin";
 import { writeAuditEvent } from "../../ops/audit";
@@ -113,11 +116,14 @@ export async function register(deps: Deps, request: Request, ip: string | null =
     limiter = createRateLimiter();
     registerLimiters.set(deps.db, limiter);
   }
-  const wait = limiter.take(`mcp-register:${clientIp(request, ip, deps.proxy.trusts(ip)) ?? "unknown"}`, "strict");
+  // An IPv6 /64 counts as one address, like the sign-in limits.
+  const wait = limiter.take(`mcp-register:${addressKey(clientIp(request, ip, deps.proxy.trusts(ip)))}`, "strict");
   if (wait > 0) return oauthError("invalid_client_metadata", `Too many registrations. Try again in ${wait} seconds.`, 429);
+  const text = await readOAuthBody(request);
+  if (typeof text !== "string") return text;
   let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as Record<string, unknown>;
+    body = JSON.parse(text) as Record<string, unknown>;
   } catch {
     return oauthError("invalid_client_metadata", "The body must be JSON.");
   }
@@ -298,7 +304,9 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
   if (!isSameOrigin(request, deps.proxy.trusts(ip))) {
     return messagePage(panelName, "Not allowed", "This form can only be sent from the panel itself.", 403);
   }
-  const form = new URLSearchParams(await request.text());
+  const text = await readOAuthBody(request);
+  if (typeof text !== "string") return text;
+  const form = new URLSearchParams(text);
   const read = readAuthorize(deps, form);
   if (!read.ok) return read.response;
   const principal = sessionPrincipal(deps, request, form, ip);
@@ -371,13 +379,32 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
   return Response.redirect(target.toString(), 302);
 }
 
-async function readForm(request: Request): Promise<URLSearchParams> {
+/**
+ * The OAuth endpoints are public, so their bodies (small forms and JSON)
+ * go through the capped reader before anything else: at most
+ * oauthBodyBytes each, counted against the panel's shared body budget.
+ */
+export const oauthBodyBytes = 64 * 1024;
+
+async function readOAuthBody(request: Request): Promise<string | Response> {
+  const read = await readBodyText(request, oauthBodyBytes);
+  return read.ok ? read.text : bodyRefused(read.reason);
+}
+
+async function readForm(request: Request): Promise<URLSearchParams | Response> {
+  const text = await readOAuthBody(request);
+  if (typeof text !== "string") return text;
   const type = request.headers.get("content-type") ?? "";
   if (type.includes("application/json")) {
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    return new URLSearchParams(Object.entries(body).filter((e): e is [string, string] => typeof e[1] === "string"));
+    let body: Record<string, unknown> = {};
+    try {
+      body = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      // An unreadable body is an empty form: the checks below answer for it.
+    }
+    return new URLSearchParams(Object.entries(body ?? {}).filter((e): e is [string, string] => typeof e[1] === "string"));
   }
-  return new URLSearchParams(await request.text());
+  return new URLSearchParams(text);
 }
 
 function s256(verifier: string): string {
@@ -416,6 +443,7 @@ function tokenResponse(tokens: { access: string; refresh: string }, readOnly: bo
 export async function token(deps: Deps, request: Request): Promise<Response> {
   if (!readMcpEnabled(deps.db)) return oauthError("access_denied", "The MCP server is turned off on this panel.", 403);
   const form = await readForm(request);
+  if (form instanceof Response) return form;
   const clientId = form.get("client_id") ?? "";
   const grant = form.get("grant_type");
 
@@ -476,6 +504,7 @@ export async function token(deps: Deps, request: Request): Promise<Response> {
 
 export async function revoke(deps: Deps, request: Request): Promise<Response> {
   const form = await readForm(request);
+  if (form instanceof Response) return form;
   const hash = hashToken(form.get("token") ?? "");
   deps.db
     .update(apiKeys)

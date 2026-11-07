@@ -1168,7 +1168,7 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   the next panel start writes the close of those a restart or crash ended,
   with reason `the panel restarted`, `lastSeenAt` and the duration up to it. Anonymous
   client registration only goes to the panel log; `/oauth/register` is
-  rate limited per address (strict class), clients nobody authorized are
+  rate limited per address (strict class; an IPv6 /64 counts as one), clients nobody authorized are
   forgotten after 24 h, and at the 500-client cap the oldest unused one
   (older than 10 minutes) makes room.
 - MCP tool results go through `redact(output, op.sensitive.output)` like the
@@ -1207,8 +1207,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   UNAVAILABLE and `retry-after: 5`. The GitHub webhook allows 60 deliveries
   per sending address (then one a second, 429) before it reads or hashes a
   body, and takes 5 MiB (after answering 404 without an App), git
-  provider webhooks at 5 MiB (after answering 404 for an unknown hook id)
-  and deploy trigger URL bodies at 5 MiB. The
+  provider webhooks at 5 MiB (after answering 404 for an unknown hook id),
+  deploy trigger URL bodies at 5 MiB and the public OAuth endpoints
+  (`/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`)
+  at 64 KiB (`oauthBodyBytes`), all through `readBodyText`. The
   webhook needs `X-GitHub-Delivery`, records at most 20 rejected deliveries
   an hour, and answers `duplicate` for a signed body already handled under
   another delivery id within 3 days (in memory). The App's hook is created
