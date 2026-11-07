@@ -26,6 +26,8 @@ interface Poster {
  */
 export function api(page: Page) {
   const send = async (path: string, options: { method: "GET" | "POST"; data?: unknown }) => {
+    // localStorage belongs to the app's origin: a page that has not loaded anything yet opens the app first.
+    if (!page.url().startsWith("http")) await page.goto("/");
     const key = await page.evaluate((name) => window.localStorage.getItem(name), sessionKey.storage);
     const headers = key ? { [sessionKey.header]: key } : undefined;
     const response =

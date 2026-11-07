@@ -84,31 +84,30 @@ test.describe("plain HTTP", () => {
   /** Pages as a browser sees them on http://<public ip>:<port> (127.0.0.1 itself counts as secure). */
   const insecure = () => Object.defineProperty(window, "isSecureContext", { get: () => false });
 
-  test("signed-out pages warn that the connection is not encrypted, loopback does not", async ({ page, browser }) => {
+  // One page load only: the sign-in page's setup.status shares the anonymous sign-in limit with the specs after this one.
+  test("signed-out pages warn that the connection is not encrypted", async ({ page }) => {
+    await page.addInitScript(insecure);
     await page.goto("/login");
-    await expect(page.getByRole("heading", { level: 1, name: /Sign in to/ })).toBeVisible();
-    await expect(page.getByTestId("plain-http-warning")).toHaveCount(0);
-
-    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-    const other = await context.newPage();
-    await other.addInitScript(insecure);
-    await other.goto("/login");
-    const warning = other.getByTestId("plain-http-warning");
+    const warning = page.getByTestId("plain-http-warning");
     await expect(warning).toBeVisible();
     await expect(warning).toContainText("This connection is not encrypted");
     await expect(warning).toContainText(/ssh -L \d+:localhost:\d+ 127\.0\.0\.1/);
-    await other.screenshot({ path: `${shots}/login-plain-http.png`, fullPage: true });
-    await context.close();
+    await page.screenshot({ path: `${shots}/login-plain-http.png`, fullPage: true });
   });
 });
 
 test.describe("signed in", () => {
   test.use({ storageState: stateFile });
 
-  test("the app shell warns on plain HTTP too", async ({ page }) => {
-    await page.addInitScript(() => Object.defineProperty(window, "isSecureContext", { get: () => false }));
+  test("the app shell warns on plain HTTP too, loopback does not", async ({ page, browser }) => {
     await openDashboard(page);
-    await expect(page.getByTestId("plain-http-warning")).toBeVisible();
+    await expect(page.getByTestId("plain-http-warning")).toHaveCount(0);
+    const context = await browser.newContext({ storageState: stateFile });
+    const other = await context.newPage();
+    await other.addInitScript(() => Object.defineProperty(window, "isSecureContext", { get: () => false }));
+    await openDashboard(other);
+    await expect(other.getByTestId("plain-http-warning")).toBeVisible();
+    await context.close();
   });
 
   test("the session cookie another port of the address receives signs nobody in", async ({ page, playwright }) => {
@@ -235,7 +234,12 @@ test.describe("signed in", () => {
     const other = await fresh.newPage();
     const errors = trackErrors(other);
     await other.goto(url.pathname + url.search);
-    await expect(other.getByRole("heading", { level: 1, name: "You are invited" })).toBeVisible();
+    // Reading the invite shares the anonymous sign-in limit: wait out a window when the page says so.
+    const invited = other.getByRole("heading", { level: 1, name: "You are invited" });
+    const retry = other.getByRole("button", { name: "Try again" });
+    await expect(invited.or(retry)).toBeVisible();
+    if (await retry.isVisible()) await submitPastRateLimit(other, retry, invited);
+    await expect(invited).toBeVisible();
     await expect(other.getByText(/member@example.com/)).toBeVisible();
     await other.screenshot({ path: `${shots}/invite.png`, fullPage: true });
     await other.getByLabel("Password").fill("member-password-123");
