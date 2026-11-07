@@ -11,7 +11,7 @@ import type { Panel } from "../src/panel";
 import { type CallOptions, callOp, sessionCookieFor } from "./helpers";
 
 /** A limiter that never limits, for tests that sign in many times. */
-export const noLimits: RateLimiter = { take: () => 0 };
+export const noLimits: RateLimiter = { take: () => 0, refund: () => {} };
 
 /**
  * The session cookie a response set, as a Cookie header value; undefined

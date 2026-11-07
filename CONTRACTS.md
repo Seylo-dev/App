@@ -1172,9 +1172,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   duplicate (scoped to the service: GitLab before 17.4 sends sibling hooks
   of one push the same event UUID), rejected deliveries go to the
   service's delivery list with their own row id (20 an hour at most).
-  Checked deliveries are rate limited per hook (20, then one every 3
-  seconds; 429 with `Retry-After`, logged as rejected); unchecked ones do
-  not use the budget. A push never builds a sha from the payload alone:
+  Checked deliveries are rate limited per hook (120, then one a second;
+  429 with `Retry-After`, logged as rejected), far above a busy
+  repository, because providers do not retry and GitLab turns off a hook
+  that keeps failing; unchecked ones do not use the budget. A push never builds a sha from the payload alone:
   the branch head the provider's API reports is deployed (a payload sha
   is used only when the API cannot say and the body is signed, never for
   GitLab's token). Every push path (provider and GitHub webhooks, both
@@ -1345,9 +1346,14 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `maintenance.setGlobal` 2 MiB), read by `readBodyText` in
   `@seylo/ops/elysia`; all body reads in flight share a budget of 64 MiB of
   buffered bytes (`bodyBudget`), past which a read is refused with 503
-  UNAVAILABLE and `retry-after: 5`. The GitHub webhook allows 60 deliveries
-  per sending address (then one a second, 429) before it reads or hashes a
-  body, and takes 5 MiB (after answering 404 without an App), git
+  UNAVAILABLE and `retry-after: 5`. The GitHub webhook counts unverified
+  deliveries per sending address: each takes a token before its body is
+  read or hashed and gives it back once the signature verifies (and on a
+  503 busy), so only bodies being read and refused ones (bad signature,
+  too large, replay) count, 60 then one a second (429). GitHub sends
+  every delivery from a few addresses and does not retry, so its signed
+  traffic never uses the bucket up. The route takes 5 MiB (after
+  answering 404 without an App), git
   provider webhooks at 5 MiB (after answering 404 for an unknown hook id),
   deploy trigger URL bodies at 5 MiB and the public OAuth endpoints
   (`/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`)

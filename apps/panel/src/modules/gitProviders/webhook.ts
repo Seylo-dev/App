@@ -28,12 +28,14 @@ const maxBody = 5 * 1024 * 1024;
 const kinds: GitProviderKind[] = ["gitlab", "gitea", "bitbucket"];
 
 /**
- * Checked deliveries per hook: a burst of merge request events passes, a
- * loop does not (each push asks the provider for the head and may queue a
- * deploy). Like the deploy trigger URL's limit, a little roomier because
- * merge request edits and approvals each send an event.
+ * Checked deliveries per hook. A provider does not retry a refused
+ * delivery and GitLab turns off a hook that keeps failing, so the limit
+ * sits far above a busy repository (a bot rebasing a hundred merge
+ * requests, pushes from a whole team) and only stops a loop with a leaked
+ * GitLab token: each push asks the provider for the head, and at most one
+ * push deploy waits behind the running one however many arrive.
  */
-const hookRules = { standard: { burst: 20, refillPerSecond: 1 / 3 }, strict: { burst: 20, refillPerSecond: 1 / 3 } };
+const hookRules = { standard: { burst: 120, refillPerSecond: 1 }, strict: { burst: 120, refillPerSecond: 1 } };
 const limiters = new WeakMap<object, RateLimiter>();
 
 function limiterFor(deps: Pick<Deps, "db">): RateLimiter {

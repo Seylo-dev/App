@@ -131,10 +131,16 @@ export async function handleGithubEvent(
 }
 
 /**
- * Deliveries per sending address, counted before the body is read or its
- * HMAC computed: anyone may post here, and each try costs up to 5 MiB and a
- * hash of it. GitHub sends from a few addresses; a busy organisation stays
- * far below a minute of bursts.
+ * Unverified deliveries per sending address. Anyone may post here and each
+ * try costs reading up to 5 MiB and a hash of it, so a delivery takes a
+ * token before its body is read, and one whose signature verifies gives it
+ * back. Only deliveries being read and refused ones (bad signature, too
+ * large, a replayed body) count: an address gets a burst of 60 of those,
+ * then 1 per second. GitHub sends every delivery of every installation
+ * from a few addresses and does not retry a refused one, so its signed
+ * deliveries must never use the bucket up, however busy the organisation.
+ * The bytes held by all body reads at once are capped by the shared body
+ * budget (bodyBudget in @seylo/ops/elysia).
  */
 const senderRules = { standard: { burst: 60, refillPerSecond: 1 }, strict: { burst: 60, refillPerSecond: 1 } };
 const senderLimiters = new WeakMap<object, RateLimiter>();
@@ -156,16 +162,21 @@ export function githubWebhookRoute(deps: Deps) {
       const secret = webhookSecret(deps.db, deps.secrets);
       if (!secret) return json(404, { error: { code: "NOT_FOUND", message: "This panel has no GitHub App." } });
       const peer = server?.requestIP(request)?.address ?? null;
-      const sender = addressKey(clientIp(request, peer, deps.proxy.trusts(peer)));
-      const wait = senderLimiter(deps).take(`github-hook:${sender}`, "standard");
+      const sender = `github-hook:${addressKey(clientIp(request, peer, deps.proxy.trusts(peer)))}`;
+      const limiter = senderLimiter(deps);
+      const wait = limiter.take(sender, "standard");
       if (wait > 0) {
         return new Response(
-          JSON.stringify({ error: { code: "RATE_LIMITED", message: `Too many deliveries. Try again in ${wait} seconds.` } }),
+          JSON.stringify({ error: { code: "RATE_LIMITED", message: `Too many refused deliveries. Try again in ${wait} seconds.` } }),
           { status: 429, headers: { "content-type": "application/json", "retry-after": String(wait) } },
         );
       }
       const read = await readBodyText(request, maxBody);
-      if (!read.ok) return bodyRefused(read.reason);
+      if (!read.ok) {
+        // "busy" is the panel's state, not something this sender did.
+        if (read.reason === "busy") limiter.refund(sender, "standard");
+        return bodyRefused(read.reason);
+      }
       const raw = read.text;
       const deliveryId = (request.headers.get("x-github-delivery") ?? "").slice(0, 64);
       const event = (request.headers.get("x-github-event") ?? "unknown").slice(0, 64);
@@ -184,6 +195,8 @@ export function githubWebhookRoute(deps: Deps) {
         });
         return json(200, { ok: true, duplicate: true });
       }
+      // Signed by GitHub and new: it does not count against the sender.
+      limiter.refund(sender, "standard");
       let payload: unknown;
       try {
         payload = JSON.parse(raw);

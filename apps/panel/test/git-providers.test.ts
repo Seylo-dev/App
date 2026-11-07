@@ -6,7 +6,7 @@
 // requests open previews, polling catches missed pushes, commit statuses
 // go back, and webhooks go away with the source or the service.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import {
   deployments as deploymentOps,
@@ -628,27 +628,34 @@ describe("pushes that come faster than deploys", () => {
     expect((await deliveriesOf(id))[0]?.detail).toBe(`A deploy was already queued; it builds ${"7".repeat(7)} now.`);
   });
 
-  test("checked deliveries are rate limited per hook; unchecked ones do not use the budget", async () => {
+  test("checked deliveries are rate limited per hook far above a busy repository; unchecked ones do not use the budget", async () => {
     const { id, hook, secret } = await connectedService("gitlab");
     const other = await connectedService("gitlab", "worker");
-    for (let i = 0; i < 30; i++) {
-      await deliver("gitlab", hook, secret, "Push Hook", payloadFixture("gitlab-push"), { badSecret: true });
+    // No refill while the test runs: every token is accounted for.
+    setSystemTime(new Date("2026-11-07T12:00:00Z"));
+    try {
+      for (let i = 0; i < 30; i++) {
+        await deliver("gitlab", hook, secret, "Push Hook", payloadFixture("gitlab-push"), { badSecret: true });
+      }
+      // A bot rebasing a hundred merge requests, say. Before: 429 from the 21st on; GitLab does not retry and turns off a failing hook.
+      const statuses: number[] = [];
+      for (let i = 0; i < 124; i++) {
+        const res = await deliver("gitlab", hook, secret, "Push Hook", { ...payloadFixture("gitlab-push"), event_n: i });
+        statuses.push(res.status);
+      }
+      expect(statuses.slice(0, 120).filter((s) => s !== 200)).toEqual([]);
+      expect(statuses.slice(120)).toEqual([429, 429, 429, 429]);
+      const limited = await panel.app.handle(
+        new Request(`http://panel.test/api/hooks/gitlab/${hook.id}`, {
+          method: "POST",
+          headers: { "x-gitlab-token": secret, "x-gitlab-event": "Push Hook", "x-gitlab-event-uuid": "late" },
+          body: "{}",
+        }),
+      );
+      expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    } finally {
+      setSystemTime();
     }
-    const statuses: number[] = [];
-    for (let i = 0; i < 24; i++) {
-      const res = await deliver("gitlab", hook, secret, "Push Hook", { ...payloadFixture("gitlab-push"), event_n: i });
-      statuses.push(res.status);
-    }
-    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
-    expect(statuses.slice(20)).toEqual([429, 429, 429, 429]);
-    const limited = await panel.app.handle(
-      new Request(`http://panel.test/api/hooks/gitlab/${hook.id}`, {
-        method: "POST",
-        headers: { "x-gitlab-token": secret, "x-gitlab-event": "Push Hook", "x-gitlab-event-uuid": "late" },
-        body: "{}",
-      }),
-    );
-    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
     // Each push asked for the head, but at most one deploy runs and one waits.
     expect(deploymentsOf(id).length).toBeLessThanOrEqual(2);
     // Another service's hook has its own budget.

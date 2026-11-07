@@ -2,7 +2,7 @@
 // GitHub webhook neither stores unlimited rejected rows nor deploys a
 // replayed signed body sent under a new delivery id.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { bodyBudget, bufferedBodyBytes } from "@seylo/ops/elysia";
 import { githubApps, webhookDeliveries } from "../src/db/schema";
@@ -106,6 +106,75 @@ test("webhook: rejected rows are capped, a replayed body under a new id is not h
   expect(await replay.json()).toMatchObject({ duplicate: true });
   const noId = await post(body, { "x-github-event": "meta", "x-hub-signature-256": signature });
   expect(noId.status).toBe(400);
+});
+
+function insertGithubApp() {
+  panel.deps.db
+    .insert(githubApps)
+    .values({
+      appId: 1,
+      slug: "s",
+      name: "s",
+      htmlUrl: "https://github.com/apps/s",
+      ownerLogin: "o",
+      clientId: "c",
+      clientSecretSealed: panel.deps.secrets.seal("cs", "github.app"),
+      privateKeySealed: panel.deps.secrets.seal("not used", "github.app"),
+      webhookSecretSealed: panel.deps.secrets.seal(secret, "github.app"),
+    })
+    .run();
+}
+
+const signedDelivery = (n: number) => {
+  const body = JSON.stringify({ zen: `delivery ${n}` });
+  const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+  return post("/api/hooks/github", body, { "x-github-delivery": `ok-${n}`, "x-github-event": "meta", "x-hub-signature-256": signature });
+};
+const badDelivery = (n: number) =>
+  post("/api/hooks/github", "{}", { "x-github-delivery": `bad-${n}`, "x-github-event": "push", "x-hub-signature-256": "sha256=00" });
+
+test("webhook: signed deliveries from one address never use its budget up; only refused ones count", async () => {
+  insertGithubApp();
+  // No refill while the test runs: every token is accounted for.
+  setSystemTime(new Date("2026-11-07T12:00:00Z"));
+  try {
+    // A busy organisation: GitHub sends them all from one address. Before: 429 from the 61st on, and GitHub does not retry.
+    const statuses: number[] = [];
+    for (let i = 0; i < 300; i++) statuses.push((await signedDelivery(i)).status);
+    expect(statuses.filter((s) => s !== 200)).toEqual([]);
+    // Refused deliveries keep their token: 60, then 429 before the body is read, signed or not.
+    const refused: number[] = [];
+    for (let i = 0; i < 61; i++) refused.push((await badDelivery(i)).status);
+    expect(refused.slice(0, 60).every((s) => s === 401)).toBe(true);
+    expect(refused[60]).toBe(429);
+    expect((await signedDelivery(300)).status).toBe(429);
+    // A second later one token is back, and a signed delivery returns the one it took.
+    setSystemTime(new Date("2026-11-07T12:00:01Z"));
+    expect((await signedDelivery(301)).status).toBe(200);
+    expect((await signedDelivery(302)).status).toBe(200);
+    expect((await badDelivery(61)).status).toBe(401);
+    expect((await badDelivery(62)).status).toBe(429);
+  } finally {
+    setSystemTime();
+  }
+});
+
+test("webhook: a body refused because the panel is busy does not count against the sender", async () => {
+  insertGithubApp();
+  const saved = bodyBudget.maxBytes;
+  bodyBudget.maxBytes = 1000;
+  setSystemTime(new Date("2026-11-07T12:00:00Z"));
+  try {
+    for (let i = 0; i < 80; i++) {
+      const res = await post("/api/hooks/github", " ".repeat(2000), { "x-github-delivery": `busy-${i}`, "x-github-event": "push" });
+      expect(res.status).toBe(503);
+    }
+    bodyBudget.maxBytes = saved;
+    expect((await badDelivery(0)).status).toBe(401);
+  } finally {
+    bodyBudget.maxBytes = saved;
+    setSystemTime();
+  }
 });
 
 test("webhook: one sender gets 60 deliveries, then 429 before the body is read", async () => {
