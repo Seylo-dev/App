@@ -112,18 +112,18 @@ test("the byte budget counts too, and a restarted panel starts from what the nod
   let stored = { rows: 0, bytes: 900 };
   const budget = createReportBudget({
     storedSince: () => stored,
-    onExceeded: (nodeId) => exceeded.push(nodeId),
+    onExceeded: (nodeId, lane) => exceeded.push(`${lane}:${nodeId}`),
     limits: { rowsPerDay: 100, bytesPerDay: 1000, windowMs: 1000 },
   });
-  expect(budget.allows("n1", 100, 0)).toBe(true);
-  budget.spend("n1", 100, 0);
-  expect(budget.allows("n1", 1, 10)).toBe(false);
-  expect(budget.allows("n1", 1, 20)).toBe(false);
-  expect(exceeded).toEqual(["n1"]);
+  expect(budget.allows("n1", "general", 100, 0)).toBe(true);
+  budget.spend("n1", "general", 100, 0);
+  expect(budget.allows("n1", "general", 1, 10)).toBe(false);
+  expect(budget.allows("n1", "general", 1, 20)).toBe(false);
+  expect(exceeded).toEqual(["general:n1"]);
   // A new window starts empty.
-  expect(budget.allows("n1", 500, 1000)).toBe(true);
+  expect(budget.allows("n1", "general", 500, 1000)).toBe(true);
   stored = { rows: 0, bytes: 0 };
-  expect(budget.allows("n2", 1000, 0)).toBe(true);
+  expect(budget.allows("n2", "general", 1000, 0)).toBe(true);
 });
 
 test("field caps cut strings, lists (output tails keep their end) and unknown fields", () => {

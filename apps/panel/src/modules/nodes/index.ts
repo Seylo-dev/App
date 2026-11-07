@@ -8,6 +8,7 @@ import { toJson } from "@bufbuild/protobuf";
 import { NodeFactsSchema } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { createPanelService } from "../../agent-hub/panel-service";
+import type { ReportLane } from "../../agent-hub/report-budget";
 import { servicesOnNode } from "../../agent-hub/service-scope";
 import { minimumAgentVersion } from "../../agent-hub/version";
 import { nodes, services } from "../../db/schema";
@@ -25,6 +26,18 @@ import { ensurePanelService, panelContributor, panelServiceId } from "./panel-se
 import { pruneTables } from "./retention";
 
 const flushers = new WeakMap<object, DesiredFlusher>();
+
+/** What each report lane (agent-hub/report-budget.ts) carries, and what still arrives when it is full, for the alert. */
+const reportLaneNames: Record<ReportLane, string> = {
+  general: "crash reports, alerts and deploy results",
+  cron: "cron job results",
+  results: "backup, cleanup and update results",
+};
+const reportLaneOthers: Record<ReportLane, string> = {
+  general: "cron, backup and cleanup results have budgets of their own and are still kept.",
+  cron: "crash reports, alerts and backup results have budgets of their own and are still kept.",
+  results: "crash reports, alerts and cron results have budgets of their own and are still kept.",
+};
 /** At most one nodes.facts write (and live publish) per node in this time. */
 const factsWriteMs = 2000;
 
@@ -73,14 +86,13 @@ function start(deps: Deps) {
       logger: deps.logger.child({ component: "panel-service" }),
       desiredState: (nodeId, knownRevision) => flusher.currentState(nodeId, knownRevision),
       edgeAccessAllowed: (nodeId, request) => edgeAccessAllowed(deps, nodeId, request),
-      reportBudgetExceeded: (nodeId) => {
+      reportBudgetExceeded: (nodeId, lane) => {
         const name = deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? "A node";
         deps.alerts.raise({
           event: "node_health_check_failed",
-          key: `report-budget:${nodeId}:${new Date().toISOString().slice(0, 10)}`,
-          title: `${name} sends more reports than the panel keeps`,
-          message:
-            "In the last day this node sent more durable reports (deploy, cron, backup and cleanup results, alerts, crashes) than the panel stores for one node. The panel acknowledges and drops the rest until the day is over. A healthy node does not get here: check what runs on it.",
+          key: `report-budget:${nodeId}:${lane}:${new Date().toISOString().slice(0, 10)}`,
+          title: `${name} sends more ${reportLaneNames[lane]} than the panel keeps`,
+          message: `In the last day this node sent more ${reportLaneNames[lane]} than the panel stores for one node. The panel acknowledges and drops the rest of them until the day is over; ${reportLaneOthers[lane]} A healthy node does not get here: check what runs on it.`,
           severity: "warning",
           nodeId,
         });
