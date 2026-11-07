@@ -29,6 +29,7 @@ const { createLogger } = await import(`${root}/src/logger.ts`);
 const { createPanel } = await import(`${root}/src/panel.ts`);
 const { loadMasterKey } = await import(`${root}/src/security/master-key.ts`);
 const { createSession } = await import(`${root}/src/auth/sessions.ts`);
+const { sessionCookieName, sessionKeyHeader } = await import(`${root}/node_modules/@seylo/ops/src/index.ts`);
 const { alerts, auditLog, joinTokens, users } = await import(`${root}/src/db/schema/index.ts`);
 const { eq } = await import(`${root}/node_modules/drizzle-orm/index.js`);
 
@@ -50,16 +51,19 @@ panel.app.listen({ hostname: "127.0.0.1", port });
 const hub = panel.deps.agents;
 const db = databases.db;
 
-// The owner, signed in just now (fresh for host shells).
+// The owner, signed in just now (fresh for host shells). A browser session
+// is the cookie plus its key in a header (src/auth/sessions.ts); over plain
+// HTTP with SECURE_COOKIES off the panel reads the plain cookie name, not
+// the __Host- one.
 const owner = db.insert(users).values({ email: "owner@example.com", name: "owner", role: "owner", passwordHash: null }).returning().get();
-const { token: sessionToken } = createSession(db, owner.id, { ip: "127.0.0.1", userAgent: "interop" });
-const cookie = `seylo_session=${sessionToken}`;
+const { token: sessionToken, key: sessionKey } = createSession(db, owner.id, { ip: "127.0.0.1", userAgent: "interop" });
+const sessionHeaders = { cookie: `${sessionCookieName(false)}=${sessionToken}`, [sessionKeyHeader]: sessionKey };
 const op = async (id: string, input: Record<string, unknown>, method: "GET" | "POST" = "POST") => {
   const url = new URL(`/api/v1/${id}`, base);
   if (method === "GET") for (const [k, v] of Object.entries(input)) url.searchParams.set(k, String(v));
   const res = await fetch(url, {
     method,
-    headers: { cookie, origin: base, "content-type": "application/json" },
+    headers: { ...sessionHeaders, origin: base, "content-type": "application/json" },
     body: method === "POST" ? JSON.stringify(input) : undefined,
   });
   return { status: res.status, body: (await res.json()) as any };

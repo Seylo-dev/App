@@ -34703,7 +34703,7 @@
       "get": {
         "operationId": "github.installations",
         "summary": "List GitHub App installations",
-        "description": "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one.",
+        "description": "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one. Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
         "tags": [
           "github"
         ],
@@ -34726,7 +34726,8 @@
                   "type": "object",
                   "required": [
                     "installations",
-                    "installUrl"
+                    "installUrl",
+                    "hidden"
                   ],
                   "properties": {
                     "installations": {
@@ -34801,6 +34802,10 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "hidden": {
+                      "description": "True when the caller may not see the App or its installations: the list is then empty whatever is installed, and says nothing about whether there is an App.",
+                      "type": "boolean"
                     }
                   }
                 }
@@ -35018,7 +35023,7 @@
       "get": {
         "operationId": "github.status",
         "summary": "Get the GitHub connection",
-        "description": "Returns the panel's GitHub App (null before it is created), the webhook URL GitHub calls, and the device-flow GitHub account used to clone private repos, if one is connected.",
+        "description": "Returns the panel's GitHub App (null before it is created, and for people who neither manage it nor may create or update a service anywhere), the webhook URL GitHub calls, and the device-flow GitHub account used to clone private repos, if one is connected.",
         "tags": [
           "github"
         ],

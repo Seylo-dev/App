@@ -62,7 +62,7 @@ export const status = defineOp({
   kind: "query",
   summary: "Get the GitHub connection",
   description:
-    "Returns the panel's GitHub App (null before it is created), the webhook URL GitHub calls, and the device-flow GitHub account used to clone private repos, if one is connected.",
+    "Returns the panel's GitHub App (null before it is created, and for people who neither manage it nor may create or update a service anywhere), the webhook URL GitHub calls, and the device-flow GitHub account used to clone private repos, if one is connected.",
   input: Type.Object({}),
   output: Type.Object({
     app: Type.Union([GithubApp, Type.Null()]),
@@ -139,9 +139,17 @@ export const installations = defineOp({
   id: "github.installations",
   kind: "query",
   summary: "List GitHub App installations",
-  description: "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one.",
+  description:
+    "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one. Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
   input: Type.Object({}),
-  output: Type.Object({ installations: Type.Array(Installation), installUrl: Type.Union([Type.String(), Type.Null()]) }),
+  output: Type.Object({
+    installations: Type.Array(Installation),
+    installUrl: Type.Union([Type.String(), Type.Null()]),
+    hidden: Type.Boolean({
+      description:
+        "True when the caller may not see the App or its installations: the list is then empty whatever is installed, and says nothing about whether there is an App.",
+    }),
+  }),
   permission: permission.signedIn(),
   mcp: true,
   audit: false,

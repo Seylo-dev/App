@@ -39,6 +39,7 @@ export default {
     pickRepoFirst: "Pick a repository first",
     connect: "Connect repository",
     connected: "Repository connected. The next deploy builds it.",
+    readOnly: "Connecting or changing a GitHub repository needs the right to create or update services.",
   },
   provider: {
     noConnectionTitle: "Connect {provider} first",

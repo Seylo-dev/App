@@ -61,6 +61,8 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
       </LoadingRegion>
     );
   if (installs.isError) return <OpErrorNote error={installs.error} />;
+  // Someone who may not see the App gets no installations: that does not mean there is no App.
+  if (installs.data.hidden) return <ReadOnlyGithub repo={src?.repo ?? null} branch={src?.branch ?? null} />;
   const list = installs.data.installations.filter((i) => !i.suspended);
   if (list.length === 0) {
     return (
@@ -152,6 +154,25 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
         <MutationError error={connect.error} />
       </div>
     </form>
+  );
+}
+
+/** The connected repository and branch, for someone who may not change them (and so does not see the App). */
+function ReadOnlyGithub({ repo, branch }: { repo: string | null; branch: string | null }) {
+  return (
+    <div className="flex flex-col gap-4">
+      {repo && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t("serviceSource.github.repository")} htmlFor="gh-repo-readonly">
+            <Input id="gh-repo-readonly" className="font-mono" value={repo} readOnly />
+          </Field>
+          <Field label={t("serviceSource.github.branch")} htmlFor="gh-branch-readonly">
+            <Input id="gh-branch-readonly" className="font-mono" value={branch ?? ""} readOnly />
+          </Field>
+        </div>
+      )}
+      <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">{t("serviceSource.github.readOnly")}</p>
+    </div>
   );
 }
 

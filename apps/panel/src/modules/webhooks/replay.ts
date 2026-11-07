@@ -31,6 +31,16 @@ const rejectedCount = new WeakMap<object, { hour: number; n: number }>();
  * has one for the whole panel and passes none).
  */
 export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string, hookId?: string): boolean {
+  return bodySeen(db, source, deliveryId, raw, hookId) === "replay";
+}
+
+/**
+ * What a signed body is to this source (and hook): "new", "again" (seen
+ * in the window under this same delivery id: a provider's redelivery, or
+ * a captured delivery posted again) or "replay" (seen under another id).
+ * Remembers the body unless it is a replay.
+ */
+export function bodySeen(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string, hookId?: string): "new" | "again" | "replay" {
   const now = Date.now();
   const key = { source, hookId: hookId ?? "", bodyHash: createHash("sha256").update(raw).digest("hex") };
   const before = db
@@ -38,7 +48,8 @@ export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: str
     .from(webhookBodies)
     .where(and(eq(webhookBodies.source, key.source), eq(webhookBodies.hookId, key.hookId), eq(webhookBodies.bodyHash, key.bodyHash)))
     .get();
-  if (before && now - before.seenAt.getTime() <= replayWindowMs && before.deliveryId !== deliveryId) return true;
+  const recent = before !== undefined && now - before.seenAt.getTime() <= replayWindowMs;
+  if (recent && before.deliveryId !== deliveryId) return "replay";
   db.insert(webhookBodies)
     .values({ ...key, deliveryId, seenAt: new Date(now) })
     .onConflictDoUpdate({
@@ -46,17 +57,18 @@ export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: str
       set: { deliveryId, seenAt: new Date(now) },
     })
     .run();
-  return false;
+  return recent ? "again" : "new";
 }
 
 /**
  * Logs a refused delivery (bad signature, replay) for a service's delivery
- * list. The row gets its own id: a delivery id from an unverified request
- * must never overwrite the row of a real delivery.
+ * list, or one that was not handled ("ignored", over a hook's limit). The
+ * row gets its own id: a delivery id from an unverified request must never
+ * overwrite the row of a real delivery.
  */
 export function recordRejected(
   db: PanelDb,
-  input: { source: WebhookSource; event: string; serviceId: string | null; detail: string },
+  input: { source: WebhookSource; event: string; serviceId: string | null; detail: string; outcome?: "rejected" | "ignored" },
 ): void {
   const hour = Math.floor(Date.now() / 3_600_000);
   const count = rejectedCount.get(db);
@@ -69,7 +81,7 @@ export function recordRejected(
     deliveryId: `rejected-${randomUUID()}`,
     event: input.event,
     serviceId: input.serviceId,
-    outcome: "rejected",
+    outcome: input.outcome ?? "rejected",
     detail: input.detail,
   });
 }

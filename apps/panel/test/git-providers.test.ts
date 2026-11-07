@@ -6,7 +6,7 @@
 // requests open previews, polling catches missed pushes, commit statuses
 // go back, and webhooks go away with the source or the service.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import {
   deployments as deploymentOps,
@@ -636,32 +636,63 @@ describe("pushes that come faster than deploys", () => {
     expect((await deliveriesOf(id))[0]?.detail).toBe(`A deploy was already queued; it builds ${"7".repeat(7)} now.`);
   });
 
-  test("checked deliveries are rate limited per hook; unchecked ones do not use the budget", async () => {
+  test("checked deliveries are limited per hook far above a busy repository; past it they are answered 200 and left to polling", async () => {
     const { id, hook, secret } = await connectedService("gitlab");
     const other = await connectedService("gitlab", "worker");
-    for (let i = 0; i < 30; i++) {
-      await deliver("gitlab", hook, secret, "Push Hook", payloadFixture("gitlab-push"), { badSecret: true });
-    }
-    const statuses: number[] = [];
-    for (let i = 0; i < 24; i++) {
-      const res = await deliver("gitlab", hook, secret, "Push Hook", { ...payloadFixture("gitlab-push"), event_n: i });
-      statuses.push(res.status);
-    }
-    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
-    expect(statuses.slice(20)).toEqual([429, 429, 429, 429]);
-    const limited = await panel.app.handle(
-      new Request(`http://panel.test/api/hooks/gitlab/${hook.id}`, {
-        method: "POST",
-        headers: { "x-gitlab-token": secret, "x-gitlab-event": "Push Hook", "x-gitlab-event-uuid": "late" },
-        body: "{}",
-      }),
+    let head = gitlabHead;
+    fake.override((r) =>
+      r.path.endsWith("/repository/branches/main")
+        ? { body: { name: "main", commit: { id: head, message: "Head\n", author_name: "jdev" } } }
+        : undefined,
     );
-    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
-    // Each push asked for the head, but at most one deploy runs and one waits.
+    const headReads = () => fake.calls("gitlab.com").filter((c) => c.endsWith("/repository/branches/main")).length;
+    // No refill while the test runs: every token is accounted for.
+    const now = new Date("2026-11-07T12:00:00Z");
+    setSystemTime(now);
+    try {
+      // Unchecked deliveries take no token (10: refused rows are kept 20 an hour, and the deferred ones below are counted too).
+      for (let i = 0; i < 10; i++) {
+        await deliver("gitlab", hook, secret, "Push Hook", payloadFixture("gitlab-push"), { badSecret: true });
+      }
+      // A bot rebasing a hundred merge requests, say. Before: 429 from the 121st on (from the 21st before that); GitLab does
+      // not retry and turns a hook off after 4 failures in a row, after which every push is missed.
+      const statuses: number[] = [];
+      const bodies: unknown[] = [];
+      const readsBefore = headReads();
+      let readsHandled = 0;
+      for (let i = 0; i < 124; i++) {
+        if (i === 120) readsHandled = headReads() - readsBefore;
+        if (i === 123) head = "7".repeat(40);
+        const res = await deliver("gitlab", hook, secret, "Push Hook", { ...payloadFixture("gitlab-push"), event_n: i });
+        statuses.push(res.status);
+        bodies.push(res.body);
+      }
+      expect(statuses.filter((s) => s !== 200)).toEqual([]);
+      expect(bodies.slice(120)).toEqual(Array(4).fill({ ok: true, deferred: true }));
+      // Each handled push asked for the head; the deferred ones did not.
+      expect(readsHandled).toBe(120);
+      expect(headReads() - readsBefore).toBe(120);
+      // The last push (7777777) was deferred: the next poll reads the head even though the hook just delivered.
+      expect(deploymentsOf(id).some((d) => d.commitSha === head)).toBe(false);
+      await pollProviderBranches(panel.deps, now.getTime() + 60_000);
+      await fleet.settle();
+      expect(deploymentsOf(id).some((d) => d.commitSha === head)).toBe(true);
+      // Once: the turn after that is back to "the webhook works, no reads" (and the other hook's 5-minute safety net).
+      const readsAfterPoll = headReads();
+      await pollProviderBranches(panel.deps, now.getTime() + 120_000);
+      expect(headReads()).toBe(readsAfterPoll);
+    } finally {
+      setSystemTime();
+    }
+    const listed = await deliveriesOf(id);
+    expect(listed.filter((d) => d.detail.startsWith("Too many deliveries")).map((d) => [d.outcome, d.detail])).toEqual(
+      Array(4).fill(["ignored", "Too many deliveries to this webhook: not handled; the branch head is read again within a minute."]),
+    );
+    // At most one deploy runs and one waits.
     expect(deploymentsOf(id).length).toBeLessThanOrEqual(2);
     // Another service's hook has its own budget.
     const fresh = await deliver("gitlab", other.hook, other.secret, "Push Hook", payloadFixture("gitlab-push"));
-    expect(fresh.status).toBe(200);
+    expect(fresh.body).toMatchObject({ ok: true, deployed: 1 });
   });
 });
 

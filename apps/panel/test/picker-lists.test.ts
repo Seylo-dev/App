@@ -1,11 +1,12 @@
 // The shared pickers (registry logins, git credentials, git provider
-// connections, notification channels, backup destinations) are for people
-// who may use them somewhere: an account whose grants were all removed gets
-// empty lists, not the panel's catalogue of hosts, buckets and channels.
+// connections, notification channels, backup destinations, the GitHub App
+// and its installations) are for people who may use them somewhere: an
+// account whose grants were all removed gets empty lists, not the panel's
+// catalogue of hosts, buckets, channels and GitHub accounts.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { backups, git, gitProviders, notifications, projects, registries } from "@seylo/ops";
-import { gitCredentials, gitProviders as providerRows, registryCredentials } from "../src/db/schema";
+import { backups, git, github, gitProviders, notifications, projects, registries } from "@seylo/ops";
+import { gitCredentials, githubApps, githubInstallations, gitProviders as providerRows, registryCredentials } from "../src/db/schema";
 import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -25,6 +26,24 @@ beforeEach(async () => {
     .run();
   db.insert(providerRows)
     .values({ kind: "gitlab", name: "GitLab", url: "https://gitlab.example.com", tokenSealed: secrets.seal("t", "git.provider") })
+    .run();
+  const app = db
+    .insert(githubApps)
+    .values({
+      appId: 1,
+      slug: "acme-seylo",
+      name: "Acme Seylo",
+      htmlUrl: "https://github.com/apps/acme-seylo",
+      ownerLogin: "acme",
+      clientId: "c",
+      clientSecretSealed: secrets.seal("cs", "github.app"),
+      privateKeySealed: secrets.seal("k", "github.app"),
+      webhookSecretSealed: secrets.seal("w", "github.app"),
+    })
+    .returning()
+    .get();
+  db.insert(githubInstallations)
+    .values({ githubAppId: app.id, installationId: 7, accountLogin: "acme-private-org", accountType: "Organization" })
     .run();
   const channel = await callOp(
     panel,
@@ -65,22 +84,57 @@ async function lists(options: { cookie?: string; bearer?: string }) {
     providers: (await read(callOp(panel, gitProviders.list, {}, options))).items.length,
     channels: (await read(callOp(panel, notifications.channels, {}, options))).channels.length,
     destinations: (await read(callOp(panel, backups.listDestinations, {}, options))).choices.length,
+    githubApp: ((await read(callOp(panel, github.status, {}, options))).app?.ownerLogin ?? null) as string | null,
+    installations: ((await read(callOp(panel, github.installations, {}, options))).installations as { accountLogin: string }[]).map(
+      (i) => i.accountLogin,
+    ),
   };
 }
 
+const none = { registries: 0, credentials: 0, providers: 0, channels: 0, destinations: 0, githubApp: null, installations: [] };
+const everything = {
+  registries: 1,
+  credentials: 1,
+  providers: 1,
+  channels: 1,
+  destinations: 1,
+  githubApp: "acme",
+  installations: ["acme-private-org"],
+};
+
 test("an account with no grants gets empty pickers", async () => {
   const nobody = await createUser(panel, "member");
-  expect(await lists({ cookie: nobody.cookie })).toEqual({ registries: 0, credentials: 0, providers: 0, channels: 0, destinations: 0 });
+  expect(await lists({ cookie: nobody.cookie })).toEqual(none);
+  // Not even the install link, which names the App; the web app shows the connected repository read-only instead.
+  expect((await callOp(panel, github.installations, {}, { cookie: nobody.cookie })).body).toEqual({
+    installations: [],
+    installUrl: null,
+    hidden: true,
+  });
+});
+
+test("owners and admins see the GitHub App and its installations", async () => {
+  expect(await lists({ cookie: owner })).toEqual(everything);
+  const admin = await createUser(panel, "admin");
+  expect(await lists({ cookie: admin.cookie })).toEqual(everything);
+  expect((await callOp(panel, github.installations, {}, { cookie: admin.cookie })).body).toMatchObject({
+    installUrl: expect.stringContaining("acme-seylo"),
+    hidden: false,
+  });
 });
 
 test("a viewer reads channel and destination names; source pickers need a source edit right", async () => {
   const viewer = await createUser(panel, "member");
   grant(panel, viewer.user.id, "project", projectId, ["services.view"]);
-  expect(await lists({ cookie: viewer.cookie })).toEqual({ registries: 0, credentials: 0, providers: 0, channels: 1, destinations: 1 });
+  expect(await lists({ cookie: viewer.cookie })).toEqual({ ...none, channels: 1, destinations: 1 });
 
   const builder = await createUser(panel, "member");
   grant(panel, builder.user.id, "project", projectId, ["services.view", "services.create"]);
-  expect(await lists({ cookie: builder.cookie })).toEqual({ registries: 1, credentials: 1, providers: 1, channels: 1, destinations: 1 });
+  expect(await lists({ cookie: builder.cookie })).toEqual(everything);
+
+  const editor = await createUser(panel, "member");
+  grant(panel, editor.user.id, "project", projectId, ["services.view", "services.update"]);
+  expect(await lists({ cookie: editor.cookie })).toEqual(everything);
 });
 
 test("a key follows its owner's grants and its own project list", async () => {
@@ -91,8 +145,8 @@ test("a key follows its owner's grants and its own project list", async () => {
 
   const other = (await callOp(panel, projects.create, { name: "other" }, { cookie: owner })).body.id as string;
   const elsewhere = createApiKey(panel, builder.user.id, { readOnly: true, projectIds: [other] });
-  expect(await lists({ bearer: elsewhere })).toEqual({ registries: 0, credentials: 0, providers: 0, channels: 0, destinations: 0 });
+  expect(await lists({ bearer: elsewhere })).toEqual(none);
 
   const ownerKey = createApiKey(panel, (await createUser(panel, "owner")).user.id, { readOnly: true });
-  expect(await lists({ bearer: ownerKey })).toEqual({ registries: 1, credentials: 1, providers: 1, channels: 1, destinations: 1 });
+  expect(await lists({ bearer: ownerKey })).toEqual(everything);
 });
