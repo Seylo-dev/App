@@ -907,6 +907,13 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   fresh access no longer allows (an `error` FORBIDDEN per topic);
   `deps.live.recheck({ userId })` does it at once (grants and role changes). `ai:<id>` is for the conversation's
   owner only; `deployment:<id>` needs `services.view` on its service.
+  Messages bypass the op pipeline, so the endpoint limits them itself
+  (`src/live/endpoint.ts`), before parsing or any database work: a token
+  bucket per person over all their sockets (`liveMessageRule`, 300 then 30
+  a second); a socket past it is closed with 1008 (the web app reconnects
+  with backoff, it is not a sign-out). One socket follows at most 200 topics
+  (`maxTopicsPerSocket`); a subscribe past that answers an `error`
+  BAD_REQUEST for the topic.
 - MCP: `POST /mcp` (Streamable HTTP, stateless JSON replies, protocol
   2025-03-26 to 2025-11-25), MCP tokens only (`api_keys.kind = "mcp"`).
   OAuth: `/.well-known/oauth-authorization-server`,

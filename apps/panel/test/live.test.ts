@@ -10,6 +10,7 @@ import {
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { aiConversations, sessions } from "../src/db/schema";
+import { liveFloodCloseCode, liveMessageRule, maxTopicsPerSocket } from "../src/live/endpoint";
 import { callOp, createUser, grant, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -135,5 +136,32 @@ test("removing a grant stops the topics it allowed at once", async () => {
   let message = await live.next();
   while (message.type === "event") message = await live.next();
   expect(message).toMatchObject({ type: "error", topic: `project:${a}`, code: "FORBIDDEN" });
+  live.ws.close();
+});
+
+test("a socket that floods messages is closed before they cost any database work", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const live = openLive(cookie);
+  await live.opened;
+  // More than one person's whole burst in one go: the panel stops reading and closes the socket.
+  for (let i = 0; i <= liveMessageRule.burst + 10; i++) live.ws.send(JSON.stringify({ type: "unsubscribe", topic: "panel" }));
+  expect(await live.closed).toBe(liveFloodCloseCode);
+  // Not the signed-out code: the web app reconnects with backoff instead of showing sign-in.
+  expect(liveFloodCloseCode).not.toBe(liveUnauthorizedCloseCode);
+});
+
+test("one socket follows a bounded number of topics", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const live = openLive(cookie);
+  await live.opened;
+  const topics = Array.from({ length: maxTopicsPerSocket + 1 }, (_, i) => `node:${String(i).padStart(16, "0")}`);
+  for (const topic of topics) live.ws.send(JSON.stringify({ type: "subscribe", topic }));
+  const answers: LiveServerMessage[] = [];
+  for (let i = 0; i < topics.length; i++) answers.push(await live.next());
+  expect(answers.filter((m) => m.type === "subscribed")).toHaveLength(maxTopicsPerSocket);
+  expect(answers.at(-1)).toMatchObject({ type: "error", code: "BAD_REQUEST", topic: topics.at(-1) });
+  // A topic it already follows still answers.
+  live.ws.send(JSON.stringify({ type: "subscribe", topic: topics[0] }));
+  expect(await live.next()).toEqual({ type: "subscribed", topic: topics[0] as `node:${string}` });
   live.ws.close();
 });
