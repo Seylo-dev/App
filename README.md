@@ -87,11 +87,25 @@ live-restore, starts the panel and a node on that server and prints a
 one-time setup link. Add more servers from the panel's Nodes page: the join
 command connects over HTTPS with the panel's key pinned.
 
-The laptop CLI is the same binary: download `seylo_darwin_arm64` (or the
-build for your system) from the
-[latest release](https://github.com/Seylo-dev/App/releases/latest), or build
-it with `go install github.com/seylo-dev/app/go/cmd/seylo@latest` (such a
-build reports version `dev`).
+The laptop CLI is the same binary. Download the build for your system from
+the [latest release](https://github.com/Seylo-dev/App/releases/latest) and
+check it against the signed `checksums.txt` before you run it (needs
+[minisign](https://jedisct1.github.io/minisign/); on Linux use
+`sha256sum -c -` instead of `shasum -a 256 -c -`):
+
+```sh
+base=https://github.com/Seylo-dev/App/releases/latest/download
+f=seylo_darwin_arm64   # or seylo_darwin_amd64, seylo_linux_amd64, seylo_linux_arm64
+for x in checksums.txt checksums.txt.minisig "$f"; do curl -fsSLO "$base/$x"; done
+minisign -Vm checksums.txt -P RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip
+awk -v f="$f" '$2 == f' checksums.txt | shasum -a 256 -c -
+chmod +x "$f" && sudo mv "$f" /usr/local/bin/seylo
+```
+
+`RWTwvr...` is the release key; [SECURITY.md](SECURITY.md) explains what is
+signed and how to check a download on Windows. Or build the CLI with
+`go install github.com/seylo-dev/app/go/cmd/seylo@latest` (such a build
+reports version `dev`).
 
 ## Repository layout
 
@@ -133,7 +147,9 @@ the three-VM end-to-end test (`make e2e`).
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Changes
 to the documentation go to the docs app in the Website repo,
 [Seylo-dev/Website `apps/docs`](https://github.com/Seylo-dev/Website/tree/main/apps/docs).
-Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md)
+(GitHub's private reporting, or security@seylo.dev), which also covers the
+threat model, where secrets live and how releases are signed.
 
 ## License
 

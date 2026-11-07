@@ -1,16 +1,26 @@
 name: Release
 
-# A pushed v* tag makes a DRAFT GitHub release with `make release`: the
-# binaries, checksums signed with the release key, install.sh, openapi.json,
-# the multi-arch panel image on ghcr.io and the signed update manifest. The
-# Publish job then checks the draft on its own (signatures against brand.json's
-# key, files, versions, an anonymous pull of the panel image) and publishes it
-# only when every check passes; otherwise the draft stays and the run summary
-# says what to do (CONTRIBUTING.md, Releases).
+# A pushed v* tag makes a GitHub release in three jobs:
+#
+# - Draft release: tests the tagged commit and runs `make release-draft`: the
+#   binaries, checksums.txt, install.sh, openapi.json, the multi-arch panel
+#   image on ghcr.io and manifest.json, as a DRAFT release with nothing
+#   signed. goreleaser's before hooks run every npm build script, so this job
+#   never gets the release key.
+# - Sign: the only job that sees the release key (MINISIGN_SECRET_KEY and
+#   MINISIGN_PASSWORD of the "release" environment). It gets the built files
+#   as an artifact, runs no npm, bun or goreleaser code, checks the files,
+#   signs checksums.txt and manifest.json with minisign
+#   (scripts/release-sign.sh) and attaches the signatures to the draft.
+# - Publish: checks the draft on its own (signatures against brand.json's
+#   key, files, versions, an anonymous pull of the panel image) and publishes
+#   it only when every check passes; otherwise the draft stays and the run
+#   summary says what to do (CONTRIBUTING.md, Releases).
 #
 # Run by hand (workflow_dispatch) it is a dry run that publishes nothing: the
-# same checks and goreleaser config in snapshot mode, signed with a throwaway
-# key made inside the job, and no secrets. Real releases only come from tags.
+# same checks, goreleaser config and signing script in snapshot mode, the
+# signing in its own job with a throwaway key made there, and no secrets.
+# Real releases only come from tags.
 
 on:
   push:
@@ -52,7 +62,7 @@ jobs:
           exit 1
 
   dry-run:
-    name: Dry run (publishes nothing)
+    name: "Dry run: build (publishes nothing)"
     if: github.event_name == 'workflow_dispatch' && inputs.dry_run
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -61,6 +71,8 @@ jobs:
     concurrency:
       group: release-dry-run-${{ github.ref }}
       cancel-in-progress: true
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,6 +82,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
+          check-latest: true # the newest 1.27.x: a release ships its stdlib
           cache: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -82,7 +95,7 @@ jobs:
           version: 1.75.0
           setup_only: true
 
-      # minisign signs the release; dash and jq are for the installer tests.
+      # minisign, dash and jq are for the installer and release script tests.
       - name: Release tools
         run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
 
@@ -99,26 +112,10 @@ jobs:
             exit 1
           fi
 
-      - name: Throwaway signing key
-        run: |
-          umask 077
-          dir="$RUNNER_TEMP/dry-run-key"
-          mkdir "$dir"
-          password=$(openssl rand -hex 24)
-          echo "::add-mask::$password"
-          printf '%s\n%s\n' "$password" "$password" | minisign -G -p "$dir/key.pub" -s "$dir/key" >/dev/null
-          echo "MINISIGN_PASSWORD=$password" >>"$GITHUB_ENV"
-
-      - name: Preflight, with the throwaway key standing in for brand.json's
-        env:
-          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
+      - name: Preflight, as the Draft release job runs it (no secret key)
         run: |
           set -a && . installer/brand.env && set +a
-          if [[ "$BRAND_MINISIGN_PUBLIC_KEY" == "$BRAND_PLACEHOLDER_PREFIX"* ]]; then
-            echo "::warning::brand.json minisignPublicKey is still a placeholder: a tag release stops at the preflight until it is set (CONTRIBUTING.md, Releases)"
-          fi
-          BRAND_MINISIGN_PUBLIC_KEY=$(sed -n 2p "$RUNNER_TEMP/dry-run-key/key.pub")
-          scripts/release-preflight.sh
+          scripts/release-preflight.sh --no-secret-key
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
@@ -136,9 +133,7 @@ jobs:
           version: ${{ env.GORELEASER_VERSION }}
           install-only: true
 
-      - name: goreleaser in snapshot mode (builds and signs everything, pushes nothing)
-        env:
-          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
+      - name: goreleaser in snapshot mode (builds everything, signs and pushes nothing)
         run: make release-dry-run
 
       - name: Panel images
@@ -156,12 +151,21 @@ jobs:
             fi
             echo "$image: $platform"
           done
+          {
+            echo "### Dry run of $version - nothing was published"
+            echo
+            echo "Panel images (built per platform, not pushed):"
+            echo
+            echo '```'
+            docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' "$BRAND_IMAGE"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Signed manifest (not uploaded)
+      - name: Manifest and the release files (not uploaded)
+        id: manifest
         # The local amd64 image's id stands in for the pushed index digest,
         # so the manifest step needs no registry.
         env:
-          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
           DRY_RUN: "1"
         run: |
           set -a && . installer/brand.env && set +a
@@ -169,29 +173,75 @@ jobs:
           PANEL_DIGEST=$(docker image inspect --format '{{.Id}}' "$BRAND_IMAGE:$version-amd64")
           export PANEL_DIGEST
           scripts/release-manifest.sh
+          echo "version=$version" >>"$GITHUB_OUTPUT"
 
-      - name: Check what a release would attach
+      # What the Draft release job hands to the Sign job.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dry-run-release-files
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 1
+
+  dry-run-sign:
+    name: "Dry run: sign with a throwaway key"
+    needs: dry-run
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Release tools
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign jq
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dry-run-release-files
+          path: ${{ runner.temp }}/release-files
+
+      - name: Throwaway signing key
+        run: |
+          umask 077
+          dir="$RUNNER_TEMP/dry-run-key"
+          mkdir "$dir"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          printf '%s\n%s\n' "$password" "$password" | minisign -G -p "$dir/key.pub" -s "$dir/key" >/dev/null
+          echo "MINISIGN_PASSWORD=$password" >>"$GITHUB_ENV"
+          echo "DRY_RUN_PUBLIC_KEY=$(sed -n 2p "$dir/key.pub")" >>"$GITHUB_ENV"
+
+      - name: Sign, with the throwaway key standing in for brand.json's
+        env:
+          MINISIGN_SECRET_KEY: ${{ runner.temp }}/dry-run-key/key
+          VERSION: ${{ needs.dry-run.outputs.version }}
         run: |
           set -a && . installer/brand.env && set +a
-          pub=$(sed -n 2p "$RUNNER_TEMP/dry-run-key/key.pub")
-          version=$(jq -r .version dist/metadata.json)
+          export BRAND_MINISIGN_PUBLIC_KEY=$DRY_RUN_PUBLIC_KEY
+          scripts/release-sign.sh sign "$VERSION" "$RUNNER_TEMP/release-files"
+
+      - name: Remove the throwaway key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/dry-run-key"
+
+      - name: Check what a release would attach
+        env:
+          VERSION: ${{ needs.dry-run.outputs.version }}
+        run: |
+          set -a && . installer/brand.env && set +a
+          files="$RUNNER_TEMP/release-files"
           for f in checksums.txt manifest.json; do
-            out=$(minisign -Vm "dist/$f" -P "$pub")
+            out=$(minisign -Vm "$files/$f" -P "$DRY_RUN_PUBLIC_KEY")
             echo "$out"
-            if ! grep -qxF "Trusted comment: $BRAND_SLUG $version $f" <<<"$out"; then
+            if ! grep -qxF "Trusted comment: $BRAND_SLUG $VERSION $f" <<<"$out"; then
               echo "::error::the signature of $f has an unexpected trusted comment"
               exit 1
             fi
           done
-          # goreleaser keeps the binaries in per-target folders and uploads
-          # them under <slug>_<os>_<arch>; gather them under those names.
-          files="$RUNNER_TEMP/release-files"
-          mkdir "$files"
-          jq -r --arg prefix "${BRAND_SLUG}_" \
-            '.[] | select(.type == "Binary" and (.name | startswith($prefix))) | [.name, .path] | @tsv' \
-            dist/artifacts.json | while IFS=$'\t' read -r name path; do cp "$path" "$files/$name"; done
-          cp dist/checksums.txt dist/checksums.txt.minisig dist/manifest.json dist/manifest.json.minisig \
-            build/install.sh openapi.json "$files/"
           # checksums.txt covers every file but the signed ones, as the
           # Publish job requires: the binaries, install.sh and openapi.json.
           (cd "$files" && sha256sum --strict -c checksums.txt)
@@ -207,24 +257,14 @@ jobs:
             [ -s "$files/$f" ] || { echo "::error::$f is missing"; exit 1; }
           done
           {
-            echo "### Dry run of $version - nothing was published"
+            echo "### Dry run of $VERSION: the files a tag release would attach"
             echo
-            echo "Signed with a throwaway key made in this job. A tag release would attach:"
+            echo "Signed in this job with a throwaway key made here; the build job never had a key."
             echo
             echo '```'
             (cd "$files" && ls -l)
             echo '```'
-            echo
-            echo "Panel images (built per platform, not pushed):"
-            echo
-            echo '```'
-            docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' "$BRAND_IMAGE"
-            echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
-
-      - name: Remove the throwaway key
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/dry-run-key"
 
   release:
     name: Draft release
@@ -251,32 +291,18 @@ jobs:
             echo "::error::$TAG is not a vMAJOR.MINOR.PATCH[-PRERELEASE] tag"
             exit 1
           fi
-          # make release passes the tag to goreleaser (GORELEASER_CURRENT_TAG),
-          # so other tags on the commit (an rc being promoted) do not matter.
+          # make release-draft passes the tag to goreleaser
+          # (GORELEASER_CURRENT_TAG), so other tags on the commit (an rc being
+          # promoted) do not matter.
           if ! git tag --points-at HEAD | grep -qxF "$TAG"; then
             echo "::error::$TAG does not point at the checked-out commit"
             exit 1
           fi
 
-      - name: Release secrets are set
-        env:
-          KEY_SET: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
-          PASSWORD_SET: ${{ secrets.MINISIGN_PASSWORD != '' }}
-        run: |
-          missing=0
-          if [ "$KEY_SET" != true ]; then
-            echo "::error::the repository secret MINISIGN_SECRET_KEY is not set (CONTRIBUTING.md, Releases)"
-            missing=1
-          fi
-          if [ "$PASSWORD_SET" != true ]; then
-            echo "::error::the repository secret MINISIGN_PASSWORD is not set (CONTRIBUTING.md, Releases)"
-            missing=1
-          fi
-          exit "$missing"
-
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
+          check-latest: true # the newest 1.27.x: a release ships its stdlib
           cache: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -289,7 +315,8 @@ jobs:
           version: 1.75.0
           setup_only: true
 
-      # minisign signs the release; dash and jq are for the installer tests.
+      # minisign, dash and jq are for the installer and release script tests;
+      # this job signs nothing.
       - name: Release tools
         run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
 
@@ -327,22 +354,14 @@ jobs:
           version: ${{ env.GORELEASER_VERSION }}
           install-only: true
 
-      - name: Signing key
-        env:
-          RELEASE_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-        run: |
-          umask 077
-          printf '%s\n' "$RELEASE_KEY" | tr -d '\r' >"$RUNNER_TEMP/release.key"
-
-      # Preflight, goreleaser (draft release, image push), signed manifest.
-      - name: make release
+      # Preflight (without the secret key), goreleaser (draft release, image
+      # push), manifest.json, and dist/release/ for the Sign job.
+      - name: make release-draft
         env:
           # Release exactly the pushed tag, not the highest tag on the commit.
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MINISIGN_SECRET_KEY: ${{ runner.temp }}/release.key
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-        run: make release
+        run: make release-draft
 
       - name: Check the draft
         env:
@@ -364,15 +383,17 @@ jobs:
           prerelease=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)
           [ "$prerelease" = "$want" ] || { echo "::error::release $TAG has isPrerelease=$prerelease, want $want"; exit 1; }
           assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          # The signatures come from the Sign job.
           for f in "${BRAND_SLUG}_linux_amd64" "${BRAND_SLUG}_linux_arm64" "${BRAND_SLUG}_darwin_amd64" \
             "${BRAND_SLUG}_darwin_arm64" "${BRAND_SLUG}_windows_amd64.exe" "${BRAND_SLUG}_windows_arm64.exe" \
-            checksums.txt checksums.txt.minisig install.sh openapi.json manifest.json manifest.json.minisig; do
+            checksums.txt install.sh openapi.json manifest.json; do
             grep -qxF "$f" <<<"$assets" || { echo "::error::the draft has no $f"; exit 1; }
+            [ -s "dist/release/$f" ] || { echo "::error::dist/release has no $f for the Sign job"; exit 1; }
           done
           {
-            echo "### Draft release $TAG"
+            echo "### Draft release $TAG (not signed yet)"
             echo
-            echo "The Publish job checks it again and publishes it: https://github.com/$GITHUB_REPOSITORY/releases"
+            echo "The Sign job signs it, then the Publish job checks it again and publishes it: https://github.com/$GITHUB_REPOSITORY/releases"
             echo
             echo '```'
             echo "$assets"
@@ -380,17 +401,106 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
+      # The files the Sign job checks and signs. It treats them as data: it
+      # hashes and signs them and never runs them.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 14 # the Sign job may wait for a reviewer
+
+  sign:
+    name: Sign
+    needs: release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # MINISIGN_SECRET_KEY and MINISIGN_PASSWORD live in this environment only,
+    # with required reviewers and v* tags as its only deployment refs
+    # (CONTRIBUTING.md, Releases). No other job can read them.
+    environment: release
+    permissions:
+      contents: write # attach the signatures to the draft
+    concurrency:
+      group: release-sign-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      # The tag's own scripts and installer/brand.env; nothing is built or
+      # installed from it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Release secrets are set
+        env:
+          KEY_SET: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+          PASSWORD_SET: ${{ secrets.MINISIGN_PASSWORD != '' }}
+        run: |
+          missing=0
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::the release environment has no MINISIGN_SECRET_KEY secret (CONTRIBUTING.md, Releases)"
+            missing=1
+          fi
+          if [ "$PASSWORD_SET" != true ]; then
+            echo "::error::the release environment has no MINISIGN_PASSWORD secret (CONTRIBUTING.md, Releases)"
+            missing=1
+          fi
+          exit "$missing"
+
+      # Only minisign (jq and gh come with the runner image): no npm, bun or
+      # goreleaser runs in this job.
+      - name: Release tools
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign jq
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release-files
+
+      - name: Signing key
+        env:
+          RELEASE_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$RELEASE_KEY" | tr -d '\r' >"$RUNNER_TEMP/release.key"
+
+      # Checks the files (checksums, manifest, install.sh), signs
+      # checksums.txt and manifest.json, and verifies both signatures with
+      # brand.json's key.
+      - name: Sign checksums.txt and manifest.json
+        env:
+          TAG: ${{ github.ref_name }}
+          MINISIGN_SECRET_KEY: ${{ runner.temp }}/release.key
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -a && . installer/brand.env && set +a
+          scripts/release-sign.sh sign "${TAG#v}" "$RUNNER_TEMP/release-files"
+
       - name: Remove the signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.key"
 
+      - name: Attach the signatures to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -a && . installer/brand.env && set +a
+          scripts/release-sign.sh upload "$TAG" "$RUNNER_TEMP/release-files"
+          {
+            echo "### Signed $TAG"
+            echo
+            echo "checksums.txt and manifest.json are signed and attached to the draft; the Publish job checks it again."
+          } >>"$GITHUB_STEP_SUMMARY"
+
   publish:
     name: Publish
-    needs: release
-    # After the draft job of a pushed v* tag succeeded. Re-running only this
+    needs: sign
+    # After the Sign job of a pushed v* tag succeeded. Re-running only this
     # job (Actions > the run > Publish > Re-run, say after making the package
     # public) checks the draft again and publishes it; it needs nothing from
-    # the draft job but the release itself.
+    # the other jobs but the release itself.
     if: success() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 15

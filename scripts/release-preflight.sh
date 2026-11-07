@@ -8,7 +8,10 @@
 #   - INSTALLER_TEST_PUBLIC_KEY is set (the release's install.sh would
 #     trust that key instead of brand.json's);
 #   - MINISIGN_SECRET_KEY does not sign for that public key (installers,
-#     agents and panels would refuse every file of the release);
+#     agents and panels would refuse every file of the release); skipped with
+#     --no-secret-key, which the Draft release job of a tag release uses: it
+#     never sees the key (the Sign job does, and scripts/release-sign.sh
+#     verifies what it signs with brand.json's key);
 #   - the GitHub repo <githubOrg>/<githubRepo> does not exist or the token
 #     cannot push to it (the org is unclaimed or someone else's). In GitHub
 #     Actions (.github/workflows/release.yml) the job's token can only write
@@ -19,10 +22,22 @@
 # docs URL that does not answer.
 #
 # Needs the brand variables (the Makefile exports installer/brand.env),
-# MINISIGN_SECRET_KEY, MINISIGN_PASSWORD (may be empty), minisign and gh.
-# GITHUB_ACTIONS and GITHUB_REPOSITORY come from the Actions runner.
+# MINISIGN_SECRET_KEY, MINISIGN_PASSWORD (may be empty) and minisign (not
+# with --no-secret-key), and gh. GITHUB_ACTIONS and GITHUB_REPOSITORY come
+# from the Actions runner.
+#
+# Usage: scripts/release-preflight.sh [--no-secret-key]
 set -euo pipefail
 : "${BRAND_PLACEHOLDER_PREFIX:?run through the Makefile}" "${BRAND_MINISIGN_PUBLIC_KEY:?}" "${BRAND_GITHUB_ORG:?}" "${BRAND_GITHUB_REPO:?}"
+check_secret_key=1
+case ${1:-} in
+"") ;;
+--no-secret-key) check_secret_key= ;;
+*)
+  echo "usage: scripts/release-preflight.sh [--no-secret-key]" >&2
+  exit 2
+  ;;
+esac
 
 failed=0
 fail() {
@@ -43,6 +58,8 @@ if [ -n "$e2e_key" ] && [ "$BRAND_MINISIGN_PUBLIC_KEY" = "$e2e_key" ]; then
   fail "brand.json minisignPublicKey is the TEST-ONLY e2e key, whose secret half is public"
 elif placeholder "$BRAND_MINISIGN_PUBLIC_KEY"; then
   fail "brand.json minisignPublicKey is a placeholder; no installer, agent or panel could verify this release (CONTRIBUTING.md, Releases)"
+elif [ -z "$check_secret_key" ]; then
+  : # the Sign job checks the key against brand.json's (scripts/release-sign.sh)
 elif [ -z "${MINISIGN_SECRET_KEY:-}" ] || [ ! -f "$MINISIGN_SECRET_KEY" ]; then
   fail "MINISIGN_SECRET_KEY must name the release key file"
 elif ! command -v minisign >/dev/null 2>&1; then

@@ -1,0 +1,8 @@
+# Triaged advisories for osv-scanner (.github/workflows/security.yml). Each
+# says why it does not reach a shipped binary or bundle, and expires so
+# someone looks again.
+
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+ignoreUntil = 2027-02-01
+reason = "esbuild <=0.24.2 dev-server CORS issue; only drizzle-kit/@esbuild-kit pull esbuild 0.18.20, at dev time, and nothing runs esbuild's dev server"
