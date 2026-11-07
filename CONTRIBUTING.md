@@ -209,6 +209,10 @@ Once, before the first release (owners):
    tag ruleset for `v*` that restricts creations, updates and deletions to
    the maintainers (bypass list), and a branch ruleset for `main` that blocks
    force pushes and deletion.
+6. Security contact: turn on Private vulnerability reporting (Settings >
+   Code security), which the link in [SECURITY.md](SECURITY.md) needs, and
+   create the `security@seylo.dev` mailbox (or a forward to the maintainers)
+   that SECURITY.md names as the fallback channel.
 
 Each release:
 

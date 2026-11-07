@@ -34,4 +34,17 @@ if [ -n "$(git status --porcelain -- "${generated[@]}")" ]; then
   git status --short -- "${generated[@]}" >&2
   exit 1
 fi
+
+# SECURITY.md and README.md print the release key for checking downloads by
+# hand, so they follow brand.json when the key changes.
+key=$(sed -n "s/^BRAND_MINISIGN_PUBLIC_KEY='\(.*\)'\$/\1/p" installer/brand.env)
+prefix=$(sed -n "s/^BRAND_PLACEHOLDER_PREFIX='\(.*\)'\$/\1/p" installer/brand.env)
+if [ -n "$key" ] && [[ "$key" != "$prefix"* ]]; then
+  for f in SECURITY.md README.md; do
+    if ! grep -qF -- "$key" "$f"; then
+      echo "check-generated: $f does not show brand.json minisignPublicKey ($key); update its verification commands" >&2
+      exit 1
+    fi
+  done
+fi
 echo "check-generated: up to date"
