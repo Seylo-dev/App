@@ -1351,11 +1351,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   buffered bytes (`bodyBudget`), past which a read is refused with 503
   UNAVAILABLE and `retry-after: 5`. The GitHub webhook counts unverified
   deliveries per sending address: each takes a token before its body is
-  read or hashed and gives it back once the signature verifies (and on a
-  503 busy), so only bodies being read and refused ones (bad signature,
-  too large, replay) count, 60 then one a second (429). GitHub sends
-  every delivery from a few addresses and does not retry, so its signed
-  traffic never uses the bucket up. The route takes 5 MiB (after
+  read or hashed and gives it back once the signature verifies on a body
+  not seen before (and on a 503 busy), so only bodies being read, refused
+  ones (bad signature, too large, replay) and repeats (the same delivery
+  id and body again, pings) count, 60 then one a second (429). GitHub
+  sends every delivery from a few addresses and does not retry, so its
+  new signed deliveries never use the bucket up. The route takes 5 MiB (after
   answering 404 without an App), git
   provider webhooks at 5 MiB (after answering 404 for an unknown hook id),
   deploy trigger URL bodies at 5 MiB and the public OAuth endpoints

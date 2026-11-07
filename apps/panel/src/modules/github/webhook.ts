@@ -13,7 +13,7 @@ import { addressKey } from "../../http/ip-ranges";
 import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { changesFromPushPayload } from "../webhooks/changes";
 import { alreadyHandled, recordDelivery } from "../webhooks/deliveries";
-import { recordRejected, replayedBody } from "../webhooks/replay";
+import { bodySeen, recordRejected } from "../webhooks/replay";
 import { appRow, forgetTokens, githubWebhookPath, verifySignature, webhookSecret } from "./app";
 import { type GithubInstallationPayload, upsertInstallation } from "./ops";
 import { handlePullRequest, handlePush } from "./push";
@@ -133,12 +133,13 @@ export async function handleGithubEvent(
 /**
  * Unverified deliveries per sending address. Anyone may post here and each
  * try costs reading up to 5 MiB and a hash of it, so a delivery takes a
- * token before its body is read, and one whose signature verifies gives it
- * back. Only deliveries being read and refused ones (bad signature, too
- * large, a replayed body) count: an address gets a burst of 60 of those,
- * then 1 per second. GitHub sends every delivery of every installation
- * from a few addresses and does not retry a refused one, so its signed
- * deliveries must never use the bucket up, however busy the organisation.
+ * token before its body is read, and a new one whose signature verifies
+ * gives it back. Only deliveries being read and refused or repeated ones
+ * (bad signature, too large, a replayed body, the same delivery again, a
+ * ping) count: an address gets a burst of 60 of those, then 1 per second.
+ * GitHub sends every delivery of every installation from a few addresses
+ * and does not retry a refused one, so its new signed deliveries must
+ * never use the bucket up, however busy the organisation.
  * The bytes held by all body reads at once are capped by the shared body
  * budget (bodyBudget in @seylo/ops/elysia).
  */
@@ -186,7 +187,9 @@ export function githubWebhookRoute(deps: Deps) {
       }
       // GitHub always sends one; without it the dedupe below could not work.
       if (!deliveryId) return json(400, { error: { code: "BAD_REQUEST", message: "X-GitHub-Delivery is missing." } });
-      if (event !== "ping" && replayedBody(deps.db, "github", deliveryId, raw)) {
+      // Pings are not remembered (GitHub sends one per App and may send it again).
+      const seen = event === "ping" ? "again" : bodySeen(deps.db, "github", deliveryId, raw);
+      if (seen === "replay") {
         recordRejected(deps.db, {
           source: "github",
           event,
@@ -195,8 +198,11 @@ export function githubWebhookRoute(deps: Deps) {
         });
         return json(200, { ok: true, duplicate: true });
       }
-      // Signed by GitHub and new: it does not count against the sender.
-      limiter.refund(sender, "standard");
+      // Signed by GitHub and new: it does not count against the sender. The
+      // same delivery sent again (a redelivery, or a captured one posted in
+      // a loop) and pings keep their token, so a signed body cannot be
+      // replayed for free.
+      if (seen === "new") limiter.refund(sender, "standard");
       let payload: unknown;
       try {
         payload = JSON.parse(raw);

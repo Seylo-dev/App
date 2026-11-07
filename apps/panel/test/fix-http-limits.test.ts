@@ -125,10 +125,10 @@ function insertGithubApp() {
     .run();
 }
 
-const signedDelivery = (n: number) => {
+const signedDelivery = (n: number, event = "meta") => {
   const body = JSON.stringify({ zen: `delivery ${n}` });
   const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
-  return post("/api/hooks/github", body, { "x-github-delivery": `ok-${n}`, "x-github-event": "meta", "x-hub-signature-256": signature });
+  return post("/api/hooks/github", body, { "x-github-delivery": `ok-${n}`, "x-github-event": event, "x-hub-signature-256": signature });
 };
 const badDelivery = (n: number) =>
   post("/api/hooks/github", "{}", { "x-github-delivery": `bad-${n}`, "x-github-event": "push", "x-hub-signature-256": "sha256=00" });
@@ -154,6 +154,27 @@ test("webhook: signed deliveries from one address never use its budget up; only 
     expect((await signedDelivery(302)).status).toBe(200);
     expect((await badDelivery(61)).status).toBe(401);
     expect((await badDelivery(62)).status).toBe(429);
+  } finally {
+    setSystemTime();
+  }
+});
+
+test("webhook: a signed delivery posted again under its own id, and pings, keep their token", async () => {
+  insertGithubApp();
+  setSystemTime(new Date("2026-11-07T12:00:00Z"));
+  try {
+    // A captured delivery posted in a loop: the first is new and gives its token back, every repeat keeps one.
+    const again: number[] = [];
+    for (let i = 0; i < 61; i++) again.push((await signedDelivery(0)).status);
+    expect(again.filter((s) => s !== 200)).toEqual([]);
+    expect((await signedDelivery(0)).status).toBe(429);
+    // A second later one token is back; new deliveries still pass and return it.
+    setSystemTime(new Date("2026-11-07T12:00:01Z"));
+    expect((await signedDelivery(1)).status).toBe(200);
+    expect((await signedDelivery(2)).status).toBe(200);
+    // Pings are not remembered, so each one keeps its token.
+    expect((await signedDelivery(3, "ping")).status).toBe(200);
+    expect((await signedDelivery(4, "ping")).status).toBe(429);
   } finally {
     setSystemTime();
   }

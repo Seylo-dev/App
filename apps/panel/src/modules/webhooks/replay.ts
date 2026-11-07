@@ -31,6 +31,16 @@ const rejectedCount = new WeakMap<object, { hour: number; n: number }>();
  * has one for the whole panel and passes none).
  */
 export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string, hookId?: string): boolean {
+  return bodySeen(db, source, deliveryId, raw, hookId) === "replay";
+}
+
+/**
+ * What a signed body is to this source (and hook): "new", "again" (seen
+ * in the window under this same delivery id: a provider's redelivery, or
+ * a captured delivery posted again) or "replay" (seen under another id).
+ * Remembers the body unless it is a replay.
+ */
+export function bodySeen(db: PanelDb, source: WebhookSource, deliveryId: string, raw: string, hookId?: string): "new" | "again" | "replay" {
   const now = Date.now();
   const key = { source, hookId: hookId ?? "", bodyHash: createHash("sha256").update(raw).digest("hex") };
   const before = db
@@ -38,7 +48,8 @@ export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: str
     .from(webhookBodies)
     .where(and(eq(webhookBodies.source, key.source), eq(webhookBodies.hookId, key.hookId), eq(webhookBodies.bodyHash, key.bodyHash)))
     .get();
-  if (before && now - before.seenAt.getTime() <= replayWindowMs && before.deliveryId !== deliveryId) return true;
+  const recent = before !== undefined && now - before.seenAt.getTime() <= replayWindowMs;
+  if (recent && before.deliveryId !== deliveryId) return "replay";
   db.insert(webhookBodies)
     .values({ ...key, deliveryId, seenAt: new Date(now) })
     .onConflictDoUpdate({
@@ -46,7 +57,7 @@ export function replayedBody(db: PanelDb, source: WebhookSource, deliveryId: str
       set: { deliveryId, seenAt: new Date(now) },
     })
     .run();
-  return false;
+  return recent ? "again" : "new";
 }
 
 /**
