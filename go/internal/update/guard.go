@@ -70,12 +70,18 @@ func RunGuard(ctx context.Context, opts GuardOptions) (rolledBack bool, err erro
 	if err := writeFileAtomic(filepath.Join(dir, agentResult), data, 0o600); err != nil {
 		return true, fmt.Errorf("writing the update result: %w", err)
 	}
+	// Kept across restarts, so the restored agent does not install the
+	// same release again on its next connect (rollbacks.go).
+	var recordErr error
+	if _, err := recordRollback(dir, p.ToVersion, opts.Now()); err != nil {
+		recordErr = fmt.Errorf("recording the rollback: %w", err)
+	}
 	// A crash-looping new agent may have hit systemd's start limit.
 	_ = opts.Run(ctx, io.Discard, "systemctl", "reset-failed", systemd.AgentUnit)
 	if err := opts.Run(ctx, io.Discard, "systemctl", "restart", systemd.AgentUnit); err != nil {
-		return true, fmt.Errorf("restarting the restored agent: %w", err)
+		return true, errors.Join(fmt.Errorf("restarting the restored agent: %w", err), recordErr)
 	}
-	return true, removeIfExists(claimed)
+	return true, errors.Join(recordErr, removeIfExists(claimed))
 }
 
 func unmarshalEvent(data []byte, ev *agentv1.Event) error {

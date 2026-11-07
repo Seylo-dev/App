@@ -217,8 +217,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   makes the agent install the latest signed release itself
   (`update.AgentUpdater.UpdateToLatest`: `<release base>/latest/download/
   manifest.json(.minisig)`, at least `min_agent_version`, at most once an
-  hour per version), since the panel cannot send UpdateAgent to an agent
-  it refuses. A WebSocket ping every
+  hour per version, and a release the update guard rolled back waits as
+  "Releases and updates" says), since the panel cannot send UpdateAgent
+  to an agent it refuses. A WebSocket ping every
   30 s (15 s timeout) drops a silent panel. The outbox drains in id order
   after every connect; UNIMPLEMENTED stops draining until the next
   connection, INVALID_ARGUMENT drops that one report, anything else
@@ -1278,7 +1279,15 @@ SHA-256, runs `<new> version`, keeps the old binary in
 The new agent confirms after its first accepted handshake; otherwise the
 guard restores the old binary and restarts it. Either way exactly one
 durable `UpdateResult` (target AGENT) reaches the panel. Failures before
-the swap are reported at once and returned as the RPC error.
+the swap are reported at once and returned as the RPC error. The guard
+also counts the rollback in `<dataDir>/update/agent-rollbacks.json`
+(by version, kept across restarts; `update/rollbacks.go`): automatic
+installs of that release (auto-update on connect, the AGENT_TOO_OLD
+self-update) wait an hour after its first rollback and a day after each
+later one, and the restored agent raises an `UPDATE_FAILED` node alert
+saying until when. `UpdateAgent` from the panel does not wait. A
+confirmed update, or an agent already at or past the release, drops its
+record and resolves the alert once none is left.
 
 Test-build overrides (the end-to-end tests only; release builds leave
 them empty and use brand.json): link the agent and `releasetool` with

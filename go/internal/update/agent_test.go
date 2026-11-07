@@ -46,13 +46,24 @@ func (f *fakeSystem) DisarmGuard(context.Context) error {
 type reports struct {
 	mu     sync.Mutex
 	events []*agentv1.UpdateResult
+	alerts []*agentv1.NodeAlert
 }
 
 func (r *reports) add(_ context.Context, ev *agentv1.Event) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if a := ev.GetNodeAlert(); a != nil {
+		r.alerts = append(r.alerts, a)
+		return nil
+	}
 	r.events = append(r.events, ev.GetUpdateResult())
 	return nil
+}
+
+func (r *reports) nodeAlerts() []*agentv1.NodeAlert {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*agentv1.NodeAlert(nil), r.alerts...)
 }
 
 func (r *reports) all() []*agentv1.UpdateResult {
