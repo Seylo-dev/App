@@ -53,7 +53,7 @@ A real node agent needs Linux and Docker; see "Tests in a VM" below.
 | `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` |
 | `make breaking` | `buf breaking` against `main` |
 | `make release-snapshot` | Release binaries and `install.sh` into `dist/` (no signing, image or publish) |
-| `make release-dry-run` | goreleaser as a release runs it, in snapshot mode: signed, one panel image per platform loaded into Docker, nothing pushed |
+| `make release-dry-run` | goreleaser as a release runs it, in snapshot mode: one panel image per platform loaded into Docker, nothing signed or pushed (`scripts/release-sign.sh` signs) |
 | `make e2e` | The three-VM end-to-end test (below) |
 
 Before you open a pull request:
@@ -170,11 +170,19 @@ ported from other projects keeps its original notice and is listed in
 ## Releases
 
 Maintainers only. Releases are built by GitHub Actions
-(`.github/workflows/release.yml`) from a pushed `v*` tag: the Draft release
-job builds a draft release, then the Publish job checks the draft on its own
-and publishes it.
+(`.github/workflows/release.yml`) from a pushed `v*` tag, in three jobs:
+the Draft release job builds an unsigned draft release, the Sign job signs
+it, and the Publish job checks the draft on its own and publishes it.
 
-Once, before the first release:
+The release key is the root of trust for every install and every
+auto-update, so only the Sign job ever sees it. The Draft release job runs
+`bun install` and every npm build script (goreleaser's before hooks), so it
+gets no signing secret at all. The Sign job runs in the `release`
+environment, gets the built files as an artifact, runs no npm, bun or
+goreleaser code, and only hashes, checks and signs them
+(`scripts/release-sign.sh`).
+
+Once, before the first release (owners):
 
 1. Make the release key pair with [minisign](https://jedisct1.github.io/minisign/):
    `minisign -G -p release.pub -s release.key`. Keep the secret key and its
@@ -182,30 +190,58 @@ Once, before the first release:
 2. Put the public key (the `RW...` line of `release.pub`) into
    `brand/brand.json` as `minisignPublicKey`, run `make gen` and commit the
    result. Installers, agents and panels only trust files signed by this key.
-3. Add two repository secrets (Settings > Secrets and variables > Actions):
-   `MINISIGN_SECRET_KEY` with the full contents of `release.key` and
-   `MINISIGN_PASSWORD` with its password.
+3. Create the `release` environment (Settings > Environments > New
+   environment, name `release`) before the next tag. A tag run creates it
+   on first use, but then without any protection, so set it up first:
+   - Deployment protection rules: Required reviewers, the maintainers who
+     may approve a release (leave "Prevent self-review" off while there is
+     only one).
+   - Deployment branches and tags: Selected branches and tags, then add a
+     tag rule `v*` and no branch rule, so only a `v*` tag can reach the key.
+   - Environment secrets: `MINISIGN_SECRET_KEY` with the full contents of
+     `release.key` and `MINISIGN_PASSWORD` with its password.
+4. Delete the repository secrets `MINISIGN_SECRET_KEY` and
+   `MINISIGN_PASSWORD` if they exist (Settings > Secrets and variables >
+   Actions > Repository secrets). A repository secret can be read by any
+   workflow on any pushed branch; an environment secret only by jobs in that
+   environment, after its rules pass.
+5. Protect the refs a release comes from (Settings > Rules > Rulesets): a
+   tag ruleset for `v*` that restricts creations, updates and deletions to
+   the maintainers (bypass list), and a branch ruleset for `main` that blocks
+   force pushes and deletion.
 
 Each release:
 
 1. Run a dry run on `main`: Actions > Release > Run workflow, or
    `gh workflow run release.yml -f dry_run=true`. It runs the same checks
-   and builds everything a release attaches (binaries, signed checksums,
-   `install.sh`, both panel images, the signed manifest), signed with a
-   throwaway key made inside the job, and publishes nothing. A run started
-   by hand with `dry_run` off is refused: real releases only come from tags.
+   and builds everything a release attaches (binaries, checksums,
+   `install.sh`, both panel images, the manifest), then hands the files to a
+   second job that signs them with `scripts/release-sign.sh` and a throwaway
+   key made there, as the Sign job does, and publishes nothing. A run
+   started by hand with `dry_run` off is refused: real releases only come
+   from tags.
 2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
    The Draft release job checks that the tag is on the commit, runs
-   `make install`, `make check-gen` and `make test`, then `make release` for
-   exactly that tag, which makes the draft and pushes the image tags
-   (`<version>`, and `latest` unless it is a pre-release) to
-   `ghcr.io/seylo-dev/seylo`. One release runs at a time, and a running
-   release is never cancelled by another tag. Re-running the job replaces
-   the draft an earlier run made. A `vX.Y.Z-<pre>` tag (`v0.1.0-rc.1`)
-   makes a pre-release that installs and updates do not follow; to promote
-   it, tag the same commit `vX.Y.Z`.
-3. The Publish job (`scripts/release-publish.sh`) then checks the draft
-   without trusting the job that made it, and publishes it only when every
+   `make install`, `make check-gen` and `make test`, then
+   `make release-draft` for exactly that tag, which makes the draft (nothing
+   signed yet), pushes the image tags (`<version>`, and `latest` unless it
+   is a pre-release) to `ghcr.io/seylo-dev/seylo` and hands the release files
+   to the Sign job as an artifact (kept 14 days). One release runs at a
+   time, and a running release is never cancelled by another tag. Re-running
+   the job replaces the draft an earlier run made. A `vX.Y.Z-<pre>` tag
+   (`v0.1.0-rc.1`) makes a pre-release that installs and updates do not
+   follow; to promote it, tag the same commit `vX.Y.Z`.
+3. The Sign job waits for a reviewer: open the run, Review deployments,
+   tick `release` and approve. It then checks the files (every file
+   `checksums.txt` lists matches it; `manifest.json` is for this version and
+   has the sha256 of this release's linux binaries and `install.sh`;
+   `install.sh` installs this version and is not a test build), signs
+   `checksums.txt` and `manifest.json`, verifies both signatures with
+   `brand.json`'s key, and attaches them to the draft once it is the only
+   release with the tag and its `checksums.txt` and `manifest.json` are the
+   signed files.
+4. The Publish job (`scripts/release-publish.sh`) then checks the draft
+   without trusting the jobs that made it, and publishes it only when every
    check passes:
    - `checksums.txt` and `manifest.json` are signed by `brand.json`'s
      `minisignPublicKey`, with this version in their trusted comments;
@@ -231,7 +267,7 @@ Each release:
    drafts with one tag: delete the stale one, then re-run Publish). Running
    Publish again on a release that is already published checks it and
    changes nothing.
-4. On the first release only, the new package is private, so Publish stops
+5. On the first release only, the new package is private, so Publish stops
    with "The ghcr.io/seylo-dev/seylo package is private". Open it
    (github.com/orgs/Seylo-dev/packages > seylo), check that it is connected
    to the `App` repository, change its visibility to public (Package
@@ -240,38 +276,43 @@ Each release:
 
 To keep a release from going out on its own:
 
-- Push the tag as a pre-release (`v0.1.0-rc.1`). Publish still publishes it,
-  as a pre-release that installs and updates do not follow; tag the same
-  commit `vX.Y.Z` when it is ready.
-- Or cancel the workflow run (Actions > the run > Cancel workflow run)
-  while the Draft release job is still running or before the Publish job
-  starts; once Publish is running it may already have published. If the
-  Draft release job had finished, the draft is complete and stays a draft:
-  publish it later by re-running the Publish job. If it was still running,
-  the draft may be half made: delete it and the tag as below.
+- Reject the Sign job's deployment (the run's page > Review deployments >
+  Reject). The draft stays unsigned and Publish never runs; delete the
+  draft and the tag as below, or re-run the Sign job later to sign it.
+- Or push the tag as a pre-release (`v0.1.0-rc.1`). Publish still
+  publishes it, as a pre-release that installs and updates do not follow;
+  tag the same commit `vX.Y.Z` when it is ready.
 
-If the Draft release job fails, or Publish refuses the draft's content (not
-the private package), do not publish the draft by hand. Fix the cause on
-`main`, delete the draft release if one was made, delete the tag
-(`git push origin :refs/tags/v0.1.0` and `git tag -d v0.1.0`) and tag again.
+If the Sign job stops at "Release secrets are set", the `release`
+environment has no key yet: add its secrets (step 3 above), then re-run the
+Sign job; Publish follows it. If the Draft release job fails, or Sign or
+Publish refuse the draft's content (not the private package), do not sign or
+publish the draft by hand. Fix the cause on `main`, delete the draft release
+if one was made, delete the tag (`git push origin :refs/tags/v0.1.0` and
+`git tag -d v0.1.0`) and tag again.
 
-`make release` is the local fallback for the Draft release job and the step
-it runs. It needs the `v*` tag checked out, `GITHUB_TOKEN`,
-`MINISIGN_SECRET_KEY` (the path of the key file), `MINISIGN_PASSWORD`, a
-`docker login ghcr.io` and a buildx builder that builds linux/amd64 and
-linux/arm64. `scripts/release-preflight.sh` first refuses a placeholder or
-test signing key in `brand/brand.json`, a secret key that does not match it,
+`make release` is the local fallback for the Draft release and Sign jobs
+together, on a maintainer's machine that holds the key. It needs the `v*`
+tag checked out, `GITHUB_TOKEN`, `MINISIGN_SECRET_KEY` (the path of the key
+file), `MINISIGN_PASSWORD`, `jq`, a `docker login ghcr.io` and a buildx
+builder that builds linux/amd64 and linux/arm64.
+`scripts/release-preflight.sh` first refuses a placeholder or test signing
+key in `brand/brand.json`, a secret key that does not match it,
 `INSTALLER_TEST_PUBLIC_KEY` in the environment and a repository the token
 cannot push to (in Actions: a workflow running in another repository than
-`brand.json`'s `githubOrg`/`githubRepo`). goreleaser then makes a draft
-release with the binaries, signed checksums, `install.sh`, `openapi.json`
-and the multi-arch panel image, and `scripts/release-manifest.sh` adds the
-signed update manifest. `make release-dry-run` is the goreleaser half of the
-dry run (it needs `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` too).
+`brand.json`'s `githubOrg`/`githubRepo`); `--no-secret-key`, as the Draft
+release job runs it, skips the secret key. goreleaser then makes a draft
+release with the binaries, `checksums.txt`, `install.sh`, `openapi.json` and
+the multi-arch panel image, `scripts/release-manifest.sh` adds the update
+manifest and gathers every release file into `dist/release/`, and
+`scripts/release-sign.sh sign` and `upload` sign and attach the signatures.
+`make release-draft` is the Draft release job's part alone (no key), and
+`make release-dry-run` the goreleaser half of the dry run (no key either).
 
 `scripts/release-publish.sh v0.1.0` is the local fallback for the Publish
 job: the same checks, then the publish, with `gh` logged in to an account
 that can write to the repository, `minisign`, `jq` and `curl`.
 `scripts/release-publish.sh --check-image ghcr.io/seylo-dev/seylo:0.1.0`
-runs only the anonymous pull check. `make test-release` tests the script
-against a fake draft release and registry.
+runs only the anonymous pull check. `make test-release` tests
+`scripts/release-sign.sh` and `scripts/release-publish.sh` against fake
+draft releases and a fake registry.

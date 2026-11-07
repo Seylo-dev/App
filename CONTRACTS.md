@@ -29,10 +29,11 @@ openapi.json              generated from the op registry (scripts/gen-openapi.ts
 biome.json                TypeScript/CSS formatting and lint rules
 scripts/                  codegen helpers and the generated-code check
 deploy/panel.Dockerfile   panel image: Bun runtime + the built panel and web app (`make panel-image`)
-.goreleaser.yaml          release build; scripts/release-manifest.sh writes and signs the update manifest
+.goreleaser.yaml          release build (signs nothing); scripts/release-manifest.sh writes the update manifest and scripts/release-sign.sh signs it and checksums.txt
 test/e2e-colima/          three-VM end-to-end harness and checklist (`make e2e`, results in RESULTS.md)
 test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/ci.yml  CI on GitHub's runners: check-gen, lint, test, build (publishes nothing)
+.github/workflows/release.yml   tag releases: Draft release (unsigned), Sign (the only job with the release key, environment `release`), Publish
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
 templates/                one-click template catalog (meta.yaml + index.ts per app; README.md has the format)
 ```
@@ -1244,7 +1245,8 @@ the node is offline (`modules/databases/capability.ts`).
 ## Releases and updates
 
 Release assets (GitHub release `v<version>` of `<githubOrg>/<githubRepo>`,
-built by `make release`):
+built by the Release workflow: `make release-draft`, then
+`scripts/release-sign.sh` in the Sign job; `make release` does both locally):
 
 - `<slug>_linux_amd64`, `<slug>_linux_arm64`: static agent binaries, and
   the laptop CLI as `<slug>_darwin_amd64`, `<slug>_darwin_arm64`,

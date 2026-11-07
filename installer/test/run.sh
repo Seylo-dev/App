@@ -460,12 +460,17 @@ cat >"$shims/gh" <<'EOF'
 echo "${FAKE_GH_PUSH:-true}"
 EOF
 chmod +x "$shims/gh"
-preflight() { # [VAR=value...]: runs the preflight with the test release key unless overridden
+preflight() { # [--no-secret-key] [VAR=value...]: runs the preflight with the test release key unless overridden
+  local args=()
+  if [ "${1:-}" = --no-secret-key ]; then
+    args+=("$1")
+    shift
+  fi
   set +e
   OUT=$(env -i PATH="$shims:$tools:$with_minisign" HOME="$T" TMPDIR="$T" \
     BRAND_PLACEHOLDER_PREFIX="$BRAND_PLACEHOLDER_PREFIX" BRAND_GITHUB_ORG=test-org BRAND_GITHUB_REPO=test-repo \
     BRAND_MINISIGN_PUBLIC_KEY="$KEY" BRAND_OAUTH_CLIENT_ID=client MINISIGN_SECRET_KEY="$T/test.key" MINISIGN_PASSWORD= \
-    "$@" bash "$root/scripts/release-preflight.sh" 2>&1)
+    "$@" bash "$root/scripts/release-preflight.sh" ${args[@]+"${args[@]}"} 2>&1)
   RC=$?
   set -e
 }
@@ -481,6 +486,18 @@ preflight INSTALLER_TEST_PUBLIC_KEY="$KEY"
 expect_fail "release preflight refuses a run that would render a test-key installer" "INSTALLER_TEST_PUBLIC_KEY is set"
 preflight BRAND_MINISIGN_PUBLIC_KEY="$(sed -n 2p "$root/test/e2e-colima/keys/e2e-test.pub")"
 expect_fail "release preflight refuses the committed e2e test key" "TEST-ONLY e2e key"
+# The Draft release job of a tag release never sees the secret key: the Sign
+# job holds it (scripts/release-sign.sh).
+preflight --no-secret-key MINISIGN_SECRET_KEY=
+expect_ok "release preflight --no-secret-key passes without a secret key" "release-preflight: ok"
+preflight --no-secret-key MINISIGN_SECRET_KEY="$T/other.key"
+expect_ok "release preflight --no-secret-key does not check the secret key" "release-preflight: ok"
+preflight --no-secret-key BRAND_MINISIGN_PUBLIC_KEY="${BRAND_PLACEHOLDER_PREFIX}MINISIGN_PUBLIC_KEY"
+expect_fail "release preflight --no-secret-key still refuses the placeholder signing key" "minisignPublicKey is a placeholder"
+preflight --no-secret-key BRAND_MINISIGN_PUBLIC_KEY="$(sed -n 2p "$root/test/e2e-colima/keys/e2e-test.pub")"
+expect_fail "release preflight --no-secret-key still refuses the committed e2e test key" "TEST-ONLY e2e key"
+preflight --no-secret-key FAKE_GH_PUSH=false
+expect_fail "release preflight --no-secret-key still refuses a GitHub repo the releaser cannot push to" "cannot push to it"
 
 # Prompting needs a terminal that really opens. With no controlling terminal
 # (cloud-init, CI, ssh without -t) /dev/tty still reads as mode 666, so the old

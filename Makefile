@@ -12,7 +12,7 @@ GO_MODULE := $(shell sed -n 's/^module //p' go/go.mod)
 VERSION_PKG := $(GO_MODULE)/internal/version
 
 .PHONY: help install gen gen-brand gen-proto gen-ts check-gen build build-go build-ts test test-go test-ts lint breaking \
-	test-installer test-release installer panel-image release-check release-snapshot release-dry-run release e2e e2e-checks e2e-refresh e2e-down
+	test-installer test-release installer panel-image release-check release-snapshot release-dry-run release-draft release e2e e2e-checks e2e-refresh e2e-down
 
 help: ## List targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -56,7 +56,8 @@ test-ts: ## bun test in every workspace
 test-installer: ## install.sh in --root mode against a fake signed release (skips without minisign)
 	installer/test/run.sh
 
-test-release: ## scripts/release-publish.sh against a fake draft release and ghcr.io (skips without minisign or jq)
+test-release: ## scripts/release-sign.sh and release-publish.sh against fake releases and ghcr.io (skip without minisign or jq)
+	installer/test/release-sign.sh
 	installer/test/release-publish.sh
 
 lint: ## buf lint, gofmt, go vet, staticcheck, Biome, tsc
@@ -88,13 +89,24 @@ release-snapshot: ## Build the release binaries and install.sh into dist/ (no pu
 	$(BRAND_ENV) goreleaser release --snapshot --clean --skip=sign,docker,before
 	cp build/install.sh dist/install.sh
 
-release-dry-run: ## goreleaser as in `make release`, publishing nothing: snapshot, signed, one panel image per platform loaded locally (MINISIGN_SECRET_KEY, MINISIGN_PASSWORD)
+release-dry-run: ## goreleaser as a release runs it, publishing nothing: snapshot, one panel image per platform loaded locally, nothing signed
 	$(BRAND_ENV) goreleaser release --snapshot --clean
 
-release: ## Publish from a v* tag (GITHUB_TOKEN, MINISIGN_SECRET_KEY, MINISIGN_PASSWORD, docker login)
+# The Draft release job of a tag release: everything but the signatures, with
+# no signing key around (the before hooks run every npm build script). The
+# Sign job signs dist/release/ with scripts/release-sign.sh.
+release-draft: ## Draft release from a v* tag, unsigned: goreleaser (draft, image push), manifest.json, dist/release/ (GITHUB_TOKEN, docker login)
+	$(BRAND_ENV) scripts/release-preflight.sh --no-secret-key
+	$(BRAND_ENV) goreleaser release --clean
+	$(BRAND_ENV) scripts/release-manifest.sh
+
+# Local fallback for the Draft release and Sign jobs together.
+release: ## Signed draft release from a v* tag (GITHUB_TOKEN, MINISIGN_SECRET_KEY, MINISIGN_PASSWORD, docker login)
 	$(BRAND_ENV) scripts/release-preflight.sh
 	$(BRAND_ENV) goreleaser release --clean
 	$(BRAND_ENV) scripts/release-manifest.sh
+	$(BRAND_ENV) v=$$(jq -r .version dist/metadata.json) && scripts/release-sign.sh sign "$$v" dist/release && \
+		scripts/release-sign.sh upload "v$$v" dist/release
 
 e2e: ## Three VMs (Colima A/B, plain Lima C): install, join, the 38-check checklist -> test/e2e-colima/RESULTS.md (KEEP=1 keeps the VMs)
 	test/e2e-colima/run.sh

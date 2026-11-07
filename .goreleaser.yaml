@@ -1,9 +1,14 @@
 # Release build: static agent binaries for linux/amd64 and linux/arm64, the
-# laptop CLI for macOS and Windows (amd64, arm64), checksums signed with minisign, the multi-arch panel image, and the
-# rendered install.sh. The signed release manifest (manifest.json + .minisig,
-# read by the panel and the agents to update) needs the pushed image's
-# digest, so `make release` writes and uploads it after this run
-# (scripts/release-manifest.sh).
+# laptop CLI for macOS and Windows (amd64, arm64), checksums.txt, the
+# multi-arch panel image, and the rendered install.sh. The release manifest
+# (manifest.json, read by the panel and the agents to update) needs the
+# pushed image's digest, so scripts/release-manifest.sh writes and uploads it
+# after this run.
+#
+# Nothing here signs. The before hooks run every npm build script, so this
+# run never gets the release key: scripts/release-sign.sh signs
+# checksums.txt and manifest.json afterwards, in a tag release in its own
+# job (.github/workflows/release.yml, Sign).
 #
 # Brand values come from installer/brand.env as BRAND_* environment
 # variables, and GO_MODULE from go/go.mod; run through the Makefile
@@ -67,33 +72,13 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
   # release.extra_files are not checksummed on their own: list them here
-  # too, so every file the release attaches is covered by a signature
-  # (scripts/release-publish.sh refuses a checksums.txt without them). This
-  # only adds lines to checksums.txt; release.extra_files uploads them.
+  # too, so every file the release attaches is covered by the signature of
+  # checksums.txt (scripts/release-sign.sh and scripts/release-publish.sh
+  # refuse a checksums.txt without them). This only adds lines to
+  # checksums.txt; release.extra_files uploads them.
   extra_files:
     - glob: build/install.sh
     - glob: openapi.json
-
-signs:
-  # minisign -S with the release key; MINISIGN_SECRET_KEY is the key file,
-  # MINISIGN_PASSWORD its password. Its public half is brand.json
-  # minisignPublicKey.
-  - id: checksums
-    artifacts: checksum
-    cmd: minisign
-    stdin: "{{ .Env.MINISIGN_PASSWORD }}"
-    args:
-      - -S
-      - -s
-      - "{{ .Env.MINISIGN_SECRET_KEY }}"
-      - -m
-      - "${artifact}"
-      - -x
-      - "${signature}"
-      - -t
-      # Not .ProjectName: goreleaser does not render project_name.
-      - "{{ .Env.BRAND_SLUG }} {{ .Version }} checksums.txt"
-    signature: "${artifact}.minisig"
 
 dockers_v2:
   - id: panel
