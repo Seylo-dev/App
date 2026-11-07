@@ -31802,7 +31802,7 @@
       "get": {
         "operationId": "git.branches",
         "summary": "List a git repository's branches",
-        "description": "Checks access to a git URL (with a stored credential for private repos, like git ls-remote) and lists its branches with the default one. Used to validate a generic git source before saving it.",
+        "description": "Checks access to a git URL (with a stored credential for private repos, like git ls-remote) and lists its branches with the default one. Used to validate a generic git source before saving it. The host follows the rule for saving a source: a public address, an internal host an admin already saved a source with in this project, or any internal host for a git.manage caller; never a cloud metadata address (BAD_REQUEST internalTarget otherwise).",
         "tags": [
           "git"
         ],
