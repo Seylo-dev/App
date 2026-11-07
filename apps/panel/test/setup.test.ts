@@ -27,6 +27,12 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
+// The GitHub client id normally comes from brand.json; tests set the one they
+// are about so they never depend on whether the brand has a real one.
+function useGithubClientId(id: string): void {
+  (panel.deps.config as { githubClientId?: string }).githubClientId = id;
+}
+
 test("the panel imports the installer's token, or writes a fresh one", () => {
   const path = setupTokenPath(dataDir);
   writeFileSync(path, "seylo_setup_from-installer\n");
@@ -45,6 +51,7 @@ test("the panel imports the installer's token, or writes a fresh one", () => {
 });
 
 test("status reports the link, and createOwner burns it and signs in", async () => {
+  useGithubClientId("PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID");
   const { token } = issueSetupToken(panel.deps.db);
   writeFileSync(setupTokenPath(dataDir), `${token}\n`);
 
@@ -134,7 +141,15 @@ test("GitHub owner sign-up refuses an account without a verified email", async (
 });
 
 test("GitHub is unavailable while the client id is a placeholder", async () => {
+  useGithubClientId("PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID");
   const { token } = issueSetupToken(panel.deps.db);
+  expect((await ok(panel, setup.status, { token })).body.githubAvailable).toBe(false);
   const result = await call(panel, setup.githubStart, { token, repoAccess: false });
   expect(result.status).toBe(503);
+});
+
+test("GitHub sign-in is offered once the panel has a real client id", async () => {
+  useGithubClientId("Ov23liExampleClient1");
+  const { token } = issueSetupToken(panel.deps.db);
+  expect((await ok(panel, setup.status, { token })).body.githubAvailable).toBe(true);
 });

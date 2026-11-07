@@ -31,7 +31,7 @@ export const githubRepo = "App";
 export const image = "ghcr.io/seylo-dev/seylo";
 
 /** OAuthClientID is the public client id of the GitHub OAuth App used for device-flow sign-in. */
-export const oauthClientId = "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID";
+export const oauthClientId = "Ov23liX9a5KSfuT6qsYI";
 
 /** MinisignPublicKey verifies signed release manifests. */
 export const minisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip";

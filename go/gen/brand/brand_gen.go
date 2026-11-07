@@ -27,7 +27,7 @@ const (
 	// Image is the panel container image, without a tag.
 	Image = "ghcr.io/seylo-dev/seylo"
 	// OAuthClientID is the public client id of the GitHub OAuth App used for device-flow sign-in.
-	OAuthClientID = "PLACEHOLDER_GITHUB_OAUTH_CLIENT_ID"
+	OAuthClientID = "Ov23liX9a5KSfuT6qsYI"
 	// MinisignPublicKey verifies signed release manifests.
 	MinisignPublicKey = "RWTwvrETQsecIkFOCm1ceiZwfxVq6sFfiEmJfWnUVv7UBIn0jWm2h1ip"
 )
