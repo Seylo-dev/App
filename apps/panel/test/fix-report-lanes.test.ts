@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { ReportCrashRequestSchema, ReportCrashResponseSchema, ReportEventRequestSchema, ReportEventResponseSchema } from "@seylo/proto";
 import { and, eq, sql } from "drizzle-orm";
-import { reportBudget } from "../src/agent-hub/report-budget";
+import { createReportBudget, reportBudget, storedReportsSince } from "../src/agent-hub/report-budget";
 import { agentReports, alerts } from "../src/db/schema";
 import { pruneTables, retention } from "../src/modules/nodes/retention";
 import type { FakeAgent } from "./fake-agent";
@@ -115,4 +115,28 @@ test("retention trims each lane to its own caps, so an alert flood does not push
   for (let i = 0; i < 4; i++) await report(agent, backupResult(i));
   pruneTables(panel.deps.db);
   expect(storedKinds(agent.nodeId)).toEqual({ cronRun: 10, nodeAlert: 25, backupResult: 2 });
+});
+
+test("a restarted panel counts each lane from what panel.db holds, so a full general lane does not count against cron", async () => {
+  const { agent, service } = await setup();
+  for (let i = 0; i < 6; i++) await crash(agent, service.id, i);
+  for (let i = 0; i < 20; i++) await report(agent, nodeAlert(i));
+  for (let i = 0; i < 7; i++) await report(agent, cronRun(service.id, i));
+  for (let i = 0; i < 2; i++) await report(agent, backupResult(i));
+  const since = new Date(Date.now() - reportBudget.windowMs);
+  const rows = (lane: "general" | "cron" | "results") => storedReportsSince(panel.deps.db, agent.nodeId, lane, since).rows;
+  expect([rows("general"), rows("cron"), rows("results")]).toEqual([26, 7, 2]);
+  // A fresh budget (a panel restart) seeds each lane on its own.
+  const exceeded: string[] = [];
+  const budget = createReportBudget({
+    storedSince: (nodeId, lane, from) => storedReportsSince(panel.deps.db, nodeId, lane, from),
+    onExceeded: (_nodeId, lane) => exceeded.push(lane),
+    limits: { rowsPerDay: 26, cronRowsPerDay: 8, resultRowsPerDay: 2 },
+  });
+  expect(budget.allows(agent.nodeId, "general", 1)).toBe(false);
+  expect(budget.allows(agent.nodeId, "cron", 1)).toBe(true);
+  budget.spend(agent.nodeId, "cron", 1);
+  expect(budget.allows(agent.nodeId, "cron", 1)).toBe(false);
+  expect(budget.allows(agent.nodeId, "results", 1)).toBe(false);
+  expect(exceeded).toEqual(["general", "cron", "results"]);
 });
