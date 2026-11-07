@@ -120,14 +120,14 @@ test("node facts are capped and written at most once every 2 s, the newest last"
   // Before: 30 UPDATEs of 2 MiB each.
   expect(stored()?.bytes).toBeLessThan(4096);
   await Bun.sleep(2100);
-  expect((stored()?.facts as { hostname?: string }).hostname).toStartWith("29h");
+  expect((stored()?.facts as { hostname?: string } | undefined)?.hostname).toStartWith("29h");
 });
 
 test("a node's hello facts are capped before they are stored", async () => {
   const agent = await joinAgent(panel, url, { facts: { hostname: "x".repeat(100_000), capabilities: ["state.sync.v1"] } });
   agents.push(agent);
   const row = panel.deps.db.select({ facts: nodes.facts }).from(nodes).where(eq(nodes.id, agent.nodeId)).get();
-  expect((row?.facts as { hostname: string }).hostname).toHaveLength(256);
+  expect((row?.facts as { hostname?: string } | undefined)?.hostname).toHaveLength(256);
 });
 
 test("GetDesiredState is rate limited per node and repeated asks reuse the compiled state", async () => {
