@@ -321,7 +321,8 @@ func TestPlainFallbackNeverMovesOrIsRestored(t *testing.T) {
 
 // A panel_url that answers as another panel (a typo'd or hijacked domain
 // serving another installation) is never taken, even when that panel
-// accepts the node: the node stays and the panel gets one alert with why.
+// would accept the node: the node signs nothing for it, stays, and the
+// panel gets one alert with why.
 func TestMoveToAnotherPanelFails(t *testing.T) {
 	moveSetup(t, false)
 	panel := rpctest.NewFakePanel(t, rpctest.WithTLS())
@@ -331,8 +332,8 @@ func TestMoveToAnotherPanelFails(t *testing.T) {
 	layout := joined(t, panel)
 	startDaemon(t, layout)
 	nodeID := panel.WaitConnected("")
-	// The other panel knows the node's key, so the resume there is accepted
-	// and only the panel id tells the two apart.
+	// The other panel knows the node's key, so it would accept a resume:
+	// only the panel id tells the two apart.
 	other.AddNode(nodeID, panel.NodeKey(nodeID))
 	panel.SetPanelAddress(other.URL(), conn.FormatPin(other.SPKI()))
 	panel.DropConnections()
@@ -345,8 +346,8 @@ func TestMoveToAnotherPanelFails(t *testing.T) {
 	}
 	panel.WaitConnected(nodeID)
 	time.Sleep(300 * time.Millisecond)
-	if hosts := other.AcceptedHosts(); len(hosts) != 1 {
-		t.Fatalf("the other panel accepted %v, want the one resume of the move", hosts)
+	if hosts, hellos := other.AcceptedHosts(), other.Hellos(); len(hosts) != 0 || len(hellos) != 0 {
+		t.Fatalf("the other panel got hellos %v and accepted %v, want none: the node knows its panel id", hellos, hosts)
 	}
 	hosts := panel.AcceptedHosts()
 	if len(hosts) != 3 {

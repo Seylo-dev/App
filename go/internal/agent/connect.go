@@ -124,7 +124,7 @@ func (c *connector) run(ctx context.Context) error {
 			delay = rejectedRetry
 			c.logger.Error("the panel refused this agent; fix the node config or join again", "reason", rejected.Rejected.GetReason().String(), "message", rejected.Rejected.GetMessage())
 			c.status.failed("rejected", err, delay)
-		case errors.Is(err, conn.ErrPinMismatch), errors.Is(err, errNotJoined):
+		case errors.Is(err, conn.ErrPinMismatch), errors.Is(err, errNotJoined), errors.Is(err, errOtherPanel):
 			delay = rejectedRetry
 			c.logger.Error("cannot connect to the panel", "err", err)
 			c.status.failed("rejected", err, delay)
@@ -262,11 +262,20 @@ func (c *connector) dial(ctx context.Context, target panelTarget) (*conn.WebSock
 
 	hsCtx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	res, err := rpc.AgentHandshake(hsCtx, t, func(server *agentv1.ServerHello) (*agentv1.ClientHello, error) {
-		return c.hello(c.config(), server)
+		cfg := c.config()
+		// Another panel gets no signature at all (panel_identity.go).
+		if err := checkPanelID(cfg, target.url, server); err != nil {
+			return nil, err
+		}
+		return c.hello(cfg, server)
 	})
 	cancel()
 	if err != nil {
 		_ = t.Close("handshake failed")
+		return nil, nil, err
+	}
+	if err := c.checkPanelIdentity(target.url, res); err != nil {
+		_ = t.Close("not this node's panel")
 		return nil, nil, err
 	}
 	return t, res, nil
