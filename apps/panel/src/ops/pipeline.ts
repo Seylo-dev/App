@@ -17,6 +17,7 @@ import { type Access, createAccess, type Target, targetOf } from "../auth/access
 import { authenticate, type Credentials } from "../auth/authenticate";
 import type { Principal, PrincipalUser } from "../auth/principal";
 import type { Deps } from "../deps";
+import { addressKey } from "../http/ip-ranges";
 import { targetLabel, targetProject, writeAudit } from "./audit";
 import type { HttpEffects, OpContext, OpHandler } from "./implement";
 import type { RateLimiter } from "./rate-limit";
@@ -143,11 +144,11 @@ function buildContext(
   };
 }
 
-/** Signed-in callers are limited per person or key; anonymous ones per IP. */
+/** Signed-in callers are limited per person or key; anonymous ones per address (an IPv6 /64 counts as one). */
 function rateLimitKey(principal: Principal, ip: string | null): string {
   switch (principal.type) {
     case "anonymous":
-      return `ip:${ip ?? "unknown"}`;
+      return `ip:${addressKey(ip)}`;
     case "session":
       return `user:${principal.user.id}`;
     case "apiKey":

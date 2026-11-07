@@ -719,11 +719,18 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   never tells which emails exist) or account for that address for 30 s,
   doubling up to 15 minutes; 15 quiet minutes forgive the streak, and
   `users.enable` clears every address's streak (`src/auth/lockout.ts`,
-  in memory). A soft brake per typed email counts wrong passwords from
-  every address: past 50 within the same forgiveness window each sign-in
-  for that email waits 2.5 s first and the account gets one
-  `security_change` alert per streak (never a lock; `users.enable` clears
-  it too). Recovery codes are stored as HMACs (`secrets.sign(code,
+  in memory). Addresses are grouped for locks and the anonymous rate-limit
+  bucket by `addressKey` (`src/http/ip-ranges.ts`): IPv4 exact, IPv6 by its
+  /64. A brake per typed email counts wrong passwords from every address:
+  past 50 within the same forgiveness window the email gets one password
+  check every 2.5 s and one at a time, whatever the number of addresses
+  (the rest answer RATE_LIMITED with `retryAfter`, nothing sleeps in the
+  panel), and the account gets one `security_change` alert per streak.
+  Address groups that gave the right password for that email in the last
+  30 days skip the brake, so a campaign does not keep the owner out
+  (`users.enable` clears the brake too). At most 4 password verifications
+  (argon2id, about 64 MiB each) run at once, 32 wait, and the rest answer
+  RATE_LIMITED (`src/security/password.ts` `verifyLimits`). Recovery codes are stored as HMACs (`secrets.sign(code,
   "recovery-code")`), not bare SHA-256: they carry only 50 bits.
 - Audit: the pipeline records the permission's target and its name before
   the op runs (so deletes keep it); refused attempts keep the target id but

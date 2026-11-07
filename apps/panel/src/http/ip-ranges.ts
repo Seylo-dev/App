@@ -44,6 +44,22 @@ function ipv6Bytes(ip: string): Uint8Array | null {
   return out;
 }
 
+/**
+ * The group of addresses one caller controls, for limits and sign-in locks:
+ * an IPv4 address on its own, an IPv6 address by its /64 (one customer
+ * line usually gets a whole /64, so counting single IPv6 addresses would
+ * hand an attacker 2^64 fresh buckets). Unknown callers share "unknown".
+ */
+export function addressKey(address: string | null): string {
+  if (address === null) return "unknown";
+  const bytes = ipBytes(address);
+  if (!bytes) return address.trim().toLowerCase();
+  if (bytes.length === 4) return bytes.join(".");
+  const groups: string[] = [];
+  for (let i = 0; i < 8; i += 2) groups.push((((bytes[i] ?? 0) << 8) | (bytes[i + 1] ?? 0)).toString(16));
+  return `${groups.join(":")}::/64`;
+}
+
 export interface Cidr {
   bytes: Uint8Array;
   bits: number;
