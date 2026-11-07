@@ -366,9 +366,16 @@ function runGlob(g: CompiledGlob, path: string): boolean {
  * part of reading a character.
  */
 export function globCost(glob: string, path: string): number {
-  const g = compileGlob(glob);
-  if (!fitsLiterals(g, path)) return workPerLiteralCheck;
+  return costOf(compileGlob(glob), path);
+}
+
+/** The automaton's work for a path that has the glob's literal head and tail. */
+function runCost(g: CompiledGlob, path: string): number {
   return (path.length + workPerCall) * (g.words + workPerCharacter);
+}
+
+function costOf(g: CompiledGlob, path: string): number {
+  return fitsLiterals(g, path) ? runCost(g, path) : workPerLiteralCheck;
 }
 
 /** A changed file as the repository names it, without a leading "./" or "/". */
@@ -386,7 +393,25 @@ export interface WatchFileDecision {
 
 /** What the patterns say about one changed file. */
 export function decideWatchFile(patterns: readonly string[], file: string): WatchFileDecision {
-  return decide(patterns, normalizeChangedPath(file), null) as WatchFileDecision;
+  return decide(prepare(patterns), normalizeChangedPath(file), null) as WatchFileDecision;
+}
+
+/** A list of patterns with each glob compiled once for a whole decision, not looked up again per file. */
+interface PreparedPatterns {
+  /** In list order; a pattern that is "!" alone is left out. */
+  list: { pattern: string; negated: boolean; glob: CompiledGlob }[];
+  /** Only "!" patterns: a file none of them matches counts. */
+  onlyExclusions: boolean;
+}
+
+function prepare(patterns: readonly string[]): PreparedPatterns {
+  const list: PreparedPatterns["list"] = [];
+  for (const pattern of patterns) {
+    const negated = pattern.startsWith("!");
+    const body = negated ? pattern.slice(1) : pattern;
+    if (body !== "") list.push({ pattern, negated, glob: compileGlob(body) });
+  }
+  return { list, onlyExclusions: patterns.length > 0 && patterns.every((p) => p.startsWith("!")) };
 }
 
 /**
@@ -394,20 +419,18 @@ export function decideWatchFile(patterns: readonly string[], file: string): Watc
  * first. The last matching pattern decides, so patterns are tried from
  * the last one back and the first match ends it.
  */
-function decide(patterns: readonly string[], path: string, budget: { left: number } | null): WatchFileDecision | null {
-  for (let i = patterns.length - 1; i >= 0; i--) {
-    const pattern = patterns[i] as string;
-    const negated = pattern.startsWith("!");
-    const body = negated ? pattern.slice(1) : pattern;
-    if (body === "") continue;
+function decide(patterns: PreparedPatterns, path: string, budget: { left: number } | null): WatchFileDecision | null {
+  const { list } = patterns;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const { pattern, negated, glob } = list[i] as PreparedPatterns["list"][number];
+    const fits = fitsLiterals(glob, path);
     if (budget) {
-      budget.left -= globCost(body, path);
+      budget.left -= fits ? runCost(glob, path) : workPerLiteralCheck;
       if (budget.left < 0) return null;
     }
-    if (globMatches(body, path)) return { file: path, included: !negated, pattern };
+    if (fits && runGlob(glob, path)) return { file: path, included: !negated, pattern };
   }
-  const onlyExclusions = patterns.length > 0 && patterns.every((p) => p.startsWith("!"));
-  return { file: path, included: onlyExclusions, pattern: null };
+  return { file: path, included: patterns.onlyExclusions, pattern: null };
 }
 
 export type WatchPathsResult =
@@ -438,6 +461,7 @@ export function matchWatchPaths(
 ): WatchPathsResult {
   if (patterns.length === 0) return { deploy: true, reason: "off" };
   if (files === null) return { deploy: true, reason: "unknown" };
+  const prepared = prepare(patterns);
   const left = { left: budget };
   for (let i = 0; i < files.length; i++) {
     const file = files[i] as string;
@@ -447,7 +471,7 @@ export function matchWatchPaths(
       continue;
     }
     left.left -= workPerCall;
-    const decision = left.left < 0 ? null : decide(patterns, normalizeChangedPath(file), left);
+    const decision = left.left < 0 ? null : decide(prepared, normalizeChangedPath(file), left);
     if (decision === null) return { deploy: true, reason: "tooMany", checked: i, total: files.length };
     if (decision.included) return { deploy: true, reason: "matched", file: decision.file, pattern: decision.pattern };
   }
