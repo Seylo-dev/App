@@ -87,12 +87,20 @@ const maxContainerIdLength = 128;
 /** Reports per node: a burst after an outage drains, a flood is told to back off. */
 const reportBurst = 600;
 const reportsPerSecond = 10;
+/** GetDesiredState per node: an agent asks once per connection (catching up after a fresh start). */
+const desiredBurst = 10;
+const desiredPerSecond = 0.1;
 
 export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers {
   const { db, hub, logger } = deps;
   const reportLimiter = createRateLimiter({
     standard: { burst: reportBurst, refillPerSecond: reportsPerSecond },
     strict: { burst: reportBurst, refillPerSecond: reportsPerSecond },
+  });
+
+  const desiredLimiter = createRateLimiter({
+    standard: { burst: desiredBurst, refillPerSecond: desiredPerSecond },
+    strict: { burst: desiredBurst, refillPerSecond: desiredPerSecond },
   });
 
   const budget = createReportBudget({
@@ -201,6 +209,10 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
   };
 
   const getDesiredState = (nodeId: string, bytes: Uint8Array): Uint8Array => {
+    // Compiling a node's state reads every service placed on it; the agent needs it once per connection.
+    if (desiredLimiter.take(`node:${nodeId}`, "standard") > 0) {
+      throw new PanelServiceError(StatusCode.RESOURCE_EXHAUSTED, "Too many desired state requests. The panel sends changes on its own.");
+    }
     const request = fromBinary(GetDesiredStateRequestSchema, bytes);
     const state = deps.desiredState(nodeId, request.knownRevision);
     return toBinary(GetDesiredStateResponseSchema, create(GetDesiredStateResponseSchema, { state: state ?? undefined }));

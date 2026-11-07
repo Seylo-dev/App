@@ -203,7 +203,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   flight (RESOURCE_EXHAUSTED beyond), stream-0 EVENT frames through a
   token bucket (burst 2000, 200 per second; past it frames are dropped
   before they are decoded, and a dropped state delta makes the panel fetch
-  a snapshot), 32 MiB unread on agent streams (a running count, and
+  a snapshot), GetDesiredState 10 per node then one per 10 s
+  (RESOURCE_EXHAUSTED; the agent only asks after a fresh start, and the
+  compiled state is reused for the same revision for 5 s), 32 MiB unread on agent streams (a running count, and
   `DelimitedDecoder` copies each byte once when its message is complete, so
   the sender's DATA frame sizes do not change the panel's work). One
   GetStateSnapshot per node at a time. panel.db retention (hourly,

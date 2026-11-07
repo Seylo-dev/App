@@ -2,15 +2,18 @@
 // GetDesiredState calls: events pass a token bucket per connection (the
 // rest are dropped before decoding), best-effort events reuse a cached
 // service scope, metrics keep one entry per service and a bounded number
-// of live points, and facts are capped and written at most every 2 s.
+// of live points, facts are capped and written at most every 2 s, and
+// GetDesiredState is rate limited and reuses the compiled state.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { GetDesiredStateRequestSchema, GetDesiredStateResponseSchema, StatusCode } from "@seylo/proto";
 import { eq, sql } from "drizzle-orm";
 import { servicesOnNode } from "../src/agent-hub/service-scope";
 import { agentLimits } from "../src/agent-hub/session";
 import { nodes } from "../src/db/schema";
 import { maxLivePoints, metricsFor } from "../src/modules/metrics/ingest";
-import type { FakeAgent } from "./fake-agent";
+import { flusherFor } from "../src/modules/nodes/index";
+import { type FakeAgent, FakeStatus } from "./fake-agent";
 import { type TestPanel, testPanel } from "./helpers";
 import { joinAgent, listen, seedProject, seedService } from "./hub-helpers";
 
@@ -125,4 +128,30 @@ test("a node's hello facts are capped before they are stored", async () => {
   agents.push(agent);
   const row = panel.deps.db.select({ facts: nodes.facts }).from(nodes).where(eq(nodes.id, agent.nodeId)).get();
   expect((row?.facts as { hostname: string }).hostname).toHaveLength(256);
+});
+
+test("GetDesiredState is rate limited per node and repeated asks reuse the compiled state", async () => {
+  const agent = await join();
+  seedService(panel, seedProject(panel).id, agent.nodeId);
+  await flusherFor(panel.deps)?.flush();
+  const flusher = flusherFor(panel.deps);
+  const first = flusher?.currentState(agent.nodeId, 0n);
+  expect(first).not.toBeNull();
+  // Before: compiled again on every call.
+  expect(flusher?.currentState(agent.nodeId, 0n)).toBe(first);
+
+  let answered = 0;
+  let refused = 0;
+  for (let i = 0; i < 40; i++) {
+    try {
+      await agent.callPanel("GetDesiredState", GetDesiredStateRequestSchema, GetDesiredStateResponseSchema, { knownRevision: 0n });
+      answered++;
+    } catch (error) {
+      expect(error).toBeInstanceOf(FakeStatus);
+      expect((error as FakeStatus).code).toBe(StatusCode.RESOURCE_EXHAUSTED);
+      refused++;
+    }
+  }
+  expect(answered).toBe(10);
+  expect(refused).toBe(30);
 });
