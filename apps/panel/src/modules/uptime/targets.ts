@@ -206,7 +206,8 @@ export async function checkTarget(
   if (blocked.length === 0) return { ok: true, address: pin, byName: false };
   // The metadata service is never one of ours, even on a node's own address.
   const first = blocked.find((b) => b.reason === "metadata") ?? (blocked[0] as { address: string; reason: BlockReason });
-  if (first.reason !== "metadata" && options.ownNodes !== false && ownTarget(deps, addresses)) return { ok: true, address: pin, byName: false };
+  if (first.reason !== "metadata" && options.ownNodes !== false && ownTarget(deps, addresses))
+    return { ok: true, address: pin, byName: false };
   return { ok: false, reason: first.reason as BlockReason, address: first.address };
 }
 

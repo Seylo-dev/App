@@ -17,6 +17,7 @@ import { compose, git as gitOps, projects, services as serviceOps } from "@seylo
 import { eq } from "drizzle-orm";
 import { gitInternalHosts, nodes } from "../src/db/schema";
 import { resolveBuild } from "../src/modules/deployments/source";
+import { seedInternalGitHosts } from "../src/modules/git/targets";
 import { loadService } from "../src/modules/services/rows";
 import { readSpec } from "../src/modules/services/spec";
 import { setTargetResolver } from "../src/modules/uptime/targets";
@@ -122,6 +123,19 @@ test("builds and FetchGitFile tell the node when the host may be internal, and o
     { url: "https://gitea.lan/stack.git", allowInternalHost: true },
     { url: "https://git.example.com/stack.git", allowInternalHost: false },
   ]);
+});
+
+// Hosts recorded on the first start (sources saved before 0.2) count like an admin's.
+test("a seeded internal host builds with allowInternalHost", async () => {
+  const svc = await callOp(panel, serviceOps.create, gitService("https://gitea.lan/seeded.git", "seeded"), { cookie: owner });
+  expect(svc.status).toBe(200);
+  // As if it had been saved before the check existed.
+  panel.deps.db.delete(gitInternalHosts).run();
+  await expect(built(svc.body.id)).rejects.toThrow("Only an admin can use an internal git host");
+  setSetting(panel.deps.db, "gitInternalHostsSeeded", false);
+  seedInternalGitHosts(panel.deps.db);
+  // Before: allowInternalHost was never sent, so a 0.2 node refused a LAN git server an upgrade kept.
+  expect((await built(svc.body.id)).allowInternalHost).toBe(true);
 });
 
 // Uptime checks may reach a node's own address (an admin set it), but for git that address is
