@@ -33,6 +33,7 @@ deploy/panel.Dockerfile   panel image: Bun runtime + the built panel and web app
 test/e2e-colima/          three-VM end-to-end harness and checklist (`make e2e`, results in RESULTS.md)
 test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/ci.yml  CI on GitHub's runners: check-gen, lint, test, build (publishes nothing)
+.github/workflows/security.yml  govulncheck, osv-scanner (triaged ignores in osv-scanner.toml) and zizmor on push, pull request and weekly
 .github/workflows/release.yml   tag releases: Draft release (unsigned), Sign (the only job with the release key, environment `release`), Publish
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
 templates/                one-click template catalog (meta.yaml + index.ts per app; README.md has the format)

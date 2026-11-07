@@ -1,0 +1,73 @@
+name: Security
+
+# Dependency and workflow checks. Nothing here publishes or needs secrets.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1" # weekly: advisories land without code changes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: govulncheck (Go, reachable only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          check-latest: true # the stdlib result is only as new as the toolchain
+          cache-dependency-path: go/go.sum
+
+      # The version is checked against sum.golang.org, so @v1.9.0 is
+      # hash-pinned. Exit 3 = our code calls a vulnerable function.
+      - name: govulncheck
+        working-directory: go
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  osv-scanner:
+    name: osv-scanner (bun.lock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false
+
+      # Go modules are govulncheck's job (it knows what is reachable);
+      # osv-scanner.toml lists triaged npm advisories, each with an expiry.
+      - name: osv-scanner
+        run: go run github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0 scan source --config osv-scanner.toml -L bun.lock
+
+  zizmor:
+    name: zizmor (workflows)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.32.0
+          advanced-security: false # fail the job on findings instead of uploading SARIF
+          min-severity: medium
