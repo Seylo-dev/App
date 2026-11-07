@@ -23,6 +23,7 @@ func nodeCommands(d *deps) []*cobra.Command {
 		newPanelCommand(d),
 		newUpdateGuardCommand(d),
 		newInstallUnitsCommand(d),
+		newGitDialCommand(d),
 	}
 	for _, c := range cmds {
 		linuxOnly(d, c)

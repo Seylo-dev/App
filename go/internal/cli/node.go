@@ -5,6 +5,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"text/tabwriter"
@@ -14,6 +15,7 @@ import (
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/agent"
+	"github.com/seylo-dev/app/go/internal/build"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/nodecheck"
 	"github.com/seylo-dev/app/go/internal/systemd"
@@ -304,6 +306,21 @@ func newUpdateGuardCommand(d *deps) *cobra.Command {
 				fmt.Fprintln(d.out, "The new agent did not reconnect in time; the previous agent was restored.")
 			}
 			return nil
+		},
+	}
+}
+
+// newGitDialCommand is the ssh ProxyCommand of git fetches: it asks the
+// fetch's proxy in the agent for a tunnel to the source's host, so ssh
+// connects only where the agent allows (internal/build gitproxy.go).
+func newGitDialCommand(*deps) *cobra.Command {
+	return &cobra.Command{
+		Use:    build.GitDialCommand + " <proxy> <host:port>",
+		Short:  "Connect ssh to a git host through a fetch's proxy",
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return build.GitDial(cmd.Context(), args[0], args[1], cmd.InOrStdin(), os.Stdout, cmd.ErrOrStderr())
 		},
 	}
 }

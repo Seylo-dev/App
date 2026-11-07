@@ -31,7 +31,8 @@ func TestITGiteaPrivateClone(t *testing.T) {
 	work := t.TempDir()
 	dir := filepath.Join(work, "src")
 	var log bytes.Buffer
-	src := &agentv1.GitSource{Url: repo, Ref: "main", Commit: head, Token: token, Username: user}
+	// The VM's own address: a host an admin allowed for the project.
+	src := &agentv1.GitSource{Url: repo, Ref: "main", Commit: head, Token: token, Username: user, AllowInternalHost: true}
 	if err := validateGit(src); err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +51,8 @@ func TestITGiteaPrivateClone(t *testing.T) {
 	}
 
 	anon := t.TempDir()
-	_, err = fetchGit(ctx, run, &log, &agentv1.GitSource{Url: repo, Ref: "main"}, filepath.Join(anon, "src"), anon, false)
-	if !errors.Is(err, ErrFetch) {
+	_, err = fetchGit(ctx, run, &log, &agentv1.GitSource{Url: repo, Ref: "main", AllowInternalHost: true}, filepath.Join(anon, "src"), anon, false)
+	if !errors.Is(err, ErrFetch) || errors.Is(err, ErrBlockedHost) {
 		t.Fatalf("a clone without the token: got %v, want ErrFetch", err)
 	}
 }

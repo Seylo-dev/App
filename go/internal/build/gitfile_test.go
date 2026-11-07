@@ -19,7 +19,7 @@ func TestFetchGitFile(t *testing.T) {
 	s := New(Options{Dir: t.TempDir(), Runner: run})
 	ctx := context.Background()
 	src := func(ref, commit string) *agentv1.GitSource {
-		return &agentv1.GitSource{Url: url, Ref: ref, Commit: commit, Token: "tok"}
+		return &agentv1.GitSource{Url: url, Ref: ref, Commit: commit, Token: "tok", AllowInternalHost: true}
 	}
 	cases := []struct {
 		name string

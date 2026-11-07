@@ -84,7 +84,7 @@ func TestPlainHTTPGitNeedsAdminOptIn(t *testing.T) {
 		t.Fatalf("http:// with a token: %v", err)
 	}
 
-	res, err := fetch(&agentv1.GitSource{Url: url, Ref: "main", AllowPlainHttp: true})
+	res, err := fetch(&agentv1.GitSource{Url: url, Ref: "main", AllowPlainHttp: true, AllowInternalHost: true})
 	if err != nil || !strings.Contains(string(res.GetContent()), "INTERNAL-ONLY-SECRET") {
 		t.Fatalf("http:// with the admin opt-in: %v %v", res, err)
 	}
@@ -102,7 +102,7 @@ func TestPlainHTTPGitNeedsAdminOptIn(t *testing.T) {
 	before := hits.Load()
 	viaTLS := New(Options{Dir: t.TempDir(), Runner: caRunner{ca: ca}})
 	defer viaTLS.Close()
-	_, err = viaTLS.FetchFile(ctx, &agentv1.FetchGitFileRequest{Source: &agentv1.GitSource{Url: redirect.URL + "/internal.git", Ref: "main"}, Path: "secret.txt"})
+	_, err = viaTLS.FetchFile(ctx, &agentv1.FetchGitFileRequest{Source: &agentv1.GitSource{Url: redirect.URL + "/internal.git", Ref: "main", AllowInternalHost: true}, Path: "secret.txt"})
 	if !errors.Is(err, ErrFetch) {
 		t.Fatalf("https:// redirected to http://: %v", err)
 	}

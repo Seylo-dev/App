@@ -7,7 +7,7 @@ import (
 // nodeCommandNames are the commands that run on a node, in help order.
 // The Windows CLI keeps their names so a mistaken `seylo agent` says where
 // it belongs instead of "unknown command".
-var nodeCommandNames = []string{"agent", "join", "status", "start", "restart", "logs", "health", "troubleshoot", "panel", "update-guard", "install-units"}
+var nodeCommandNames = []string{"agent", "join", "status", "start", "restart", "logs", "health", "troubleshoot", "panel", "update-guard", "install-units", "git-dial"}
 
 // nodeCommands off Linux: the agent packages are not built here, so every
 // node command only explains that it runs on a Linux server.
@@ -22,7 +22,7 @@ func nodeCommands(d *deps) []*cobra.Command {
 			Use:                name,
 			Short:              "Runs on a Linux server only",
 			GroupID:            groupNode,
-			Hidden:             name == "update-guard" || name == "install-units",
+			Hidden:             name == "update-guard" || name == "install-units" || name == "git-dial",
 			DisableFlagParsing: true,
 			RunE: func(*cobra.Command, []string) error {
 				return errLinuxOnly(name)

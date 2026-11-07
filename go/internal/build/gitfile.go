@@ -74,6 +74,7 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	if err != nil {
 		return nil, fmt.Errorf("preparing git credentials: %w", err)
 	}
+	defer g.close()
 	dir := filepath.Join(work, "repo")
 	if err := g.do(ctx, "", "init", "-q", "--bare", dir); err != nil {
 		return nil, fmt.Errorf("git init: %w", err)
@@ -109,17 +110,17 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	target := "FETCH_HEAD"
 	if err := fetch(want, true); err != nil {
 		if src.GetCommit() == "" || ctx.Err() != nil {
-			return nil, fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
+			return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
 		}
 		// The server does not serve commits by id: fetch the branch.
 		if err := fetch(ref, false); err != nil {
-			return nil, fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
+			return nil, g.fetchErr(ctx, err, "could not fetch %s - check the address, the branch and the credentials", ref)
 		}
 		target = src.GetCommit()
 	}
 	commit, err := output(ctx, s.opts.Runner, g.cmd(dir, "rev-parse", "--verify", target+"^{commit}"))
 	if err != nil {
-		return nil, fetchErr(ctx, err, "commit %s is not on %s", short(src.GetCommit()), ref)
+		return nil, g.fetchErr(ctx, err, "commit %s is not on %s", short(src.GetCommit()), ref)
 	}
 	object := commit + ":" + p
 	kind, err := output(ctx, s.opts.Runner, g.cmd(dir, "cat-file", "-t", object))
@@ -127,11 +128,14 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if refused := g.proxy.Refused(); refused != nil {
+			return nil, refused
+		}
 		return nil, fmt.Errorf("%w: %s at %s", ErrGitFileNotFound, p, short(commit))
 	}
 	sizeText, err := output(ctx, s.opts.Runner, g.cmd(dir, "cat-file", "-s", object))
 	if err != nil {
-		return nil, fetchErr(ctx, err, "could not read %s", p)
+		return nil, g.fetchErr(ctx, err, "could not read %s", p)
 	}
 	size, err := strconv.ParseUint(sizeText, 10, 64)
 	if err != nil {
@@ -145,7 +149,7 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	cmd.Stdout = &limitedBuffer{buf: &content, max: int(limit)}
 	cmd.Stderr = io.Discard
 	if err := s.opts.Runner.Run(ctx, cmd); err != nil {
-		return nil, fetchErr(ctx, err, "could not read %s", p)
+		return nil, g.fetchErr(ctx, err, "could not read %s", p)
 	}
 	return &agentv1.FetchGitFileResponse{Content: content.Bytes(), Commit: commit, SizeBytes: uint64(content.Len())}, nil
 }

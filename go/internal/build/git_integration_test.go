@@ -71,12 +71,25 @@ exec /usr/sbin/sshd -D -e`
 	privKey, _ := os.ReadFile(key)
 	url := "git@" + ip + ":repo.git"
 
-	work := t.TempDir()
+	// The container's address is a private one: without the panel's
+	// allow_internal_host the node does not connect, before ssh says a word.
+	// Before: the clone went through.
+	blocked := t.TempDir()
 	var log bytes.Buffer
 	src := &agentv1.GitSource{Url: url, SshPrivateKey: string(privKey), SshKnownHosts: string(hosts)}
 	if err := validateGit(src); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := fetchGit(context.Background(), ExecRunner{}, &log, src, filepath.Join(blocked, "src"), blocked, false); !errors.Is(err, ErrFetch) ||
+		!strings.Contains(err.Error(), "private address") || !strings.Contains(log.String(), "Refused a git connection to "+ip+":22") {
+		t.Fatalf("an internal ssh host without allow_internal_host: %v\n%s", err, log.String())
+	}
+
+	// Allowed by the panel: the clone goes through the ProxyCommand (this
+	// test binary as git-dial, see TestMain) and the fetch's proxy.
+	work := t.TempDir()
+	log.Reset()
+	src.AllowInternalHost = true
 	info, err := fetchGit(context.Background(), ExecRunner{}, &log, src, filepath.Join(work, "src"), work, false)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
@@ -88,7 +101,7 @@ exec /usr/sbin/sshd -D -e`
 	// Without the host's key (built-in hosts only) the clone is refused.
 	work2 := t.TempDir()
 	log.Reset()
-	_, err = fetchGit(context.Background(), ExecRunner{}, &log, &agentv1.GitSource{Url: url, SshPrivateKey: string(privKey)}, filepath.Join(work2, "src"), work2, false)
+	_, err = fetchGit(context.Background(), ExecRunner{}, &log, &agentv1.GitSource{Url: url, SshPrivateKey: string(privKey), AllowInternalHost: true}, filepath.Join(work2, "src"), work2, false)
 	if !errors.Is(err, ErrFetch) || !strings.Contains(log.String(), "Host key verification failed") {
 		t.Fatalf("unpinned host: %v\n%s", err, log.String())
 	}

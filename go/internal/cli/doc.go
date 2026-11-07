@@ -9,8 +9,9 @@
 //
 // Hidden commands used by the installer and the updater: `seylo panel
 // bootstrap` (first panel container + join), `seylo install-units`
-// (systemd units from internal/systemd) and `seylo update-guard` (agent
-// update rollback, run by a systemd timer).
+// (systemd units from internal/systemd), `seylo update-guard` (agent
+// update rollback, run by a systemd timer) and `seylo git-dial` (the ssh
+// ProxyCommand of git fetches, internal/build gitproxy.go).
 //
 // Commands hold little logic: each parses flags and calls the package that
 // owns the feature (agent, localapi, systemd, nodecheck, troubleshoot,
