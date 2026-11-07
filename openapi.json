@@ -25846,6 +25846,397 @@
         "x-mcp": true
       }
     },
+    "/api/v1/domains.retryCertificate": {
+      "post": {
+        "operationId": "domains.retryCertificate",
+        "summary": "Regenerate a domain's certificate",
+        "description": "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise). Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
+        "tags": [
+          "domains"
+        ],
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "domainId"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "domainId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "serviceId",
+                    "host",
+                    "pathPrefix",
+                    "stripPrefix",
+                    "targetPort",
+                    "https",
+                    "redirectToHttps",
+                    "auto",
+                    "primary",
+                    "forward",
+                    "middlewares",
+                    "dnsStatus",
+                    "dnsCheckedAt",
+                    "certificate",
+                    "liveAt",
+                    "url",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "serviceId": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "host": {
+                      "minLength": 3,
+                      "maxLength": 253,
+                      "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$",
+                      "description": "Lower-case host name without scheme or port, for example shop.example.com.",
+                      "type": "string"
+                    },
+                    "pathPrefix": {
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "pattern": "^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$",
+                      "description": "Only requests under this path match. \"/\" is the whole host.",
+                      "type": "string"
+                    },
+                    "stripPrefix": {
+                      "type": "boolean"
+                    },
+                    "targetPort": {
+                      "minimum": 1,
+                      "maximum": 65535,
+                      "description": "Port the container listens on.",
+                      "type": "integer"
+                    },
+                    "https": {
+                      "anyOf": [
+                        {
+                          "const": "acme",
+                          "type": "string"
+                        },
+                        {
+                          "const": "custom",
+                          "type": "string"
+                        },
+                        {
+                          "const": "off",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "redirectToHttps": {
+                      "type": "boolean"
+                    },
+                    "auto": {
+                      "type": "boolean"
+                    },
+                    "primary": {
+                      "type": "boolean"
+                    },
+                    "forward": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "url",
+                            "permanent",
+                            "keepPath"
+                          ],
+                          "properties": {
+                            "url": {
+                              "minLength": 8,
+                              "maxLength": 1000,
+                              "pattern": "^https?://",
+                              "type": "string"
+                            },
+                            "permanent": {
+                              "type": "boolean"
+                            },
+                            "keepPath": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "middlewares": {
+                      "type": "object",
+                      "required": [
+                        "basicAuth",
+                        "ipAllowList",
+                        "rateLimit",
+                        "redirects"
+                      ],
+                      "properties": {
+                        "basicAuth": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "usernames"
+                              ],
+                              "properties": {
+                                "usernames": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "ipAllowList": {
+                          "type": "array",
+                          "items": {
+                            "minLength": 2,
+                            "maxLength": 64,
+                            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
+                            "type": "string"
+                          }
+                        },
+                        "rateLimit": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "average",
+                                "burst",
+                                "periodSeconds"
+                              ],
+                              "properties": {
+                                "average": {
+                                  "minimum": 1,
+                                  "maximum": 1000000,
+                                  "type": "integer"
+                                },
+                                "burst": {
+                                  "minimum": 1,
+                                  "maximum": 1000000,
+                                  "type": "integer"
+                                },
+                                "periodSeconds": {
+                                  "minimum": 1,
+                                  "maximum": 3600,
+                                  "default": 1,
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "redirects": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "from",
+                              "to",
+                              "permanent"
+                            ],
+                            "properties": {
+                              "from": {
+                                "minLength": 1,
+                                "maxLength": 500,
+                                "type": "string"
+                              },
+                              "to": {
+                                "minLength": 1,
+                                "maxLength": 1000,
+                                "type": "string"
+                              },
+                              "permanent": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "dnsStatus": {
+                      "anyOf": [
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        },
+                        {
+                          "const": "ok",
+                          "type": "string"
+                        },
+                        {
+                          "const": "missing",
+                          "type": "string"
+                        },
+                        {
+                          "const": "wrongTarget",
+                          "type": "string"
+                        },
+                        {
+                          "const": "proxied",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "dnsCheckedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "certificate": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "expiresAt",
+                        "issuer",
+                        "error"
+                      ],
+                      "properties": {
+                        "status": {
+                          "anyOf": [
+                            {
+                              "const": "none",
+                              "type": "string"
+                            },
+                            {
+                              "const": "pending",
+                              "type": "string"
+                            },
+                            {
+                              "const": "valid",
+                              "type": "string"
+                            },
+                            {
+                              "const": "failed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "expiresAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "issuer": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "liveAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:domains.edit",
+        "x-mcp": true
+      }
+    },
     "/api/v1/domains.setCertificate": {
       "post": {
         "operationId": "domains.setCertificate",
