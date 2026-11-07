@@ -2,16 +2,16 @@
 // the user of an open tool session (a Box or a database web UI) may keep
 // it. The answer uses the same permission as opening the tool
 // (boxes.open / databases.openWebUi), for a user that still exists and is
-// not disabled, for a service that runs on the asking node. Tickets are
-// only minted for browser sessions, so every ticket's user can be
-// rechecked this way.
+// not disabled, for a service that runs on the asking node. A ticket opened
+// with an API key names the key ("key:<id>"), so the key's own narrower
+// rights, revocation and expiry count too.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { boxes as boxOps, databases as dbOps } from "@seylo/ops";
+import { boxes as boxOps } from "@seylo/ops";
 import { CheckEdgeAccessRequestSchema, CheckEdgeAccessResponseSchema, StatusCode } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { panelCapabilities } from "../src/agent-hub/panel-service";
-import { grants, serviceBoxes, serviceDatabases, users } from "../src/db/schema";
+import { apiKeys, grants, nodes, serviceBoxes, serviceDatabases, users } from "../src/db/schema";
 import type { FakeAgent, FakeStatus } from "./fake-agent";
 import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { joinAgent, listen, seedProject, seedService } from "./hub-helpers";
@@ -52,6 +52,7 @@ async function setup() {
     .insert(serviceDatabases)
     .values({ serviceId: db.id, engine: "postgres", version: "17", adminUser: "postgres", exposedUser: "app" })
     .run();
+  panel.deps.db.update(nodes).set({ wildcardDomain: "n1.example.com" }).where(eq(nodes.id, agent.nodeId)).run();
   const member = await createUser(panel, "member");
   grant(panel, member.user.id, "service", box.id, ["boxes.use"]);
   grant(panel, member.user.id, "service", db.id, ["databases.tools"]);
@@ -89,13 +90,44 @@ test("only for services on the asking node, and only known subjects", async () =
   expect(await check(agent, `box:${box.id}/x`, member.user.id)).toBe(false);
 });
 
-test("API keys cannot mint tool tickets, since a key's narrower rights could not be rechecked", async () => {
-  const { box, db, member } = await setup();
+test("a ticket opened with an API key is checked again as that key: revoked, expired or narrowed keys lose it", async () => {
+  const { agent, box, db, member } = await setup();
   const bearer = createApiKey(panel, member.user.id);
   const viaKey = await callOp(panel, boxOps.open, { serviceId: box.id }, { bearer });
-  expect(viaKey.status).toBe(403);
-  expect(viaKey.body.error.details.reason).toBe("browserOnly");
-  expect((await callOp(panel, dbOps.openWebUi, { serviceId: db.id }, { bearer })).body.error.details.reason).toBe("browserOnly");
+  expect(viaKey.status).toBe(200);
+  const token = new URL(viaKey.body.url).searchParams.get("t") ?? "";
+  const claims = JSON.parse(Buffer.from(token.split(".")[0] ?? "", "base64url").toString("utf8")) as { uid: string };
+  // Before: the ticket named the key's owner, so a revoked key kept the session while the person had the right.
+  const key = panel.deps.db.select().from(apiKeys).where(eq(apiKeys.userId, member.user.id)).get();
+  expect(claims.uid).toBe(`key:${key?.id}`);
+  expect(await check(agent, `box:${box.id}`, claims.uid)).toBe(true);
+
+  panel.deps.db
+    .update(apiKeys)
+    .set({ actions: ["databases.tools"] })
+    .where(eq(apiKeys.id, key?.id ?? ""))
+    .run();
+  expect(await check(agent, `box:${box.id}`, claims.uid)).toBe(false);
+  expect(await check(agent, `db-ui:${db.id}`, claims.uid)).toBe(true);
+  panel.deps.db
+    .update(apiKeys)
+    .set({ readOnly: true })
+    .where(eq(apiKeys.id, key?.id ?? ""))
+    .run();
+  expect(await check(agent, `db-ui:${db.id}`, claims.uid)).toBe(false);
+  panel.deps.db
+    .update(apiKeys)
+    .set({ readOnly: false, expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(apiKeys.id, key?.id ?? ""))
+    .run();
+  expect(await check(agent, `db-ui:${db.id}`, claims.uid)).toBe(false);
+  panel.deps.db
+    .update(apiKeys)
+    .set({ expiresAt: null, revokedAt: new Date() })
+    .where(eq(apiKeys.id, key?.id ?? ""))
+    .run();
+  expect(await check(agent, `db-ui:${db.id}`, claims.uid)).toBe(false);
+  expect(await check(agent, `db-ui:${db.id}`, "key:no-such-key")).toBe(false);
 });
 
 test("checks are budgeted per node", async () => {

@@ -13,7 +13,7 @@ import { boxes as boxOps, databases as dbOps, OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { createAccess } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
-import { serviceBoxes, users } from "../../db/schema";
+import { apiKeys, serviceBoxes, users } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { ensureEdgeTicketKey } from "../../security/edge-ticket-key";
 import { findDatabase } from "./info";
@@ -78,10 +78,10 @@ export function edgeToolHost(tool: EdgeTool, serviceId: string, wildcardDomain: 
 
 /**
  * One-time sign-in link to a tool on a node; CONFLICT when the node has no
- * wildcard domain. Only for browser sessions: the node asks the panel about
- * every tool session once a minute (CheckEdgeAccess, edgeAccessAllowed) as
- * the ticket's user, and an API key's narrower rights could not be checked
- * that way, so keys get FORBIDDEN.
+ * wildcard domain. The ticket's uid names who opened it so the node can
+ * ask again later (CheckEdgeAccess, edgeAccessAllowed): the user's id for
+ * a browser session, "key:<id>" for an API key, whose narrower rights are
+ * what is checked again.
  */
 export function edgeToolLink(
   deps: Pick<Deps, "db" | "secrets">,
@@ -90,12 +90,8 @@ export function edgeToolLink(
   node: { name: string; wildcardDomain: string | null },
   principal: Principal,
 ): { url: string; expiresAt: Date } {
-  if (principal.type !== "session") {
-    throw new OpError("FORBIDDEN", "Opening a tool in the browser needs a signed-in browser session, not an API key.", {
-      reason: "browserOnly",
-    });
-  }
-  const userId = principal.user.id;
+  if (principal.type === "anonymous") throw new OpError("UNAUTHENTICATED", "Sign in or use a valid API key.");
+  const userId = principal.type === "apiKey" ? `${keyUidPrefix}${principal.keyId}` : principal.user.id;
   if (!node.wildcardDomain) {
     throw new OpError(
       "CONFLICT",
@@ -123,24 +119,58 @@ export function mayOpenEdgeTool(db: Deps["db"], principal: Principal, tool: Edge
   return db.select({ id: serviceBoxes.serviceId }).from(serviceBoxes).where(eq(serviceBoxes.serviceId, serviceId)).get() !== undefined;
 }
 
+/** Ticket uid prefix of an API key: "key:<api key id>". */
+const keyUidPrefix = "key:";
+
 /**
- * PanelService.CheckEdgeAccess: whether the user a node's edge opened a tool
+ * Who a ticket's uid names, as of now: null when the user is gone or
+ * disabled, or the API key was revoked or expired (the same conditions
+ * as signing in with them).
+ */
+function principalOfUid(db: Deps["db"], uid: string, now: Date): Principal | null {
+  const keyId = uid.startsWith(keyUidPrefix) ? uid.slice(keyUidPrefix.length) : null;
+  const userId = keyId ? db.select({ userId: apiKeys.userId }).from(apiKeys).where(eq(apiKeys.id, keyId)).get()?.userId : uid;
+  if (!userId) return null;
+  const user = db
+    .select({ id: users.id, email: users.email, name: users.name, role: users.role, disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, userId))
+    .get();
+  if (!user || user.disabledAt) return null;
+  const { disabledAt: _, ...person } = user;
+  if (!keyId) return { type: "session", user: person, sessionId: "" };
+  const key = db.select().from(apiKeys).where(eq(apiKeys.id, keyId)).get();
+  if (!key || key.revokedAt || (key.expiresAt && key.expiresAt <= now)) return null;
+  return {
+    type: "apiKey",
+    user: person,
+    keyId: key.id,
+    keyName: key.name,
+    keyKind: key.kind,
+    actions: key.actions,
+    projectIds: key.projectIds ?? null,
+    readOnly: key.readOnly,
+  };
+}
+
+/**
+ * PanelService.CheckEdgeAccess: whether whoever a node's edge opened a tool
  * session for (ticket subject "box:<id>" or "db-ui:<id>", uid) may keep it.
  * False when the subject is unknown, the service does not run on the asking
- * node, the user is gone or disabled, or no longer has the tool's right.
+ * node, the user is gone or disabled (or the API key revoked or expired), or
+ * no longer has the tool's right.
  */
-export function edgeAccessAllowed(deps: Pick<Deps, "db" | "agents">, nodeId: string, input: { subject: string; userId: string }): boolean {
+export function edgeAccessAllowed(
+  deps: Pick<Deps, "db" | "agents">,
+  nodeId: string,
+  input: { subject: string; userId: string },
+  now = new Date(),
+): boolean {
   const match = /^(box|db-ui):([A-Za-z0-9_-]{1,64})$/.exec(input.subject);
   if (!match || !input.userId) return false;
   const tool: EdgeTool = match[1] === "box" ? "box" : "db";
   const serviceId = match[2] as string;
-  const user = deps.db
-    .select({ id: users.id, email: users.email, name: users.name, role: users.role, disabledAt: users.disabledAt })
-    .from(users)
-    .where(eq(users.id, input.userId))
-    .get();
-  if (!user || user.disabledAt) return false;
   if (!deps.agents.runsService(nodeId, serviceId)) return false;
-  const { disabledAt: _, ...person } = user;
-  return mayOpenEdgeTool(deps.db, { type: "session", user: person, sessionId: "" }, tool, serviceId);
+  const principal = principalOfUid(deps.db, input.userId, now);
+  return principal !== null && mayOpenEdgeTool(deps.db, principal, tool, serviceId);
 }

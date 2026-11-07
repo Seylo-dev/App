@@ -654,10 +654,11 @@ local API, join and resume. The areas:
   the permission of `boxes.open` / `databases.openWebUi` on that service
   (`mayOpenEdgeTool`, the op contracts' own permission); a Box or a
   database is checked to be one. 300 checks per node, then 5 a second
-  (RESOURCE_EXHAUSTED). Tool tickets are minted only for browser sessions
-  (`edgeToolLink` refuses API keys with FORBIDDEN `browserOnly`; both ops
-  are `mcp: false`), so a ticket's `uid` is always a person whose rights
-  can be checked again. Route certificate failures come from the Traefik container's
+  (RESOURCE_EXHAUSTED). A ticket's `uid` is the user's id for a browser
+  session and `key:<api key id>` for an API key (`edgeToolLink`), so a
+  session opened with a key is checked as that key: its action list,
+  projects and read-only flag, and it ends when the key is revoked or
+  expires. Route certificate failures come from the Traefik container's
   log (the last 24 h, kept until a certificate appears). RetryCertificate
   (`routing.certificate-retry.v1`, `proxy/certretry.go`) makes Traefik ask
   the CA again for an ACME route's hosts without a certificate, without a
@@ -1919,7 +1920,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   JSON `{"v":1,"sub","uid","exp","jti"}` (`exp` in Unix seconds, 60 s
   after issue, single use by `jti`); signature is Ed25519 over the ASCII
   `<slug>-edge-ticket-v1`, a 0x00 byte, then the payload string. Subjects
-  `db-ui:<serviceId>` and `box:<serviceId>`. Links are
+  `db-ui:<serviceId>` and `box:<serviceId>`; `uid` is the user's id, or
+  `key:<api key id>` when an API key opened the tool. Links are
   `https://<slug>-db-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>` and
   `https://<slug>-box-<serviceId>.<wildcard>/_<slug>/ticket?t=<token>`;
   without a wildcard domain on the node the ops answer CONFLICT
