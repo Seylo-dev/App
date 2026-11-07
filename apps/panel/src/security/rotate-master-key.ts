@@ -1,18 +1,24 @@
-// Replaces master.key after a backup of the data dir leaked (panel.db and
-// master.key travel together): every sealed value in panel.db is opened
-// with the old key and sealed again with a new one in one transaction, and
-// the keys that were themselves secrets of the old install are dropped so
-// the panel makes new ones on its next start:
+// Replaces master.key after a leak: every sealed value in panel.db is
+// opened with the old key and sealed again with a new one in one
+// transaction. What happens to the panel's identity is the caller's choice,
+// because it decides whether nodes keep working:
 //
-// - the edge ticket key (DB web UI, Box and status tickets): agents get the
-//   new public key in their next HelloAccepted, so tickets signed with the
-//   leaked key stop working once they reconnect;
-// - the load balancer CA and node certificates: nodes get new ones when
-//   they connect again.
+// - "new" (panel.db leaked, usually together with master.key in a backup of
+//   the data dir): the edge ticket key and the load balancer CA and node
+//   certificates are dropped and the panel makes new ones on its next start.
+//   The leaked edge key could otherwise mint DB web UI, Box and status
+//   tickets and prove itself as this panel to nodes. Nodes pin that key on
+//   their first connect and refuse a panel with another one, so every node
+//   must be joined again (`seylo join --force` with a token from Nodes > Add
+//   node); the panel id stays the same.
+// - "keep" (only master.key leaked, panel.db never did): the edge key was
+//   never exposed, so it and the LB CA are sealed again like every other
+//   value and nodes keep working.
 //
 // Recovery codes are keyed hashes under the old key and cannot be carried
-// over: they are deleted and the people who had them are listed, so they
-// make new ones. The agents' TLS key (agent-tls.key) stays: nodes pin it.
+// over in either case: they are deleted and the people who had them are
+// listed, so they make new ones. The agents' TLS key (agent-tls.key) stays:
+// nodes pin it too, and it is not sealed.
 //
 // Run it with the panel stopped. master.key is replaced only after the
 // database commit; the new key waits in master.key.new until then, and a
@@ -26,8 +32,18 @@ import { createSecretBox, type SealPurpose, type SecretBox, sealPurposes } from 
 
 /** `v1.<12-byte iv>.<16-byte tag>.<ciphertext>`, all base64url (secret-box.ts). */
 const sealedPattern = /^v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]*$/;
-/** Settings that hold keys of the old install; the panel makes new ones on start. */
-const regeneratedSettings = ["edgeTicketKey", "lbTlsCa", "lbTlsNodes"];
+/** Settings that hold the panel's identity keys; with "new" the panel makes new ones on start. */
+const identitySettings = ["edgeTicketKey", "lbTlsCa", "lbTlsNodes"];
+
+export type PanelIdentity = "new" | "keep";
+
+/** A node that must be joined again after a "new" rotation. */
+export interface RejoinNode {
+  name: string;
+  /** Public address, public IPv4 or IPv6, or null when the panel never learned one. */
+  address: string | null;
+  panelNode: boolean;
+}
 
 export interface RotationResult {
   /** Sealed values sealed again, by "table.column". */
@@ -36,13 +52,15 @@ export interface RotationResult {
   recoveryCodesCleared: string[];
   /** True when the run only finished an earlier, interrupted rotation. */
   resumed: boolean;
+  /** With "new": every enabled node, which refuses the panel until it is joined again. */
+  rejoin: RejoinNode[];
 }
 
 export class RotationError extends Error {
   override name = "RotationError";
 }
 
-export function rotateMasterKey(dataDir: string): RotationResult {
+export function rotateMasterKey(dataDir: string, options: { panelIdentity: PanelIdentity }): RotationResult {
   const keyPath = join(dataDir, "master.key");
   const nextPath = `${keyPath}.new`;
   const dbPath = join(dataDir, "panel.db");
@@ -56,7 +74,7 @@ export function rotateMasterKey(dataDir: string): RotationResult {
       if (sealedWith(sqlite, createSecretBox(pending))) {
         // The database was re-sealed but master.key not replaced yet: finish.
         renameSync(nextPath, keyPath);
-        return { resealed: {}, recoveryCodesCleared: [], resumed: true };
+        return { resealed: {}, recoveryCodesCleared: [], resumed: true, rejoin: [] };
       }
       rmSync(nextPath);
     }
@@ -70,7 +88,7 @@ export function rotateMasterKey(dataDir: string): RotationResult {
     chmodSync(nextPath, 0o600);
     const after = createSecretBox(newKey);
 
-    const result: RotationResult = { resealed: {}, recoveryCodesCleared: [], resumed: false };
+    const result: RotationResult = { resealed: {}, recoveryCodesCleared: [], resumed: false, rejoin: [] };
     sqlite.transaction(() => {
       for (const { table, column } of textColumns(sqlite)) {
         const rows = sqlite
@@ -85,7 +103,15 @@ export function rotateMasterKey(dataDir: string): RotationResult {
           result.resealed[`${table}.${column}`] = (result.resealed[`${table}.${column}`] ?? 0) + count;
         }
       }
-      for (const key of regeneratedSettings) sqlite.query("DELETE FROM settings WHERE key = ?").run(key);
+      if (options.panelIdentity === "new") {
+        for (const key of identitySettings) sqlite.query("DELETE FROM settings WHERE key = ?").run(key);
+        result.rejoin = sqlite
+          .query<{ name: string; address: string | null; panelNode: number }, []>(
+            "SELECT name, coalesce(public_address, public_ipv4, public_ipv6) AS address, is_panel_node AS panelNode FROM nodes WHERE disabled_at IS NULL ORDER BY is_panel_node DESC, name",
+          )
+          .all()
+          .map((n) => ({ name: n.name, address: n.address, panelNode: n.panelNode === 1 }));
+      }
       result.recoveryCodesCleared = sqlite
         .query<{ email: string }, []>(
           "SELECT DISTINCT users.email AS email FROM recovery_codes JOIN users ON users.id = recovery_codes.user_id ORDER BY users.email",
