@@ -251,12 +251,19 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the socket actually connects to (after DNS) and refuses loopback,
   private, link-local, CGNAT, unique-local, multicast, unspecified and
   reserved addresses, also as IPv4-mapped, IPv4-compatible, NAT64 or 6to4
-  forms. With this field set, internal addresses are allowed for the
+  forms, and the node's own interface addresses, public ones included (a
+  connection to them stays on the node, past a firewall that hides a
+  service from the internet; read again at most every 5 seconds, and if
+  they cannot be read public addresses are refused too). With this field
+  set, internal addresses (and the node's own) are allowed for the
   source's own host and port only (not for a redirect or submodule to
   another host); cloud metadata addresses never. The panel sets it for a
   generic git source exactly when its host is in `git_internal_hosts` for
-  the project, and for git provider connections (their address is set by
-  `gitProviders.manage`). A refused connection fails the fetch with
+  the project; for a git provider connection when the panel sees its host
+  as internal or cannot resolve it (the address is set by
+  `gitProviders.manage`), or when the host is in `git_internal_hosts` for
+  the project; for a GitHub App source only when `github.com` is in
+  `git_internal_hosts` for the project. A refused connection fails the fetch with
   "the node refused to connect to <host:port>: ...". ssh is used only with
   the source's SSH key (`protocol.ssh.allow=never` otherwise), and ssh://
   hosts must be plain names or IP addresses. Since the ssh tunnel always
@@ -271,9 +278,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   operator set it), never a metadata one. The node cannot see where the
   proxy connects, so then the address check is on the target before the
   request goes out: an IP address exactly, a name by what it resolves to
-  on the node (all its addresses; a name the node cannot resolve goes on,
-  since behind a proxy often only the proxy can resolve it). Rebinding
-  between that lookup and the proxy's own is up to the proxy's rules. A
+  on the node (all its addresses). A name the node cannot resolve goes on
+  to the proxy only with `allow_internal_host` for that host (the proxy
+  could resolve it to anything): on a node whose DNS knows no outside
+  names, an admin allows each git host with `git.allowInternalHost`.
+  Rebinding between that lookup and the proxy's own is up to the proxy's
+  rules. A
   0.2 agent behind a panel that never sends the field clones from public
   addresses only.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
@@ -1318,18 +1328,23 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   there: that records (project, host) in `git_internal_hosts`, and the
   project's members may then use it too. Cloud metadata addresses never.
   On the first start of 0.2 the hosts of git sources already stored are
-  recorded once (`gitInternalHostsSeeded`), so existing LAN git servers
-  keep building: only hosts the panel sees as internal then, or names that
-  do not exist in its DNS (ENOTFOUND); a public host is not recorded (a
-  member's own name stays public-only after a rebind), and a lookup that
-  fails otherwise (timeout, failing server) is logged and not recorded.
-  The lookups run in the background; `assertGitTarget` and
-  `git.branches` wait for them, and the setting is written once all are
-  done. The panel's check is not the last word, since the node
+  recorded once (`gitInternalHostsSeededV2`), so existing LAN git servers
+  keep building: only hosts the panel resolves to internal addresses then,
+  or internal IP addresses. A public host is not recorded (a member's own
+  name stays public-only after a rebind), and neither is a name the panel
+  cannot resolve (not found, timeout, failing server: whoever controls the
+  name could point it inside later); each of those is logged once with
+  the `git.allowInternalHost` hint. The lookups run in the background;
+  `assertGitTarget` and `git.branches` wait for them, and the setting is
+  written once all are done. A panel that ran the first features-1 seed
+  (`gitInternalHostsSeeded`, which recorded every host) first deletes the
+  `git_internal_hosts` rows with `approved_by` null, once, logs how many,
+  and drops that setting. The panel's check is not the last word, since the node
   resolves the name again: the agent checks the address of every
   connection it makes and accepts internal ones only for a host the panel
   marks with `GitSource.allow_internal_host` (exactly the hosts in
-  `git_internal_hosts` for the project, plus git provider connections), so
+  `git_internal_hosts` for the project, plus git provider connections on
+  an internal host), so
   DNS rebinding and split-horizon DNS do not reach the node's network
   either. Saving a source records a host only when the panel sees it as
   internal; for a LAN git server whose name resolves publicly at the
@@ -1339,7 +1354,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   repository from the panel under the same rule: public addresses, a host
   in `git_internal_hosts` for the project, or any internal host for a
   `git.manage` caller; never metadata, and the uptime "allow internal
-  targets" setting plays no part. FetchGitFile (compose files from git) runs only on the
+  targets" setting plays no part. A name the panel cannot resolve is read
+  by name for a `git.manage` caller (one they can save a source with) and
+  refused for everyone else. FetchGitFile (compose files from git) runs only on the
   stack's own node (the one it is or will be placed on), never on another
   online node. Plain `http://` git is refused when saved (services,
   compose stacks, provider connections and Box repositories take
