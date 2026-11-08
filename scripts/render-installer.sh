@@ -46,6 +46,13 @@ if [ -z "$panel_uid" ]; then
   echo "render-installer: no PanelUID constant in $names" >&2
   exit 1
 fi
+# The panel's reserved service id, whose containers the installer reads the
+# running panel's version from (go/internal/docker/names.go PanelServiceID).
+panel_service=$(sed -n 's/^[[:space:]]*PanelServiceID[[:space:]]*=[[:space:]]*"\([a-z0-9]*\)".*/\1/p' "$names" | head -1)
+if [ -z "$panel_service" ]; then
+  echo "render-installer: no PanelServiceID constant in $names" >&2
+  exit 1
+fi
 
 brand=$(grep -v '^#' "$env_file")
 tmp="$(mktemp)"
@@ -58,6 +65,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     line="${line//@@MIN_DOCKER_MAJOR@@/$docker_min}"
     line="${line//@@RECOMMENDED_DOCKER_MAJOR@@/$docker_rec}"
     line="${line//@@PANEL_UID@@/$panel_uid}"
+    line="${line//@@PANEL_SERVICE_ID@@/$panel_service}"
     printf '%s\n' "${line//@@TEST_RELEASE_PUBLIC_KEY@@/$test_key}"
     ;;
   esac

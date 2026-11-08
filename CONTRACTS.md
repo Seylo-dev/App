@@ -1877,7 +1877,13 @@ Join: `install.sh join --panel
 `seylo join --no-start`, then starts `seylo.service`. An installer from a
 release defaults to that release (`--version` picks another), which is how
 the panel's join command pins the agent to the panel's version. Re-runs update the binary and units and keep the
-node; `uninstall [--purge]` removes the agent (and with `--purge` every
+node, but never to an older release than the node runs: when the installed
+agent (`seylo version`), or on the panel's node the running panel (the
+`org.opencontainers.image.version` label of its `seylo.service=panel00000000000`
+containers), is newer than the release to install, the installer stops
+before it changes anything unless `--downgrade` (`--binary` is not checked);
+versions compare by semantic versioning, a pre-release before its release.
+`uninstall [--purge]` removes the agent (and with `--purge` every
 `seylo.managed` container, network, volume and the data dir).
 Port check (before anything changes): a new panel install stops when
 another program holds 80 or 443 (named from `ss -ltnp`) unless `--force`,

@@ -314,15 +314,18 @@ http_code() { curl -s -o /dev/null -m "${3:-5}" -w '%{http_code}' "$@" 2>/dev/nu
 # ---------------------------------------------------------------- 1-3 install
 
 check_01() {
-  local out link token cid1 cid2 cid3 started1 started3 labels
+  local out link token cid1 cid2 cid3 started1 started3 labels again=
   write_key_dropin "$E2E_A"
   if on "$E2E_A" "grep -q '^node_id:' $BRAND_DATA_DIR/config.yml 2>/dev/null"; then
     ev "A was installed by an earlier run; re-running the installer (keeps the node)"
+    # A kept A may run a later release (the update checks): the installer
+    # refuses to install the older $E2E_V1 over it without --downgrade.
+    again=--downgrade
   fi
   # No --image: the installer takes the panel image from the signed release
   # manifest, pinned by its digest, as a real install does.
   out=$(on "$E2E_A" "$(installer_fetch) | sh -s -- --release-url $(release_base)/$ORG/$REPO/releases \
-    --version $E2E_V1 --port $E2E_PORT" 2>&1) || {
+    --version $E2E_V1 --port $E2E_PORT $again" 2>&1) || {
     printf '%s\n' "$out" >>"$RES/$CUR.log"
     bad "install.sh failed on A: $(printf '%s' "$out" | grep -i error | tail -2 | tr '\n' ' ')"
     return 1
