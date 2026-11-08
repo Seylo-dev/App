@@ -153,6 +153,12 @@ func (c *Capturer) capture(ctx context.Context, id string) error {
 		if svc == "" {
 			return nil
 		}
+		if info.HostConfig.LogConfig.Type == "none" {
+			// Nothing to read, ever: Docker answers 501 and logs an error.
+			// One-off job containers (cron runs, backups) run like this;
+			// their runner reads the output through attach instead.
+			return nil
+		}
 		since := c.cursors.get(id)
 		running := info.State.Running
 		if !running && !since.IsZero() && !info.FinishedAt().After(since) {
@@ -182,7 +188,8 @@ func (c *Capturer) read(ctx context.Context, id, svc string, info *dockerapi.Con
 	if err != nil {
 		var de *dockerapi.Error
 		if errors.As(err, &de) && de.Status != 404 {
-			// For example the "none" log driver: nothing to read, ever.
+			// A driver Docker cannot read back (a remote one with its
+			// local cache turned off): nothing to read, ever.
 			c.log.Info("container output cannot be read", "container_id", short(id), "log_driver", info.HostConfig.LogConfig.Type, "err", err)
 			return nil
 		}
