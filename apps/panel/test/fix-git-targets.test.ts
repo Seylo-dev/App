@@ -208,7 +208,7 @@ test("hosts of git sources saved before the check count as allowed once", async 
     })
     .returning()
     .get();
-  setSetting(panel.deps.db, "gitInternalHostsSeeded", false);
+  setSetting(panel.deps.db, "gitInternalHostsSeededV2", false);
   // The seed looks the hosts up in the background (an address here, a private one: recorded).
   await seedInternalGitHosts(panel.deps.db);
   expect(panel.deps.db.select().from(gitInternalHosts).where(eq(gitInternalHosts.projectId, row.projectId)).all()).toMatchObject([

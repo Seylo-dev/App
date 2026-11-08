@@ -260,12 +260,18 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the socket actually connects to (after DNS) and refuses loopback,
   private, link-local, CGNAT, unique-local, multicast, unspecified and
   reserved addresses, also as IPv4-mapped, IPv4-compatible, NAT64 or 6to4
-  forms. With this field set, internal addresses are allowed for the
+  forms. The node's own public addresses are not refused (a git server on
+  the node, reached by its public name, keeps working); refusing them
+  needs the panel to know every node address first (see Not built yet).
+  With this field set, internal addresses are allowed for the
   source's own host and port only (not for a redirect or submodule to
   another host); cloud metadata addresses never. The panel sets it for a
   generic git source exactly when its host is in `git_internal_hosts` for
-  the project, and for git provider connections (their address is set by
-  `gitProviders.manage`). A refused connection fails the fetch with
+  the project; for a git provider connection when the panel sees its host
+  as internal or cannot resolve it (the address is set by
+  `gitProviders.manage`), or when the host is in `git_internal_hosts` for
+  the project; for a GitHub App source only when `github.com` is in
+  `git_internal_hosts` for the project. A refused connection fails the fetch with
   "the node refused to connect to <host:port>: ...". ssh is used only with
   the source's SSH key (`protocol.ssh.allow=never` otherwise), and ssh://
   hosts must be plain names or IP addresses. Since the ssh tunnel always
@@ -280,9 +286,10 @@ Summary; the full rules are in `proto/README.md` and the comments of
   operator set it), never a metadata one. The node cannot see where the
   proxy connects, so then the address check is on the target before the
   request goes out: an IP address exactly, a name by what it resolves to
-  on the node (all its addresses; a name the node cannot resolve goes on,
-  since behind a proxy often only the proxy can resolve it). Rebinding
-  between that lookup and the proxy's own is up to the proxy's rules. A
+  on the node (all its addresses). A name the node cannot resolve goes on
+  to the proxy unchecked (nodes whose DNS knows no outside names rely on
+  the proxy to resolve), so then the proxy's own rules decide, as they do
+  for rebinding between the node's lookup and the proxy's. A
   0.2 agent behind a panel that never sends the field clones from public
   addresses only.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
@@ -1346,18 +1353,23 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   there: that records (project, host) in `git_internal_hosts`, and the
   project's members may then use it too. Cloud metadata addresses never.
   On the first start of 0.2 the hosts of git sources already stored are
-  recorded once (`gitInternalHostsSeeded`), so existing LAN git servers
-  keep building: only hosts the panel sees as internal then, or names that
-  do not exist in its DNS (ENOTFOUND); a public host is not recorded (a
-  member's own name stays public-only after a rebind), and a lookup that
-  fails otherwise (timeout, failing server) is logged and not recorded.
-  The lookups run in the background; `assertGitTarget` and
-  `git.branches` wait for them, and the setting is written once all are
-  done. The panel's check is not the last word, since the node
+  recorded once (`gitInternalHostsSeededV2`), so existing LAN git servers
+  keep building: only hosts the panel resolves to internal addresses then,
+  or internal IP addresses. A public host is not recorded (a member's own
+  name stays public-only after a rebind), and neither is a name the panel
+  cannot resolve (not found, timeout, failing server: whoever controls the
+  name could point it inside later); each of those is logged once with
+  the `git.allowInternalHost` hint. The lookups run in the background;
+  `assertGitTarget` and `git.branches` wait for them, and the setting is
+  written once all are done. A panel that ran the first features-1 seed
+  (`gitInternalHostsSeeded`, which recorded every host) first deletes the
+  `git_internal_hosts` rows with `approved_by` null, once, logs how many,
+  and drops that setting. The panel's check is not the last word, since the node
   resolves the name again: the agent checks the address of every
   connection it makes and accepts internal ones only for a host the panel
   marks with `GitSource.allow_internal_host` (exactly the hosts in
-  `git_internal_hosts` for the project, plus git provider connections), so
+  `git_internal_hosts` for the project, plus git provider connections on
+  an internal host), so
   DNS rebinding and split-horizon DNS do not reach the node's network
   either. Saving a source records a host only when the panel sees it as
   internal; for a LAN git server whose name resolves publicly at the
@@ -1367,7 +1379,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   repository from the panel under the same rule: public addresses, a host
   in `git_internal_hosts` for the project, or any internal host for a
   `git.manage` caller; never metadata, and the uptime "allow internal
-  targets" setting plays no part. FetchGitFile (compose files from git) runs only on the
+  targets" setting plays no part. A name the panel cannot resolve is read
+  by name for a `git.manage` caller (one they can save a source with) and
+  refused for everyone else. FetchGitFile (compose files from git) runs only on the
   stack's own node (the one it is or will be placed on), never on another
   online node. Plain `http://` git is refused when saved (services,
   compose stacks, provider connections and Box repositories take
@@ -1537,6 +1551,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
+| Git and the node's own addresses: a node does not refuse git connections to its own public addresses, and a name the node cannot resolve goes to its HTTP proxy unchecked. Refusing both needs the panel to know every node address (admin-set public address plus the addresses agents report) so an admin's save of a git server on a node records the host, and a node-level opt-in for proxy-only DNS. The panel's address classifier (uptime/targets.ts) also lacks a few ranges netguard has (6to4, IPv4-compatible, fec0::/10, documentation ranges); the node refuses those anyway | Planned for 0.2.1 |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled by `bun scripts/rotate-master-key.ts --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key and LB CA, so every node is joined again with `seylo join --force`; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |

@@ -139,7 +139,8 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
   const auth = input.credentialId ? openCredential(ctx.db, ctx.secrets, input.credentialId) : {};
   // The panel itself makes this request, to the vetted address: members cannot point it inside the
   // panel's network, except at a host an admin allowed for the project (the rule of saving the
-  // source, git/targets.ts). Admins (root on the nodes anyway) may list any internal git server.
+  // source, git/targets.ts). Admins (root on the nodes anyway) may list any internal git server,
+  // and one the panel cannot resolve by name (a LAN-only name they can still save).
   const target = await gitReadTarget(ctx.db, { projectId: input.projectId, url: input.url, admin: ctx.access.can("git.manage") });
   if (!target.ok) {
     const check = target.check;
@@ -151,7 +152,7 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
       { field: "url", reason: check.reason === "unresolvable" ? "unresolvable" : "internalTarget" },
     );
   }
-  const refs = await listRemoteRefs(input.url, auth, { address: target.address });
+  const refs = await listRemoteRefs(input.url, auth, { address: target.address, byName: target.byName });
   return { branches: refs.branches.slice(0, 1000), defaultBranch: refs.defaultBranch };
 });
 
