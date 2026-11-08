@@ -80,6 +80,70 @@ test.describe("Add node: build images by default", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a revoke that fails keeps the command on screen and says why", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installDemo(page);
+    // The panel could not be reached: the token was not expired, so it still makes a build node.
+    await page.route(/\/api\/v1\/nodes\.revokeJoinToken/, (route) => route.abort("connectionrefused"));
+    const sent = recordOps(page);
+    await page.goto("/nodes");
+    const card = page.getByRole("region", { name: "Add a node" });
+    await card.getByRole("button", { name: "Create join command" }).click();
+    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+
+    await card.getByRole("button", { name: "Change", exact: true }).click();
+    await expect(card.getByText("The panel could not be reached.")).toBeVisible();
+    expect(sent["nodes.revokeJoinToken"]).toEqual([{ tokenId: "token00000000001" }]);
+    await expect(card.getByText(/Single use · expires in/)).toBeVisible();
+    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+    await expect(card.getByRole("checkbox", { name: "Build images on this node", exact: true })).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/revoke-failed.png` });
+
+    // Change again once the panel answers: now the command goes and the box comes back.
+    await page.unroute(/\/api\/v1\/nodes\.revokeJoinToken/);
+    await page.route(/\/api\/v1\/nodes\.revokeJoinToken/, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "{}" }),
+    );
+    await card.getByRole("button", { name: "Change", exact: true }).click();
+    await expect(card.getByRole("checkbox", { name: "Build images on this node", exact: true })).toBeVisible();
+    await expect(card.getByText("The panel could not be reached.")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("Change on a command someone already ran says so and points to Can build", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installDemo(page);
+    // What the panel answers for a used token (nodes/ops.ts revokeJoinToken).
+    const used = { code: "NOT_FOUND", message: "No unused join token with this id." };
+    await page.route(/\/api\/v1\/nodes\.revokeJoinToken/, (route) =>
+      route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: used }) }),
+    );
+    await page.goto("/nodes");
+    const card = page.getByRole("region", { name: "Add a node" });
+    await card.getByRole("button", { name: "Create join command" }).click();
+    await card.getByRole("button", { name: "Change", exact: true }).click();
+
+    const note = card.getByText(
+      "That command was already used, so it can't be changed. Set Can build for the node that ran it in the list above.",
+    );
+    await expect(note).toBeVisible();
+    await expect(card.getByText(used.message)).toHaveCount(0);
+    // The used command is no good to anyone: the box is back for a new one.
+    await expect(card.getByText(/Single use · expires in/)).toHaveCount(0);
+    const box = card.getByRole("checkbox", { name: "Build images on this node", exact: true });
+    await expect(box).toBeVisible();
+    await page.screenshot({ path: `${shots}/revoke-used.png` });
+
+    // A new command clears the note.
+    await box.click();
+    await card.getByRole("button", { name: "Create join command" }).click();
+    await expect(card.getByText("The node that joins does not build images.")).toBeVisible();
+    await expect(note).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test("Add node in the page header creates the command with the box's value", async ({ page }) => {
     await installDemo(page);
     const sent = recordOps(page);
