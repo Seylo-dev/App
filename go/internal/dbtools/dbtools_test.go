@@ -2,7 +2,10 @@ package dbtools
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"regexp"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/dbengine"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/jobrun"
 )
@@ -92,7 +96,7 @@ func TestUITargets(t *testing.T) {
 		env   string
 	}{
 		agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES:  {ImagePgweb, 8081, "DATABASE_URL=postgres://admin:p%40ss%3Aw%2Frd@db:5432/app?sslmode=disable"},
-		agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:     {ImagePhpMyAdmin, 80, "PMA_USER=admin"},
+		agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL:     {ImagePhpMyAdmin, 80, "PMA_HOST=db"},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:   {ImagePhpMyAdmin, 80, "PMA_PORT=3306"},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO:     {ImageMongoExpress, 8081, "ME_CONFIG_MONGODB_URL=mongodb://admin:p%40ss%3Aw%2Frd@db:27017/?authSource=admin"},
 		agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS:     {ImageRedisCmdr, 8081, "REDIS_PASSWORD=p@ss:w/rd"},
@@ -102,10 +106,37 @@ func TestUITargets(t *testing.T) {
 		// The Play page through nginx on the HTTP port, signed in with a Basic header of admin:p@ss:w/rd.
 		agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE: {ImageClickHouseUI, 8080, "CH_AUTH=YWRtaW46cEBzczp3L3Jk"},
 	}
+	keys := uiKeys{cookie: "a", session: "b", login: "l0g1n", jwt: "jwt-secret"}
+	now := time.Unix(1_800_000_000, 0)
 	for e, w := range want {
-		tg, err := uiTarget(dbSpec("db1", e, true), [2]string{"a", "b"})
+		tg, auth, err := uiTarget(dbSpec("db1", e, true), keys)
 		if err != nil {
 			t.Fatal(err)
+		}
+		// No helper is open: each has a login only the edge sends.
+		got := auth(now)
+		switch {
+		case e == agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL || e == agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB:
+			// phpMyAdmin's HTTP auth: the admin's own login, no auto sign-in.
+			if got != basic("admin", "p@ss:w/rd") || slices.ContainsFunc(tg.Spec.Env, func(v string) bool { return strings.HasPrefix(v, "PMA_USER=") }) {
+				t.Errorf("%v: auth %q env %v", e, got, tg.Spec.Env)
+			}
+		case dbengine.RedisLike(e):
+			if got != "Bearer "+redisCommanderToken("jwt-secret", now) || !slices.Contains(tg.Spec.Env, "HTTP_PASSWORD=l0g1n") ||
+				!slices.Contains(tg.Spec.Env, `NODE_CONFIG={"server":{"httpAuth":{"jwtSecret":"jwt-secret"}}}`) {
+				t.Errorf("%v: auth %q env %v", e, got, tg.Spec.Env)
+			}
+		case e == agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE:
+			if got != basic(helperLogin, "l0g1n") || !slices.Contains(tg.Spec.Env, "UI_AUTH="+strings.TrimPrefix(got, "Basic ")) {
+				t.Errorf("%v: auth %q env %v", e, got, tg.Spec.Env)
+			}
+		default:
+			if got != basic(helperLogin, "l0g1n") || !strings.Contains(strings.Join(tg.Spec.Env, " "), "l0g1n") {
+				t.Errorf("%v: auth %q env %v", e, got, tg.Spec.Env)
+			}
+		}
+		if slices.Contains(tg.Spec.Env, "ME_CONFIG_BASICAUTH=false") {
+			t.Errorf("%v: mongo-express without its login", e)
 		}
 		if tg.Spec.Image != w.image || tg.Port != w.port || !slices.Contains(tg.Spec.Env, w.env) {
 			t.Errorf("%v: target %+v", e, tg)
@@ -114,19 +145,48 @@ func TestUITargets(t *testing.T) {
 			t.Errorf("%v: target %+v", e, tg)
 		}
 	}
-	if _, err := uiTarget(&agentv1.ServiceSpec{Id: "x", Kind: agentv1.ServiceKind_SERVICE_KIND_APP}, [2]string{}); !errors.Is(err, ErrNotFound) {
+	if _, _, err := uiTarget(&agentv1.ServiceSpec{Id: "x", Kind: agentv1.ServiceKind_SERVICE_KIND_APP}, uiKeys{}); !errors.Is(err, ErrNotFound) {
 		t.Fatal("app accepted")
 	}
 	// ClickHouse: the HTTP port, not the native one the spec lists first,
 	// and the password only inside the Basic header.
 	ch := dbSpec("db1", agentv1.DatabaseEngine_DATABASE_ENGINE_CLICKHOUSE, true)
 	ch.Ports = []*agentv1.PortSpec{{ContainerPort: 9000}, {ContainerPort: 8123}}
-	tg, err := uiTarget(ch, [2]string{})
+	tg, _, err := uiTarget(ch, uiKeys{login: "l0g1n"})
 	if err != nil || !slices.Contains(tg.Spec.Env, "CH_PORT=8123") || !slices.Contains(tg.Spec.Env, "CH_HOST=db") {
 		t.Fatalf("clickhouse target %+v, %v", tg, err)
 	}
 	if strings.Contains(strings.Join(tg.Spec.Env, " ")+strings.Join(tg.Spec.Cmd, " "), "p@ss") {
 		t.Fatal("clickhouse password in clear")
+	}
+}
+
+// Redis Commander's session tokens: HS256 over its issuer and subject,
+// valid for 10 minutes, signed with the secret the helper was given.
+func TestRedisCommanderToken(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	tok := redisCommanderToken("s3cret", now)
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token %q", tok)
+	}
+	head, _ := base64.RawURLEncoding.DecodeString(parts[0])
+	body, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	if string(head) != `{"alg":"HS256","typ":"JWT"}` || string(body) != `{"exp":1800000600,"iat":1800000000,"iss":"Redis Commander","sub":"Session Token"}` {
+		t.Fatalf("head %s body %s", head, body)
+	}
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	if base64.RawURLEncoding.EncodeToString(mac.Sum(nil)) != parts[2] {
+		t.Fatal("signature does not match")
+	}
+}
+
+// The ClickHouse UI proxy refuses requests without the helper's login,
+// whatever else they carry.
+func TestClickHouseUIRequiresItsLogin(t *testing.T) {
+	if !strings.Contains(clickhouseUIScript, `if (\$http_authorization != "Basic $UI_AUTH") { return 401; }`) {
+		t.Fatalf("script = %s", clickhouseUIScript)
 	}
 }
 

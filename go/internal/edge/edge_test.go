@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,53 @@ func TestToolTicketCookieAndProxy(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("unregistered tool: %d", resp.StatusCode)
+	}
+}
+
+// authTool is a tool with a login of its own.
+type authTool struct {
+	url, auth string
+}
+
+func (a authTool) Upstream(context.Context) (string, error) { return a.url, nil }
+func (a authTool) Authorization() string                    { return a.auth }
+
+// A tool with a login of its own (a database web UI next to the project's
+// other containers) gets it from the edge on every request, in place of
+// whatever the browser sent; other tools see the browser's header.
+func TestToolLoginIsSetByTheEdge(t *testing.T) {
+	pub, priv := newKey(t)
+	v := NewVerifier("node1")
+	v.SetKey(pub)
+	s := NewHTTPServer(Config{Tickets: v})
+	var saw []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = append(saw, r.Header.Get("Authorization"))
+	}))
+	defer upstream.Close()
+	s.Register("db-ui:d1", authTool{url: upstream.URL, auth: "Basic c2V5bG86a2V5"})
+	s.Register("box:b1", ToolFunc(func(context.Context) (string, error) { return upstream.URL, nil }))
+
+	for i, subject := range []string{"db-ui:d1", "box:b1"} {
+		front := httptest.NewServer(edgeBehindTraefik(s, subject))
+		jar, _ := cookiejar.New(nil)
+		client := &http.Client{Jar: jar}
+		ticket := SignTicket(priv, subject, "u1", "node1", fmt.Sprintf("jti-%d", i), time.Now().Add(time.Minute))
+		resp, err := client.Get(front.URL + proxy.TicketPath + "?t=" + url.QueryEscape(ticket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		req, _ := http.NewRequest(http.MethodGet, front.URL+"/", nil)
+		req.Header.Set("Authorization", "Basic YnJvd3Nlcjp4")
+		if resp, err = client.Do(req); err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		front.Close()
+	}
+	if want := []string{"Basic c2V5bG86a2V5", "Basic c2V5bG86a2V5", "", "Basic YnJvd3Nlcjp4"}; !slices.Equal(saw, want) {
+		t.Fatalf("upstream saw Authorization %q, want %q", saw, want)
 	}
 }
 

@@ -310,9 +310,7 @@ func (r *toolRegistrations) sync(services []*agentv1.ServiceSpec, p *jobsParts) 
 		id := s.GetId()
 		switch {
 		case s.GetKind() == agentv1.ServiceKind_SERVICE_KIND_DATABASE && s.GetDatabase().GetTools().GetWebUi():
-			want[proxy.ToolSubject(proxy.ToolDatabaseUI, id)] = edge.ToolFunc(func(ctx context.Context) (string, error) {
-				return p.uis.Wake(ctx, id)
-			})
+			want[proxy.ToolSubject(proxy.ToolDatabaseUI, id)] = dbUITool{uis: p.uis, id: id}
 		case s.GetKind() == agentv1.ServiceKind_SERVICE_KIND_BOX && p.boxes != nil:
 			want[proxy.ToolSubject(proxy.ToolBox, id)] = edge.ToolFunc(func(ctx context.Context) (string, error) {
 				return p.boxes.Upstream(ctx, id)
@@ -333,6 +331,18 @@ func (r *toolRegistrations) sync(services []*agentv1.ServiceSpec, p *jobsParts) 
 		}
 	}
 }
+
+// dbUITool is a database web UI for the edge: it wakes the helper and
+// hands the edge the helper's own login.
+type dbUITool struct {
+	uis *dbtools.UIs
+	id  string
+}
+
+func (t dbUITool) Upstream(ctx context.Context) (string, error) { return t.uis.Wake(ctx, t.id) }
+func (t dbUITool) Authorization() string                        { return t.uis.Authorization(t.id) }
+
+var _ edge.AuthorizedTool = dbUITool{}
 
 func (r *toolRegistrations) closeAll() {
 	r.mu.Lock()

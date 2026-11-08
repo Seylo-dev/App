@@ -76,6 +76,25 @@ func TestWebUIsStartAndStop(t *testing.T) {
 	}
 	uis.Sync(context.Background(), specs)
 
+	// do sends a request to a UI the way the edge does: with the helper's
+	// login (auth), or as a container of the project would without it.
+	do := func(method, target, auth, body string) (int, string, error) {
+		req, err := http.NewRequest(method, target, strings.NewReader(body))
+		if err != nil {
+			return 0, "", err
+		}
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b), nil
+	}
+
 	// The group returns only when every parallel UI check is done.
 	t.Run("ui", func(t *testing.T) {
 		for name, c := range cases {
@@ -87,6 +106,7 @@ func TestWebUIsStartAndStop(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				auth := func() string { return uis.Authorization(id) }
 				var body string
 				e.Eventually(name+" UI answers", 3*time.Minute, func() bool {
 					// Like the edge, wake on every request: a UI that gave up
@@ -94,15 +114,23 @@ func TestWebUIsStartAndStop(t *testing.T) {
 					if up, err = uis.Wake(e.Ctx(time.Minute), id); err != nil {
 						return false
 					}
-					resp, err := http.Get(up + "/")
-					if err != nil {
-						return false
-					}
-					b, _ := io.ReadAll(resp.Body)
-					resp.Body.Close()
-					body = string(b)
-					return resp.StatusCode == 200 && strings.Contains(body, c.marker)
+					code, b, err := do(http.MethodGet, up+"/", auth(), "")
+					body = b
+					return err == nil && code == 200 && strings.Contains(body, c.marker)
 				})
+				// A container of the project reaches the helper too, but without
+				// the edge's login it gets nothing of the database.
+				guarded := map[string]string{"postgres": "/api/connection", "postgres18": "/api/connection", "mysql": "/", "mongo": "/",
+					"redis": "/apiv2/server/info", "valkey": "/apiv2/server/info", "keydb": "/apiv2/server/info", "dragonfly": "/apiv2/server/info"}
+				if path, ok := guarded[name]; ok {
+					for _, who := range []string{"", "Basic c2V5bG86d3Jvbmc=", "Bearer x.y.z"} {
+						// 401, or 400 for a header the UI cannot parse (mongo-express).
+						code, b, err := do(http.MethodGet, up+path, who, "")
+						if err != nil || (code != http.StatusUnauthorized && code != http.StatusBadRequest) {
+							t.Fatalf("%s %s without the helper's login (%q) = %d %v %.200s", name, path, who, code, err, b)
+						}
+					}
+				}
 				// Signed in: phpMyAdmin shows the server's databases without a
 				// login form; pgweb's API reports the connected database.
 				switch name {
@@ -113,30 +141,20 @@ func TestWebUIsStartAndStop(t *testing.T) {
 				case "valkey", "keydb", "dragonfly":
 					// Redis Commander lists the server it is signed in to.
 					e.Eventually(name+" connected", time.Minute, func() bool {
-						resp, err := http.Get(up + "/apiv2/server/info")
-						if err != nil {
-							return false
-						}
-						b, _ := io.ReadAll(resp.Body)
-						resp.Body.Close()
-						return resp.StatusCode == 200 && strings.Contains(string(b), `"Redis version"`)
+						code, b, err := do(http.MethodGet, up+"/apiv2/server/info", auth(), "")
+						return err == nil && code == 200 && strings.Contains(b, `"Redis version"`)
 					})
 				case "clickhouse":
-					// Queries run as the admin whatever the browser sends:
-					// nothing, or a Basic header of someone else.
-					for _, auth := range []string{"", "Basic " + "bm9ib2R5Ong="} {
-						req, _ := http.NewRequest(http.MethodPost, up+"/?default_format=TSV", strings.NewReader("SELECT currentUser()"))
-						if auth != "" {
-							req.Header.Set("Authorization", auth)
-						}
-						resp, err := http.DefaultClient.Do(req)
-						if err != nil {
-							t.Fatal(err)
-						}
-						b, _ := io.ReadAll(resp.Body)
-						resp.Body.Close()
-						if resp.StatusCode != 200 || strings.TrimSpace(string(b)) != "admin" {
-							t.Fatalf("query through the UI proxy (%q) = %d %s", auth, resp.StatusCode, b)
+					// Queries with the edge's login run as the admin; without it
+					// (nothing, a Basic header of someone else) nothing runs.
+					code, b, err := do(http.MethodPost, up+"/?default_format=TSV", auth(), "SELECT currentUser()")
+					if err != nil || code != 200 || strings.TrimSpace(b) != "admin" {
+						t.Fatalf("query through the UI proxy = %d %v %s", code, err, b)
+					}
+					for _, who := range []string{"", "Basic " + "bm9ib2R5Ong="} {
+						code, b, err := do(http.MethodPost, up+"/?default_format=TSV", who, "SELECT currentUser()")
+						if err != nil || code != http.StatusUnauthorized {
+							t.Fatalf("query without the helper's login (%q) = %d %v %s", who, code, err, b)
 						}
 					}
 					// Credentials as URL parameters (which ClickHouse takes over
@@ -151,24 +169,20 @@ func TestWebUIsStartAndStop(t *testing.T) {
 						"default_format=TSV&param_user=1":       http.StatusOK,
 						"default_format=TSV&max_result_rows=10": http.StatusOK,
 					} {
-						resp, err := http.Post(up+"/?"+query, "text/plain", strings.NewReader("SELECT currentUser()"))
+						code, b, err := do(http.MethodPost, up+"/?"+query, auth(), "SELECT currentUser()")
 						if err != nil {
 							t.Fatal(err)
 						}
-						b, _ := io.ReadAll(resp.Body)
-						resp.Body.Close()
-						if resp.StatusCode != want {
-							t.Fatalf("query through the UI proxy with ?%s = %d %s, want %d", query, resp.StatusCode, b, want)
+						if code != want {
+							t.Fatalf("query through the UI proxy with ?%s = %d %s, want %d", query, code, b, want)
 						}
 					}
 				case "postgres", "postgres18":
-					resp, err := http.Get(up + "/api/connection")
+					_, b, err := do(http.MethodGet, up+"/api/connection", auth(), "")
 					if err != nil {
 						t.Fatal(err)
 					}
-					b, _ := io.ReadAll(resp.Body)
-					resp.Body.Close()
-					if !strings.Contains(string(b), `"current_database":"app"`) {
+					if !strings.Contains(b, `"current_database":"app"`) {
 						t.Fatalf("pgweb not connected: %s", b)
 					}
 				}
