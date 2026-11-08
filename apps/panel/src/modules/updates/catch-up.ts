@@ -20,6 +20,10 @@
 // The job is queued on a connect only when the node has a waiting step whose
 // retryAt (if any) has passed.
 //
+// An agent step that timed out (runs.ts) waits the same way, with retryAt a
+// few minutes later and the job queued for then; its second try is a run
+// of trigger "auto", since the node did not go away.
+//
 // Panels before 0.2.0-rc.2 skipped offline nodes with another message and
 // no retry, and kept no manifest on the run. At start such a step waits like
 // one of today's when no later run has a step for its node (adoptOldSkips),
@@ -173,7 +177,8 @@ export function catchUp(deps: Pick<Deps, "db" | "agents" | "jobs" | "live">, nod
 
   createRun(
     deps,
-    { release, trigger: "reconnect", startedBy: null },
+    // A step that timed out (runs.ts timedOut) is the panel trying again, not a node coming back.
+    { release, trigger: newest.step.status === "failed" ? "auto" : "reconnect", startedBy: null },
     [{ target: "agent", nodeId, fromVersion: current, toVersion: release.version }],
     (tx, runId) => {
       tx.update(updateSteps).set({ retry: "retried", retryRunId: runId, retryAt: now }).where(eq(updateSteps.id, newest.step.id)).run();
