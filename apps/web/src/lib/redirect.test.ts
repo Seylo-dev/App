@@ -16,6 +16,11 @@ describe("safeRedirectPath", () => {
       "//evil.example/x",
       "/\\evil.example/x",
       "/\\/evil.example",
+      "/..//evil.example",
+      "/a/..//evil.example",
+      "/%2e%2e//evil.example",
+      "/x/../..//evil.example",
+      "/.//evil.example",
       "javascript:alert(1)",
       "settings",
       "",
@@ -24,5 +29,10 @@ describe("safeRedirectPath", () => {
     ]) {
       expect(safeRedirectPath(value, origin)).toBeUndefined();
     }
+  });
+
+  test("keeps dot-segment paths that stay on the panel", () => {
+    expect(safeRedirectPath("/a/../settings", origin)).toBe("/settings");
+    expect(safeRedirectPath("/a/..//b/x", origin)).toBeUndefined();
   });
 });

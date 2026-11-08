@@ -2474,8 +2474,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   dialog fails the call with `isReauthCancelled(error)` true, which
   `toastError` and the screens keep quiet. `/reauth?redirect=<path>` is the
   same form as a page (for the MCP consent page). `?redirect=` on `/login`
-  and `/reauth` goes through `lib/redirect.ts` `safeRedirectPath`, and
-  `validateSearch` always returns the key, because the router keeps raw
+  and `/reauth` goes through `lib/redirect.ts` `safeRedirectPath` (a path
+  on this origin whose parsed path does not start with `//`, so
+  `/..//evil.example` is refused), and `validateSearch` always returns the key, because the router keeps raw
   search values a route leaves out.
 - Shared helpers: `lib/theme.ts` (`refreshBoot()` after an appearance or
   branding save, `useBoot()`), `lib/format.ts`, `lib/types.ts`,
