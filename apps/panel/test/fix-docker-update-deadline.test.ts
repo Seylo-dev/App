@@ -121,6 +121,8 @@ test("a late result still counts, and removing the node fails its Docker update 
 });
 
 test("a Docker run an older panel left running gets watched when the panel starts", async () => {
+  // Without it the run job asks the real GitHub releases API, which made this test slow and flaky.
+  serveReleases([{ tag: "v0.9.0" }]);
   const node = await join("0.8.0", "n1");
   const real = await ok(callOp(panel, nodeOps.updateDocker, { nodeId: node.nodeId }, { cookie: owner.cookie }));
   const runId = real.runId as string;

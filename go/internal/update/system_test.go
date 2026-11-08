@@ -119,18 +119,21 @@ func TestAgentUpdateRestartErrorOnlyWhenTheRestartFailed(t *testing.T) {
 			if err := u.Update(context.Background(), f.request(testManifest("1.2.0", f.binary, f.server.URL))); err != nil {
 				t.Fatal(err)
 			}
+			var restartErr error
 			select {
-			case <-sys.done:
+			case restartErr = <-sys.done:
 			case <-time.After(5 * time.Second):
 				t.Fatal("the agent was not restarted")
+			}
+			// The update's goroutine logs the ERROR exactly when RestartAgent
+			// returns an error, so the returned error decides it, with no wait.
+			if (restartErr != nil) != c.wantError {
+				t.Fatalf("RestartAgent error = %v, want an error: %v", restartErr, c.wantError)
 			}
 			const msg = "restarting into the new agent failed"
 			deadline := time.Now().Add(2 * time.Second)
 			for c.wantError && !strings.Contains(logs.String(), msg) && time.Now().Before(deadline) {
 				time.Sleep(5 * time.Millisecond)
-			}
-			if !c.wantError {
-				time.Sleep(50 * time.Millisecond) // the goroutine logs right after the restart returns
 			}
 			out := logs.String()
 			if got := strings.Contains(out, "level=ERROR msg=\""+msg); got != c.wantError {
