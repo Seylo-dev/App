@@ -24,7 +24,7 @@ declare module "../../settings" {
   }
 }
 
-export type BlockReason = "loopback" | "linkLocal" | "metadata" | "private" | "reserved" | "unresolvable";
+export type BlockReason = "loopback" | "linkLocal" | "metadata" | "private" | "reserved" | "unresolvable" | "node";
 
 /**
  * ok carries the vetted address to connect to. `byName` (address null) only
@@ -209,17 +209,78 @@ function ownTarget(deps: Pick<Deps, "db">, addresses: readonly string[]): boolea
   return internal.every((a) => set.includes(a));
 }
 
+/** One spelling per IP address ("4:<n>" or "6:<n>", IPv4-mapped as IPv4), or null for anything else. */
+function ipKey(address: string): string | null {
+  const text = address
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/%.*$/, "");
+  const kind = isIP(text);
+  if (kind === 4) {
+    const n = parseV4(text);
+    return n === null ? null : `4:${n}`;
+  }
+  if (kind !== 6) return null;
+  const n = parseV6(text);
+  if (n === null) return null;
+  return inV6(n, mapped, 96) ? `4:${Number(n & 0xffffffffn)}` : `6:${n}`;
+}
+
+/**
+ * Every address of this panel's nodes: the admin-set public address and
+ * what agents report (public_ipv4/public_ipv6, NodeFacts.interface_addresses:
+ * the public addresses on their interfaces, which their git fetches refuse
+ * unless allowed), plus admin-set public host names. Only ever used to
+ * count a target as more internal (git sources), never to open one up, so
+ * what an agent reports may count here.
+ */
+function nodeAddresses(deps: Pick<Deps, "db">): { ips: Set<string>; names: Set<string> } {
+  const ips = new Set<string>();
+  const names = new Set<string>();
+  const rows = deps.db
+    .select({ publicAddress: nodes.publicAddress, ipv4: nodes.publicIpv4, ipv6: nodes.publicIpv6, facts: nodes.facts })
+    .from(nodes)
+    .all();
+  for (const row of rows) {
+    const facts = (row.facts ?? {}) as { interfaceAddresses?: unknown; publicIpv4?: unknown; publicIpv6?: unknown };
+    const reported = Array.isArray(facts.interfaceAddresses) ? facts.interfaceAddresses.slice(0, 256) : [];
+    for (const address of [row.publicAddress, row.ipv4, row.ipv6, facts.publicIpv4, facts.publicIpv6, ...reported]) {
+      if (typeof address !== "string" || address === "") continue;
+      const key = ipKey(address);
+      if (key) ips.add(key);
+      else if (address === row.publicAddress) names.add(address.toLowerCase().replace(/\.$/, ""));
+    }
+  }
+  return { ips, names };
+}
+
+/**
+ * True when the target is one of this panel's nodes: its name is a node's
+ * admin-set public host name, or every address it resolves to is a node's
+ * address (nodeAddresses).
+ */
+function nodeTarget(deps: Pick<Deps, "db">, host: string, addresses: readonly string[]): boolean {
+  const known = nodeAddresses(deps);
+  if (known.names.has(host.replace(/\.$/, ""))) return true;
+  return addresses.length > 0 && addresses.every((a) => known.ips.has(ipKey(a) ?? ""));
+}
+
 /**
  * Decides whether an uptime check may request this URL. Hostnames are
  * resolved; every address must be public (or the panel's own).
  * `ownNodes: false` drops the "panel's own" exception: a node's address on
  * a private network then counts like any other internal address (git
  * sources, where such a host needs an admin's approval per project).
+ * `nodesInternal` refuses a target on one of this panel's nodes too, public
+ * addresses included (reason "node"): the node connects to itself there,
+ * past a firewall that hides a service from the internet (git sources,
+ * whose nodes refuse their own addresses unless allowed).
  */
 export async function checkTarget(
   deps: Pick<Deps, "db">,
   url: string,
-  options: { allowInternal?: boolean; ownNodes?: boolean } = {},
+  options: { allowInternal?: boolean; ownNodes?: boolean; nodesInternal?: boolean } = {},
 ): Promise<TargetCheck> {
   if (options.allowInternal ?? getSetting(deps.db, "uptimeAllowInternalTargets") === true) return { ok: true, address: null, byName: true };
   let host: string;
@@ -250,7 +311,10 @@ export async function checkTarget(
   }
   const blocked = addresses.map((address) => ({ address, reason: blockedReason(address) })).filter((a) => a.reason !== null);
   const pin = addresses[0] as string;
-  if (blocked.length === 0) return { ok: true, address: pin, byName: false };
+  if (blocked.length === 0) {
+    if (options.nodesInternal && nodeTarget(deps, host, addresses)) return { ok: false, reason: "node", address: pin };
+    return { ok: true, address: pin, byName: false };
+  }
   // The metadata service is never one of ours, even on a node's own address.
   const first = blocked.find((b) => b.reason === "metadata") ?? (blocked[0] as { address: string; reason: BlockReason });
   if (first.reason !== "metadata" && options.ownNodes !== false && ownTarget(deps, addresses))
@@ -265,6 +329,7 @@ const reasonText: Record<BlockReason, string> = {
   private: "a private network address",
   reserved: "a reserved address",
   unresolvable: "a name that does not resolve",
+  node: "an address of one of this panel's nodes",
 };
 
 /** What a refused target is, for messages: "a private network address (10.0.0.7)". */
