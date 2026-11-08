@@ -141,6 +141,8 @@ test("an agent step that times out raises update_failed and is tried once more o
   expect(updateAlerts()[1]?.message).toContain("It was the second try. Update now in Settings > Updates tries again.");
   await drain(new Date(retryAt + stepTimeoutMs + 2 * timeoutRetryMs));
   expect(node.requests("UpdateAgent")).toHaveLength(2);
+  // The node never got there: both alerts stay open.
+  expect(updateAlerts().map((a) => a.resolvedAt)).toEqual([null, null]);
 
   const history = await ok(callOp(panel, updates.history, {}, { cookie: owner.cookie }));
   expect(history.runs.map((r: Run) => [r.trigger, r.status, r.steps[0]?.retry])).toEqual([
@@ -169,6 +171,7 @@ test("a node that reconnects on the new version after the timeout is up to date,
   const start = Date.now();
   while ((await advanceRun(panel.deps, first.id)) === 0) {}
   await timeOut(first.id, start);
+  expect(updateAlerts()).toMatchObject([{ resolvedAt: null }]);
   node.event({ payload: { case: "nodeFacts", value: { agentVersion: "0.9.0" } } });
   await Bun.sleep(50);
   const at = new Date(start + stepTimeoutMs + timeoutRetryMs + 5000);
@@ -176,6 +179,75 @@ test("a node that reconnects on the new version after the timeout is up to date,
   await drain(at);
   expect(node.requests("UpdateAgent")).toHaveLength(1);
   expect(stepsOf(node.nodeId)[0]?.step.retry).toBe("up_to_date");
+  // Before: the alert kept saying the node did not update while it ran 0.9.0.
+  expect(updateAlerts()).toHaveLength(1);
+  expect(updateAlerts()[0]?.resolvedAt).not.toBeNull();
+});
+
+test("a late success for a timed-out agent step resolves its alert and leaves the step as it was", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await silentNode();
+  await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+  const first = await ok(callOp(panel, updates.updateNode, { nodeId: node.nodeId }, { cookie: owner.cookie }));
+  const start = Date.now();
+  while ((await advanceRun(panel.deps, first.id)) === 0) {}
+  await timeOut(first.id, start);
+  const failed = stepsOf(node.nodeId)[0]?.step;
+  expect(updateAlerts()).toMatchObject([{ eventKey: `update-failed:${failed?.id}`, resolvedAt: null }]);
+
+  // Another node's result for this step changes nothing.
+  const other = await joinAgent(panel, url, { name: "de-fsn-9", agentVersion: "0.8.0", facts: { agentVersion: "0.8.0" } });
+  agents.push(other);
+  await other.callPanel("ReportEvent", ReportEventRequestSchema, ReportEventResponseSchema, {
+    outboxId: 1n,
+    event: {
+      payload: {
+        case: "updateResult",
+        value: { target: UpdateTarget.AGENT, updateId: failed?.id, fromVersion: "0.8.0", toVersion: "0.9.0", success: true },
+      },
+    },
+  });
+  expect(updateAlerts()[0]?.resolvedAt).toBeNull();
+
+  // The agent restarted into 0.9.0 after the deadline and confirms it.
+  await node.callPanel("ReportEvent", ReportEventRequestSchema, ReportEventResponseSchema, {
+    outboxId: 1n,
+    event: {
+      payload: {
+        case: "updateResult",
+        value: { target: UpdateTarget.AGENT, updateId: failed?.id, fromVersion: "0.8.0", toVersion: "0.9.0", success: true },
+      },
+    },
+  });
+  expect(updateAlerts()).toHaveLength(1);
+  expect(updateAlerts()[0]?.resolvedAt).not.toBeNull();
+  expect(stepsOf(node.nodeId)[0]?.step).toMatchObject({ status: "failed", error: stepTimeoutError });
+  expect(panel.deps.db.select().from(updateRuns).where(eq(updateRuns.id, first.id)).get()?.status).toBe("failed");
+});
+
+test("the retry run reaching the version resolves the alert of the step that timed out", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await silentNode();
+  await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+  const first = await ok(callOp(panel, updates.updateNode, { nodeId: node.nodeId }, { cookie: owner.cookie }));
+  const start = Date.now();
+  while ((await advanceRun(panel.deps, first.id)) === 0) {}
+  await timeOut(first.id, start);
+  const retryAt = start + stepTimeoutMs + 1000 + timeoutRetryMs;
+  setSystemTime(new Date(retryAt + 1000));
+  await drain(new Date(retryAt + 1000));
+  await node.waitFor("UpdateAgent", 2);
+  const [original, retry] = stepsOf(node.nodeId);
+  expect(original?.step).toMatchObject({ retry: "retried", retryRunId: retry?.run.id });
+  expect(updateAlerts()[0]?.resolvedAt).toBeNull();
+
+  // The second try works: the node reconnects on 0.9.0.
+  node.event({ payload: { case: "nodeFacts", value: { agentVersion: "0.9.0" } } });
+  await Bun.sleep(50);
+  while ((await advanceRun(panel.deps, retry?.run.id as string)) === 0) {}
+  expect(stepsOf(node.nodeId)[1]?.step.status).toBe("succeeded");
+  expect(updateAlerts()).toHaveLength(1);
+  expect(updateAlerts()[0]?.resolvedAt).not.toBeNull();
 });
 
 test("a Docker update without a result alerts too, and the alert is resolved when the result comes late", async () => {
@@ -235,6 +307,18 @@ test("the panel step timing out raises update_failed for the panel node", async 
       { eventKey: `update-failed:${step?.id}`, title: "Update of the panel to 0.9.0 did not finish", nodeId: agent.nodeId },
     ]);
     expect(updateAlerts()[0]?.message).toContain("Update the panel again in Settings > Updates.");
+
+    // The panel node reports the swap after all: the alert is resolved.
+    await agent.callPanel("ReportEvent", ReportEventRequestSchema, ReportEventResponseSchema, {
+      outboxId: 1n,
+      event: {
+        payload: {
+          case: "updateResult",
+          value: { target: UpdateTarget.PANEL, updateId: step?.id, fromVersion: "0.8.0", toVersion: "0.9.0", success: true },
+        },
+      },
+    });
+    expect(updateAlerts()[0]?.resolvedAt).not.toBeNull();
   } finally {
     Object.assign(panel.deps.config, saved);
   }

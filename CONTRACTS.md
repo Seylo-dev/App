@@ -2451,7 +2451,12 @@ A run is update_runs/update_steps advanced by the `updates.run` job: panel
 step (UpdatePanel on the panel node), then one agent step per older node
 (UpdateAgent with the verified bytes); a durable `UpdateResult` or the new
 version on reconnect finishes a step, 10 minutes without either fails it
-and the run. A run keeps the manifest it installs (`update_runs.manifest`,
+and the run with an `update_failed` alert (an agent step is tried once
+more 5 minutes later). That alert is resolved when the node gets there
+after all: a late successful `UpdateResult` for the step (it stays
+failed), the retry or a later run reaching that version, a successful
+agent `UpdateResult` for it or a newer one, or the catch-up finding the
+node up to date. A run keeps the manifest it installs (`update_runs.manifest`,
 `manifest_signature`; a run from before rc.2 gets the stored one while it
 is still that version), so a later check or a channel switch never changes
 what its steps send. `nodes.updateDocker` is a one-step run finished by

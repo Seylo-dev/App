@@ -21,13 +21,14 @@
 // never changes what a run in progress sends. A failed step fails the run
 // and skips the rest. A step that times out raises an update_failed alert;
 // a timed-out agent step is tried once more on its own (retry "waiting"
-// until retryAt, catch-up.ts).
+// until retryAt, catch-up.ts). The alert is resolved when the step's version
+// arrives after all (resolveTimedOutAlerts).
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
-import type { UpdateResult } from "@seylo/proto";
+import { type UpdateResult, UpdateTarget } from "@seylo/proto";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { isNewer, parseVersion } from "../../agent-hub/version";
+import { compareVersions, isNewer, parseVersion } from "../../agent-hub/version";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import {
@@ -466,6 +467,7 @@ export async function advanceRun(ctx: RunCtx, runId: string): Promise<number | n
     if (doneByVersion) {
       busySteps.delete(step.id);
       finishStep(db, step.id, "succeeded");
+      if (step.target === "agent" && step.nodeId) resolveTimedOutAlerts(ctx, step.nodeId, step.toVersion);
       publish();
       return 0;
     }
@@ -549,6 +551,7 @@ export async function advanceRun(ctx: RunCtx, runId: string): Promise<number | n
       // this one may already be there.
       if (ctx.agents.isOnline(step.nodeId) && ctx.agents.state.get(step.nodeId)?.facts?.agentVersion === step.toVersion) {
         finishStep(db, step.id, "succeeded");
+        resolveTimedOutAlerts(ctx, step.nodeId, step.toVersion);
         publish();
         return 0;
       }
@@ -634,6 +637,7 @@ async function sendUpdateAgent(ctx: RunCtx, run: RunRow, step: StepRow, release:
       // The agent runs that version or a newer one (its facts may be older).
       busySteps.delete(step.id);
       finishStep(db, step.id, "succeeded");
+      resolveTimedOutAlerts(ctx, nodeId, step.toVersion);
       publish();
       return 0;
     }
@@ -705,6 +709,34 @@ function timedOut(ctx: RunCtx, run: RunRow, step: StepRow): void {
   });
 }
 
+/**
+ * Resolves the update_failed alerts of the node's agent steps that timed
+ * out (timedOut) on their way to `version` or an older release: the node
+ * runs it now after all (a late restart, the panel's retry, Update now, or
+ * its own update on connect), so "did not finish on <node>" no longer holds.
+ * The steps keep their status.
+ */
+export function resolveTimedOutAlerts(deps: Pick<Deps, "db" | "alerts">, nodeId: string, version: string | null | undefined): void {
+  const reached = parseVersion(version);
+  if (!reached) return;
+  const steps = deps.db
+    .select({ id: updateSteps.id, toVersion: updateSteps.toVersion })
+    .from(updateSteps)
+    .where(
+      and(
+        eq(updateSteps.nodeId, nodeId),
+        eq(updateSteps.target, "agent"),
+        eq(updateSteps.status, "failed"),
+        eq(updateSteps.error, stepTimeoutError),
+      ),
+    )
+    .all();
+  for (const step of steps) {
+    const wanted = parseVersion(step.toVersion);
+    if (wanted && compareVersions(wanted, reached) <= 0) deps.alerts.resolve(`update-failed:${step.id}`);
+  }
+}
+
 /** Runs being advanced right now; jobs for the same run never overlap. */
 const advancing = new Set<string>();
 
@@ -749,11 +781,20 @@ export const checkJob = defineJob<Record<string, never>>({
 export function applyUpdateResult(deps: Pick<Deps, "db" | "jobs" | "live" | "alerts">, nodeId: string, result: UpdateResult): void {
   // Also results no step names (the agent updating itself on connect).
   noteUpdateResult(deps.db, nodeId, result, panelNodeId(deps.db));
+  // This node's agent runs that release now (agents always report toVersion), with or without a step.
+  if (result.success && result.target === UpdateTarget.AGENT) resolveTimedOutAlerts(deps, nodeId, result.toVersion);
   const step = deps.db.select().from(updateSteps).where(eq(updateSteps.id, result.updateId)).get();
-  // A Docker step the panel stopped waiting for still takes its late result.
-  const lateDocker = step?.target === "docker" && step.status === "failed" && step.error === dockerNoResultError;
-  if (!step || (!["pending", "running"].includes(step.status) && !lateDocker)) return;
+  if (!step) return;
   const runsOn = step.nodeId ?? deps.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get()?.id ?? null;
+  // A step that timed out and then finished after all keeps its status
+  // (its run already failed and skipped the rest), but not its alert.
+  if (step.status === "failed" && step.error === stepTimeoutError) {
+    if (result.success && runsOn === nodeId) deps.alerts.resolve(`update-failed:${step.id}`);
+    return;
+  }
+  // A Docker step the panel stopped waiting for still takes its late result.
+  const lateDocker = step.target === "docker" && step.status === "failed" && step.error === dockerNoResultError;
+  if (!["pending", "running"].includes(step.status) && !lateDocker) return;
   if (runsOn !== nodeId) return;
   const status: UpdateStepStatus = result.success ? "succeeded" : result.rolledBack ? "rolled_back" : "failed";
   finishStep(deps.db, step.id, status, result.success ? null : result.error || "The update failed.", {
