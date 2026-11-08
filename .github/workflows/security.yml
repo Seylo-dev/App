@@ -68,6 +68,6 @@ jobs:
 
       - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
         with:
-          version: 1.32.0
+          version: 1.31.1 # the newest version this action release has a hash lock for
           advanced-security: false # fail the job on findings instead of uploading SARIF
           min-severity: medium
