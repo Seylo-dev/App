@@ -3,7 +3,7 @@
 // what the dialogs sent.
 
 import { expect, test } from "@playwright/test";
-import { ids } from "./demo/fixtures";
+import { ids, projects } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { stateFile } from "./helpers";
 
@@ -148,6 +148,51 @@ test.describe("clone and move", () => {
     await expect(dialog.getByText("This move cannot run:")).toBeVisible();
     await expect(dialog.getByText("Rename one of them first")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Move", exact: true })).toBeDisabled();
+    expect(errors).toEqual([]);
+  });
+
+  test("Move to project: the project stays locked while the move runs, and the page follows the one it went to", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const sent: Record<string, unknown>[] = [];
+    // A second project to move to, so the picker has a choice to change.
+    const staging = { ...projects[1], id: "projstaging00004", name: "staging", position: 3 };
+    await installDemo(page, {
+      delay: (op) => (op === "services.moveProject" ? 1500 : 0),
+      overrides: {
+        "projects.list": () => ({ projects: [...projects, staging] }),
+        "services.moveProjectImpact": () => ({
+          blockers: [],
+          referencedBy: [],
+          hiddenReferrers: 0,
+          targetReferrers: [],
+          hiddenTargetReferrers: 0,
+          ownReferences: [],
+          sharedLost: { count: 0, names: [] },
+          grants: { count: 0, names: [] },
+          invites: 0,
+          switches: true,
+        }),
+        "services.moveProject": (input) => {
+          sent.push(input);
+          return { deploymentId: "d0000000000000mv", impact: {} };
+        },
+      },
+    });
+    await page.goto(apiPage);
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: "Move to project" }).click();
+    const dialog = page.getByRole("dialog");
+    const picker = dialog.getByRole("combobox", { name: "New project" });
+    await expect(picker).toHaveText("personal");
+    await expect(dialog.getByTestId("move-impact")).toBeVisible();
+    await dialog.getByRole("button", { name: "Move", exact: true }).click();
+    // While services.moveProject runs, another pick would name the wrong project in the toast and the URL.
+    await expect(picker).toBeDisabled();
+    await expect(dialog).toBeHidden();
+    expect(sent).toEqual([{ serviceId: ids.api, projectId: ids.personal }]);
+    await expect(page).toHaveURL(new RegExp(`/p/${ids.personal}/s/${ids.api}$`));
+    await expect(page.getByText("Moving api to personal.")).toBeVisible();
     expect(errors).toEqual([]);
   });
 });
