@@ -32,7 +32,8 @@
 // (whose host only gitProviders.manage sets) when the panel sees the host
 // as internal or it is recorded for the project (providerGitVerdict).
 
-import { OpError } from "@seylo/ops";
+import { git as gitOps, OpError } from "@seylo/ops";
+import { Value } from "@sinclair/typebox/value";
 import { and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
 import { compareVersions, parseVersion } from "../../agent-hub/version";
 import type { Access } from "../../auth/access";
@@ -81,12 +82,27 @@ export function gitCaller(ctx: { access: Pick<Access, "can">; principal: Princip
   return { access: ctx.access, userId: userOf(ctx.principal)?.id ?? null };
 }
 
-function hostOf(url: string, field: string): string {
+/**
+ * The host of a git URL as git_internal_hosts records it (urlHost, lower
+ * case), or null when the URL has none InternalGitHost can name (no host
+ * at all, say "ssh://" and a control character): such a host is never
+ * recorded, so git.listInternalHosts and git.removeInternalHost work for
+ * every row.
+ */
+export function recordedHostOf(url: string): string | null {
+  let host: string;
   try {
-    return urlHost(url).toLowerCase();
+    host = urlHost(url).toLowerCase();
   } catch {
-    throw new OpError("BAD_REQUEST", "This is not a git URL.", { field });
+    return null;
   }
+  return Value.Check(gitOps.InternalGitHost, host) ? host : null;
+}
+
+function hostOf(url: string, field: string): string {
+  const host = recordedHostOf(url);
+  if (host === null) throw new OpError("BAD_REQUEST", "This is not a git URL.", { field });
+  return host;
 }
 
 /** The first-start seed while it runs, per database: every check below waits for it. */
@@ -229,11 +245,10 @@ function gitSourceRows(db: PanelDb, filter?: SQL): { id: string; projectId: stri
     const hosts: string[] = [];
     const urls: string[] = [];
     for (const url of [row.source === "git" ? row.url : null, row.stackSource === "git" ? row.stackUrl : null]) {
-      if (!url) continue;
-      try {
-        hosts.push(urlHost(url).toLowerCase());
-        urls.push(url);
-      } catch {}
+      const host = url ? recordedHostOf(url) : null;
+      if (!url || host === null) continue;
+      hosts.push(host);
+      urls.push(url);
     }
     return { id: row.id, projectId: row.projectId, hosts, urls };
   });

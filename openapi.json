@@ -32613,10 +32613,7 @@
                         ],
                         "properties": {
                           "host": {
-                            "minLength": 1,
-                            "maxLength": 260,
-                            "pattern": "^[A-Za-z0-9.:\\[\\]-]+$",
-                            "description": "A host as recorded for a project, for example \"gitea.lan\", \"10.0.0.7:3000\" or \"[fd00::7]:3000\".",
+                            "description": "A host as recorded for a project (host[:port] of a git URL, lower case), for example \"gitea.lan\", \"git_srv.lan\", \"10.0.0.7:3000\" or \"[fd00::7]:3000\".",
                             "type": "string"
                           },
                           "approvedBy": {
@@ -32703,9 +32700,9 @@
                   },
                   "host": {
                     "minLength": 1,
-                    "maxLength": 260,
-                    "pattern": "^[A-Za-z0-9.:\\[\\]-]+$",
-                    "description": "A host as recorded for a project, for example \"gitea.lan\", \"10.0.0.7:3000\" or \"[fd00::7]:3000\".",
+                    "maxLength": 4500,
+                    "pattern": "^\\S+$",
+                    "description": "A host as recorded for a project (host[:port] of a git URL, lower case), for example \"gitea.lan\", \"git_srv.lan\", \"10.0.0.7:3000\" or \"[fd00::7]:3000\".",
                     "type": "string"
                   }
                 }

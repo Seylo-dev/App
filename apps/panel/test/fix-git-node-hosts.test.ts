@@ -15,10 +15,12 @@
 // only an agent reported fails at that node instead, which refuses it.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { git as gitOps, projects, services as serviceOps } from "@seylo/ops";
+import { GitUrl, git as gitOps, projects, services as serviceOps } from "@seylo/ops";
+import { Value } from "@sinclair/typebox/value";
 import { eq } from "drizzle-orm";
 import { gitInternalHosts, nodes } from "../src/db/schema";
 import { resolveBuild } from "../src/modules/deployments/source";
+import { urlHost } from "../src/modules/git/remote";
 import { gitReadTarget, providerGitVerdict, seedInternalGitHosts } from "../src/modules/git/targets";
 import { loadService } from "../src/modules/services/rows";
 import { readSpec } from "../src/modules/services/spec";
@@ -246,4 +248,61 @@ test("admins list a project's internal git hosts and take one off", async () => 
   const again = await callOp(panel, gitOps.removeInternalHost, { projectId, host: "git.example.com" }, { cookie: owner });
   expect(again.status).toBe(404);
   expect((await callOp(panel, gitOps.listInternalHosts, { projectId: "0000000000000000" }, { cookie: owner })).status).toBe(404);
+});
+
+// A recorded host is urlHost() of a git URL, which holds more than letters, digits and dots: an
+// underscore in a LAN name (git_srv.lan, Windows and AD names), an scp-style host as written, the
+// percent-escapes of an ssh:// host. Before (rc.2 review), git.listInternalHosts failed its own
+// output check for the whole project (500) once such a host was recorded, and
+// git.removeInternalHost refused to name it (400), so the row could never be taken off.
+test("hosts with underscores and other URL host characters are listed and can be taken off", async () => {
+  dns.set("git_srv.lan", ["10.0.0.7"]);
+  const svc = await callOp(panel, serviceOps.create, gitService("https://git_srv.lan/team/app.git", "app"), { cookie: owner });
+  expect(svc.status).toBe(200);
+  expect(rowsFor("git_srv.lan")).toHaveLength(1);
+  const long = `${"a".repeat(300)}.lan`;
+  for (const url of [
+    "ssh://git@srv_2.lan:2222/team/app.git",
+    "git@build~box:team/app.git",
+    "ssh://git@gité.lan/x.git",
+    `https://${long}/x.git`,
+  ])
+    expect((await callOp(panel, gitOps.allowInternalHost, { projectId, url }, { cookie: owner })).status).toBe(200);
+  const hosts = ["build~box", "git%c3%a9.lan", "git_srv.lan", long, "srv_2.lan:2222"];
+
+  const list = await callOp(panel, gitOps.listInternalHosts, { projectId }, { cookie: owner });
+  expect(list.status).toBe(200);
+  expect(list.body.items.map((h: { host: string }) => h.host).sort()).toEqual(hosts.sort());
+  expect(list.body.items.find((h: { host: string }) => h.host === "git_srv.lan")).toMatchObject({
+    usedBy: 1,
+    approvedBy: { name: ownerName },
+  });
+
+  for (const host of hosts)
+    expect((await callOp(panel, gitOps.removeInternalHost, { projectId, host }, { cookie: owner })).status).toBe(200);
+  expect((await callOp(panel, gitOps.listInternalHosts, { projectId }, { cookie: owner })).body.items).toEqual([]);
+});
+
+// The other way round: the panel records only hosts InternalGitHost can name, so every row lists
+// and can be removed. The longest host a GitUrl gives (an ssh:// host of 494 three-byte
+// characters, each percent-encoded to 9) fits; a URL whose host is empty is not a git URL. Before:
+// "ssh://\u0001" passed GitUrl and urlHost() gave "", which allowInternalHost recorded.
+test("the panel records no git host that git.removeInternalHost could not name", async () => {
+  const widest = `ssh://${"中".repeat(494)}`;
+  expect(Value.Check(GitUrl, widest)).toBe(true);
+  const host = urlHost(widest).toLowerCase();
+  expect(host).toHaveLength(4446);
+  expect(Value.Check(gitOps.InternalGitHost, host)).toBe(true);
+
+  expect(Value.Check(GitUrl, "ssh://\u0001")).toBe(true);
+  const empty = await callOp(panel, gitOps.allowInternalHost, { projectId, url: "ssh://\u0001" }, { cookie: owner });
+  expect(empty.status).toBe(400);
+  expect(empty.body.error.message).toBe("This is not a git URL.");
+  expect(panel.deps.db.select().from(gitInternalHosts).all()).toEqual([]);
+
+  // A row an older panel recorded so still lists (the output takes any string), with the others.
+  panel.deps.db.insert(gitInternalHosts).values({ projectId, host: "", approvedBy: null }).run();
+  const list = await callOp(panel, gitOps.listInternalHosts, { projectId }, { cookie: owner });
+  expect(list.status).toBe(200);
+  expect(list.body.items).toMatchObject([{ host: "", approvedBy: null, usedBy: 0 }]);
 });

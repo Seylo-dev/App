@@ -1441,7 +1441,13 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   each, `approvedBy` null for the seed's rows or a removed account, and
   `usedBy`, its generic git and stack sources on the host) and
   `git.removeInternalHost {projectId, host}` takes one off (NOT_FOUND when
-  it is not there); both `git.manage`. A refusal an admin can lift
+  it is not there); both `git.manage`. A host is recorded as `urlHost` of
+  the URL, lower case, with whatever a URL's host holds (`git_srv.lan`, an
+  scp-style host as written, the percent-escapes of an ssh:// host);
+  `InternalGitHost` (no whitespace, up to 4500 characters, which the
+  longest host of a 500-character git URL fits) names any of them, and a
+  URL whose host it cannot name (an empty one) is not a git URL, so every
+  recorded host lists and can be taken off. A refusal an admin can lift
   (BAD_REQUEST `internalTarget` or `unresolvable` from saving a source or
   `git.branches`, never a metadata address) carries `details.host`, the
   host as it would be recorded. The web app shows "Allow this host for
