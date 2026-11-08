@@ -23,6 +23,11 @@ name: Release
 #   it only when every check passes; otherwise the draft stays and the run
 #   summary says what to do (CONTRIBUTING.md, Releases).
 #
+# Then Start the install smoke test starts install-smoke.yml for the tag: a
+# release published with GITHUB_TOKEN starts no "release: published"
+# workflow, but workflow_dispatch works with that token. It holds only
+# actions: write and runs gh.
+#
 # scripts/check-release-workflow.ts (make test-release) fails when a job
 # that holds a write token or a secret runs bun, npm or node, or when
 # goreleaser's hooks do.
@@ -585,3 +590,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: scripts/release-publish.sh "$TAG"
+
+  install-smoke:
+    name: Start the install smoke test
+    needs: publish
+    # Publish uses GITHUB_TOKEN, and a release published with it starts no
+    # "release: published" workflow, so this starts install-smoke.yml with
+    # workflow_dispatch (which that token may do) once the release is out.
+    if: success() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write # start install-smoke.yml
+      contents: read # see that the release is published
+    steps:
+      - name: Start install-smoke.yml for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A draft (Publish kept it because a check failed) cannot be installed yet.
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" != false ]; then
+            echo "$TAG is not published yet, so the install smoke test does not start."
+            exit 0
+          fi
+          gh workflow run install-smoke.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" -f tag="$TAG"
+          echo "Install smoke test started for $TAG (Actions > Install smoke test)." >>"$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,96 @@
+name: Install smoke test
+
+# Installs a published release with its own install.sh on fresh GitHub
+# runners (amd64 and arm64), sets the panel up through its API, deploys
+# traefik/whoami from Docker Hub and checks that its IP:port answers
+# (test/install-smoke/smoke.sh). Runs when a release is published: the
+# Release workflow's last job starts it for its tag (a release published with
+# GITHUB_TOKEN starts no "release: published" run), and a release a person
+# publishes starts it through that event. Also by hand for any release tag.
+# Nothing here publishes or needs a secret; on a failure the job uploads the
+# installer output and the agent's and panel's logs, with tokens redacted.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to install, for example v0.2.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-smoke-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  smoke:
+    name: install.sh on ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      REPO: Seylo-dev/App
+      PANEL_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tag
+        run: |
+          if ! [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The tag is not a release tag like v0.2.1"
+            exit 1
+          fi
+          echo "VERSION=${TAG#v}" >>"$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/smoke"
+
+      # The command the docs give, with the version pinned to the tag.
+      - name: Install with install.sh
+        run: |
+          curl -fsSL "https://github.com/$REPO/releases/download/$TAG/install.sh" |
+            sudo sh -s -- --version "$VERSION" 2>&1 | tee "$RUNNER_TEMP/smoke/install.log"
+
+      - name: Set up the panel and deploy whoami
+        run: test/install-smoke/smoke.sh --panel-url "$PANEL_URL" --install-log "$RUNNER_TEMP/smoke/install.log" 2>&1 | tee "$RUNNER_TEMP/smoke/smoke.log"
+
+      - name: Collect logs
+        if: failure()
+        run: |
+          out=$RUNNER_TEMP/smoke-logs
+          mkdir -p "$out"
+          # Setup links, join tokens and API keys never go into the artifact.
+          redact() { sed -E 's/([?&]t=)[A-Za-z0-9_-]+/\1<redacted>/g; s/(seylo_[a-z]+_)[A-Za-z0-9_-]+/\1<redacted>/g'; }
+          for f in install.log smoke.log; do
+            [ ! -f "$RUNNER_TEMP/smoke/$f" ] || redact <"$RUNNER_TEMP/smoke/$f" >"$out/$f"
+          done
+          { sudo seylo status; echo; sudo seylo panel status; } 2>&1 | redact >"$out/status.txt" || true
+          sudo journalctl -u seylo.service --no-pager -o short-iso 2>&1 | redact >"$out/agent.log" || true
+          sudo seylo panel logs --tail 5000 2>&1 | redact >"$out/panel.log" || true
+          { sudo docker ps -a; echo; sudo docker info; } >"$out/docker.txt" 2>&1 || true
+          sudo journalctl -u docker.service --no-pager -o short-iso -n 500 2>&1 | redact >"$out/docker.log" || true
+          curl -sS -m 5 "$PANEL_URL/api/health" >"$out/health.json" 2>&1 || true
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: install-smoke-${{ matrix.runner }}
+          path: ${{ runner.temp }}/smoke-logs/
+          if-no-files-found: ignore
+          retention-days: 14

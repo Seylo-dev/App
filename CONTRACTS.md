@@ -1972,7 +1972,7 @@ tests that run in a Linux VM (`scripts/dev/vm-gotest.sh`), git providers
 run against a real Gitea in that VM (`scripts/dev/it-gitea.sh`: the panel
 test `gitea.integration.test.ts` and the agent's `TestITGiteaPrivateClone`), the web app has
 Playwright suites (`test/playwright/run.sh`), and `make e2e` runs the real
-installer on three fresh VMs and 38 end-to-end checks against test-signed
+installer on three fresh VMs and 40 end-to-end checks against test-signed
 releases from a local mirror (`test/e2e-colima/README.md`; the evidence of
 the latest run is in `test/e2e-colima/RESULTS.md`). Every op contract has a
 handler.
@@ -1999,7 +1999,20 @@ disk-triggered cleanup, host shells, clone and project move, Valkey,
 ClickHouse and pgvector) and the update from the 0.1.1 release, built from
 its tag, to this build with real rows (every migration since applies, as
 many as the journal has; rows and keys survive; a cron job saved with 7
-for Sunday reads 0 and runs).
+for Sunday reads 0 and runs). Check 39 covers 0.2.1's build default (a
+join command made with "Build images on this node" unticked makes a node
+that does not build whatever its `--can-build` says, a refused join makes
+the installer exit 3, a default command makes a builder) and panel access
+over the domain ("Serve on IP address" off from a domain session closes
+http://<A>:<port> to the Mac, B and C while loopback, the domain and the
+panel node's agent keep working; `seylo panel ip-access on`; a dead domain
+reopens it and it closes again after the hour). Check 40 serves the panel on
+a Headscale tailnet in HTTP mode (Serve to the panel's socket, Lock to
+Tailscale from the tailnet, `tailscale down` reopening IP access, the
+`seylo panel tailscale` and `ip-access` commands). Outside the checklist,
+`test/e2e-colima/extra-installs.sh` installs on Debian 12 and on Ubuntu with
+ufw, and `.github/workflows/install-smoke.yml` installs each published
+release on GitHub's amd64 and arm64 runners (`test/install-smoke/smoke.sh`).
 
 ## Capabilities
 

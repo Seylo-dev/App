@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # The e2e checklist against the three VMs. One function per check
-# (check_01 .. check_38); each prints its sub-results with evidence and ends
+# (check_01 .. check_40); each prints its sub-results with evidence and ends
 # PASS, FAIL, BLOCKED (a precondition is missing, with the reason) or SKIP.
 # Results are kept per check in dist/e2e/state/results and RESULTS.md (next
 # to this file) is rewritten from them after every run, so a single check
 # can be rerun alone.
 #
-# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..38, then 31)
+# Usage: test/e2e-colima/checks.sh [N ...]     (default: 1..30, 32..40, then 31)
 #        test/e2e-colima/checks.sh report      rewrite RESULTS.md only
 #
 # Panel calls go through the REST op routes (/api/v1/<op id>) with the API
@@ -64,11 +64,14 @@ TITLES=(
   "Clone whoami with its data into another project on C; move a service between projects (impact list, keeps serving)"
   "Valkey, ClickHouse, Postgres 18 + pgvector on B: app connects, TLS exposure, shell query, backup to MinIO, restore"
   "Upgrade: a $E2E_BASE panel and node with real rows move to this build by the normal update; 0001 applies, data survives"
+  "Build default: Add node's box decides Can build, a refused join exits 3; Serve on IP address off over the domain, CLI and domain-death reopen"
+  "Panel on Tailscale (Headscale): Serve over HTTP to the panel's socket, reached from C, Lock to Tailscale, automatic and CLI recovery"
 )
 # The highest check number. Check 31 gives the panel a domain and puts
-# everything back afterwards; it runs last (after 32..38) so a failed
-# cleanup cannot spoil the others.
-LAST=38
+# everything back afterwards; it runs last (after 32..40) so a failed
+# cleanup cannot spoil the others. Checks 39 and 40 put back what they
+# change too.
+LAST=40
 DOMAIN_CHECK=31
 
 CUR=
@@ -483,10 +486,20 @@ check_02() {
   fi
 }
 
-# join_node <vm> <letter> [extra installer flags]
+# join_node <vm> <letter> [extra installer flags] [nodes.createJoinToken input]
+# Runs the panel's join command on the VM. JOIN_TOKEN keeps the token's
+# {tokenId, canBuild}, JOIN_CMD the command as run (with the token in it)
+# and JOIN_OUT its output, for checks that look closer.
+JOIN_TOKEN=
+JOIN_CMD=
+JOIN_OUT=
 join_node() {
-  local vm=$1 letter=$2 extra=${3:-} join cmd out
-  join=$(api nodes.createJoinToken '{}') || { bad "nodes.createJoinToken failed"; return 1; }
+  local vm=$1 extra=${3:-} input=${4:-'{}'} join cmd out
+  JOIN_TOKEN=''
+  JOIN_CMD=''
+  JOIN_OUT=''
+  join=$(api nodes.createJoinToken "$input") || { bad "nodes.createJoinToken $input failed"; return 1; }
+  JOIN_TOKEN=$(printf '%s' "$join" | jq -c '{tokenId, canBuild}')
   cmd=$(printf '%s' "$join" | jq -r .command)
   ev "join command from the panel: $(printf '%s' "$cmd" | sed 's/--token [^ ]*/--token <redacted>/; s/seylo_join_[A-Za-z0-9_-]*/<redacted>/')"
   # A panel without a domain hands out its agents' TLS port with the key pinned.
@@ -515,14 +528,27 @@ join_node() {
   # A node left half-joined by an earlier run joins again.
   if on "$vm" "test -f $BRAND_DATA_DIR/config.yml"; then cmd="$cmd --force"; fi
   write_key_dropin "$vm"
+  JOIN_CMD=$cmd
   out=$(on "$vm" "$cmd" 2>&1) || {
+    JOIN_OUT=$out
     printf '%s\n' "$out" >>"$RES/$CUR.log"
     bad "join on $vm failed: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
     return 1
   }
+  JOIN_OUT=$out
   printf '%s\n' "$out" >>"$RES/$CUR.log"
-  good "installer join on $vm finished: $(printf '%s' "$out" | grep -E 'Docker|Joining|joins' | tr '\n' ';' | head -c 300)"
+  good "installer join on $vm finished: $(printf '%s' "$out" | grep -E 'Docker|Joining|joins|Connected|connected' | tr '\n' ';' | head -c 300)"
 }
+
+# join_connected: the last join's installer waited for the agent's first
+# connection and said so, with the closing block of a connected join.
+join_connected() {
+  printf '%s' "$JOIN_OUT" | grep -qF 'Connected: the node shows up in the panel now.' &&
+    printf '%s' "$JOIN_OUT" | grep -qF 'This server is a node of the panel now.'
+}
+
+# node_can_build <letter>: the node's Can build in nodes.list (true, false or empty when not found).
+node_can_build() { api nodes.list | jq -r --arg id "$(node_id "$1")" '.nodes[] | select(.id==$id) | .canBuild'; }
 
 # pinned_join <vm>: config.yml holds an https:// panel URL and its pin, and no insecure_transport.
 pinned_join() {
@@ -563,9 +589,14 @@ map_nodes() {
 
 check_03() {
   need_key || return 3
-  local n nodes report
+  local n nodes report l joined=
   map_nodes
-  if [ -n "$(node_id b)" ]; then ev "B already joined ($(node_id b))"; else join_node "$E2E_B" b "--name e2e-b"; fi
+  if [ -n "$(node_id b)" ]; then
+    ev "B already joined ($(node_id b))"
+  elif join_node "$E2E_B" b "--name e2e-b"; then
+    joined="$joined b"
+    expect "the installer on B waited for the agent's first connection and says it is connected" join_connected
+  fi
   if [ -n "$(node_id c)" ]; then
     ev "C already joined ($(node_id c))"
   else
@@ -578,13 +609,25 @@ check_03() {
     no) good "C had no Docker before its first join" ;;
     *) bad "C had Docker before its first join (not a fresh VM)" ;;
     esac
-    join_node "$E2E_C" c "--name e2e-c --yes"
+    # No --yes or --install-docker: the installer installs a missing Docker by itself, with nobody to ask.
+    if join_node "$E2E_C" c "--name e2e-c"; then
+      joined="$joined c"
+      if [ "$(state_get c-docker-before)" = no ]; then
+        expect "the installer on C installed Docker by itself, without --yes ($(printf '%s' "$JOIN_OUT" | grep -m1 'Docker is missing' || true))" \
+          grep -qF 'Docker is missing: installing it with the official script from get.docker.com' <<<"$JOIN_OUT"
+      fi
+      expect "the installer on C waited for the agent's first connection and says it is connected" join_connected
+    fi
   fi
   wait_for 180 "3 online nodes" online_ge 3 || true
   map_nodes
   nodes=$(api nodes.list)
   printf '%s\n' "$nodes" >>"$RES/$CUR.log"
   expect "3 nodes online" online_ge 3
+  # Add node's "Build images on this node" is ticked by default: a default join command makes a build node.
+  for l in $joined; do
+    expect "$l joined with a default join command builds images (canBuild $(node_can_build $l))" test "$(node_can_build $l)" = true
+  done
   for l in a b c; do
     n=$(node_id $l)
     [ -n "$n" ] || { bad "node $l not found in nodes.list"; continue; }
@@ -742,6 +785,21 @@ check_05() {
     sh -c "curl -fsS -m 5 http://$(first_run_addr "$svc")/ | grep -q node-app"
 }
 
+# expect_built_on <service> <deployment> <node id> <label>: the deployment was
+# built on that node, its own. A node with Can build off (kept VMs joined
+# before 0.2.1) only gets a note: check 3 asserts the join default.
+expect_built_on() {
+  local on_id on_name builds
+  on_id=$(deploy_info "$1" "$2" | jq -r '.deployment.builtOn.id // empty')
+  on_name=$(deploy_info "$1" "$2" | jq -r '.deployment.builtOn.name // "nowhere"')
+  builds=$(api nodes.list | jq -r --arg id "$3" '.nodes[] | select(.id==$id) | .canBuild')
+  if [ "$builds" != true ]; then
+    ev "note: $4 has Can build off (joined before 0.2.1), so it built elsewhere: builtOn=$on_name"
+    return 0
+  fi
+  expect "built on $4, its own node (builtOn=$on_name)" test "$on_id" = "$3"
+}
+
 check_06() {
   need_key || return 3
   local pid na nb svc st dep url code
@@ -770,8 +828,11 @@ check_06() {
       build:{builder:"dockerfile", inlineDockerfile:"FROM busybox:1.37\nRUN mkdir -p /www && echo inline-ok > /www/index.html\nEXPOSE 8080\nCMD [\"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/www\"]\n"},
       ports:[{containerPort:8080, protocol:"tcp"}], deployNow:true}')") || bad "services.create inline-app failed"
   if [ -n "$svc" ]; then
-    st=$(wait_deploy "$svc" 600)
+    dep=$(latest_deploy "$svc" | jq -r .id)
+    st=$(wait_deploy "$svc" 600 "$dep")
     [ "$st" = live ] && good "inline Dockerfile service is live" || bad "inline-app deployment ended $st: $(latest_deploy "$svc" | jq -r .error)"
+    # No build node chosen: B builds images (the join default), so its own service builds there.
+    expect_built_on "$svc" "$dep" "$nb" B
     wait_for 60 "inline first-run" has_first_run "$svc" || true
     expect "inline-app answers inline-ok" sh -c "curl -fsS -m 5 http://$(first_run_addr "$svc")/ | grep -q inline-ok"
   fi
@@ -787,8 +848,11 @@ check_06() {
       -H 'x-file-name: upload-app.tar.gz' -H 'content-type: application/gzip' --data-binary "@$E2E_OUT/upload-app.tar.gz" "$url") || code=000
     ev "POST /api/uploads/services/<id> -> $code $(head -c 200 "$RES/$CUR.upload")"
     if [ "${code:0:1}" = 2 ]; then
-      st=$(wait_deploy "$svc" 600 "$(jq -r '.deployment.id // empty' "$RES/$CUR.upload")")
+      dep=$(jq -r '.deployment.id // empty' "$RES/$CUR.upload")
+      [ -n "$dep" ] || dep=$(latest_deploy "$svc" | jq -r .id)
+      st=$(wait_deploy "$svc" 600 "$dep")
       [ "$st" = live ] && good "uploaded archive service is live" || bad "upload-app deployment ended $st: $(latest_deploy "$svc" | jq -r .error)"
+      expect_built_on "$svc" "$dep" "$nb" B
       wait_for 60 "upload first-run" has_first_run "$svc" || true
       expect "upload-app answers upload-app ok" sh -c "curl -fsS -m 5 http://$(first_run_addr "$svc")/ | grep -q 'upload-app ok'"
     else
@@ -1068,9 +1132,8 @@ check_10() {
   wurl=$(printf '%s' "$out" | jq -r .url)
   ev "web UI ticket URL: $(printf '%s' "$wurl" | sed -E 's/([?&]t(icket)?=)[^&]*/\1<redacted>/')"
   if [ -n "$wurl" ] && [ "$wurl" != null ]; then
-    local whost wpath
+    local whost
     whost=$(printf '%s' "$wurl" | sed -E 's#^https?://([^/:]+).*#\1#')
-    wpath=$(printf '%s' "$wurl" | sed -E 's#^https?://[^/]+##')
     # The edge answers on B's Traefik with the URL's host name.
     # https with the certificate unchecked: no public CA issues for a private address.
     if curl -s -L -k -m 30 -c "$RES/$CUR.jar" -b "$RES/$CUR.jar" --resolve "$whost:80:$(node_ip b)" --resolve "$whost:443:$(node_ip b)" \
@@ -1096,7 +1159,7 @@ check_10() {
 
 check_11() {
   need_key || return 3
-  local db vol dest minio policy run st rrun volid
+  local db vol dest policy run st rrun volid
   db=$(state_get svc-pg)
   [ -n "$db" ] || { blocked "no Postgres (check 10)"; return 3; }
   read -r murl muser mpass <<<"$(state_get minio)"
@@ -1153,7 +1216,7 @@ run_done() { run_info "$1" "$2" | jq -e '.status != "running"' >/dev/null; }
 
 check_12() {
   need_key || return 3
-  local vol job runs n0 t0 tdown tup during c
+  local vol job runs t0 tdown tup during c
   vol=$(state_get svc-vol)
   [ -n "$vol" ] || { blocked "no vol service (check 11)"; return 3; }
   for j in $(api cron.list "{\"serviceId\":\"$vol\"}" | jq -r '(.jobs // .cronJobs // [])[].id'); do
@@ -1194,7 +1257,7 @@ sched_runs_ge() { api cron.runs "{\"serviceId\":\"$1\",\"cronJobId\":\"$2\",\"li
 
 check_13() {
   need_key || return 3
-  local app vol res gens ticket out echoer sh_svc path up down content
+  local app vol res gens ticket out echoer path up down content
   app=$(state_get svc-node-app)
   [ -n "$app" ] || { blocked "no node-app (check 5)"; return 3; }
   res=$(api logs.search "{\"serviceId\":\"$app\",\"query\":\"listening\",\"limit\":50}") || { bad "logs.search failed"; }
@@ -1568,7 +1631,8 @@ check_20() {
 # seylo_containers <vm>: id, name and StartedAt of every running managed
 # container, without the crash-test services (they restart by design).
 seylo_containers() {
-  local skip="$(state_get svc-crasher)|$(state_get svc-crasher2)"
+  local skip
+  skip="$(state_get svc-crasher)|$(state_get svc-crasher2)"
   on "$1" "for c in \$(docker ps -q --filter label=$SLUG.managed=true); do docker inspect -f '{{.Id}} {{.Name}} {{.State.StartedAt}} {{index .Config.Labels \"$SLUG.service\"}}' \$c; done" |
     grep -vE " (${skip})\$" | sort
 }
@@ -1906,6 +1970,10 @@ P31_ROOT=$E2E_STATE/pebble-root.pem
 P31_CA=/usr/local/share/ca-certificates/$SLUG-e2e-pebble.crt
 P31_DOM=
 P31_BLOCKED=
+# Set by p31_domain_up.
+P31_TLS_PORT=
+P31_MISSING=
+P31_BY_ITSELF=
 
 # p31_curl <args...>: curl from the Mac trusting Pebble's root and nothing else.
 p31_curl() { curl -sS -m 10 --cacert "$P31_ROOT" "$@"; }
@@ -1995,22 +2063,43 @@ check_31() {
   return "$rc"
 }
 
-p31_run() {
-  local ip_a l vm st out hfile pfile lfile jar cookie key tls_port missing waited refusal by_itself=
+# p31_check_active: the stored domain state is active, after asking the
+# panel to check now (settings.checkDomain, once per 10 seconds; a refusal
+# for the rate limit is fine, the next try asks again).
+p31_check_active() {
+  p31_state_is active && return 0
+  api settings.checkDomain '{}' >/dev/null 2>&1 || true
+  p31_state_is active
+}
+
+# p31_domain_up: gives the panel a new domain with a Pebble certificate and
+# waits until the panel finds it active (check 31, and check 39 for the
+# panel access switches). Sets P31_DOM, P31_TLS_PORT (the agents' TLS port
+# B and C dial), P31_MISSING (why B and C cannot move to the domain with
+# the build the VMs run, empty when they can) and P31_BY_ITSELF (1 when the
+# panel's own probe made it active, empty when the check wrote the state).
+# Returns 3 when a precondition is missing (blocked), 1 on a failure.
+# p31_cleanup undoes it from any point it stopped at.
+p31_domain_up() {
+  local ip_a l vm st waited
+  P31_DOM=''
+  P31_TLS_PORT=''
+  P31_MISSING=''
+  P31_BY_ITSELF=''
   ip_a=$(node_ip a)
   [ -n "$(node_id b)" ] && [ -n "$(node_id c)" ] || { blocked "B and C are not joined (check 3)"; return 3; }
   [ -s "$E2E_STATE/owner" ] || { blocked "no owner credentials (check 2)"; return 3; }
   on "$E2E_A" "docker inspect -f '{{.State.Running}}' e2e-pebble 2>/dev/null | grep -q true" ||
     { blocked "Pebble is not running on A (infra.sh)"; return 3; }
   [ "$(api settings.general | jq -r .domain)" = null ] ||
-    { blocked "the panel already has a domain ($(api settings.general | jq -r .domain)); check 31 starts from IP:port"; return 3; }
+    { blocked "the panel already has a domain ($(api settings.general | jq -r .domain)); check $CUR starts from IP:port"; return 3; }
   # Where B and C dial now; the cleanup puts it back (kept from an interrupted run).
   for l in b c; do
     [ -n "$(state_get "p31-conn-$l")" ] || state_set "p31-conn-$l" "$(p31_conn $l)"
   done
-  tls_port=$(state_get p31-conn-b | sed -n 's#^panel_url: https://[^/]*:\([0-9][0-9]*\).*#\1#p')
-  [ -n "$tls_port" ] || tls_port=3443
-  missing=$(p31_move_missing)
+  P31_TLS_PORT=$(state_get p31-conn-b | sed -n 's#^panel_url: https://[^/]*:\([0-9][0-9]*\).*#\1#p')
+  [ -n "$P31_TLS_PORT" ] || P31_TLS_PORT=3443
+  P31_MISSING=$(p31_move_missing)
 
   # Pebble signs with a new root on every start: read the current one from its management port.
   on "$E2E_A" "curl -fsS -k https://127.0.0.1:15001/roots/0" >"$P31_ROOT" 2>>"$RES/$CUR.log" && grep -q 'BEGIN CERTIFICATE' "$P31_ROOT" ||
@@ -2020,7 +2109,7 @@ p31_run() {
     on "$vm" "cat >$P31_CA && update-ca-certificates >/dev/null 2>&1" <"$P31_ROOT" || bad "could not add Pebble's root to the trust store of $vm"
   done
   good "A, B and C trust Pebble's root ($(openssl x509 -in "$P31_ROOT" -noout -subject 2>/dev/null | sed 's/^subject= *//')); on the Mac only this check's curl and CLI calls do"
-  if [ -z "$missing" ]; then
+  if [ -z "$P31_MISSING" ]; then
     p31_restart b c
     wait_for 90 "B and C back" p31_both_connected || true
     ev "B's and C's agents restarted to read the new trust store"
@@ -2037,8 +2126,7 @@ p31_run() {
   fi
   # A test build of the panel trusts this file in its domain probe (a shipped one never reads it).
   state_set p31-test-ca yes
-  on "$E2E_A" "cat >$BRAND_DATA_DIR/panel/test-ca.pem && chmod 0644 $BRAND_DATA_DIR/panel/test-ca.pem" <"$P31_ROOT" ||
-    bad "could not write the panel's test CA"
+  p31_test_ca_on || bad "could not write the panel's test CA"
 
   P31_DOM=panel$(date +%H%M%S).$(wildcard_of a)
   state_set p31-domain "$P31_DOM"
@@ -2053,16 +2141,15 @@ p31_run() {
     bad "https://$P31_DOM has no certificate Pebble's root verifies ($(p31_curl -o /dev/null "https://$P31_DOM/api/health" 2>&1 | tail -1)); domain status $(api settings.general | jq -c .domainStatus)"
     return 1
   fi
-  out=$(curl -s -o /dev/null -m 5 -w '%{http_code} %{redirect_url}' "http://$P31_DOM/")
-  expect "http://$P31_DOM goes to HTTPS ($out)" p31_to_https "$out"
 
   # The panel's own check: DNS, then its HTTPS probe (with the test CA in a
-  # test build). Asking again for the same domain re-runs it where the panel
-  # supports that; otherwise the 5-minute schedule does.
+  # test build). settings.checkDomain runs it now; a panel without that op
+  # re-runs it when it is asked for the same domain again, else the 5-minute
+  # schedule does.
   api settings.updateGeneral "$(jq -nc --arg d "$P31_DOM" '{domain: $d}')" >/dev/null || true
   waited=$SECONDS
   if p31_built 'testCaFile' apps/panel/src; then
-    wait_for 400 "the panel's probe to find the domain active" p31_state_is active && by_itself=1
+    wait_for 400 "the panel's probe to find the domain active" p31_check_active && P31_BY_ITSELF=1
   else
     wait_for 60 "the panel's domain check" p31_state_not pending_dns || true
   fi
@@ -2080,6 +2167,25 @@ p31_run() {
     ;;
   esac
   expect "settings.general reports the domain active" p31_state_is active
+}
+
+# p31_test_ca_on / p31_test_ca_off: the panel's domain probe trusts Pebble
+# (a test build reads <data dir>/panel/test-ca.pem), or no longer does,
+# which makes its next check fail as if the domain stopped working.
+p31_test_ca_on() {
+  on "$E2E_A" "cat >$BRAND_DATA_DIR/panel/test-ca.pem && chmod 0644 $BRAND_DATA_DIR/panel/test-ca.pem" <"$P31_ROOT"
+}
+p31_test_ca_off() { on "$E2E_A" "rm -f $BRAND_DATA_DIR/panel/test-ca.pem"; }
+
+p31_run() {
+  local ip_a l out hfile pfile lfile jar cookie key tls_port missing waited refusal by_itself
+  ip_a=$(node_ip a)
+  p31_domain_up || return $?
+  tls_port=$P31_TLS_PORT
+  missing=$P31_MISSING
+  by_itself=$P31_BY_ITSELF
+  out=$(curl -s -o /dev/null -m 5 -w '%{http_code} %{redirect_url}' "http://$P31_DOM/")
+  expect "http://$P31_DOM goes to HTTPS ($out)" p31_to_https "$out"
 
   # HSTS on HTTPS only; the session cookie a sign-in over HTTPS sets is Secure.
   hfile=$RES/$CUR.https-headers
@@ -2927,52 +3033,6 @@ check_37() {
 
 # ---------------------------------------------------------------- 38 upgrade from the last release
 
-# The panel image of a release is pinned as 127.0.0.1:$E2E_REG_PORT/... (the
-# registry container on A). For a panel on C, a small TCP relay on A exposes
-# that registry on A's address and one on C serves it at C's own
-# 127.0.0.1:$E2E_REG_PORT (Docker trusts plain HTTP on 127.0.0.0/8), so C
-# pulls exactly the pinned image. Both run as transient systemd units.
-fwd_py='import socket, sys, threading
-lh, lp, rh, rp = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
-def pipe(a, b):
-    try:
-        while True:
-            d = a.recv(65536)
-            if not d:
-                break
-            b.sendall(d)
-    except OSError:
-        pass
-    finally:
-        for s in (a, b):
-            try:
-                s.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-def handle(c):
-    try:
-        r = socket.create_connection((rh, rp), timeout=10)
-        r.settimeout(None)
-    except OSError:
-        c.close()
-        return
-    threading.Thread(target=pipe, args=(c, r), daemon=True).start()
-    threading.Thread(target=pipe, args=(r, c), daemon=True).start()
-s = socket.socket()
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind((lh, lp))
-s.listen(64)
-while True:
-    c, _ = s.accept()
-    threading.Thread(target=handle, args=(c,), daemon=True).start()
-'
-E2E_FWD_PORT=${E2E_FWD_PORT:-15002}
-relay_start() { # vm listen-host listen-port remote-host remote-port
-  printf '%s' "$fwd_py" | on "$1" "cat >/root/e2e-fwd.py && (systemctl stop e2e-regfwd >/dev/null 2>&1; systemctl reset-failed e2e-regfwd >/dev/null 2>&1; true) &&
-    systemd-run --unit=e2e-regfwd --collect python3 /root/e2e-fwd.py $2 $3 $4 $5 >/dev/null"
-}
-relay_stop() { on "$1" "systemctl stop e2e-regfwd >/dev/null 2>&1; rm -f /root/e2e-fwd.py; true"; }
-
 # up_sql <sql>: read-only query on the panel database on C (the upgraded panel).
 up_sql() {
   local c
@@ -3034,7 +3094,7 @@ check_38() {
 }
 
 upgrade_body() {
-  local to=$1 out link token jar email pw key up nodeid pid web pg worker job addr st run before after n
+  local to=$1 out link token jar email pw key up nodeid pid web pg worker job addr st run before after n want can_build
   up=http://$(node_ip c):$E2E_PORT
 
   free_c || { bad "uninstalling C from A's panel failed"; return 1; }
@@ -3105,6 +3165,8 @@ upgrade_body() {
   out=$(api cron.runNow "{\"serviceId\":\"$worker\",\"cronJobId\":\"$job\"}" 2>&1 | head -c 300)
   ev "on $E2E_BASE: cron job saved as $(api cron.list "{\"serviceId\":\"$worker\"}" | jq -c '.jobs[0] | {schedule, nextRunAt}'); run now: $out"
   before=$(api projects.list | jq -c '[.projects[].name] | sort')
+  # A node's Can build is never changed by an update (0004 only adds join_tokens.can_build).
+  can_build=$(api nodes.list | jq -r --arg id "$nodeid" '.nodes[] | select(.id==$id) | .canBuild')
   n=$(up_sql "select count(*) as n from __drizzle_migrations" | jq -r '.[0].n')
   ev "before: projects $before; services $(api services.list "{\"projectId\":\"$pid\"}" | jq -c '[.services[] | "\(.name)=\(.status)"]'); web deployments $(deploy_count "$web"); migrations applied $n"
   good "rows on $E2E_BASE: project upgrade, web (whoami with env) on $addr, Postgres 17 with a row, worker with a cron job saved as 0 4 * * 7"
@@ -3131,6 +3193,10 @@ upgrade_body() {
   expect "0001's tables exist ($out)" test "$out" = '["cleanup_runs","git_providers","host_shell_sessions"]'
   out=$(up_sql "select name from pragma_table_info('update_steps') where name in ('retry', 'retry_run_id', 'retry_at') order by name" | jq -c '[.[].name]')
   expect "0002's update step columns exist ($out)" test "$out" = '["retry","retry_at","retry_run_id"]'
+  out=$(up_sql "select name from pragma_table_info('join_tokens') where name = 'can_build'" | jq -c '[.[].name]')
+  expect "0004's join_tokens.can_build column exists ($out)" test "$out" = '["can_build"]'
+  out=$(api nodes.list | jq -r --arg id "$nodeid" '.nodes[] | select(.id==$id) | .canBuild')
+  expect "C's node keeps its Can build through the update ($can_build before, $out after)" test "$out" = "$can_build"
   after=$(api projects.list | jq -c '[.projects[].name] | sort')
   expect "the projects are the same ($after)" test "$after" = "$before"
   expect "the API key made on $E2E_BASE still works" sh -c "curl -fsS -m 5 -H 'authorization: Bearer $key' '$up/api/v1/auth.whoami' >/dev/null"
@@ -3154,6 +3220,839 @@ upgrade_body() {
   expect "web answers after the redeploy" sh -c "curl -fsS -m 5 http://$(first_run_addr "$web")/ | grep -q upgrade-web"
   expect "the upgraded node runs scheduled cleanup (cleanup.getSchedule supported)" json_ok "$(api cleanup.getSchedule "{\"nodeId\":\"$nodeid\"}" | jq -c .)" '.supported'
   expect "the upgraded node runs host shells (hostShell.status available)" json_ok "$(api hostShell.status "{\"nodeId\":\"$nodeid\"}" | jq -c .)" '.available'
+}
+
+# ---------------------------------------------------------------- 39-40 panel access helpers
+
+# api_loop <op> [json]: like api, from A itself to the panel's loopback
+# (http://127.0.0.1:<port>), which keeps answering while IP access is closed
+# (the way back in that an SSH tunnel takes). The API key goes on stdin,
+# never on a command line.
+api_loop() {
+  local op=$1 body=${2:-'{}'} url out code
+  url="http://127.0.0.1:$E2E_PORT/api/v1/$op"
+  if op_is_query "$op"; then
+    out=$(state_get api-key | on "$E2E_A" "IFS= read -r k; curl -sS -m 120 -w '\n%{http_code}' -H \"authorization: Bearer \$k\" '$url?$(query_string "$body")'" 2>>"$RES/$CUR.log") || true
+  else
+    out=$({ state_get api-key; printf '%s' "$body"; } | on "$E2E_A" "IFS= read -r k; curl -sS -m 300 -w '\n%{http_code}' -H \"authorization: Bearer \$k\" \
+      -H 'content-type: application/json' -X POST --data-binary @- '$url'" 2>>"$RES/$CUR.log") || true
+  fi
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [ "${code:0:1}" != 2 ]; then
+    printf '  api (A loopback) %s %s -> %s %s\n' "$op" "$(printf '%s' "$body" | head -c 300)" "$code" "$(printf '%s' "$out" | head -c 800)" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# sess <jar> <base url> <op> <json> [curl args...]: a mutation as the browser
+# session in the jar (scurl), on that panel URL with its Origin; prints the
+# body, fails on a non-2xx answer (the answer goes to stderr).
+sess() {
+  local jar=$1 base=$2 op=$3 body=$4 out code
+  shift 4
+  out=$(mktemp)
+  code=$(scurl "$jar" -sS -m 60 -o "$out" -w '%{http_code}' "$@" -H 'content-type: application/json' -H "origin: $base" \
+    -X POST --data "$body" "$base/api/v1/$op") || code=000
+  if [ "${code:0:1}" != 2 ]; then
+    printf '  %s %s (session on %s) -> %s %s\n' "$op" "$(printf '%s' "$body" | head -c 200)" "$base" "$code" "$(head -c 600 "$out")" >&2
+    rm -f "$out"
+    return 1
+  fi
+  cat "$out"
+  rm -f "$out"
+}
+# sess_get <jar> <base url> <op> [curl args...]: a query without input the same way.
+sess_get() {
+  local jar=$1 base=$2 op=$3
+  shift 3
+  scurl "$jar" -fsS -m 60 "$@" "$base/api/v1/$op"
+}
+owner_login_json() { jq -nc --arg e "$(sed -n 1p "$E2E_STATE/owner")" --arg p "$(sed -n 2p "$E2E_STATE/owner")" '{email: $e, password: $p}'; }
+# sess_login <jar> <base url> [curl args...]: the owner signs in on that URL, a new browser session (a fresh sign-in).
+sess_login() {
+  local jar=$1 base=$2
+  shift 2
+  rm -f "$jar" "$jar.key"
+  sess "$jar" "$base" auth.login "$(owner_login_json)" "$@" >/dev/null
+}
+
+# jq_ok <json> <jq arguments...>: jq -e with them holds for the JSON.
+jq_ok() {
+  local j=$1
+  shift
+  printf '%s' "$j" | jq -e "$@" >/dev/null
+}
+# fails <command...>: the command fails (for expect).
+fails() { ! "$@"; }
+# refused_with <reason> <command...>: the command fails and its error output names the reason.
+refused_with() {
+  local reason=$1 out
+  shift
+  if out=$("$@" 2>&1 >/dev/null); then
+    echo "accepted"
+    return 1
+  fi
+  printf '%s\n' "$out"
+  printf '%s' "$out" | grep -q -- "$reason"
+}
+# utc_ago <seconds>: that long ago as the panel writes times (ISO 8601, UTC), for comparisons.
+utc_ago() { date -u -v-"$1"S +%Y-%m-%dT%H:%M:%S.000Z; }
+now_ms() { echo $(($(date +%s) * 1000)); }
+
+# ip_answers <mac|a|b|c>: http://<A>:<panel port>/api/health answers there with anything.
+ip_answers() {
+  local url
+  url="http://$(node_ip a):$E2E_PORT/api/health"
+  case $1 in
+  mac) [ "$(http_code "$url")" != 000 ] ;;
+  *) on_node "$1" "curl -s -o /dev/null -m 5 '$url'" ;;
+  esac
+}
+ip_closed_from() { ! ip_answers "$1"; }
+# agent_port_answers <letter>: a TCP connection from the node to A's agents' TLS port goes through.
+agent_port_answers() { on_node "$1" "timeout 5 bash -c '</dev/tcp/$(node_ip a)/${2:-3443}'"; }
+panel_access() { api_loop settings.panelAccess; }
+pa_ip_is() { panel_access | jq -e --arg v "$1" '.actual.ip == $v' >/dev/null; }
+pa_agent_port_is() { panel_access | jq -e --arg v "$1" '.actual.agentPort == $v' >/dev/null; }
+pa_closed() { pa_ip_is closed && ip_closed_from mac; }
+pa_open() { pa_ip_is open && ip_answers mac; }
+pa_recloses() { panel_access | jq -e '.reclosesAt != null' >/dev/null; }
+pa_brief() { panel_access 2>/dev/null | jq -c '{serveOnIp, agentPortOpen, onFailure, actual, openReason, reclosesAt, paths: [.privatePaths[]? | "\(.kind) working=\(.working)"], blocked: [.blocked[]?.code], lastChange}'; }
+online_ge_loop() { [ "$(api_loop nodes.list | jq '[.nodes[] | select(.status=="online")] | length')" -ge "$1" ] 2>/dev/null; }
+# panel_bindings: the panel container's published ports on A, as Docker has them.
+panel_bindings() { on "$E2E_A" "docker inspect -f '{{json .HostConfig.PortBindings}}' \$(docker ps -q --filter label=$SLUG.service=panel00000000000 | head -1)"; }
+panel_loopback_only() { panel_bindings | jq -e '."3000/tcp" | length > 0 and all(.HostIp == "127.0.0.1")' >/dev/null; }
+panel_started() { on "$E2E_A" "docker inspect -f '{{.State.StartedAt}}' \$(docker ps -q --filter label=$SLUG.service=panel00000000000 | head -1)"; }
+# security_alert <title> <since>: a security_change alert with that title raised since then.
+security_alert() {
+  api_loop alerts.list '{"limit":50}' | jq -e --arg t "$1" --arg s "$2" \
+    '[.alerts[] | select(.event == "security_change" and .title == $t and .createdAt >= $s)] | length >= 1' >/dev/null
+}
+# settings_json_set <key> <path> <value>...: changes fields of a JSON value in the panel's settings
+# table (only to move stored times into the past, standing in for waiting).
+settings_json_set() {
+  local key=$1 args=
+  shift
+  while [ $# -ge 2 ]; do
+    args="$args, '$1', $2"
+    shift 2
+  done
+  panel_sql_write "update settings set value = json_set(value$args) where key = '$key'" >>"$RES/$CUR.log" 2>&1
+}
+
+# ip_access_reset: both switches on, "reopen", and http://<A>:<port>
+# answering again, with the API key (turning things back on needs no
+# browser); `seylo panel ip-access on` on A when that call fails.
+ip_access_reset() {
+  if panel_access 2>/dev/null | jq -e '.serveOnIp and .agentPortOpen and .onFailure == "reopen" and .actual.ip != "closed" and .actual.agentPort != "closed"' >/dev/null 2>&1 &&
+    ip_answers mac; then
+    return 0
+  fi
+  if ! api_loop settings.updatePanelAccess '{"serveOnIp":true,"agentPortOpen":true,"onFailure":"reopen"}' >/dev/null 2>>"$RES/$CUR.log"; then
+    ev "cleanup: settings.updatePanelAccess with the API key failed; running $SLUG panel ip-access on on A"
+    on "$E2E_A" "$SLUG panel ip-access on" >>"$RES/$CUR.log" 2>&1 || true
+  fi
+  if wait_for 300 "IP access open again" pa_open; then
+    ev "cleanup: IP access is open again (http://$(node_ip a):$E2E_PORT answers)"
+  else
+    bad "cleanup: http://$(node_ip a):$E2E_PORT does not answer again: $(pa_brief)"
+  fi
+}
+
+# ---------------------------------------------------------------- 39 build default, panel access
+
+# Check 39, part one: Add node's "Build images on this node" (the join
+# token's canBuild) decides whether a new node builds, not the node's own
+# --can-build. C leaves the panel (free_c) and joins with a command made
+# with the box unticked plus --can-build; the same, now used, command again
+# is refused (the installer exits 3); C joins once more with a default
+# command and builds. Part two: the panel gets a domain the way check 31
+# does (p31_domain_up), and the owner turns "Serve on IP address" off from
+# a session on the domain: http://<A>:<port> stops answering from the Mac,
+# B and C, while the domain and A's own agent keep working; `seylo panel
+# ip-access on` opens it again; a domain that stops working (2 failed checks
+# in a row, the first one backdated) opens it by itself, and it closes again
+# an hour (backdated) after the domain works again. The check puts back IP
+# access and removes the domain (p31_cleanup).
+P39_BLOCKED=
+
+check_39() {
+  need_key || return 3
+  local rc=0 r
+  P39_BLOCKED=
+  p39_builds || {
+    r=$?
+    if [ "$r" != 3 ]; then
+      rc=$r
+      p39_c_back
+    fi
+  }
+  p39_access || {
+    r=$?
+    [ "$r" = 3 ] || rc=$r
+  }
+  # A part that was blocked (p31_domain_up's preconditions) does not hide the other part's failures.
+  if [ "$CUR_STATUS" = BLOCKED ]; then
+    CUR_STATUS=
+    P39_BLOCKED=1
+  fi
+  if [ -n "$P39_BLOCKED" ] && [ "$CUR_FAILS" = 0 ] && [ "$rc" = 0 ]; then CUR_STATUS=BLOCKED; fi
+  return "$rc"
+}
+
+p39_builds() {
+  local nb report out rc again
+  map_nodes
+  nb=$(node_id b)
+  if [ -z "$nb" ] || [ -z "$(node_id c)" ]; then
+    ev "BLOCKED build default: B and C are not joined (check 3)"
+    P39_BLOCKED=1
+    return 3
+  fi
+  ev "Can build now: $(api nodes.list | jq -c '[.nodes[] | {name, canBuild, canBuildWarning, buildx: (.facts.buildx // null)}]')"
+  report=$(api nodes.runHealthCheck "{\"nodeId\":\"$nb\"}") || report='{}'
+  printf '%s\n' "$report" >>"$RES/$CUR.log"
+  expect "the buildx health check passes on B ($(printf '%s' "$report" | jq -r '[.results[]? | select(.id=="docker.buildx") | "\(.status): \(.detail)"][0] // "no docker.buildx result"'))" \
+    jq_ok "$report" '[.results[]? | select(.id=="docker.buildx" and .status=="pass")] | length == 1'
+
+  # C leaves the panel, then joins with the box unticked and its own --can-build.
+  free_c || { bad "taking C out of the panel failed"; return 1; }
+  good "C left the panel and was uninstalled (its services went first)"
+  join_node "$E2E_C" c "--name e2e-c --can-build" '{"canBuild":false}' || return 1
+  expect "nodes.createJoinToken {canBuild: false} made a token that says so ($JOIN_TOKEN)" jq_ok "$JOIN_TOKEN" '.canBuild == false'
+  expect "the installer on C waited for the agent's first connection and says it is connected" join_connected
+  wait_for 120 "C online" online_ge 3 || true
+  map_nodes
+  expect "C, joined with the box unticked, does not build whatever its --can-build says (canBuild $(node_can_build c))" \
+    test "$(node_can_build c)" = false
+  ev "C's config.yml says $(on "$E2E_C" "grep '^can_build:' $BRAND_DATA_DIR/config.yml" 2>/dev/null || echo 'no can_build'), which the panel only reports"
+
+  # The same command again: its token is used, the panel refuses the node and the installer exits 3.
+  again=$JOIN_CMD
+  case " $again " in *" --force "*) ;; *) again="$again --force" ;; esac
+  rc=0
+  out=$(on "$E2E_C" "$again" 2>&1) || rc=$?
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  ev "the used join command again: exit $rc, $(printf '%s' "$out" | grep -E 'refused|not valid|already used' | head -2 | tr '\n' ' ' | head -c 300)"
+  expect "a join the panel refuses exits 3 (exit $rc)" test "$rc" = 3
+  expect "and its closing block says the panel refused this node" grep -qF 'Installed, but the panel refused this node.' <<<"$out"
+
+  # A default command: the node that joins builds. The old entry goes first so the name stays e2e-c.
+  api nodes.remove "{\"nodeId\":\"$(node_id c)\",\"confirmName\":\"e2e-c\"}" >/dev/null || bad "nodes.remove of the refused C failed"
+  state_set node-c ""
+  join_node "$E2E_C" c "--name e2e-c" || return 1
+  expect "a default join command made a token with canBuild true ($JOIN_TOKEN)" jq_ok "$JOIN_TOKEN" '.canBuild == true'
+  expect "the installer on C waited for the agent's first connection and says it is connected" join_connected
+  wait_for 120 "C online" online_ge 3 || true
+  map_nodes
+  expect "C, joined with a default command, builds images (canBuild $(node_can_build c))" test "$(node_can_build c)" = true
+  expect "3 nodes online" online_ge 3
+}
+
+node_online() { api nodes.list | jq -e --arg id "$(node_id "$1")" '[.nodes[] | select(.id == $id and .status == "online")] | length == 1' >/dev/null; }
+
+# p39_c_back: C is a connected node of the panel again after the build
+# default part, whatever happened there, for the checks that follow.
+p39_c_back() {
+  map_nodes
+  [ -n "$(node_id c)" ] && node_online c && return 0
+  ev "putting C back as a node of the panel"
+  [ -z "$(node_id c)" ] || api nodes.remove "{\"nodeId\":\"$(node_id c)\",\"confirmName\":\"e2e-c\"}" >/dev/null 2>&1 || true
+  state_set node-c ""
+  if join_node "$E2E_C" c "--name e2e-c" && wait_for 180 "C back" online_ge 3; then
+    map_nodes
+    ev "C joined the panel again as $(node_id c)"
+  else
+    bad "C did not join the panel again"
+  fi
+}
+
+p39_access() {
+  local s rc=0
+  map_nodes
+  # A run of check 31 or 39 that was stopped half way left state behind: undo it first.
+  for s in p31-domain p31-conn-b p31-conn-c p31-a-acme p31-test-ca p31-ca; do
+    if [ -e "$E2E_STATE/$s" ]; then
+      ev "an earlier run of check 31 or 39 stopped half way; putting things back first"
+      ip_access_reset
+      p31_cleanup
+      break
+    fi
+  done
+  p31_domain_up || rc=$?
+  [ "$rc" != 0 ] || p39_access_run || rc=$?
+  ip_access_reset
+  p31_cleanup
+  return "$rc"
+}
+
+p39_access_run() {
+  local ip_a port dom jar ipjar out st code since t
+  ip_a=$(node_ip a)
+  port=$E2E_PORT
+  dom=https://$P31_DOM
+  # B and C move to the domain once it is active; the restarts below are easier on them once that settled.
+  if [ -z "$P31_MISSING" ]; then
+    [ -n "$P31_BY_ITSELF" ] || p31_restart b c
+    wait_for 240 "B and C on the domain" p31_both_moved ||
+      ev "note: B and C did not both move to the domain (b: $(p31_conn b | tr '\n' ' '), c: $(p31_conn c | tr '\n' ' '))"
+  fi
+  wait_for 120 "B and C connected" p31_both_connected || true
+
+  jar=$E2E_STATE/p39-domain-cookies
+  ipjar=$E2E_STATE/p39-ip-cookies
+  sess_login "$jar" "$dom" --cacert "$P31_ROOT" || { bad "the owner could not sign in over $dom"; return 1; }
+  sess_login "$ipjar" "$(panel_url)" || { bad "the owner could not sign in over $(panel_url)"; return 1; }
+  good "the owner signed in over $dom and over $(panel_url) (two browser sessions)"
+  out=$(sess_get "$jar" "$dom" settings.panelAccess --cacert "$P31_ROOT") || out='{}'
+  ev "settings.panelAccess on the domain: $(printf '%s' "$out" | jq -c '{serveOnIp, agentPortOpen, onFailure, panelPort, agentPort, actual, privatePaths, blocked: [.blocked[]?.code], agentPortBlocked: [.agentPortBlocked[]?.code], recovery}')"
+  expect "the domain is a working private path and this session is on it" \
+    jq_ok "$out" '[.privatePaths[]? | select(.kind == "domain" and .working and .usingNow)] | length == 1'
+  expect "nothing refuses closing IP access for the owner on the domain" jq_ok "$out" '(.blocked | length) == 0'
+  expect "the recovery SSH tunnel goes to 127.0.0.1:$port ($(printf '%s' "$out" | jq -r '.recovery.sshTunnel // empty'))" \
+    jq_ok "$out" --arg p "ssh -L 3000:127.0.0.1:$port " '.recovery.sshTunnel | startswith($p)'
+
+  # Refused: an API key, and an IP:port session that claims to be on the domain.
+  expect "an API key cannot turn Serve on IP address off (notBrowserSession)" \
+    refused_with notBrowserSession api settings.updatePanelAccess '{"serveOnIp":false}'
+  code=$(scurl "$ipjar" -sS -m 30 -o "$RES/$CUR.forged" -w '%{http_code}' -H 'content-type: application/json' -H "Host: $P31_DOM" \
+    -H "origin: https://$P31_DOM" -H 'x-forwarded-proto: https' -X POST --data '{"serveOnIp":false}' \
+    "$(panel_url)/api/v1/settings.updatePanelAccess") || code=000
+  ev "the IP:port session with Host: $P31_DOM and X-Forwarded-Proto: https -> $code $(head -c 240 "$RES/$CUR.forged" 2>/dev/null)"
+  expect "an IP:port session with a forged Host and X-Forwarded-Proto is refused ($code)" test "${code:0:1}" != 2
+  expect "Serve on IP address is still on and IP:port answers" sh -c "[ \"\$(curl -s -m 5 -o /dev/null -w '%{http_code}' '$(panel_url)/api/health')\" = 200 ]"
+  expect "settings.panelAccess still says serveOnIp" jq_ok "$(panel_access)" '.serveOnIp'
+
+  # The owner turns it off on the domain.
+  since=$(utc_ago 30)
+  out=$(sess "$jar" "$dom" settings.updatePanelAccess '{"serveOnIp":false}' --cacert "$P31_ROOT") ||
+    { bad "the owner could not turn Serve on IP address off over $dom"; return 1; }
+  good "Serve on IP address turned off over $dom: $(printf '%s' "$out" | jq -c '{serveOnIp, actual, lastChange: .lastChange.reason}')"
+  t=$SECONDS
+  if wait_for 240 "IP access closed" pa_closed; then
+    good "the panel restarted with its port on 127.0.0.1 only after $((SECONDS - t))s"
+  else
+    bad "IP access did not close: $(pa_brief)"
+    return 1
+  fi
+  expect "http://$ip_a:$port no longer answers from the Mac" ip_closed_from mac
+  expect "http://$ip_a:$port no longer answers from B" ip_closed_from b
+  expect "http://$ip_a:$port no longer answers from C" ip_closed_from c
+  expect "A's loopback still answers (the SSH tunnel's way in)" on "$E2E_A" "curl -fsS -m 5 -o /dev/null http://127.0.0.1:$port/api/health"
+  expect "Docker publishes the panel port on 127.0.0.1 only ($(panel_bindings))" panel_loopback_only
+  expect "$dom still answers" p31_curl -f -o /dev/null "$dom/api/health"
+  expect "the owner's session on the domain still works" sess_get "$jar" "$dom" auth.whoami --cacert "$P31_ROOT"
+  wait_for 120 "A's agent connected" p31_connected a || true
+  expect "the panel node's own agent stays connected ($(p31_status a))" p31_connected a
+  wait_for 180 "3 nodes online" online_ge_loop 3 || true
+  expect "B and C stay online" online_ge_loop 3
+  out=$(on "$E2E_A" "$SLUG panel status 2>&1" || true)
+  ev "seylo panel status on A: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"
+  expect "seylo panel status says IP access is closed on 127.0.0.1:$port" grep -qF "IP access: closed (127.0.0.1:$port" <<<"$out"
+  expect "a security_change alert says IP access closed" security_alert "IP access closed" "$since"
+
+  # The agents' port closes only once no node needs it (B and C on the domain).
+  st=$(panel_access)
+  if jq_ok "$st" '(.agentPortBlocked | length) == 0'; then
+    if sess "$jar" "$dom" settings.updatePanelAccess '{"agentPortOpen":false}' --cacert "$P31_ROOT" >/dev/null; then
+      good "the agents' port turned off over the domain (every node connects over the domain)"
+      if wait_for 240 "the agents' port closed" pa_agent_port_is closed; then
+        expect "C can no longer connect to A:$P31_TLS_PORT" fails agent_port_answers c "$P31_TLS_PORT"
+        wait_for 180 "3 nodes online" online_ge_loop 3 || true
+        expect "B and C stay online over the domain" online_ge_loop 3
+      else
+        bad "the agents' port did not close: $(pa_brief)"
+      fi
+    else
+      bad "turning the agents' port off was refused although agentPortBlocked was empty"
+    fi
+  else
+    ev "the agents' port stays open: $(printf '%s' "$st" | jq -c '[.agentPortBlocked[] | "\(.code): \(.message | .[0:120])"]')"
+    expect "turning the agents' port off is refused while nodes need it" fails sess "$jar" "$dom" settings.updatePanelAccess '{"agentPortOpen":false}' --cacert "$P31_ROOT"
+  fi
+
+  # The way back in on the server: seylo panel ip-access on.
+  since=$(utc_ago 30)
+  out=$(on "$E2E_A" "$SLUG panel ip-access on" 2>&1) || bad "seylo panel ip-access on failed: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+  ev "seylo panel ip-access on: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"
+  t=$SECONDS
+  if wait_for 300 "IP access open again" pa_open; then
+    good "seylo panel ip-access on opened http://$ip_a:$port again: the Mac reaches it after $((SECONDS - t))s"
+  else
+    bad "seylo panel ip-access on did not open IP access again: $(pa_brief)"
+    return 1
+  fi
+  st=$(panel_access)
+  expect "both switches are on and set to reopen again ($(printf '%s' "$st" | jq -c '{serveOnIp, agentPortOpen, onFailure}'))" \
+    jq_ok "$st" '.serveOnIp and .agentPortOpen and .onFailure == "reopen"'
+  wait_for 120 "the agents' port open" pa_agent_port_is open || true
+  expect "C reaches A's agents' port again" agent_port_answers c "$P31_TLS_PORT"
+  expect "C reaches http://$ip_a:$port again" ip_answers c
+  expect "the audit log has the reopen from the server's command line" \
+    jq_ok "$(api audit.list "$(jq -nc --arg s "$since" '{opId: "settings.ipAccessOnFromServer", from: $s, limit: 5}')")" '.entries | length >= 1'
+
+  # The domain stops working while IP access is closed: it opens by itself.
+  if [ -z "$P31_BY_ITSELF" ]; then
+    ev "BLOCKED the domain-death reopen: the panel build the VMs run does not trust the test CA, so its own probe never finds the domain working (rebuild with refresh.sh)"
+    P39_BLOCKED=1
+    return 0
+  fi
+  sess_login "$jar" "$dom" --cacert "$P31_ROOT" || { bad "the owner could not sign in over $dom again"; return 1; }
+  sess "$jar" "$dom" settings.updatePanelAccess '{"serveOnIp":false}' --cacert "$P31_ROOT" >/dev/null ||
+    { bad "turning Serve on IP address off over $dom a second time failed"; return 1; }
+  wait_for 240 "IP access closed" pa_closed || { bad "IP access did not close the second time: $(pa_brief)"; return 1; }
+  good "IP access closed again from the domain session"
+  # The panel's probe stops trusting Pebble (no test CA), and the stored
+  # status says one failed check counted 5 minutes ago: the next check is
+  # the second in a row, after which the domain counts as down.
+  since=$(utc_ago 30)
+  p31_test_ca_off || bad "could not remove the panel's test CA"
+  settings_json_set panelDomainStatus '$.failedChecks' 1 '$.lastFailedAt' "$(($(now_ms) - 300000))" || bad "could not backdate the domain's first failed check"
+  api_loop settings.checkDomain '{}' >>"$RES/$CUR.log" 2>&1 || true
+  ev "the panel's domain status after a failing check: $(api_loop settings.general | jq -c .domainStatus)"
+  t=$SECONDS
+  if wait_for 240 "IP access to reopen by itself" pa_open; then
+    good "with the domain down (2 failed checks in a row), IP access reopened by itself after $((SECONDS - t))s"
+  else
+    bad "IP access did not reopen with the domain down: $(pa_brief)"
+    return 1
+  fi
+  st=$(panel_access)
+  ev "settings.panelAccess: $(pa_brief)"
+  expect "the domain counts as not working" jq_ok "$st" '[.privatePaths[] | select(.kind == "domain" and (.working | not))] | length == 1'
+  expect "Serve on IP address stays off as the owner set it, and the card says why IP access is open ($(printf '%s' "$st" | jq -r '.openReason // "no reason"'))" \
+    jq_ok "$st" '(.serveOnIp | not) and (.openReason // "" | test("stopped working"))'
+  expect "a security_change alert says IP access reopened" security_alert "IP access reopened" "$since"
+  # The domain works again: IP access closes again once it has worked for an hour.
+  p31_test_ca_on || bad "could not put the panel's test CA back"
+  sleep 11 # settings.checkDomain runs once per 10 seconds
+  wait_for 120 "the domain active again" p31_check_active || bad "the domain did not turn active again: $(api settings.general | jq -c .domainStatus)"
+  wait_for 120 "a time to close again" pa_recloses || true
+  st=$(panel_access)
+  expect "with the domain working again, IP access stays open for an hour first (reclosesAt $(printf '%s' "$st" | jq -r .reclosesAt))" \
+    jq_ok "$st" '.reclosesAt != null and .actual.ip == "open"'
+  settings_json_set panelIpAccessApplied '$.reopenedAt' "$(($(now_ms) - 3660000))" || bad "could not backdate the reopen"
+  settings_json_set panelDomainStatus '$.since' "$(($(now_ms) - 3660000))" || bad "could not backdate the domain's working time"
+  t=$SECONDS
+  if wait_for 240 "IP access to close again" pa_closed; then
+    good "an hour (backdated) after the domain worked again, IP access closed again by itself after $((SECONDS - t))s"
+  else
+    bad "IP access did not close again an hour after the domain worked again: $(pa_brief)"
+  fi
+}
+
+# ---------------------------------------------------------------- 40 panel on Tailscale (Headscale)
+
+# Check 40 serves the panel on a tailnet that Headscale runs (e2e-headscale
+# on A, infra.sh; nothing on the internet): A's own tailscaled plays the
+# owner's server (kernel mode when A has /dev/net/tun), C's tailscaled the
+# owner's laptop (userspace, curl goes through its SOCKS5 proxy). Both sign
+# in with a pre-auth key: the CLI path (`tailscale up`), since the panel's
+# sign-in link is for login.tailscale.com. Headscale gives no HTTPS
+# certificates, so Serve runs in HTTP mode (http://<machine>.$E2E_HS_DOMAIN).
+# After Lock to Tailscale it checks the ways back: tailscaled stopped for 5
+# minutes (backdated) reopens IP access by itself, `seylo panel tailscale
+# status` works with the agent stopped, `seylo panel ip-access on`, and
+# `seylo panel tailscale off` / `on`. p40_cleanup turns Serve off, opens IP
+# access, removes tailscaled from A and C and their Headscale nodes, so the
+# check reruns from the start.
+P40_SOCKS=1055
+P40_DNS=
+P40_TSIP=
+P40_UP=
+# C keeps the owner's tailnet browser session here: <this>.jar, .key, .hdr.
+P40_JAR=/root/e2e-p40
+
+# hs <args...>: the headscale CLI in its container on A.
+hs() { on "$E2E_A" "docker exec e2e-headscale headscale $*"; }
+hs_running() { on "$E2E_A" "docker inspect -f '{{.State.Running}}' e2e-headscale 2>/dev/null | grep -q true && curl -fsS -m 5 -o /dev/null https://$(node_ip a):$E2E_HS_PORT/health"; }
+
+# tailscaled's unit, as Tailscale's packages ship it ($FLAGS from /etc/default/tailscaled).
+# shellcheck disable=SC2016
+ts_unit='[Unit]
+Description=Tailscale node agent (e2e test, check 40)
+Wants=network-pre.target
+After=network-pre.target systemd-resolved.service
+
+[Service]
+EnvironmentFile=/etc/default/tailscaled
+ExecStart=/usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=${PORT} $FLAGS
+ExecStopPost=/usr/sbin/tailscaled --cleanup
+Restart=on-failure
+RuntimeDirectory=tailscale
+RuntimeDirectoryMode=0755
+StateDirectory=tailscale
+StateDirectoryMode=0700
+CacheDirectory=tailscale
+CacheDirectoryMode=0750
+Type=notify
+
+[Install]
+WantedBy=multi-user.target
+'
+
+# ts_install <letter> <tailscaled flags>: Tailscale $E2E_TS_VERSION on the node, from the release server, sha256 checked.
+ts_install() {
+  local url sha
+  url="$(release_base)/e2e-tools/$(e2e_ts_file)"
+  sha=$(e2e_ts_sha256)
+  on_node "$1" "set -e; d=\$(mktemp -d); curl -fsSL -o \$d/ts.tgz '$url'; echo '$sha  '\$d/ts.tgz | sha256sum -c --quiet
+    tar -xzf \$d/ts.tgz -C \$d; install -m 0755 \$d/tailscale_*/tailscaled /usr/sbin/tailscaled; install -m 0755 \$d/tailscale_*/tailscale /usr/bin/tailscale
+    rm -rf \$d; printf 'PORT=41641\nFLAGS=\"%s\"\n' '$2' >/etc/default/tailscaled" || return 1
+  printf '%s' "$ts_unit" | on_node "$1" "cat >/etc/systemd/system/tailscaled.service && systemctl daemon-reload && systemctl enable --now tailscaled >/dev/null 2>&1"
+}
+# ts_remove <letter>: tailscaled, its state and its unit gone from the node.
+ts_remove() {
+  on_node "$1" "systemctl disable --now tailscaled >/dev/null 2>&1; test ! -x /usr/sbin/tailscaled || /usr/sbin/tailscaled --cleanup >/dev/null 2>&1
+    rm -rf /var/lib/tailscale /var/cache/tailscale /run/tailscale /usr/sbin/tailscaled /usr/bin/tailscale /etc/systemd/system/tailscaled.service /etc/default/tailscaled
+    systemctl daemon-reload; true"
+}
+
+# tcurl <curl args...>: curl on C through its tailscaled (SOCKS5), with the
+# panel server's tailnet name and its short name resolving to its tailnet address.
+tcurl() {
+  on_node c "curl -sS -m 20 --socks5 127.0.0.1:$P40_SOCKS --resolve $P40_DNS:80:$P40_TSIP --resolve ${P40_DNS%%.*}:80:$P40_TSIP $(printf '%q ' "$@")"
+}
+tailnet_health() { [ "$(tcurl -o /dev/null -w '%{http_code}' "http://$P40_DNS/api/health" 2>/dev/null)" = 200 ]; }
+tailnet_web_app() { tcurl "http://$P40_DNS/" 2>/dev/null | grep -qi '<!doctype html'; }
+
+# tsess <op> [json]: an op as the owner's browser session on C over the
+# tailnet (cookie jar and session key stay on C, in $P40_JAR.*), a query as
+# GET. Prints the body, fails on a non-2xx answer. TSESS_EXTRA adds curl
+# arguments (shell words).
+tsess() {
+  local op=$1 body=${2:-'{}'} req out code
+  if op_is_query "$op"; then
+    req="'http://$P40_DNS/api/v1/$op?$(query_string "$body")'"
+  else
+    req="-H 'content-type: application/json' -H 'origin: http://$P40_DNS' -X POST --data-binary @- 'http://$P40_DNS/api/v1/$op'"
+  fi
+  out=$(printf '%s' "$body" | on_node c "k=\$(cat $P40_JAR.key 2>/dev/null || true)
+    curl -sS -m 60 --socks5 127.0.0.1:$P40_SOCKS --resolve $P40_DNS:80:$P40_TSIP -c $P40_JAR.jar -b $P40_JAR.jar -D $P40_JAR.hdr \\
+      \${k:+-H \"$SESSION_KEY_HEADER: \$k\"} ${TSESS_EXTRA:-} -w '\n%{http_code}' $req
+    n=\$(tr -d '\r' <$P40_JAR.hdr 2>/dev/null | grep -i '^$SESSION_KEY_HEADER:' | tail -1 | sed 's/^[^:]*:[[:space:]]*//')
+    [ -z \"\$n\" ] || printf '%s\n' \"\$n\" >$P40_JAR.key" 2>>"$RES/$CUR.log") || true
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [ "${code:0:1}" != 2 ]; then
+    printf '  %s %s (tailnet session on C) -> %s %s\n' "$op" "$(printf '%s' "$body" | head -c 200)" "$code" "$(printf '%s' "$out" | head -c 600)" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+ts_get() { api_loop tailscale.get; }
+ts_brief() { ts_get 2>/dev/null | jq -c '{detected, agentSupported, version, backendState, tailnet, dnsName, magicDns, https, acceptDns, disabledOnServer, serve: (.serve | {wanted, state, url, panelAnswers, message}), owned}'; }
+ts_detected() { ts_get | jq -e --argjson d "$1" '.detected == $d' >/dev/null; }
+ts_state_is() { ts_get | jq -e --arg s "$1" '.backendState == $s' >/dev/null; }
+ts_serving() { ts_get | jq -e '.serve.state == "active" and .serve.panelAnswers and .owned != null' >/dev/null; }
+ts_disabled() { ts_get | jq -e --argjson d "$1" '.disabledOnServer == $d' >/dev/null; }
+ts_serving_again() { ts_serving && ts_disabled false; }
+tailnet_working() { panel_access | jq -e '[.privatePaths[] | select(.kind == "tailnet" and .working)] | length == 1' >/dev/null; }
+tailnet_down_since() { panel_sql "select json_extract(value, '\$.downSince') as d from settings where key = 'tailscaleSeen'" | jq -e '.[0].d != null' >/dev/null; }
+# serve_config: tailscaled's Serve config on A (JSON).
+serve_config() { on "$E2E_A" "tailscale serve status --json 2>/dev/null || echo '{}'"; }
+# entry_ours: the panel's entry is in the Serve config, pointing at the panel's socket.
+entry_ours() {
+  serve_config | jq -e --arg h "$P40_DNS:80" '.Web[$h].Handlers["/"].Proxy // "" | (startswith("unix:") and endswith("/panel/tailnet.sock"))' >/dev/null
+}
+# owner_entry_kept: the owner's own entry (http://<name>:8080 -> text:owner) is in the Serve config.
+owner_entry_kept() {
+  serve_config | jq -e --arg h "$P40_DNS:8080" '.Web[$h].Handlers["/"].Text == "owner"' >/dev/null
+}
+p40_loop_done() { on_node c "! systemctl is-active --quiet e2e-p40-loop"; }
+
+check_40() {
+  need_key || return 3
+  local rc=0 s
+  for s in p40-ts-a p40-ts-c; do
+    if [ -e "$E2E_STATE/$s" ]; then
+      ev "an earlier run of this check stopped half way; putting things back first"
+      p40_cleanup
+      break
+    fi
+  done
+  p40_run || rc=$?
+  p40_cleanup
+  return "$rc"
+}
+
+p40_run() {
+  local ip_a port ipjar out st key mode t since started codes total failed seeded
+  ip_a=$(node_ip a)
+  port=$E2E_PORT
+  map_nodes
+  [ -n "$(node_id b)" ] && [ -n "$(node_id c)" ] || { blocked "B and C are not joined (check 3)"; return 3; }
+  [ -s "$E2E_STATE/owner" ] || { blocked "no owner credentials (check 2)"; return 3; }
+  [ -n "$(e2e_ts_sha256)" ] || { blocked "no sha256 for Tailscale $E2E_TS_VERSION in lib.sh"; return 3; }
+  [ -s "$E2E_REL/e2e-tools/$(e2e_ts_file)" ] || { blocked "no Tailscale tarball on the release server (serve.sh fetches $(e2e_ts_file))"; return 3; }
+  hs_running || { blocked "Headscale does not answer on https://$ip_a:$E2E_HS_PORT (infra.sh starts e2e-headscale)"; return 3; }
+  [ "$(api settings.general | jq -r .domain)" = null ] ||
+    { blocked "the panel has a domain ($(api settings.general | jq -r .domain)); check 40 needs the tailnet to be its only private path"; return 3; }
+  ip_access_reset
+
+  # 1. No Tailscale on the server yet.
+  ipjar=$E2E_STATE/p40-ip-cookies
+  sess_login "$ipjar" "$(panel_url)" || { bad "the owner could not sign in over $(panel_url)"; return 1; }
+  st=$(ts_get) || { bad "tailscale.get failed"; return 1; }
+  ev "tailscale.get before Tailscale: $(ts_brief)"
+  jq_ok "$st" '.agentSupported' || { blocked "A's agent does not read Tailscale (no tailnet.serve.v1): the build the VMs run predates it (refresh.sh)"; return 3; }
+  expect "tailscale.get: not detected" jq_ok "$st" '.detected | not'
+  expect "turning Serve on is refused: notInstalled" refused_with notInstalled sess "$ipjar" "$(panel_url)" tailscale.setServe '{"serve":true}'
+
+  # 2. tailscaled on A (the owner's server) and C (the laptop), not signed in.
+  mode=
+  on "$E2E_A" "test -c /dev/net/tun || modprobe tun 2>/dev/null; test -c /dev/net/tun" || mode=--tun=userspace-networking
+  state_set p40-ts-a yes
+  ts_install a "$mode" || { bad "installing tailscaled $E2E_TS_VERSION on A failed"; return 1; }
+  state_set p40-ts-c yes
+  ts_install c "--tun=userspace-networking --socks5-server=127.0.0.1:$P40_SOCKS" || { bad "installing tailscaled on C failed"; return 1; }
+  good "tailscaled $E2E_TS_VERSION on A (${mode:-kernel mode}) and on C (userspace, SOCKS5 on 127.0.0.1:$P40_SOCKS), sha256 checked"
+  wait_for 120 "the agent to find tailscaled waiting for a sign-in" ts_state_is NeedsLogin || true
+  ev "tailscale.get, not signed in: $(ts_brief)"
+  expect "tailscale.get: detected, waiting for a sign-in" jq_ok "$(ts_get)" '.detected and .backendState == "NeedsLogin"'
+  expect "turning Serve on is refused: notSignedIn" refused_with notSignedIn sess "$ipjar" "$(panel_url)" tailscale.setServe '{"serve":true}'
+
+  # 3. Both sign in to Headscale with a pre-auth key, Tailscale DNS off.
+  for s in $(hs nodes list -o json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null); do hs nodes delete -i "$s" --force >/dev/null 2>&1 || true; done
+  s=$(hs users list -o json 2>/dev/null | jq -r '.[]? | select(.name == "e2e") | .id' | head -1)
+  [ -n "$s" ] || { hs users create e2e >/dev/null && s=$(hs users list -o json | jq -r '.[] | select(.name == "e2e") | .id' | head -1); }
+  key=$(hs preauthkeys create --user "$s" --reusable --expiration 2h 2>/dev/null | tail -1 | tr -d '[:space:]')
+  [ -n "$key" ] || { bad "Headscale made no pre-auth key"; return 1; }
+  P40_UP="tailscale up --login-server=https://$ip_a:$E2E_HS_PORT --accept-dns=false --timeout=60s"
+  on "$E2E_A" "$P40_UP --hostname=e2e-a --authkey=$key" >>"$RES/$CUR.log" 2>&1 || { bad "tailscale up on A failed"; return 1; }
+  on_node c "$P40_UP --hostname=e2e-c --authkey=$key" >>"$RES/$CUR.log" 2>&1 || { bad "tailscale up on C failed"; return 1; }
+  P40_UP="$P40_UP --hostname=e2e-a"
+  wait_for 120 "the agent to see A signed in" ts_state_is Running || true
+  st=$(ts_get)
+  ev "tailscale.get, signed in: $(ts_brief)"
+  P40_DNS=$(printf '%s' "$st" | jq -r '.dnsName // empty')
+  P40_TSIP=$(on "$E2E_A" "tailscale ip -4" | head -1 | tr -d '[:space:]')
+  [ -n "$P40_DNS" ] && [ -n "$P40_TSIP" ] || { bad "A has no tailnet name or address (dnsName '$P40_DNS', ip '$P40_TSIP')"; return 1; }
+  good "A and C signed in to Headscale; A is $P40_DNS ($P40_TSIP) on tailnet $(printf '%s' "$st" | jq -r .tailnet)"
+  expect "tailscale.get: Running, MagicDNS on, no HTTPS certificates, Tailscale DNS off, version OK" \
+    jq_ok "$st" '.backendState == "Running" and .magicDns and (.https | not) and (.acceptDns | not) and .versionOk'
+
+  # 4. An entry of the owner's own, which the panel must leave alone.
+  seeded=
+  if on "$E2E_A" "tailscale serve --bg --http=8080 text:owner" >>"$RES/$CUR.log" 2>&1 && owner_entry_kept; then
+    seeded=1
+    ev "the owner's own Serve entry: http://$P40_DNS:8080 -> text:owner"
+  else
+    ev "note: tailscale serve --bg --http=8080 text:owner did not add an entry here, so there is no owner's entry to keep"
+  fi
+
+  # 5. Serve on: refused for an API key, done for the owner's browser session. Nothing restarts.
+  expect "an API key cannot turn Serve on" fails api tailscale.setServe '{"serve":true}'
+  started=$(panel_started)
+  out=$(sess "$ipjar" "$(panel_url)" tailscale.setServe '{"serve":true}') || { bad "the owner could not turn Serve on"; return 1; }
+  good "tailscale.setServe {serve: true} from the owner's session: $(printf '%s' "$out" | jq -c '.tailscale.serve | {wanted, state}')"
+  t=$SECONDS
+  if wait_for 120 "Serve active" ts_serving; then
+    good "the panel's Serve entry is active after $((SECONDS - t))s: $(ts_get | jq -c '{url: .serve.url, owned}')"
+  else
+    bad "Serve did not turn active: $(ts_brief)"
+    return 1
+  fi
+  st=$(ts_get)
+  expect "it serves http://$P40_DNS (HTTP mode, the tailnet has no certificates)" jq_ok "$st" --arg u "http://$P40_DNS" '.serve.url == $u'
+  expect "the entry is $P40_DNS:80 / -> the panel's socket ($(printf '%s' "$st" | jq -c .owned))" \
+    jq_ok "$st" --arg h "$P40_DNS:80" '.owned.hostPort == $h and .owned.path == "/" and (.owned.proxy | endswith("/panel/tailnet.sock"))'
+  expect "tailscaled's Serve config has the same entry" entry_ours
+  [ -z "$seeded" ] || expect "the owner's own 8080 entry is untouched" owner_entry_kept
+  expect "the panel did not restart for it (StartedAt $started)" test "$(panel_started)" = "$started"
+  out=$(on "$E2E_A" "stat -c '%u:%a' $BRAND_DATA_DIR/panel/tailnet.sock" 2>&1 || true)
+  expect "the panel's socket is the panel user's, mode 0600 ($out)" test "$out" = "61000:600"
+  expect "another user on A cannot use the socket" \
+    on "$E2E_A" "! runuser -u nobody -- curl -s -m 5 -o /dev/null --unix-socket $BRAND_DATA_DIR/panel/tailnet.sock http://localhost/api/health"
+
+  # 6. From C over the tailnet.
+  wait_for 60 "the panel over the tailnet" tailnet_health || true
+  expect "http://$P40_DNS/api/health answers 200 from C over the tailnet" tailnet_health
+  expect "http://$P40_DNS/ serves the web app" tailnet_web_app
+  out=$(tcurl -o /dev/null -w '%{http_code} %{redirect_url}' "http://${P40_DNS%%.*}/settings/general" 2>/dev/null || true)
+  expect "the short name ${P40_DNS%%.*} goes to the full name ($out)" test "$out" = "308 http://$P40_DNS/settings/general"
+  since=$(utc_ago 30)
+  on_node c "rm -f $P40_JAR.jar $P40_JAR.key $P40_JAR.hdr"
+  # Serve drops X-Forwarded-* a client sends and sets its own, so these never reach the panel.
+  if TSESS_EXTRA="-H 'X-Forwarded-For: 1.2.3.4' -H 'X-Forwarded-Host: evil.example'" tsess auth.login "$(owner_login_json)" >/dev/null; then
+    good "the owner signed in from C over the tailnet, with a forged X-Forwarded-For and X-Forwarded-Host"
+    out=$(api_loop audit.list "$(jq -nc --arg s "$since" '{opId: "auth.login", from: $s, limit: 5}')" | jq -c '[.entries[] | .ip]')
+    expect "the sign-in's audit row has C's tailnet address, not the forged one ($out)" \
+      jq_ok "$out" 'length >= 1 and all(.[]; (. // "") | startswith("100."))'
+  else
+    bad "a sign-in over the tailnet with a forged X-Forwarded-For and X-Forwarded-Host was refused (Serve should replace them)"
+    tsess auth.login "$(owner_login_json)" >/dev/null || { bad "the owner could not sign in from C over the tailnet"; return 1; }
+    good "the owner signed in from C over the tailnet"
+  fi
+  st=$(tsess tailscale.get) || st='{}'
+  expect "tailscale.get on the tailnet says this request came over it" jq_ok "$st" '.viaTailnet'
+  expect "tailscale.get with the API key over IP:port does not" jq_ok "$(api tailscale.get)" '.viaTailnet | not'
+
+  # 7. Lock to Tailscale: refused from IP:port, done from the tailnet session.
+  expect "closing IP access from the IP:port session is refused (notOnPrivatePath)" \
+    refused_with notOnPrivatePath sess "$ipjar" "$(panel_url)" settings.updatePanelAccess '{"serveOnIp":false}'
+  st=$(tsess settings.panelAccess) || st='{}'
+  ev "settings.panelAccess on the tailnet: $(printf '%s' "$st" | jq -c '{privatePaths, blocked: [.blocked[]?.code], agentPortBlocked: [.agentPortBlocked[]?.code]}')"
+  expect "the tailnet is a working private path and this session is on it" \
+    jq_ok "$st" '[.privatePaths[]? | select(.kind == "tailnet" and .working and .usingNow)] | length == 1'
+  expect "nothing refuses closing IP access for the owner on the tailnet" jq_ok "$st" '(.blocked | length) == 0'
+  expect "the agents' port has to stay open while B and C connect over it (nodesOnAgentPort)" \
+    jq_ok "$st" '[.agentPortBlocked[]? | select(.code == "nodesOnAgentPort")] | length == 1'
+  since=$(utc_ago 30)
+  out=$(tsess settings.updatePanelAccess '{"serveOnIp":false}') || { bad "Lock to Tailscale (serveOnIp off from the tailnet session) failed"; return 1; }
+  good "Lock to Tailscale: Serve on IP address turned off from the tailnet session"
+  t=$SECONDS
+  if wait_for 240 "IP access closed" pa_closed; then
+    good "IP access closed after $((SECONDS - t))s"
+  else
+    bad "IP access did not close: $(pa_brief)"
+    return 1
+  fi
+  expect "http://$ip_a:$port no longer answers from the Mac" ip_closed_from mac
+  expect "http://$ip_a:$port no longer answers from B" ip_closed_from b
+  expect "http://$ip_a:$port no longer answers from C (outside the tailnet)" ip_closed_from c
+  expect "A's loopback still answers" on "$E2E_A" "curl -fsS -m 5 -o /dev/null http://127.0.0.1:$port/api/health"
+  wait_for 60 "the panel over the tailnet" tailnet_health || true
+  expect "the panel answers over the tailnet" tailnet_health
+  expect "the owner's tailnet session still works" tsess auth.whoami
+  wait_for 120 "A's agent connected" p31_connected a || true
+  expect "A's own agent stays connected" p31_connected a
+  wait_for 180 "3 nodes online" online_ge_loop 3 || true
+  expect "B and C stay online over the agents' port" online_ge_loop 3
+  out=$(on "$E2E_A" "$SLUG panel status 2>&1" || true)
+  ev "seylo panel status on A: $(printf '%s' "$out" | tr '\n' ' ' | head -c 400)"
+  expect "seylo panel status says IP access is closed" grep -qF "IP access: closed (127.0.0.1:$port" <<<"$out"
+  expect "seylo panel status names the tailnet address" grep -qF "Tailnet: active (http://$P40_DNS)" <<<"$out"
+  expect "a security_change alert says IP access closed" security_alert "IP access closed" "$since"
+
+  # 8. Agent restarts never touch the tailnet path: requests twice a second from C while A's agent restarts.
+  on_node c "rm -f /root/e2e-p40-loop.txt; systemctl reset-failed e2e-p40-loop >/dev/null 2>&1; systemd-run --unit=e2e-p40-loop --collect bash -c \
+    'for i in \$(seq 1 60); do curl -s -o /dev/null -m 5 -w \"%{http_code}\\n\" --socks5 127.0.0.1:$P40_SOCKS --resolve $P40_DNS:80:$P40_TSIP http://$P40_DNS/api/health >>/root/e2e-p40-loop.txt; sleep 0.5; done' >/dev/null" ||
+    bad "could not start the request loop on C"
+  sleep 5
+  on "$E2E_A" "systemctl restart $SLUG.service"
+  wait_for 120 "the request loop" p40_loop_done || true
+  codes=$(on_node c "cat /root/e2e-p40-loop.txt" 2>/dev/null || true)
+  total=$(printf '%s\n' "$codes" | grep -c . || true)
+  failed=$(printf '%s\n' "$codes" | grep -c -v -x 200 || true)
+  [ -n "$codes" ] || failed=0
+  expect "A's agent restarted during $total requests over the tailnet, $failed of them not 200" test "$total" -ge 50 -a "$failed" = 0
+  wait_for 120 "A's agent connected" p31_connected a || true
+
+  # 9. The agent puts its entry back after `tailscale serve reset`; a panel restart replaces its socket.
+  on "$E2E_A" "tailscale serve reset" >>"$RES/$CUR.log" 2>&1 || bad "tailscale serve reset failed"
+  t=$SECONDS
+  if wait_for 150 "the panel's entry back" entry_ours; then
+    good "after tailscale serve reset, the agent put the panel's entry back within $((SECONDS - t))s"
+  else
+    bad "the panel's entry did not come back after tailscale serve reset: $(serve_config | jq -c .)"
+  fi
+  on "$E2E_A" "docker restart \$(docker ps -q --filter label=$SLUG.service=panel00000000000 | head -1) >/dev/null" || bad "restarting the panel container failed"
+  wait_for 120 "the panel over the tailnet after its restart" tailnet_health || true
+  expect "after a panel container restart the tailnet answers again (the stale socket was replaced)" tailnet_health
+
+  # 10. Tailscale stops on the server: after 5 minutes (backdated) IP access reopens by itself.
+  since=$(utc_ago 30)
+  on "$E2E_A" "tailscale down" >>"$RES/$CUR.log" 2>&1 || bad "tailscale down failed"
+  wait_for 120 "the agent to report Tailscale stopped" ts_state_is Stopped || bad "the agent did not report Tailscale stopped: $(ts_brief)"
+  wait_for 120 "the panel to count the tailnet as failing" tailnet_down_since || true
+  settings_json_set tailscaleSeen '$.downSince' "$(($(now_ms) - 360000))" || bad "could not backdate the tailnet's failing reports"
+  t=$SECONDS
+  if wait_for 240 "IP access to reopen by itself" pa_open; then
+    good "with Tailscale stopped on A for 5 minutes (backdated), IP access reopened by itself after $((SECONDS - t))s"
+  else
+    bad "IP access did not reopen with Tailscale stopped: $(pa_brief)"
+    return 1
+  fi
+  st=$(panel_access)
+  expect "the tailnet counts as not working and Serve on IP address stays off" \
+    jq_ok "$st" '(.serveOnIp | not) and ([.privatePaths[] | select(.kind == "tailnet" and (.working | not))] | length == 1)'
+  expect "a security_change alert says IP access reopened" security_alert "IP access reopened" "$since"
+  on "$E2E_A" "$P40_UP" >>"$RES/$CUR.log" 2>&1 || bad "tailscale up on A again failed"
+  wait_for 150 "the tailnet working again" tailnet_working || bad "the tailnet did not work again: $(ts_brief)"
+  wait_for 120 "a time to close again" pa_recloses || true
+  expect "with the tailnet back, IP access stays open for an hour first (reclosesAt $(panel_access | jq -r .reclosesAt))" pa_recloses
+  settings_json_set panelIpAccessApplied '$.reopenedAt' "$(($(now_ms) - 3660000))" || bad "could not backdate the reopen"
+  settings_json_set tailscaleSeen '$.workingSince' "$(($(now_ms) - 3660000))" || bad "could not backdate the tailnet's working time"
+  t=$SECONDS
+  if wait_for 240 "IP access to close again" pa_closed; then
+    good "an hour (backdated) after the tailnet worked again, IP access closed again by itself after $((SECONDS - t))s"
+  else
+    bad "IP access did not close again: $(pa_brief)"
+  fi
+
+  # 11. The recovery commands on the server.
+  out=$(on "$E2E_A" "systemctl stop $SLUG.service; $SLUG panel tailscale status 2>&1; rc=\$?; systemctl start $SLUG.service; exit \$rc") && s=0 || s=$?
+  printf '%s\n' "$out" >>"$RES/$CUR.log"
+  ev "seylo panel tailscale status with the agent stopped (exit $s): $(printf '%s' "$out" | tr -s ' \n' ' ' | head -c 400)"
+  expect "seylo panel tailscale status works with the agent stopped" test "$s" = 0
+  expect "it shows Tailscale running" grep -qE '^State[[:space:]]+Running' <<<"$out"
+  expect "it shows the panel's entry ($(printf '%s' "$out" | grep '^Panel entry' | tr -s ' ' || true))" \
+    grep -qE "^Panel entry[[:space:]]+http://$P40_DNS -> unix:.*/panel/tailnet\.sock" <<<"$out"
+  wait_for 120 "A's agent connected" p31_connected a || true
+  out=$(on "$E2E_A" "$SLUG panel ip-access on" 2>&1) || bad "seylo panel ip-access on failed: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+  ev "seylo panel ip-access on: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"
+  t=$SECONDS
+  if wait_for 300 "IP access open again" pa_open; then
+    good "seylo panel ip-access on opened http://$ip_a:$port again after $((SECONDS - t))s"
+  else
+    bad "seylo panel ip-access on did not open IP access: $(pa_brief)"
+  fi
+  expect "Serve on IP address is on again" jq_ok "$(panel_access)" '.serveOnIp and .onFailure == "reopen"'
+  out=$(on "$E2E_A" "$SLUG panel tailscale off" 2>&1) || bad "seylo panel tailscale off failed: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+  ev "seylo panel tailscale off: $(printf '%s' "$out" | tr '\n' ' ' | head -c 300)"
+  expect "seylo panel tailscale off removed the panel's entry" fails entry_ours
+  wait_for 120 "the panel to see Tailscale off on the server" ts_disabled true || true
+  expect "tailscale.get says it is off on the server (disabledOnServer)" ts_disabled true
+  out=$(on "$E2E_A" "$SLUG panel status 2>&1" || true)
+  expect "seylo panel status says the tailnet is off on this server" grep -qF 'Tailnet: off on this server' <<<"$out"
+  reauth "$ipjar"
+  expect "turning Serve on is refused while it is off on the server (disabledOnServer)" \
+    refused_with disabledOnServer sess "$ipjar" "$(panel_url)" tailscale.setServe '{"serve":true}'
+  out=$(on "$E2E_A" "$SLUG panel tailscale on" 2>&1) || bad "seylo panel tailscale on failed: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+  t=$SECONDS
+  if wait_for 150 "the panel's entry back" entry_ours; then
+    good "seylo panel tailscale on: the agent put the panel's entry back after $((SECONDS - t))s"
+  else
+    bad "the panel's entry did not come back after seylo panel tailscale on: $(ts_brief)"
+  fi
+  wait_for 120 "Serve active" ts_serving || true
+  expect "tailscale.get: Serve active again and not off on the server ($(ts_brief))" ts_serving_again
+}
+
+# p40_cleanup: Serve off, IP access open, the agent's no_tailnet gone,
+# tailscaled gone from A and C, no Headscale nodes; works from any point
+# check 40 stopped at.
+p40_cleanup() {
+  local s
+  on_node c "rm -f $P40_JAR.jar $P40_JAR.key $P40_JAR.hdr /root/e2e-p40-loop.txt; systemctl stop e2e-p40-loop >/dev/null 2>&1; true" || true
+  api_loop tailscale.setServe '{"serve":false,"reopenIpAccess":true}' >/dev/null 2>>"$RES/$CUR.log" || ev "cleanup: tailscale.setServe {serve: false} failed"
+  ip_access_reset
+  if on "$E2E_A" "grep -q '^no_tailnet:' $BRAND_DATA_DIR/config.yml" 2>/dev/null; then
+    on "$E2E_A" "$SLUG panel tailscale on" >>"$RES/$CUR.log" 2>&1 || bad "cleanup: seylo panel tailscale on failed"
+    wait_for 90 "A's agent back" p31_connected a || true
+  fi
+  if [ "$(state_get p40-ts-a)" = yes ]; then
+    ts_remove a || bad "cleanup: could not remove tailscaled from A"
+    rm -f "$E2E_STATE/p40-ts-a"
+  fi
+  if [ "$(state_get p40-ts-c)" = yes ]; then
+    ts_remove c || bad "cleanup: could not remove tailscaled from C"
+    rm -f "$E2E_STATE/p40-ts-c"
+  fi
+  if hs_running 2>/dev/null; then
+    for s in $(hs nodes list -o json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null); do hs nodes delete -i "$s" --force >/dev/null 2>&1 || true; done
+  fi
+  rm -f "$E2E_STATE/p40-ip-cookies" "$E2E_STATE/p40-ip-cookies.key"
+  wait_for 120 "the panel to see no Tailscale" ts_detected false || true
+  expect "cleanup: tailscale.get shows no Tailscale on the panel server ($(ts_brief))" ts_detected false
+  expect "cleanup: Serve is off in the panel" jq_ok "$(ts_get)" '.serve.wanted | not'
+  expect "cleanup: IP access is open (http://$(node_ip a):$E2E_PORT answers)" pa_open
+  wait_for 120 "3 online nodes" online_ge 3 || true
+  expect "cleanup: 3 nodes online" online_ge 3
 }
 
 # ---------------------------------------------------------------- main
