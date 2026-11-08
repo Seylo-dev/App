@@ -12,7 +12,7 @@
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import type { MetricsReport } from "@seylo/proto";
-import { and, between, eq, lt } from "drizzle-orm";
+import { and, asc, between, eq, lt } from "drizzle-orm";
 import type { MetricsDb } from "../../db/client";
 import { nodeMetrics, type Resolution, serviceMetrics } from "../../db/metrics/schema";
 
@@ -56,6 +56,45 @@ interface Counter {
   tx: bigint;
 }
 
+/** One 1m row's values, as the rollups average them. */
+interface MinuteRow {
+  bucketStart: number;
+  cpuPercent: number;
+  cpuPercentMax: number;
+  memoryBytes: number;
+  memoryBytesMax: number;
+  networkRxBytesPerSec: number;
+  networkTxBytesPerSec: number;
+}
+
+/** Node 1m rows also carry the memory and disk totals the rollup takes from its latest minute. */
+interface NodeMinuteRow extends MinuteRow {
+  memoryTotalBytes: number;
+  diskUsedBytes: number;
+  diskTotalBytes: number;
+}
+
+/**
+ * A 5m or 1h bucket being filled: the sums of its 1m rows, added as each
+ * minute closes, so closing a minute does not read the bucket's 1m rows
+ * back. It starts from the stored rows (a new bucket, a panel restart),
+ * and starts over from them whenever a minute comes again or out of order.
+ */
+interface Rollup<R extends MinuteRow> {
+  start: number;
+  minutes: Set<number>;
+  latest: R;
+  n: number;
+  cpu: number;
+  mem: number;
+  rx: number;
+  tx: number;
+  cpuMax: number;
+  memMax: number;
+}
+
+const rollupSeconds = { "5m": 300, "1h": 3600 } as const;
+
 export const liveWindowMs = 5 * 60 * 1000;
 /** Most live points per node or service series (two a second over the live window). */
 export const maxLivePoints = 600;
@@ -95,12 +134,23 @@ export class MetricsIngest {
   private readonly serviceCounters = new Map<string, Counter>();
   private readonly nodeBuckets = new Map<string, Bucket>();
   private readonly serviceBuckets = new Map<string, Bucket>();
+  /** key: nodeId \0 resolution */
+  private readonly nodeRollups = new Map<string, Rollup<NodeMinuteRow>>();
+  /** key: serviceId \0 nodeId \0 resolution */
+  private readonly serviceRollups = new Map<string, Rollup<MinuteRow>>();
   private lastPruneHour = 0;
 
   constructor(private readonly db: MetricsDb) {}
 
-  /** Records one sample; returns the ids of the services it carried. */
+  /**
+   * Records one sample; returns the ids of the services it carried. One
+   * transaction: a sample that closes a minute writes three rows per service.
+   */
   record(nodeId: string, report: MetricsReport): string[] {
+    return this.db.transaction(() => this.recordSample(nodeId, report));
+  }
+
+  private recordSample(nodeId: string, report: MetricsReport): string[] {
     const t = report.time ? timestampDate(report.time).getTime() : Date.now();
     const minute = Math.floor(t / 60_000) * 60;
     const node = report.node;
@@ -152,6 +202,10 @@ export class MetricsIngest {
 
   /** Writes every open minute (node disconnected, panel stopping). */
   flushNode(nodeId: string): void {
+    this.db.transaction(() => this.flushOpenMinutes(nodeId));
+  }
+
+  private flushOpenMinutes(nodeId: string): void {
     const bucket = this.nodeBuckets.get(nodeId);
     if (bucket) this.writeNode(nodeId, bucket);
     this.nodeBuckets.delete(nodeId);
@@ -165,12 +219,14 @@ export class MetricsIngest {
   }
 
   flushAll(): void {
-    for (const nodeId of [...this.nodeBuckets.keys()]) this.flushNode(nodeId);
-    for (const [key, b] of this.serviceBuckets) {
-      const [serviceId, nodeId] = key.split("\0") as [string, string];
-      this.writeService(serviceId, nodeId, b);
-    }
-    this.serviceBuckets.clear();
+    this.db.transaction(() => {
+      for (const nodeId of [...this.nodeBuckets.keys()]) this.flushOpenMinutes(nodeId);
+      for (const [key, b] of this.serviceBuckets) {
+        const [serviceId, nodeId] = key.split("\0") as [string, string];
+        this.writeService(serviceId, nodeId, b);
+      }
+      this.serviceBuckets.clear();
+    });
   }
 
   latestNode(nodeId: string): NodePointNow | null {
@@ -211,12 +267,14 @@ export class MetricsIngest {
       if (byNode.size === 0) this.serviceLive.delete(serviceId);
     }
     for (const key of [...this.serviceCounters.keys()]) if (key.endsWith(`\0${nodeId}`)) this.serviceCounters.delete(key);
+    for (const key of [...this.nodeRollups.keys()]) if (key.startsWith(`${nodeId}\0`)) this.nodeRollups.delete(key);
+    for (const key of [...this.serviceRollups.keys()]) if (key.split("\0")[1] === nodeId) this.serviceRollups.delete(key);
   }
 
   /** Drops in-memory state of a deleted service (its stored buckets go with the service). */
   forgetService(serviceId: string): void {
     this.serviceLive.delete(serviceId);
-    for (const map of [this.serviceCounters, this.serviceBuckets]) {
+    for (const map of [this.serviceCounters, this.serviceBuckets, this.serviceRollups]) {
       for (const key of [...map.keys()]) if (key.startsWith(`${serviceId}\0`)) map.delete(key);
     }
   }
@@ -234,6 +292,11 @@ export class MetricsIngest {
     }
     for (const [key, counter] of this.serviceCounters) if (counter.t < cutoff) this.serviceCounters.delete(key);
     for (const [nodeId, points] of this.nodeLive) if ((points.at(-1)?.t ?? 0) < cutoff) this.nodeLive.delete(nodeId);
+    // A bucket that ended an hour ago gets no more minutes (they are dropped as late).
+    const ended = Math.floor(t / 1000) - 3600;
+    for (const map of [this.nodeRollups, this.serviceRollups] as Map<string, Rollup<MinuteRow>>[]) {
+      for (const [key, rollup] of map) if (rollup.start + 3600 < ended) map.delete(key);
+    }
   }
 
   private accumulate(
@@ -294,7 +357,7 @@ export class MetricsIngest {
       .values(row)
       .onConflictDoUpdate({ target: [nodeMetrics.nodeId, nodeMetrics.resolution, nodeMetrics.bucketStart], set: row })
       .run();
-    for (const resolution of ["5m", "1h"] as const) this.rollNode(nodeId, resolution, b.minute);
+    for (const resolution of ["5m", "1h"] as const) this.rollNode(nodeId, resolution, row);
   }
 
   private writeService(serviceId: string, nodeId: string, b: Bucket): void {
@@ -319,30 +382,27 @@ export class MetricsIngest {
         set: row,
       })
       .run();
-    for (const resolution of ["5m", "1h"] as const) this.rollService(serviceId, nodeId, resolution, b.minute);
+    for (const resolution of ["5m", "1h"] as const) this.rollService(serviceId, nodeId, resolution, row);
   }
 
-  /** Recomputes the 5m or 1h bucket holding `minute` from the 1m rows. */
-  private rollNode(nodeId: string, resolution: "5m" | "1h", minute: number): void {
-    const size = resolution === "5m" ? 300 : 3600;
-    const start = Math.floor(minute / size) * size;
-    const rows = this.db
-      .select()
-      .from(nodeMetrics)
-      .where(
-        and(eq(nodeMetrics.nodeId, nodeId), eq(nodeMetrics.resolution, "1m"), between(nodeMetrics.bucketStart, start, start + size - 1)),
-      )
-      .all();
-    if (rows.length === 0) return;
-    const last = rows.reduce((a, b) => (b.bucketStart > a.bucketStart ? b : a));
+  /** Updates the 5m or 1h bucket holding the 1m row just written. */
+  private rollNode(nodeId: string, resolution: "5m" | "1h", minute: NodeMinuteRow): void {
+    const rollup = this.rollup(this.nodeRollups, `${nodeId}\0${resolution}`, resolution, minute, (start, end) =>
+      this.db
+        .select()
+        .from(nodeMetrics)
+        .where(and(eq(nodeMetrics.nodeId, nodeId), eq(nodeMetrics.resolution, "1m"), between(nodeMetrics.bucketStart, start, end)))
+        .orderBy(asc(nodeMetrics.bucketStart))
+        .all(),
+    );
     const row = {
       nodeId,
       resolution,
-      bucketStart: start,
-      ...averages(rows),
-      memoryTotalBytes: last.memoryTotalBytes,
-      diskUsedBytes: last.diskUsedBytes,
-      diskTotalBytes: last.diskTotalBytes,
+      bucketStart: rollup.start,
+      ...averagesOf(rollup),
+      memoryTotalBytes: rollup.latest.memoryTotalBytes,
+      diskUsedBytes: rollup.latest.diskUsedBytes,
+      diskTotalBytes: rollup.latest.diskTotalBytes,
     };
     this.db
       .insert(nodeMetrics)
@@ -351,23 +411,23 @@ export class MetricsIngest {
       .run();
   }
 
-  private rollService(serviceId: string, nodeId: string, resolution: "5m" | "1h", minute: number): void {
-    const size = resolution === "5m" ? 300 : 3600;
-    const start = Math.floor(minute / size) * size;
-    const rows = this.db
-      .select()
-      .from(serviceMetrics)
-      .where(
-        and(
-          eq(serviceMetrics.serviceId, serviceId),
-          eq(serviceMetrics.nodeId, nodeId),
-          eq(serviceMetrics.resolution, "1m"),
-          between(serviceMetrics.bucketStart, start, start + size - 1),
-        ),
-      )
-      .all();
-    if (rows.length === 0) return;
-    const row = { serviceId, nodeId, resolution, bucketStart: start, ...averages(rows) };
+  private rollService(serviceId: string, nodeId: string, resolution: "5m" | "1h", minute: MinuteRow): void {
+    const rollup = this.rollup(this.serviceRollups, `${serviceId}\0${nodeId}\0${resolution}`, resolution, minute, (start, end) =>
+      this.db
+        .select()
+        .from(serviceMetrics)
+        .where(
+          and(
+            eq(serviceMetrics.serviceId, serviceId),
+            eq(serviceMetrics.nodeId, nodeId),
+            eq(serviceMetrics.resolution, "1m"),
+            between(serviceMetrics.bucketStart, start, end),
+          ),
+        )
+        .orderBy(asc(serviceMetrics.bucketStart))
+        .all(),
+    );
+    const row = { serviceId, nodeId, resolution, bucketStart: rollup.start, ...averagesOf(rollup) };
     this.db
       .insert(serviceMetrics)
       .values(row)
@@ -376,6 +436,34 @@ export class MetricsIngest {
         set: row,
       })
       .run();
+  }
+
+  /**
+   * The rollup of the bucket holding `minute` with that minute counted. The
+   * next minute of the bucket being filled is added to its sums; anything
+   * else (a new bucket, a minute written again or out of order) reads the
+   * bucket's stored 1m rows, which already hold `minute`, in order, so the
+   * sums are always those of the stored rows.
+   */
+  private rollup<R extends MinuteRow>(
+    rollups: Map<string, Rollup<R>>,
+    key: string,
+    resolution: "5m" | "1h",
+    minute: R,
+    stored: (start: number, end: number) => R[],
+  ): Rollup<R> {
+    const size = rollupSeconds[resolution];
+    const start = Math.floor(minute.bucketStart / size) * size;
+    const current = rollups.get(key);
+    if (current && current.start === start && !current.minutes.has(minute.bucketStart) && minute.bucketStart > current.latest.bucketStart) {
+      addMinute(current, minute);
+      return current;
+    }
+    const rows = stored(start, start + size - 1);
+    const fresh: Rollup<R> = { start, minutes: new Set(), latest: minute, n: 0, cpu: 0, mem: 0, rx: 0, tx: 0, cpuMax: 0, memMax: 0 };
+    for (const row of rows.length > 0 ? rows : [minute]) addMinute(fresh, row);
+    rollups.set(key, fresh);
+    return fresh;
   }
 
   /** Once an hour: drop buckets past their retention. */
@@ -398,38 +486,27 @@ export class MetricsIngest {
   }
 }
 
-function averages(
-  rows: {
-    cpuPercent: number;
-    cpuPercentMax: number;
-    memoryBytes: number;
-    memoryBytesMax: number;
-    networkRxBytesPerSec: number;
-    networkTxBytesPerSec: number;
-  }[],
-) {
-  const n = rows.length;
-  let cpu = 0;
-  let mem = 0;
-  let rx = 0;
-  let tx = 0;
-  let cpuMax = 0;
-  let memMax = 0;
-  for (const r of rows) {
-    cpu += r.cpuPercent;
-    mem += r.memoryBytes;
-    rx += r.networkRxBytesPerSec;
-    tx += r.networkTxBytesPerSec;
-    cpuMax = Math.max(cpuMax, r.cpuPercentMax);
-    memMax = Math.max(memMax, r.memoryBytesMax);
-  }
+function addMinute<R extends MinuteRow>(rollup: Rollup<R>, row: R): void {
+  rollup.minutes.add(row.bucketStart);
+  rollup.latest = row;
+  rollup.n++;
+  rollup.cpu += row.cpuPercent;
+  rollup.mem += row.memoryBytes;
+  rollup.rx += row.networkRxBytesPerSec;
+  rollup.tx += row.networkTxBytesPerSec;
+  rollup.cpuMax = Math.max(rollup.cpuMax, row.cpuPercentMax);
+  rollup.memMax = Math.max(rollup.memMax, row.memoryBytesMax);
+}
+
+function averagesOf(rollup: Rollup<MinuteRow>) {
+  const n = rollup.n;
   return {
-    cpuPercent: cpu / n,
-    cpuPercentMax: cpuMax,
-    memoryBytes: Math.round(mem / n),
-    memoryBytesMax: memMax,
-    networkRxBytesPerSec: rx / n,
-    networkTxBytesPerSec: tx / n,
+    cpuPercent: rollup.cpu / n,
+    cpuPercentMax: rollup.cpuMax,
+    memoryBytes: Math.round(rollup.mem / n),
+    memoryBytesMax: rollup.memMax,
+    networkRxBytesPerSec: rollup.rx / n,
+    networkTxBytesPerSec: rollup.tx / n,
   };
 }
 

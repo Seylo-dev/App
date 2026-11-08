@@ -2146,7 +2146,12 @@ history.
 Metrics: each `metrics` event feeds `modules/metrics/ingest.ts`: a 5-minute
 in-memory window (range `live`) and `metrics.db` buckets 1m (26 h), 5m
 (8 days) and 1h (35 days); `30d` groups hourly buckets by 6 hours. Network
-rates come from the cumulative counters of consecutive samples.
+rates come from the cumulative counters of consecutive samples. Each sample
+is one metrics.db transaction; closing a minute writes the 1m row and
+updates the 5m and 1h rows from running sums (a bucket's 1m rows are read
+only when it starts, after a restart, or when a minute comes again), and
+the hourly prune deletes through `(resolution, bucket_start)` indexes
+(metrics migration 0001).
 
 ## Placeholders
 
