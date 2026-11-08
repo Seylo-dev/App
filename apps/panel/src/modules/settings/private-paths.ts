@@ -9,7 +9,7 @@ import type { settings as settingOps } from "@seylo/ops";
 import type { Deps } from "../../deps";
 import type { OpContext } from "../../ops/implement";
 import { getSetting } from "../../settings";
-import type { StoredDomainStatus } from "./domain";
+import { domainWorking } from "./domain";
 import "./keys";
 
 export interface PrivatePathState {
@@ -82,7 +82,10 @@ export function provingPrivatePath(ctx: OpContext): PrivatePathSource | null {
 }
 
 /**
- * The panel domain. Working: its status is active for the current domain.
+ * The panel domain. Working: a check found it active for the current
+ * domain, and it did not fail the 2 checks since in a row (domain.ts
+ * domainWorking). A changed or removed domain stops working at once: its
+ * status is dropped with it (settings.updateGeneral).
  * Proven by an https://<domain> origin, which a request over IP:port cannot
  * produce: there the scheme is always http (http/request-origin.ts), so only
  * a trusted proxy (Traefik with the domain's certificate) sets it.
@@ -92,8 +95,8 @@ export const domainPath: PrivatePathSource = {
   state(deps) {
     const domain = getSetting(deps.db, "panelDomain") ?? null;
     if (!domain) return { url: null, working: false, since: null };
-    const status: StoredDomainStatus | undefined = getSetting(deps.db, "panelDomainStatus");
-    return { url: `https://${domain}`, working: status?.domain === domain && status.state === "active", since: null };
+    const { working, since } = domainWorking(getSetting(deps.db, "panelDomainStatus"), domain);
+    return { url: `https://${domain}`, working, since: since === null ? null : new Date(since) };
   },
   provenBy(ctx) {
     const domain = getSetting(ctx.db, "panelDomain") ?? null;

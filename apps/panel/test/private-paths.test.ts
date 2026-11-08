@@ -1,10 +1,9 @@
 // The private-path registry and the panel domain path (added in 0.2.1), and
-// the WP0 stubs built on them: IP access stays open until WP-F2b, the
-// panel access ops answer NOT_IMPLEMENTED, and tailscale.get reports
-// Tailscale as not detected.
+// the WP0 stubs built on them: tailscale.get reports Tailscale as not
+// detected. IP access itself is in ip-access.test.ts and panel-access.test.ts.
 
 import { afterEach, expect, test } from "bun:test";
-import { settings as settingOps, tailscale } from "@seylo/ops";
+import { tailscale } from "@seylo/ops";
 import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "../src/modules/settings/ip-access";
 import {
   anyPrivatePathWorking,
@@ -82,7 +81,7 @@ test("a registered path joins the list after the domain, and one of the same kin
   ]);
 });
 
-test("IP access stays open while it is not built", () => {
+test("IP access is open by default, and stays open without a panel node", () => {
   panel = testPanel();
   activeDomain(panel, "panel.example.com");
   expect(readPanelAccessWanted(panel.deps)).toEqual({ serveOnIp: true, agentPortOpen: true, onFailure: "reopen" });
@@ -90,11 +89,9 @@ test("IP access stays open while it is not built", () => {
   expect(readIpAccessApplied(panel.deps).closed).toBe(false);
 });
 
-test("the panel access ops are routed but not built, and tailscale.get says not detected", async () => {
+test("tailscale.get says not detected while nothing reads Tailscale", async () => {
   panel = testPanel();
   const { cookie } = await createUser(panel, "owner");
-  expect((await callOp(panel, settingOps.panelAccess, {}, { cookie })).status).toBe(501);
-  expect((await callOp(panel, settingOps.updatePanelAccess, { serveOnIp: true }, { cookie })).status).toBe(501);
   for (const [op, input] of [
     [tailscale.setServe, { serve: true }],
     [tailscale.signIn, {}],

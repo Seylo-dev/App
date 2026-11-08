@@ -4,7 +4,12 @@
 // should not type their password into a plain-HTTP page. API calls are left
 // alone (CLI, scripts, agents); loopback stays open as the way back in over
 // an SSH tunnel when the domain breaks. A domain that stops answering drops
-// out of "active" on the next hourly check, which reopens IP:port.
+// out of "active" at its next check (hourly while IP access is open, every
+// 5 minutes while it is closed or the domain is not active), and from then
+// IP:port pages are served again instead of redirected. Closing the port
+// itself is Settings > General > "Serve on IP address" (modules/settings/
+// ip-access.ts): then IP:port only answers on the server, where loopback
+// is never redirected.
 
 import type { Deps } from "../deps";
 import "../modules/settings/domain";

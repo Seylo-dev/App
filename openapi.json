@@ -62577,6 +62577,10 @@
                                 "type": "string"
                               },
                               {
+                                "const": "panelNotManaged",
+                                "type": "string"
+                              },
+                              {
                                 "const": "agentTooOld",
                                 "type": "string"
                               },
@@ -62641,6 +62645,10 @@
                               },
                               {
                                 "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNotManaged",
                                 "type": "string"
                               },
                               {
@@ -63635,6 +63643,10 @@
                                 "type": "string"
                               },
                               {
+                                "const": "panelNotManaged",
+                                "type": "string"
+                              },
+                              {
                                 "const": "agentTooOld",
                                 "type": "string"
                               },
@@ -63699,6 +63711,10 @@
                               },
                               {
                                 "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNotManaged",
                                 "type": "string"
                               },
                               {

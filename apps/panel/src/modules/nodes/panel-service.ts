@@ -16,7 +16,10 @@
 //
 // panelContributor keeps the service's spec as the installer made it (env,
 // the published port, the "panel" alias, recreate deploys, no volumes: the
-// agent binds the data dir itself) and routes the panel domain to it.
+// agent binds the data dir itself) and routes the panel domain to it. While
+// IP access is closed (settings/ip-access.ts) it publishes the panel port,
+// and the agents' TLS port when that is closed too, on 127.0.0.1 only;
+// bumpPanelGeneration rolls the panel once for each such change.
 //
 // The spec never names the panel's user: the agent runs the panel as its
 // panel user (go/internal/docker PanelUser, uid 61000) after giving the data
@@ -42,6 +45,7 @@ import type { Deps } from "../../deps";
 import type { DesiredContributor } from "../../desired/contributors";
 import { getSetting, setSetting } from "../../settings";
 import { defaultSpec, runSettingsOf, type ServiceSpecJson } from "../services/spec";
+import type { PanelIpAccessApplied } from "../settings/ip-access";
 import { runRelease } from "../updates/release-state";
 
 /** Reserved ids, the same as go/internal/docker (PanelProjectID, PanelServiceID). */
@@ -49,6 +53,8 @@ export const panelProjectId = "panelproject0000";
 export const panelServiceId = "panel00000000000";
 export const panelServiceName = "panel";
 export const panelContainerPort = 3000;
+/** Where a closed port is published (PublicPort.bind_address): IPv4 loopback, which Docker publishes without IPv6. */
+export const loopbackBindAddress = "127.0.0.1";
 
 declare module "../../settings" {
   interface SettingValues {
@@ -201,9 +207,25 @@ export function syncPanelImage(deps: Pick<Deps, "db" | "config" | "logger">, now
   const svc = db.select().from(services).where(eq(services.id, panelServiceId)).get();
   const live = svc?.targetDeploymentId ? db.select().from(deployments).where(eq(deployments.id, svc.targetDeploymentId)).get() : undefined;
   if (!svc || !live || live.imageDigest === image.digest) return false;
-  db.transaction((tx) => {
+  nextPanelDeployment(deps, svc, live, image, now);
+  deps.logger.info({ serviceId: svc.id, image: `${image.reference}@${image.digest}` }, "recorded the updated panel image");
+  return true;
+}
+
+/**
+ * Supersedes the panel's live deployment with a live one at the next
+ * generation, of `image`, in one transaction. Returns the new generation.
+ */
+function nextPanelDeployment(
+  deps: Pick<Deps, "db">,
+  svc: typeof services.$inferSelect,
+  live: typeof deployments.$inferSelect,
+  image: ImageRef,
+  now: Date,
+): number {
+  const generation = live.generation + 1;
+  deps.db.transaction((tx) => {
     tx.update(deployments).set({ status: "superseded" }).where(eq(deployments.id, live.id)).run();
-    const generation = live.generation + 1;
     const next = tx
       .insert(deployments)
       .values({
@@ -226,8 +248,26 @@ export function syncPanelImage(deps: Pick<Deps, "db" | "config" | "logger">, now
     const spec = { ...(svc.spec as ServiceSpecJson), source: { type: "image" as const, image: image.reference, registryId: null } };
     tx.update(services).set({ targetDeploymentId: next.id, generation, spec }).where(eq(services.id, svc.id)).run();
   });
-  deps.logger.info({ serviceId: svc.id, image: `${image.reference}@${image.digest}` }, "recorded the updated panel image");
-  return true;
+  return generation;
+}
+
+/**
+ * A new generation of the same panel image, the way syncPanelImage records
+ * an update: the agent compares the spec it gets with the running
+ * container's and rolls the panel once (RECREATE) when they differ, for
+ * example after a port's bind address changed. Returns the new generation,
+ * or null when the panel is not a service here (development, tests).
+ */
+export function bumpPanelGeneration(deps: Pick<Deps, "db">, now = new Date()): number | null {
+  const svc = deps.db.select().from(services).where(eq(services.id, panelServiceId)).get();
+  const live = svc?.targetDeploymentId
+    ? deps.db.select().from(deployments).where(eq(deployments.id, svc.targetDeploymentId)).get()
+    : undefined;
+  if (!svc || !live) return null;
+  const source = (svc.spec as ServiceSpecJson).source;
+  const reference = live.imageRef ?? (source?.type === "image" ? source.image : null);
+  if (!reference) return null;
+  return nextPanelDeployment(deps, svc, live, { reference, digest: live.imageDigest }, now);
 }
 
 /**
@@ -242,6 +282,9 @@ export const panelContributor: DesiredContributor = {
     if (service.id !== panelServiceId) return;
     const hostPort = getSetting(db, "panelHostPort") ?? panelContainerPort;
     const agentTlsPort = getSetting(db, "panelAgentTlsPort") ?? null;
+    // What applyPanelIpAccess decided; absent means open, as in 0.2.0 (an empty bind address hashes as before).
+    const applied: PanelIpAccessApplied | undefined = getSetting(db, "panelIpAccessApplied");
+    const loopbackOnly = (closed: boolean | undefined) => (closed ? { bindAddress: loopbackBindAddress } : {});
     spec.env = [
       ["PORT", String(panelContainerPort)],
       ["HOST_PORT", String(hostPort)],
@@ -252,7 +295,7 @@ export const panelContributor: DesiredContributor = {
       create(PortSpecSchema, {
         containerPort: panelContainerPort,
         protocol: PortProtocol.TCP,
-        public: { hostPort, mode: PublicPortMode.FORWARD },
+        public: { hostPort, mode: PublicPortMode.FORWARD, ...loopbackOnly(applied?.closed) },
       }),
       // The agents' TLS listener, published like the panel port (the same number on the host).
       ...(agentTlsPort
@@ -260,7 +303,7 @@ export const panelContributor: DesiredContributor = {
             create(PortSpecSchema, {
               containerPort: agentTlsPort,
               protocol: PortProtocol.TCP,
-              public: { hostPort: agentTlsPort, mode: PublicPortMode.FORWARD },
+              public: { hostPort: agentTlsPort, mode: PublicPortMode.FORWARD, ...loopbackOnly(applied?.closed && applied.agentPortClosed) },
             }),
           ]
         : []),
