@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0e018baa-fd03-4be0-a35e-65edbd31fcd2",
+  "id": "0684b9c9-dcf7-42da-9bff-b3adc589a1d5",
   "prevId": "ef0e91b9-1d6e-46b3-8398-4ca228225a30",
   "tables": {
     "audit_log": {
@@ -8375,6 +8375,13 @@
             "occurred_at"
           ],
           "isUnique": false
+        },
+        "crash_reports_occurred_idx": {
+          "name": "crash_reports_occurred_idx",
+          "columns": [
+            "occurred_at"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -8406,6 +8413,68 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "report_totals": {
+      "name": "report_totals",
+      "columns": {
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "row_count": {
+          "name": "row_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "byte_count": {
+          "name": "byte_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "report_totals_node_id_nodes_id_fk": {
+          "name": "report_totals_node_id_nodes_id_fk",
+          "tableFrom": "report_totals",
+          "tableTo": "nodes",
+          "columnsFrom": [
+            "node_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "report_totals_node_id_kind_pk": {
+          "columns": [
+            "node_id",
+            "kind"
+          ],
+          "name": "report_totals_node_id_kind_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

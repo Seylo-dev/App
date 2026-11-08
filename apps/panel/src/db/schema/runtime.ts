@@ -2,7 +2,7 @@
 // connection: crash reports (alerts and the crash history view). Delivered
 // through the agent's outbox, so (node, outbox id) makes redelivery a no-op.
 
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createdAt, id, json, timestamp } from "./columns";
 import { nodes } from "./infra";
 import { services } from "./projects";
@@ -34,6 +34,8 @@ export const crashReports = sqliteTable(
   (t) => [
     uniqueIndex("crash_reports_outbox_unique").on(t.nodeId, t.outboxId),
     index("crash_reports_service_idx").on(t.serviceId, t.occurredAt),
+    // The hourly prune deletes by age (modules/nodes/retention.ts).
+    index("crash_reports_occurred_idx").on(t.occurredAt),
   ],
 );
 
@@ -74,4 +76,28 @@ export const agentReports = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("agent_reports_outbox_unique").on(t.nodeId, t.outboxId), index("agent_reports_created_idx").on(t.createdAt)],
+);
+
+/** report_totals.kind of crash_reports rows (agent_reports rows use their own kind). */
+export const crashReportsTotalKind = "crash";
+
+/**
+ * Rows and stored bytes per node of agent_reports (per kind) and
+ * crash_reports (kind "crash"), kept by triggers in the database
+ * (migration 0003), so the hourly prune (modules/nodes/retention.ts) knows
+ * which node is over a cap without reading every report. Bytes are
+ * length(event) for agent reports and length(last_lines) +
+ * length(container_id) for crash reports, as the prune counts them.
+ */
+export const reportTotals = sqliteTable(
+  "report_totals",
+  {
+    nodeId: text("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    rowCount: integer("row_count").notNull().default(0),
+    byteCount: integer("byte_count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.kind] })],
 );

@@ -9,15 +9,17 @@
 // the rollback targets); only their log lines go.
 
 import { and, desc, eq, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
-import { reportLaneSql } from "../../agent-hub/report-budget";
+import { type ReportLane, reportLane, reportLaneSql } from "../../agent-hub/report-budget";
 import type { PanelDb } from "../../db/client";
 import {
   agentReports,
   alerts,
   crashReports,
+  crashReportsTotalKind,
   deploymentLogs,
   deployments,
   notificationDeliveries,
+  reportTotals,
   services,
   webhookBodies,
   webhookDeliveries,
@@ -54,6 +56,40 @@ export const retention = {
   deploymentLogsKeep: 20,
 };
 
+interface LaneCap {
+  rows: number;
+  bytes: number;
+}
+
+function laneCap(lane: ReportLane): LaneCap {
+  return lane === "results"
+    ? { rows: retention.resultReportsPerNode, bytes: retention.resultReportBytesPerNode }
+    : { rows: retention.agentReportsPerNode, bytes: retention.reportBytesPerNode };
+}
+
+/** The node lanes of agent_reports and the nodes' crash_reports over their caps, from report_totals. */
+function overCaps(db: PanelDb): { agentReports: { nodeId: string; lane: ReportLane; cap: LaneCap }[]; crashBytes: string[] } {
+  const lanes = new Map<string, { nodeId: string; lane: ReportLane; rows: number; bytes: number }>();
+  const crashBytes: string[] = [];
+  for (const total of db.select().from(reportTotals).all()) {
+    if (total.kind === crashReportsTotalKind) {
+      if (total.byteCount > retention.reportBytesPerNode) crashBytes.push(total.nodeId);
+      continue;
+    }
+    const lane = reportLane(total.kind);
+    const key = `${total.nodeId}\0${lane}`;
+    const sum = lanes.get(key) ?? { nodeId: total.nodeId, lane, rows: 0, bytes: 0 };
+    sum.rows += total.rowCount;
+    sum.bytes += total.byteCount;
+    lanes.set(key, sum);
+  }
+  const agentReports = [...lanes.values()]
+    .map(({ nodeId, lane, rows, bytes }) => ({ nodeId, lane, rows, bytes, cap: laneCap(lane) }))
+    .filter(({ rows, bytes, cap }) => rows > cap.rows || bytes > cap.bytes)
+    .map(({ nodeId, lane, cap }) => ({ nodeId, lane, cap }));
+  return { agentReports, crashBytes };
+}
+
 export function pruneTables(db: PanelDb, now = Date.now()): void {
   const before = (ms: number) => new Date(now - ms);
   db.delete(agentReports)
@@ -63,36 +99,48 @@ export function pruneTables(db: PanelDb, now = Date.now()): void {
     .where(lt(crashReports.occurredAt, before(retention.crashReportsMs)))
     .run();
   // A crash-looping service writes a report every few seconds: keep its newest ones only.
-  db.run(sql`
-    delete from ${crashReports} where ${crashReports.id} in (
-      select id from (
-        select id, row_number() over (partition by service_id order by occurred_at desc) as n from ${crashReports}
-      ) where n > ${retention.crashReportsPerService}
-    )`);
+  // Counting per service reads only crash_reports_service_idx.
+  const crashLoops = db
+    .select({ serviceId: crashReports.serviceId })
+    .from(crashReports)
+    .groupBy(crashReports.serviceId)
+    .having(sql`count(*) > ${retention.crashReportsPerService}`)
+    .all();
+  for (const { serviceId } of crashLoops) {
+    db.run(sql`
+      delete from ${crashReports} where ${crashReports.id} in (
+        select id from ${crashReports} where service_id = ${serviceId}
+        order by occurred_at desc limit -1 offset ${retention.crashReportsPerService}
+      )`);
+  }
   // Per node and lane: the newest rows up to a count and a size, so one node's reports stay
   // bounded and a flood in one lane (crash loops, alerts) does not push out another's rows.
-  db.run(sql`
-    delete from ${agentReports} where ${agentReports.id} in (
-      select id from (
-        select id, lane,
-          row_number() over newest as n,
-          sum(size) over newest as total
-        from (select id, node_id, created_at, length(event) as size, ${reportLaneSql(agentReports.kind)} as lane from ${agentReports})
-        window newest as (partition by node_id, lane order by created_at desc, id desc rows unbounded preceding)
-      ) where case lane
-        when 'results' then n > ${retention.resultReportsPerNode} or total > ${retention.resultReportBytesPerNode}
-        else n > ${retention.agentReportsPerNode} or total > ${retention.reportBytesPerNode}
-      end
-    )`);
-  db.run(sql`
-    delete from ${crashReports} where ${crashReports.id} in (
-      select id from (
-        select id, sum(length(last_lines) + length(container_id)) over (
-          partition by node_id order by occurred_at desc, id desc rows unbounded preceding
-        ) as total
-        from ${crashReports} where node_id is not null
-      ) where total > ${retention.reportBytesPerNode}
-    )`);
+  // report_totals (kept by triggers) says which node is over a cap; only those are read.
+  const over = overCaps(db);
+  for (const { nodeId, lane, cap } of over.agentReports) {
+    db.run(sql`
+      delete from ${agentReports} where ${agentReports.id} in (
+        select id from (
+          select id, row_number() over newest as n, sum(size) over newest as total
+          from (
+            select id, created_at, length(event) as size from ${agentReports}
+            where node_id = ${nodeId} and ${reportLaneSql(agentReports.kind)} = ${lane}
+          )
+          window newest as (order by created_at desc, id desc rows unbounded preceding)
+        ) where n > ${cap.rows} or total > ${cap.bytes}
+      )`);
+  }
+  for (const nodeId of over.crashBytes) {
+    db.run(sql`
+      delete from ${crashReports} where ${crashReports.id} in (
+        select id from (
+          select id, sum(length(last_lines) + length(container_id)) over (
+            order by occurred_at desc, id desc rows unbounded preceding
+          ) as total
+          from ${crashReports} where node_id = ${nodeId}
+        ) where total > ${retention.reportBytesPerNode}
+      )`);
+  }
   db.delete(webhookDeliveries)
     .where(
       or(

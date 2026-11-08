@@ -235,7 +235,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (newest 200 crashes per service always kept), and per node at most the
   newest agent reports of each report lane up to its budget (75,000 and
   32 MiB; 10,000 and 8 MiB for backup, cleanup and update results) and
-  32 MiB of crash reports, webhook deliveries 30 days
+  32 MiB of crash reports (`report_totals`, rows and bytes per node and
+  kind kept by triggers since migration 0003, says which node is over a
+  cap; only those nodes' rows are read), webhook deliveries 30 days
   (rejected ones 1 day), notification deliveries 30 days, alerts 180 days
   after they were resolved, or after they were raised when nothing resolved
   them (deploy, build, backup, cleanup and update results are events, not

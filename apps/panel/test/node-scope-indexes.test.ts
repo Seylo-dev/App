@@ -4,8 +4,8 @@
 // lookups must read the few rows in flight through their partial indexes,
 // not the whole history.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { registryScope } from "../src/agent-hub/panel-service";
