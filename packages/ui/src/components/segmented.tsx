@@ -12,6 +12,8 @@ export interface SegmentedProps {
   tone?: "muted" | "track";
   className?: string;
   children: React.ReactNode;
+  /** The track element, for example scrollFadeRef on a track that scrolls. */
+  ref?: React.Ref<HTMLDivElement>;
 }
 
 const SegmentedContext = React.createContext<{ value: string; layoutId: string } | null>(null);
@@ -21,12 +23,13 @@ const SegmentedContext = React.createContext<{ value: string; layoutId: string }
  * small white pill that slides to the option you pick. Single choice; use
  * for ranges and view switches.
  */
-export function Segmented({ value, onValueChange, tone = "muted", className, children, ...rest }: SegmentedProps) {
+export function Segmented({ value, onValueChange, tone = "muted", className, children, ref, ...rest }: SegmentedProps) {
   // Each control slides its own pill, never one from another control.
   const layoutId = `segmented-${React.useId()}`;
   return (
     <SegmentedContext.Provider value={{ value, layoutId }}>
       <ToggleGroup.Root
+        ref={ref}
         data-slot="segmented"
         type="single"
         value={value}

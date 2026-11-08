@@ -204,6 +204,46 @@ test.describe("screens", () => {
     }
   });
 
+  test("the service tabs all show on a desktop and fade where they hide on a phone", async ({ page }) => {
+    await installDemo(page);
+    const bar = page.getByRole("navigation", { name: "Service sections" });
+    const measure = () =>
+      bar.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const last = el.lastElementChild?.getBoundingClientRect();
+        return {
+          hidden: el.scrollWidth - el.clientWidth,
+          lastRight: last?.right ?? 0,
+          right: box.right,
+          fadeStart: el.hasAttribute("data-fade-start"),
+          fadeEnd: el.hasAttribute("data-fade-end"),
+        };
+      });
+
+    // 1440 wide: an app's 17 tabs wrap instead of running past the content box with no scrollbar.
+    await page.goto(service(svc.api));
+    await settle(page);
+    await expect(bar.getByRole("link", { name: "Settings" })).toBeInViewport();
+    const desktop = await measure();
+    expect(desktop.hidden, "the tab bar hides tabs").toBeLessThanOrEqual(0);
+    expect(desktop.lastRight).toBeLessThanOrEqual(desktop.right + 0.5);
+    expect(desktop.fadeEnd).toBe(false);
+    mkdirSync(shots, { recursive: true });
+    await page.screenshot({ path: `${shots}/service-tabs-desktop.png` });
+
+    // A phone keeps one swipe row: the end fades while tabs hide past it, the start once scrolled.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(service(svc.api));
+    await settle(page);
+    const phone = await measure();
+    expect(phone.hidden).toBeGreaterThan(0);
+    expect({ start: phone.fadeStart, end: phone.fadeEnd }).toEqual({ start: false, end: true });
+    await page.screenshot({ path: `${shots}/service-tabs-phone.png` });
+    await bar.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+    await expect(bar).toHaveAttribute("data-fade-start", "");
+    await expect(bar).not.toHaveAttribute("data-fade-end", "");
+  });
+
   test("phone width has no sideways scroll", async ({ page }) => {
     test.setTimeout(10 * 60_000);
     await page.setViewportSize({ width: 390, height: 844 });

@@ -8,6 +8,7 @@ import { useOp } from "@seylo/ops/react";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { SkeletonText } from "@seylo/ui/components/skeleton";
 import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
+import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { createFileRoute, Link, Outlet, useChildMatches, useRouterState } from "@tanstack/react-router";
 import { DataCopyNote } from "../../../../../components/service/copy/data-copy-note";
 import { OpErrorNote, retryOp } from "../../../../../components/service/op-state";
@@ -57,7 +58,8 @@ function ServiceLayout() {
       {service.data && <DataCopyNote service={service.data} />}
       {service.isPending && usageStripTabs.has(tabPath) && <UsageStripSkeleton />}
       {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
-      <TabList aria-label={t("service.sections")} className="flex-nowrap overflow-x-auto [scrollbar-width:none]">
+      {/* One swipe row on a phone (the hidden edge fades); from md up the tabs wrap, so every tab shows. */}
+      <TabList ref={scrollFadeRef} aria-label={t("service.sections")} className="scroll-row flex-nowrap md:flex-wrap md:overflow-visible">
         {tabs.map((tab) => (
           <Link
             key={tab.path}
