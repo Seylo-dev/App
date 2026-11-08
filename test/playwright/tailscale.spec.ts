@@ -119,7 +119,7 @@ test.describe("settings > tailscale", () => {
       overrides: { "tailscale.get": () => status({ detected: false, version: null, backendState: null, tailnet: null, dnsName: null, addresses: [] }) },
     });
     await page.goto("/settings/tailscale");
-    await expect(page.getByText("Not installed")).toBeVisible();
+    await expect(page.getByText("Not installed", { exact: true })).toBeVisible();
     const install = page.getByRole("link", { name: "Install on the server" });
     await expect(install).toHaveAttribute("href", new RegExp(`/nodes\\?.*node=${ids.de}`));
     const href = (await install.getAttribute("href")) ?? "";
@@ -210,7 +210,21 @@ test.describe("settings > tailscale", () => {
   });
 
   test("host shells off: the install command is shown to run over SSH instead", async ({ page }) => {
-    await installDemo(page);
+    // The demo allows host shells on de-fsn-1: off here.
+    await installDemo(page, {
+      overrides: {
+        "hostShell.status": () => ({
+          nodeId: ids.de,
+          enabled: false,
+          available: true,
+          canOpen: false,
+          canEnable: true,
+          maxSessions: 2,
+          idleTimeoutSeconds: 900,
+          sessions: [],
+        }),
+      },
+    });
     await page.goto(`/nodes?node=${ids.de}&view=shell&prefill=tailscale-install`);
     const sheet = page.getByRole("dialog");
     await expect(sheet.getByRole("heading", { name: "Host shells are off for this node" })).toBeVisible();
@@ -311,7 +325,8 @@ test.describe("settings > tailscale", () => {
     answer = status({ agentOnline: false });
     await page.reload();
     await expect(page.getByText("The panel server's agent is offline. This is what it reported last.")).toBeVisible();
-    await expect(page.getByText("The panel server's agent is offline.", { exact: true })).toHaveCount(0);
+    // The short text only as the Serve switch's reason, not in the status card.
+    await expect(page.getByText("The panel server's agent is offline.", { exact: true })).toHaveCount(1);
 
     answer = status({ disabledOnServer: true });
     await page.reload();
@@ -331,7 +346,8 @@ test.describe("settings > tailscale", () => {
     await expect.poll(() => sent["tailscale.setServe"]).toEqual([{ serve: true }]);
     await expect(toggle).toBeChecked();
     await expect(page.getByText("Active", { exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open" }).first()).toHaveAttribute("href", tailnetUrl);
+    // Exact: "Open access controls" in the status card comes first (the Lock card has one more Open).
+    await expect(page.getByRole("link", { name: "Open", exact: true }).first()).toHaveAttribute("href", tailnetUrl);
     await expect(page.getByText(`${machine}:443/ -> unix:/var/lib/seylo/panel/tailnet.sock`)).toBeVisible();
     // Not on the tailnet yet: no chip, and Lock says where to go.
     await expect(page.getByText("You are on the tailnet now")).toHaveCount(0);
@@ -361,6 +377,27 @@ test.describe("settings > tailscale", () => {
     // Stopped is signed in: only the command that starts it, no sign-in.
     await expect(page.getByText("Tailscale is signed in but stopped on the server.", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign in to Tailscale" })).toHaveCount(0);
+  });
+
+  test("on another tailnet: both tailnets, and the owner's button turns Serve on there", async ({ page }) => {
+    const errors = pageErrors(page);
+    const moved = status({
+      tailnet: "work.example",
+      dnsName: "de-fsn-1.tail9999.ts.net",
+      serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: true, state: "off", url: null, message: "", panelAnswers: false },
+    });
+    await installDemo(page, { overrides: { "tailscale.get": () => moved } });
+    const sent = recordOps(page);
+    await page.goto("/settings/tailscale");
+    await expect(page.getByText("The server is on another tailnet")).toBeVisible();
+    await expect(
+      page.getByText("Serve was turned on for acme.dev, and the server is now signed in to work.example.", { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByText("Waiting for the server:", { exact: false })).toHaveCount(0);
+    await page.getByRole("button", { name: "Serve on work.example" }).click();
+    await expect.poll(() => sent["tailscale.setServe"]).toEqual([{ serve: true }]);
+    await page.screenshot({ path: `${shots}/other-tailnet.png` });
+    expect(errors).toEqual([]);
   });
 
   test("Serve off in keep-closed mode while it is the only way in asks to reopen IP access too", async ({ page }) => {
