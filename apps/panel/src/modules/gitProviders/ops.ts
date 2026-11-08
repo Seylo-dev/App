@@ -54,13 +54,13 @@ async function verifyToken(ctx: OpContext, row: ProviderRow): Promise<string> {
 }
 
 // People who may set a source somewhere pick connections by name and host;
-// an account with no such grant gets an empty list.
+// an account with no such grant gets an empty list marked hidden.
 const list = implement(contracts.list, (_input, ctx) => {
   const full = canManage(ctx);
-  if (!full && !ctx.access.canSomewhere(sourcePickerActions)) return { items: [] };
+  if (!full && !ctx.access.canSomewhere(sourcePickerActions)) return { items: [], hidden: true };
   const usage = providerUsage(ctx.db);
   const rows = ctx.db.select().from(gitProviders).orderBy(gitProviders.name).all();
-  return { items: rows.map((r) => toProvider(r, usage.get(r.id) ?? 0, full)) };
+  return { items: rows.map((r) => toProvider(r, usage.get(r.id) ?? 0, full)), hidden: false };
 });
 
 const create = implement(contracts.create, async (input, ctx) => {

@@ -90,9 +90,15 @@ export const list = defineOp({
   kind: "query",
   summary: "List git provider connections",
   description:
-    "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only. Empty for callers who may create or edit services nowhere.",
+    "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only. Empty, with hidden true, for callers who may create or edit services nowhere.",
   input: Type.Object({}),
-  output: Type.Object({ items: Type.Array(Provider) }),
+  output: Type.Object({
+    items: Type.Array(Provider),
+    hidden: Type.Boolean({
+      description:
+        "True when the caller may not see the connections: the list is then empty whatever is connected, and a provider source shows its repository and branch read-only.",
+    }),
+  }),
   // Names and hosts only, for people who may set a source somewhere (services.create or services.update).
   permission: permission.signedIn(),
   mcp: true,

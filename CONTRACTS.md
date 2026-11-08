@@ -1410,7 +1410,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   list, no install link and `hidden: true`, so the Source tab shows a
   GitHub-connected service's repository and branch read-only instead of
   "Connect GitHub first"; `github.manage` sees them too) need
-  `services.create` or `services.update` on some project or service,
+  `services.create` or `services.update` on some project or service
+  (`gitProviders.list` answers `hidden: true` then, and the Source tab shows
+  a provider source's repository, branch and webhook state read-only,
+  without "Create webhook again"),
   notification channels and
   backup destination choices `services.view` (or the edit action) somewhere;
   a key counts only its own actions and projects. The node field of every
