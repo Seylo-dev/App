@@ -1,10 +1,11 @@
 // The "Nodes" card on the dashboard (Main.dc.html): CPU, memory and
 // network per node as smooth graphs, one line per node. The node chips in
-// the header show or hide a node's line in all three graphs at once. The
-// live topic "panel" invalidates metrics.nodes on every sample, so the
-// graphs move by themselves.
+// the header show or hide a node's line in all three graphs at once. Each
+// node's "node:<id>" topic brings its newest values every sample (applied
+// to the cache in lib/live-metrics.ts), and "panel" refetches the graphs
+// when a minute was written, so they move by themselves.
 
-import { metrics, system } from "@seylo/ops";
+import { type LiveTopic, metrics, system } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card, CardHeader, CardTitle } from "@seylo/ui/components/card";
@@ -19,6 +20,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { formatPercent, formatPointTime, formatRate, formatUsedOfTotal } from "../../lib/format";
+import { useLiveTopics } from "../../lib/live";
 import type { MetricsRange, NodeSeries } from "../../lib/types";
 import { QueryError } from "../query-error";
 
@@ -30,6 +32,7 @@ export function NodeUsage() {
   const [range, setRange] = useState<MetricsRange>("1h");
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const usage = useOp(metrics.nodes, { range }, { placeholderData: (previous) => previous });
+  useLiveTopics((usage.data?.nodes ?? []).map((node): LiveTopic => `node:${node.nodeId}`));
   // The sidebar already has the node count: placeholders show as many node chips and values as will arrive.
   const nodeCount = useOp(system.info, {}).data?.nodes.total ?? 3;
   const series = usage.data?.nodes ?? [];

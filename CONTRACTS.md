@@ -824,8 +824,13 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
 - Outputs are cleaned against the output schema (undeclared fields are
   dropped), so returning a database row never leaks a column.
 - After a change, a handler publishes `ctx.live.publish(topic, { type:
-  "invalidate", ops: [...] })` for the queries it affected. Topics: `panel`,
-  `project:<id>`, `service:<id>`, `node:<id>`.
+  "invalidate", ops: [...], match? })` for the queries it affected
+  (`match`, for example `{ range: ["1h"] }`, limits it to cached queries
+  whose input holds one of those values). Topics: `panel`,
+  `project:<id>`, `service:<id>`, `node:<id>`. The web app
+  (`lib/live-invalidate.ts`) refetches an op at most once a second however
+  many events name it, and nothing while its tab is hidden: what waited
+  runs once when the tab is shown.
 - Permissions: see "Permission model" below.
 
 #### Permission model
@@ -868,7 +873,11 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   only the `__Host-` cookie is read, so a cookie a sibling subdomain sets for
   the parent domain is ignored, and a request carrying the read cookie name
   twice is refused (UNAUTHENTICATED `reason: duplicateSession`; the sign-in
-  page says to clear the site's cookies). 30-day sliding. Sessions without
+  page says to clear the site's cookies). 30-day sliding on use: requests
+  through the op pipeline slide it (at most once a minute), the live
+  socket's own checks do not (`authenticate(..., { touch: false })`), and
+  the web app holds live invalidations while its tab is hidden, so an open
+  but unused tab lets the session expire. Sessions without
   a key (made before keys existed) sign nobody in. Sign-out answers an
   empty key header (the web app forgets its key). A
   bearer token is an `api_keys` row: kind `api` (`<slug>_key_...`) or
@@ -1136,7 +1145,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `runOpAs(deps, { op, input, userId, transport, approvalId? })`
   (`modules/approvals/run-as.ts`) runs one as a person. Models (MCP, AI)
   never set `approvalId`; only `approvals.approve` does.
-- Live sockets are re-checked every 15 s and on each subscribe and closed
+- Live sockets are re-checked every 15 s, on open and on each subscribe
+  (without sliding the session) and closed
   (code 4401) when their session ended (a socket needs the session key in
   its `key` query parameter); `deps.live.disconnect({ sessionId }
   | { userId })` closes them at once. The re-check also drops topics the
@@ -2075,12 +2085,22 @@ place, in registration order. The networking contributor
 ports, database/Box specs and the global maintenance page.
 
 Live topics the nodes module publishes (`modules/nodes/live.ts`): `panel` invalidates
-`nodes.list`, `system.info`, `updates.status` on node changes and
-`metrics.nodes`, `metrics.summary` on each metrics sample (about every
-10 s); `node:<id>` invalidates `nodes.get`, `nodes.healthReport`,
-`metrics.node`; `service:<id>` invalidates `metrics.service`, and
+`nodes.list`, `system.info`, `updates.status` on node changes; `node:<id>`
+invalidates `nodes.get`, `nodes.healthReport`; `service:<id>` invalidates
 `services.get` (with `project:<id>` -> `services.list`) whenever a node
-reports a change in the service's status.
+reports a change in the service's status. Metrics samples (about every 10 s
+per node) follow `modules/metrics/live.ts`, since the stored series change
+only when a minute is written: every sample sends `nodeUsage { nodeId,
+usage }` on `node:<id>` (the `latest` of metrics.nodes and metrics.node,
+which the web app writes into its cache, `lib/live-metrics.ts`; the
+dashboard follows every node's topic for it) and invalidates
+`metrics.node` `range: live` there, and `metrics.service` `live`/`1h` on
+`service:<id>` at most once per 9 s per service. When a minute is written,
+`panel` invalidates `metrics.nodes` and `metrics.summary` once for the
+whole fleet (12 s after the first node's minute), and `node:<id>` /
+`service:<id>` their own series, by range: `1h` every minute, `24h` every
+5 minutes, `7d` and `30d` every hour. Screens that follow those topics poll
+only while the socket is down.
 
 Socket and ticket shapes for the web app live in the op contracts:
 `StreamTicket` and `LogsSocketMessage` (`ops/logs.ts`), `TerminalTicket`,

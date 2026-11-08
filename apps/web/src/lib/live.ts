@@ -1,6 +1,9 @@
 // The live socket (/api/live): one per tab. Screens follow topics with
 // useLiveTopic(); when the panel says an op's results changed, every cached
-// query of that op is refetched. The signed-in layout connects and
+// query of that op (or the inputs the event names) is refetched, at most
+// once a second per op and not while the tab is hidden (live-invalidate.ts);
+// node usage samples update the cached graphs in place (live-metrics.ts).
+// The signed-in layout connects and
 // disconnects it; subscriptions made while it is down are sent on
 // (re)connect. Topics that carry more than invalidations (deployment logs,
 // AI replies) are read with listen(), which also says whether the panel
@@ -14,10 +17,11 @@ import {
   liveSessionKeyParam,
   liveUnauthorizedCloseCode,
 } from "@seylo/ops";
-import { opQueryKey } from "@seylo/ops/react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
 import { queryClient } from "./api";
+import { createInvalidator } from "./live-invalidate";
+import { applyNodeUsage } from "./live-metrics";
 import { readSessionKey } from "./session-key";
 
 /** What a listener hears on its topic. */
@@ -43,6 +47,12 @@ export interface LiveClient {
 const maxBackoffMs = 15_000;
 
 export function createLiveClient(cache: QueryClient): LiveClient {
+  const invalidator = createInvalidator(cache);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") invalidator.visible();
+    });
+  }
   const counts = new Map<LiveTopic, number>();
   const listeners = new Map<LiveTopic, Set<(signal: LiveSignal) => void>>();
   // Topics the panel has acknowledged on the current socket.
@@ -84,9 +94,8 @@ export function createLiveClient(cache: QueryClient): LiveClient {
     ws.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as LiveServerMessage;
       if (message.type === "event") {
-        if (message.event.type === "invalidate") {
-          for (const opId of message.event.ops) void cache.invalidateQueries({ queryKey: opQueryKey({ id: opId }) });
-        }
+        if (message.event.type === "invalidate") invalidator.invalidate(message.event.ops, message.event.match);
+        else if (message.event.type === "nodeUsage") applyNodeUsage(cache, message.event);
         tell(message.topic, { type: "event", event: message.event });
       } else if (message.type === "subscribed") tell(message.topic, { type: "subscribed" });
       else if (message.type === "error" && message.topic) tell(message.topic as LiveTopic, { type: "down" });
@@ -103,7 +112,7 @@ export function createLiveClient(cache: QueryClient): LiveClient {
       // missed while down is refetched on reconnect.
       const delay = Math.min(maxBackoffMs, 500 * 2 ** attempt++) * (0.75 + Math.random() / 2);
       retryTimer = setTimeout(() => {
-        void cache.invalidateQueries();
+        invalidator.invalidateAll();
         open(onUnauthorized);
       }, delay);
     };
@@ -163,6 +172,18 @@ export const live = createLiveClient(queryClient);
 /** Follows a topic while the calling component is mounted. */
 export function useLiveTopic(topic: LiveTopic | undefined): void {
   useEffect(() => (topic ? live.subscribe(topic) : undefined), [topic]);
+}
+
+/** Follows several topics (for example one per node) while the calling component is mounted. */
+export function useLiveTopics(topics: readonly LiveTopic[]): void {
+  const key = topics.join(" ");
+  useEffect(() => {
+    if (!key) return undefined;
+    const stops = (key.split(" ") as LiveTopic[]).map((topic) => live.subscribe(topic));
+    return () => {
+      for (const stop of stops) stop();
+    };
+  }, [key]);
 }
 
 /** Whether the live socket is open; screens poll faster while it is not. */
