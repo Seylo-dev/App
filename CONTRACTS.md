@@ -1851,11 +1851,23 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   node balancing its own domains' traffic. A copy on another node is reached at
   `https://<node address>:5757`, where the address is its public IPv4, else
   public IPv6, else `facts.privateIpv4` (nodes on one private network). The
-  balancing node sends GET/HEAD/OPTIONS through a Traefik `failover` service
-  (`seylo-<id>[-pNNN]-retry`): a 502-504 from the pool is resent once to its
-  own copies (up to 1 MiB of body is buffered); other methods are never
-  replayed. A node with no copy of the service right now answers 503 on its
-  LB entry point (a service with no servers), not 404.
+  balancing node (and a node with two or more replicas of its own) splits
+  each route into GET/HEAD/OPTIONS (router `...-retry`) and the other methods,
+  each with a Traefik `retry` middleware last in the chain
+  (`seylo-<id>-resend-idem` / `seylo-<id>-resend`, up to 4 tries, the first
+  included). Every try goes through the balancer again, so it lands on the
+  next copy: a copy that could not be reached (nothing was sent) is retried
+  for every method, a 502-504 only for GET/HEAD/OPTIONS (up to 1 MiB of body
+  is buffered). A POST that reached a copy on another node is never replayed,
+  so one sent to a copy that just died there fails. With sticky sessions the
+  cookie would pick the same copy on every try, so GET/HEAD/OPTIONS go
+  through a Traefik `failover` service (`seylo-<id>[-pNNN]-retry`) instead
+  that resends a 502-504 once to the balancing node's own copies, and the
+  other methods keep the connection-error retry. Upstream transports bound
+  the connect time: 2s to a container on the node, 3s to another node
+  (Traefik's default is 30s, which held requests to a copy that just died
+  until its crash restart). A node with no copy of the service right now
+  answers 503 on its LB entry point (a service with no servers), not 404.
 - Node addresses: agents report `NodeFacts.private_ipv4` (the local address
   they dial the panel from, or the default-route address when the panel is on
   the same host; empty when that address is public). `nodes.publicAddress`
@@ -1929,7 +1941,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`) | Works as tested |
-| Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of other nodes: a dead node's share is retried on the balancing node's own copies per request (GET/HEAD/OPTIONS only; a POST to a copy that just died fails once) | Covered by unit, fake-agent and VM package tests |
+| Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of copies: a failed request is sent to the next copy per request (a copy that cannot be reached: every method; a 502-504: GET/HEAD/OPTIONS only, so a POST to a copy on another node that just died fails). With sticky sessions a client pinned to a copy on the balancing node that died gets errors until that copy is back (about 5s with the crash policy) | Covered by unit, fake-agent and VM package tests |
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
 | Removing or changing the panel domain after nodes moved to it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node whose address before the move was an unpinned https:// address (another domain) has no fallback after the first cycle and cannot reach the panel until it rejoins (`seylo join --force`). Plain-HTTP nodes never move, so this does not reach them | Those nodes go offline after a domain removal or change; the node offline alert fires |
 | Re-auth scope: demotions and grants that only take actions away are not gated, and API keys never are (admin keys may invite, widen grants, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |

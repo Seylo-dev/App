@@ -4,7 +4,7 @@ http:
     seylo-svc1-probe:
       entryPoints:
         - web
-      rule: PathPrefix(`/_seylo/probe/svc1/00f2f2730a40e048`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
+      rule: PathPrefix(`/_seylo/probe/svc1/e2e69b81a232ce9f`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
       priority: 2000000000
       middlewares:
         - seylo-svc1-probe-mark
@@ -13,9 +13,11 @@ http:
     seylo-svc1-r-r1:
       entryPoints:
         - websecure
-      rule: (Host(`app.example.com`) || Host(`www.example.com`))
+      rule: ((Host(`app.example.com`) || Host(`www.example.com`))) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 52
       middlewares:
         - seylo-svc1-unreachable
+        - seylo-svc1-resend
       service: seylo-svc1
       tls:
         certResolver: le
@@ -26,6 +28,17 @@ http:
       middlewares:
         - seylo-svc1-https
       service: seylo-svc1
+    seylo-svc1-r-r1-retry:
+      entryPoints:
+        - websecure
+      rule: ((Host(`app.example.com`) || Host(`www.example.com`))) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 52
+      middlewares:
+        - seylo-svc1-unreachable
+        - seylo-svc1-resend-idem
+      service: seylo-svc1
+      tls:
+        certResolver: le
   middlewares:
     seylo-svc1-https:
       redirectScheme:
@@ -34,10 +47,19 @@ http:
     seylo-svc1-probe-mark:
       headers:
         customResponseHeaders:
-          X-Seylo-Route: 00f2f2730a40e048
+          X-Seylo-Route: e2e69b81a232ce9f
     seylo-svc1-probe-path:
       replacePath:
         path: /
+    seylo-svc1-resend:
+      retry:
+        attempts: 3
+    seylo-svc1-resend-idem:
+      retry:
+        attempts: 3
+        status:
+          - 502-504
+        maxRequestBodyBytes: 1048576
     seylo-svc1-unreachable:
       errors:
         status:
@@ -51,6 +73,7 @@ http:
         servers:
           - url: http://seylo-svc1-7:3000
           - url: http://seylo-svc1-7-1:3000
+        serversTransport: seylo-svc1-local
     seylo-svc1-edge:
       loadBalancer:
         servers:
@@ -60,3 +83,8 @@ http:
         servers:
           - url: http://seylo-svc1-7:3000
           - url: http://seylo-svc1-7-1:3000
+        serversTransport: seylo-svc1-local
+  serversTransports:
+    seylo-svc1-local:
+      forwardingTimeouts:
+        dialTimeout: 2s

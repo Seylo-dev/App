@@ -59,6 +59,7 @@ http:
       loadBalancer:
         servers:
           - url: http://seylo-svc3-1:3000
+        serversTransport: seylo-svc3-local
     seylo-svc3-edge:
       loadBalancer:
         servers:
@@ -67,3 +68,8 @@ http:
       loadBalancer:
         servers:
           - url: http://seylo-svc3-1:3000
+        serversTransport: seylo-svc3-local
+  serversTransports:
+    seylo-svc3-local:
+      forwardingTimeouts:
+        dialTimeout: 2s

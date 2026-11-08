@@ -41,7 +41,7 @@ TITLES=(
   "Logs search/follow across deploys; console stdin; shell PTY; files"
   "Metrics: node and service series have samples"
   "Move a service with a volume B -> C; data intact; domain follows"
-  "Replicas on B and C, entry on B; failover when one container dies"
+  "Replicas on B and C, entry on B; failover when either container dies (round robin and sticky)"
   "Compose stack from pasted YAML (two services, shared volume)"
   "A template from the catalog creates and runs"
   "Global and per-service maintenance pages; timed expose locked to an IP"
@@ -1338,6 +1338,67 @@ check_16() {
   failed=$(grep -cv '^200$' "$codes" || true)
   ev "$total requests during the failover, $failed not 200 ($(sort "$codes" | uniq -c | tr -s ' \n' ' '))"
   expect "requests keep succeeding when one replica dies" test "$failed" = 0
+
+  # The copy on the entry node itself dies: its share goes to C.
+  lb_failover b "$svc" "$host" "" "requests keep succeeding when the entry node's own replica dies"
+
+  # Sticky sessions: a client pinned to either copy keeps being answered
+  # when that copy dies (the cookie works on this plain-HTTP domain).
+  api services.setPlacements "{\"serviceId\":\"$svc\",\"placements\":[{\"nodeId\":\"$nb\",\"replicas\":1},{\"nodeId\":\"$nc\",\"replicas\":1}],\"stickySessions\":true,\"entryNodeId\":\"$nb\"}" >/dev/null ||
+    { bad "services.setPlacements (sticky) failed"; return 1; }
+  api deployments.deploy "{\"serviceId\":\"$svc\"}" >/dev/null || true
+  [ "$(wait_deploy "$svc" 600)" = live ] || bad "sticky deploy failed"
+  local jar n
+  for n in b c; do
+    jar=$RES/$CUR.jar-$n
+    lb_failover "$n" "$svc" "$host" "$jar" "a client pinned to the copy on $(printf '%s' "$n" | tr a-z A-Z) keeps being answered when it dies"
+  done
+  api services.setPlacements "{\"serviceId\":\"$svc\",\"placements\":[{\"nodeId\":\"$nb\",\"replicas\":1},{\"nodeId\":\"$nc\",\"replicas\":1}],\"stickySessions\":false,\"entryNodeId\":\"$nb\"}" >/dev/null || true
+  api deployments.deploy "{\"serviceId\":\"$svc\"}" >/dev/null || true
+  wait_deploy "$svc" 600 >/dev/null
+}
+
+# lb_failover <node> <svc> <host> <jar> <claim>: load through the entry
+# node B (with the cookie jar, pinned to the copy on <node>, when <jar> is
+# set), kill that node's copy and expect every request to be answered.
+lb_failover() {
+  local node=$1 svc=$2 host=$3 jar=$4 claim=$5 cid ip i got codes failed total
+  for i in $(seq 1 60); do
+    cid=$(container_on "$node" "$svc")
+    [ -n "$cid" ] && break
+    sleep 1
+  done
+  [ -n "$cid" ] || { bad "no replica container on $node"; return 1; }
+  sleep 3
+  if [ -n "$jar" ]; then
+    ip=$(on_node "$node" "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' $cid" | awk '{print $1}')
+    for i in $(seq 1 20); do
+      rm -f "$jar"
+      got=$(curl -s -m 3 -c "$jar" -H "Host: $host" "http://$(node_ip b)/" | awk '/^IP: /{print $2}' | tr '\n' ' ')
+      case " $got " in *" $ip "*) break ;; esac
+    done
+    got=$(for i in $(seq 1 6); do printf ' %s\n' "$(curl -s -m 3 -b "$jar" -c "$jar" -H "Host: $host" "http://$(node_ip b)/" | awk '/^IP: /{print $2}' | tr '\n' ' ')"; done | grep -cF " $ip " || true)
+    ev "cookie jar pinned to $node's copy ($ip): $got of 6 requests answered by it"
+    expect "the sticky cookie pins a client to one copy" test "$got" = 6
+  fi
+  codes=$RES/$CUR.codes-$node${jar:+-sticky}
+  : >"$codes"
+  (
+    end=$((SECONDS + 22))
+    while [ $SECONDS -lt $end ]; do
+      curl -s -o /dev/null -m 3 -w '%{http_code}\n' ${jar:+-b "$jar" -c "$jar"} -H "Host: $host" "http://$(node_ip b)/" >>"$codes" 2>/dev/null || echo 000 >>"$codes"
+      sleep 0.1
+    done
+  ) &
+  local loop=$!
+  sleep 3
+  on_node "$node" "docker kill $cid >/dev/null"
+  ev "killed the replica on $node ($cid) during the load${jar:+ (sticky)}"
+  wait $loop || true
+  total=$(wc -l <"$codes" | tr -d ' ')
+  failed=$(grep -cv '^200$' "$codes" || true)
+  ev "$total requests during the failover, $failed not 200 ($(sort "$codes" | uniq -c | tr -s ' \n' ' '))"
+  expect "$claim" test "$failed" = 0
 }
 
 # ---------------------------------------------------------------- 17-21 stacks, pages, resilience

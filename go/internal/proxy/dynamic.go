@@ -73,6 +73,18 @@ type middleware struct {
 	IPAllowList    *ipAllowList    `yaml:"ipAllowList,omitempty"`
 	RateLimit      *rateLimit      `yaml:"rateLimit,omitempty"`
 	Headers        *headers        `yaml:"headers,omitempty"`
+	Retry          *retryMW        `yaml:"retry,omitempty"`
+}
+
+// retryMW sends a request again through the router's service, so the
+// balancer picks the next copy: when the copy could not be reached before
+// the request went out (any method), and with Status when it answered one
+// of those codes (Traefik replays those only for idempotent methods, after
+// buffering up to MaxRequestBodyBytes).
+type retryMW struct {
+	Attempts            int      `yaml:"attempts"`
+	Status              []string `yaml:"status,omitempty"`
+	MaxRequestBodyBytes *int64   `yaml:"maxRequestBodyBytes,omitempty"`
 }
 
 type stripPrefix struct {
@@ -182,8 +194,16 @@ type serversTransport struct {
 	// ServerName is sent as SNI and checked in the peer's certificate.
 	ServerName string `yaml:"serverName,omitempty"`
 	// RootCAs and Certificates take PEM content, like tlsCertificate.
-	RootCAs      []string         `yaml:"rootCAs,omitempty"`
-	Certificates []tlsCertificate `yaml:"certificates,omitempty"`
+	RootCAs            []string            `yaml:"rootCAs,omitempty"`
+	Certificates       []tlsCertificate    `yaml:"certificates,omitempty"`
+	ForwardingTimeouts *forwardingTimeouts `yaml:"forwardingTimeouts,omitempty"`
+}
+
+// forwardingTimeouts bounds how long Traefik waits on an upstream. Its own
+// default dial timeout is 30s: a request to a container that just died
+// waits on SYN retries until the crash restart instead of failing over.
+type forwardingTimeouts struct {
+	DialTimeout string `yaml:"dialTimeout,omitempty"`
 }
 
 type tlsConfig struct {

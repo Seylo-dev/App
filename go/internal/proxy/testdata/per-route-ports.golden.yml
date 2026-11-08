@@ -4,9 +4,11 @@ http:
     seylo-svc9-r-admin:
       entryPoints:
         - web
-      rule: Host(`admin.x.example.com`)
+      rule: (Host(`admin.x.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 27
       middlewares:
         - seylo-svc9-unreachable
+        - seylo-svc9-resend
       service: seylo-svc9-p9000
     seylo-svc9-r-admin-lb:
       entryPoints:
@@ -17,12 +19,23 @@ http:
       service: seylo-svc9-local-p9000
       tls:
         options: seylo-lb
+    seylo-svc9-r-admin-retry:
+      entryPoints:
+        - web
+      rule: (Host(`admin.x.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 27
+      middlewares:
+        - seylo-svc9-unreachable
+        - seylo-svc9-resend-idem
+      service: seylo-svc9-p9000
     seylo-svc9-r-web:
       entryPoints:
         - web
-      rule: Host(`x.example.com`)
+      rule: (Host(`x.example.com`)) && !(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 21
       middlewares:
         - seylo-svc9-unreachable
+        - seylo-svc9-resend
       service: seylo-svc9
     seylo-svc9-r-web-lb:
       entryPoints:
@@ -33,7 +46,25 @@ http:
       service: seylo-svc9-local
       tls:
         options: seylo-lb
+    seylo-svc9-r-web-retry:
+      entryPoints:
+        - web
+      rule: (Host(`x.example.com`)) && (Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))
+      priority: 21
+      middlewares:
+        - seylo-svc9-unreachable
+        - seylo-svc9-resend-idem
+      service: seylo-svc9
   middlewares:
+    seylo-svc9-resend:
+      retry:
+        attempts: 3
+    seylo-svc9-resend-idem:
+      retry:
+        attempts: 3
+        status:
+          - 502-504
+        maxRequestBodyBytes: 1048576
     seylo-svc9-unreachable:
       errors:
         status:
@@ -47,6 +78,7 @@ http:
         servers:
           - url: http://seylo-svc9-1:3000
           - url: http://seylo-svc9-1-1:3000
+        serversTransport: seylo-svc9-local
     seylo-svc9-edge:
       loadBalancer:
         servers:
@@ -56,13 +88,20 @@ http:
         servers:
           - url: http://seylo-svc9-1:3000
           - url: http://seylo-svc9-1-1:3000
+        serversTransport: seylo-svc9-local
     seylo-svc9-local-p9000:
       loadBalancer:
         servers:
           - url: http://seylo-svc9-1:9000
           - url: http://seylo-svc9-1-1:9000
+        serversTransport: seylo-svc9-local
     seylo-svc9-p9000:
       loadBalancer:
         servers:
           - url: http://seylo-svc9-1:9000
           - url: http://seylo-svc9-1-1:9000
+        serversTransport: seylo-svc9-local
+  serversTransports:
+    seylo-svc9-local:
+      forwardingTimeouts:
+        dialTimeout: 2s

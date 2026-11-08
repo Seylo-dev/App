@@ -15,6 +15,7 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/docker/dockertest"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestSpecHash(t *testing.T) {
@@ -293,6 +294,34 @@ func TestCrashPolicyRestartsThenGivesUp(t *testing.T) {
 	if st := h.state.get("svc"); st.GetPhase() != agentv1.ServicePhase_SERVICE_PHASE_RUNNING || st.GetCrashStreak() != 0 {
 		t.Fatalf("status = %v", st)
 	}
+}
+
+// A crashed replica leaves the route at once (the other one serves) and
+// comes back with its restart, rather than Traefik connecting to a dead
+// container during the restart delay.
+func TestCrashedReplicaLeavesTheRouteUntilItsRestart(t *testing.T) {
+	h := newHarness(t)
+	s1 := appSpec("svc", 1, "app:v1")
+	s1.Replicas = 2
+	s1.CrashPolicy.RestartDelay = durationpb.New(2 * time.Second)
+	h.apply(1, s1)
+	h.deployResult("svc", 1)
+	if ups := h.router.get("svc"); len(ups) != 2 {
+		t.Fatalf("upstreams before the crash = %v", ups)
+	}
+	h.eng.Crash("seylo-svc-1", 1, false)
+	h.rec.WaitCrash(t, func(c *agentv1.CrashReport) bool { return c.GetStreak() == 1 })
+	h.waitFor("the crashed replica leaves the route", func() bool {
+		ups := h.router.get("svc")
+		return len(ups) == 1 && ups[0].URL == "http://seylo-svc-1-1:80"
+	})
+	if n := len(h.running("svc")); n != 1 {
+		t.Fatalf("%d replicas run during the restart delay, want 1", n)
+	}
+	if st := h.state.get("svc"); !strings.Contains(st.GetMessage(), "restarting in") {
+		t.Fatalf("status message during the delay = %q", st.GetMessage())
+	}
+	h.waitFor("the restarted replica is back in the route", func() bool { return len(h.router.get("svc")) == 2 })
 }
 
 // A pass that runs between a crash and its die event (a resync, another

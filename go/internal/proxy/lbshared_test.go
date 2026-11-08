@@ -33,6 +33,13 @@ func TestBuildLBOnly(t *testing.T) {
 	if strings.Contains(text, "203.0.113.20") || strings.Contains(text, ProbePath) {
 		t.Fatalf("LB file sends to other nodes or has the probe router:\n%s", text)
 	}
+	// The local copies keep their short dial timeout (a copy that died
+	// answers 502 fast, so the forwarding node retries elsewhere); the
+	// transports to other nodes are gone with their services.
+	if !strings.Contains(text, "serversTransport: seylo-svc1-local") || !strings.Contains(text, "dialTimeout: "+localDialTimeout) ||
+		strings.Contains(text, "serverName:") || strings.Contains(text, "seylo-svc1-node-") {
+		t.Fatalf("LB file transports:\n%s", text)
+	}
 	for _, want := range []string{"basicAuth", "stripPrefix", "seylo-svc1-7:3000"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("LB file misses %s:\n%s", want, text)
@@ -110,5 +117,31 @@ func TestTraefikTrustsTestCA(t *testing.T) {
 	}
 	if len(plain.Env) != 0 || len(plain.Mounts) != 2 {
 		t.Fatalf("a node without the setting changed: %v %v", plain.Env, plain.Mounts)
+	}
+}
+
+// A sticky cookie is Secure only when every route is HTTPS: browsers drop a
+// Secure cookie on plain HTTP, so it would never pin anything there.
+func TestStickyCookieSecureOnlyWithHTTPS(t *testing.T) {
+	for _, tc := range []struct {
+		https  agentv1.HttpsMode
+		secure bool
+	}{
+		{agentv1.HttpsMode_HTTPS_MODE_ACME, true},
+		{agentv1.HttpsMode_HTTPS_MODE_OFF, false},
+	} {
+		r := route("r1", "app.example.com")
+		r.Https = tc.https
+		spec := app("svc1", r)
+		spec.LoadBalancer = &agentv1.LoadBalancer{StickySessions: true, RemoteUpstreams: []*agentv1.RemoteUpstream{{NodeId: "n2", Url: "https://203.0.113.20:5757"}}}
+		built, err := Build(BuildInput{Service: spec, Upstreams: ups("http://seylo-svc1-7:3000"), Edge: "http://172.30.0.1:5756",
+			Settings: &agentv1.NodeSettings{LbTls: fakeLBTLS}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(built.Data)
+		if got := strings.Count(text, "secure: true"); (got == 2) != tc.secure || (!tc.secure && got != 0) {
+			t.Fatalf("https %v: %d Secure cookies, want secure=%v:\n%s", tc.https, got, tc.secure, text)
+		}
 	}
 }

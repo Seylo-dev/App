@@ -8,6 +8,7 @@ http:
       priority: 25
       middlewares:
         - seylo-svc10-unreachable
+        - seylo-svc10-resend
       service: seylo-svc10
       tls:
         certResolver: le
@@ -34,6 +35,7 @@ http:
       priority: 25
       middlewares:
         - seylo-svc10-unreachable
+        - seylo-svc10-resend
       service: seylo-svc10-retry
       tls:
         certResolver: le
@@ -44,6 +46,7 @@ http:
       priority: 31
       middlewares:
         - seylo-svc10-unreachable
+        - seylo-svc10-resend
       service: seylo-svc10-p9000
     seylo-svc10-r-r2-lb:
       entryPoints:
@@ -61,12 +64,16 @@ http:
       priority: 31
       middlewares:
         - seylo-svc10-unreachable
+        - seylo-svc10-resend
       service: seylo-svc10-p9000-retry
   middlewares:
     seylo-svc10-https:
       redirectScheme:
         scheme: https
         permanent: true
+    seylo-svc10-resend:
+      retry:
+        attempts: 4
     seylo-svc10-unreachable:
       errors:
         status:
@@ -87,13 +94,21 @@ http:
         sticky:
           cookie:
             name: seylo_svc10
-            secure: true
+            secure: false
             httpOnly: true
             sameSite: lax
     seylo-svc10-edge:
       loadBalancer:
         servers:
           - url: http://172.30.0.1:5756
+    seylo-svc10-fallback:
+      failover:
+        service: seylo-svc10-local
+        fallback: seylo-svc10-others
+        errors:
+          status:
+            - 502-504
+          maxRequestBodyBytes: 1048576
     seylo-svc10-local:
       loadBalancer:
         servers:
@@ -102,9 +117,10 @@ http:
         sticky:
           cookie:
             name: seylo_svc10_r
-            secure: true
+            secure: false
             httpOnly: true
             sameSite: lax
+        serversTransport: seylo-svc10-local
     seylo-svc10-local-p9000:
       loadBalancer:
         servers:
@@ -113,9 +129,10 @@ http:
         sticky:
           cookie:
             name: seylo_svc10_r
-            secure: true
+            secure: false
             httpOnly: true
             sameSite: lax
+        serversTransport: seylo-svc10-local
     seylo-svc10-node-n2:
       loadBalancer:
         servers:
@@ -126,6 +143,13 @@ http:
         servers:
           - url: https://198.51.100.3:5757
         serversTransport: seylo-svc10-node-n3
+    seylo-svc10-others:
+      weighted:
+        services:
+          - name: seylo-svc10-node-n2
+            weight: 1
+          - name: seylo-svc10-node-n3
+            weight: 1
     seylo-svc10-p9000:
       weighted:
         services:
@@ -138,13 +162,28 @@ http:
         sticky:
           cookie:
             name: seylo_svc10
-            secure: true
+            secure: false
             httpOnly: true
             sameSite: lax
+    seylo-svc10-p9000-fallback:
+      failover:
+        service: seylo-svc10-local-p9000
+        fallback: seylo-svc10-p9000-others
+        errors:
+          status:
+            - 502-504
+          maxRequestBodyBytes: 1048576
+    seylo-svc10-p9000-others:
+      weighted:
+        services:
+          - name: seylo-svc10-node-n2
+            weight: 1
+          - name: seylo-svc10-node-n3
+            weight: 1
     seylo-svc10-p9000-retry:
       failover:
         service: seylo-svc10-p9000
-        fallback: seylo-svc10-local-p9000
+        fallback: seylo-svc10-p9000-fallback
         errors:
           status:
             - 502-504
@@ -152,12 +191,15 @@ http:
     seylo-svc10-retry:
       failover:
         service: seylo-svc10
-        fallback: seylo-svc10-local
+        fallback: seylo-svc10-fallback
         errors:
           status:
             - 502-504
           maxRequestBodyBytes: 1048576
   serversTransports:
+    seylo-svc10-local:
+      forwardingTimeouts:
+        dialTimeout: 2s
     seylo-svc10-node-n2:
       serverName: n2.lb.seylo.internal
       rootCAs:
@@ -174,6 +216,8 @@ http:
             -----BEGIN PRIVATE KEY-----
             KEY
             -----END PRIVATE KEY-----
+      forwardingTimeouts:
+        dialTimeout: 3s
     seylo-svc10-node-n3:
       serverName: lb.seylo.internal
       rootCAs:
@@ -190,3 +234,5 @@ http:
             -----BEGIN PRIVATE KEY-----
             KEY
             -----END PRIVATE KEY-----
+      forwardingTimeouts:
+        dialTimeout: 3s

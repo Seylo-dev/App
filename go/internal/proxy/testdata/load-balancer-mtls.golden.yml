@@ -8,6 +8,7 @@ http:
       priority: 22
       middlewares:
         - seylo-svc7-unreachable
+        - seylo-svc7-resend
       service: seylo-svc7
       tls:
         certResolver: le
@@ -34,7 +35,8 @@ http:
       priority: 22
       middlewares:
         - seylo-svc7-unreachable
-      service: seylo-svc7-retry
+        - seylo-svc7-resend-idem
+      service: seylo-svc7
       tls:
         certResolver: le
   middlewares:
@@ -42,6 +44,15 @@ http:
       redirectScheme:
         scheme: https
         permanent: true
+    seylo-svc7-resend:
+      retry:
+        attempts: 3
+    seylo-svc7-resend-idem:
+      retry:
+        attempts: 3
+        status:
+          - 502-504
+        maxRequestBodyBytes: 1048576
     seylo-svc7-unreachable:
       errors:
         status:
@@ -65,20 +76,16 @@ http:
       loadBalancer:
         servers:
           - url: http://seylo-svc7-4:3000
+        serversTransport: seylo-svc7-local
     seylo-svc7-node-n2:
       loadBalancer:
         servers:
           - url: https://198.51.100.2:5757
         serversTransport: seylo-svc7-node-n2
-    seylo-svc7-retry:
-      failover:
-        service: seylo-svc7
-        fallback: seylo-svc7-local
-        errors:
-          status:
-            - 502-504
-          maxRequestBodyBytes: 1048576
   serversTransports:
+    seylo-svc7-local:
+      forwardingTimeouts:
+        dialTimeout: 2s
     seylo-svc7-node-n2:
       serverName: lb.seylo.internal
       rootCAs:
@@ -95,3 +102,5 @@ http:
             -----BEGIN PRIVATE KEY-----
             KEY
             -----END PRIVATE KEY-----
+      forwardingTimeouts:
+        dialTimeout: 3s

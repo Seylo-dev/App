@@ -444,7 +444,8 @@ func (w *worker) converge(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 		w.rec.FailedGeneration, w.rec.FailedHash, w.rec.FailedMessage = 0, "", ""
 		w.saveRecord()
 	}
-	if !halted && len(running) > 0 {
+	if !halted && len(running) > 0 && len(w.restartAt) == 0 {
+		// (A crashed replica waiting for its restart keeps its message.)
 		w.message = ""
 	}
 	w.syncAccess(ctx, spec, running)
@@ -855,6 +856,11 @@ func (w *worker) crashed(ctx context.Context, ev docker.Event) {
 		oom = " (out of memory)"
 	}
 	w.systemLine(exit.Generation, "%s exited with code %d%s", d.Name, d.ExitCode, oom)
+	// A pass now takes the dead copy out of the routes (the other copies
+	// serve, or the status page when there are none) instead of leaving
+	// Traefik to connect to it until the restart; the restart pass puts it
+	// back.
+	defer w.kick()
 	if dec.Restart {
 		w.saveRecord()
 		w.restartAt[d.ID] = w.r.o.Now().Add(dec.Delay)

@@ -360,16 +360,27 @@ func (b *builder) addUpstreamServices() {
 	// the node that takes another node's forwarded traffic.
 	var mainSticky, localSticky *sticky
 	if spec.GetLoadBalancer().GetStickySessions() {
+		// Browsers never send a Secure cookie over plain HTTP, so on a
+		// domain without HTTPS such a cookie would pin nothing. It only
+		// names a copy (a hash), so it may go without Secure there.
+		secure := allHTTPS(spec.GetRouting().GetRoutes())
 		cookie := func(name string) *sticky {
-			return &sticky{Cookie: &stickyCookie{Name: name, Secure: true, HTTPOnly: true, SameSite: "lax"}}
+			return &sticky{Cookie: &stickyCookie{Name: name, Secure: secure, HTTPOnly: true, SameSite: "lax"}}
 		}
 		mainSticky, localSticky = cookie(brand.Slug+"_"+spec.GetId()), cookie(brand.Slug+"_"+spec.GetId()+"_r")
 	}
+	// Containers here get a short dial timeout: a copy that just died
+	// answers 502 fast, so the failover (or the other node's) resends the
+	// request to a live copy before the visitor gives up.
+	localTransport := ""
+	if len(local) > 0 || len(b.remotes) == 0 {
+		localTransport = b.transport(b.n.svc("local"), &serversTransport{}, localDialTimeout)
+	}
 	if len(local) > 0 {
-		b.cfg.HTTP.Services[b.n.svc("local")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: localSticky}}
+		b.cfg.HTTP.Services[b.n.svc("local")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: localSticky, ServersTransport: localTransport}}
 	}
 	if len(b.remotes) == 0 {
-		b.cfg.HTTP.Services[b.n.svc("")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: mainSticky}}
+		b.cfg.HTTP.Services[b.n.svc("")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: mainSticky, ServersTransport: localTransport}}
 		return
 	}
 	// Copies on other nodes answer on their LB entry point: each verified
@@ -381,18 +392,43 @@ func (b *builder) addUpstreamServices() {
 		children = append(children, weightedService{Name: b.n.svc("local"), Weight: len(local)})
 	}
 	for _, rc := range b.remotes {
-		lb := &loadBalancer{Servers: []lbServer{{URL: rc.url}}}
-		if rc.transport != nil {
-			if b.cfg.HTTP.ServersTransports == nil {
-				b.cfg.HTTP.ServersTransports = map[string]*serversTransport{}
-			}
-			b.cfg.HTTP.ServersTransports[rc.name] = rc.transport
-			lb.ServersTransport = rc.name
+		t := rc.transport
+		if t == nil {
+			t = &serversTransport{}
 		}
+		lb := &loadBalancer{Servers: []lbServer{{URL: rc.url}}, ServersTransport: b.transport(rc.name, t, nodeDialTimeout)}
 		b.cfg.HTTP.Services[rc.name] = &service{LoadBalancer: lb}
 		children = append(children, weightedService{Name: rc.name, Weight: 1})
 	}
 	b.cfg.HTTP.Services[b.n.svc("")] = &service{Weighted: &weighted{Services: children, Sticky: mainSticky}}
+}
+
+// Dial timeouts of the upstream transports. A container on this node
+// connects in well under a millisecond; 2s still lets one lost SYN be
+// resent (after 1s). Another node gets more room for its network.
+const (
+	localDialTimeout = "2s"
+	nodeDialTimeout  = "3s"
+)
+
+// transport adds t under name with the given dial timeout and returns name.
+func (b *builder) transport(name string, t *serversTransport, dial string) string {
+	t.ForwardingTimeouts = &forwardingTimeouts{DialTimeout: dial}
+	if b.cfg.HTTP.ServersTransports == nil {
+		b.cfg.HTTP.ServersTransports = map[string]*serversTransport{}
+	}
+	b.cfg.HTTP.ServersTransports[name] = t
+	return name
+}
+
+// allHTTPS reports whether every route serves HTTPS (unset means ACME).
+func allHTTPS(routes []*agentv1.Route) bool {
+	for _, r := range routes {
+		if r.GetHttps() == agentv1.HttpsMode_HTTPS_MODE_OFF {
+			return false
+		}
+	}
+	return true
 }
 
 // upstreamService returns the Traefik service a route sends to: the main
@@ -545,9 +581,9 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	if err != nil {
 		return err
 	}
-	retry := ""
+	var retry *resendPlan
 	if m == modeUpstream {
-		retry = b.retryService(r, target)
+		retry = b.resendPlan(r, target)
 	}
 
 	if tls == nil {
@@ -560,7 +596,7 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 			// the service is never reached.
 			redirect := b.mw(b.n.svc("https"), &middleware{RedirectScheme: &redirectScheme{Scheme: "https", Permanent: true}})
 			httpRouter.Middlewares = append(b.redirects(r), redirect)
-			retry = ""
+			retry = nil
 		}
 		b.putRouter(name+"-http", httpRouter, retry)
 	}
@@ -629,48 +665,107 @@ func (b *builder) lbRouters() bool {
 // idempotentMethods matches the requests a failover may replay.
 const idempotentMethods = "(Method(`GET`) || Method(`HEAD`) || Method(`OPTIONS`))"
 
-// putRouter adds a router. With a retry service (copies on other nodes),
-// GET, HEAD and OPTIONS go to it under name+"-retry" and the other methods
-// stay on the plain service: a request is replayed on this node's own
-// copies only when it is safe to send twice. Both halves keep the
-// priority Traefik would give the original rule (its length), so the
-// order against other routes does not change.
-func (b *builder) putRouter(name string, rt *router, retry string) {
-	if retry == "" {
+// putRouter adds a router. With a resend plan (more than one copy), GET,
+// HEAD and OPTIONS go to the plan's service under name+"-retry" and the
+// other methods stay on the plain service, each half with its own retry
+// middleware last in the chain: a request is sent to another copy after a
+// 502-504 only when it is safe to send twice, and after a copy that could
+// not be reached at all (nothing was sent) for every method. Both halves
+// keep the priority Traefik would give the original rule (its length), so
+// the order against other routes does not change.
+func (b *builder) putRouter(name string, rt *router, plan *resendPlan) {
+	if plan == nil {
 		b.cfg.HTTP.Routers[name] = rt
 		return
 	}
 	priority := len(rt.Rule)
 	idem := *rt
 	idem.Rule = "(" + rt.Rule + ") && " + idempotentMethods
-	idem.Service = retry
+	idem.Service = plan.idemService
+	idem.Middlewares = append(slices.Clone(rt.Middlewares), plan.idemMW)
 	idem.Priority = priority
 	rt.Rule = "(" + rt.Rule + ") && !" + idempotentMethods
+	rt.Middlewares = append(slices.Clone(rt.Middlewares), plan.otherMW)
 	rt.Priority = priority
 	b.cfg.HTTP.Routers[name] = rt
 	b.cfg.HTTP.Routers[name+"-retry"] = &idem
 }
 
-// retryService returns, on a node that balances over copies on other
-// nodes and has copies of its own, a failover service that resends a
-// request this node's copies when the pool answered 502-504 (a copy on
-// another node went away: that node answers 503, see the LB routers, or
-// is unreachable). "" otherwise.
-func (b *builder) retryService(r *agentv1.Route, target string) string {
-	if len(b.in.Upstreams) == 0 || len(b.remotes) == 0 || b.in.LBOnly {
-		return ""
+// resendPlan is how a route's requests reach another copy when the one
+// the balancer picked failed.
+type resendPlan struct {
+	// idemService serves GET, HEAD and OPTIONS.
+	idemService string
+	// idemMW and otherMW are the retry middlewares of the two halves.
+	idemMW, otherMW string
+}
+
+// maxResendAttempts caps the tries of one request (the first included).
+const maxResendAttempts = 4
+
+// resendPlan returns, for a route to the service's copies when there is
+// more than one (replicas here or copies on other nodes), how failed
+// requests are sent again; nil otherwise. Each try goes through the
+// balancer again and so to the next copy: a copy here that died fails to
+// connect (sent again, any method), one on another node answers 502-504
+// (sent again for GET, HEAD and OPTIONS). With sticky sessions the cookie
+// would pick the same copy every time, so GET, HEAD and OPTIONS go to a
+// failover service instead that resends to this node's own copies when
+// the pool answered 502-504 (a copy on another node went away: that node
+// answers 503, see the LB routers, or is unreachable).
+func (b *builder) resendPlan(r *agentv1.Route, target string) *resendPlan {
+	copies := len(b.in.Upstreams) + len(b.remotes)
+	if b.in.LBOnly || copies < 2 || target != b.upstreamService(r, false) {
+		return nil
 	}
-	if target != b.upstreamService(r, false) {
-		return ""
+	attempts := min(copies+1, maxResendAttempts)
+	plan := &resendPlan{idemService: target, otherMW: b.mw(b.n.svc("resend"), &middleware{Retry: &retryMW{Attempts: attempts}})}
+	if !b.spec().GetLoadBalancer().GetStickySessions() || len(b.in.Upstreams) == 0 || len(b.remotes) == 0 {
+		maxBody := int64(retryMaxBodyBytes)
+		plan.idemMW = b.mw(b.n.svc("resend-idem"), &middleware{Retry: &retryMW{
+			Attempts: attempts, Status: []string{"502-504"}, MaxRequestBodyBytes: &maxBody,
+		}})
+		return plan
 	}
 	name := target + "-retry"
 	if _, ok := b.cfg.HTTP.Services[name]; !ok {
-		b.cfg.HTTP.Services[name] = &service{Failover: &failover{
-			Service:  target,
-			Fallback: b.upstreamService(r, true),
-			Errors:   &failoverErrors{Status: []string{"502-504"}, MaxRequestBodyBytes: retryMaxBodyBytes},
-		}}
+		errs := &failoverErrors{Status: []string{"502-504"}, MaxRequestBodyBytes: retryMaxBodyBytes}
+		// This node's copies, then (when those fail too: the pinned copy
+		// was the one here that died) the copies on other nodes.
+		fallback := b.upstreamService(r, true)
+		if others := b.othersService(target); others != "" {
+			chain := target + "-fallback"
+			b.cfg.HTTP.Services[chain] = &service{Failover: &failover{Service: fallback, Fallback: others, Errors: errs}}
+			fallback = chain
+		}
+		b.cfg.HTTP.Services[name] = &service{Failover: &failover{Service: target, Fallback: fallback, Errors: errs}}
 	}
+	plan.idemService, plan.idemMW = name, plan.otherMW
+	return plan
+}
+
+// othersService returns a service over the copies on other nodes of the
+// weighted service target, without its sticky cookie: the one copy's
+// service, or a weighted one; "" when there are none.
+func (b *builder) othersService(target string) string {
+	main := b.cfg.HTTP.Services[target]
+	if main == nil || main.Weighted == nil {
+		return ""
+	}
+	var others []weightedService
+	for _, c := range main.Weighted.Services {
+		if c.Name != b.n.svc("local") && !strings.HasPrefix(c.Name, b.n.svc("local-")) {
+			others = append(others, c)
+		}
+	}
+	switch len(others) {
+	case 0:
+		return ""
+	case 1:
+		return others[0].Name
+	}
+	name := target + "-others"
+	b.cfg.HTTP.Services[name] = &service{Weighted: &weighted{Services: others}}
 	return name
 }
 
@@ -831,7 +926,21 @@ func (b *builder) keepLBRouters() {
 		}
 	}
 	b.cfg.TLS = nil
-	b.cfg.HTTP.ServersTransports = nil
+	// Only the transports the kept services use (the local one).
+	usedTransport := map[string]bool{}
+	for _, s := range b.cfg.HTTP.Services {
+		if s.LoadBalancer != nil && s.LoadBalancer.ServersTransport != "" {
+			usedTransport[s.LoadBalancer.ServersTransport] = true
+		}
+	}
+	for name := range b.cfg.HTTP.ServersTransports {
+		if !usedTransport[name] {
+			delete(b.cfg.HTTP.ServersTransports, name)
+		}
+	}
+	if len(b.cfg.HTTP.ServersTransports) == 0 {
+		b.cfg.HTTP.ServersTransports = nil
+	}
 }
 
 func (b *builder) trim() {

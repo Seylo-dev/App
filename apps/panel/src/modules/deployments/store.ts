@@ -47,7 +47,8 @@ export function setStep(
     let durationMs = step.durationMs;
     if (status === "running" && step.status !== "running") durationMs = -now;
     else if (status !== "running" && status !== "pending" && step.status === "running" && durationMs !== null && durationMs < 0) {
-      durationMs = now + durationMs;
+      // The wall clock can step back (NTP): never a negative duration.
+      durationMs = Math.max(0, now + durationMs);
     } else if (status === "skipped") durationMs = null;
     return {
       ...step,
@@ -143,10 +144,13 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
         status: s.status,
         node: ref(s.nodeId),
         detail: s.detail,
-        // A running step stores its start as a negative number; show the time so far.
-        durationMs: s.durationMs === null ? null : s.durationMs < 0 ? Math.max(0, now + s.durationMs) : s.durationMs,
+        // A running step stores its start as a negative number: show the time
+        // so far. On a finished step a negative number is a duration measured
+        // across a wall clock step back (stored before setStep clamped it): 0.
+        durationMs:
+          s.durationMs === null ? null : s.durationMs >= 0 ? s.durationMs : s.status === "running" ? Math.max(0, now + s.durationMs) : 0,
       })),
-      durationMs: r.finishedAt && r.startedAt ? r.finishedAt.getTime() - r.startedAt.getTime() : null,
+      durationMs: r.finishedAt && r.startedAt ? Math.max(0, r.finishedAt.getTime() - r.startedAt.getTime()) : null,
       canRollback: r.status === "superseded" && keep.has(r.id),
       rollbackOf: r.rollbackOf,
       error: r.error,

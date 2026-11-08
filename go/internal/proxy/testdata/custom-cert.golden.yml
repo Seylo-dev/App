@@ -17,10 +17,16 @@ http:
       loadBalancer:
         servers:
           - url: http://seylo-svc4-2:80
+        serversTransport: seylo-svc4-local
     seylo-svc4-local:
       loadBalancer:
         servers:
           - url: http://seylo-svc4-2:80
+        serversTransport: seylo-svc4-local
+  serversTransports:
+    seylo-svc4-local:
+      forwardingTimeouts:
+        dialTimeout: 2s
 tls:
   certificates:
     - certFile: |
