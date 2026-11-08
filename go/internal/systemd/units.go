@@ -43,9 +43,19 @@ func NewUnits() *Units {
 	return &Units{run: ExecRunner}
 }
 
+// NewUnitsWithRunner returns Units that run systemctl and journalctl with run.
+func NewUnitsWithRunner(run Runner) *Units {
+	return &Units{run: run}
+}
+
 // Start starts unit.
 func (u *Units) Start(ctx context.Context, unit string) error {
 	return u.run(ctx, io.Discard, "systemctl", "start", unit)
+}
+
+// Stop stops unit.
+func (u *Units) Stop(ctx context.Context, unit string) error {
+	return u.run(ctx, io.Discard, "systemctl", "stop", unit)
 }
 
 // Restart restarts unit.

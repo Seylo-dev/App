@@ -20,6 +20,7 @@ import (
 // tests substitute a fake so they never run systemctl.
 type unitController interface {
 	Start(ctx context.Context, unit string) error
+	Stop(ctx context.Context, unit string) error
 	Restart(ctx context.Context, unit string) error
 	Logs(ctx context.Context, unit string, opts systemd.LogsOptions, w io.Writer) error
 }
@@ -34,6 +35,13 @@ type deps struct {
 	units  unitController
 	// run runs host commands (docker, systemctl); tests replace it.
 	run systemd.Runner
+	// runShielded runs a host command that must finish even when the
+	// command is interrupted (`panel rotate-key`); nil uses run.
+	runShielded systemd.Runner
+	// unitsShielded is units over runShielded; nil uses units.
+	unitsShielded unitController
+	// geteuid replaces os.Geteuid in tests.
+	geteuid func() int
 	// profile is the --profile flag of the laptop commands.
 	profile string
 	// openClient replaces panelapi.Open in tests.
@@ -52,7 +60,10 @@ type globalFlags struct {
 // NewRootCommand returns the seylo command tree wired to real
 // implementations.
 func NewRootCommand() *cobra.Command {
-	return newRootCommand(&deps{units: systemd.NewUnits(), run: systemd.ExecRunner, in: os.Stdin})
+	return newRootCommand(&deps{
+		units: systemd.NewUnits(), run: systemd.ExecRunner, in: os.Stdin,
+		runShielded: shieldedRunner, unitsShielded: systemd.NewUnitsWithRunner(shieldedRunner),
+	})
 }
 
 func newRootCommand(d *deps) *cobra.Command {
