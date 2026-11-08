@@ -5,10 +5,10 @@
 // screens send are checked here; the panel's own tests cover the server.
 
 import { mkdirSync } from "node:fs";
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { ids, cleanupSchedule } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
 const node = ids.de;

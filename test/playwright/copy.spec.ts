@@ -5,11 +5,11 @@
 // with its password) does not copy it, Enter does, and the field shows a
 // focus ring while the keyboard is on it. Demo data.
 
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { databaseOf, ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 test.use({ storageState: stateFile, permissions: ["clipboard-read", "clipboard-write"] });
 

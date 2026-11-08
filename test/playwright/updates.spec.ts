@@ -6,10 +6,10 @@
 // the panel's own tests cover the server.
 
 import { mkdirSync } from "node:fs";
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { updateStatus } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/updates`;

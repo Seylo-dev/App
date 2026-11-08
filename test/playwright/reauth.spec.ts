@@ -9,8 +9,8 @@
 
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { type APIRequestContext, expect, type Locator, type Page, type Response, test } from "@playwright/test";
-import { api, credentials, postPastRateLimit, signIn, stateFile, submitPastRateLimit, totp, waitOut } from "./helpers";
+import type { APIRequestContext, Locator, Page, Response } from "@playwright/test";
+import { api, credentials, expect, postPastRateLimit, signIn, stateFile, submitPastRateLimit, test, totp, waitOut } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/reauth`;
 const dataDir = process.env.PANEL_DATA_DIR;

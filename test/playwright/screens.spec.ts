@@ -8,11 +8,11 @@
 //   SCREENS=deployments     only screens whose name contains one of these
 
 import { mkdirSync } from "node:fs";
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo, type Preset, presets } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/screens`;
 const wanted = (process.env.PRESETS?.split(",") ?? presets) as Preset[];

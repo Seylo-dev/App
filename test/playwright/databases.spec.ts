@@ -8,11 +8,11 @@
 // Screenshots: $SHOTS_DIR/databases/*.png.
 
 import { mkdirSync } from "node:fs";
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { databaseOf, ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/databases`;
 const connection = (serviceId: string) => `/p/${ids.acme}/s/${serviceId}/connection`;

@@ -1,9 +1,115 @@
-// Shared bits of the browser tests: the owner account the smoke run
-// creates through /setup, and signing in through the real form.
+// Shared bits of the browser tests: the `test` every spec imports (it fails
+// a test on a render loop or an uncaught page error), the owner account the
+// smoke run creates through /setup, and signing in through the real form.
 
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { type APIResponse, expect, type Locator, type Page } from "@playwright/test";
+import {
+  type APIResponse,
+  type BrowserContext,
+  test as base,
+  type ConsoleMessage,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test";
+
+export { expect };
+
+/** Console errors that fail a test: React's render loop warning (it only logs, the page goes on). */
+const fatalConsole = /Maximum update depth/;
+
+/**
+ * Runs in every page before the app: React's loop warning comes from inside
+ * the setState call that went over the limit, so the stack at that moment
+ * names the component and the effect. It goes on the message as one more argument.
+ */
+function stackOnLoopWarning(pattern: string) {
+  const fatal = new RegExp(pattern);
+  const original = console.error;
+  console.error = function (...args: unknown[]) {
+    if (args.some((arg) => typeof arg === "string" && fatal.test(arg))) {
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 25;
+      args.push(`\nstack at the setState call:\n${new Error().stack}`);
+      Error.stackTraceLimit = limit;
+    }
+    return original.apply(this, args);
+  };
+}
+
+/** A console message with every argument, read from the page (or its text when the page is gone or stuck). */
+async function describeConsole(message: ConsoleMessage): Promise<string> {
+  const read = Promise.all(
+    message.args().map((arg) =>
+      arg.jsonValue().then(
+        (value) => (typeof value === "string" ? value : JSON.stringify(value)),
+        () => arg.toString(),
+      ),
+    ),
+  );
+  const stuck = new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 5_000).unref());
+  const args = await Promise.race([read, stuck]);
+  const { url, lineNumber, columnNumber } = message.location();
+  const page = message.page()?.url() ?? "no page";
+  return `console.${message.type()} on ${page} (${url}:${lineNumber}:${columnNumber}):\n${(args.length ? args : [message.text()]).join("\n")}`;
+}
+
+/**
+ * Every spec's `test`. An auto fixture watches every page the test opens (its
+ * own `page`, and pages in contexts from browser.newContext) and fails the
+ * test on a console error matching `fatalConsole` or an uncaught page error,
+ * printing the whole message. A spec's own pageerror listener still sees the errors too.
+ */
+export const test = base.extend<{ pageGuard: undefined }>({
+  pageGuard: [
+    async ({ browser, context }, use) => {
+      const problems: Promise<string>[] = [];
+      const report = (problem: Promise<string>) => problems.push(problem);
+      const watch = async (ctx: BrowserContext) => {
+        await ctx.addInitScript(stackOnLoopWarning, fatalConsole.source);
+        ctx.on("console", (message) => {
+          if (message.type() === "error" && fatalConsole.test(message.text())) report(describeConsole(message));
+        });
+        ctx.on("weberror", (webError) => {
+          const error = webError.error();
+          report(Promise.resolve(`uncaught error on ${webError.page()?.url() ?? "no page"}:\n${error.stack ?? String(error)}`));
+        });
+        // CPU_THROTTLE=4 runs every page four times slower: timing bugs (a render loop that needs slow renders) show up.
+        const rate = Number(process.env.CPU_THROTTLE ?? 1);
+        if (rate > 1) {
+          ctx.on("page", (page) => {
+            void ctx.newCDPSession(page).then((cdp) => cdp.send("Emulation.setCPUThrottlingRate", { rate }), () => {});
+          });
+        }
+      };
+      await watch(context);
+      const newContext = browser.newContext;
+      browser.newContext = async (...args) => {
+        const ctx = await newContext.apply(browser, args);
+        await watch(ctx);
+        return ctx;
+      };
+      try {
+        await use(undefined);
+      } finally {
+        browser.newContext = newContext;
+      }
+      const found = await Promise.all(problems);
+      if (found.length) {
+        // A loop logs the same warning again every 50 updates: each distinct problem once, with how often it came.
+        const counts = new Map<string, number>();
+        for (const text of found) counts.set(text, (counts.get(text) ?? 0) + 1);
+        const listed = [...counts].map(([text, n]) => (n > 1 ? `${n} times: ${text}` : text));
+        const error = new Error(`The page guard saw ${found.length} problem(s):\n\n${listed.join("\n\n")}`);
+        // No frames of its own: Playwright would read the page's "at ..." lines in the message as this error's frames and print them twice.
+        error.stack = "";
+        throw error;
+      }
+    },
+    { auto: true, box: "self" },
+  ],
+});
 
 const slug = /^BRAND_SLUG='([^']+)'$/m.exec(readFileSync(new URL("../../installer/brand.env", import.meta.url), "utf8"))?.[1] ?? "";
 

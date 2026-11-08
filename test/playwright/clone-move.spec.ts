@@ -2,10 +2,9 @@
 // The ops behind them answer from per-test overrides, which also record
 // what the dialogs sent.
 
-import { expect, test } from "@playwright/test";
 import { ids, projects } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 const apiPage = `/p/${ids.acme}/s/${ids.api}`;
 

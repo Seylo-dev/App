@@ -5,12 +5,12 @@
 // with their presets.
 
 import { mkdirSync } from "node:fs";
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { handlers as dockerHubHandlers } from "./demo/dockerhub";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { handlers as serviceHandlers, ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/dockerhub`;
 

@@ -4,11 +4,10 @@
 // Environment tab) or replacing it with the saved text (the project's
 // Shared environment).
 
-import { expect, test } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
 

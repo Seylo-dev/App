@@ -5,11 +5,11 @@
 // explained, and the row switching to Generating after a click. The ops
 // answer from per-test overrides, which also record what was sent.
 
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 const domainsPage = `/p/${ids.acme}/s/${svc.web}/domains`;
 const day = 86_400_000;

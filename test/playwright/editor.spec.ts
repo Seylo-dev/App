@@ -5,11 +5,10 @@
 // markers' navigation, that the other editors keep URL links and Ctrl+G,
 // and the CSS editor's color swatches, on the demo data.
 
-import { expect, test } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 test.use({ storageState: stateFile });
 

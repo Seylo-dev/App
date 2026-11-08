@@ -10,8 +10,8 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
-import { api, credentials, openDashboard, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, totp } from "./helpers";
+import type { Page } from "@playwright/test";
+import { api, credentials, expect, openDashboard, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, test, totp } from "./helpers";
 
 const shots = process.env.SHOTS_DIR ?? "shots";
 const dataDir = process.env.PANEL_DATA_DIR;

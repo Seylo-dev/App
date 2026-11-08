@@ -4,8 +4,8 @@
 // notification channel and the activity export. Runs after the smoke spec,
 // signed in as the owner it created.
 
-import { expect, type Page, test } from "@playwright/test";
-import { api, stateFile, totp } from "./helpers";
+import type { Page } from "@playwright/test";
+import { api, expect, stateFile, test, totp } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/flows`;
 

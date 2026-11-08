@@ -3,11 +3,11 @@
 // place and size when the data arrives. Also: a checkbox that is already
 // checked when a screen opens does not animate.
 
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { hostShellStatus, ids, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
 

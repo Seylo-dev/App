@@ -4,11 +4,11 @@
 // watch paths editor with its live tester. The provider answers are
 // per-test overrides, so nothing leaves the machine.
 
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { installDemo } from "./demo/routes";
 import { handlers as serviceHandlers, ids as svc } from "./demo/service";
 import { ids, viewer } from "./demo/fixtures";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
 

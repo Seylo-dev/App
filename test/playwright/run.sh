@@ -11,7 +11,12 @@
 #   test/playwright/run.sh --project smoke     extra arguments go to `playwright test`
 #
 # Environment: PANEL_PORT (3151), WEB_PORT (5251), DATA_DIR (a new temp dir,
-# deleted afterwards unless set), SHOTS_DIR (test/playwright/shots).
+# deleted afterwards unless set), SHOTS_DIR (test/playwright/shots),
+# CPU_THROTTLE (say 6: every page runs that many times slower, which brings
+# out timing bugs such as a render loop that needs slow renders).
+#
+# Every test fails on an uncaught page error or a React render loop warning
+# in any page it opens (the `test` in helpers.ts), with the page's stack.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

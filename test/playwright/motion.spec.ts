@@ -4,11 +4,11 @@
 // same result without the slide. Runs on the demo data, motion on unless
 // a test says otherwise.
 
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { ids, projects, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { stateFile } from "./helpers";
+import { expect, stateFile, test } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
 
