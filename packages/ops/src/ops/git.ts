@@ -180,7 +180,7 @@ export const listInternalHosts = defineOp({
   kind: "query",
   summary: "List a project's internal git hosts",
   description:
-    "Lists the git hosts a project's nodes may clone from internal addresses (private, loopback, link-local, a node's own and the like): recorded when an admin saved a source with an internal host there, by git.allowInternalHost, or by the first start of 0.2 for sources saved before. approvedBy is null for hosts the first start recorded (or whose admin account is gone); usedBy counts the project's generic git and compose stack sources on the host.",
+    "Lists the git hosts a project's nodes may clone from internal addresses (private, loopback, link-local, a node's own and the like): recorded when an admin saved a source with an internal host there, by git.allowInternalHost, or by the first start of 0.2 for sources saved before. approvedBy is null for hosts the first start recorded (or whose admin account is gone); usedBy counts the project's sources that clone from the host: generic git and compose stack git sources by URL, GitHub sources as github.com, and git provider sources by their connection's host.",
   input: Type.Object({ projectId: Id }),
   output: Type.Object({
     items: Type.Array(

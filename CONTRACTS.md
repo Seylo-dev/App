@@ -1472,7 +1472,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   metadata address; the node's refusal message names the op).
   `git.listInternalHosts {projectId}` lists a project's hosts (who allowed
   each, `approvedBy` null for the seed's rows or a removed account, and
-  `usedBy`, its generic git and stack sources on the host) and
+  `usedBy`, its sources that clone from the host: generic git and stack
+  git sources by URL, GitHub sources as `github.com`, provider sources by
+  their connection's host) and
   `git.removeInternalHost {projectId, host}` takes one off (NOT_FOUND when
   it is not there); both `git.manage`. A refusal an admin can lift
   (BAD_REQUEST `internalTarget` or `unresolvable` from saving a source or
