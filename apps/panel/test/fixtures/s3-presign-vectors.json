@@ -1,0 +1,911 @@
+{
+  "headerSigned": [
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "body": "",
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploads=",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=3312daed506c5e82777fc5af0f450046de3a5c58764892d0983c25b375dade27"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"e1\"</ETag></Part></CompleteMultipartUpload>",
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=c7f6a9bf9246b3b137470e4960ee2c52f7c60f772d338106e1024c928ecc28f5"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "",
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=4b78b1cef8a20fec0ef1fe3f72a072aa2ceb1fcfbd11e00d15d5b07ae0ab1ae8"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "body": "",
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploads=",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=5e9d610c11ae17173422eeb29ccd8c1169e7d4bc4b4a6ac13eeecb26b229b426"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"e1\"</ETag></Part></CompleteMultipartUpload>",
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=c989aee714e746d7de66cfa4d578505e8cf0a24b9014535e18395e1e52069ed7"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "",
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=494e477445bbdc2723774fe196ca3ed83579a31ae9cb0c39f8ca71d658af4d89"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "body": "",
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploads=",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/eu-central-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=644b7b8f78af938650761e336407d9aca2c148042f6099606fb2198756953485"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"e1\"</ETag></Part></CompleteMultipartUpload>",
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/eu-central-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=a1343c512dc3bed7ee57dbb223320efea1c1f0c33cedcf741f99a6567640f011"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "",
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/eu-central-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=78e84d56f40d18c3d90271ef7b21314acbb0c5b8e81ac0d892e8ab696c70ce64"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "body": "",
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploads=",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=5356b019ee60b38944d2c7a18d044419f19b6c0b2dc959b6cab5de22c7615abe"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"e1\"</ETag></Part></CompleteMultipartUpload>",
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=fd40e4a31a48ba9c8b37208aa558527b93a7c82333af791af1b06f42f0e5009a"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "",
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=be27d91c1ef9e2a47c988411103331be7abca67b27854a4f3c8355dfa1a1314e"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "body": "",
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploads=",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=10a9e216ced401d7e2821fa452c29517c2f3f6328eff8c5e3c94acd9f9a9eaf7"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"e1\"</ETag></Part></CompleteMultipartUpload>",
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=8cd1f6560b34274971d89cf8ffc6537ba119943769b235b206f326fec5362487"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def/123="
+      },
+      "body": "",
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?uploadId=abc~def%2F123%3D",
+      "date": "20261108T045036Z",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20261108/auto/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=d0dedfcc65afc9cb982e2e6285449a286ff33cab654c49581cdab099549d3753"
+    }
+  ],
+  "presigned": [
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=8957f5aa350697a60669f955902c84d8a32178e789630af105d54b324b23e69d"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "GET",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=8bb0c1584b20ad8fa530b34d22ad805d534fc7fb7642a8619677b5e29b7e8adb"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=24939b954adc6713cc1d281a9c90fbde87346bf8eb3c447ad5bc0032aff3a6ee"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploads=&X-Amz-Signature=f1315e8f34c4986ad17fee35f2be540b884ef906552efd7c32158b2afff360eb"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "partNumber": "7",
+        "uploadId": "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA+/="
+      },
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&partNumber=7&uploadId=VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA%2B%2F%3D&X-Amz-Signature=48244e5e44639855c8d7e5f9e053085a1ca6b65a9eddbae91bc8716c25c2c8d3"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=f259fd2209e45a31f6d62e8cfb249bcf9480996c0b99fcc5cbc11f7626438ff0"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=d3a5aadf0a096d626d3f9eb04f259ad9ae4ea8df533b8f5b46aba16831581df8"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "GET",
+      "key": "",
+      "query": {
+        "continuation-token": "1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=",
+        "list-type": "2",
+        "prefix": "seylo/a1b2c3d4/pol_1/"
+      },
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&continuation-token=1ueGcxLPRx1Tr%2FXYExHnhbYLgveDs2J%2Fwm36Hy4vbOwM%3D&list-type=2&prefix=seylo%2Fa1b2c3d4%2Fpol_1%2F&X-Amz-Signature=2fb11919f087b368e75c079a2348e262863ccf2f95700e64db3b6bf95da85ae9"
+    },
+    {
+      "destination": {
+        "endpoint": "http://127.0.0.1:9000",
+        "region": "us-east-1",
+        "bucket": "backups",
+        "pathStyle": true
+      },
+      "method": "PUT",
+      "key": "my backups/ünï code+plus=eq/20260101T030000Z-r.tar.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "http://127.0.0.1:9000/backups/my%20backups/%C3%BCn%C3%AF%20code%2Bplus%3Deq/20260101T030000Z-r.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=015237bfbf59185ae783e3bb1283aad87cf7203ab47e2aa0c53e299be411383f"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=fe899ef16dd9aa67e3cb0d11675fd5a188c7b63a9a594f64d1812640e135aa8c"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=2c32968c4b4e899ae91a3da24b6e2888cb9b178930cd7febd95d2611e9e572fc"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=15b28dd46cac2e70e2f405d794cc37bbb7a11e3ab02cdb35da43af1e4ba3eafc"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploads=&X-Amz-Signature=5d743d18891762683c1317d232492b72d808f775820d0c41f55510d38f65a55e"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "partNumber": "7",
+        "uploadId": "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA+/="
+      },
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&partNumber=7&uploadId=VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA%2B%2F%3D&X-Amz-Signature=3b95e8bbfbfcfc502f3e3b58e5719d9926da92c52b212f74a3fa330e2d154b6b"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=58f45dcecb480e885851ffa08dc2780999f855f1d478c9986021e254f73732f9"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=2b3b75d646f426d7ed9afcb42ac4e8c9205b1ab42a3079a291c7f424c6088b5f"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "",
+      "query": {
+        "continuation-token": "1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=",
+        "list-type": "2",
+        "prefix": "seylo/a1b2c3d4/pol_1/"
+      },
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&continuation-token=1ueGcxLPRx1Tr%2FXYExHnhbYLgveDs2J%2Fwm36Hy4vbOwM%3D&list-type=2&prefix=seylo%2Fa1b2c3d4%2Fpol_1%2F&X-Amz-Signature=7bc0c8712fd215cae6e3c8a14ff4bb8068cbbdff2564109067869e6a1fa36fb9"
+    },
+    {
+      "destination": {
+        "endpoint": "https://0123456789abcdef.r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "my backups/ünï code+plus=eq/20260101T030000Z-r.tar.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://0123456789abcdef.r2.cloudflarestorage.com/backups/my%20backups/%C3%BCn%C3%AF%20code%2Bplus%3Deq/20260101T030000Z-r.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=d809db2a341260b5a0ce119679fb96a024c4c60f07fa4742fc95e68eda9853d4"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=7bdc6b231f8e6ffba43f686148dafd91d6f963245bfd5a0b5ea6e604f847b412"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=9777d9f8abbed3ec3668b75a4624ddd8361354a8c9e31e817827f2ceb16ccd46"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=5b918b16d81582717b5b103b9a4deb1b1028fe7566f05cee12e218ce8a7e5dca"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploads=&X-Amz-Signature=10f9ff2fbb15dcd80de1e933a1062b192ec30b1061527eac704d81787d9f2675"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "partNumber": "7",
+        "uploadId": "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA+/="
+      },
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&partNumber=7&uploadId=VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA%2B%2F%3D&X-Amz-Signature=3116427968d21b24a4b76e5f0c72946fe2bec6a87b985ee01dcf3d313aee397e"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=ff2cfad15600a6e3004d5fa5b0ade2a58c05f43f3b8985fab5b12c89aa701fd9"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=4570fcddf34b61c5d161f1f42853b6fbc3a00e9456e99d4faec29184bf727824"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "",
+      "query": {
+        "continuation-token": "1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=",
+        "list-type": "2",
+        "prefix": "seylo/a1b2c3d4/pol_1/"
+      },
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&continuation-token=1ueGcxLPRx1Tr%2FXYExHnhbYLgveDs2J%2Fwm36Hy4vbOwM%3D&list-type=2&prefix=seylo%2Fa1b2c3d4%2Fpol_1%2F&X-Amz-Signature=2696168f80f75103c1e42a79136f8b0fb96d00bb5cfe853988aeaa3a102d1e5d"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.eu-central-1.amazonaws.com",
+        "region": "eu-central-1",
+        "bucket": "seylo-backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "my backups/ünï code+plus=eq/20260101T030000Z-r.tar.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://seylo-backups.s3.dualstack.eu-central-1.amazonaws.com/my%20backups/%C3%BCn%C3%AF%20code%2Bplus%3Deq/20260101T030000Z-r.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=dce7937ff5ca843003987669e1fc0512ee42d91bed84683c8d1551fdd5a905e7"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=db9766cf40c528d268ebf5dfa8eea37f07414f31b8afcb7d8bf766bd807d2aaf"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ad2ca2b06151c5013f37e822dbce9dd34441f000295f6c85fadd44db055d0d1d"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=92688525562b4c97519d92b80409076644b512935ffa64d9fafe84e78b906a0f"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploads=&X-Amz-Signature=aa8ebbc8b5371acc008bd397376667f89d308319d18152c43ebae330fed2a170"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "partNumber": "7",
+        "uploadId": "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA+/="
+      },
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&partNumber=7&uploadId=VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA%2B%2F%3D&X-Amz-Signature=3ffd049599e7521460c60f338cd3fd64dbe384f80c28121fb1de546f0919019a"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=78db170ad750b413a5b5951cd0ffd38731726a634fc0d9ef56b6cbb32e688135"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=34e8875df25872f2f5b1a2b7ec709fcf7b019550399bc4f5d269bc4e32e82246"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "",
+      "query": {
+        "continuation-token": "1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=",
+        "list-type": "2",
+        "prefix": "seylo/a1b2c3d4/pol_1/"
+      },
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&continuation-token=1ueGcxLPRx1Tr%2FXYExHnhbYLgveDs2J%2Fwm36Hy4vbOwM%3D&list-type=2&prefix=seylo%2Fa1b2c3d4%2Fpol_1%2F&X-Amz-Signature=5044efa1ddf2b151c6c16da67ba52e98429d04fa7d1c339bdc8a7a63b9f85b35"
+    },
+    {
+      "destination": {
+        "endpoint": "https://s3.amazonaws.com",
+        "region": "us-east-1",
+        "bucket": "my.dotted.bucket",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "my backups/ünï code+plus=eq/20260101T030000Z-r.tar.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://s3.dualstack.us-east-1.amazonaws.com/my.dotted.bucket/my%20backups/%C3%BCn%C3%AF%20code%2Bplus%3Deq/20260101T030000Z-r.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=7a567094c0626d00d3eab126eaff7fff124a46196c16fd935a41a94d3693c283"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f43797ca4abaff0a8e3087d48ac733fd9b04dabc70ececed434b561c477597e3"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=56aec0170f80d9677920a361ead8227b327405a6f73e26ff3bc611fd5f4fb910"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a2ade28183e319d69a3d24c1f11c2a4af03a790fa5f23a9bbba8323dac140d7c"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploads": ""
+      },
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploads=&X-Amz-Signature=e3b2779bde5765a4e4594fabb6abb073ebd76b5a1d5edcfb6e4d03ff4f31aaac"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "partNumber": "7",
+        "uploadId": "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA+/="
+      },
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&partNumber=7&uploadId=VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA%2B%2F%3D&X-Amz-Signature=f5e30c8266dbaac4fb6133d227f3ff4469aa0fb4e6a9535ba4cef95fe980c41b"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "POST",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=ea5810603657fbaa9d186343e28405d41bcb369cfc6c94ab118d53d6a0a72eca"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "DELETE",
+      "key": "seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz",
+      "query": {
+        "uploadId": "abc~def_123"
+      },
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/seylo/a1b2c3d4/pol_1/20260101T030000Z-run_9.sql.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&uploadId=abc~def_123&X-Amz-Signature=4d3766e0deb2252c1f2910d8dc5fe2723b026a62ac4d116d0a5677b8450407e1"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "GET",
+      "key": "",
+      "query": {
+        "continuation-token": "1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=",
+        "list-type": "2",
+        "prefix": "seylo/a1b2c3d4/pol_1/"
+      },
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&continuation-token=1ueGcxLPRx1Tr%2FXYExHnhbYLgveDs2J%2Fwm36Hy4vbOwM%3D&list-type=2&prefix=seylo%2Fa1b2c3d4%2Fpol_1%2F&X-Amz-Signature=4d869d07258239c91a6d04dc4ca1d107bf39d8b8df6435819bf428564e4f4b7d"
+    },
+    {
+      "destination": {
+        "endpoint": "https://minio.example.com:9443",
+        "region": "auto",
+        "bucket": "backups",
+        "pathStyle": false
+      },
+      "method": "PUT",
+      "key": "my backups/ünï code+plus=eq/20260101T030000Z-r.tar.gz",
+      "query": {},
+      "expiresIn": 3600,
+      "url": "https://minio.example.com:9443/backups/my%20backups/%C3%BCn%C3%AF%20code%2Bplus%3Deq/20260101T030000Z-r.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261108%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261108T045036Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=359ffd538b3def1bd71dca5ce7464732f1007b9645b335ebc3c7437f53f78b05"
+    }
+  ]
+}

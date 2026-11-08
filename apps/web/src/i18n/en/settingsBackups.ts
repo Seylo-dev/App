@@ -11,7 +11,8 @@ export default {
   schedules: { one: "{count} schedule", other: "{count} schedules" },
   addTitle: "Add a backup destination",
   editTitle: "Edit backup destination",
-  formDescription: "Nodes upload straight to the bucket. Test the keys before saving.",
+  formDescription:
+    "Nodes upload straight to the bucket with links the panel signs, so the keys never leave the panel. The panel must reach the bucket too. Test the keys before saving.",
   providers: { s3: "AWS S3", r2: "Cloudflare R2", minio: "MinIO", other: "Other S3" },
   fields: {
     provider: "Provider",

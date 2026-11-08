@@ -71,7 +71,12 @@ func provideJobs(d *Deps) error {
 	p.exposed = dbtools.NewExposedUsers(dk, certs, filepath.Join(d.Layout.StateDir(), "db-tls"), log)
 	// Suspend is set in wireJobs, once d.Reconcile exists.
 	services := func() []*agentv1.ServiceSpec { return d.Feed.Current().GetServices() }
-	p.backups = backup.NewLocal(backup.Options{Docker: dk, Layout: d.Layout, Spec: spec, Services: services, Logger: log,
+	// Panels from 0.2 keep the destination's keys and presign each request.
+	var signer backup.Signer
+	if d.Panel != nil {
+		signer = d.Panel
+	}
+	p.backups = backup.NewLocal(backup.Options{Docker: dk, Layout: d.Layout, Spec: spec, Services: services, Logger: log, Signer: signer,
 		Progress: func(bp *agentv1.BackupProgress) {
 			d.Events.Emit(&agentv1.Event{Payload: &agentv1.Event_BackupProgress{BackupProgress: bp}})
 		}})
@@ -173,6 +178,10 @@ func wireJobs(reg *Registry, d *Deps) error {
 	// Valkey, KeyDB, Dragonfly and ClickHouse: backups and dbtools (here)
 	// and the portgate's TLS (network area) all handle them in this build.
 	reg.Advertise(dbengine.Capability)
+	// Destinations without keys: the panel presigns every storage request.
+	if d.Panel != nil {
+		reg.Advertise(backup.SignedCapability)
+	}
 
 	rpc.HandleUnary(reg, "RunCronNow", func(ctx context.Context, req *agentv1.RunCronNowRequest) (*agentv1.RunCronNowResponse, error) {
 		resp, err := d.Cron.RunNow(ctx, req)

@@ -21,6 +21,378 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// BackupStorageOp names the S3 step of a BackupStorageRequest.
+type BackupStorageOp int32
+
+const (
+	BackupStorageOp_BACKUP_STORAGE_OP_UNSPECIFIED BackupStorageOp = 0
+	// PutObject, presigned: a whole object in one request.
+	BackupStorageOp_BACKUP_STORAGE_OP_PUT BackupStorageOp = 1
+	// CreateMultipartUpload, made by the panel; answers upload_id.
+	BackupStorageOp_BACKUP_STORAGE_OP_CREATE_MULTIPART BackupStorageOp = 2
+	// UploadPart, presigned (PUT <key>?partNumber=<n>&uploadId=<id>).
+	BackupStorageOp_BACKUP_STORAGE_OP_UPLOAD_PART BackupStorageOp = 3
+	// CompleteMultipartUpload, made by the panel with the parts given.
+	BackupStorageOp_BACKUP_STORAGE_OP_COMPLETE_MULTIPART BackupStorageOp = 4
+	// AbortMultipartUpload, made by the panel.
+	BackupStorageOp_BACKUP_STORAGE_OP_ABORT_MULTIPART BackupStorageOp = 5
+	// GetObject, presigned.
+	BackupStorageOp_BACKUP_STORAGE_OP_GET BackupStorageOp = 6
+	// DeleteObject, presigned.
+	BackupStorageOp_BACKUP_STORAGE_OP_DELETE BackupStorageOp = 7
+)
+
+// Enum value maps for BackupStorageOp.
+var (
+	BackupStorageOp_name = map[int32]string{
+		0: "BACKUP_STORAGE_OP_UNSPECIFIED",
+		1: "BACKUP_STORAGE_OP_PUT",
+		2: "BACKUP_STORAGE_OP_CREATE_MULTIPART",
+		3: "BACKUP_STORAGE_OP_UPLOAD_PART",
+		4: "BACKUP_STORAGE_OP_COMPLETE_MULTIPART",
+		5: "BACKUP_STORAGE_OP_ABORT_MULTIPART",
+		6: "BACKUP_STORAGE_OP_GET",
+		7: "BACKUP_STORAGE_OP_DELETE",
+	}
+	BackupStorageOp_value = map[string]int32{
+		"BACKUP_STORAGE_OP_UNSPECIFIED":        0,
+		"BACKUP_STORAGE_OP_PUT":                1,
+		"BACKUP_STORAGE_OP_CREATE_MULTIPART":   2,
+		"BACKUP_STORAGE_OP_UPLOAD_PART":        3,
+		"BACKUP_STORAGE_OP_COMPLETE_MULTIPART": 4,
+		"BACKUP_STORAGE_OP_ABORT_MULTIPART":    5,
+		"BACKUP_STORAGE_OP_GET":                6,
+		"BACKUP_STORAGE_OP_DELETE":             7,
+	}
+)
+
+func (x BackupStorageOp) Enum() *BackupStorageOp {
+	p := new(BackupStorageOp)
+	*p = x
+	return p
+}
+
+func (x BackupStorageOp) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BackupStorageOp) Descriptor() protoreflect.EnumDescriptor {
+	return file_seylo_agent_v1_panel_service_proto_enumTypes[0].Descriptor()
+}
+
+func (BackupStorageOp) Type() protoreflect.EnumType {
+	return &file_seylo_agent_v1_panel_service_proto_enumTypes[0]
+}
+
+func (x BackupStorageOp) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BackupStorageOp.Descriptor instead.
+func (BackupStorageOp) EnumDescriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{0}
+}
+
+type SignBackupRequestsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// BackupDestination.signing_id of the run.
+	SigningId string `protobuf:"bytes,1,opt,name=signing_id,json=signingId,proto3" json:"signing_id,omitempty"`
+	// At most 32 per call.
+	Requests      []*BackupStorageRequest `protobuf:"bytes,2,rep,name=requests,proto3" json:"requests,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SignBackupRequestsRequest) Reset() {
+	*x = SignBackupRequestsRequest{}
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignBackupRequestsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignBackupRequestsRequest) ProtoMessage() {}
+
+func (x *SignBackupRequestsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignBackupRequestsRequest.ProtoReflect.Descriptor instead.
+func (*SignBackupRequestsRequest) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SignBackupRequestsRequest) GetSigningId() string {
+	if x != nil {
+		return x.SigningId
+	}
+	return ""
+}
+
+func (x *SignBackupRequestsRequest) GetRequests() []*BackupStorageRequest {
+	if x != nil {
+		return x.Requests
+	}
+	return nil
+}
+
+// BackupStorageRequest is one S3 step of a backup or restore.
+type BackupStorageRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Op    BackupStorageOp        `protobuf:"varint,1,opt,name=op,proto3,enum=seylo.agent.v1.BackupStorageOp" json:"op,omitempty"`
+	// The full object key (prefix included).
+	Key string `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	// UPLOAD_PART, COMPLETE_MULTIPART, ABORT_MULTIPART: the upload id that
+	// CREATE_MULTIPART returned.
+	UploadId string `protobuf:"bytes,3,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	// UPLOAD_PART: 1 to 10000.
+	PartNumber uint32 `protobuf:"varint,4,opt,name=part_number,json=partNumber,proto3" json:"part_number,omitempty"`
+	// COMPLETE_MULTIPART: every uploaded part, in order.
+	Parts         []*BackupUploadedPart `protobuf:"bytes,5,rep,name=parts,proto3" json:"parts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupStorageRequest) Reset() {
+	*x = BackupStorageRequest{}
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupStorageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupStorageRequest) ProtoMessage() {}
+
+func (x *BackupStorageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupStorageRequest.ProtoReflect.Descriptor instead.
+func (*BackupStorageRequest) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *BackupStorageRequest) GetOp() BackupStorageOp {
+	if x != nil {
+		return x.Op
+	}
+	return BackupStorageOp_BACKUP_STORAGE_OP_UNSPECIFIED
+}
+
+func (x *BackupStorageRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *BackupStorageRequest) GetUploadId() string {
+	if x != nil {
+		return x.UploadId
+	}
+	return ""
+}
+
+func (x *BackupStorageRequest) GetPartNumber() uint32 {
+	if x != nil {
+		return x.PartNumber
+	}
+	return 0
+}
+
+func (x *BackupStorageRequest) GetParts() []*BackupUploadedPart {
+	if x != nil {
+		return x.Parts
+	}
+	return nil
+}
+
+// BackupUploadedPart is one part of a multipart upload.
+type BackupUploadedPart struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	PartNumber uint32                 `protobuf:"varint,1,opt,name=part_number,json=partNumber,proto3" json:"part_number,omitempty"`
+	// The ETag header UploadPart answered with.
+	Etag          string `protobuf:"bytes,2,opt,name=etag,proto3" json:"etag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupUploadedPart) Reset() {
+	*x = BackupUploadedPart{}
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupUploadedPart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupUploadedPart) ProtoMessage() {}
+
+func (x *BackupUploadedPart) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupUploadedPart.ProtoReflect.Descriptor instead.
+func (*BackupUploadedPart) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BackupUploadedPart) GetPartNumber() uint32 {
+	if x != nil {
+		return x.PartNumber
+	}
+	return 0
+}
+
+func (x *BackupUploadedPart) GetEtag() string {
+	if x != nil {
+		return x.Etag
+	}
+	return ""
+}
+
+type SignBackupRequestsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// One per request, in the same order.
+	Requests      []*SignedStorageRequest `protobuf:"bytes,1,rep,name=requests,proto3" json:"requests,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SignBackupRequestsResponse) Reset() {
+	*x = SignBackupRequestsResponse{}
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignBackupRequestsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignBackupRequestsResponse) ProtoMessage() {}
+
+func (x *SignBackupRequestsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignBackupRequestsResponse.ProtoReflect.Descriptor instead.
+func (*SignBackupRequestsResponse) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SignBackupRequestsResponse) GetRequests() []*SignedStorageRequest {
+	if x != nil {
+		return x.Requests
+	}
+	return nil
+}
+
+// SignedStorageRequest answers one BackupStorageRequest. For a presigned
+// request (SigV4 query authentication) send it with this method to this
+// URL, adding only Content-Length and Content-Type (and the body of a PUT):
+// no other header is signed. The steps the panel made itself have no URL.
+type SignedStorageRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Method string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	Url    string                 `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	// CREATE_MULTIPART: the new upload's id.
+	UploadId      string `protobuf:"bytes,3,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SignedStorageRequest) Reset() {
+	*x = SignedStorageRequest{}
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignedStorageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignedStorageRequest) ProtoMessage() {}
+
+func (x *SignedStorageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignedStorageRequest.ProtoReflect.Descriptor instead.
+func (*SignedStorageRequest) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SignedStorageRequest) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *SignedStorageRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *SignedStorageRequest) GetUploadId() string {
+	if x != nil {
+		return x.UploadId
+	}
+	return ""
+}
+
 type CheckEdgeAccessRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The ticket's subject: "box:<service id>" or "db-ui:<service id>".
@@ -33,7 +405,7 @@ type CheckEdgeAccessRequest struct {
 
 func (x *CheckEdgeAccessRequest) Reset() {
 	*x = CheckEdgeAccessRequest{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[0]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +417,7 @@ func (x *CheckEdgeAccessRequest) String() string {
 func (*CheckEdgeAccessRequest) ProtoMessage() {}
 
 func (x *CheckEdgeAccessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[0]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +430,7 @@ func (x *CheckEdgeAccessRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckEdgeAccessRequest.ProtoReflect.Descriptor instead.
 func (*CheckEdgeAccessRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{0}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CheckEdgeAccessRequest) GetSubject() string {
@@ -87,7 +459,7 @@ type CheckEdgeAccessResponse struct {
 
 func (x *CheckEdgeAccessResponse) Reset() {
 	*x = CheckEdgeAccessResponse{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -99,7 +471,7 @@ func (x *CheckEdgeAccessResponse) String() string {
 func (*CheckEdgeAccessResponse) ProtoMessage() {}
 
 func (x *CheckEdgeAccessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -112,7 +484,7 @@ func (x *CheckEdgeAccessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckEdgeAccessResponse.ProtoReflect.Descriptor instead.
 func (*CheckEdgeAccessResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{1}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CheckEdgeAccessResponse) GetAllowed() bool {
@@ -133,7 +505,7 @@ type ReportCrashRequest struct {
 
 func (x *ReportCrashRequest) Reset() {
 	*x = ReportCrashRequest{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[2]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -145,7 +517,7 @@ func (x *ReportCrashRequest) String() string {
 func (*ReportCrashRequest) ProtoMessage() {}
 
 func (x *ReportCrashRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[2]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -158,7 +530,7 @@ func (x *ReportCrashRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCrashRequest.ProtoReflect.Descriptor instead.
 func (*ReportCrashRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{2}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReportCrashRequest) GetOutboxId() uint64 {
@@ -183,7 +555,7 @@ type ReportCrashResponse struct {
 
 func (x *ReportCrashResponse) Reset() {
 	*x = ReportCrashResponse{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +567,7 @@ func (x *ReportCrashResponse) String() string {
 func (*ReportCrashResponse) ProtoMessage() {}
 
 func (x *ReportCrashResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[3]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +580,7 @@ func (x *ReportCrashResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportCrashResponse.ProtoReflect.Descriptor instead.
 func (*ReportCrashResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{3}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{8}
 }
 
 type ReportEventRequest struct {
@@ -221,7 +593,7 @@ type ReportEventRequest struct {
 
 func (x *ReportEventRequest) Reset() {
 	*x = ReportEventRequest{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -233,7 +605,7 @@ func (x *ReportEventRequest) String() string {
 func (*ReportEventRequest) ProtoMessage() {}
 
 func (x *ReportEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[4]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -246,7 +618,7 @@ func (x *ReportEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportEventRequest.ProtoReflect.Descriptor instead.
 func (*ReportEventRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{4}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ReportEventRequest) GetOutboxId() uint64 {
@@ -271,7 +643,7 @@ type ReportEventResponse struct {
 
 func (x *ReportEventResponse) Reset() {
 	*x = ReportEventResponse{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -283,7 +655,7 @@ func (x *ReportEventResponse) String() string {
 func (*ReportEventResponse) ProtoMessage() {}
 
 func (x *ReportEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -296,7 +668,7 @@ func (x *ReportEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportEventResponse.ProtoReflect.Descriptor instead.
 func (*ReportEventResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{10}
 }
 
 type GetDesiredStateRequest struct {
@@ -309,7 +681,7 @@ type GetDesiredStateRequest struct {
 
 func (x *GetDesiredStateRequest) Reset() {
 	*x = GetDesiredStateRequest{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +693,7 @@ func (x *GetDesiredStateRequest) String() string {
 func (*GetDesiredStateRequest) ProtoMessage() {}
 
 func (x *GetDesiredStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +706,7 @@ func (x *GetDesiredStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDesiredStateRequest.ProtoReflect.Descriptor instead.
 func (*GetDesiredStateRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetDesiredStateRequest) GetKnownRevision() uint64 {
@@ -354,7 +726,7 @@ type GetDesiredStateResponse struct {
 
 func (x *GetDesiredStateResponse) Reset() {
 	*x = GetDesiredStateResponse{}
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -366,7 +738,7 @@ func (x *GetDesiredStateResponse) String() string {
 func (*GetDesiredStateResponse) ProtoMessage() {}
 
 func (x *GetDesiredStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_panel_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -379,7 +751,7 @@ func (x *GetDesiredStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDesiredStateResponse.ProtoReflect.Descriptor instead.
 func (*GetDesiredStateResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{7}
+	return file_seylo_agent_v1_panel_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetDesiredStateResponse) GetState() *DesiredState {
@@ -393,7 +765,28 @@ var File_seylo_agent_v1_panel_service_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_panel_service_proto_rawDesc = "" +
 	"\n" +
-	"\"seylo/agent/v1/panel_service.proto\x12\x0eseylo.agent.v1\x1a\x1cseylo/agent/v1/desired.proto\x1a\x1bseylo/agent/v1/events.proto\x1a\x1cseylo/agent/v1/options.proto\x1a\x1bseylo/agent/v1/tunnel.proto\"K\n" +
+	"\"seylo/agent/v1/panel_service.proto\x12\x0eseylo.agent.v1\x1a\x1cseylo/agent/v1/desired.proto\x1a\x1bseylo/agent/v1/events.proto\x1a\x1cseylo/agent/v1/options.proto\x1a\x1bseylo/agent/v1/tunnel.proto\"|\n" +
+	"\x19SignBackupRequestsRequest\x12\x1d\n" +
+	"\n" +
+	"signing_id\x18\x01 \x01(\tR\tsigningId\x12@\n" +
+	"\brequests\x18\x02 \x03(\v2$.seylo.agent.v1.BackupStorageRequestR\brequests\"\xd1\x01\n" +
+	"\x14BackupStorageRequest\x12/\n" +
+	"\x02op\x18\x01 \x01(\x0e2\x1f.seylo.agent.v1.BackupStorageOpR\x02op\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x12\x1b\n" +
+	"\tupload_id\x18\x03 \x01(\tR\buploadId\x12\x1f\n" +
+	"\vpart_number\x18\x04 \x01(\rR\n" +
+	"partNumber\x128\n" +
+	"\x05parts\x18\x05 \x03(\v2\".seylo.agent.v1.BackupUploadedPartR\x05parts\"I\n" +
+	"\x12BackupUploadedPart\x12\x1f\n" +
+	"\vpart_number\x18\x01 \x01(\rR\n" +
+	"partNumber\x12\x12\n" +
+	"\x04etag\x18\x02 \x01(\tR\x04etag\"^\n" +
+	"\x1aSignBackupRequestsResponse\x12@\n" +
+	"\brequests\x18\x01 \x03(\v2$.seylo.agent.v1.SignedStorageRequestR\brequests\"]\n" +
+	"\x14SignedStorageRequest\x12\x16\n" +
+	"\x06method\x18\x01 \x01(\tR\x06method\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1b\n" +
+	"\tupload_id\x18\x03 \x01(\tR\buploadId\"K\n" +
 	"\x16CheckEdgeAccessRequest\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"3\n" +
@@ -410,13 +803,23 @@ const file_seylo_agent_v1_panel_service_proto_rawDesc = "" +
 	"\x16GetDesiredStateRequest\x12%\n" +
 	"\x0eknown_revision\x18\x01 \x01(\x04R\rknownRevision\"M\n" +
 	"\x17GetDesiredStateResponse\x122\n" +
-	"\x05state\x18\x01 \x01(\v2\x1c.seylo.agent.v1.DesiredStateR\x05state2\xe4\x04\n" +
+	"\x05state\x18\x01 \x01(\v2\x1c.seylo.agent.v1.DesiredStateR\x05state*\xa4\x02\n" +
+	"\x0fBackupStorageOp\x12!\n" +
+	"\x1dBACKUP_STORAGE_OP_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15BACKUP_STORAGE_OP_PUT\x10\x01\x12&\n" +
+	"\"BACKUP_STORAGE_OP_CREATE_MULTIPART\x10\x02\x12!\n" +
+	"\x1dBACKUP_STORAGE_OP_UPLOAD_PART\x10\x03\x12(\n" +
+	"$BACKUP_STORAGE_OP_COMPLETE_MULTIPART\x10\x04\x12%\n" +
+	"!BACKUP_STORAGE_OP_ABORT_MULTIPART\x10\x05\x12\x19\n" +
+	"\x15BACKUP_STORAGE_OP_GET\x10\x06\x12\x1c\n" +
+	"\x18BACKUP_STORAGE_OP_DELETE\x10\a2\xec\x05\n" +
 	"\fPanelService\x12k\n" +
 	"\vReportCrash\x12\".seylo.agent.v1.ReportCrashRequest\x1a#.seylo.agent.v1.ReportCrashResponse\"\x13\xca\xf3\x18\x0fpanel.report.v1\x12k\n" +
 	"\vReportEvent\x12\".seylo.agent.v1.ReportEventRequest\x1a#.seylo.agent.v1.ReportEventResponse\"\x13\xca\xf3\x18\x0fpanel.report.v1\x12x\n" +
 	"\x0fGetDesiredState\x12&.seylo.agent.v1.GetDesiredStateRequest\x1a'.seylo.agent.v1.GetDesiredStateResponse\"\x14\xca\xf3\x18\x10panel.desired.v1\x12\x81\x01\n" +
 	"\x0eRegistryTunnel\x12%.seylo.agent.v1.RegistryTunnelRequest\x1a&.seylo.agent.v1.RegistryTunnelResponse\" \xc0\xf3\x18\x03\xca\xf3\x18\x18panel.registry-tunnel.v1\x12|\n" +
-	"\x0fCheckEdgeAccess\x12&.seylo.agent.v1.CheckEdgeAccessRequest\x1a'.seylo.agent.v1.CheckEdgeAccessResponse\"\x18\xca\xf3\x18\x14panel.edge-access.v1B\xbc\x01\n" +
+	"\x0fCheckEdgeAccess\x12&.seylo.agent.v1.CheckEdgeAccessRequest\x1a'.seylo.agent.v1.CheckEdgeAccessResponse\"\x18\xca\xf3\x18\x14panel.edge-access.v1\x12\x85\x01\n" +
+	"\x12SignBackupRequests\x12).seylo.agent.v1.SignBackupRequestsRequest\x1a*.seylo.agent.v1.SignBackupRequestsResponse\"\x18\xca\xf3\x18\x14panel.backup-sign.v1B\xbc\x01\n" +
 	"\x12com.seylo.agent.v1B\x11PanelServiceProtoP\x01Z9github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1;agentv1\xa2\x02\x03SAX\xaa\x02\x0eSeylo.Agent.V1\xca\x02\x0eSeylo\\Agent\\V1\xe2\x02\x1aSeylo\\Agent\\V1\\GPBMetadata\xea\x02\x10Seylo::Agent::V1b\x06proto3"
 
 var (
@@ -431,41 +834,54 @@ func file_seylo_agent_v1_panel_service_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_panel_service_proto_rawDescData
 }
 
-var file_seylo_agent_v1_panel_service_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_seylo_agent_v1_panel_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_seylo_agent_v1_panel_service_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_seylo_agent_v1_panel_service_proto_goTypes = []any{
-	(*CheckEdgeAccessRequest)(nil),  // 0: seylo.agent.v1.CheckEdgeAccessRequest
-	(*CheckEdgeAccessResponse)(nil), // 1: seylo.agent.v1.CheckEdgeAccessResponse
-	(*ReportCrashRequest)(nil),      // 2: seylo.agent.v1.ReportCrashRequest
-	(*ReportCrashResponse)(nil),     // 3: seylo.agent.v1.ReportCrashResponse
-	(*ReportEventRequest)(nil),      // 4: seylo.agent.v1.ReportEventRequest
-	(*ReportEventResponse)(nil),     // 5: seylo.agent.v1.ReportEventResponse
-	(*GetDesiredStateRequest)(nil),  // 6: seylo.agent.v1.GetDesiredStateRequest
-	(*GetDesiredStateResponse)(nil), // 7: seylo.agent.v1.GetDesiredStateResponse
-	(*CrashReport)(nil),             // 8: seylo.agent.v1.CrashReport
-	(*Event)(nil),                   // 9: seylo.agent.v1.Event
-	(*DesiredState)(nil),            // 10: seylo.agent.v1.DesiredState
-	(*RegistryTunnelRequest)(nil),   // 11: seylo.agent.v1.RegistryTunnelRequest
-	(*RegistryTunnelResponse)(nil),  // 12: seylo.agent.v1.RegistryTunnelResponse
+	(BackupStorageOp)(0),               // 0: seylo.agent.v1.BackupStorageOp
+	(*SignBackupRequestsRequest)(nil),  // 1: seylo.agent.v1.SignBackupRequestsRequest
+	(*BackupStorageRequest)(nil),       // 2: seylo.agent.v1.BackupStorageRequest
+	(*BackupUploadedPart)(nil),         // 3: seylo.agent.v1.BackupUploadedPart
+	(*SignBackupRequestsResponse)(nil), // 4: seylo.agent.v1.SignBackupRequestsResponse
+	(*SignedStorageRequest)(nil),       // 5: seylo.agent.v1.SignedStorageRequest
+	(*CheckEdgeAccessRequest)(nil),     // 6: seylo.agent.v1.CheckEdgeAccessRequest
+	(*CheckEdgeAccessResponse)(nil),    // 7: seylo.agent.v1.CheckEdgeAccessResponse
+	(*ReportCrashRequest)(nil),         // 8: seylo.agent.v1.ReportCrashRequest
+	(*ReportCrashResponse)(nil),        // 9: seylo.agent.v1.ReportCrashResponse
+	(*ReportEventRequest)(nil),         // 10: seylo.agent.v1.ReportEventRequest
+	(*ReportEventResponse)(nil),        // 11: seylo.agent.v1.ReportEventResponse
+	(*GetDesiredStateRequest)(nil),     // 12: seylo.agent.v1.GetDesiredStateRequest
+	(*GetDesiredStateResponse)(nil),    // 13: seylo.agent.v1.GetDesiredStateResponse
+	(*CrashReport)(nil),                // 14: seylo.agent.v1.CrashReport
+	(*Event)(nil),                      // 15: seylo.agent.v1.Event
+	(*DesiredState)(nil),               // 16: seylo.agent.v1.DesiredState
+	(*RegistryTunnelRequest)(nil),      // 17: seylo.agent.v1.RegistryTunnelRequest
+	(*RegistryTunnelResponse)(nil),     // 18: seylo.agent.v1.RegistryTunnelResponse
 }
 var file_seylo_agent_v1_panel_service_proto_depIdxs = []int32{
-	8,  // 0: seylo.agent.v1.ReportCrashRequest.report:type_name -> seylo.agent.v1.CrashReport
-	9,  // 1: seylo.agent.v1.ReportEventRequest.event:type_name -> seylo.agent.v1.Event
-	10, // 2: seylo.agent.v1.GetDesiredStateResponse.state:type_name -> seylo.agent.v1.DesiredState
-	2,  // 3: seylo.agent.v1.PanelService.ReportCrash:input_type -> seylo.agent.v1.ReportCrashRequest
-	4,  // 4: seylo.agent.v1.PanelService.ReportEvent:input_type -> seylo.agent.v1.ReportEventRequest
-	6,  // 5: seylo.agent.v1.PanelService.GetDesiredState:input_type -> seylo.agent.v1.GetDesiredStateRequest
-	11, // 6: seylo.agent.v1.PanelService.RegistryTunnel:input_type -> seylo.agent.v1.RegistryTunnelRequest
-	0,  // 7: seylo.agent.v1.PanelService.CheckEdgeAccess:input_type -> seylo.agent.v1.CheckEdgeAccessRequest
-	3,  // 8: seylo.agent.v1.PanelService.ReportCrash:output_type -> seylo.agent.v1.ReportCrashResponse
-	5,  // 9: seylo.agent.v1.PanelService.ReportEvent:output_type -> seylo.agent.v1.ReportEventResponse
-	7,  // 10: seylo.agent.v1.PanelService.GetDesiredState:output_type -> seylo.agent.v1.GetDesiredStateResponse
-	12, // 11: seylo.agent.v1.PanelService.RegistryTunnel:output_type -> seylo.agent.v1.RegistryTunnelResponse
-	1,  // 12: seylo.agent.v1.PanelService.CheckEdgeAccess:output_type -> seylo.agent.v1.CheckEdgeAccessResponse
-	8,  // [8:13] is the sub-list for method output_type
-	3,  // [3:8] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	2,  // 0: seylo.agent.v1.SignBackupRequestsRequest.requests:type_name -> seylo.agent.v1.BackupStorageRequest
+	0,  // 1: seylo.agent.v1.BackupStorageRequest.op:type_name -> seylo.agent.v1.BackupStorageOp
+	3,  // 2: seylo.agent.v1.BackupStorageRequest.parts:type_name -> seylo.agent.v1.BackupUploadedPart
+	5,  // 3: seylo.agent.v1.SignBackupRequestsResponse.requests:type_name -> seylo.agent.v1.SignedStorageRequest
+	14, // 4: seylo.agent.v1.ReportCrashRequest.report:type_name -> seylo.agent.v1.CrashReport
+	15, // 5: seylo.agent.v1.ReportEventRequest.event:type_name -> seylo.agent.v1.Event
+	16, // 6: seylo.agent.v1.GetDesiredStateResponse.state:type_name -> seylo.agent.v1.DesiredState
+	8,  // 7: seylo.agent.v1.PanelService.ReportCrash:input_type -> seylo.agent.v1.ReportCrashRequest
+	10, // 8: seylo.agent.v1.PanelService.ReportEvent:input_type -> seylo.agent.v1.ReportEventRequest
+	12, // 9: seylo.agent.v1.PanelService.GetDesiredState:input_type -> seylo.agent.v1.GetDesiredStateRequest
+	17, // 10: seylo.agent.v1.PanelService.RegistryTunnel:input_type -> seylo.agent.v1.RegistryTunnelRequest
+	6,  // 11: seylo.agent.v1.PanelService.CheckEdgeAccess:input_type -> seylo.agent.v1.CheckEdgeAccessRequest
+	1,  // 12: seylo.agent.v1.PanelService.SignBackupRequests:input_type -> seylo.agent.v1.SignBackupRequestsRequest
+	9,  // 13: seylo.agent.v1.PanelService.ReportCrash:output_type -> seylo.agent.v1.ReportCrashResponse
+	11, // 14: seylo.agent.v1.PanelService.ReportEvent:output_type -> seylo.agent.v1.ReportEventResponse
+	13, // 15: seylo.agent.v1.PanelService.GetDesiredState:output_type -> seylo.agent.v1.GetDesiredStateResponse
+	18, // 16: seylo.agent.v1.PanelService.RegistryTunnel:output_type -> seylo.agent.v1.RegistryTunnelResponse
+	7,  // 17: seylo.agent.v1.PanelService.CheckEdgeAccess:output_type -> seylo.agent.v1.CheckEdgeAccessResponse
+	4,  // 18: seylo.agent.v1.PanelService.SignBackupRequests:output_type -> seylo.agent.v1.SignBackupRequestsResponse
+	13, // [13:19] is the sub-list for method output_type
+	7,  // [7:13] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_panel_service_proto_init() }
@@ -482,13 +898,14 @@ func file_seylo_agent_v1_panel_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_panel_service_proto_rawDesc), len(file_seylo_agent_v1_panel_service_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   8,
+			NumEnums:      1,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_seylo_agent_v1_panel_service_proto_goTypes,
 		DependencyIndexes: file_seylo_agent_v1_panel_service_proto_depIdxs,
+		EnumInfos:         file_seylo_agent_v1_panel_service_proto_enumTypes,
 		MessageInfos:      file_seylo_agent_v1_panel_service_proto_msgTypes,
 	}.Build()
 	File_seylo_agent_v1_panel_service_proto = out.File

@@ -16,6 +16,10 @@
 //   CheckEdgeAccess           whether the user of an edge tool session (a Box or a
 //                             database web UI) may keep it; the agent asks about
 //                             each session at most once a minute.
+//   SignBackupRequests        the S3 steps of a backup or restore running on the
+//                             node: presigned URLs, or the multipart steps made by
+//                             the panel (modules/backups/signing.ts), so nodes never
+//                             hold a destination's keys.
 
 import { clone, create, fromBinary, toBinary, toJson } from "@bufbuild/protobuf";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
@@ -33,6 +37,10 @@ import {
   ReportCrashResponseSchema,
   ReportEventRequestSchema,
   ReportEventResponseSchema,
+  type SignBackupRequestsRequest,
+  SignBackupRequestsRequestSchema,
+  SignBackupRequestsResponseSchema,
+  type SignedStorageRequest,
   StatusCode,
 } from "@seylo/proto";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -64,12 +72,20 @@ export interface PanelServiceDeps {
   reportBudgetExceeded?(nodeId: string, lane: ReportLane): void;
   /** CheckEdgeAccess: whether the ticket's user may keep the tool session ("box:<id>", "db-ui:<id>") on this node. */
   edgeAccessAllowed(nodeId: string, request: { subject: string; userId: string }): boolean;
+  /** SignBackupRequests: presigned URLs for a run on this node, or a PanelServiceError (modules/backups/signing.ts). */
+  signBackupRequests(nodeId: string, request: SignBackupRequestsRequest): Promise<SignedStorageRequest[]>;
 }
 
 const wire = (name: string) => `/${PanelService.typeName}/${name}`;
 
 /** Every PanelService method this panel serves, by capability. */
-export const panelCapabilities = ["panel.report.v1", "panel.desired.v1", "panel.registry-tunnel.v1", "panel.edge-access.v1"] as const;
+export const panelCapabilities = [
+  "panel.report.v1",
+  "panel.desired.v1",
+  "panel.registry-tunnel.v1",
+  "panel.edge-access.v1",
+  "panel.backup-sign.v1",
+] as const;
 
 const crashActions: Record<CrashAction, StoredCrashAction> = {
   [CrashAction.UNSPECIFIED]: "restarting",
@@ -100,6 +116,11 @@ const desiredPerSecond = 0.1;
 /** CheckEdgeAccess per node: one a minute per open tool session; a few hundred sessions fit. */
 const edgeAccessBurst = 300;
 const edgeAccessPerSecond = 5;
+/** SignBackupRequests per node: one call per 32 MiB part, so a few gigabit of uploads fit. */
+const signBurst = 600;
+const signPerSecond = 50;
+/** A CompleteMultipartUpload names up to 10,000 parts with their ETags. */
+const maxSignRequestBytes = 1 << 20;
 
 export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers {
   const { db, hub, logger } = deps;
@@ -116,6 +137,11 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
   const edgeAccessLimiter = createRateLimiter({
     standard: { burst: edgeAccessBurst, refillPerSecond: edgeAccessPerSecond },
     strict: { burst: edgeAccessBurst, refillPerSecond: edgeAccessPerSecond },
+  });
+
+  const signLimiter = createRateLimiter({
+    standard: { burst: signBurst, refillPerSecond: signPerSecond },
+    strict: { burst: signBurst, refillPerSecond: signPerSecond },
   });
 
   const budget = createReportBudget({
@@ -245,6 +271,16 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
     return toBinary(CheckEdgeAccessResponseSchema, create(CheckEdgeAccessResponseSchema, { allowed }));
   };
 
+  const signBackupRequests = async (nodeId: string, bytes: Uint8Array): Promise<Uint8Array> => {
+    if (bytes.length > maxSignRequestBytes) throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, "The request is too large.");
+    if (signLimiter.take(`node:${nodeId}`, "standard") > 0) {
+      throw new PanelServiceError(StatusCode.RESOURCE_EXHAUSTED, "Too many signing requests. Retry later.");
+    }
+    const request = fromBinary(SignBackupRequestsRequestSchema, bytes);
+    const requests = await deps.signBackupRequests(nodeId, request);
+    return toBinary(SignBackupRequestsResponseSchema, create(SignBackupRequestsResponseSchema, { requests }));
+  };
+
   const registryTunnel = async (nodeId: string, stream: IncomingStream): Promise<Uint8Array> => {
     const panelNode = db.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get();
     if (!panelNode || !hub.isOnline(panelNode.id)) {
@@ -297,6 +333,8 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
           return getDesiredState(nodeId, request);
         case wire("CheckEdgeAccess"):
           return checkEdgeAccess(nodeId, request);
+        case wire("SignBackupRequests"):
+          return signBackupRequests(nodeId, request);
         default:
           throw new PanelServiceError(StatusCode.UNIMPLEMENTED, `${method} is not a unary PanelService method of this panel.`);
       }

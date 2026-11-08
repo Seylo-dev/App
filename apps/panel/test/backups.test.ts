@@ -9,7 +9,9 @@ import { runDueBackups } from "../src/modules/backups/schedule";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
 
-// A tiny path-style S3: PUT, GET and DELETE on /<bucket>/<key>; access key "BADKEY" is refused.
+const signed = "backup.signed.v1";
+
+// A tiny path-style S3: PUT, GET and DELETE on /<bucket>/<key>, ListObjectsV2; access key "BADKEY" is refused.
 const objects = new Map<string, string>();
 let s3: ReturnType<typeof Bun.serve>;
 beforeAll(() => {
@@ -23,6 +25,15 @@ beforeAll(() => {
       if (req.method === "PUT") {
         objects.set(path, await req.text());
         return new Response("");
+      }
+      const url = new URL(req.url);
+      if (req.method === "GET" && url.searchParams.get("list-type") === "2") {
+        const prefix = `/backups/${url.searchParams.get("prefix") ?? ""}`;
+        const keys = [...objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+        const contents = keys.map((k) => `<Contents><Key>${k.slice("/backups/".length)}</Key><Size>1</Size></Contents>`).join("");
+        return new Response(
+          `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>backups</Name><IsTruncated>false</IsTruncated>${contents}</ListBucketResult>`,
+        );
       }
       if (req.method === "GET") {
         const body = objects.get(path);
@@ -167,9 +178,9 @@ describe("schedules and runs", () => {
       runId: string;
       keepLast: number;
       subject: { what: { case: string } };
-      destination: { secretAccessKey: string; prefix: string };
+      destination: { accessKeyId: string; secretAccessKey: string; prefix: string; signingId: string };
     }[] = [];
-    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void requests.push(req) }, ["restoreBackup"]);
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void requests.push(req) }, ["restoreBackup"], [signed]);
     const runIds: string[] = [];
     for (let i = 0; i < 3; i++) {
       const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: policy.body.id }, { cookie });
@@ -180,10 +191,21 @@ describe("schedules and runs", () => {
     }
     expect(requests[0]).toMatchObject({
       backupId: policy.body.id,
-      keepLast: 2,
+      // The node cannot list or delete in the bucket: the panel prunes.
+      keepLast: 0,
       subject: { serviceId: dbId, what: { case: "database" } },
-      destination: { secretAccessKey: "super-secret-key", prefix: "seylo", pathStyle: true, bucket: "backups" },
+      // No keys: the node asks the panel to sign each request for this run (fix-backup-signing.test.ts).
+      destination: {
+        accessKeyId: "",
+        secretAccessKey: "",
+        signingId: runIds[0] as string,
+        prefix: "seylo",
+        pathStyle: true,
+        bucket: "backups",
+      },
     });
+    expect(JSON.stringify(requests)).not.toContain("super-secret-key");
+    expect(JSON.stringify(requests)).not.toContain("GOODKEY");
     // A redelivered result changes nothing.
     backupResult(node.id, runIds[2] as string, false);
 
@@ -202,11 +224,45 @@ describe("schedules and runs", () => {
     agent.disconnect();
   });
 
+  test("the panel prunes a policy's folder past keepLast, newest kept, nothing outside it", async () => {
+    const { node, project, dbId, destinationId } = await setup();
+    const other = seedService(panel, { projectId: project.id, name: "other", nodeIds: [node.id] });
+    const policy = await callOp(
+      panel,
+      backupOps.createPolicy,
+      { serviceId: dbId, target: "database", destinationId, schedule: "0 3 * * *", keepLast: 2 },
+      { cookie },
+    );
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, ["restoreBackup"], [signed]);
+    const folder = `/backups/seylo/${dbId}/${policy.body.id}/`;
+    const kept = [
+      `${folder}20260102T030000Z-b.dump`,
+      `${folder}notes.txt`,
+      `${folder}sub/20250101T030000Z-c.dump`,
+      `/backups/seylo/${other.id}/${policy.body.id}/20200101T030000Z-x.dump`,
+    ];
+    objects.set(`${folder}20260101T030000Z-a.dump`, "oldest");
+    for (const k of kept) objects.set(k, "keep");
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, policyId: policy.body.id }, { cookie });
+    const key = `seylo/${dbId}/${policy.body.id}/20260103T030000Z-${run.body.id}.dump`;
+    objects.set(`/backups/${key}`, "newest");
+    backupResult(node.id, run.body.id, true, key);
+    await panel.runner.runDue(panel.deps);
+    expect([...objects.keys()].sort()).toEqual([...kept, `/backups/${key}`].sort());
+
+    // Lowering keepLast prunes right away.
+    await callOp(panel, backupOps.updatePolicy, { serviceId: dbId, policyId: policy.body.id, keepLast: 1 }, { cookie });
+    await panel.runner.runDue(panel.deps);
+    expect(objects.has(`${folder}20260102T030000Z-b.dump`)).toBe(false);
+    expect(objects.has(`/backups/${key}`)).toBe(true);
+    agent.disconnect();
+  });
+
   test("failures are recorded: the node offline, or the agent's error", async () => {
     const { node, dbId, destinationId } = await setup();
     const offline = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
     expect(offline.status).toBe(503);
-    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, ["restoreBackup"]);
+    const agent = fakeAgent(panel, node.id, { runBackup: () => ({}) }, ["restoreBackup"], [signed]);
     const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
     backupResult(node.id, run.body.id, false);
     const runs = await callOp(panel, backupOps.listRuns, { serviceId: dbId }, { cookie });
@@ -215,6 +271,38 @@ describe("schedules and runs", () => {
       ["failed", "The node is offline. Try again when it is back."],
     ]);
     agent.disconnect();
+  });
+
+  test("an agent that cannot ask the panel to sign gets no keys: backups and restores fail with what to do", async () => {
+    const { node, dbId, destinationId } = await setup();
+    const calls: string[] = [];
+    const old = fakeAgent(panel, node.id, {
+      runBackup: () => void calls.push("runBackup"),
+      restoreBackup: () => {
+        calls.push("restoreBackup");
+        return { restoredBytes: 1n };
+      },
+    });
+    const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    expect(run.status).toBe(409);
+    expect(run.body.error.message).toContain("too old for backups");
+    const row = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.serviceId, dbId)).get();
+    expect(row).toMatchObject({ status: "failed" });
+    expect(row?.error).toContain("Update the node");
+
+    // A backup an up-to-date agent made, restored after the node went back to an old agent.
+    panel.deps.db
+      .update(backupRuns)
+      .set({ status: "succeeded", objectKey: keyFor(row?.id as string), error: null })
+      .where(eq(backupRuns.id, row?.id as string))
+      .run();
+    const restore = await callOp(panel, backupOps.restore, { serviceId: dbId, runId: row?.id as string, confirmName: "db" }, { cookie });
+    await panel.runner.runDue(panel.deps);
+    const failed = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, restore.body.id)).get();
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toContain("too old for backups");
+    expect(calls).toEqual([]);
+    old.disconnect();
   });
 
   test("volume backups need one of the service's volumes; the scheduler starts due ones and moves on", async () => {
@@ -244,7 +332,7 @@ describe("schedules and runs", () => {
     expect(policy.body).toMatchObject({ volumeName: "uploads", stopService: true });
 
     const seen: { subject: { what: { case: string; value: string } }; stopService: boolean }[] = [];
-    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void seen.push(req) }, ["restoreBackup"]);
+    const agent = fakeAgent(panel, node.id, { runBackup: (req) => void seen.push(req) }, ["restoreBackup"], [signed]);
     const past = new Date(Date.now() - 60_000);
     panel.deps.db.update(backupPolicies).set({ nextRunAt: past }).where(eq(backupPolicies.id, policy.body.id)).run();
     expect(await runDueBackups(panel.deps)).toBe(1);
@@ -258,13 +346,19 @@ describe("schedules and runs", () => {
   test("restore runs as a job on the node; delete removes the object", async () => {
     const { node, dbId, destinationId } = await setup();
     const restoreCalls: { objectKey: string }[] = [];
-    const agent = fakeAgent(panel, node.id, {
-      runBackup: () => ({}),
-      restoreBackup: (req) => {
-        restoreCalls.push(req);
-        return { restoredBytes: 999n };
+    const agent = fakeAgent(
+      panel,
+      node.id,
+      {
+        runBackup: () => ({}),
+        restoreBackup: (req) => {
+          restoreCalls.push(req);
+          return { restoredBytes: 999n };
+        },
       },
-    });
+      [],
+      [signed],
+    );
     const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
     const key = keyFor(run.body.id);
     objects.set(`/backups/${key}`, "dump bytes");
@@ -294,13 +388,19 @@ describe("schedules and runs", () => {
     const { node, project, dbId, destinationId } = await setup();
     const other = seedService(panel, { projectId: project.id, name: "other", nodeIds: [node.id] });
     const restoreCalls: { objectKey: string }[] = [];
-    const agent = fakeAgent(panel, node.id, {
-      runBackup: () => ({}),
-      restoreBackup: (req) => {
-        restoreCalls.push(req);
-        return { restoredBytes: 1n };
+    const agent = fakeAgent(
+      panel,
+      node.id,
+      {
+        runBackup: () => ({}),
+        restoreBackup: (req) => {
+          restoreCalls.push(req);
+          return { restoredBytes: 1n };
+        },
       },
-    });
+      [],
+      [signed],
+    );
     const othersKey = `seylo/${other.id}/manual/20260101T030000Z-${crypto.randomUUID()}.tar.gz`;
     objects.set(`/backups/${othersKey}`, "someone else's volume");
 

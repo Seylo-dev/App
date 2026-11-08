@@ -41,6 +41,81 @@ service PanelService {
   rpc CheckEdgeAccess(CheckEdgeAccessRequest) returns (CheckEdgeAccessResponse) {
     option (capability) = "panel.edge-access.v1";
   }
+
+  // The S3 requests of a backup or restore the panel started on this node
+  // (BackupDestination.signing_id), so the node moves the bytes straight to
+  // the bucket without holding the destination's keys: the panel presigns
+  // the requests the node sends (PUT, UPLOAD_PART, GET, DELETE) and makes
+  // the multipart create, complete and abort steps itself. Only for that
+  // run's own object (a restore: the restored backup's GET); anything else,
+  // a finished run or another node's run is PERMISSION_DENIED for the whole
+  // call. Added in 0.2.
+  rpc SignBackupRequests(SignBackupRequestsRequest) returns (SignBackupRequestsResponse) {
+    option (capability) = "panel.backup-sign.v1";
+  }
+}
+
+message SignBackupRequestsRequest {
+  // BackupDestination.signing_id of the run.
+  string signing_id = 1;
+  // At most 32 per call.
+  repeated BackupStorageRequest requests = 2;
+}
+
+// BackupStorageRequest is one S3 step of a backup or restore.
+message BackupStorageRequest {
+  BackupStorageOp op = 1;
+  // The full object key (prefix included).
+  string key = 2;
+  // UPLOAD_PART, COMPLETE_MULTIPART, ABORT_MULTIPART: the upload id that
+  // CREATE_MULTIPART returned.
+  string upload_id = 3;
+  // UPLOAD_PART: 1 to 10000.
+  uint32 part_number = 4;
+  // COMPLETE_MULTIPART: every uploaded part, in order.
+  repeated BackupUploadedPart parts = 5;
+}
+
+// BackupUploadedPart is one part of a multipart upload.
+message BackupUploadedPart {
+  uint32 part_number = 1;
+  // The ETag header UploadPart answered with.
+  string etag = 2;
+}
+
+// BackupStorageOp names the S3 step of a BackupStorageRequest.
+enum BackupStorageOp {
+  BACKUP_STORAGE_OP_UNSPECIFIED = 0;
+  // PutObject, presigned: a whole object in one request.
+  BACKUP_STORAGE_OP_PUT = 1;
+  // CreateMultipartUpload, made by the panel; answers upload_id.
+  BACKUP_STORAGE_OP_CREATE_MULTIPART = 2;
+  // UploadPart, presigned (PUT <key>?partNumber=<n>&uploadId=<id>).
+  BACKUP_STORAGE_OP_UPLOAD_PART = 3;
+  // CompleteMultipartUpload, made by the panel with the parts given.
+  BACKUP_STORAGE_OP_COMPLETE_MULTIPART = 4;
+  // AbortMultipartUpload, made by the panel.
+  BACKUP_STORAGE_OP_ABORT_MULTIPART = 5;
+  // GetObject, presigned.
+  BACKUP_STORAGE_OP_GET = 6;
+  // DeleteObject, presigned.
+  BACKUP_STORAGE_OP_DELETE = 7;
+}
+
+message SignBackupRequestsResponse {
+  // One per request, in the same order.
+  repeated SignedStorageRequest requests = 1;
+}
+
+// SignedStorageRequest answers one BackupStorageRequest. For a presigned
+// request (SigV4 query authentication) send it with this method to this
+// URL, adding only Content-Length and Content-Type (and the body of a PUT):
+// no other header is signed. The steps the panel made itself have no URL.
+message SignedStorageRequest {
+  string method = 1;
+  string url = 2;
+  // CREATE_MULTIPART: the new upload's id.
+  string upload_id = 3;
 }
 
 message CheckEdgeAccessRequest {

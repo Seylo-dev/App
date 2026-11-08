@@ -13,7 +13,8 @@ import { backupDestinations, backupPolicies, backupRuns, services, volumes } fro
 import type { Deps } from "../../deps";
 import { findDatabase } from "../databases/info";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
-import { protoDestination, storageConfig } from "./storage";
+import { backupFolder, expiredObjects, signedBackupsCapability, signedDestination } from "./signing";
+import { deleteObject, listObjects, storageConfig } from "./storage";
 
 export type RunRow = typeof backupRuns.$inferSelect;
 export type PolicyRow = typeof backupPolicies.$inferSelect;
@@ -65,11 +66,11 @@ const keyTime = /^\d{8}T\d{6}Z$/;
 /**
  * Whether `key` names this run's object the way the agent lays keys out
  * (go/internal/backup/keys.go): [<prefix>/]<service id>/<backup id>/<UTC
- * time>-<run id><ext>. Every node holds the destination's keys, so a node
- * could report any key in the bucket; the panel records, restores and
- * deletes only a key named for this run of this service. Run ids are
- * random, so no other service's object carries one. The prefix is not
- * compared: it may have been edited since the run.
+ * time>-<run id><ext>. A node reports the key, and nodes of older panels
+ * held the destination's keys, so it could name any key in the bucket; the
+ * panel records, restores and deletes only a key named for this run of
+ * this service. Run ids are random, so no other service's object carries
+ * one. The prefix is not compared: it may have been edited since the run.
  */
 export function ownObjectKey(run: Pick<RunRow, "id" | "serviceId">, key: string): boolean {
   if (!key || key.length > 1024) return false;
@@ -113,6 +114,22 @@ export function checkTarget(db: PanelDb, serviceId: string, target: "database" |
   return volume;
 }
 
+/**
+ * Nodes never get a destination's keys (signing.ts): an agent that cannot
+ * ask the panel to sign its requests cannot back up or restore. An offline
+ * node fails at the call itself.
+ */
+function assertSignedBackups(agents: Pick<Deps["agents"], "capabilities">, nodeId: string, nodeName: string) {
+  const capabilities = agents.capabilities(nodeId);
+  if (capabilities && !capabilities.has(signedBackupsCapability)) {
+    throw new OpError(
+      "CONFLICT",
+      `The agent on ${nodeName} is too old for backups: the panel no longer gives nodes the bucket's keys. Update the node, then try again.`,
+      { reason: "agentTooOld" },
+    );
+  }
+}
+
 function destinationRow(db: PanelDb, destinationId: string) {
   const row = db.select().from(backupDestinations).where(eq(backupDestinations.id, destinationId)).get();
   if (!row) throw new OpError("NOT_FOUND", "That backup destination does not exist.", { field: "destinationId" });
@@ -154,13 +171,15 @@ export async function startBackup(deps: Pick<Deps, "db" | "secrets" | "agents" |
     .get();
   invalidateService(deps, service.id, [backupOps.listRuns.id, backupOps.listPolicies.id]);
   try {
+    assertSignedBackups(deps.agents, node.id, node.name);
     await deps.agents.call(node.id, "runBackup", {
       backupId: what.policy?.id ?? manualBackupId,
       runId: run.id,
       subject: subjectOf(deps.db, what),
-      destination: protoDestination(storageConfig(deps.secrets, destination)),
+      destination: signedDestination(destination, run.id),
       stopService: what.target === "volume" && what.stopService,
-      keepLast: what.keepLast,
+      // The node cannot list or delete in the bucket: the panel prunes (pruneBackups).
+      keepLast: 0,
     });
     return run;
   } catch (error) {
@@ -176,12 +195,15 @@ export async function startBackup(deps: Pick<Deps, "db" | "secrets" | "agents" |
   }
 }
 
+/** The job that deletes a policy's objects past keepLast (pruneBackups). */
+export const pruneJobType = "backups.prune";
+
 /**
  * A durable BackupResult from an agent. Redelivery is harmless: only a
  * running run changes. After a success, scheduled runs past keepLast are
- * marked deleted (the agent already removed their objects).
+ * marked deleted and the prune job deletes their objects.
  */
-export function recordBackupResult(deps: Pick<Deps, "db" | "live">, nodeId: string, result: BackupResult): boolean {
+export function recordBackupResult(deps: Pick<Deps, "db" | "live" | "jobs">, nodeId: string, result: BackupResult): boolean {
   const run = deps.db.select().from(backupRuns).where(eq(backupRuns.id, result.runId)).get();
   // A run the sweep gave up on may still succeed late: take the good news.
   const swept = run?.status === "failed" && run.error === noResultError && result.success;
@@ -201,7 +223,10 @@ export function recordBackupResult(deps: Pick<Deps, "db" | "live">, nodeId: stri
     )
     .where(eq(backupRuns.id, run.id))
     .run();
-  if (succeeded && run.policyId) applyRetention(deps.db, run.policyId);
+  if (succeeded && run.policyId) {
+    applyRetention(deps.db, run.policyId);
+    queuePrune(deps, run.policyId);
+  }
   invalidateService(deps, run.serviceId, [backupOps.listRuns.id, backupOps.listPolicies.id]);
   return true;
 }
@@ -242,6 +267,32 @@ export function sweepStaleBackups(deps: Pick<Deps, "db" | "live" | "alerts">, no
     invalidateService(deps, run.serviceId, [backupOps.listRuns.id]);
   }
   return stale.length;
+}
+
+/** Queues pruneBackups for a policy (one pending job per policy). */
+export function queuePrune(deps: Pick<Deps, "jobs">, policyId: string): void {
+  deps.jobs.enqueue(pruneJobType, { policyId }, { dedupeKey: `${pruneJobType}:${policyId}`, maxAttempts: 3 });
+}
+
+/**
+ * Retention in the bucket: deletes the objects of a policy's folder past
+ * its keepLast, newest kept by the time in the key (what agents did before
+ * nodes lost the keys, go/internal/backup/keys.go expired). Only the
+ * policy's own folder, only names the agent writes. Throws when the bucket
+ * fails, so the job retries; returns the deleted keys.
+ */
+export async function pruneBackups(deps: Pick<Deps, "db" | "secrets" | "logger">, policyId: string): Promise<string[]> {
+  const policy = deps.db.select().from(backupPolicies).where(eq(backupPolicies.id, policyId)).get();
+  if (!policy || policy.keepLast <= 0) return [];
+  const destination = deps.db.select().from(backupDestinations).where(eq(backupDestinations.id, policy.destinationId)).get();
+  if (!destination) return [];
+  const config = storageConfig(deps.secrets, destination);
+  const folder = backupFolder(destination.pathPrefix, policy.serviceId, policy.id);
+  const expired = expiredObjects(folder, await listObjects(config, folder), policy.keepLast);
+  for (const key of expired) await deleteObject(config, key);
+  if (expired.length > 0)
+    deps.logger.info({ policyId, serviceId: policy.serviceId, count: expired.length }, "backup retention deleted old objects");
+  return expired;
 }
 
 /** Marks succeeded runs of a policy beyond its keepLast as deleted, newest kept. */
@@ -320,12 +371,13 @@ export async function runRestore(
   }
 
   try {
+    assertSignedBackups(deps.agents, node.id, node.name);
     const res = await deps.agents.call(
       node.id,
       "restoreBackup",
       {
         subject: subjectOf(deps.db, { serviceId: restore.serviceId, target: source.target, volumeId: source.volumeId }),
-        destination: protoDestination(storageConfig(deps.secrets, destination)),
+        destination: signedDestination(destination, restore.id),
         objectKey: source.objectKey,
       },
       { timeoutMs: restoreTimeoutMs },

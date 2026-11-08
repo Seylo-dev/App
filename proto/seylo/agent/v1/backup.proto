@@ -12,9 +12,20 @@ message BackupDestination {
   string bucket = 3;
   // Key prefix inside the bucket.
   string prefix = 4;
+  // Empty when signing_id is set.
   string access_key_id = 5;
+  // Empty when signing_id is set.
   string secret_access_key = 6;
   bool path_style = 7;
+  // Set by panels that keep the destination's keys to themselves (0.2 and
+  // later, for agents that advertised backup.signed.v1), in place of
+  // access_key_id and secret_access_key: the agent asks
+  // PanelService.SignBackupRequests with this id for each storage step. The
+  // panel signs only this run's own object, so a node never holds a key
+  // that reaches other services' backups. Such a RunBackupRequest has
+  // keep_last 0: the panel applies retention itself. The backup's run id,
+  // or the restore's run id. Empty means the keys are set (older panels).
+  string signing_id = 8;
 }
 
 message BackupSubject {

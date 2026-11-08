@@ -32,6 +32,8 @@ var (
 	MethodGetDesiredState = panelMethod("GetDesiredState")
 	MethodRegistryTunnel  = panelMethod("RegistryTunnel")
 	MethodCheckEdgeAccess = panelMethod("CheckEdgeAccess")
+	// MethodSignBackupRequests is PanelService.SignBackupRequests.
+	MethodSignBackupRequests = panelMethod("SignBackupRequests")
 )
 
 // ReportCrash delivers one outbox crash report. Components do not call it:
@@ -77,6 +79,17 @@ func (c *PanelClient) RegistryTunnel(ctx context.Context, req *agentv1.RegistryT
 func (c *PanelClient) CheckEdgeAccess(ctx context.Context, req *agentv1.CheckEdgeAccessRequest) (*agentv1.CheckEdgeAccessResponse, error) {
 	resp := &agentv1.CheckEdgeAccessResponse{}
 	if err := c.peer.Call(ctx, MethodCheckEdgeAccess, req, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// SignBackupRequests asks the panel to presign the storage requests of a
+// backup or restore it started on this node (BackupDestination.signing_id).
+// UNIMPLEMENTED from a panel without panel.backup-sign.v1.
+func (c *PanelClient) SignBackupRequests(ctx context.Context, req *agentv1.SignBackupRequestsRequest) (*agentv1.SignBackupRequestsResponse, error) {
+	resp := &agentv1.SignBackupRequestsResponse{}
+	if err := c.peer.Call(ctx, MethodSignBackupRequests, req, resp); err != nil {
 		return nil, err
 	}
 	return resp, nil

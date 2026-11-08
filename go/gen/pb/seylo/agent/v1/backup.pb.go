@@ -86,12 +86,23 @@ type BackupDestination struct {
 	Region   string `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
 	Bucket   string `protobuf:"bytes,3,opt,name=bucket,proto3" json:"bucket,omitempty"`
 	// Key prefix inside the bucket.
-	Prefix          string `protobuf:"bytes,4,opt,name=prefix,proto3" json:"prefix,omitempty"`
-	AccessKeyId     string `protobuf:"bytes,5,opt,name=access_key_id,json=accessKeyId,proto3" json:"access_key_id,omitempty"`
+	Prefix string `protobuf:"bytes,4,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	// Empty when signing_id is set.
+	AccessKeyId string `protobuf:"bytes,5,opt,name=access_key_id,json=accessKeyId,proto3" json:"access_key_id,omitempty"`
+	// Empty when signing_id is set.
 	SecretAccessKey string `protobuf:"bytes,6,opt,name=secret_access_key,json=secretAccessKey,proto3" json:"secret_access_key,omitempty"`
 	PathStyle       bool   `protobuf:"varint,7,opt,name=path_style,json=pathStyle,proto3" json:"path_style,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Set by panels that keep the destination's keys to themselves (0.2 and
+	// later, for agents that advertised backup.signed.v1), in place of
+	// access_key_id and secret_access_key: the agent asks
+	// PanelService.SignBackupRequests with this id for each storage step. The
+	// panel signs only this run's own object, so a node never holds a key
+	// that reaches other services' backups. Such a RunBackupRequest has
+	// keep_last 0: the panel applies retention itself. The backup's run id,
+	// or the restore's run id. Empty means the keys are set (older panels).
+	SigningId     string `protobuf:"bytes,8,opt,name=signing_id,json=signingId,proto3" json:"signing_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BackupDestination) Reset() {
@@ -171,6 +182,13 @@ func (x *BackupDestination) GetPathStyle() bool {
 		return x.PathStyle
 	}
 	return false
+}
+
+func (x *BackupDestination) GetSigningId() string {
+	if x != nil {
+		return x.SigningId
+	}
+	return ""
 }
 
 type BackupSubject struct {
@@ -619,7 +637,7 @@ var File_seylo_agent_v1_backup_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_backup_proto_rawDesc = "" +
 	"\n" +
-	"\x1bseylo/agent/v1/backup.proto\x12\x0eseylo.agent.v1\"\xe6\x01\n" +
+	"\x1bseylo/agent/v1/backup.proto\x12\x0eseylo.agent.v1\"\x85\x02\n" +
 	"\x11BackupDestination\x12\x1a\n" +
 	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12\x16\n" +
@@ -628,7 +646,9 @@ const file_seylo_agent_v1_backup_proto_rawDesc = "" +
 	"\raccess_key_id\x18\x05 \x01(\tR\vaccessKeyId\x12*\n" +
 	"\x11secret_access_key\x18\x06 \x01(\tR\x0fsecretAccessKey\x12\x1d\n" +
 	"\n" +
-	"path_style\x18\a \x01(\bR\tpathStyle\"\x8c\x01\n" +
+	"path_style\x18\a \x01(\bR\tpathStyle\x12\x1d\n" +
+	"\n" +
+	"signing_id\x18\b \x01(\tR\tsigningId\"\x8c\x01\n" +
 	"\rBackupSubject\x12\x1d\n" +
 	"\n" +
 	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x18\n" +

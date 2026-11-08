@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/backup.proto.
  */
 export const file_seylo_agent_v1_backup: GenFile = /*@__PURE__*/
-  fileDesc("ChtzZXlsby9hZ2VudC92MS9iYWNrdXAucHJvdG8SDnNleWxvLmFnZW50LnYxIpsBChFCYWNrdXBEZXN0aW5hdGlvbhIQCghlbmRwb2ludBgBIAEoCRIOCgZyZWdpb24YAiABKAkSDgoGYnVja2V0GAMgASgJEg4KBnByZWZpeBgEIAEoCRIVCg1hY2Nlc3Nfa2V5X2lkGAUgASgJEhkKEXNlY3JldF9hY2Nlc3Nfa2V5GAYgASgJEhIKCnBhdGhfc3R5bGUYByABKAgibwoNQmFja3VwU3ViamVjdBISCgpzZXJ2aWNlX2lkGAEgASgJEhAKBnZvbHVtZRgCIAEoCUgAEjAKCGRhdGFiYXNlGAMgASgLMhwuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VEdW1wSABCBgoEd2hhdCIgCgxEYXRhYmFzZUR1bXASEAoIZGF0YWJhc2UYASABKAkixgEKEFJ1bkJhY2t1cFJlcXVlc3QSEQoJYmFja3VwX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIuCgdzdWJqZWN0GAMgASgLMh0uc2V5bG8uYWdlbnQudjEuQmFja3VwU3ViamVjdBI2CgtkZXN0aW5hdGlvbhgEIAEoCzIhLnNleWxvLmFnZW50LnYxLkJhY2t1cERlc3RpbmF0aW9uEhQKDHN0b3Bfc2VydmljZRgFIAEoCBIRCglrZWVwX2xhc3QYBiABKA0iEwoRUnVuQmFja3VwUmVzcG9uc2UicwoOQmFja3VwUHJvZ3Jlc3MSEQoJYmFja3VwX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIqCgVwaGFzZRgDIAEoDjIbLnNleWxvLmFnZW50LnYxLkJhY2t1cFBoYXNlEhIKCmJ5dGVzX2RvbmUYBCABKAQikgEKFFJlc3RvcmVCYWNrdXBSZXF1ZXN0Ei4KB3N1YmplY3QYASABKAsyHS5zZXlsby5hZ2VudC52MS5CYWNrdXBTdWJqZWN0EjYKC2Rlc3RpbmF0aW9uGAIgASgLMiEuc2V5bG8uYWdlbnQudjEuQmFja3VwRGVzdGluYXRpb24SEgoKb2JqZWN0X2tleRgDIAEoCSIvChVSZXN0b3JlQmFja3VwUmVzcG9uc2USFgoOcmVzdG9yZWRfYnl0ZXMYASABKAQqpwEKC0JhY2t1cFBoYXNlEhwKGEJBQ0tVUF9QSEFTRV9VTlNQRUNJRklFRBAAEiEKHUJBQ0tVUF9QSEFTRV9TVE9QUElOR19TRVJWSUNFEAESGgoWQkFDS1VQX1BIQVNFX1VQTE9BRElORxACEiEKHUJBQ0tVUF9QSEFTRV9TVEFSVElOR19TRVJWSUNFEAMSGAoUQkFDS1VQX1BIQVNFX1BSVU5JTkcQBEK2AQoSY29tLnNleWxvLmFnZW50LnYxQgtCYWNrdXBQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM");
+  fileDesc("ChtzZXlsby9hZ2VudC92MS9iYWNrdXAucHJvdG8SDnNleWxvLmFnZW50LnYxIq8BChFCYWNrdXBEZXN0aW5hdGlvbhIQCghlbmRwb2ludBgBIAEoCRIOCgZyZWdpb24YAiABKAkSDgoGYnVja2V0GAMgASgJEg4KBnByZWZpeBgEIAEoCRIVCg1hY2Nlc3Nfa2V5X2lkGAUgASgJEhkKEXNlY3JldF9hY2Nlc3Nfa2V5GAYgASgJEhIKCnBhdGhfc3R5bGUYByABKAgSEgoKc2lnbmluZ19pZBgIIAEoCSJvCg1CYWNrdXBTdWJqZWN0EhIKCnNlcnZpY2VfaWQYASABKAkSEAoGdm9sdW1lGAIgASgJSAASMAoIZGF0YWJhc2UYAyABKAsyHC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUR1bXBIAEIGCgR3aGF0IiAKDERhdGFiYXNlRHVtcBIQCghkYXRhYmFzZRgBIAEoCSLGAQoQUnVuQmFja3VwUmVxdWVzdBIRCgliYWNrdXBfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEi4KB3N1YmplY3QYAyABKAsyHS5zZXlsby5hZ2VudC52MS5CYWNrdXBTdWJqZWN0EjYKC2Rlc3RpbmF0aW9uGAQgASgLMiEuc2V5bG8uYWdlbnQudjEuQmFja3VwRGVzdGluYXRpb24SFAoMc3RvcF9zZXJ2aWNlGAUgASgIEhEKCWtlZXBfbGFzdBgGIAEoDSITChFSdW5CYWNrdXBSZXNwb25zZSJzCg5CYWNrdXBQcm9ncmVzcxIRCgliYWNrdXBfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEioKBXBoYXNlGAMgASgOMhsuc2V5bG8uYWdlbnQudjEuQmFja3VwUGhhc2USEgoKYnl0ZXNfZG9uZRgEIAEoBCKSAQoUUmVzdG9yZUJhY2t1cFJlcXVlc3QSLgoHc3ViamVjdBgBIAEoCzIdLnNleWxvLmFnZW50LnYxLkJhY2t1cFN1YmplY3QSNgoLZGVzdGluYXRpb24YAiABKAsyIS5zZXlsby5hZ2VudC52MS5CYWNrdXBEZXN0aW5hdGlvbhISCgpvYmplY3Rfa2V5GAMgASgJIi8KFVJlc3RvcmVCYWNrdXBSZXNwb25zZRIWCg5yZXN0b3JlZF9ieXRlcxgBIAEoBCqnAQoLQmFja3VwUGhhc2USHAoYQkFDS1VQX1BIQVNFX1VOU1BFQ0lGSUVEEAASIQodQkFDS1VQX1BIQVNFX1NUT1BQSU5HX1NFUlZJQ0UQARIaChZCQUNLVVBfUEhBU0VfVVBMT0FESU5HEAISIQodQkFDS1VQX1BIQVNFX1NUQVJUSU5HX1NFUlZJQ0UQAxIYChRCQUNLVVBfUEhBU0VfUFJVTklORxAEQrYBChJjb20uc2V5bG8uYWdlbnQudjFCC0JhY2t1cFByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw");
 
 /**
  * @generated from message seylo.agent.v1.BackupDestination
@@ -41,11 +41,15 @@ export type BackupDestination = Message<"seylo.agent.v1.BackupDestination"> & {
   prefix: string;
 
   /**
+   * Empty when signing_id is set.
+   *
    * @generated from field: string access_key_id = 5;
    */
   accessKeyId: string;
 
   /**
+   * Empty when signing_id is set.
+   *
    * @generated from field: string secret_access_key = 6;
    */
   secretAccessKey: string;
@@ -54,6 +58,20 @@ export type BackupDestination = Message<"seylo.agent.v1.BackupDestination"> & {
    * @generated from field: bool path_style = 7;
    */
   pathStyle: boolean;
+
+  /**
+   * Set by panels that keep the destination's keys to themselves (0.2 and
+   * later, for agents that advertised backup.signed.v1), in place of
+   * access_key_id and secret_access_key: the agent asks
+   * PanelService.SignBackupRequests with this id for each storage step. The
+   * panel signs only this run's own object, so a node never holds a key
+   * that reaches other services' backups. Such a RunBackupRequest has
+   * keep_last 0: the panel applies retention itself. The backup's run id,
+   * or the restore's run id. Empty means the keys are set (older panels).
+   *
+   * @generated from field: string signing_id = 8;
+   */
+  signingId: string;
 };
 
 /**
