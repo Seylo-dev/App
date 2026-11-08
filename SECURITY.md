@@ -54,10 +54,33 @@ What Seylo protects, and what it does not:
   the services placed on it need, unless it builds: a node with Can build on
   also receives the source, git credentials and build-time variables of
   every service it builds, from any project, and pushes the images other
-  nodes then run. Treat build nodes like the panel. Only the owner turns Can
-  build on (the installer's panel node starts with it); a node that joins
-  cannot make itself one, and each deployment shows which node built it.
-  Backups and restores go straight from the node to the bucket, but nodes
+  nodes then run. Treat build nodes like the panel. Each deployment shows
+  which node built it.
+- Since 0.2.1 new nodes build by default, which partly reverses a fix from
+  the 0.2 audit. 0.2 made every node that joins start with Can build off,
+  so a join token could not produce a build node. In 0.2.1 the join token
+  carries the choice ("Build images on this node" in Add node, ticked by
+  default), so whoever runs a default join command gets a build node: it
+  receives the source, git credentials and build-time variables of every
+  service that builds on it, from any project. What limits it:
+  - it is the explicit choice of whoever makes the join command, and they
+    can untick it; that is an owner or admin with `nodes.manage`, from a
+    browser with a sign-in from the last 15 minutes, or an API key that
+    may manage nodes, and the `createJoinToken` audit row records the
+    value that applies;
+  - the token is single-use, valid for one hour, and can be revoked;
+  - the node cannot change its own value: `--can-build` only writes its
+    config.yml, and a re-join of a known node (also after a master key
+    rotation) keeps the value the panel has;
+  - services build on their own node first, so most builds stay where the
+    service runs. A build node still gets builds of services pinned to it
+    and of services whose own node is offline or cannot build;
+  - an owner or admin turns it off under Nodes at any time.
+
+  Join tokens made before the update to 0.2.1, and nodes that joined
+  before it, keep 0.2's behavior. Untick the box for any server you would
+  not trust with other projects' source and secrets.
+- Backups and restores go straight from the node to the bucket, but nodes
   never get a backup destination's keys: the panel presigns each request of
   a running backup or restore for that run's own object only (and makes the
   multipart start, finish and abort steps and the keepLast deletes itself),
@@ -73,6 +96,40 @@ What Seylo protects, and what it does not:
   is plain HTTP on its port (3000 by default). Create the owner and sign
   in over an SSH tunnel or a network you trust, or set the panel domain
   first.
+- Docker publishes the panel port and the agents' TLS port past ufw. Since
+  0.2.1 the owner can have them published on 127.0.0.1 only (Settings >
+  General > Panel domain: "Serve on IP address", "Agents' port"). Closing
+  needs the owner, from a browser session with a sign-in from the last 15
+  minutes, on a request that came over a private path that works (the
+  panel domain through the trusted proxy, or the tailnet listener), with
+  the panel node's agent able to bind loopback and no node that closing
+  would cut off. Every change is audited and raises a security alert. It
+  fails open: when the private path stops working the ports reopen by
+  default (the 0.2.0 baseline, never worse), as they do after a failed
+  roll or with an older agent; "Keep IP access closed" is opt-in.
+  `sudo seylo panel ip-access on` on the server and an SSH tunnel to
+  127.0.0.1 always get the owner back in. On Docker older than 28, other
+  machines on the same local network may still reach ports published on
+  127.0.0.1; the panel and the node's health check warn.
+- Since 0.2.1 the panel can be served on the owner's tailnet through the
+  owner's own tailscaled (Tailscale Serve to a unix socket). That socket
+  is a second listener that trusts `X-Forwarded-*` and the
+  `Tailscale-User-Login` header: it is mode 0600, owned by the panel user
+  inside the 0700 data folder, so only root and the panel connect, and
+  Serve drops whatever a client sent in those headers. The panel answers
+  only on the server's own tailnet name, refuses Funnel requests, and uses
+  the tailnet login for the activity log only, never to sign anyone in.
+  Every device the tailnet's access rules allow reaches the sign-in page
+  (Tailscale's default policy allows all, including other users of a
+  shared tailnet; the card offers a narrower grant), and installing
+  Tailscale adds a firewall rule ahead of ufw for `tailscale0`. The panel
+  can read tailscaled's status, keep one Serve entry, start an interactive
+  sign-in and turn Tailscale DNS off; it never turns on Funnel. The
+  sign-in link puts the server on whichever tailnet opens it, so only the
+  owner gets it, it is kept in memory for 10 minutes and never stored or
+  logged. No Tailscale secret is stored by Seylo, and `no_tailnet: true`
+  in the node's config.yml (`seylo panel tailscale off`) turns all of it
+  off from the server.
 - Out of scope: the apps you deploy, and what you turn off yourself
   (`--insecure`, `--allow-unsigned`, `--trust-on-first-use`).
 

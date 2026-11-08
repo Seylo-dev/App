@@ -61,8 +61,8 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 19 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker, cgroups, Docker live-restore, Docker buildx on nodes that build (builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
-| `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 19 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker (since 0.2.1 it also warns below Docker 28 while the panel container publishes on loopback only: route_localnet), cgroups, Docker live-restore, Docker buildx on nodes that build (`agent.BuildsOn`: config.yml `can_build` or, since 0.2.1, the panel's `max_parallel_builds` above 0; builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
+| `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`, and since 0.2.1 `panel ip-access on` and `panel tailscale status|off|on`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
 | `panelapi` | Laptop CLI client for the panel op API (hand-written over the contracts, not generated), saved logins in `~/.config/seylo/config.json`, `SEYLO_PANEL_URL` + `SEYLO_TOKEN` for CI | Built (tested against a fake panel) |
@@ -74,7 +74,7 @@ packages use. "Built" means implemented and tested.
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS, certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM) |
-| `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM) |
+| `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM) |
 | `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
 | `registry` | 127.0.0.1:5755 relay over RegistryTunnel (`TCPRelay`), `Tunnel` handler (registry and service-port targets; a `RegistryTarget.scope` makes it an HTTP-aware gate: only the node's pull/push repositories, never DELETE of content, the catalog or foreign blob mounts), the registry container on the panel's node (`Server`, GC) | Built (push/pull through the relay, and scoped push/pull/refusals with the real Docker and registry, verified in the VM) |
 | `compose` | `Parse` for ParseCompose: compose-go normalized project JSON + unsupported-feature warnings; never reads node files | Built |
@@ -92,6 +92,7 @@ packages use. "Built" means implemented and tested.
 | `dbengine` | Per-engine facts backup, dbtools and portgate share: `Port` (ClickHouse: native 9000), `HTTPPort`, `RedisLike`, `RedisCLI`, `TLSAtGate`, `SeparateExposedUser`, and `Capability` (`database.engines.v2`) | Built |
 | `jobrun` | Docker access of the jobs packages (moby client): one-off runs with streamed stdin/stdout/stderr, helpers by spec hash, on-demand helpers with idle reaping, Exec, cleanup inventory that re-checks `seylo.managed` before every removal; every container removal takes the container's anonymous volumes with it (images with a VOLUME line, such as database images, would leave one per backup, restore or cron run that nothing else removes); `jobrun/itest` is the VM test setup | Built (verified in the VM) |
 | `wings` | Pelican Wings detection (`FileDetector`), re-attaching our networks to the fork's Traefik (`Attacher`), games-first CPU weight (`SliceCPU`) | Built (attach after recreate and cgroupfs weight verified in the VM; no real Wings yet) |
+| `tailnet` | The panel on the owner's tailnet (since 0.2.1), standard library only: `Client` over tailscaled's LocalAPI socket (`/var/run/tailscale/tailscaled.sock`, config.yml `tailscale_socket`; status, prefs, an EditPrefs mask of WantRunning and CorpDNS only, login-interactive, Serve config with ETag/If-Match), `Ensure`/`Remove`/`Find` (pure edits of the Serve config JSON: one handler whose Proxy is exactly our unix target, every other field kept byte for byte, never AllowFunnel), `Manager` (the agent's `tailnet` component, see "Panel access and the tailnet"), `MinVersion` 1.104.4 | Built (unit tests against an httptest LocalAPI with recorded 1.104.x answers; not yet against a real tailnet) |
 | `update` | Signed agent self-update with a systemd rollback guard, panel swap (snapshot, health check, restore), Docker update, reboot, release manifest builder (`releasetool`) | Built; see "Releases and updates" |
 
 Naming note: the node health check package is `nodecheck` (not `doctor`)
@@ -147,7 +148,10 @@ since the first release (0.1.0): installs out there have it applied, so it
 never changes again. Every schema change after it is a new, add-only
 migration (`0001_features` for 0.2, shipped in 0.2.0-rc.1, so frozen too;
 `0002_updates` for rc.2: update runs keep their manifest, update steps
-their reconnect retry), which the panel applies at start, also
+their reconnect retry; `0003_perf_indexes` for 0.2.0; `0004_join_token_can_build`
+for 0.2.1: `join_tokens.can_build`, default false, so tokens made before
+the update and the direct-insert test helpers keep making nodes that do
+not build), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -339,7 +343,8 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `--trust-on-first-use` records the first certificate's pin instead.
 - `seylo join` (`agent.Join`) on a node that has a config.yml (`--force`
   once it joined) keeps every key it does not set: `no_host_shell`,
-  `git_proxy_resolves`, `node_name`, `can_build`, the `acme_ca*` keys and
+  `no_tailnet`, `tailscale_socket`, `git_proxy_resolves`, `node_name`,
+  `can_build`, the `acme_ca*` keys and
   keys this agent does not know, with their comments. It replaces only the connection
   (`panel_url`, `panel_pin`, `trust_on_first_use`, `insecure_transport`,
   `fallback`), the identity the token gives (`node_id` cleared,
@@ -351,12 +356,26 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (`nodes.createJoinToken`, default true, written into the audit row even
   when the caller leaves it out; true on the installer's panel-node token)
   is copied to the new node's row, a re-join of a known node keeps the
-  row's value, and the owner changes it with `nodes.setCanBuild`. It is a
+  row's value (master key rotation re-joins included), and an owner or
+  admin changes it with `nodes.setCanBuild` (`nodes.manage`). Tokens made
+  before migration 0004 have `can_build` false. It is a
   choice, because a build node gets the source, git credentials and build
   env of whatever it builds, from any project (the service's own node
   first, else the least busy builder; automatic picks skip a node whose
-  agent reports no docker buildx), and pushes the images other nodes run;
-  a deployment records it as `builtOn`. `agent.SaveConfig` (the agent's own writes) keeps
+  agent reports no docker buildx, `NodeFacts.buildx.installed` false;
+  unset, from agents before 0.2.1, counts as installed), and pushes the
+  images other nodes run; a deployment records it as `builtOn`. An
+  explicit `buildNodeId` without buildx is refused by
+  `builds.updateSettings` (BAD_REQUEST, field `buildNodeId`; the node the
+  service already has is not checked again) and fails the deploy with
+  CONFLICT "<node> has no docker buildx. Install docker-buildx-plugin on
+  it."; `builds.settings` nodes carry `hasBuildx`, and `nodes` view's
+  `canBuildWarning` puts "docker buildx is missing" first, shown whether
+  Can build is on or off. The agent's buildx check and facts follow
+  `agent.BuildsOn`: `can_build` in config.yml or
+  `NodeSettings.max_parallel_builds` above 0 (which the panel sends only
+  to a node with Can build on); `seylo health` reads the stored
+  `state/desired.pb` for the same rule. `agent.SaveConfig` (the agent's own writes) keeps
   unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
   makes every new FileConfig key pick a side.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
@@ -1325,7 +1344,13 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   its `key` query parameter); `deps.live.disconnect({ sessionId }
   | { userId })` closes them at once. The re-check also drops topics the
   fresh access no longer allows (an `error` FORBIDDEN per topic);
-  `deps.live.recheck({ userId })` does it at once (grants and role changes). `ai:<id>` is for the conversation's
+  `deps.live.recheck({ userId })` does it at once (grants and role changes).
+  Since 0.2.1 each live endpoint (the panel port and the tailnet socket
+  each build one) wires itself with `live.addDisconnector(fn)` and
+  `live.addRechecker(fn)`, which return a remover; `disconnect` and
+  `recheck` call every one, so a sign-out closes the person's sockets on
+  both listeners (`setDisconnector`/`setRechecker`, which kept only the
+  last, are gone). Topics and `publish` are shared by both. `ai:<id>` is for the conversation's
   owner only; `deployment:<id>` needs `services.view` on its service.
   Messages bypass the op pipeline, so the endpoint limits them itself
   (`src/live/endpoint.ts`), before parsing or any database work: a token
@@ -1371,8 +1396,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (protected, generation 1, a live deployment of that image). `panelContributor`
   runs last (`DesiredContributor.order`, higher runs later) and fixes its env
   (`PORT`, `HOST_PORT`, `SECURE_COOKIES=false`, never the image), the published
-  port (FORWARD), alias `panel`, RECREATE and no volumes; with a panel domain it
-  adds the route. Proxy trust and HTTPS (`src/http/proxy-trust.ts`, `https.ts`,
+  port (FORWARD; since 0.2.1 with `bind_address` 127.0.0.1 while IP access is
+  closed, see "Panel access and the tailnet"), alias `panel`, RECREATE and no
+  volumes; with a panel domain it adds the route. The `tailscale` module's
+  contributor sets `NodeSettings.tailnet.panel` on the panel node only, and
+  only while Serve is wanted and the server is on the tailnet it was turned
+  on for, so an install that never used it sends what 0.2.0 sent. Proxy trust and HTTPS (`src/http/proxy-trust.ts`, `https.ts`,
   `domain-redirect.ts`): X-Forwarded-For/-Proto/-Host count only from the
   addresses of `SEYLO_TRUSTED_PROXIES` (default `<slug>-traefik`, resolved
   through Docker DNS every 30 s), never from the published IP:port (the
@@ -1917,8 +1946,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
 - Agent versions: the hello and `NodeFacts.agent_version` carry the bare
   version ("0.1.1"); `parseVersion` also accepts the older
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by
-  version when the node already runs it, is busy updating itself (ABORTED) or
-  answers ALREADY_EXISTS, and is skipped with the agent's message when an
+  version when the node already runs it, at once when UpdateAgent answers
+  ALREADY_EXISTS, gets UpdateAgent again while the node answers busy
+  (ABORTED, see Updates), and is skipped with the agent's message when an
   automatic update waits (FAILED_PRECONDITION with details `backoff`; on a
   catch-up step also `retry` held or waiting, see Updates).
 
@@ -1955,6 +1985,10 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
 | Removing or changing the panel domain while nodes dial it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node that joined over the domain (every node added once a domain is set: Add node prints the unpinned domain) or whose address before the move was an unpinned https:// address (another domain) has no fallback and cannot reach the panel until it rejoins (`seylo join --force`). The panel cannot tell these apart, so since 0.2.1 the change is refused (CONFLICT `nodesOnDomain`, `details.nodeIds`) while enabled nodes dial `https://<domain>` (`settings.general.domainNodes`, from `nodeDialedUrls`), unless the call passes `acknowledgeNodesOffline: true`; Settings > General and Lock to Tailscale name the nodes and ask first, and Lock to Tailscale then leaves the agents' port open. Plain-HTTP nodes never move, so this does not reach them | Acknowledged nodes go offline after a domain removal or change; the node offline alert fires |
 | The panel node's own agent dialing a public address (joined again with an Add node command instead of the installer's `http://127.0.0.1:<port>`): closing IP access would cut it off (Docker's loopback publish does not take a dial to the server's own public address), and with the panel node offline nothing reopens it from Settings or `seylo panel ip-access on` | Since 0.2.1 closing is refused (`panelNodeNotLoopback`, with the loopback join command) while it dials plain `http://` that is not loopback, and closing the agents' port while it dials anything but loopback or `https://<domain>`; `decidePanelIpAccess` keeps them open in that case too |
+| The panel on a real tailnet (0.2.1): the agent's tailnet area ran against an httptest LocalAPI with recorded tailscaled 1.104.x answers, the panel's tailnet listener and ops in the panel's tests, the cards in Playwright. Not run yet: HTTPS Serve (the certificate, the first-load delay, the `__Host-` cookie, no HSTS on the ts.net name), a real login.tailscale.com sign-in link and tailnet name, key expiry and the Disable key expiry link, the grant snippet in the real policy editor, Serve with `--netfilter-mode=off`. Whether Docker older than 28 lets the local network reach ports published on 127.0.0.1 (route_localnet) is from Docker's docs, not tested | The owner's check on a real Tailscale account before the release; the card and the Docker Engine check warn below 28 |
+| Not in 0.2.1: nodes over the tailnet (a Serve TCP forward of the agents' port, "Connect over Tailscale" in Add node), apps on the tailnet, passkeys on the ts.net name, signing in with the Tailscale identity, an installer `--tailscale` flag, a node-side veto on builds (`no_builds`) | Nodes connect over the domain or the agents' port; passkeys need the panel domain; join commands made on the tailnet URL use the domain or the agents' port |
+| Lockouts the panel cannot see: a tailnet access rule that shuts out the owner's devices, or the owner's device removed from the tailnet, while the server stays Running | Only the SSH tunnel and `seylo panel ip-access on` / `seylo panel tailscale off` help; the docs warn against limiting SSH to `tailscale0` |
+| Hiding projects (`hiddenProjectIds`, see "Web app") is the owner's request for 0.2.1, written down before it is built | Nothing is hidden; remove this row when it lands and check the "Web app" entry against it |
 | Re-auth scope: demotions and grants that only take actions away are not gated, and API keys never are (admin keys may invite, widen grants, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
@@ -2033,6 +2067,7 @@ or the method descriptor's options (TS). Current names:
 | `panel.registry-tunnel.v1` | RegistryTunnel |
 | `panel.edge-access.v1` | CheckEdgeAccess |
 | `panel.backup-sign.v1` | SignBackupRequests |
+| `tailnet.login.v1` (0.2.1) | TailscaleLogin, TailscaleSetDns |
 
 An agent advertises a capability only once every method in it works.
 
@@ -2047,7 +2082,237 @@ the node is offline (`modules/databases/capability.ts`).
 |---|---|
 | `database.engines.v2` | Valkey, KeyDB, Dragonfly and ClickHouse (`DatabaseEngine` 6-9): shells, web UIs, backups and TLS on the exposed port. The panel creates, moves or clones such a database only onto a node that advertised it, refuses exposure elsewhere, and the desired state never sends their exposure to an agent without it (an older one would relay the port without TLS) |
 | `backup.signed.v1` | Backup destinations without keys (`BackupDestination.signing_id`): the agent asks `PanelService.SignBackupRequests` for each S3 step (`backup.SignedStore`). The panel sends backups and restores only to agents that advertised it |
+| `panel.publish-bind.v1` (0.2.1, `reconcile.PanelPublishBindCapability`, `wire_runtime.go`) | The agent publishes the protected panel's ports on `PublicPort.bind_address` (empty = every address; only a loopback address, only on the protected panel service: `validateSpec` refuses anything else), adopts an installer-started panel container only when its actual bindings match the desired list (HostIP included; otherwise it rolls), and reports the bindings in `seylo panel status`. The panel closes IP access only on a panel node that is online and advertised it (`panelNodeState.capable`; else block `agentTooOld` and `decidePanelIpAccess` keeps it open); an older agent ignores the field and keeps every address |
+| `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
+
+## Panel access and the tailnet
+
+Added in 0.2.1: whether the panel answers on `http://<ip>:<panel port>`
+and on the agents' TLS port, and the panel on the owner's tailnet through
+the owner's own tailscaled. Ops: `settings.panelAccess`,
+`settings.updatePanelAccess` (`packages/ops/src/ops/settings.ts`),
+`tailscale.get|setServe|signIn|setDns` (`tailscale.ts`), none offered to
+models. Panel: `modules/settings/{ip-access,panel-access,private-paths,
+ip-access-file,domain,ops}.ts`, `agent-hub/dialed.ts`,
+`modules/tailscale/`, `http/tailnet-host.ts`, `panel.ts` (the tailnet
+app), `main.ts` (its socket). Agent: `go/internal/tailnet`,
+`agent/wire_tailnet.go`, `reconcile/spec.go` (`panelPublish`),
+`cli/panel_ipaccess.go`, `cli/panel_tailscale.go`.
+
+### IP access
+
+- Settings keys (nothing secret): `panelServeOnIp` ("Serve on IP
+  address", absent = true), `panelAgentPortOpen` ("Agents' port", absent =
+  true), `panelIpAccessOnFailure` (`reopen` | `stayClosed`, absent =
+  `reopen`), `panelAccessChoice` (`{reason, by, at}`: who set the switches
+  last and why; a change that only follows them, also one applied later,
+  is recorded in their name), `panelIpAccessApplied` (`{closed,
+  agentPortClosed, at, reason, by, generation, from, reopenedAt,
+  holdUntil}`: what the panel node was last told; absent = open, as in
+  0.2.0) and `nodeDialedUrls` (by node id `{url, at}`: the base URL each
+  node's agent dialed, written when a session starts from
+  `hub.dialedAddress`, so it is known while the node is offline; removed
+  nodes drop out on the next write).
+- `applyPanelIpAccess(deps, reason, options)` is the one place that
+  decides and rolls; every input change calls it: the switches, the
+  domain (`updateGeneral`, and the domain job on a change of its debounced
+  state), the tailnet path (`modules/tailscale/status.ts`), the panel
+  node connecting and a failed roll (`watchPanelIpAccess`:
+  `agents.onConnection`, `agents.onEvent("deployProgress")`),
+  `ip-access-on`, and the 1-minute job `settings.applyPanelIpAccess` (the
+  debounce and re-close timers). The rule (`decidePanelIpAccess`): closed =
+  !serveOnIp, the panel runs as its node's protected service, the node's
+  agent advertised `panel.publish-bind.v1`, the panel node's own agent
+  dials no plain `http://` that is not loopback, a private path works (or
+  `stayClosed` and already closed), and no enabled node dials plain
+  `http://`; agentPortClosed = closed, !agentPortOpen, an agents' TLS port
+  exists, every enabled node but the panel node dials `https://<domain>`,
+  and the panel node dials loopback or `https://<domain>`. It fails open.
+  After an automatic reopen it closes again only once a path has worked an
+  hour since (`recloseAfterMs`, from `reopenedAt`; `reclosesAt` in the
+  view); after a failed roll nothing changes by itself for 15 minutes
+  (`holdUntil`); an offline panel node agent flips nothing. Closing waits
+  for any running update run, reopening only for one whose panel step is
+  pending or running or that updates Docker on the panel node.
+- A change: a new panel generation (`bumpPanelGeneration`, a live
+  deployment of the same image), `markDirty` for the panel node,
+  `panelIpAccessApplied` saved, for automatic changes an audit row (op id
+  `settings.ipAccessChanged`, actor `system`, input `{closed,
+  agentPortClosed, reason, by}`; a person's change is in their op's row), a
+  `security_change` alert (key `ip-access:<at>:<closed>:<agentPortClosed>`,
+  link `/settings/general`; the close alert warns about Docker older than
+  28) and a live invalidate of `settings.panelAccess`, `settings.general`
+  and `tailscale.get`. `panelContributor` sets `bindAddress: "127.0.0.1"`
+  on the panel port while closed and on the TLS port while agentPortClosed.
+  An empty `PublicPort.bind_address` encodes as absent, so an open panel's
+  `SpecHash` is 0.2.0's and nothing rolls on the upgrade. `actual` is
+  `unknown` until the running panel generation reaches the applied one.
+- Failed roll (`recordFailedRoll`): the agent puts the old container back
+  when the new one fails its health check (DEPLOY_STAGE_FAILED for that
+  generation); the panel records the previous state as applied, turns the
+  switch of a close that failed back on (`panelAccessChoice` by `system`),
+  holds 15 minutes and bumps the generation to match what runs.
+- The domain as a private path (`private-paths.ts` `domainPath`): working
+  once a check found it active for the current domain and it did not fail
+  the 2 checks since in a row, at least 4 minutes apart (`domainWorking`);
+  a changed or removed domain stops working at once. Proven by
+  `ctx.origin === "https://<domain>"`, which IP:port cannot produce (the
+  scheme there is always http, `http/request-origin.ts`). While IP access
+  is closed or meant to be, the domain job checks every 5 minutes, active
+  or not. The registry (`registerPrivatePath`) holds the domain and the
+  tailnet, in that order.
+- `settings.updatePanelAccess`: turning anything off, or `stayClosed`,
+  checks the caller (`notBrowserSession` for API keys, MCP, the assistant
+  and any transport but HTTP, then `notOwner`), then `closeBlocks` (or
+  `agentPortBlocks` for `agentPortOpen: false`), then `stayClosed` needs
+  `savedRecovery: true` (BAD_REQUEST, field `savedRecovery`), then
+  `requireFreshSignIn` (FORBIDDEN `reason: reauth`). A refusal is CONFLICT
+  with `details.reason` the first block's code and `details.nodeIds`
+  comma-joined. Turning things on needs `settings.manage` over HTTP from
+  anyone but MCP and the assistant (FORBIDDEN) and is always allowed. A
+  turn-off past the guards drops the anti-flap wait (`closeNow`); a turn-on
+  or `stayClosed` drops a failed roll's hold (`resetHold`).
+  `settings.panelAccess` lists every block for this caller in `blocked` and
+  `agentPortBlocked`, plus `openReason`, `oldDocker` (the panel node's
+  Docker when older than 28: route_localnet may let the local network
+  reach 127.0.0.1 ports; the node's Docker Engine check warns too while the
+  panel is published on loopback only), `lastChange` and `recovery`
+  (`ssh -L 3000:127.0.0.1:<panel port> root@<server>`,
+  `sudo seylo panel ip-access on`).
+- Block codes (`settings.panelAccessBlockCodes`): `notOwner`,
+  `notBrowserSession`, `noPrivatePath`, `notOnPrivatePath` (the request
+  came over IP:port or a path that is down), `panelNodeOffline`,
+  `panelNotManaged`, `agentTooOld`, `updateRunning`, `plainHttpNodes`
+  (enabled nodes on plain `http://`, online or offline, and nodes not seen
+  since the update, whose address is unknown), `nodesOnAgentPort`,
+  `noAgentPort`, `panelNodeNotLoopback` (with the loopback join command).
+- Other CONFLICT reasons: `settings.updateGeneral` `nodesOnDomain` (field
+  `acknowledgeNodesOffline`, `nodeIds`) and `stayClosed` (field `domain`:
+  IP access closed in `stayClosed` mode and the domain is the only working
+  path); `nodes.createJoinToken` `agentPortClosed` (the agents' port is
+  closed and no domain is active) and `ipAccessClosed` (no agents' port,
+  no active domain, IP access closed); `tailscale.setServe` on: one of
+  `serveBlockedReasons` (`notInstalled`, `notSignedIn` (NeedsLogin or
+  Stopped), `needsApproval`, `tooOld`, `magicDnsOff`, `agentTooOld`,
+  `offline`, `disabledOnServer`), off: `stayClosed` when the tailnet is the
+  only working path into a closed panel in `stayClosed` mode, unless
+  `reopenIpAccess` (which turns Serve on IP address back on);
+  `tailscale.signIn` `needsApproval`, `stopped` and `signedIn`.
+- `seylo panel ip-access on` (root, on the panel's node; refused when
+  `panel/panel.db` is missing) writes `<data>/panel/ip-access-on` (0600,
+  owned by the panel user) and restarts the panel container like
+  setup-link. The panel reads it on start and on the 1-minute job
+  (`applyIpAccessFile`): both switches on, `onFailure` back to `reopen`,
+  an audit row (op id `settings.ipAccessOnFromServer`, actor "the server's
+  command line"), the file removed, then `applyPanelIpAccess` (the second
+  restart). The command says when the agent is down, not connected or busy
+  with an update, since only the agent applies the second restart.
+- Join targets (`nodes/join-target.ts`): an origin that is neither an IP
+  literal nor the panel domain (a `*.ts.net` name) is ignored when choosing
+  the join URL. The public URL (`modules/settings/public-url.ts`) is the
+  domain, else `SEYLO_PUBLIC_URL`, else the tailnet URL while IP access is
+  closed and the tailnet works, else IP:port.
+
+### The tailnet
+
+- Agent (`tailnet.Manager`, component `tailnet`, a 30 s tick plus a wake
+  on a desired-state change): reads status and prefs over the LocalAPI
+  socket (5 s timeout), fills `NodeFacts.tailscale` (`TailscaleInfo`, sent
+  when it changed and every 5 minutes otherwise, so `checked_at` moves),
+  and keeps the one Serve entry
+  `https://<dnsName>/` (port 443, or `http://` on 80 without HTTPS
+  certificates) -> `unix:<data>/panel/tailnet.sock` while
+  `NodeSettings.tailnet.panel` (panel node only) asks for it and
+  tailscaled is Running, at least `MinVersion` (1.104.4), MagicDNS is on,
+  the protected panel service is in this node's desired state and the
+  socket exists. The target is always the agent's own host path, never one
+  from the panel. Another handler on that host:port, or AllowFunnel on it,
+  is a conflict (state CONFLICT, the owner's entry stays); 412 retries on
+  the next tick; a removed entry comes back. Every 60 s it asks
+  `/api/health` through the socket (`panel_answers`). `TailscaleLogin`
+  (`tailnet.login.v1`): on a server never signed in, EditPrefs with only
+  WantRunning and CorpDNS false first, then login-interactive, then the
+  AuthURL from status for up to 15 s; with a profile it never touches
+  prefs. `TailscaleSetDns` changes CorpDNS only. It never runs `tailscale
+  up`, `down` or `logout`, changes routes, exit nodes or the firewall,
+  reads `/var/lib/tailscale` or logs the link; `troubleshoot` redacts
+  `login.tailscale.com/a/...`, `/register/<id>` and `tskey-...`.
+- `no_tailnet: true` in config.yml (`seylo panel tailscale off`, which
+  also removes the entry itself and restarts the agent unit; `on` undoes
+  it) is the local kill switch: no entry, both RPCs PERMISSION_DENIED,
+  `disabled_on_server` in the facts. `tailscale_socket` moves the socket
+  (absolute paths only). `seylo panel tailscale status` reads the LocalAPI
+  directly, so it works with the agent and the panel down, and prints the
+  sign-in link when tailscaled waits for one.
+- Panel: settings keys `tailscaleServe` ("Serve the panel on my tailnet",
+  absent = false), `tailscaleServeTailnet` (`{tailnet, dnsName}`, set while
+  Serve is on: Serve is pinned to that tailnet) and `tailscaleSeen` (what
+  the panel node reported last plus the path's debounce: `detected, state,
+  dnsName, tailnet, https, serveState, url, panelAnswers, keyExpiry,
+  reported, working, workingSince, stoppedAt, downSince, checkedAt`). The
+  sign-in link is never stored: memory only, 10 minutes, owner only
+  (`tailscale.get` `signInUrl`, marked sensitive output), never audited.
+  Every NodeFacts of the panel node from an agent with `tailnet.serve.v1`
+  is an explicit report (no `tailscale` = no socket). The tailnet path
+  works when Serve is wanted, tailscaled is Running, the entry is ACTIVE
+  and the panel answered through it; it stops working after 5 minutes of
+  reports that do not work from an online agent (`tailnetDownMs`; a
+  disconnect restarts the clock, an offline agent keeps the last state),
+  and at once when Serve is turned off or the report comes from another
+  tailnet than `tailscaleServeTailnet` (then the desired state drops
+  `tailnet.panel`, the agent removes the entry and the listener answers
+  403 to everything but `/api/health`). Proven by `ctx.via === "tailnet"`.
+- Alerts (`modules/tailscale/alerts.ts`, keys on existing events, only
+  while Serve is wanted, link `/settings/tailscale`): `security_change`
+  `tailnet-serve-on:<ms>` (names the tailnet and the login) and
+  `tailnet-moved:<ms>` (another tailnet); `node_health_check_failed`
+  `tailnet-key-expiry:<expiry>` (14 days ahead), `tailnet-needs-login:`,
+  `tailnet-needs-approval:`, `tailnet-stopped:` (says whether IP access
+  reopened), resolved when the state clears; `health_recovered`
+  `tailnet-recovered:`.
+- `tailscale.setServe`, `signIn` and `setDns` need the owner, from a
+  browser session (FORBIDDEN otherwise, and for any transport but HTTP),
+  with `requireFreshSignIn`. Serve on adds a way in only; off removes the
+  entry and runs `applyPanelIpAccess` (`reopenedUrl` when that reopened IP
+  access). `setDns` takes only `acceptDns: false`.
+
+### Tailnet listener trust
+
+- The panel always listens on `<data dir>/tailnet.sock` (host
+  `<data>/panel/tailnet.sock`): a stale socket is removed at start, the new
+  one is chmod 0600 and owned by the panel user inside the 0700 data dir,
+  so only root (tailscaled) and the panel connect; it is stopped on
+  shutdown. Toggling Serve never restarts the panel.
+- `tailnetApp` is `buildApp` again over a copy of the deps with
+  `proxy: trustEveryPeer` and `listener: "tailnet"`, so the `requestIP`
+  call sites stay as they are: forwarded headers count from every peer on
+  the socket, never on TCP. That is safe because Serve's reverse proxy
+  drops any `X-Forwarded-*` and `Tailscale-User-*` the client sent and sets
+  its own (X-Forwarded-For the tailnet device, X-Forwarded-Host the Host
+  the browser used, X-Forwarded-Proto `https` only in HTTPS mode, absent
+  meaning http, Tailscale-User-Login the device's user, none for tagged
+  devices), so a tailnet client chooses neither `ctx.origin` nor its audit
+  address and an HTTP-mode client cannot claim https. The tailnet app has
+  no agent endpoint and no domain redirect, and its HTTPS answers carry no
+  HSTS (the agent moves Serve between https:// and http:// when the
+  tailnet's certificates change).
+- Host pinning (`tailnetHostGuard`, before anything else): a request with
+  `Tailscale-Funnel-Request` gets 403, even `/api/health`; `/api/health`
+  otherwise answers on any host (the agent's probe); on another tailnet
+  than the one Serve was turned on for, 403; X-Forwarded-Host equal to the
+  known dnsName is served with Host set to it (so origin checks, cookies
+  and links see the browser's name); the short name or a tailnet address
+  gets 308 to the full name; any other host 421; while no dnsName is known
+  yet, 503.
+- `http/ops-http.ts` sets `via: "tailnet"` and `viaLogin` (Serve's
+  Tailscale-User-Login, cut to `maxViaLoginLength`) on calls from the
+  tailnet app only (`pipeline.ts` `viaOf` keeps them for HTTP calls only).
+  They go into the call's audit row and prove the tailnet path; they never
+  sign anyone in. Passkeys stay bound to `panelDomain`.
+- Both listeners share one LiveHub: live sockets on the tailnet socket are
+  closed and re-checked like the others (`addDisconnector`,
+  `addRechecker`, see the live socket).
 
 ## Releases and updates
 
@@ -2274,7 +2539,17 @@ with its local release server.
 Node CLI on the panel's node: `seylo panel setup-link` writes a new
 setup token and restarts the panel container so it imports it;
 `seylo panel rotate-key` replaces `master.key` after a leak (TypeScript
-conventions, secrets).
+conventions, secrets). `seylo panel status` (localapi `PanelStatus`)
+prints the service line, then since 0.2.1 how Docker publishes the two
+ports, read from the running container's bindings (`IP access: closed
+(127.0.0.1:3000); agents' port: open (0.0.0.0:3443)`; states open,
+closed, off, unknown when no panel container runs), then a `Tailnet:`
+line from the tailnet area's last report when the server runs tailscaled
+(`active (https://panel.tail1234.ts.net)`, `off (Tailscale needs a
+sign-in)`, `conflict (...)`, or `off on this server (no_tailnet is set
+in config.yml; seylo panel tailscale on undoes it)`). An agent before
+0.2.1 reports neither line. `seylo panel ip-access on` and `seylo panel
+tailscale status|off|on` are in "Panel access and the tailnet".
 
 ## Agent hub, node state and desired state
 
@@ -2488,10 +2763,24 @@ stays until a newer stable release). `updates.status` has `channel`,
 `canChangeChannel`, `panel.offeredVersion` and `panel.latestIsPrerelease`.
 A run is update_runs/update_steps advanced by the `updates.run` job: panel
 step (UpdatePanel on the panel node), then one agent step per older node
-(UpdateAgent with the verified bytes); a durable `UpdateResult` or the new
-version on reconnect finishes a step, 10 minutes without either fails it
-and the run with an `update_failed` alert (an agent step is tried once
-more 5 minutes later). That alert is resolved when the node gets there
+(UpdateAgent with the verified bytes, deadline 2 minutes since 0.2.1:
+`updateAgentTimeoutMs`); a durable `UpdateResult` or the new
+version on reconnect finishes a step, and so does ALREADY_EXISTS at once.
+A node that answers busy (ABORTED: another update holds its lock, such as
+the panel swap that just brought this panel up) is logged and gets
+UpdateAgent again after 5 s, doubling up to a minute (`busyRetryMs`, kept
+in memory: after a panel restart such a step finishes by version or times
+out), within the step's deadline; since 0.2.1 the agent's UpdateAgent
+also waits up to a minute for a panel swap that holds the lock
+(`Lock.AcquireWithin`, never into the last 30 s of the call's deadline;
+any other holder is busy at once), and its on-connect auto-update retries
+for 10 minutes. 10 minutes without a result fails the step and the run
+with "The update did not finish in time." and an `update_failed` alert
+(key `update-failed:<step id>`, the one a failed `UpdateResult` uses, so a
+late result does not alert twice; a Docker step without a result alerts
+too), and an agent step is tried once more 5 minutes later
+(`timeoutRetryMs`, through the catch-up as retry `waiting`; that try is a
+run of trigger `auto`, and a second timeout is left to Update now). That alert is resolved when the node gets there
 after all: a late successful `UpdateResult` for the step (it stays
 failed), the retry or a later run reaching that version, a successful
 agent `UpdateResult` for it or a newer one, or the catch-up finding the
@@ -2935,6 +3224,20 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and admins, "More" for the SSH tunnel command for this port, and a
   dismiss button remembered per browser (localStorage
   `<slug>.plainHttpNoticeDismissed`, every access in try/catch).
+- Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
+  a click anywhere on the field copies, the copy icon included
+  (`copy.spec.ts`).
+- Hiding projects (owner request for 0.2.1, per person, not global): the
+  person's preferences (`auth.preferences` / `auth.updatePreferences`, the
+  free-form `Preferences` record) gain `hiddenProjectIds`, add-only: a
+  capped list of ids of projects the person can see; unknown, deleted or
+  no longer visible ids drop out on read. Hidden projects leave the
+  sidebar's Projects list and the home page grid; "Hide project" and
+  "Unhide" are in the project's menu in the sidebar and on its home card;
+  a quiet "Hidden (N)" row ends the sidebar list and "Show hidden" toggles
+  them on the home page, without unhiding. The command palette, direct
+  links, search and the Projects pages ignore it. Nothing is hidden by
+  default: the protected Panel project shows until the person hides it.
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the
@@ -2992,7 +3295,18 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo
-  data, with the ops answered and recorded per test), `env-save.spec.ts`
+  data, with the ops answered and recorded per test), and since 0.2.1
+  `nodes-build-default.spec.ts` (Add node's Build images on this node:
+  ticked by default, the request carries the choice, Change),
+  `panel-access.spec.ts` (the Panel domain card's switches in every state,
+  the confirm dialog, Keep IP access closed needing the tick, Check now and
+  a Cloudflare-proxied domain), `tailscale.spec.ts` (every Tailscale card
+  state, Install typing into the Shell view without running, sign-in, the
+  Serve switch, the other-tailnet card and Lock to Tailscale only from the
+  tailnet with the recovery commands saved) and `build-settings.spec.ts`
+  (the build node picker says why a node is not offered: Can build off,
+  docker buildx missing, offline; Save sends the build node only when it
+  changed), `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
   text unsaved) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
