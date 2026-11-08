@@ -14,4 +14,13 @@ export default {
   saveFailed: "Could not save the sidebar order",
   expand: "Expand {name}",
   collapse: "Collapse {name}",
+  projectMenu: "More actions for {name}",
+  hideProject: "Hide project",
+  unhideProject: "Unhide project",
+  hidden: "Hidden ({count})",
+  hiddenToast: "{name} hidden",
+  hiddenToastHint: "It stays under Hidden at the end of the sidebar.",
+  undo: "Undo",
+  hideFailed: "Could not save hidden projects",
+  hideLimit: "You can hide up to {count} projects.",
 } as const;

@@ -32,9 +32,12 @@ export function useProjectPrefs() {
       patch((list) => list.map((p) => (p.id === projectId ? { ...p, collapsed } : p)));
       collapse.mutate({ projectId, collapsed });
     },
-    setAllCollapsed(collapsed: boolean) {
+    /** Collapses or expands every project, or only `only` (the cards on screen, without the hidden ones). */
+    setAllCollapsed(collapsed: boolean, only?: readonly { id: string }[]) {
       const list = queryClient.getQueryData<ProjectList>(listKey)?.projects ?? [];
+      const ids = only && new Set(only.map((project) => project.id));
       for (const project of list) {
+        if (ids && !ids.has(project.id)) continue;
         if (project.collapsed === collapsed) continue;
         patch((current) => current.map((p) => (p.id === project.id ? { ...p, collapsed } : p)));
         collapse.mutate({ projectId: project.id, collapsed });
