@@ -44,7 +44,7 @@ export type TailscaleServeState = Static<typeof TailscaleServeState>;
 export const serveBlockedReasons = [
   /** No tailscaled socket on the panel server. */
   "notInstalled",
-  /** tailscaled runs but is not signed in (NeedsLogin, or Stopped). */
+  /** tailscaled runs but is not signed in (NeedsLogin), or is signed in and stopped (Stopped, `tailscale down`). */
   "notSignedIn",
   /** The tailnet admin has to approve the machine (NeedsMachineAuth). */
   "needsApproval",
@@ -99,6 +99,14 @@ export const TailscaleStatus = Type.Object({
   serve: Type.Object({
     /** The owner turned "Serve the panel on my tailnet" on. */
     wanted: Type.Boolean(),
+    /** The tailnet Serve was turned on for; null while it is off. The panel is served on no other. */
+    tailnet: Nullable(Type.String()),
+    /**
+     * The server is signed in to another tailnet than `tailnet` now. The panel
+     * is not served there, and its entry is removed, until the owner turns
+     * Serve on again for the new tailnet (setServe with serve: true).
+     */
+    onOtherTailnet: Type.Boolean(),
     state: TailscaleServeState,
     /** "https://<dnsName>" (or http:// without HTTPS certificates) while active; null otherwise. */
     url: Nullable(Type.String()),
@@ -148,7 +156,7 @@ export const setServe = defineOp({
   kind: "mutation",
   summary: "Serve the panel on the tailnet",
   description:
-    'Adds or removes the one Tailscale Serve entry that sends https://<machine>.<tailnet>.ts.net to the panel. Nothing restarts and nothing closes. Turning it on needs the owner from a browser session with a fresh sign-in, and a server that is signed in, new enough and has MagicDNS on (CONFLICT details.reason one of serveBlockedReasons otherwise). Turning it off while it is the only working way in and IP access is closed reopens IP access ("reopen" mode, reopenedUrl says where), or is CONFLICT in "stayClosed" mode unless reopenIpAccess is true.',
+    'Adds or removes the one Tailscale Serve entry that sends https://<machine>.<tailnet>.ts.net to the panel. Nothing restarts and nothing closes. Turning it on needs the owner from a browser session with a fresh sign-in, and a server that is signed in, new enough and has MagicDNS on (CONFLICT details.reason one of serveBlockedReasons otherwise). It serves the panel on the tailnet the server is signed in to then, and on no other: when the server signs in to another tailnet the entry goes until the owner turns Serve on again for that one. Turning it off while it is the only working way in and IP access is closed reopens IP access ("reopen" mode, reopenedUrl says where), or is CONFLICT in "stayClosed" mode unless reopenIpAccess is true.',
   input: Type.Object({
     serve: Type.Boolean(),
     /** Turning Serve off in "stayClosed" mode: reopen IP access as well. */
@@ -170,7 +178,7 @@ export const signIn = defineOp({
   kind: "mutation",
   summary: "Get a Tailscale sign-in link for the server",
   description:
-    "Asks the server's tailscaled for an interactive sign-in link. Whoever opens it puts the server on their tailnet, so only the owner gets it, from a browser session with a fresh sign-in, and only while the server is not signed in. The first sign-in from the panel turns Tailscale DNS off on the server. The link is kept in memory for 10 minutes and never stored or audited.",
+    "Asks the server's tailscaled for an interactive sign-in link. Whoever opens it puts the server on their tailnet, so only the owner gets it, from a browser session with a fresh sign-in, and only while the server is not signed in (a stopped server is signed in: CONFLICT details.reason 'stopped', start it on the server). The first sign-in from the panel turns Tailscale DNS off on the server. The link is kept in memory for 10 minutes and never stored or audited.",
   input: Empty,
   output: Type.Object({
     url: Type.String(),

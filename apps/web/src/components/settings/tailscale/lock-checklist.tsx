@@ -60,7 +60,8 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
   if (!access.serveOnIp) return <Locked access={access} domain={domain} />;
 
   const running = status.backendState === "Running";
-  const serving = status.serve.state === "active" && status.serve.panelAnswers;
+  // Not on another tailnet than the one Serve was turned on for: the panel does not count that one.
+  const serving = status.serve.state === "active" && status.serve.panelAnswers && !status.serve.onOtherTailnet;
   const url = status.serve.url;
   const onAgentPort = access.agentPortBlocked.find((block) => block.code === "nodesOnAgentPort");
   const agentPortCloses = access.agentPort !== null && access.agentPortOpen && access.agentPortBlocked.length === 0;

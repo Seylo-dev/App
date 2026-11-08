@@ -11,13 +11,20 @@
 // user (none for tagged devices). The socket's deps therefore trust
 // forwarded headers from every peer (panel.ts).
 //
+// Funnel: Serve marks a request from the internet with
+// Tailscale-Funnel-Request (and drops one a client sent). Funnel covers a
+// whole host and port, so `tailscale funnel` on another path of the panel's
+// name would put the panel on the internet until the agent's next pass
+// removes its entry. Those requests get a 403 here, whatever the agent does.
+//
 // Host pinning: Serve sends Host "localhost" to a unix target. The request
 // is served only when X-Forwarded-Host is the server's MagicDNS name, and
 // then Host is set to it, so origin checks, cookies and links see the name
 // the browser used. The machine's short name or a tailnet address gets a
 // 308 to the full name; anything else 421; while the panel does not know
-// the name yet, 503. /api/health answers whatever the host: the agent's
-// probe through the socket uses it.
+// the name yet, 503; while the server is signed in to another tailnet than
+// the one Serve was turned on for, 403. /api/health answers whatever the
+// host: the agent's probe through the socket uses it.
 
 import { chmodSync, lstatSync, rmSync } from "node:fs";
 import type { AnyElysia } from "elysia";
@@ -34,11 +41,18 @@ export interface TailnetIdentity {
   dnsName: string | null;
   /** The machine's tailnet addresses (100.x, fd7a:115c:a1e0::). */
   addresses: readonly string[];
+  /** The server is signed in to another tailnet than the one Serve was turned on for: nothing is served. */
+  otherTailnet?: boolean;
 }
 
 export type TailnetHostVerdict =
   /** host: what Host becomes for the rest of the request; null keeps it (the health probe). */
-  { kind: "serve"; host: string | null } | { kind: "redirect"; location: string } | { kind: "misdirected" } | { kind: "unknown" };
+  | { kind: "serve"; host: string | null }
+  | { kind: "redirect"; location: string }
+  | { kind: "misdirected" }
+  | { kind: "unknown" }
+  | { kind: "funnel" }
+  | { kind: "otherTailnet" };
 
 /** "Panel.tail1234.ts.net.:443" -> "panel.tail1234.ts.net"; "[fd7a::1]:80" -> "fd7a::1". */
 function hostnameOf(host: string): string {
@@ -50,8 +64,11 @@ function hostnameOf(host: string): string {
 
 /** Decides one request on the tailnet listener. */
 export function pinTailnetHost(request: Request, identity: TailnetIdentity): TailnetHostVerdict {
+  // From the internet through Funnel: never served, not even the health check.
+  if (request.headers.has("tailscale-funnel-request")) return { kind: "funnel" };
   const url = new URL(request.url);
   if (url.pathname === healthPath) return { kind: "serve", host: null };
+  if (identity.otherTailnet) return { kind: "otherTailnet" };
   const dnsName = identity.dnsName?.trim().toLowerCase().replace(/\.$/, "") || null;
   if (!dnsName) return { kind: "unknown" };
   const host = request.headers.get("x-forwarded-host")?.trim() ?? "";
@@ -90,6 +107,13 @@ export function tailnetHostGuard(identity: () => TailnetIdentity) {
         return plain(503, "The panel does not know its tailnet name yet. Try again in a minute.", { "retry-after": "30" });
       case "misdirected":
         return plain(421, "This address does not serve the panel. Open the panel's tailnet name instead.");
+      case "funnel":
+        return plain(403, "The panel is not served over Tailscale Funnel.");
+      case "otherTailnet":
+        return plain(
+          403,
+          "The panel server is signed in to another tailnet than the one the panel was served on. Its owner has to turn Serve on again for this tailnet.",
+        );
     }
   };
 }

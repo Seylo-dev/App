@@ -4,8 +4,18 @@
 import { tailscale } from "@seylo/ops";
 import type { TailscaleInfo } from "@seylo/proto";
 import type { OpContext } from "../../ops/implement";
-import { agentReadsTailscale, dnsNameOf, keyExpiryMs, panelNodeFacts, panelNodeId, serveStateOf, versionAtLeast } from "./facts";
-import { readServeWanted } from "./keys";
+import {
+  agentReadsTailscale,
+  dnsNameOf,
+  keyExpiryMs,
+  onOtherTailnet,
+  panelNodeFacts,
+  panelNodeId,
+  serveStateOf,
+  tailnetLabel,
+  versionAtLeast,
+} from "./facts";
+import { readServeTailnet, readServeWanted } from "./keys";
 import { freshSignInLink } from "./sign-in";
 
 /** The owner, from a browser session, over HTTP: who may turn Serve on, sign in and change DNS. */
@@ -56,6 +66,8 @@ export function tailscaleView(ctx: OpContext, info?: TailscaleInfo): tailscale.T
   const canManage = canManageTailscale(ctx);
   const serveState = serveStateOf(current);
   const expiry = keyExpiryMs(current);
+  const wanted = readServeWanted(ctx.db);
+  const approved = readServeTailnet(ctx.db);
   return {
     detected: !!current,
     agentOnline: nodeId !== null && ctx.agents.isOnline(nodeId),
@@ -77,7 +89,9 @@ export function tailscaleView(ctx: OpContext, info?: TailscaleInfo): tailscale.T
     keyExpiry: expiry === null ? null : new Date(expiry).toISOString(),
     disabledOnServer: current?.disabledOnServer ?? false,
     serve: {
-      wanted: readServeWanted(ctx.db),
+      wanted,
+      tailnet: wanted && approved ? tailnetLabel(approved.tailnet, approved.dnsName) : null,
+      onOtherTailnet: wanted && onOtherTailnet(approved, current?.tailnet ?? "", dnsNameOf(current)),
       state: serveState,
       url: serveState === "active" ? current?.serve?.url || null : null,
       message: current?.serve?.message ?? "",

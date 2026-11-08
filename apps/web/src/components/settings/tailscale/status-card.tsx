@@ -1,8 +1,9 @@
 // Settings > Tailscale, first card: what the panel server's agent sees of
 // the server's own tailscaled. Not found: the Install button (the panel
 // node's Shell tab with the command typed in) and the command to copy. Not
-// signed in: Sign in to Tailscale (the link opens in a new tab). Needs
-// approval: the admin console. Running: the tailnet, the machine, key expiry,
+// signed in: Sign in to Tailscale (the link opens in a new tab). Stopped
+// (signed in, `tailscale down`): the command that starts it on the server,
+// with no sign-in. Needs approval: the admin console. Running: the tailnet, the machine, key expiry,
 // HTTPS and MagicDNS, the warnings, and the access rule to paste.
 
 import { nodes, tailscale } from "@seylo/ops";
@@ -21,7 +22,7 @@ import { t } from "../../../i18n/t";
 import { formatDate } from "../format";
 import { invalidateOps } from "../mutation";
 import { toastError } from "../op-state";
-import { adminConsole, commands, installShellSearch, isSignedOut, type TailscaleStatus } from "./shared";
+import { adminConsole, commands, installShellSearch, isSignedOut, isStopped, type TailscaleStatus } from "./shared";
 
 const keyExpirySoonMs = 14 * 86_400_000;
 
@@ -77,6 +78,8 @@ function StatusBody({ status }: { status: TailscaleStatus }) {
       )}
       {status.backendState === "NeedsMachineAuth" ? (
         <NeedsApproval />
+      ) : isStopped(status) ? (
+        <Stopped />
       ) : isSignedOut(status) ? (
         <SignedOut status={status} />
       ) : (
@@ -122,14 +125,11 @@ function SignedOut({ status }: { status: TailscaleStatus }) {
     },
     onError: (error) => toastError(error),
   });
-  const stopped = status.backendState === "Stopped";
   return (
     <div className="flex flex-col items-start gap-3">
       <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        <Chip tone="amber">{stopped ? t("settingsTailscale.status.stopped") : t("settingsTailscale.status.notSignedIn")}</Chip>
-        <span className="text-muted-foreground">
-          {stopped ? t("settingsTailscale.status.stoppedHint") : t("settingsTailscale.status.notSignedInHint")}
-        </span>
+        <Chip tone="amber">{t("settingsTailscale.status.notSignedIn")}</Chip>
+        <span className="text-muted-foreground">{t("settingsTailscale.status.notSignedInHint")}</span>
       </div>
       {status.canManage ? (
         <Button variant="primary" disabled={signIn.isPending} onClick={() => signIn.mutate({})}>
@@ -148,6 +148,19 @@ function SignedOut({ status }: { status: TailscaleStatus }) {
         {t("settingsTailscale.status.signInSsh")}
         <CopyCode code={commands.signIn} />
       </div>
+    </div>
+  );
+}
+
+/** `tailscale down` on the server: signed in, so no sign-in link; only the command there starts it. */
+function Stopped() {
+  return (
+    <div className="flex flex-col items-start gap-2 text-[13px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip tone="amber">{t("settingsTailscale.status.stopped")}</Chip>
+        <span className="text-muted-foreground">{t("settingsTailscale.status.stoppedHint")}</span>
+      </div>
+      <CopyCode code={commands.signIn} />
     </div>
   );
 }

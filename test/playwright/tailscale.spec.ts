@@ -44,7 +44,7 @@ function status(changes: Input = {}): Input {
     advertisesRoutes: false,
     keyExpiry: new Date(Date.now() + 150 * 86_400_000).toISOString(),
     disabledOnServer: false,
-    serve: { wanted: false, state: "off", url: null, message: "", panelAnswers: false },
+    serve: { wanted: false, tailnet: null, onOtherTailnet: false, state: "off", url: null, message: "", panelAnswers: false },
     owned: null,
     viaTailnet: false,
     canManage: true,
@@ -57,7 +57,7 @@ function status(changes: Input = {}): Input {
 
 const serving = (changes: Input = {}) =>
   status({
-    serve: { wanted: true, state: "active", url: tailnetUrl, message: "", panelAnswers: true },
+    serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: false, state: "active", url: tailnetUrl, message: "", panelAnswers: true },
     owned: { hostPort: `${machine}:443`, path: "/", proxy: "unix:/var/lib/seylo/panel/tailnet.sock" },
     ...changes,
   });
@@ -347,7 +347,7 @@ test.describe("settings > tailscale", () => {
 
   test("conflict and waiting states show the agent's words and what is missing", async ({ page }) => {
     let answer = serving({
-      serve: { wanted: true, state: "conflict", url: null, message: "Another handler serves de-fsn-1.tail4f2a9c.ts.net:443.", panelAnswers: false },
+      serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: false, state: "conflict", url: null, message: "Another handler serves de-fsn-1.tail4f2a9c.ts.net:443.", panelAnswers: false },
       owned: null,
     });
     await installDemo(page, { overrides: { "tailscale.get": () => answer } });
@@ -355,9 +355,12 @@ test.describe("settings > tailscale", () => {
     await expect(page.getByText("Another Serve entry uses this address")).toBeVisible();
     await expect(page.getByText("Another handler serves de-fsn-1.tail4f2a9c.ts.net:443.")).toBeVisible();
 
-    answer = serving({ backendState: "Stopped", serve: { wanted: true, state: "off", url: null, message: "", panelAnswers: false }, owned: null });
+    answer = serving({ backendState: "Stopped", serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: false, state: "off", url: null, message: "", panelAnswers: false }, owned: null });
     await page.reload();
     await expect(page.getByText("Waiting for the server:", { exact: false })).toBeVisible();
+    // Stopped is signed in: only the command that starts it, no sign-in.
+    await expect(page.getByText("Tailscale is signed in but stopped on the server.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign in to Tailscale" })).toHaveCount(0);
   });
 
   test("Serve off in keep-closed mode while it is the only way in asks to reopen IP access too", async ({ page }) => {

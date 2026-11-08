@@ -1,7 +1,7 @@
 // Settings keys of the tailscale module, declared by augmenting
 // SettingValues (src/settings.ts). Nothing here is a secret: the server's
-// tailnet name and MagicDNS name, and what the panel last heard. The
-// sign-in link is never stored (sign-in.ts).
+// tailnet name and MagicDNS name, the tailnet Serve was turned on for, and
+// what the panel last heard. The sign-in link is never stored (sign-in.ts).
 
 import type { tailscale } from "@seylo/ops";
 import type { PanelDb } from "../../db/client";
@@ -36,10 +36,24 @@ export interface TailscaleSeen {
   checkedAt: number;
 }
 
+/**
+ * The tailnet the owner turned Serve on for (tailscale.setServe). The panel
+ * is served on no other: a server that signs in to another tailnet gets no
+ * Serve entry there until the owner turns Serve on again for it.
+ */
+export interface ServeTailnet {
+  /** tailscaled's CurrentTailnet.Name, for example "example.com". It stays when the tailnet's DNS name is renamed. */
+  tailnet: string;
+  /** The server's MagicDNS name then; its suffix stands in when a tailnet name is missing. */
+  dnsName: string;
+}
+
 declare module "../../settings" {
   interface SettingValues {
     /** "Serve the panel on my tailnet"; absent means false. */
     tailscaleServe: boolean;
+    /** Set while tailscaleServe is on. */
+    tailscaleServeTailnet: ServeTailnet;
     tailscaleSeen: TailscaleSeen;
   }
 }
@@ -64,6 +78,10 @@ export const emptySeen: TailscaleSeen = {
 
 export function readServeWanted(db: PanelDb): boolean {
   return getSetting(db, "tailscaleServe") ?? false;
+}
+
+export function readServeTailnet(db: PanelDb): ServeTailnet | null {
+  return getSetting(db, "tailscaleServeTailnet") ?? null;
 }
 
 export function readSeen(db: PanelDb): TailscaleSeen {

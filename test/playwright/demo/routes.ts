@@ -169,7 +169,7 @@ const runningTailscale = () => ({
   advertisesRoutes: false,
   keyExpiry: new Date(Date.now() + 150 * 86_400_000).toISOString(),
   disabledOnServer: false,
-  serve: { wanted: false, state: "off", url: null, message: "", panelAnswers: false },
+  serve: { wanted: false, tailnet: null, onOtherTailnet: false, state: "off", url: null, message: "", panelAnswers: false },
   owned: null,
   viaTailnet: false,
   canManage: true,

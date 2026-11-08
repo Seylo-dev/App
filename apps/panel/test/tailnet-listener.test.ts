@@ -12,7 +12,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { liveSessionKeyParam, liveUnauthorizedCloseCode, opRoute, sessionCookieName, settings as settingOps } from "@seylo/ops";
+import { auth, liveSessionKeyParam, liveUnauthorizedCloseCode, opRoute, sessionCookieName, settings as settingOps } from "@seylo/ops";
 import { desc } from "drizzle-orm";
 import { createSession } from "../src/auth/sessions";
 import { auditLog, users } from "../src/db/schema";
@@ -143,6 +143,80 @@ test("a cross-site POST over the tailnet is refused: Origin must be the pinned n
     }),
   );
   expect(response.status).toBe(403);
+});
+
+test("Funnel requests from the internet are never served, not even the health check", async () => {
+  panel = testPanel();
+  const p = panel;
+  knowName(p);
+  // Serve sets this on every Funnel request (and drops one a client sent).
+  const funnel = { "tailscale-funnel-request": "?1" };
+  expect(pinTailnetHost(overServe("/", { headers: funnel }), { dnsName, addresses: [] })).toEqual({ kind: "funnel" });
+  for (const path of ["/", "/login", "/api/health", opRoute(settingOps.general).path]) {
+    const response = await p.tailnetApp.handle(overServe(path, { headers: { ...funnel, "x-forwarded-for": "198.51.100.23" } }));
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("The panel is not served over Tailscale Funnel.");
+  }
+  // The same requests from a tailnet device are served (an op without a session: 401).
+  expect((await p.tailnetApp.handle(overServe("/api/health"))).status).toBe(200);
+  expect((await p.tailnetApp.handle(generalOverServe())).status).toBe(401);
+});
+
+/** settings.general (a GET) without a session, as Serve forwards it. */
+const generalOverServe = (host = dnsName) => overServe(opRoute(settingOps.general).path, { host });
+
+test("signed in to another tailnet than the one Serve was turned on for: only /api/health answers", async () => {
+  const moved = { dnsName, addresses: [], otherTailnet: true };
+  expect(pinTailnetHost(overServe("/"), moved)).toEqual({ kind: "otherTailnet" });
+  expect(pinTailnetHost(overServe("/api/health", { host: null }), moved)).toEqual({ kind: "serve", host: null });
+
+  panel = testPanel();
+  const p = panel;
+  const other = "panel.tail9999.ts.net";
+  setSetting(p.deps.db, "tailscaleServe", true);
+  setSetting(p.deps.db, "tailscaleServeTailnet", { tailnet: "example.com", dnsName });
+  setSetting(p.deps.db, "tailscaleSeen", {
+    ...emptySeen,
+    detected: true,
+    state: "Running",
+    tailnet: "work.example",
+    dnsName: other,
+    https: true,
+  });
+  for (const request of [overServe("/", { host: other }), generalOverServe(other), generalOverServe()]) {
+    const refused = await p.tailnetApp.handle(request);
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain("signed in to another tailnet");
+  }
+  expect((await p.tailnetApp.handle(overServe("/api/health", { host: other }))).status).toBe(200);
+  // Back on the tailnet Serve was turned on for.
+  setSetting(p.deps.db, "tailscaleSeen", { ...emptySeen, detected: true, state: "Running", tailnet: "example.com", dnsName, https: true });
+  expect((await p.tailnetApp.handle(generalOverServe())).status).toBe(401);
+});
+
+test("no HSTS on the tailnet name, also over HTTPS: the agent moves the panel to HTTP when the tailnet drops its certificates", async () => {
+  panel = testPanel();
+  const p = panel;
+  knowName(p);
+  const { user, password } = await createUser(p, "owner");
+  const { path } = opRoute(auth.login);
+  const response = await p.tailnetApp.handle(
+    overServe(path, {
+      method: "POST",
+      body: JSON.stringify({ email: user.email, password }),
+      headers: { "content-type": "application/json", origin: `https://${dnsName}` },
+    }),
+  );
+  expect(response.status).toBe(200);
+  // HTTPS all the same: the Secure session cookie, the other security headers.
+  expect(response.headers.getSetCookie().join(";")).toContain("Secure");
+  expect(response.headers.get("x-frame-options")).toBe("DENY");
+  expect(response.headers.get("strict-transport-security")).toBeNull();
+  expect((await p.tailnetApp.handle(overServe("/login"))).headers.get("strict-transport-security")).toBeNull();
+  // The panel domain keeps it.
+  setSetting(p.deps.db, "panelDomain", "panel.example.com");
+  const onDomain = await p.app.handle(new Request("http://panel.example.com/login", { headers: { host: "panel.example.com" } }));
+  expect(onDomain.headers.get("strict-transport-security")).toBe("max-age=31536000");
 });
 
 test("no domain redirect and no agent endpoint on the tailnet listener", async () => {
