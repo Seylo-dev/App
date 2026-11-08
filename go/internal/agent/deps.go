@@ -50,6 +50,12 @@ type Config struct {
 	// GitProxyResolves is config.yml's git_proxy_resolves: git hosts the
 	// node cannot resolve go on to the agent's HTTP proxy.
 	GitProxyResolves bool
+	// NoTailnet is config.yml's no_tailnet: the panel stays off this
+	// server's tailnet whatever the panel says (wire_tailnet.go).
+	NoTailnet bool
+	// TailscaleSocket is config.yml's tailscale_socket; empty is
+	// tailscaled's default socket.
+	TailscaleSocket string
 }
 
 // Deps is everything the wiring functions share. The agent fills the

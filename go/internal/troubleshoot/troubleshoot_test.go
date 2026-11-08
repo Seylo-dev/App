@@ -79,6 +79,9 @@ owner is someone@example.com
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
 -----END OPENSSH PRIVATE KEY-----
 peer 10.0.0.5 and public 203.0.113.7 and docker 172.17.0.2
+tailscale sign-in https://login.tailscale.com/a/1a2b3c4d5e6f78 waits
+headscale https://hs.example.com:8080/register/mkey_8b7c6d5e4f3a2b1c for this node
+auth key tskey-auth-kAbCdEf1CNTRL-0123456789abcdefABCDEF in a script
 `
 
 func TestRedactPassesTheSiteCheck(t *testing.T) {
@@ -89,12 +92,14 @@ func TestRedactPassesTheSiteCheck(t *testing.T) {
 	if f := siteFindings(out); len(f) > 0 {
 		t.Fatalf("site would refuse:\n%s\n\nredacted:\n%s", strings.Join(f, "\n"), out)
 	}
-	for _, secret := range []string{"hunter2", "seylo_join_", "seylo_key_", "correct-horse", "abcdefghijklmnopqrstuvwxyz0123456789", "s3cr3t", "AKIA", "ghp_", "sk-ant", "eyJ", "Zm9vYmFy", "someone@example.com", "b3BlbnNzaC1", "203.0.113.7"} {
+	for _, secret := range []string{"hunter2", "seylo_join_", "seylo_key_", "correct-horse", "abcdefghijklmnopqrstuvwxyz0123456789", "s3cr3t", "AKIA", "ghp_", "sk-ant", "eyJ", "Zm9vYmFy", "someone@example.com", "b3BlbnNzaC1", "203.0.113.7",
+		"1a2b3c4d5e6f78", "mkey_8b7c6d5e4f3a2b1c", "tskey-auth", "kAbCdEf1CNTRL"} {
 		if strings.Contains(out, secret) {
 			t.Errorf("%q survived redaction:\n%s", secret, out)
 		}
 	}
-	for _, keep := range []string{"panel.example.com", "10.0.0.5", "172.17.0.2", "&x=1", "panel_url: https://admin:"} {
+	for _, keep := range []string{"panel.example.com", "10.0.0.5", "172.17.0.2", "&x=1", "panel_url: https://admin:",
+		"https://login.tailscale.com/a/" + Marker + " waits", "https://hs.example.com:8080/register/" + Marker + " for this node"} {
 		if !strings.Contains(out, keep) {
 			t.Errorf("%q was removed but carries no secret:\n%s", keep, out)
 		}
@@ -187,6 +192,36 @@ func TestBuild(t *testing.T) {
 	}
 	if f := siteFindings(md); len(f) > 0 {
 		t.Errorf("site would refuse: %v", f)
+	}
+}
+
+// tailscaled's state folder holds the machine's keys: the report never
+// reads it, and a sign-in link in the agent's journal comes out redacted.
+func TestBuildLeavesTailscaleAlone(t *testing.T) {
+	opts := fakeOptions(t)
+	var read, ran []string
+	readFile := opts.ReadFile
+	opts.ReadFile = func(path string) ([]byte, error) {
+		read = append(read, path)
+		return readFile(path)
+	}
+	run := opts.Run
+	opts.Run = func(ctx context.Context, w io.Writer, name string, args ...string) error {
+		ran = append(ran, name+" "+strings.Join(args, " "))
+		if name == "journalctl" {
+			_, _ = io.WriteString(w, "2026-11-05T11:59:00Z node seylo[1]: login https://login.tailscale.com/a/9f8e7d6c5b4a\n")
+			return nil
+		}
+		return run(ctx, w, name, args...)
+	}
+	md := Build(context.Background(), opts)
+	for _, p := range append(read, ran...) {
+		if strings.Contains(p, "/var/lib/tailscale") || strings.Contains(p, "tailscale") {
+			t.Errorf("the report touched %q", p)
+		}
+	}
+	if strings.Contains(md, "9f8e7d6c5b4a") || !strings.Contains(md, "login.tailscale.com/a/"+Marker) {
+		t.Errorf("the sign-in link was not redacted:\n%s", md)
 	}
 }
 
