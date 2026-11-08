@@ -4,7 +4,8 @@
 // A socket only lives as long as its credentials: every revalidateMs the
 // endpoint authenticates each socket's cookie again and closes the ones
 // whose session was signed out, revoked, expired or whose person was
-// disabled (close code liveUnauthorizedCloseCode). deps.live.disconnect()
+// disabled (close code liveUnauthorizedCloseCode). These checks do not
+// count as using the session, so they never push its expiry out. deps.live.disconnect()
 // closes them at once, for code that knows a session just ended.
 //
 // The cookie alone signs nobody in: the web app adds the session key as the
@@ -36,6 +37,13 @@ const clientMessage = TypeCompiler.Compile(LiveClientMessage);
 
 /** How often open sockets are checked against their session. */
 export const revalidateMs = 15_000;
+
+/**
+ * The socket's own checks (open, revalidate, subscribe) only ask whether
+ * the session still works; they are not a use of it, so an open tab does
+ * not slide its session's idle expiry (auth/sessions.ts).
+ */
+const notAUse = { touch: false } as const;
 
 /** Topics one socket may follow at once; a tab needs a handful per screen. */
 export const maxTopicsPerSocket = 200;
@@ -82,7 +90,7 @@ export function liveEndpoint(
     for (const [id, connection] of connections) {
       const before = connection.access.principal;
       if (userId && (before.type === "anonymous" || before.user.id !== userId)) continue;
-      const principal = authenticate(deps.db, connection.credentials);
+      const principal = authenticate(deps.db, connection.credentials, undefined, notAUse);
       if (principal.type === "anonymous") {
         drop(id, "signed out");
         continue;
@@ -145,7 +153,7 @@ export function liveEndpoint(
         sessionKey: all.sessionKey,
         duplicateSession: all.duplicateSession,
       };
-      const principal = authenticate(deps.db, credentials);
+      const principal = authenticate(deps.db, credentials, undefined, notAUse);
       if (principal.type === "anonymous") {
         ws.close(liveUnauthorizedCloseCode, "sign in first");
         return;
@@ -180,7 +188,7 @@ export function liveEndpoint(
         return;
       }
       // A subscribe re-checks the session too, so a signed-out tab learns it at once.
-      if (authenticate(deps.db, connection.credentials).type === "anonymous") {
+      if (authenticate(deps.db, connection.credentials, undefined, notAUse).type === "anonymous") {
         drop(ws.id, "signed out");
         return;
       }

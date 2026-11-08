@@ -22,13 +22,17 @@ export interface Credentials {
   duplicateSession?: boolean;
 }
 
-/** Unknown or expired credentials yield the anonymous principal; ops then refuse with UNAUTHENTICATED. */
-export function authenticate(db: PanelDb, credentials: Credentials, now = new Date()): Principal {
+/**
+ * Unknown or expired credentials yield the anonymous principal; ops then
+ * refuse with UNAUTHENTICATED. touch: false checks a session without
+ * counting as a use of it (the live socket's checks; see auth/sessions.ts).
+ */
+export function authenticate(db: PanelDb, credentials: Credentials, now = new Date(), options: { touch?: boolean } = {}): Principal {
   if (credentials.bearerToken) {
     return lookupApiKey(db, credentials.bearerToken, now) ?? anonymous;
   }
   if (credentials.sessionToken && credentials.sessionKey && !credentials.duplicateSession) {
-    const session = lookupSession(db, credentials.sessionToken, credentials.sessionKey, now);
+    const session = lookupSession(db, credentials.sessionToken, credentials.sessionKey, now, options);
     if (session) return { type: "session", ...session };
   }
   return anonymous;
