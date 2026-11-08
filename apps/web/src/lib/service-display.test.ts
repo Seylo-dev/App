@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isBusy, kindTag, lastActivity, placementLine, sourceLine, statusDisplay } from "./service-display";
+import { deploysOnPush, isBusy, kindTag, lastActivity, placementLine, sourceLine, statusDisplay } from "./service-display";
 
 describe("service display", () => {
   test("kind tags", () => {
@@ -37,5 +37,14 @@ describe("service display", () => {
     expect(lastActivity({ status: "building", liveDeployment: null, lastDeployedAt: null, createdAt: new Date().toISOString() })).toBe(
       "building now",
     );
+  });
+
+  test("deploy on push for every source that has the switch", () => {
+    expect(deploysOnPush({ type: "github", deployOnPush: true })).toBe(true);
+    expect(deploysOnPush({ type: "git", deployOnPush: false })).toBe(false);
+    // GitLab, Gitea and Bitbucket sources (new in 0.2) have it too.
+    expect(deploysOnPush({ type: "provider", deployOnPush: true })).toBe(true);
+    expect(deploysOnPush({ type: "image" })).toBeNull();
+    expect(deploysOnPush({ type: "none" })).toBeNull();
   });
 });

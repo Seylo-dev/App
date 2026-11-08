@@ -111,3 +111,11 @@ export const panelServiceId = "panel00000000000";
 export function isPanelService(service: { id: string }): boolean {
   return service.id === panelServiceId;
 }
+
+/**
+ * Whether pushes to the source deploy it: GitHub, generic git and provider
+ * (GitLab, Gitea, Bitbucket) sources have the switch; null for the others.
+ */
+export function deploysOnPush(source: { type: string; deployOnPush?: boolean }): boolean | null {
+  return "deployOnPush" in source && typeof source.deployOnPush === "boolean" ? source.deployOnPush : null;
+}
