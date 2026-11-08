@@ -242,7 +242,12 @@ function RepoPicker({
   );
 }
 
-function BranchSelect({
+/**
+ * The branches of the picked repository. When the list fails (the App lost
+ * access, a rate limit, a repository that is gone) the error shows under the
+ * field: the saved or default branch alone in the list would hide it otherwise.
+ */
+export function BranchSelect({
   projectId,
   installationId,
   repo,
@@ -257,19 +262,29 @@ function BranchSelect({
 }) {
   const branches = useOp(github.branches, { projectId, installationId, repo }, { retry: retryOp });
   const list = branches.data?.branches ?? (value ? [value] : []);
+  const placeholder = branches.isPending
+    ? t("service.loading")
+    : branches.isError
+      ? t("serviceSource.github.branchesFailed")
+      : list.length === 0
+        ? t("serviceSource.github.noBranches")
+        : t("serviceSource.github.pickBranch");
   return (
-    <Select value={value ?? undefined} onValueChange={onChange} disabled={branches.isPending && !value}>
-      <SelectTrigger aria-label={t("serviceSource.github.branch")} className="font-mono">
-        <SelectValue placeholder={branches.isError ? t("service.notBuilt.title") : t("service.loading")} />
-      </SelectTrigger>
-      <SelectContent>
-        {list.map((b) => (
-          <SelectItem key={b} value={b} className="font-mono">
-            {b}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <>
+      <Select value={value ?? undefined} onValueChange={onChange} disabled={list.length === 0}>
+        <SelectTrigger aria-label={t("serviceSource.github.branch")} className="font-mono">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {list.map((b) => (
+            <SelectItem key={b} value={b} className="font-mono">
+              {b}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {branches.isError && <OpErrorNote error={branches.error} compact />}
+    </>
   );
 }
 
