@@ -545,7 +545,7 @@ function BadLink() {
   return (
     <Panel label={t("setup.badLinkTitle")} className="w-full max-w-[560px] flex-none">
       <Heading title={t("setup.badLinkTitle")} hint={t("setup.badLinkHint")} />
-      <CodeBlock code={`${slug} panel setup-link`} tone="dark" wrap />
+      <CodeBlock code={`${slug} panel setup-link`} tone="dark" />
     </Panel>
   );
 }
