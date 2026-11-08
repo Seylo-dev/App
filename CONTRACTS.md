@@ -637,7 +637,11 @@ local API, join and resume. The areas:
   from uid 1000), each panel container start names it in the agent's log
   and as a SYSTEM line in the panel's own log, and the node health check
   `panel.files` warns (it also warns when the folder belongs to another
-  uid or is open to other users). A panel
+  uid or is open to other users). The check runs on the panel's node only:
+  the one whose last accepted desired state (`state/desired.pb`) has the
+  protected panel service, or, before the agent has a desired state, the
+  one with a protected panel container. Elsewhere the folder is a leftover
+  (an uninstall without `--purge`, a panel that moved) and it passes. A panel
   container without `seylo.user` (from an agent or installer before
   0.2.0-rc.2: the image's uid 1000, often the default login user) serves
   no spec and is replaced once at its generation; the old one is stopped

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/conn"
 	"github.com/seylo-dev/app/go/internal/docker"
@@ -27,7 +29,7 @@ type fakeDocker struct {
 
 func (f fakeDocker) Info(context.Context) (*DockerInfo, error) { return f.info, f.err }
 func (f fakeDocker) Containers(_ context.Context, filters map[string][]string) ([]DockerContainer, error) {
-	return f.publishers, nil
+	return f.publishers, f.err
 }
 
 // machine builds a fake /proc, /sys and /etc.
@@ -110,6 +112,26 @@ func TestHealthyMachine(t *testing.T) {
 	}
 }
 
+// writeDesired saves a desired state the way the agent does
+// (<data>/state/desired.pb).
+func writeDesired(t *testing.T, data string, desired *agentv1.DesiredState) {
+	t.Helper()
+	b, err := proto.Marshal(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(data, "state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, desiredFile), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func panelSpec() *agentv1.ServiceSpec {
+	return &agentv1.ServiceSpec{Id: docker.PanelServiceID, Protected: true}
+}
+
 // The panel's folder: only on the node that runs the panel, warns about an
 // account with the panel's uid (the installer checks new installs only;
 // this covers upgrades and accounts made later), an owner that is not the
@@ -121,7 +143,7 @@ func TestPanelFiles(t *testing.T) {
 		return env.panelFiles(context.Background())
 	}
 	data, etc := t.TempDir(), t.TempDir()
-	env := Env{DataDir: data, EtcDir: etc}
+	env := Env{DataDir: data, EtcDir: etc, Docker: fakeDocker{}}
 	if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || r.GetDetail() != "no panel on this node" {
 		t.Fatalf("no panel folder = %v %q", r.GetStatus(), r.GetDetail())
 	}
@@ -130,6 +152,7 @@ func TestPanelFiles(t *testing.T) {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeDesired(t, data, &agentv1.DesiredState{Revision: 7, Services: []*agentv1.ServiceSpec{panelSpec()}})
 	if os.Geteuid() == 0 {
 		if err := os.Chown(dir, docker.PanelUID, docker.PanelGID); err != nil {
 			t.Fatal(err)
@@ -169,6 +192,63 @@ func TestPanelFiles(t *testing.T) {
 		if !strings.Contains(r.GetFixHint(), want) {
 			t.Errorf("hint = %q, want %q", r.GetFixHint(), want)
 		}
+	}
+
+	// Before the agent has a desired state (the installer's first panel),
+	// a protected panel container on the node makes it the panel's.
+	if err := os.Remove(filepath.Join(data, desiredFile)); err != nil {
+		t.Fatal(err)
+	}
+	installed := DockerContainer{Names: []string{"/" + docker.ContainerName(docker.PanelServiceID, 1, 0)},
+		Labels: docker.InstanceLabels{ServiceID: docker.PanelServiceID, Protected: true}.Map()}
+	env.Docker = fakeDocker{publishers: []DockerContainer{installed}}
+	if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN {
+		t.Errorf("the installer's panel before a desired state = %v %q", r.GetStatus(), r.GetDetail())
+	}
+	writeDesired(t, data, &agentv1.DesiredState{})
+	if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN {
+		t.Errorf("the installer's panel with an empty desired state = %v %q", r.GetStatus(), r.GetDetail())
+	}
+	env.Docker = fakeDocker{err: errors.New("docker is down")}
+	if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_SKIPPED || !strings.Contains(r.GetDetail(), "docker is down") {
+		t.Errorf("no desired state and no Docker = %v %q", r.GetStatus(), r.GetDetail())
+	}
+
+	// A node that only has a leftover folder (an uninstall without --purge,
+	// or a panel that moved to another node) and joined a panel as a plain
+	// node: the agent never starts a panel on the folder, so the uid 1000
+	// owner, the open mode and the uid 61000 account above are not this
+	// node's problem. A stopped old panel container stays (protected
+	// containers are never removed for missing from the desired state);
+	// the desired state decides once there is one.
+	leftover := "no panel on this node; " + dir + " is left from an earlier one"
+	for name, desired := range map[string]*agentv1.DesiredState{
+		"no services":          {Revision: 3},
+		"other services":       {Revision: 3, Services: []*agentv1.ServiceSpec{{Id: "web0000000000000"}}},
+		"unprotected panel id": {Revision: 3, Services: []*agentv1.ServiceSpec{{Id: docker.PanelServiceID}}},
+	} {
+		writeDesired(t, data, desired)
+		env.Docker = fakeDocker{publishers: []DockerContainer{installed}}
+		if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || r.GetDetail() != leftover {
+			t.Errorf("%s: leftover folder = %v %q (hint %q), want a pass %q", name, r.GetStatus(), r.GetDetail(), r.GetFixHint(), leftover)
+		}
+	}
+	if os.Geteuid() != 0 {
+		// `seylo node health` without root: desired.pb is the agent's 0600.
+		if err := os.Chmod(filepath.Join(data, desiredFile), 0); err != nil {
+			t.Fatal(err)
+		}
+		if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_SKIPPED || r.GetDetail() != "run as root to check "+dir {
+			t.Errorf("an unreadable desired state = %v %q", r.GetStatus(), r.GetDetail())
+		}
+	}
+	if err := os.Remove(filepath.Join(data, desiredFile)); err != nil {
+		t.Fatal(err)
+	}
+	other := DockerContainer{Labels: docker.InstanceLabels{ServiceID: "web0000000000000"}.Map()}
+	env.Docker = fakeDocker{publishers: []DockerContainer{other}}
+	if r := run(env); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || r.GetDetail() != leftover {
+		t.Errorf("leftover folder, no desired state, no panel container = %v %q", r.GetStatus(), r.GetDetail())
 	}
 }
 

@@ -17,8 +17,9 @@
 //	time.sync         NTP state and skew against the panel's clock
 //	panel.reachable   GET <panel>/api/health and its latency
 //	wings.detected    Wings next to us and whether its Traefik can be shared
-//	panel.files       on the panel's node: <dataDir>/panel belongs to root or
-//	                  the panel user, is 0700, and no account has uid/gid 61000
+//	panel.files       on the panel's node (its desired state has the panel
+//	                  service): <dataDir>/panel belongs to root or the panel
+//	                  user, is 0700, and no account has uid/gid 61000
 //
 // Named nodecheck (not doctor or health) because package health is the
 // per-service health probe. Everything machine-specific comes in through
