@@ -9,6 +9,7 @@ import {
   projects,
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
+import { authenticate } from "../src/auth/authenticate";
 import { aiConversations, sessions } from "../src/db/schema";
 import { liveFloodCloseCode, liveMessageRule, maxTopicsPerSocket } from "../src/live/endpoint";
 import { callOp, createUser, grant, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
@@ -163,5 +164,49 @@ test("one socket follows a bounded number of topics", async () => {
   // A topic it already follows still answers.
   live.ws.send(JSON.stringify({ type: "subscribe", topic: topics[0] }));
   expect(await live.next()).toEqual({ type: "subscribed", topic: topics[0] as `node:${string}` });
+  live.ws.close();
+});
+
+test("an open tab's socket checks do not slide its session; only requests do", async () => {
+  const { user, cookie } = await createUser(panel, "owner");
+  const day = 24 * 3600 * 1000;
+  const back = (ms: number) => new Date(Date.now() - ms);
+  // Signed in 29 days ago and idle since: one day of the 30-day idle window left.
+  panel.deps.db
+    .update(sessions)
+    .set({ createdAt: back(29 * day), lastSeenAt: back(29 * day), expiresAt: new Date(Date.now() + day) })
+    .where(eq(sessions.userId, user.id))
+    .run();
+  const row = () => panel.deps.db.select().from(sessions).where(eq(sessions.userId, user.id)).get();
+  const before = row();
+
+  const live = openLive(cookie);
+  await live.opened;
+  live.ws.send(JSON.stringify({ type: "subscribe", topic: "panel" }));
+  expect(await live.next()).toEqual({ type: "subscribed", topic: "panel" });
+  // The 15 s revalidation, as it runs for every open socket.
+  panel.deps.live.recheck({ userId: user.id });
+  // Before: expiresAt moved 30 days out and lastSeenAt to now, with nobody using the tab.
+  expect(row()?.expiresAt).toEqual(before?.expiresAt as Date);
+  expect(row()?.lastSeenAt).toEqual(before?.lastSeenAt as Date);
+
+  // A day and a bit of such checks later, the idle session is gone.
+  const credentials = { sessionToken: cookie.split("=")[1]?.split(";")[0], sessionKey: sessionKeyOf(cookie) };
+  let principal = authenticate(panel.deps.db, credentials, new Date(), { touch: false });
+  expect(principal.type).toBe("session");
+  for (let t = Date.now(); t < Date.now() + 1.1 * day; t += 3600 * 1000)
+    principal = authenticate(panel.deps.db, credentials, new Date(t), { touch: false });
+  expect(principal.type).toBe("anonymous");
+
+  // A request is a use and slides it (checked on a fresh session).
+  const other = await createUser(panel, "owner");
+  panel.deps.db
+    .update(sessions)
+    .set({ lastSeenAt: back(2 * day), expiresAt: new Date(Date.now() + day) })
+    .where(eq(sessions.userId, other.user.id))
+    .run();
+  expect((await callOp(panel, auth.listSessions, {}, { cookie: other.cookie })).status).toBe(200);
+  const slid = panel.deps.db.select().from(sessions).where(eq(sessions.userId, other.user.id)).get();
+  expect(slid?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * day);
   live.ws.close();
 });

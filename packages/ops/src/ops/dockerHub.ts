@@ -190,7 +190,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Create an app from a Docker Hub image",
   description:
-    "Creates an app service that runs a Docker Hub image pinned to a tag, with its main port, a volume per mount path and a .env, then deploys it unless deployNow is false. A public main port gets the node's automatic domain when the node has a wildcard domain, otherwise IP:port until a domain is added. Use dockerHub.inspect first to read the image's ports, volumes and env defaults.",
+    "Creates an app service that runs a Docker Hub image pinned to a tag, with its main port, a volume per mount path and a .env, then deploys it unless deployNow is false. A public main port gets the node's automatic domain when the node has a wildcard domain, otherwise IP:port until a domain is added. Use dockerHub.inspect first to read the image's ports, volumes and env defaults. Beyond services.create, an env needs env.edit and deploying needs services.deploy in the project.",
   input: Type.Object({
     projectId: Id,
     name: ServiceName,

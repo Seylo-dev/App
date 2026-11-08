@@ -320,6 +320,61 @@ export function removeInternalGitHost(db: PanelDb, input: { projectId: string; h
     throw new OpError("NOT_FOUND", `${input.host} is not an allowed internal host of this project.`, { field: "host" });
 }
 
+/**
+ * What moving a service with this source to another project
+ * (services.moveProject) does to its git host. Its builds there are
+ * checked against the new project's internal hosts, so an internal host
+ * (or one allowed in the old project for split-horizon DNS, which the node
+ * resolves to an internal address) has to be allowed there too. A caller
+ * with git.manage records it (`record`, written by the move itself);
+ * anyone else gets `problem` and the move is blocked, as saving the source
+ * there would be refused. Metadata addresses are always a problem.
+ */
+export async function gitHostForMove(
+  db: PanelDb,
+  input: {
+    fromProjectId: string;
+    toProjectId: string;
+    source: { type: string; url?: string } | null | undefined;
+    caller: GitCaller;
+  },
+): Promise<{ problem: string | null; record: { host: string } | null }> {
+  const fine = { problem: null, record: null };
+  if (input.source?.type !== "git" || typeof input.source.url !== "string") return fine;
+  let host: string;
+  try {
+    host = hostOf(input.source.url, "source.url");
+  } catch {
+    return fine;
+  }
+  await seeding.get(db);
+  if (approved(db, input.toProjectId, host)) return fine;
+  const target = await checkGitHost(db, input.source.url);
+  if (target.ok && !approved(db, input.fromProjectId, host)) return fine;
+  if (!target.ok && target.reason === "metadata")
+    return { problem: `${host} is ${blockedTarget(target)}; nodes never clone from it.`, record: null };
+  if (input.caller.access.can("git.manage")) return { problem: null, record: { host } };
+  const what = target.ok
+    ? `Its git host ${host} is allowed as an internal host only in its current project`
+    : target.reason === "unresolvable"
+      ? `Its git host ${host} does not resolve from the panel`
+      : `Its git host ${host} is ${blockedTarget(target)}`;
+  return {
+    problem: `${what}. Only an admin can use an internal git host in the new project: ask one to move the service, or to allow the host there first.`,
+    record: null,
+  };
+}
+
+/** Records a host gitHostForMove said the move records. */
+export function recordGitHostForMove(
+  db: Pick<PanelDb, "insert">,
+  projectId: string,
+  record: { host: string } | null,
+  userId: string | null,
+): void {
+  if (record) db.insert(gitInternalHosts).values({ projectId, host: record.host, approvedBy: userId }).onConflictDoNothing().run();
+}
+
 /** For sources that may be git: checks the URL of a git one. */
 export async function assertGitSourceTarget(
   db: PanelDb,

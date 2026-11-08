@@ -12,6 +12,7 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
+import { useLiveUp } from "../../lib/live";
 import { formatBytes, formatPercent, formatRate } from "./format";
 import { retryOp } from "./op-state";
 import type { ServiceDetail } from "./use-service";
@@ -26,7 +27,13 @@ export function crashPolicyLabel(service: Pick<ServiceDetail, "crashPolicy">): s
 }
 
 export function UsageStrip({ service }: { service: ServiceDetail }) {
-  const history = useOp(metrics.service, { serviceId: service.id, range: "1h" }, { retry: retryOp, refetchInterval: 60_000 });
+  // The service layout follows "service:<id>", which refreshes this with every sample; poll only while the socket is down.
+  const liveUp = useLiveUp();
+  const history = useOp(
+    metrics.service,
+    { serviceId: service.id, range: "1h" },
+    { retry: retryOp, refetchInterval: liveUp ? false : 60_000 },
+  );
   const current = history.data?.current ?? [];
   const network = current.length ? current.reduce((sum, c) => sum + c.networkRxBytesPerSec + c.networkTxBytesPerSec, 0) : null;
   const memory = service.memoryBytes;

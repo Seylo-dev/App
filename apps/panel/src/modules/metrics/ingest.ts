@@ -96,11 +96,18 @@ export class MetricsIngest {
   private readonly nodeBuckets = new Map<string, Bucket>();
   private readonly serviceBuckets = new Map<string, Bucket>();
   private lastPruneHour = 0;
+  /** Set by write() while record() runs. */
+  private wrote = false;
 
   constructor(private readonly db: MetricsDb) {}
 
-  /** Records one sample; returns the ids of the services it carried. */
-  record(nodeId: string, report: MetricsReport): string[] {
+  /**
+   * Records one sample; returns the ids of the services it carried and
+   * whether it closed a minute (wrote a 1-minute bucket, and so changed the
+   * stored series every range but live reads).
+   */
+  record(nodeId: string, report: MetricsReport): { serviceIds: string[]; wrote: boolean } {
+    this.wrote = false;
     const t = report.time ? timestampDate(report.time).getTime() : Date.now();
     const minute = Math.floor(t / 60_000) * 60;
     const node = report.node;
@@ -147,7 +154,7 @@ export class MetricsIngest {
       this.accumulate(this.serviceBuckets, key, minute, point.cpuPercent, point.memoryBytes, r);
     }
     this.maybePrune(t);
-    return ids;
+    return { serviceIds: ids, wrote: this.wrote };
   }
 
   /** Writes every open minute (node disconnected, panel stopping). */
@@ -266,6 +273,7 @@ export class MetricsIngest {
   }
 
   private write(isNode: boolean, key: string, bucket: Bucket): void {
+    if (bucket.n > 0) this.wrote = true;
     if (isNode) this.writeNode(key, bucket);
     else {
       const [serviceId, nodeId] = key.split("\0") as [string, string];

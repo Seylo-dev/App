@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { compose, exposures, OpError, projects, services as serviceOps } from "@seylo/ops";
+import { compose, env as envOps, exposures, OpError, projects, services as serviceOps } from "@seylo/ops";
 import { ServiceKind } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { deployments, services, volumes } from "../src/db/schema";
+import { deployments, services, users, volumes } from "../src/db/schema";
 import { durationSeconds, memberName, planStack } from "../src/modules/compose/plan";
 import { readServiceEnv } from "../src/modules/env/store";
 import { serviceSpecFor } from "../src/modules/services/desired";
 import { FakeFleet } from "./fake-fleet";
-import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
 let fleet: FakeFleet;
@@ -184,6 +184,41 @@ describe("compose stacks", () => {
 
     const detail = await callOp(panel, serviceOps.get, { serviceId: res.body.stack.id }, { cookie });
     expect(detail.body.members.map((m: { name: string }) => m.name)).toEqual(["stack-db", "stack-web"]);
+  });
+
+  test("the pasted file holds the members' env, so compose.get returns it only with env.view", async () => {
+    const res = await callOp(
+      panel,
+      compose.create,
+      { projectId, name: "stack", nodeId: nodeA, source: { type: "inline", yaml: file }, deployNow: false },
+      { cookie },
+    );
+    expect(res.status).toBe(200);
+    const stackId = res.body.stack.id;
+    const db = (res.body.members as { id: string; name: string }[]).find((m) => m.name === "stack-db") as { id: string };
+    const owner = await callOp(panel, compose.get, { serviceId: stackId }, { cookie });
+    expect(owner.body).toMatchObject({ source: { type: "inline", yaml: file }, fileHidden: false });
+
+    // A key (or a grant) with services.view only sees the stack, not the file.
+    const ownerId = panel.deps.db.select().from(users).get()?.id as string;
+    const viewKey = createApiKey(panel, ownerId, { actions: ["services.view"], projectIds: [projectId] });
+    const hidden = await callOp(panel, compose.get, { serviceId: stackId }, { bearer: viewKey });
+    expect(hidden.status).toBe(200);
+    expect(hidden.body).toMatchObject({ source: { type: "inline", yaml: "" }, fileHidden: true });
+    expect(hidden.body.members).toHaveLength(2);
+    expect(JSON.stringify(hidden.body)).not.toContain("POSTGRES_PASSWORD");
+    expect((await callOp(panel, envOps.get, { serviceId: db.id }, { bearer: viewKey })).status).toBe(403);
+
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "service", stackId, ["services.view", "env.view"]);
+    // env.view on the stack alone does not reach the members' values.
+    expect((await callOp(panel, compose.get, { serviceId: stackId }, { cookie: member.cookie })).body.fileHidden).toBe(true);
+    grant(panel, member.user.id, "project", projectId, ["services.view", "env.view"]);
+    const shown = await callOp(panel, compose.get, { serviceId: stackId }, { cookie: member.cookie });
+    expect(shown.body).toMatchObject({ source: { type: "inline", yaml: file }, fileHidden: false });
+
+    const fullKey = createApiKey(panel, ownerId, { actions: ["services.view", "env.view"], projectIds: [projectId] });
+    expect((await callOp(panel, compose.get, { serviceId: stackId }, { bearer: fullKey })).body.source.yaml).toBe(file);
   });
 
   test("update diffs the file, deletes removed members and redeploys changed ones", async () => {

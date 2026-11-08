@@ -383,7 +383,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Create an app or cron service",
   description:
-    "Creates an app or cron service in a project on one node. The source can be set now or later (services.setSource, github.connectRepo). Nothing runs until the first deploy, unless deployNow is true. Databases, Boxes, compose stacks and templates have their own create ops.",
+    "Creates an app or cron service in a project on one node. The source can be set now or later (services.setSource, github.connectRepo). Nothing runs until the first deploy, unless deployNow is true (which needs services.deploy in the project). Databases, Boxes, compose stacks and templates have their own create ops.",
   input: Type.Object({
     projectId: Id,
     name: ServiceName,

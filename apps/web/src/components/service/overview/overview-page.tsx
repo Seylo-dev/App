@@ -18,6 +18,7 @@ import { Link, Navigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { useLiveUp } from "../../../lib/live";
 import { CronRuns } from "../cron/cron-page";
 import { describeCron } from "../cron-text";
 import { StepChips } from "../deploy-steps";
@@ -177,7 +178,9 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
 }
 
 function UsagePanel({ service }: { service: ServiceDetail }) {
-  const data = useOp(metrics.service, { serviceId: service.id, range: "1h" }, { retry: retryOp, refetchInterval: 60_000 });
+  // "service:<id>" (followed by the service layout) refreshes this; poll only while the socket is down.
+  const liveUp = useLiveUp();
+  const data = useOp(metrics.service, { serviceId: service.id, range: "1h" }, { retry: retryOp, refetchInterval: liveUp ? false : 60_000 });
   const points = data.data?.points ?? [];
   return (
     <Panel

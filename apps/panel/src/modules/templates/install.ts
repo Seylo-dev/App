@@ -19,6 +19,7 @@ import { buildEnvGraph } from "../env/graph";
 import { checkEnvReferences } from "../env/ops";
 import { writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
+import { assertCreateRights } from "../services/create-rights";
 import { deleteServiceTree } from "../services/delete";
 import { assertNode, insertService } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
@@ -195,6 +196,18 @@ export async function installTemplate(ctx: OpContext, input: InstallInput & { de
       action: "domains.edit",
     });
   }
+  // The same goes for its env, file mounts and first deploy (services/create-rights.ts); its
+  // databases always start, so a template with one deploys even with deployNow false.
+  const apps = output.services.flatMap((s) => (s.type === "app" ? [s.data] : []));
+  assertCreateRights(
+    ctx,
+    { type: "project", id: input.projectId },
+    {
+      env: apps.some((a) => (a.env ?? "").trim() !== ""),
+      files: apps.some((a) => (a.mounts ?? []).some((m) => m.type === "file")),
+      deploy: input.deployNow || apps.length < output.services.length,
+    },
+  );
   // A template's env is written as is, so its ${{svc.VAR}} references follow the env.set rule:
   // only values the caller can read; the template's own services count as their own.
   const own = output.services.map((s) => s.data.serviceName);

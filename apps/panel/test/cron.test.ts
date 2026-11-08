@@ -14,9 +14,9 @@ import {
 } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import type { ConnectedAgent } from "../src/agent-hub/hub";
-import { cronJobs, nodes, projects, servicePlacements, services } from "../src/db/schema";
+import { cronJobs, grants, nodes, projects, servicePlacements, services } from "../src/db/schema";
 import { compileServiceSpec } from "../src/desired/compile";
-import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
+import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
 beforeEach(() => {
@@ -241,9 +241,10 @@ test("a job the node cannot schedule is a failed run with the node's reason, sto
   expect(alerts[0]).toMatchObject({ event: "cron_failed", title: "Cron job weekly on worker failed", message: `${reason}.` });
 });
 
-test("members need services.cron to change cron jobs and services.logs to read output", async () => {
+test("members need services.cron to change cron jobs and logs.view to read a run's output", async () => {
   const member = await createUser(panel, "member");
-  const { service } = seed();
+  const { cookie } = await createUser(panel, "owner");
+  const { node, service } = seed();
   const response = await callOp(
     panel,
     cron.create,
@@ -251,4 +252,27 @@ test("members need services.cron to change cron jobs and services.logs to read o
     { cookie: member.cookie },
   );
   expect(response.status).toBe(403);
+
+  const job = (await callOp(panel, cron.create, { serviceId: service.id, name: "x", schedule: "@daily", command: "x" }, { cookie })).body;
+  fakeAgent(node.id);
+  const started = await callOp(panel, cron.runNow, { serviceId: service.id, cronJobId: job.id }, { cookie });
+  expect(started.status).toBe(200);
+  const read = () => callOp(panel, cron.run, { serviceId: service.id, runId: started.body.id }, { cookie: member.cookie });
+
+  // The run list is services.view, like the other cron reads.
+  grant(panel, member.user.id, "service", service.id, ["services.view", "services.cron"]);
+  expect((await callOp(panel, cron.runs, { serviceId: service.id }, { cookie: member.cookie })).status).toBe(200);
+  const refused = await read();
+  expect(refused.status).toBe(403);
+  expect(refused.body.error.details.action).toBe("logs.view");
+
+  // The output is a log: the grant that reads logs reads it too.
+  panel.deps.db
+    .update(grants)
+    .set({ actions: ["services.view", "services.cron", "logs.view"] })
+    .where(eq(grants.userId, member.user.id))
+    .run();
+  const allowed = await read();
+  expect(allowed.status).toBe(200);
+  expect(allowed.body.command).toBe("x");
 });

@@ -43,7 +43,7 @@ import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { enqueueNext } from "../nodes/recurring";
 import { fetchRelease, ReleaseError } from "./manifest";
-import { type RunRelease, releaseChannel, runRelease, storedCheck, storedRelease } from "./release-state";
+import { type RunRelease, releaseChannel, rememberRunningRelease, runRelease, storedCheck, storedRelease } from "./release-state";
 import { forgetRollback, noteUpdateResult, panelKey, panelNodeId, wasRolledBack } from "./rollbacks";
 import "./settings";
 
@@ -188,11 +188,14 @@ export function updateStatus(deps: Pick<Deps, "db" | "agents" | "config"> & { pr
  * stores the result (also failures, for the UI). A failed check keeps the
  * last good release of the same channel.
  */
-export async function checkNow(deps: Pick<Deps, "db" | "logger">): Promise<void> {
+export async function checkNow(deps: Pick<Deps, "db" | "logger" | "config">): Promise<void> {
   const channel = releaseChannel(deps.db);
   const previous = storedCheck(deps.db);
+  // The running release's minAgent outlives a check that finds a newer one.
+  rememberRunningRelease(deps.db, deps.config.version, previous);
   try {
     const release = await fetchRelease(channel);
+    rememberRunningRelease(deps.db, deps.config.version, { latestVersion: release.manifest.version, minAgent: release.manifest.minAgent });
     setSetting(deps.db, "updateCheck", {
       checkedAt: new Date().toISOString(),
       latestVersion: release.manifest.version,

@@ -227,7 +227,7 @@ test("ops that hand out lasting access need a fresh session; demotions, narrowin
   const grantee = await createUser(panel, "member");
   const project = seedProject(panel);
   const service = seedService(panel, project.id);
-  grant(panel, grantee.user.id, "project", project.id, ["services.view", "services.logs"]);
+  grant(panel, grantee.user.id, "project", project.id, ["services.view", "logs.view"]);
   age(owner.user.id, 60 * 60 * 1000);
   const { cookie } = owner;
 
@@ -260,7 +260,7 @@ test("ops that hand out lasting access need a fresh session; demotions, narrowin
   expect((await ok(panel, userOps.get, { userId: member.user.id }, { cookie })).body.user.role).toBe("member");
   expect((await ok(panel, nodeOps.listJoinTokens, {}, { cookie })).body.tokens).toHaveLength(0);
   const grantsNow = (await ok(panel, grantOps.listByUser, { userId: grantee.user.id }, { cookie })).body.grants;
-  expect(grantsNow.map((g: { actions: string[] }) => g.actions)).toEqual([["services.view", "services.logs"]]);
+  expect(grantsNow.map((g: { actions: string[] }) => g.actions)).toEqual([["services.view", "logs.view"]]);
 
   // Taking access away (or keeping it the same) hands out nothing new.
   expect((await call(panel, userOps.updateRole, { userId: admin.user.id, role: "member" }, { cookie })).status).toBe(200);

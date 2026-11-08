@@ -40,7 +40,8 @@ afterEach(() => panel.close());
 
 async function member() {
   const m = await createUser(panel, "member");
-  grant(panel, m.user.id, "project", projectId, ["services.create", "services.view", "services.deploy"]);
+  // env.edit: writing a new service's env needs it (services/create-rights.ts); the references are checked on top.
+  grant(panel, m.user.id, "project", projectId, ["services.create", "services.view", "services.deploy", "env.edit", "services.update"]);
   return m.cookie;
 }
 
@@ -70,8 +71,10 @@ test("compose: preview, create and update refuse references the caller cannot re
   environment = { LEAK: "${{payments.STRIPE_KEY}}" };
   const update = await callOp(panel, compose.update, { serviceId: stackId, source: inline }, { cookie });
   expect(update.status).toBe(403);
+  expect(update.body.error.details).toMatchObject({ reference: "payments.STRIPE_KEY" });
   const dry = await callOp(panel, compose.update, { serviceId: stackId, source: inline, dryRun: true }, { cookie });
   expect(dry.status).toBe(403);
+  expect(dry.body.error.details).toMatchObject({ reference: "payments.STRIPE_KEY" });
   const web = panel.deps.db.select().from(services).where(eq(services.name, "s-web")).get();
   expect(readServiceEnv(panel.deps.db, panel.deps.secrets, web?.id as string).text).not.toContain("STRIPE_KEY");
 

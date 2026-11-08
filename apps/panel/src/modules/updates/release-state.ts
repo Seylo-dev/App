@@ -3,9 +3,10 @@
 // policy.
 
 import { OpError } from "@seylo/ops";
+import { compareVersions, parseVersion } from "../../agent-hub/version";
 import type { PanelDb } from "../../db/client";
 import type { updateRuns } from "../../db/schema";
-import { getSetting } from "../../settings";
+import { getSetting, setSetting } from "../../settings";
 import type { ReleaseChannel } from "./manifest";
 import "./settings";
 
@@ -30,8 +31,34 @@ export function latestRelease(db: PanelDb): string | null {
   return storedCheck(db)?.latestVersion ?? null;
 }
 
-export function manifestMinAgent(db: PanelDb): string | null {
-  return storedCheck(db)?.minAgent ?? null;
+function sameVersion(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  return x !== null && y !== null && compareVersions(x, y) === 0;
+}
+
+/**
+ * The minAgent of the release this panel runs, for the agent version floor.
+ * A newer release the panel has only checked does not count: its minAgent
+ * would refuse the nodes' agents (which then update themselves ahead of the
+ * panel) before anyone installed it. Null for a dev panel, or before a
+ * verified check found the running version.
+ */
+export function runningMinAgent(db: PanelDb, panelVersion: string): string | null {
+  const check = storedCheck(db);
+  if (check && sameVersion(check.latestVersion, panelVersion)) return check.minAgent ?? null;
+  const running = getSetting(db, "runningRelease");
+  return running && sameVersion(running.version, panelVersion) ? running.minAgent : null;
+}
+
+/** Keeps a verified check's minAgent when it is the release the panel runs (see runningMinAgent). */
+export function rememberRunningRelease(
+  db: PanelDb,
+  panelVersion: string,
+  check: { latestVersion: string | null; minAgent?: string | null } | null | undefined,
+): void {
+  if (!check?.latestVersion || !sameVersion(check.latestVersion, panelVersion)) return;
+  setSetting(db, "runningRelease", { version: check.latestVersion, minAgent: check.minAgent ?? null });
 }
 
 /** A verified release as a run installs it. */

@@ -8,6 +8,9 @@
 // so that copy is useless. An HttpOnly cookie still keeps the token out of
 // reach of scripts. Sessions slide: each use (at most once a minute) pushes
 // the expiry out again, so active people stay signed in and idle ones do not.
+// Only requests count as use: the live socket's checks (on open, every 15 s,
+// on subscribe) only ask whether the session still works (touch: false), so
+// a tab that is merely open does not keep its session alive.
 // No session lives longer than maxSessionAgeMs, however active. Token and
 // key are rotated when the account's security changes (rotateSession), so a
 // copy made before a password change stops working.
@@ -59,6 +62,7 @@ export function lookupSession(
   token: string,
   key: string,
   now = new Date(),
+  options: { touch?: boolean } = {},
 ): { sessionId: string; user: PrincipalUser } | undefined {
   const row = db
     .select({
@@ -79,7 +83,8 @@ export function lookupSession(
     return undefined;
   }
 
-  if (now.getTime() - row.lastSeenAt.getTime() > touchIntervalMs) {
+  // A check that is not a use (touch: false) leaves the expiry and "last seen" alone.
+  if (options.touch !== false && now.getTime() - row.lastSeenAt.getTime() > touchIntervalMs) {
     db.update(sessions)
       .set({ lastSeenAt: now, expiresAt: new Date(Math.min(now.getTime() + sessionLifetimeMs, hardExpiry)) })
       .where(eq(sessions.id, row.sessionId))

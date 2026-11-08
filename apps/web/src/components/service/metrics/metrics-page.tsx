@@ -13,6 +13,7 @@ import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { StatTile } from "@seylo/ui/components/stat-tile";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
+import { useLiveUp } from "../../../lib/live";
 import { formatBytes, formatPercent, formatRate, formatRelative } from "../format";
 import { OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
@@ -24,10 +25,12 @@ const ranges: Range[] = ["live", "1h", "24h", "7d", "30d"];
 
 export function MetricsPage({ service }: { service: ServiceDetail }) {
   const [range, setRange] = useState<Range>("1h");
+  // "service:<id>" (followed by the service layout) refreshes every range as its buckets change; poll only while the socket is down.
+  const liveUp = useLiveUp();
   const data = useOp(
     metrics.service,
     { serviceId: service.id, range },
-    { retry: retryOp, refetchInterval: range === "live" ? 10_000 : range === "1h" ? 60_000 : false },
+    { retry: retryOp, refetchInterval: liveUp ? false : range === "live" ? 10_000 : range === "1h" ? 60_000 : false },
   );
   return (
     <div className="flex flex-col gap-4">

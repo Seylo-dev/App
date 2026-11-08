@@ -219,3 +219,76 @@ test("hosts of git sources saved before the check count as allowed once", async 
   await seedInternalGitHosts(panel.deps.db);
   expect(panel.deps.db.select().from(gitInternalHosts).all()).toHaveLength(0);
 });
+
+test("moving a service to another project carries its internal git host for an admin and blocks anyone else", async () => {
+  const created = await callOp(panel, serviceOps.create, gitService("https://gitea.lan/x.git"), { cookie: owner });
+  expect(created.status).toBe(200);
+  const serviceId = created.body.id as string;
+  // A member with full access to the service, who may create services in blog.
+  const mover = await createUser(panel, "member");
+  grant(panel, mover.user.id, "project", projectId, ["*"]);
+  grant(panel, mover.user.id, "project", otherProjectId, ["services.create", "services.view"]);
+  const memberImpact = await callOp(
+    panel,
+    serviceOps.moveProjectImpact,
+    { serviceId, projectId: otherProjectId },
+    { cookie: mover.cookie },
+  );
+  expect(memberImpact.status).toBe(200);
+  // Before: blockers [] and the move went through, then every build failed in blog.
+  expect(memberImpact.body.blockers).toEqual([{ reason: "access", message: expect.stringContaining("gitea.lan") }]);
+  const memberMove = await callOp(
+    panel,
+    serviceOps.moveProject,
+    { serviceId, projectId: otherProjectId, confirm: true },
+    { cookie: mover.cookie },
+  );
+  expect(memberMove.status).toBe(403);
+  expect(loadService(panel.deps.db, serviceId).projectId).toBe(projectId);
+
+  // The owner's move records the host in blog, so the next build works there.
+  const ownerImpact = await callOp(panel, serviceOps.moveProjectImpact, { serviceId, projectId: otherProjectId }, { cookie: owner });
+  expect(ownerImpact.body.blockers).toEqual([]);
+  expect(panel.deps.db.select().from(gitInternalHosts).all()).toHaveLength(1); // the impact writes nothing
+  const moved = await callOp(panel, serviceOps.moveProject, { serviceId, projectId: otherProjectId, confirm: true }, { cookie: owner });
+  expect(moved.status).toBe(200);
+  const hosts = panel.deps.db
+    .select({ projectId: gitInternalHosts.projectId, host: gitInternalHosts.host })
+    .from(gitInternalHosts)
+    .all()
+    .map((h) => [h.projectId === projectId ? "shop" : "blog", h.host])
+    .sort();
+  expect(hosts).toEqual([
+    ["blog", "gitea.lan"],
+    ["shop", "gitea.lan"],
+  ]);
+  const service = loadService(panel.deps.db, serviceId);
+  await expect(
+    resolveBuild(panel.deps, {
+      service,
+      spec: readSpec(service.spec),
+      buildId: "b1",
+      generation: 1,
+      commitSha: "a".repeat(40),
+      uploadId: null,
+    }),
+  ).resolves.toMatchObject({ commit: { sha: "a".repeat(40) } });
+
+  // A public host needs nothing; one allowed in shop for split-horizon DNS needs an admin too.
+  const publicHost = await callOp(panel, serviceOps.create, gitService("https://git.example.com/y.git", "web"), { cookie: owner });
+  const publicImpact = await callOp(
+    panel,
+    serviceOps.moveProjectImpact,
+    { serviceId: publicHost.body.id, projectId: otherProjectId },
+    { cookie: mover.cookie },
+  );
+  expect(publicImpact.body.blockers).toEqual([]);
+  panel.deps.db.insert(gitInternalHosts).values({ projectId, host: "git.example.com", approvedBy: null }).run();
+  const splitImpact = await callOp(
+    panel,
+    serviceOps.moveProjectImpact,
+    { serviceId: publicHost.body.id, projectId: otherProjectId },
+    { cookie: mover.cookie },
+  );
+  expect(splitImpact.body.blockers).toEqual([{ reason: "access", message: expect.stringContaining("git.example.com") }]);
+});

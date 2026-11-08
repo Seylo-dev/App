@@ -45,6 +45,7 @@ import {
   renameSelf,
   sharedVariablesLost,
 } from "../src/modules/services/impact";
+import { setTargetResolver } from "../src/modules/uptime/targets";
 import { hashToken, prefixedToken } from "../src/security/tokens";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
@@ -67,7 +68,10 @@ beforeEach(async () => {
   shop = (await callOp(panel, projects.create, { name: "shop" }, { cookie })).body.id;
   blog = (await callOp(panel, projects.create, { name: "blog" }, { cookie })).body.id;
 });
-afterEach(() => panel.close());
+afterEach(() => {
+  setTargetResolver(null);
+  panel.close();
+});
 
 async function app(projectId: string, name: string, options: { volumes?: { name: string; mountPath: string }[]; env?: string } = {}) {
   const id = (
@@ -861,6 +865,8 @@ describe("services.moveProject", () => {
     const member = await createUser(panel, "member");
     grant(panel, member.user.id, "service", id, ["*"]);
     grant(panel, member.user.id, "project", blog, ["*"]);
+    // A public git host: only the credential matters (an internal one would block too, fix-git-targets.test.ts).
+    setTargetResolver(async () => ["93.184.216.34"]);
     const impact = await callOp(panel, serviceOps.moveProjectImpact, { serviceId: id, projectId: blog }, { cookie: member.cookie });
     expect(impact.body.blockers).toEqual([{ reason: "access", message: expect.stringContaining("git credential") }]);
     const refused = await callOp(

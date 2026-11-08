@@ -337,7 +337,13 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `join_token`) and the old panel's identity (`panel_id`, `panel_key`,
   `panel_proves` cleared); `node_name` changes with `--name`, `can_build`
   with `--can-build` / `--can-build=false` (the installer's `--can-build`
-  / `--no-can-build`). `agent.SaveConfig` (the agent's own writes) keeps
+  / `--no-can-build`). The panel reads `can_build` (NodeFacts) only when the
+  installer's panel node first joins: any other new node starts with Can
+  build off until the owner turns it on (`nodes.setCanBuild`), because a
+  build node gets the source, git credentials and build env of whatever it
+  builds, from any project (the service's own node first, else the least
+  busy builder), and pushes the images other nodes run; a deployment
+  records it as `builtOn`. `agent.SaveConfig` (the agent's own writes) keeps
   unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
   makes every new FileConfig key pick a side.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
@@ -842,8 +848,13 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
 - Outputs are cleaned against the output schema (undeclared fields are
   dropped), so returning a database row never leaks a column.
 - After a change, a handler publishes `ctx.live.publish(topic, { type:
-  "invalidate", ops: [...] })` for the queries it affected. Topics: `panel`,
-  `project:<id>`, `service:<id>`, `node:<id>`.
+  "invalidate", ops: [...], match? })` for the queries it affected
+  (`match`, for example `{ range: ["1h"] }`, limits it to cached queries
+  whose input holds one of those values). Topics: `panel`,
+  `project:<id>`, `service:<id>`, `node:<id>`. The web app
+  (`lib/live-invalidate.ts`) refetches an op at most once a second however
+  many events name it, and nothing while its tab is hidden: what waited
+  runs once when the tab is shown.
 - Permissions: see "Permission model" below.
 
 #### Permission model
@@ -861,6 +872,19 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
 - Action lists (grants and keys) hold `*` (everything), `<area>.*` (every
   action of one area, for example `services.*`) or exact actions; match
   them with `actionAllowed(list, action)` from `@seylo/ops`.
+- `services.create` makes a service; what the new service gets beyond that
+  is its own permission in the project, whichever op makes it
+  (`services/create-rights.ts` `assertCreateRights`, FORBIDDEN with
+  `details.action`): an env the caller wrote or picked needs `env.edit`
+  (dockerHub.create `env`, a template's app env, compose members'
+  `environment:`), file mounts `files.write` (templates), and running it
+  `services.deploy` (services.create and dockerHub/templates/compose.create
+  with `deployNow`, databases.create and boxes.create, which always start,
+  and a template with a database). compose.update needs `env.edit` on the
+  stack when it changes a member's env and `services.deploy` when it
+  creates or changes a member. services.clone and services.start of a
+  never-deployed service follow the same rule, so `services.create` alone
+  makes services that someone who may deploy starts.
 - Grants (`grants` table): one row per member per project or service, with
   a list of actions (`*` = all grantable ones). A project grant covers the
   project's services, so it takes project and service actions; a service
@@ -886,7 +910,11 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   only the `__Host-` cookie is read, so a cookie a sibling subdomain sets for
   the parent domain is ignored, and a request carrying the read cookie name
   twice is refused (UNAUTHENTICATED `reason: duplicateSession`; the sign-in
-  page says to clear the site's cookies). 30-day sliding. Sessions without
+  page says to clear the site's cookies). 30-day sliding on use: requests
+  through the op pipeline slide it (at most once a minute), the live
+  socket's own checks do not (`authenticate(..., { touch: false })`), and
+  the web app holds live invalidations while its tab is hidden, so an open
+  but unused tab lets the session expire. Sessions without
   a key (made before keys existed) sign nobody in. Sign-out answers an
   empty key header (the web app forgets its key). A
   bearer token is an `api_keys` row: kind `api` (`<slug>_key_...`) or
@@ -1121,6 +1149,19 @@ Web:
 - An op the panel answers with NOT_IMPLEMENTED renders "Not built yet" in
   place (`components/query-error.tsx`), never an empty screen.
 
+#### Compression
+
+Neither Bun.serve nor Elysia compresses, so the panel does
+(`http/compress.ts`): the web build writes `.br` (quality 11) and `.gz`
+copies of every compressible file of 1 KiB or more except source maps
+(`apps/web/build/precompress.ts`, a Vite plugin), and `http/static.ts`
+sends the copy the request's Accept-Encoding takes (highest q, brotli on a
+tie; `Vary: Accept-Encoding`). `index.html`, op results (`ops-http.ts`)
+and MCP replies of 1 KiB or more are compressed as they go out (brotli 4,
+else gzip 6). Downloads, streams and WebSockets are left alone. BREACH
+does not apply: an op call signs in only with the session key header or a
+bearer token, which a cross-site page cannot send.
+
 #### Theme and branding injection
 
 The panel rewrites `index.html` on every request
@@ -1161,7 +1202,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   fields (or `@daily` and friends) in UTC. Each due schedule enqueues one job
   with dedupe key `schedule:<key>`, so a slow run is never doubled; calling
   `ensure` again with the same timing keeps `nextRunAt`. `remove(key)`,
-  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`.
+  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`. Every run leaves a
+  finished `jobs` row; rows finished more than 7 days ago are deleted at
+  start and by the hourly retention sweep (`pruneFinishedJobs`, called from
+  `nodes/retention.ts` `pruneTables`).
 - Alerts: `deps.alerts.raise({ event, key, title, message?, serviceId?,
   projectId?, nodeId?, link?, severity? })` (`modules/alerts/sink.ts`). One
   row per `key` ("<incident kind>:<subject>:<start>"); mutes and the
@@ -1177,7 +1221,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `runOpAs(deps, { op, input, userId, transport, approvalId? })`
   (`modules/approvals/run-as.ts`) runs one as a person. Models (MCP, AI)
   never set `approvalId`; only `approvals.approve` does.
-- Live sockets are re-checked every 15 s and on each subscribe and closed
+- Live sockets are re-checked every 15 s, on open and on each subscribe
+  (without sliding the session) and closed
   (code 4401) when their session ended (a socket needs the session key in
   its `key` query parameter); `deps.live.disconnect({ sessionId }
   | { userId })` closes them at once. The re-check also drops topics the
@@ -1586,8 +1631,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   online node. Plain `http://` git is refused when saved (services,
   compose stacks, provider connections and Box repositories take
   `https://`, `ssh://` or `git@` only), so the panel never sets
-  `GitSource.allow_plain_http`. Moving a service to another project does not record its host
-  there: its next build needs the host allowed in the new project.
+  `GitSource.allow_plain_http`. Moving a service to another project
+  (`services.moveProject`) checks its git host for the new project
+  (`gitHostForMove`): an internal host, or one allowed in the old project,
+  is recorded there when the caller has git.manage, and is an `access`
+  blocker in `services.moveProjectImpact` (FORBIDDEN on the move) for
+  anyone else, since its builds there would be refused.
 - Env references (`modules/env/ops.ts` `checkEnvReferences`): a `${{svc.VAR}}`
   the caller may not read (env.view on the target, databases.credentials for
   database credentials; addresses are fine) is refused with FORBIDDEN
@@ -1597,6 +1646,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   services count). A push to a stack's repo has no person to check, so it
   may not add references outside the stack other than addresses
   (`compose/references.ts` `assertPushReferences`).
+- A pasted compose file holds its members' `environment:` values, so
+  `compose.get` returns it (`source.yaml`) only to callers with env.view on
+  the stack and every member; anyone else gets an empty yaml with
+  `fileHidden: true`, the same rule env.get applies to the values.
 - Audit events that are not ops: `writeAuditEvent` (`ops/audit.ts`) records
   `mcp.authorizeClient` (the person, with `decision` and `access`) and
   `hostShell.close` (the person, `nodeId`, `nodeName`, `openedAt`,
@@ -1633,8 +1686,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   agent cannot read anyway is not skipped silently: the agent reports one
   failed `CronRun` per job and schedule (`unreadable-<hash>`, exit code -1,
   the parser's reason as its line; the same id after an agent restart, so
-  the panel stores it once), and `cron_failed` shows that line. Alert
-  sizes use the web app's units (binary steps, "3 GB").
+  the panel stores it once), and `cron_failed` shows that line. Cron reads
+  are `services.view` (`cron.list`, `cron.runs`), except a run's output
+  (`cron.run`), which is a log and needs `logs.view` like `logs.search`; a
+  grant or key that still lists the old one-op action `services.logs`
+  keeps an inert entry. Alert sizes use the web app's units (binary steps,
+  "3 GB").
 - Bodies read before authentication are capped while streaming: op JSON
   bodies at 1 MiB (`defaultOpBodyBytes`), or the op's own `maxBodyBytes` (at
   most 4 MiB, `maxOpBodyBytes`; `files.write` 4 MiB, `compose.preview`,
@@ -2087,7 +2144,10 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   at once; DATA is chunked to 32 KiB and round-robined per stream; a
   stream's half-close or final CLOSE never overtakes its queued DATA.
 - Handshake: agents older than `deps.agents.minimumAgentVersion()` (panel
-  version N-2 minor, raised by the release manifest's `minAgent`) get
+  version N-2 minor, raised by the `minAgent` of the release the panel runs:
+  the stored check's only when it found the running version, else the one
+  kept in `runningRelease`; a newer release the panel has only checked never
+  raises it, `updates/release-state.ts` `runningMinAgent`) get
   `HelloRejected { AGENT_TOO_OLD, min_agent_version }`; dev builds always
   connect. ServerHello advertises `panel.report.v1`, `panel.desired.v1`,
   `panel.registry-tunnel.v1`, `panel.edge-access.v1` and
@@ -2190,12 +2250,22 @@ place, in registration order. The networking contributor
 ports, database/Box specs and the global maintenance page.
 
 Live topics the nodes module publishes (`modules/nodes/live.ts`): `panel` invalidates
-`nodes.list`, `system.info`, `updates.status` on node changes and
-`metrics.nodes`, `metrics.summary` on each metrics sample (about every
-10 s); `node:<id>` invalidates `nodes.get`, `nodes.healthReport`,
-`metrics.node`; `service:<id>` invalidates `metrics.service`, and
+`nodes.list`, `system.info`, `updates.status` on node changes; `node:<id>`
+invalidates `nodes.get`, `nodes.healthReport`; `service:<id>` invalidates
 `services.get` (with `project:<id>` -> `services.list`) whenever a node
-reports a change in the service's status.
+reports a change in the service's status. Metrics samples (about every 10 s
+per node) follow `modules/metrics/live.ts`, since the stored series change
+only when a minute is written: every sample sends `nodeUsage { nodeId,
+usage }` on `node:<id>` (the `latest` of metrics.nodes and metrics.node,
+which the web app writes into its cache, `lib/live-metrics.ts`; the
+dashboard follows every node's topic for it) and invalidates
+`metrics.node` `range: live` there, and `metrics.service` `live`/`1h` on
+`service:<id>` at most once per 9 s per service. When a minute is written,
+`panel` invalidates `metrics.nodes` and `metrics.summary` once for the
+whole fleet (12 s after the first node's minute), and `node:<id>` /
+`service:<id>` their own series, by range: `1h` every minute, `24h` every
+5 minutes, `7d` and `30d` every hour. Screens that follow those topics poll
+only while the socket is down.
 
 Socket and ticket shapes for the web app live in the op contracts:
 `StreamTicket` and `LogsSocketMessage` (`ops/logs.ts`), `TerminalTicket`,

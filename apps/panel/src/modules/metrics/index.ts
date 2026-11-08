@@ -9,9 +9,9 @@ import { nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
 import { defineModule } from "../module";
-import { nodeLive } from "../nodes/live";
 import { readSpec } from "../services/spec";
 import { metricsFor, type NodePointNow } from "./ingest";
+import { createMetricsLive } from "./live";
 import { nodePoints, type Range, ranges, servicePoints } from "./query";
 
 const iso = (t: number) => new Date(t).toISOString();
@@ -109,12 +109,13 @@ const summaryOp = implement(metrics.summary, (_input, ctx) => {
   };
 });
 
-/** Feeds samples into the ingest and tells the web app which graphs changed. */
+/** Feeds samples into the ingest and tells the web app which graphs changed (live.ts). */
 function start(deps: Deps) {
   const ingest = metricsFor(deps);
+  const live = createMetricsLive(deps.live);
   deps.agents.onEvent("metrics", (nodeId, report) => {
-    const serviceIds = ingest.record(nodeId, report);
-    for (const [topic, ops] of nodeLive.metricsSample(nodeId, serviceIds)) deps.live.publish(topic, { type: "invalidate", ops });
+    const { serviceIds, wrote } = ingest.record(nodeId, report);
+    live.sample(nodeId, usageOf(ingest.latestNode(nodeId)), serviceIds, wrote);
   });
   deps.agents.onConnection((nodeId, online) => {
     if (!online) ingest.flushNode(nodeId);

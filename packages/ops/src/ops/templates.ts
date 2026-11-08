@@ -135,7 +135,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Install a template",
   description:
-    "Runs the template and creates its services in the project on one node, with generated passwords stored as secrets, then deploys them unless deployNow is false. Fails without creating anything when a name conflicts.",
+    "Runs the template and creates its services in the project on one node, with generated passwords stored as secrets, then deploys them unless deployNow is false. Fails without creating anything when a name conflicts. Beyond services.create it needs env.edit for the template's env, files.write for file mounts, domains.edit for custom domains and services.deploy to deploy (a template with a database always starts it).",
   input: Type.Object({ ...InstallInput, deployNow: Type.Optional(Type.Boolean({ default: true })) }),
   output: Type.Object({ services: Type.Array(ServiceSummary) }),
   permission: permission.project("services.create", projectScope),

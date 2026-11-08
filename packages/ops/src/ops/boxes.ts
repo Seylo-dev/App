@@ -32,7 +32,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Create a Box",
   description:
-    "Creates a code-server workspace in a project on one node, with a persistent home volume. It joins the project network, so it reaches the project's services on that node by name.",
+    "Creates a code-server workspace in a project on one node, with a persistent home volume. It joins the project network, so it reaches the project's services on that node by name. It starts right away, which needs services.deploy in the project.",
   input: Type.Object({
     projectId: Id,
     name: ServiceName,
