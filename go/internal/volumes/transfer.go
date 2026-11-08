@@ -122,7 +122,7 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 		if name == "." {
 			continue
 		}
-		mode := fs.FileMode(hdr.Mode).Perm() | fs.FileMode(hdr.Mode)&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky)
+		mode := ArchiveMode(hdr)
 		if parent := path.Dir(name); parent != "." {
 			if err := root.MkdirAll(parent, 0o755); err != nil {
 				return total, fmt.Errorf("creating %s: %w", parent, err)

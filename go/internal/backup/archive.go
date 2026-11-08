@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"slices"
@@ -67,7 +66,7 @@ func extractArchive(ctx context.Context, r io.Reader, dir string) error {
 		if err != nil {
 			return err
 		}
-		mode := fs.FileMode(hdr.Mode).Perm() | fs.FileMode(hdr.Mode)&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky)
+		mode := volumes.ArchiveMode(hdr)
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if name != "." {
@@ -127,7 +126,7 @@ func extractArchive(ctx context.Context, r io.Reader, dir string) error {
 	// writing its children and child writes do not change parent times.
 	slices.Reverse(dirs)
 	for _, d := range dirs {
-		mode := fs.FileMode(d.hdr.Mode).Perm() | fs.FileMode(d.hdr.Mode)&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky)
+		mode := volumes.ArchiveMode(d.hdr)
 		if err := root.Chmod(d.name, mode); err != nil {
 			return err
 		}
