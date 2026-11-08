@@ -42,6 +42,8 @@ export const fleetDelayMs = 12_000;
 export const serviceIntervalMs = 9_000;
 /** Minute writes arrive about 60 s apart, give or take the sampling jitter. */
 const slackMs = 30_000;
+/** Throttle state older than this (longer than any refresh period) is dropped. */
+const sweepEveryMs = 2 * 3_600_000;
 
 const storedRanges = Object.keys(refreshEveryMs) as StoredRange[];
 
@@ -108,8 +110,17 @@ export function createMetricsLive(live: Pick<LiveHub, "publish">, options: Metri
       return true;
     });
 
+  // Removed services and nodes would keep their entries for the life of the process.
+  let lastSweep = now();
+  const sweep = () => {
+    if (now() - lastSweep < sweepEveryMs) return;
+    lastSweep = now();
+    for (const map of [lastFired, lastRange]) for (const [key, at] of map) if (now() - at > sweepEveryMs) map.delete(key);
+  };
+
   return {
     sample(nodeId, usage, serviceIds, wrote) {
+      sweep();
       const nodeTopic: LiveTopic = `node:${nodeId}`;
       if (usage) live.publish(nodeTopic, { type: "nodeUsage", nodeId, usage });
       live.publish(nodeTopic, { type: "invalidate", ops: ["metrics.node"], match: { range: ["live"] } });
