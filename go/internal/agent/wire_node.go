@@ -401,8 +401,15 @@ func autoUpdateEnabled(s *agentv1.NodeSettings) bool {
 }
 
 // updateStatus maps update errors to statuses the panel shows. Messages
-// are written for people and carry no secrets.
+// are written for people and carry no secrets. An automatic update that
+// waits is FAILED_PRECONDITION with details "backoff" and "retryAfter".
 func updateStatus(err error) error {
+	var wait *update.WaitError
+	if errors.As(err, &wait) {
+		e := rpc.NewError(agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, err.Error())
+		e.Details = map[string]string{"backoff": wait.Reason, "retryAfter": wait.Until.UTC().Format(time.RFC3339)}
+		return e
+	}
 	code := agentv1.StatusCode_STATUS_CODE_UNAVAILABLE
 	switch {
 	case errors.Is(err, update.ErrBusy):

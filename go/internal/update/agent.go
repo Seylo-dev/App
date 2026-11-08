@@ -32,7 +32,48 @@ var (
 	// ErrRejected: the request breaks a version rule or names another
 	// version than the manifest; the message says which.
 	ErrRejected = errors.New("update refused")
+	// ErrWaiting: an automatic update (UpdateAgentRequest.automatic) of a
+	// release that waits, as rollbacks.go says; the error is a *WaitError.
+	ErrWaiting = errors.New("an automatic update of this release waits")
 )
+
+// WaitError says why and until when an automatic update of a release
+// waits. It unwraps to ErrWaiting, and to ErrRolledBack for a rollback.
+type WaitError struct {
+	Version string
+	// Reason is "rolledBack" (the guard rolled it back) or "failed" (it
+	// failed before the swap less than an hour ago).
+	Reason string
+	// Count is how many times the guard rolled it back.
+	Count int
+	// Until is when the next automatic try may run.
+	Until time.Time
+}
+
+func (e *WaitError) Error() string {
+	until := e.Until.UTC().Format("2006-01-02 15:04")
+	if e.Reason == "rolledBack" {
+		times := "once"
+		if e.Count > 1 {
+			times = fmt.Sprintf("%d times", e.Count)
+		}
+		return fmt.Sprintf("%s was rolled back on this node (%s); automatic updates to it wait until %s UTC. Updating from the panel installs it now.",
+			e.Version, times, until)
+	}
+	return fmt.Sprintf("updating to %s failed less than an hour ago; automatic updates to it wait until %s UTC. Updating from the panel tries it now.",
+		e.Version, until)
+}
+
+func (e *WaitError) Unwrap() []error {
+	if e.Reason == "rolledBack" {
+		return []error{ErrWaiting, ErrRolledBack}
+	}
+	return []error{ErrWaiting}
+}
+
+// autoFailureWait is how long an automatic update waits after one of the
+// same release failed before the swap.
+const autoFailureWait = time.Hour
 
 // DefaultGuardTimeout is how long a new agent has to reconnect before the
 // guard restores the previous binary.
@@ -151,8 +192,15 @@ func (u *AgentUpdater) path(name string) string {
 // Update verifies req's manifest, installs the binary and restarts into
 // it. It returns once the restart is scheduled; the result arrives as a
 // durable UpdateResult after the new agent reconnects (or the guard rolled
-// back). Failures before the swap are reported and returned.
+// back). Failures before the swap are reported and returned. An automatic
+// request (req.automatic) first checks the waits of automatic updates and
+// returns a *WaitError, reporting nothing, while one applies.
 func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentRequest) error {
+	if req.GetAutomatic() {
+		if err := u.automaticWait(req); err != nil {
+			return err
+		}
+	}
 	release, ok := u.lock.TryAcquire("agent update")
 	if !ok {
 		return fmt.Errorf("%w (%s)", ErrBusy, u.lock.Holder())
@@ -165,6 +213,9 @@ func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentReque
 		if m != nil {
 			to = m.Version
 		}
+		if req.GetAutomatic() && !errors.Is(err, ErrUpToDate) {
+			u.noteAutoFailure(to)
+		}
 		u.reportFailure(ctx, req.GetUpdateId(), to, started, err)
 		return err
 	}
@@ -175,6 +226,48 @@ func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentReque
 			u.opts.Logger.Error("restarting into the new agent failed; the guard will restore the old one", "err", err)
 		}
 	}()
+	return nil
+}
+
+// autoKey is the key of a version in failedAuto.
+func autoKey(v string) string {
+	if c := canonical(v); c != "" {
+		return strings.TrimPrefix(c, "v")
+	}
+	return v
+}
+
+// noteAutoFailure remembers that an automatic update to version failed
+// before the swap.
+func (u *AgentUpdater) noteAutoFailure(version string) {
+	u.mu.Lock()
+	u.failedAuto[autoKey(version)] = u.opts.Now()
+	u.mu.Unlock()
+}
+
+// automaticWait returns a *WaitError while an automatic update of the
+// requested release must wait: the guard rolled it back (rollbacks.go), or
+// an automatic update of it failed before the swap in the last hour.
+func (u *AgentUpdater) automaticWait(req *agentv1.UpdateAgentRequest) error {
+	version := req.GetTargetVersion()
+	if version == "" {
+		m, err := VerifyManifest(req.GetManifest(), req.GetManifestSignature(), u.opts.PublicKey)
+		if err != nil {
+			// install refuses it and says why.
+			return nil
+		}
+		version = m.Version
+	}
+	version = autoKey(version)
+	if rec, wait := u.rolledBack(version); wait {
+		return &WaitError{Version: version, Reason: "rolledBack", Count: rec.Count, Until: rec.retryAt()}
+	}
+	u.mu.Lock()
+	last, failed := u.failedAuto[version]
+	u.mu.Unlock()
+	if failed && u.opts.Now().Sub(last) < autoFailureWait {
+		return &WaitError{Version: version, Reason: "failed", Until: last.Add(autoFailureWait)}
+	}
 	return nil
 }
 
@@ -373,11 +466,11 @@ func (u *AgentUpdater) CheckOnConnect(ctx context.Context, panelVersion string, 
 	if !autoUpdate || !IsRelease(u.opts.CurrentVersion) || !Newer(panelVersion, u.opts.CurrentVersion) {
 		return nil
 	}
-	target := strings.TrimPrefix(canonical(panelVersion), "v")
+	target := autoKey(panelVersion)
 	u.mu.Lock()
 	last, failed := u.failedAuto[target]
 	u.mu.Unlock()
-	if failed && u.opts.Now().Sub(last) < time.Hour {
+	if failed && u.opts.Now().Sub(last) < autoFailureWait {
 		return nil
 	}
 	if rec, wait := u.rolledBack(target); wait {
@@ -399,9 +492,7 @@ func (u *AgentUpdater) CheckOnConnect(ctx context.Context, panelVersion string, 
 		return err
 	}
 	if err != nil {
-		u.mu.Lock()
-		u.failedAuto[target] = u.opts.Now()
-		u.mu.Unlock()
+		u.noteAutoFailure(target)
 		return fmt.Errorf("auto-update to %s: %w", target, err)
 	}
 	return nil
@@ -433,9 +524,9 @@ func (u *AgentUpdater) UpdateToLatest(ctx context.Context, minVersion string) er
 		return fmt.Errorf("%w: the latest release %s is older than the panel's minimum %s", ErrRejected, m.Version, minVersion)
 	}
 	u.mu.Lock()
-	last, failed := u.failedAuto[m.Version]
+	last, failed := u.failedAuto[autoKey(m.Version)]
 	u.mu.Unlock()
-	if failed && u.opts.Now().Sub(last) < time.Hour {
+	if failed && u.opts.Now().Sub(last) < autoFailureWait {
 		return fmt.Errorf("updating to %s failed less than an hour ago", m.Version)
 	}
 	if rec, wait := u.rolledBack(m.Version); wait {
@@ -446,9 +537,7 @@ func (u *AgentUpdater) UpdateToLatest(ctx context.Context, minVersion string) er
 		Manifest: manifest, ManifestSignature: sig, TargetVersion: m.Version, UpdateId: "too-old-" + m.Version,
 	})
 	if err != nil && !errors.Is(err, ErrBusy) {
-		u.mu.Lock()
-		u.failedAuto[m.Version] = u.opts.Now()
-		u.mu.Unlock()
+		u.noteAutoFailure(m.Version)
 	}
 	return err
 }

@@ -44,6 +44,15 @@ message UpdateAgentRequest {
   string target_version = 3;
   // Panel id of this update; echoed in the UpdateResult event.
   string update_id = 4;
+  // The panel sends this update on its own (an automatic run, or a node that
+  // was offline during a run catching up when it reconnects), not because a
+  // person asked. The agent then waits like its own automatic updates do: a
+  // release the update guard rolled back waits an hour after the first
+  // rollback and a day after each later one, and one that failed before the
+  // swap waits an hour. While it waits it answers FAILED_PRECONDITION with
+  // details "backoff" ("rolledBack" or "failed") and "retryAfter" (RFC 3339).
+  // Agents before 0.2.0-rc.2 ignore it and install.
+  bool automatic = 5;
 }
 
 message UpdateAgentResponse {}

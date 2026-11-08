@@ -174,3 +174,88 @@ func TestRolledBackReleaseManualUpdate(t *testing.T) {
 	}
 	<-f.system.restarted
 }
+
+// An update the panel marks automatic (its automatic run, or a node that
+// was offline during a run catching up on reconnect) waits like the
+// agent's own automatic updates: a rolled-back release until its wait is
+// over, a release that failed before the swap for an hour. While it waits
+// nothing is installed or reported. A person's update still goes ahead.
+func TestAutomaticUpdateWaits(t *testing.T) {
+	ctx := context.Background()
+	installs := func(f *agentFixture) int {
+		f.system.mu.Lock()
+		defer f.system.mu.Unlock()
+		return len(f.system.armed)
+	}
+
+	t.Run("rolled back", func(t *testing.T) {
+		f := newAgentFixture(t, "1.2.0")
+		c := &clock{now: time.Now()}
+		if _, err := recordRollback(updateDir(f.dataDir), "1.2.0", c.Now()); err != nil {
+			t.Fatal(err)
+		}
+		req := f.request(testManifest("1.2.0", f.binary, f.server.URL))
+		req.Automatic = true
+		err := f.updaterAt("1.1.0", c).Update(ctx, req)
+		var wait *WaitError
+		if !errors.As(err, &wait) || wait.Reason != "rolledBack" || !errors.Is(err, ErrWaiting) || !errors.Is(err, ErrRolledBack) {
+			t.Fatalf("automatic update right after a rollback: %v", err)
+		}
+		if !wait.Until.Equal(c.Now().UTC().Add(rollbackWaitFirst)) || !strings.Contains(err.Error(), "wait until") {
+			t.Fatalf("wait = %+v (%v)", wait, err)
+		}
+		if n := installs(f); n != 0 || len(f.reports.all()) != 0 {
+			t.Fatalf("%d installs and reports %v while waiting", n, f.reports.all())
+		}
+		// Without a target version the manifest names the release.
+		req.TargetVersion = ""
+		if err := f.updaterAt("1.1.0", c).Update(ctx, req); !errors.Is(err, ErrWaiting) {
+			t.Fatalf("automatic update without a target version: %v", err)
+		}
+		// Once the hour is over it installs.
+		c.add(rollbackWaitFirst + time.Minute)
+		req.TargetVersion = "1.2.0"
+		if err := f.updaterAt("1.1.0", c).Update(ctx, req); err != nil {
+			t.Fatalf("automatic update after the wait: %v", err)
+		}
+		<-f.system.restarted
+		if n := installs(f); n != 1 {
+			t.Fatalf("%d installs after the wait, want 1", n)
+		}
+	})
+
+	t.Run("failed before the swap", func(t *testing.T) {
+		f := newAgentFixture(t, "1.2.0")
+		c := &clock{now: time.Now()}
+		u := f.updaterAt("1.1.0", c)
+		m := testManifest("1.2.0", f.binary, f.server.URL)
+		f.binary = fakeBinary("6.6.6") // the download does not match the manifest
+		req := f.request(m)
+		req.Automatic = true
+		if err := u.Update(ctx, req); err == nil || errors.Is(err, ErrWaiting) {
+			t.Fatalf("first automatic update: %v", err)
+		}
+		if n := len(f.reports.all()); n != 1 {
+			t.Fatalf("%d reports after the failed download, want 1", n)
+		}
+		var wait *WaitError
+		if err := u.Update(ctx, req); !errors.As(err, &wait) || wait.Reason != "failed" || errors.Is(err, ErrRolledBack) {
+			t.Fatalf("automatic update within the hour: %v", err)
+		}
+		if n := len(f.reports.all()); n != 1 {
+			t.Fatalf("%d reports after the refused retry, want 1", n)
+		}
+		// A person's update does not wait (and fails again on the same file).
+		manual := f.request(m)
+		if err := u.Update(ctx, manual); err == nil || errors.Is(err, ErrWaiting) {
+			t.Fatalf("manual update: %v", err)
+		}
+		// An hour later the automatic one tries again.
+		c.add(autoFailureWait + time.Minute)
+		f.binary = fakeBinary("1.2.0")
+		if err := u.Update(ctx, req); err != nil {
+			t.Fatalf("automatic update an hour later: %v", err)
+		}
+		<-f.system.restarted
+	})
+}
