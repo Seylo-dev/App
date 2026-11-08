@@ -84,6 +84,11 @@ const choices = implement(nodeOps.choices, (_input, ctx) => {
 });
 
 const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
+  // "Build images on this node": the token creator decides, never the machine that joins.
+  // The audit row gets the value that applies, also when the caller left it out ({} was a
+  // non-builder before 0.2.1), and refused attempts too.
+  const canBuild = input.canBuild ?? true;
+  ctx.auditDetails?.({ canBuild });
   // A joined node receives every spec and secret placed on it: a session left
   // open must not attach a machine.
   requireFreshIfSession(ctx);
@@ -92,9 +97,6 @@ const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
   const target = agentJoinTarget(ctx);
   const token = prefixedToken("join");
   const expiresAt = new Date(Date.now() + joinTokenTtlMs);
-  // "Build images on this node": the token creator decides, never the machine that joins.
-  // The audit row keeps the input, so who made a build-enabled token is logged.
-  const canBuild = input.canBuild ?? true;
   const row = ctx.db
     .insert(joinTokens)
     .values({ tokenHash: hashToken(token), createdBy: userOf(ctx.principal)?.id ?? null, expiresAt, canBuild })
