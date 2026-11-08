@@ -168,11 +168,21 @@ export const allowInternalHost = defineOp({
   audit: true,
 });
 
+/**
+ * A host as a project records it: host[:port] of a git URL, lower case
+ * (urlHost in the panel). It holds whatever a URL's host can: underscores
+ * (git_srv.lan, Windows and AD names), an scp-style host as written, the
+ * percent-escapes of an ssh:// host. The panel records no host this does
+ * not match, so every recorded one lists and can be named again; the
+ * longest a GitUrl gives is 4446 characters (an ssh:// host of 494
+ * characters, each percent-encoded to up to 9).
+ */
 export const InternalGitHost = Type.String({
   minLength: 1,
-  maxLength: 260,
-  pattern: "^[A-Za-z0-9.:\\[\\]-]+$",
-  description: 'A host as recorded for a project, for example "gitea.lan", "10.0.0.7:3000" or "[fd00::7]:3000".',
+  maxLength: 4500,
+  pattern: "^\\S+$",
+  description:
+    'A host as recorded for a project (host[:port] of a git URL, lower case), for example "gitea.lan", "git_srv.lan", "10.0.0.7:3000" or "[fd00::7]:3000".',
 });
 
 export const listInternalHosts = defineOp({
@@ -185,7 +195,8 @@ export const listInternalHosts = defineOp({
   output: Type.Object({
     items: Type.Array(
       Type.Object({
-        host: InternalGitHost,
+        // Not InternalGitHost: a row an older panel recorded still lists.
+        host: Type.String({ description: InternalGitHost.description }),
         approvedBy: Type.Union([Type.Object({ id: Id, name: Type.String() }), Type.Null()]),
         createdAt: Timestamp,
         usedBy: Type.Integer({ minimum: 0 }),

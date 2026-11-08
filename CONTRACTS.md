@@ -272,8 +272,8 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the panel counts the nodes' addresses as internal, so an admin's save of
   such a source sets it (Git addresses below). Agents report those
   addresses as `NodeFacts.interface_addresses` (added in 0.2: the public
-  addresses on the node's interfaces, sorted, at most 64; empty from older
-  agents). With this field set, internal addresses are allowed for the
+  addresses on the node's interfaces, sorted, at most 64 of each family;
+  empty from older agents). With this field set, internal addresses are allowed for the
   source's own host and port only (not for a redirect or submodule to
   another host); cloud metadata addresses never. The panel sets it for a
   generic git source exactly when its host is in `git_internal_hosts` for
@@ -1433,15 +1433,36 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   (`uptime/targets.ts` `checkTarget`, no "allow internal targets", and a
   node's own address on a private network is internal here, unlike for
   uptime checks: `ownNodes: false`). A host whose every address is one of
-  the panel's nodes' (any node's admin-set `public_address`, `public_ipv4`,
-  `public_ipv6` or `NodeFacts.interface_addresses`; or whose name is a
-  node's admin-set public host name) is internal too, public addresses
-  included (`nodesInternal`, reason `node`, "an address of one of this
-  panel's nodes"), since nodes refuse their own addresses for git unless
-  the host is allowed. What agents report counts here because it only ever
-  makes a host more internal. A name that also resolves to another public
-  address stays public (the node skips its own address and dials the
-  other). Checked
+  the panel's nodes' (or whose name is a node's admin-set public host name)
+  is internal too, public addresses included (`nodesInternal`, reason
+  `node`, "an address of one of this panel's nodes"), since nodes refuse
+  their own addresses for git unless the host is allowed. Which of the
+  nodes' addresses count (`NodeAddressScope` in `uptime/targets.ts`):
+  "trusted" ones are each node's admin-set `public_address` and the public
+  address the panel saw it connect from (the `nodeConnectAddresses`
+  setting, written at every handshake; behind the panel's Traefik the
+  forwarded one); "reported" adds what agents say about themselves
+  (`public_ipv4`, `public_ipv6`, which the facts fill first, and
+  `NodeFacts.interface_addresses`). An agent can report any address, so
+  reported ones count only where an admin stands behind the outcome: a
+  `git.manage` caller's save (which records the host, so a git server on a
+  node's second address builds), a provider connection's allowance
+  (`providerGitVerdict`), `git.allowInternalHost` and the upgrade seed. A
+  member's save, a member's `git.branches` and the check before a build or
+  FetchGitFile count the trusted ones only, so a lying agent cannot refuse
+  members a public host such as github.com there; a member's source on an
+  address only an agent reported fails at that node instead, which refuses
+  its own addresses, with the hint to ask an admin. `public_address` is set
+  by hand in Node settings (the installer leaves it empty), and the panel's
+  own node connects over the Docker network (a private address, so no
+  connect address), so on a default single-node install no trusted address
+  is known: there a member's source on the node's public name saves and
+  fails at the node with that hint, rather than at the save. A lying agent can still
+  make an admin's save of a public host record it (and so send
+  `allow_internal_host` for it to the project's nodes), a known trade-off:
+  it takes a compromised node and DNS control at another node to use. A
+  name that also resolves to another public address stays public (the node
+  skips its own address and dials the other). Checked
   on save and again right before a build or FetchGitFile goes to a node
   (DNS may answer differently by then). An internal host (private,
   loopback, link-local, reserved, or a name the panel cannot resolve) works
@@ -1454,7 +1475,18 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   internal addresses or the nodes' own then, or internal IP addresses. A
   panel whose V2 seed ran before nodes refused their own addresses
   (0.2.0-rc.1) records the hosts of its sources on the nodes' addresses
-  once more (`gitInternalHostsSeededNodes`), nothing else, and logs them. A public host is not recorded (a member's own
+  once more (`gitInternalHostsSeededNodes`), nothing else, and logs them.
+  Both seeds count the reported addresses too, but run before the nodes'
+  0.2.0-rc.2 agents connect, so nodes whose stored facts have no
+  `interfaceAddresses` (older agents, or facts an older panel stored
+  without the field) are kept with the hosts the seed saw as public
+  (`gitInternalHostsPending`): when such a node connects with an agent that
+  reports them (0.2.0-rc.2 or newer, or a dev build), those hosts are
+  checked again once (`recheckSeededGitHosts`) and the ones now on the
+  nodes' addresses are recorded for the projects whose source from before
+  the seed is still on that host, never for sources saved since; a node
+  that reports no interface addresses is done without lookups, and the
+  setting goes once no node or host is left. A public host is not recorded (a member's own
   name stays public-only after a rebind), and neither is a name the panel
   cannot resolve (not found, timeout, failing server: whoever controls the
   name could point it inside later); each of those is logged once with
@@ -1479,15 +1511,23 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   each, `approvedBy` null for the seed's rows or a removed account, and
   `usedBy`, its generic git and stack sources on the host) and
   `git.removeInternalHost {projectId, host}` takes one off (NOT_FOUND when
-  it is not there); both `git.manage`. A refusal an admin can lift
+  it is not there); both `git.manage`. A host is recorded as `urlHost` of
+  the URL, lower case, with whatever a URL's host holds (`git_srv.lan`, an
+  scp-style host as written, the percent-escapes of an ssh:// host);
+  `InternalGitHost` (no whitespace, up to 4500 characters, which the
+  longest host of a 500-character git URL fits) names any of them, and a
+  URL whose host it cannot name (an empty one) is not a git URL, so every
+  recorded host lists and can be taken off. A refusal an admin can lift
   (BAD_REQUEST `internalTarget` or `unresolvable` from saving a source or
   `git.branches`, never a metadata address) carries `details.host`, the
   host as it would be recorded. The web app shows "Allow this host for
-  <project>" under such a refusal on the git source and provider forms for
-  owners and admins (a confirm step, then `git.allowInternalHost`, then the
-  check or save again) and tells members only an owner or admin can allow
-  it; a failed deployment whose error is the node's or the panel's refusal
-  for the source's host offers admins the same; project Settings >
+  <project>" under such a refusal on the git source form for owners and
+  admins (a confirm step, then `git.allowInternalHost`, then the check or
+  save again) and tells members only an owner or admin can allow it; the
+  provider form has no such refusal (`gitProviders.connectRepo` never
+  refuses a host, `providerGitVerdict` decides at build time), so a
+  failed deployment whose error is the node's or the panel's refusal for
+  the source's host (git or provider) offers admins the same; project Settings >
   Internal git hosts lists them for admins with Remove and an "Allow a
   host" field. `git.branches` (checking access to a generic git URL) reads the
   repository from the panel under the same rule: public addresses, a host
@@ -1624,6 +1664,13 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   so the node gets the agent of the panel's version; the install host
   (`https://<installUrl>`) serves the latest stable release only and is
   used by builds without a release (dev, snapshots, `git describe`).
+  `publicIpv4`/`publicIpv6` hold the facts' own public addresses first and
+  the public address the agent connected from only when the facts have
+  none; that connect address is also kept on its own, per node, in the
+  `nodeConnectAddresses` setting (`agent-hub/handshake.ts`, every
+  handshake; dropped when the node connects from a private address or is
+  removed), since an agent cannot make it up (git addresses count it as a
+  trusted node address).
 - Deployments keep the env they started with (`deployments.env_sealed`,
   sealed JSON): an app's desired spec uses its target deployment's env, so a
   saved but undeployed env change, or a failed deploy, never reaches the

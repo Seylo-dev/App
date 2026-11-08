@@ -228,24 +228,36 @@ function ipKey(address: string): string | null {
 }
 
 /**
- * Every address of this panel's nodes: the admin-set public address and
- * what agents report (public_ipv4/public_ipv6, NodeFacts.interface_addresses:
- * the public addresses on their interfaces, which their git fetches refuse
- * unless allowed), plus admin-set public host names. Only ever used to
- * count a target as more internal (git sources), never to open one up, so
- * what an agent reports may count here.
+ * Which addresses of this panel's nodes count (nodeAddresses). "trusted":
+ * what an admin set (public_address, an IP or a host name) and the public
+ * address the panel saw each node connect from (nodeConnectAddresses).
+ * "reported" adds what agents report about themselves (public_ipv4/
+ * public_ipv6, NodeFacts.interface_addresses: the public addresses on their
+ * interfaces, which their git fetches refuse unless allowed). An agent can
+ * report any address, so "reported" is only for outcomes an admin stands
+ * behind (an admin's save records the host, a provider connection's
+ * allowance, the upgrade seed); a member's save and a build dispatch use
+ * "trusted", so a lying agent cannot refuse members a public host there
+ * (the node still refuses its own addresses itself).
  */
-function nodeAddresses(deps: Pick<Deps, "db">): { ips: Set<string>; names: Set<string> } {
+export type NodeAddressScope = "trusted" | "reported";
+
+function nodeAddresses(deps: Pick<Deps, "db">, scope: NodeAddressScope): { ips: Set<string>; names: Set<string> } {
   const ips = new Set<string>();
   const names = new Set<string>();
+  const seen = getSetting(deps.db, "nodeConnectAddresses") ?? {};
   const rows = deps.db
-    .select({ publicAddress: nodes.publicAddress, ipv4: nodes.publicIpv4, ipv6: nodes.publicIpv6, facts: nodes.facts })
+    .select({ id: nodes.id, publicAddress: nodes.publicAddress, ipv4: nodes.publicIpv4, ipv6: nodes.publicIpv6, facts: nodes.facts })
     .from(nodes)
     .all();
   for (const row of rows) {
-    const facts = (row.facts ?? {}) as { interfaceAddresses?: unknown; publicIpv4?: unknown; publicIpv6?: unknown };
-    const reported = Array.isArray(facts.interfaceAddresses) ? facts.interfaceAddresses.slice(0, 256) : [];
-    for (const address of [row.publicAddress, row.ipv4, row.ipv6, facts.publicIpv4, facts.publicIpv6, ...reported]) {
+    const addresses: unknown[] = [row.publicAddress, seen[row.id]];
+    if (scope === "reported") {
+      const facts = (row.facts ?? {}) as { interfaceAddresses?: unknown; publicIpv4?: unknown; publicIpv6?: unknown };
+      const reported = Array.isArray(facts.interfaceAddresses) ? facts.interfaceAddresses.slice(0, 256) : [];
+      addresses.push(row.ipv4, row.ipv6, facts.publicIpv4, facts.publicIpv6, ...reported);
+    }
+    for (const address of addresses) {
       if (typeof address !== "string" || address === "") continue;
       const key = ipKey(address);
       if (key) ips.add(key);
@@ -258,10 +270,10 @@ function nodeAddresses(deps: Pick<Deps, "db">): { ips: Set<string>; names: Set<s
 /**
  * True when the target is one of this panel's nodes: its name is a node's
  * admin-set public host name, or every address it resolves to is a node's
- * address (nodeAddresses).
+ * address (nodeAddresses, in that scope).
  */
-function nodeTarget(deps: Pick<Deps, "db">, host: string, addresses: readonly string[]): boolean {
-  const known = nodeAddresses(deps);
+function nodeTarget(deps: Pick<Deps, "db">, host: string, addresses: readonly string[], scope: NodeAddressScope): boolean {
+  const known = nodeAddresses(deps, scope);
   if (known.names.has(host.replace(/\.$/, ""))) return true;
   return addresses.length > 0 && addresses.every((a) => known.ips.has(ipKey(a) ?? ""));
 }
@@ -273,14 +285,15 @@ function nodeTarget(deps: Pick<Deps, "db">, host: string, addresses: readonly st
  * a private network then counts like any other internal address (git
  * sources, where such a host needs an admin's approval per project).
  * `nodesInternal` refuses a target on one of this panel's nodes too, public
- * addresses included (reason "node"): the node connects to itself there,
- * past a firewall that hides a service from the internet (git sources,
- * whose nodes refuse their own addresses unless allowed).
+ * addresses included (reason "node"), counting the node addresses of that
+ * scope (NodeAddressScope): the node connects to itself there, past a
+ * firewall that hides a service from the internet (git sources, whose
+ * nodes refuse their own addresses unless allowed).
  */
 export async function checkTarget(
   deps: Pick<Deps, "db">,
   url: string,
-  options: { allowInternal?: boolean; ownNodes?: boolean; nodesInternal?: boolean } = {},
+  options: { allowInternal?: boolean; ownNodes?: boolean; nodesInternal?: NodeAddressScope } = {},
 ): Promise<TargetCheck> {
   if (options.allowInternal ?? getSetting(deps.db, "uptimeAllowInternalTargets") === true) return { ok: true, address: null, byName: true };
   let host: string;
@@ -312,7 +325,8 @@ export async function checkTarget(
   const blocked = addresses.map((address) => ({ address, reason: blockedReason(address) })).filter((a) => a.reason !== null);
   const pin = addresses[0] as string;
   if (blocked.length === 0) {
-    if (options.nodesInternal && nodeTarget(deps, host, addresses)) return { ok: false, reason: "node", address: pin };
+    if (options.nodesInternal && nodeTarget(deps, host, addresses, options.nodesInternal))
+      return { ok: false, reason: "node", address: pin };
     return { ok: true, address: pin, byName: false };
   }
   // The metadata service is never one of ours, even on a node's own address.

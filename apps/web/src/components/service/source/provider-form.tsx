@@ -18,7 +18,6 @@ import { IconLock, IconRefresh, IconSearch } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useDeferredValue, useState } from "react";
 import { t } from "../../../i18n/t";
-import { InternalHostNote } from "../../git/internal-hosts";
 import { Field, ToggleRow } from "../field";
 import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
@@ -86,7 +85,6 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
     );
   }
   const chosen = providerId ?? list[0]?.id ?? null;
-  const chosenConnection = list.find((c) => c.id === chosen) ?? null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -159,16 +157,6 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
           </Button>
           <MutationError error={connect.error} />
         </div>
-        {chosenConnection && (
-          <InternalHostNote
-            error={connect.error}
-            projectId={service.projectId}
-            url={`https://${chosenConnection.host}/`}
-            onAllowed={() =>
-              chosen && repo && branch && connect.mutate({ serviceId: service.id, providerId: chosen, repo, branch, rootDir, deployOnPush })
-            }
-          />
-        )}
       </form>
       {src && <WebhookStatus service={service} kind={kind} />}
     </div>

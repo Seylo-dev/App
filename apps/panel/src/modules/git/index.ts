@@ -13,7 +13,14 @@ import { assertSourceAllowed } from "../services/source-guard";
 import { blockedMessage, blockedTarget } from "../uptime/targets";
 import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
 import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, urlHost } from "./remote";
-import { allowInternalGitHost, gitReadTarget, listInternalGitHosts, removeInternalGitHost, seedInternalGitHosts } from "./targets";
+import {
+  allowInternalGitHost,
+  gitReadTarget,
+  listInternalGitHosts,
+  recheckSeededGitHosts,
+  removeInternalGitHost,
+  seedInternalGitHosts,
+} from "./targets";
 
 // People who may set a source somewhere see names and hosts for the source
 // picker (an account with no such grant gets an empty list); the account
@@ -191,5 +198,9 @@ export default defineModule({
   start(deps) {
     // Lookups run in the background; builds and source checks wait for them (git/targets.ts).
     void seedInternalGitHosts(deps.db, deps.logger);
+    // A node the seed could not see the interface addresses of reports them when it connects with a newer agent.
+    deps.agents.onConnection((nodeId, online) => {
+      if (online) void recheckSeededGitHosts(deps.db, nodeId, deps.logger);
+    });
   },
 });

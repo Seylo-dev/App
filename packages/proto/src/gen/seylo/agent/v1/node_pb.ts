@@ -150,12 +150,14 @@ export type NodeFacts = Message<"seylo.agent.v1.NodeFacts"> & {
 
   /**
    * The public addresses on the node's own interfaces (what netguard
-   * counts as public; internal ones are left out), sorted, at most 64. The
-   * agent refuses git connections to them like internal addresses unless
-   * the panel allows internal addresses for the source's host
-   * (GitSource.allow_internal_host), and the panel counts a git host whose
-   * every address is a node's address as internal. Empty from agents
-   * before this field. added in 0.2 (security)
+   * counts as public; internal ones are left out), sorted, at most 64 of
+   * each family. The agent refuses git connections to them like internal
+   * addresses unless the panel allows internal addresses for the source's
+   * host (GitSource.allow_internal_host). The panel counts a git host whose
+   * every address is a node's address as internal where an admin stands
+   * behind the outcome (an admin's save records it, a provider connection,
+   * the upgrade seed), never to refuse a member: an agent can report any
+   * address. Empty from agents before this field. added in 0.2 (security)
    *
    * @generated from field: repeated string interface_addresses = 21;
    */
