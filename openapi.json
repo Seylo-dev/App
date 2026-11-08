@@ -62526,6 +62526,8 @@
                     "blocked",
                     "agentPortBlocked",
                     "reclosesAt",
+                    "openReason",
+                    "oldDocker",
                     "lastChange",
                     "recovery"
                   ],
@@ -62804,6 +62806,26 @@
                       "anyOf": [
                         {
                           "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "openReason": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "oldDocker": {
+                      "anyOf": [
+                        {
                           "type": "string"
                         },
                         {
@@ -63608,6 +63630,8 @@
                     "blocked",
                     "agentPortBlocked",
                     "reclosesAt",
+                    "openReason",
+                    "oldDocker",
                     "lastChange",
                     "recovery"
                   ],
@@ -63886,6 +63910,26 @@
                       "anyOf": [
                         {
                           "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "openReason": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "oldDocker": {
+                      "anyOf": [
+                        {
                           "type": "string"
                         },
                         {

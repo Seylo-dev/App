@@ -140,6 +140,8 @@ const openPanelAccess = () => ({
     },
   ],
   reclosesAt: null,
+  openReason: null,
+  oldDocker: null,
   lastChange: null,
   recovery: {
     sshTunnel: "ssh -L 3000:127.0.0.1:3000 root@203.0.113.10",

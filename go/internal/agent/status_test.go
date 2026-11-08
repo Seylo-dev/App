@@ -12,6 +12,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/docker/dockertest"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/state"
+	"github.com/seylo-dev/app/go/internal/update"
 )
 
 // panelStatusBackend is a local backend whose desired state holds the
@@ -159,5 +160,29 @@ func TestPanelStatusReportsTheTailnet(t *testing.T) {
 	}
 	if got := report(&agentv1.TailscaleInfo{BackendState: "Running", DisabledOnServer: true, Serve: active.Serve}); got.State != localapi.TailnetDisabled || got.URL != "" {
 		t.Fatalf("no_tailnet = %+v", got)
+	}
+}
+
+// `seylo status` names the update that holds the node's lock, so
+// `seylo panel ip-access on` can say why the port does not open yet.
+func TestStatusReportsWhatHoldsTheUpdateLock(t *testing.T) {
+	b, _ := panelStatusBackend(t)
+	b.conn.status = &statusTracker{}
+	s, err := b.Status(context.Background())
+	if err != nil || s.Busy != "" {
+		t.Fatalf("without an updater = %q, %v", s.Busy, err)
+	}
+	lock := &update.Lock{}
+	b.deps.Updater = &update.Service{Lock: lock}
+	if s, _ := b.Status(context.Background()); s.Busy != "" {
+		t.Fatalf("idle = %q", s.Busy)
+	}
+	release, ok := lock.TryAcquire("Docker update")
+	if !ok {
+		t.Fatal("lock taken")
+	}
+	defer release()
+	if s, _ := b.Status(context.Background()); s.Busy != "Docker update" {
+		t.Fatalf("busy = %q", s.Busy)
 	}
 }

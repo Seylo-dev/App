@@ -143,6 +143,9 @@ func (b *localBackend) Status(ctx context.Context) (localapi.NodeStatus, error) 
 	if cfg.NodeName != "" {
 		out.NodeName = cfg.NodeName
 	}
+	if b.deps.Updater != nil {
+		out.Busy = b.deps.Updater.Busy()
+	}
 	if b.outbox != nil {
 		st := b.outbox.Stats()
 		out.Outbox = localapi.OutboxStatus{Pending: st.Pending, Bytes: st.Bytes, Dropped: st.Dropped}

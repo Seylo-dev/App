@@ -9,25 +9,28 @@
 // The rule (decidePanelIpAccess):
 //   closed = !serveOnIp && the panel node's agent can bind 127.0.0.1
 //            && (a private path works || (stayClosed && already closed))
+//            && no enabled node dials plain http://
 //   agentPortClosed = closed && !agentPortOpen
 //            && every enabled node but the panel node dials https://<domain>
 // It fails open: a missing capability, a panel not run by its agent, no
-// working path (in "reopen" mode) and a failed roll all leave or put the
-// port open. After an automatic reopen it closes again only once a path
-// has worked for an hour (anti-flap). An offline or restarting agent
-// flips nothing: nothing could apply the change, and its next connect
-// runs this again. Nothing changes during an update run either: the
-// panel step swaps the container itself.
+// working path (in "reopen" mode), a node that closing would cut off and a
+// failed roll all leave or put the port open. After an automatic reopen it
+// closes again only once a path has worked for an hour (anti-flap). An
+// offline or restarting agent flips nothing: nothing could apply the
+// change, and its next connect runs this again. Closing waits for any
+// update run; reopening only for one that swaps the panel container (its
+// panel step) or updates Docker on the panel node, never for the rest.
 
 import { slug } from "@seylo/brand";
 import type { settings as settingOps } from "@seylo/ops";
 import { DeployStage } from "@seylo/proto";
-import { and, eq } from "drizzle-orm";
-import { dialingNodes, dialsDomain } from "../../agent-hub/dialed";
-import { auditLog, nodes, servicePlacements, updateRuns } from "../../db/schema";
+import { and, eq, inArray, or } from "drizzle-orm";
+import { dialingNodes, dialsDomain, dialsPlainHttp } from "../../agent-hub/dialed";
+import { auditLog, nodes, servicePlacements, updateRuns, updateSteps } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting, setSetting } from "../../settings";
 import { bumpPanelGeneration, panelContainerPort, panelServiceId } from "../nodes/panel-service";
+import { panelNodeFacts } from "../tailscale/facts";
 import { type PrivatePathState, privatePathSources } from "./private-paths";
 
 /** What the panel node was last told to apply. Absent: open, as in 0.2.0. */
@@ -139,9 +142,55 @@ export function panelNodeState(deps: Pick<Deps, "db" | "agents">): PanelNodeStat
   return { nodeId: node.id, online, managed, capable };
 }
 
-/** An update run swaps the panel container and restarts agents: IP access waits for it. */
+/** Any update run is running: closing IP access waits for it, and turning it off is refused (panel-access.ts). */
 export function updateRunning(deps: Pick<Deps, "db">): boolean {
   return deps.db.select({ id: updateRuns.id }).from(updateRuns).where(eq(updateRuns.status, "running")).get() !== undefined;
+}
+
+/**
+ * A running update run is about to swap or is swapping the panel container
+ * (its panel step is pending or running), or updates Docker on the panel
+ * node (which restarts the container): reopening waits only for these. A
+ * Docker update of another node or an agent step never touches the panel
+ * container, and an agent that restarts is offline, which holds everything
+ * anyway.
+ */
+export function panelUpdateRunning(deps: Pick<Deps, "db">, panelNodeId: string): boolean {
+  return (
+    deps.db
+      .select({ id: updateSteps.id })
+      .from(updateSteps)
+      .innerJoin(updateRuns, eq(updateRuns.id, updateSteps.runId))
+      .where(
+        and(
+          eq(updateRuns.status, "running"),
+          or(
+            and(eq(updateSteps.target, "panel"), inArray(updateSteps.status, ["pending", "running"])),
+            and(eq(updateSteps.target, "docker"), eq(updateSteps.nodeId, panelNodeId), eq(updateSteps.status, "running")),
+          ),
+        ),
+      )
+      .get() !== undefined
+  );
+}
+
+/**
+ * Docker Engine releases before this one let a machine on the same local
+ * network reach ports published on 127.0.0.1 (Docker's DNAT rule with
+ * route_localnet; Docker documents it for releases older than 28.0.0).
+ */
+export const loopbackSafeDockerMajor = 28;
+
+/** The panel node's Docker version when it is older than loopbackSafeDockerMajor; null when newer or unknown. */
+export function panelNodeOldDocker(deps: Pick<Deps, "db" | "agents">): string | null {
+  const version = panelNodeFacts(deps)?.dockerVersion?.trim() ?? "";
+  const major = /^v?(\d+)\./.exec(version)?.[1];
+  return major !== undefined && Number(major) < loopbackSafeDockerMajor ? version : null;
+}
+
+/** What the close alert says about an old Docker on the panel node. */
+export function oldDockerWarning(version: string): string {
+  return `The panel's server runs Docker ${version}: before Docker ${loopbackSafeDockerMajor}, machines on the same local network may still reach ports on 127.0.0.1. Update Docker from the panel node's page.`;
 }
 
 /** The panel's host port (the installer's --port). */
@@ -218,15 +267,42 @@ export function decidePanelIpAccess(deps: Pick<Deps, "db" | "agents" | "agentTls
   } else {
     closed = true;
   }
+  // A node that dials plain http:// would be cut off. The switch refuses to close for it
+  // (panel-access.ts); this covers the closes nobody asked for, such as the one after an
+  // automatic reopen, for a node that joined over http:// while IP access was open. It
+  // stops the anti-flap wait too: that close would not happen.
+  const plain = closed || reclosesAt !== null ? dialingNodes(deps).filter((node) => dialsPlainHttp(node.url)) : [];
+  if (plain.length > 0) {
+    closed = false;
+    reclosesAt = null;
+    why = plainHttpWhy(plain);
+  }
   const agentPortClosed = closed && !wanted.agentPortOpen && agentPortOf(deps) !== null && nodesOffDomain(deps).length === 0;
   return { closed, agentPortClosed, why, reclosesAt };
+}
+
+/** Why a node on plain http:// keeps IP access open, with the fix, as the card and the alert say it. */
+function plainHttpWhy(plain: readonly { name: string; url: string | null }[]): string {
+  const [one] = plain;
+  if (plain.length === 1 && one) {
+    return `node ${one.name} connects over ${one.url} and closing would cut it off (join it again with the https command from Nodes > Add node, with --force)`;
+  }
+  const list = plain.map((node) => node.name);
+  return `nodes ${list.slice(0, -1).join(", ")} and ${list.at(-1)} connect over plain http:// and closing would cut them off (join each again with the https command from Nodes > Add node, with --force)`;
 }
 
 export interface ApplyOptions {
   /** Who made the change, when a person (or the server's command line) did; absent for automatic changes ("system"). */
   by?: string;
-  /** The owner chose again: forget the anti-flap wait and a failed roll's hold. */
+  /** Someone chose again: forget a failed roll's hold, so the change is tried now. */
   resetHold?: boolean;
+  /**
+   * The owner turned something off past the close guards (closeBlocks):
+   * forget the anti-flap wait too, so it closes now. Never for a save that
+   * did not go through them: a re-save, "reopen" or a turn-on keeps the
+   * hour after an automatic reopen.
+   */
+  closeNow?: boolean;
   now?: number;
 }
 
@@ -243,15 +319,25 @@ export interface ApplyOptions {
 export function applyPanelIpAccess(deps: Deps, reason: string, options: ApplyOptions = {}): PanelIpAccessApplied {
   const now = options.now ?? Date.now();
   let applied = readIpAccessApplied(deps);
-  if (options.resetHold && (applied.reopenedAt !== undefined || applied.holdUntil !== undefined)) {
-    const { reopenedAt: _reopenedAt, holdUntil: _holdUntil, ...rest } = applied;
-    applied = rest;
+  // Any new choice ends a failed roll's hold; only a close past the guards ends the anti-flap wait.
+  const forgetHold = (options.resetHold === true || options.closeNow === true) && applied.holdUntil !== undefined;
+  const forgetReopen = options.closeNow === true && applied.reopenedAt !== undefined;
+  if (forgetHold || forgetReopen) {
+    const { reopenedAt, holdUntil, ...rest } = applied;
+    applied = {
+      ...rest,
+      ...(reopenedAt !== undefined && !forgetReopen ? { reopenedAt } : {}),
+      ...(holdUntil !== undefined && !forgetHold ? { holdUntil } : {}),
+    };
     setSetting(deps.db, "panelIpAccessApplied", applied);
   }
   const panel = panelNodeState(deps);
-  if (!panel.nodeId || !panel.online || updateRunning(deps)) return applied;
+  if (!panel.nodeId || !panel.online) return applied;
   const decision = decidePanelIpAccess(deps, now);
   if (decision.closed === applied.closed && decision.agentPortClosed === applied.agentPortClosed) return applied;
+  // Closing waits for any update run; reopening only while one swaps the panel or updates Docker under it.
+  const closes = (decision.closed && !applied.closed) || (decision.agentPortClosed && !applied.agentPortClosed);
+  if (closes ? updateRunning(deps) : panelUpdateRunning(deps, panel.nodeId)) return applied;
 
   const wanted = readPanelAccessWanted(deps);
   const automatic = options.by === undefined;
@@ -383,9 +469,10 @@ function announce(deps: Deps, before: PanelIpAccessApplied, after: PanelIpAccess
   let message: string;
   if (after.closed && !before.closed) {
     title = after.agentPortClosed ? "IP access and the agents' port closed" : "IP access closed";
+    const oldDocker = panelNodeOldDocker(deps);
     message = `${sentence(after.reason)}${by} The panel answers on 127.0.0.1:${port} on its server only${
       after.agentPortClosed && agentPort ? `, and so does the agents' port ${agentPort}` : ""
-    }; its private path keeps working. If this was not you, run "${ipAccessOnCommand}" on the panel's server and change the password.`;
+    }; its private path keeps working.${oldDocker ? ` ${oldDockerWarning(oldDocker)}` : ""} If this was not you, run "${ipAccessOnCommand}" on the panel's server and change the password.`;
   } else if (!after.closed && before.closed) {
     title = "IP access reopened";
     message = `${sentence(after.reason)}${by} The panel answers on its IP address and port ${port} again${

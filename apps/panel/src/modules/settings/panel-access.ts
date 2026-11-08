@@ -29,6 +29,7 @@ import {
   applyPanelIpAccess,
   decidePanelIpAccess,
   ipAccessOnCommand,
+  panelNodeOldDocker,
   panelNodeState,
   panelPortOf,
   readIpAccessApplied,
@@ -170,7 +171,8 @@ export function panelAccessView(ctx: OpContext): settings.PanelAccess {
   const applied = readIpAccessApplied(ctx);
   const panelPort = panelPortOf(ctx);
   const panel = panelNodeState(ctx);
-  const reclosesAt = panel.online ? decidePanelIpAccess(ctx).reclosesAt : null;
+  const decision = panel.online ? decidePanelIpAccess(ctx) : null;
+  const reclosesAt = decision?.reclosesAt ?? null;
   const server = panelServer(ctx);
   return {
     serveOnIp: wanted.serveOnIp,
@@ -183,6 +185,8 @@ export function panelAccessView(ctx: OpContext): settings.PanelAccess {
     blocked: closeBlocks(ctx),
     agentPortBlocked: agentPortBlocks(ctx),
     reclosesAt: reclosesAt === null ? null : new Date(reclosesAt).toISOString(),
+    openReason: !wanted.serveOnIp && decision && !decision.closed ? decision.why : null,
+    oldDocker: panelNodeOldDocker(ctx),
     lastChange: applied.at > 0 ? { at: new Date(applied.at).toISOString(), reason: applied.reason, by: applied.by ?? "system" } : null,
     recovery: {
       sshTunnel: `ssh -L 3000:127.0.0.1:${panelPort} root@${server ?? "<server-ip>"}`,
@@ -243,7 +247,10 @@ export const updatePanelAccess = implement(settings.updatePanelAccess, (input, c
     },
     { reason, by, at: Date.now() },
   );
-  const applied = applyPanelIpAccess(ctx, reason, { by, resetHold: true });
+  // Only a turn-off went through the close guards, so only it skips the hour after an automatic
+  // reopen. A turn-on, or a choice made past the guards, retries a roll that failed.
+  const turnsOn = input.serveOnIp === true || input.agentPortOpen === true;
+  const applied = applyPanelIpAccess(ctx, reason, { by, closeNow: turnsOff, resetHold: turnsOn || keepsClosed });
   ctx.auditDetails?.({ applied: { closed: applied.closed, agentPortClosed: applied.agentPortClosed } });
   ctx.live.publish("panel", { type: "invalidate", ops: ["settings.panelAccess"] });
   return panelAccessView(ctx);

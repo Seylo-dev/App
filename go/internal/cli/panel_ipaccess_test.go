@@ -4,12 +4,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/seylo-dev/app/go/internal/datadir"
 	"github.com/seylo-dev/app/go/internal/localapi"
 )
 
@@ -45,11 +47,19 @@ func recordChown(t *testing.T) map[string][2]int {
 
 const panelPS = "seylo-registry-1\tregistry:2\tregistry0000000\nseylo-panel00000000000-3\tghcr.io/seylo-dev/seylo:0.2.1\tpanel00000000000"
 
+// agentSays makes the local agent answer s.
+func agentSays(s localapi.NodeStatus) func(context.Context) (localapi.NodeStatus, error) {
+	return func(context.Context) (localapi.NodeStatus, error) { return s, nil }
+}
+
+var connectedAgent = localapi.NodeStatus{PanelConnected: true, Connection: localapi.ConnectionStatus{State: "connected"}}
+
 // `seylo panel ip-access on` writes <data>/panel/ip-access-on (0600, for
 // the panel user) and restarts the running panel container.
 func TestPanelIPAccessOn(t *testing.T) {
 	h := newHarness(t)
 	h.euid = 0
+	h.agentStatus = agentSays(connectedAgent)
 	dir := panelNode(t, h)
 	owners := recordChown(t)
 	h.answer = func(cmd string) (string, error) {
@@ -78,6 +88,72 @@ func TestPanelIPAccessOn(t *testing.T) {
 	}
 	if !strings.Contains(out, "restarts once more") || !strings.Contains(out, "seylo panel status") {
 		t.Fatalf("output = %s", out)
+	}
+}
+
+// Only the agent rolls the panel with its port open again: when it is not
+// running, not connected or busy with an update, the command says so and
+// gives the SSH tunnel, instead of promising a second restart.
+func TestPanelIPAccessOnWithoutTheAgent(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status func(context.Context) (localapi.NodeStatus, error)
+		want   []string
+	}{
+		"not running": {
+			status: nil, // the harness has no agent socket
+			want:   []string{"The agent on this server is not running (no agent socket at ", "sudo seylo start", "sudo seylo logs"},
+		},
+		"not connected": {
+			status: agentSays(localapi.NodeStatus{Connection: localapi.ConnectionStatus{State: "waiting", LastError: "connection refused"}}),
+			want:   []string{"not connected to the panel (waiting: connection refused)", "Check with: seylo status"},
+		},
+		"busy": {
+			status: agentSays(localapi.NodeStatus{PanelConnected: true, Busy: "Docker update"}),
+			want:   []string{"This server is busy with a Docker update. The port opens on every address once it finished."},
+		},
+		"busy with an agent update": {
+			status: agentSays(localapi.NodeStatus{PanelConnected: true, Busy: "agent update"}),
+			want:   []string{"busy with an agent update"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.euid = 0
+			h.agentStatus = tc.status
+			dir := panelNode(t, h)
+			recordChown(t)
+			// The agent dials the panel on its host port: the tunnel uses it.
+			if err := os.MkdirAll(filepath.Dir(datadir.New(h.dataDir).ConfigFile()), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(datadir.New(h.dataDir).ConfigFile(), []byte("panel_url: http://127.0.0.1:8080\nnode_id: node00000000000000\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.answer = func(cmd string) (string, error) {
+				if strings.HasPrefix(cmd, "docker ps") {
+					return panelPS, nil
+				}
+				return "", nil
+			}
+			out, err := h.run("panel", "ip-access", "on")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, ipAccessOnFile)); err != nil {
+				t.Fatalf("no marker: %v", err)
+			}
+			if last := h.cmds[len(h.cmds)-1]; last != "docker restart seylo-panel00000000000-3" {
+				t.Fatalf("commands = %v", h.cmds)
+			}
+			for _, want := range append(tc.want, "ssh -L 3000:127.0.0.1:8080 root@") {
+				if !strings.Contains(out, want) {
+					t.Fatalf("output lacks %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "restarts once more") {
+				t.Fatalf("promises a second restart:\n%s", out)
+			}
+		})
 	}
 }
 
@@ -150,6 +226,7 @@ func TestPanelIPAccessOnRefuses(t *testing.T) {
 func TestPanelIPAccessOnWithoutARunningPanel(t *testing.T) {
 	h := newHarness(t)
 	h.euid = 0
+	h.agentStatus = agentSays(connectedAgent)
 	dir := panelNode(t, h)
 	recordChown(t)
 	h.answer = func(cmd string) (string, error) { return "", nil }
@@ -177,6 +254,23 @@ func TestPanelIPAccessOnWithoutARunningPanel(t *testing.T) {
 	}
 	if _, err := h.run("panel", "ip-access", "on"); err == nil || !strings.Contains(err.Error(), "opens IP access on its next start") {
 		t.Fatalf("failed restart = %v", err)
+	}
+}
+
+// `seylo panel start` goes through the agent: without one, the command
+// says to start the agent, which starts the panel.
+func TestPanelIPAccessOnWithoutAPanelOrAgent(t *testing.T) {
+	h := newHarness(t)
+	h.euid = 0
+	panelNode(t, h)
+	recordChown(t)
+	h.answer = func(cmd string) (string, error) { return "", nil }
+	out, err := h.run("panel", "ip-access", "on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "neither is the agent") || !strings.Contains(out, "sudo seylo start") || strings.Contains(out, "seylo panel start") {
+		t.Fatalf("output = %s", out)
 	}
 }
 

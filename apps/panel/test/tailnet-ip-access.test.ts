@@ -101,7 +101,7 @@ function closeOverTheTailnet(onFailure: "reopen" | "stayClosed" = "reopen") {
     { serveOnIp: false, onFailure },
     { reason: "Serve on IP address turned off in Settings", by: owner, at: Date.now() },
   );
-  return applyPanelIpAccess(panel.deps, "Serve on IP address turned off in Settings", { by: owner, resetHold: true });
+  return applyPanelIpAccess(panel.deps, "Serve on IP address turned off in Settings", { by: owner, closeNow: true });
 }
 
 test("a working tailnet lets IP access close, and the panel's public URL moves to the tailnet", () => {

@@ -6,10 +6,10 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { DeployProgressSchema, DeployStage, EventSchema } from "@seylo/proto";
+import { DeployProgressSchema, DeployStage, EventSchema, NodeFactsSchema } from "@seylo/proto";
 import { and, desc, eq } from "drizzle-orm";
 import { recordDialedUrl } from "../src/agent-hub/dialed";
-import { alerts, auditLog, deployments, nodes, services, updateRuns } from "../src/db/schema";
+import { alerts, auditLog, deployments, nodes, services, updateRuns, updateSteps } from "../src/db/schema";
 import { compileDesiredState } from "../src/desired";
 import { ensurePanelService, panelServiceId } from "../src/modules/nodes/panel-service";
 import {
@@ -17,6 +17,7 @@ import {
   applyPanelIpAccess,
   decidePanelIpAccess,
   failedRollHoldMs,
+  panelNodeOldDocker,
   panelPublishBindCapability,
   readIpAccessApplied,
   readPanelAccessWanted,
@@ -236,13 +237,57 @@ test("an offline or restarting agent flips nothing; its next connect applies", (
   expect(panelGeneration()).toBe(generation + 1);
 });
 
-test("an update run holds every change until it finished", () => {
+/** A running update run with one running step. */
+function runningStep(target: "panel" | "agent" | "docker", nodeId: string | null, status: "pending" | "running" = "running") {
+  const run = panel.deps.db.insert(updateRuns).values({ targetVersion: "0.2.2", trigger: "manual" }).returning().get();
+  panel.deps.db.insert(updateSteps).values({ runId: run.id, position: 0, target, nodeId, toVersion: "0.2.2", status }).run();
+  return () => panel.deps.db.update(updateRuns).set({ status: "succeeded" }).where(eq(updateRuns.id, run.id)).run();
+}
+
+test("closing waits for any update run", () => {
   activeDomain();
   want({ serveOnIp: false });
-  const run = panel.deps.db.insert(updateRuns).values({ targetVersion: "0.2.2", trigger: "manual" }).returning().get();
+  const b1 = addNode("b1");
+  recordDialedUrl(panel.deps.db, b1, "https://panel.example.com");
+  const finish = runningStep("docker", b1);
   expect(applyPanelIpAccess(panel.deps, "test").closed).toBe(false);
-  panel.deps.db.update(updateRuns).set({ status: "succeeded" }).where(eq(updateRuns.id, run.id)).run();
+  finish();
   expect(applyPanelIpAccess(panel.deps, "test").closed).toBe(true);
+});
+
+test("reopening waits only for a run that swaps the panel or updates Docker on the panel node", () => {
+  activeDomain();
+  want({ serveOnIp: false });
+  const b1 = addNode("b1");
+  recordDialedUrl(panel.deps.db, b1, "https://panel.example.com");
+  expect(applyPanelIpAccess(panel.deps, "test").closed).toBe(true);
+  domainDown();
+
+  // A Docker update of another node (up to an hour) or an agent step holds nothing back.
+  for (const [target, nodeId] of [
+    ["docker", b1],
+    ["agent", b1],
+    ["agent", panelNode],
+  ] as const) {
+    const finish = runningStep(target, nodeId);
+    const reopened = applyPanelIpAccess(panel.deps, "the panel domain stopped working");
+    expect({ target, nodeId, closed: reopened.closed }).toEqual({ target, nodeId, closed: false });
+    finish();
+    setSetting(panel.deps.db, "panelIpAccessApplied", { ...readIpAccessApplied(panel.deps), closed: true });
+  }
+
+  // The panel step (about to start or running) and Docker on the panel node do.
+  for (const [target, nodeId, status] of [
+    ["panel", panelNode, "pending"],
+    ["panel", panelNode, "running"],
+    ["docker", panelNode, "running"],
+  ] as const) {
+    const finish = runningStep(target, nodeId, status);
+    expect(applyPanelIpAccess(panel.deps, "the panel domain stopped working").closed).toBe(true);
+    finish();
+    expect(applyPanelIpAccess(panel.deps, "a scheduled check").closed).toBe(false);
+    setSetting(panel.deps.db, "panelIpAccessApplied", { ...readIpAccessApplied(panel.deps), closed: true });
+  }
 });
 
 test("anti-flap: after an automatic reopen it closes again only once a path worked for an hour", () => {
@@ -281,10 +326,65 @@ test("anti-flap counts a path that never stopped from the reopen", () => {
   want({ serveOnIp: false });
   setSetting(panel.deps.db, "panelIpAccessApplied", { closed: false, agentPortClosed: false, at: t0, reason: "x", reopenedAt: t0 });
   expect(decidePanelIpAccess(panel.deps, t0 + 1000).reclosesAt).toBe(t0 + hour);
-  // The owner choosing again forgets the wait.
+  // A save that did not go through the close guards (a turn-on, "reopen", a re-save) keeps the wait.
   expect(
-    applyPanelIpAccess(panel.deps, "turned off in Settings", { by: "owner@example.com", resetHold: true, now: t0 + 1000 }).closed,
-  ).toBe(true);
+    applyPanelIpAccess(panel.deps, "saved again in Settings", { by: "admin@example.com", resetHold: true, now: t0 + 1000 }),
+  ).toMatchObject({
+    closed: false,
+    reopenedAt: t0,
+  });
+  // The owner turning it off past the guards forgets it.
+  expect(applyPanelIpAccess(panel.deps, "turned off in Settings", { by: "owner@example.com", closeNow: true, now: t0 + 1000 }).closed).toBe(
+    true,
+  );
+});
+
+test("a node on plain http:// keeps IP access open: the close after an automatic reopen waits for it", () => {
+  const t0 = Date.now();
+  activeDomain("panel.example.com", t0 - 3 * hour);
+  want({ serveOnIp: false });
+  expect(applyPanelIpAccess(panel.deps, "test", { now: t0 }).closed).toBe(true);
+  domainDown("panel.example.com", t0 + 60_000);
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: t0 + 60_000 }).closed).toBe(false);
+
+  // While it is open, b2 joins over plain http:// (the join command says --insecure then).
+  const b2 = addNode("b2");
+  recordDialedUrl(panel.deps.db, b2, "http://203.0.113.5:3000");
+  const back = t0 + 10 * 60_000;
+  activeDomain("panel.example.com", back);
+  // No "closes again in an hour" either: that close would not happen.
+  expect(decidePanelIpAccess(panel.deps, back + 60_000)).toMatchObject({ closed: false, reclosesAt: null });
+  const decision = decidePanelIpAccess(panel.deps, back + hour);
+  expect(decision).toMatchObject({ closed: false, reclosesAt: null });
+  expect(decision.why).toContain("node b2 connects over http://203.0.113.5:3000 and closing would cut it off");
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: back + hour }).closed).toBe(false);
+
+  // Joined again over https: the close goes ahead.
+  recordDialedUrl(panel.deps.db, b2, "https://panel.example.com");
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: back + hour }).closed).toBe(true);
+});
+
+test("closing on a panel node with Docker older than 28 says machines on its network may still reach the port", () => {
+  const facts = panel.deps.agents.state.get(panelNode)?.facts;
+  panel.deps.agents.state.setFacts(
+    panelNode,
+    create(NodeFactsSchema, { hostname: "fake", capabilities: facts?.capabilities ?? [], dockerVersion: "26.1.4" }),
+  );
+  expect(panelNodeOldDocker(panel.deps)).toBe("26.1.4");
+  activeDomain();
+  want({ serveOnIp: false });
+  expect(applyPanelIpAccess(panel.deps, "test").closed).toBe(true);
+  expect(securityAlerts()[0]?.message).toContain(
+    "runs Docker 26.1.4: before Docker 28, machines on the same local network may still reach",
+  );
+
+  for (const version of ["28.0.1", "29.1.0", ""]) {
+    panel.deps.agents.state.setFacts(
+      panelNode,
+      create(NodeFactsSchema, { hostname: "fake", capabilities: facts?.capabilities ?? [], dockerVersion: version }),
+    );
+    expect(panelNodeOldDocker(panel.deps)).toBeNull();
+  }
 });
 
 test("stayClosed keeps it closed when the path fails, and still opens without the capability", () => {
@@ -344,7 +444,7 @@ test("a failed close puts the switch back on and holds; a failed reopen records 
   // Closed again by the owner, then the reopen fails: the closed container is back, and that is what is recorded.
   want({ serveOnIp: false });
   const now = Date.now();
-  applyPanelIpAccess(panel.deps, "turned off in Settings", { by: "owner@example.com", resetHold: true, now });
+  applyPanelIpAccess(panel.deps, "turned off in Settings", { by: "owner@example.com", closeNow: true, now });
   want({ serveOnIp: true });
   const reopening = applyPanelIpAccess(panel.deps, "turned on in Settings", { by: "owner@example.com", now });
   expect(reopening.closed).toBe(false);
@@ -353,8 +453,9 @@ test("a failed close puts the switch back on and holds; a failed reopen records 
   expect(stuck.closed).toBe(true);
   expect(stuck.reason).toContain("did not start with the port open");
   // Held for a while, then it tries again.
+  expect(stuck.holdUntil).toBeGreaterThanOrEqual(now + failedRollHoldMs);
   expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: now + 60_000 }).closed).toBe(true);
-  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: now + failedRollHoldMs + 1 }).closed).toBe(false);
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: (stuck.holdUntil ?? 0) + 1 }).closed).toBe(false);
 });
 
 test("a change that follows the switches names who set them, also when it applies later", () => {

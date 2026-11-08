@@ -3,11 +3,11 @@
 // be, down only after 2 failed checks in a row, and IP access follows its
 // debounced state.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { nodes } from "../src/db/schema";
 import type { JobContext } from "../src/jobs/queue";
 import { ensurePanelService } from "../src/modules/nodes/panel-service";
-import { checkDomain, domainCheckJob, domainWorking, setDomainProbes } from "../src/modules/settings/domain";
+import { checkDomain, domainCheckJob, domainFailureGapMs, domainWorking, setDomainProbes } from "../src/modules/settings/domain";
 import { panelPublishBindCapability, readIpAccessApplied } from "../src/modules/settings/ip-access";
 import { domainPath } from "../src/modules/settings/private-paths";
 import { getSetting, setSetting } from "../src/settings";
@@ -82,15 +82,41 @@ test("an active domain is checked hourly while IP access is open, on every run w
 });
 
 test("the job closes and reopens IP access with the debounced domain", async () => {
-  setSetting(panel.deps.db, "panelServeOnIp", false);
-  // The agent's connect found no working path yet.
-  expect(readIpAccessApplied(panel.deps).closed).toBe(false);
-  await run();
-  expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: true, reason: "the panel domain works again" });
+  const t0 = Date.now();
+  try {
+    setSetting(panel.deps.db, "panelServeOnIp", false);
+    // The agent's connect found no working path yet.
+    expect(readIpAccessApplied(panel.deps).closed).toBe(false);
+    await run();
+    expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: true, reason: "the panel domain works again" });
+    https = false;
+    setSystemTime(new Date(t0 + 300_000));
+    await run();
+    expect(readIpAccessApplied(panel.deps).closed).toBe(true);
+    setSystemTime(new Date(t0 + 600_000));
+    await run();
+    expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: false, reason: `the panel domain ${domain} stopped working` });
+    expect(getSetting(panel.deps.db, "panelDomainStatus")?.working).toBe(false);
+  } finally {
+    setSystemTime();
+  }
+});
+
+test("a check on demand seconds after a failed one is the same blip: the domain is not down yet", async () => {
+  const t0 = new Date("2026-11-08T10:00:00Z");
+  expect((await checkDomain(panel.deps, t0))?.working).toBe(true);
   https = false;
-  await run();
-  expect(readIpAccessApplied(panel.deps).closed).toBe(true);
-  await run();
-  expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: false, reason: `the panel domain ${domain} stopped working` });
-  expect(getSetting(panel.deps.db, "panelDomainStatus")?.working).toBe(false);
+  const scheduled = new Date(t0.getTime() + 300_000);
+  expect(await checkDomain(panel.deps, scheduled)).toMatchObject({ working: true, failedChecks: 1, lastFailedAt: scheduled.getTime() });
+  // Saving the domain again checks it now (settings.checkDomain.now), still in the blip.
+  const onDemand = await checkDomain(panel.deps, new Date(scheduled.getTime() + 10_000));
+  expect(onDemand).toMatchObject({ state: "issuing_certificate", working: true, failedChecks: 1, lastFailedAt: scheduled.getTime() });
+  // The next scheduled check, about 5 minutes after the first failure, counts.
+  const next = await checkDomain(panel.deps, new Date(scheduled.getTime() + domainFailureGapMs + 30_000));
+  expect(next).toMatchObject({ working: false, failedChecks: 2 });
+  // Working again clears the count.
+  https = true;
+  const ok = await checkDomain(panel.deps, new Date(scheduled.getTime() + 600_000));
+  expect(ok).toMatchObject({ working: true, failedChecks: 0 });
+  expect(ok?.lastFailedAt).toBeUndefined();
 });

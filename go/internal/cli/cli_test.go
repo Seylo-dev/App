@@ -20,6 +20,7 @@ import (
 
 	"github.com/seylo-dev/app/go/internal/agent"
 	"github.com/seylo-dev/app/go/internal/datadir"
+	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/panelapi"
 	"github.com/seylo-dev/app/go/internal/systemd"
 )
@@ -66,6 +67,8 @@ type harness struct {
 	in      string
 	// euid is the user id the commands see (default 1000, not root).
 	euid int
+	// agentStatus answers for the local agent; nil asks the (missing) socket.
+	agentStatus func(ctx context.Context) (localapi.NodeStatus, error)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -78,10 +81,11 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) run(args ...string) (string, error) {
 	h.t.Helper()
 	d := &deps{
-		anyOS:   true,
-		units:   h.units,
-		in:      strings.NewReader(h.in),
-		geteuid: func() int { return h.euid },
+		anyOS:       true,
+		units:       h.units,
+		in:          strings.NewReader(h.in),
+		geteuid:     func() int { return h.euid },
+		agentStatus: h.agentStatus,
 		run: func(_ context.Context, w io.Writer, name string, a ...string) error {
 			cmd := name + " " + strings.Join(a, " ")
 			h.cmds = append(h.cmds, cmd)
