@@ -1600,8 +1600,9 @@ update). Checks 32-38 cover the 0.2 features (Docker Hub against the real
 Docker Hub, a Gitea provider with watch paths and `[skip ci]`, the
 disk-triggered cleanup, host shells, clone and project move, Valkey,
 ClickHouse and pgvector) and the update from the 0.1.1 release, built from
-its tag, to this build with real rows (`0001_features` applies, rows and
-keys survive, a cron job saved with 7 for Sunday reads 0 and runs).
+its tag, to this build with real rows (every migration since applies, as
+many as the journal has; rows and keys survive; a cron job saved with 7
+for Sunday reads 0 and runs).
 
 ## Capabilities
 

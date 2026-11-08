@@ -3040,11 +3040,14 @@ upgrade_body() {
   ev "update run: $(printf '%s' "$run" | jq -c '{targetVersion, status, error, steps: [.steps[] | "\(.target):\(.status)"]}')"
   expect "the update run succeeded" json_ok "$run" '.status=="succeeded"'
 
-  # 5. What survived, and the new migration.
+  # 5. What survived, and the new migrations: every one this build has (the journal), not a fixed number.
   n=$(up_sql "select count(*) as n from __drizzle_migrations" | jq -r '.[0].n')
-  expect "0001_features applied: 2 migrations recorded (now $n)" test "$n" = 2
+  want=$(panel_migrations)
+  expect "every migration of this build applied: $want recorded (now $n)" test "$n" = "$want"
   out=$(up_sql "select name from sqlite_master where type = 'table' and name in ('git_providers', 'cleanup_runs', 'host_shell_sessions') order by name" | jq -c '[.[].name]')
   expect "0001's tables exist ($out)" test "$out" = '["cleanup_runs","git_providers","host_shell_sessions"]'
+  out=$(up_sql "select name from pragma_table_info('update_steps') where name in ('retry', 'retry_run_id', 'retry_at') order by name" | jq -c '[.[].name]')
+  expect "0002's update step columns exist ($out)" test "$out" = '["retry","retry_at","retry_run_id"]'
   after=$(api projects.list | jq -c '[.projects[].name] | sort')
   expect "the projects are the same ($after)" test "$after" = "$before"
   expect "the API key made on $E2E_BASE still works" sh -c "curl -fsS -m 5 -H 'authorization: Bearer $key' '$up/api/v1/auth.whoami' >/dev/null"
