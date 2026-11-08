@@ -43,8 +43,10 @@ type JoinOptions struct {
 	// Name proposed for the node; empty keeps config.yml's node_name (the
 	// hostname when there is none).
 	Name string
-	// CanBuild allows (true) or stops (false) builds on this node; nil
-	// keeps config.yml's can_build (off for a new node).
+	// CanBuild sets (true) or clears (false) config.yml's can_build; nil
+	// keeps it (off for a new node). It is only reported (NodeFacts) and
+	// turns the buildx health check on: whether the panel sends builds is
+	// chosen when the join command is made, and later under Nodes.
 	CanBuild *bool
 	// Force replaces the config of a node that already joined a panel.
 	Force bool

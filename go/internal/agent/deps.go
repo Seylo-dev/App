@@ -36,7 +36,8 @@ type Config struct {
 	PanelURL string
 	// PanelPin is config.yml's panel_pin, empty for a panel with a public certificate.
 	PanelPin string
-	// CanBuild is config.yml's can_build: the owner allows builds here.
+	// CanBuild is config.yml's can_build. It is only reported; the panel
+	// decides which nodes build (BuildsOn).
 	CanBuild bool
 	// AcmeCA is config.yml's acme_ca ("staging" or a directory URL).
 	AcmeCA string

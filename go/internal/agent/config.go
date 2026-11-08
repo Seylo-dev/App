@@ -56,7 +56,8 @@ type FileConfig struct {
 	// NodeName is the name proposed to the panel when joining (default:
 	// the hostname).
 	NodeName string `yaml:"node_name,omitempty"`
-	// CanBuild lets the panel run builds on this node.
+	// CanBuild is reported to the panel (NodeFacts.can_build) and turns the
+	// buildx health check on. Since 0.2.1 the panel decides which nodes build.
 	CanBuild bool `yaml:"can_build,omitempty"`
 	// AcmeCA overrides the ACME directory of the agent's own Traefik:
 	// "staging" for Let's Encrypt staging, or a directory URL. Empty is

@@ -83,6 +83,13 @@ export default {
     newCommand: "Create a new command",
     createHint: "Single use, valid for one hour.",
     singleUse: "Single use · expires {expires}",
+    installsDocker: "The command installs Docker when the server has none.",
+    buildImages: "Build images on this node",
+    buildImagesHint:
+      "Builds get the source code and build-time secrets of the services they build. Untick for servers you do not fully trust.",
+    buildsOn: "The node that joins builds images.",
+    buildsOff: "The node that joins does not build images.",
+    changeBuild: "Change",
     insecure:
       "This command connects over plain HTTP (--insecure): anyone on the network path could read the node's traffic. Set a panel domain first, or restart the panel with its agents' TLS port (the installer sets one).",
     otherOpen: { one: "{count} other unused join command is still valid.", other: "{count} other unused join commands are still valid." },
@@ -169,7 +176,7 @@ export default {
     logDays: "Keep logs (days)",
     canBuild: "Build images on this node",
     canBuildHint:
-      "This node then gets the source, git credentials and build secrets of everything it builds, from any project, and the images it builds run on every node. Turn it on only for nodes you trust like the panel. Small nodes usually leave this off.",
+      "This node gets the source, git credentials and build-time secrets of everything it builds, from any project, and the images it builds run on every node. Services build on their own node first. Turn it off for servers you do not fully trust and for small nodes.",
     gamesFirst: "Game servers first",
     gamesFirstHint: "Wings runs on this node: give game servers CPU priority over this panel's services when the CPU is busy.",
     saved: "Node saved.",

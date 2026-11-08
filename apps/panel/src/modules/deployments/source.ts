@@ -227,15 +227,18 @@ export async function resolveBuild(
 /**
  * Picks the build node: the one set in the build settings, else the
  * service's own node when it can build, else the least busy online node
- * with Can build on.
+ * with Can build on. Automatic picks skip nodes whose agent reports no
+ * docker buildx (every build needs it); agents that report nothing about
+ * buildx (before 0.2.1) count as able to build.
  */
 export function pickBuildNode(deps: Deps, spec: ServiceSpecJson, targetNodeIds: readonly string[]): { id: string; name: string } {
   const candidates = deps.db
     .select({ id: nodes.id, name: nodes.name, canBuild: nodes.canBuild, disabledAt: nodes.disabledAt })
     .from(nodes)
     .all();
-  const usable = (n: (typeof candidates)[number]) =>
+  const builder = (n: (typeof candidates)[number]) =>
     n.canBuild && !n.disabledAt && deps.agents.isOnline(n.id) && deps.agents.supports(n.id, "build");
+  const usable = (n: (typeof candidates)[number]) => builder(n) && hasBuildx(deps, n.id);
 
   if (spec.build.buildNodeId) {
     const chosen = candidates.find((n) => n.id === spec.build.buildNodeId);
@@ -244,6 +247,8 @@ export function pickBuildNode(deps: Deps, spec: ServiceSpecJson, targetNodeIds: 
     if (!deps.agents.isOnline(chosen.id)) throw new OpError("UNAVAILABLE", `${chosen.name} is offline, so it cannot build.`);
     if (!deps.agents.supports(chosen.id, "build"))
       throw new OpError("NOT_IMPLEMENTED", `The agent on ${chosen.name} is too old to build. Update the node.`);
+    if (!hasBuildx(deps, chosen.id))
+      throw new OpError("CONFLICT", `${chosen.name} has no docker buildx. Install docker-buildx-plugin on it.`);
     return chosen;
   }
   for (const id of targetNodeIds) {
@@ -252,9 +257,13 @@ export function pickBuildNode(deps: Deps, spec: ServiceSpecJson, targetNodeIds: 
   }
   const ready = candidates.filter(usable);
   if (ready.length === 0) {
-    throw new OpError("CONFLICT", "No online node can build. Turn on Can build for a node (Nodes) or use an image source.", {
-      reason: "noBuilder",
-    });
+    // Builders that are up but lack buildx would otherwise read as "no builder at all".
+    const missing = candidates.filter((n) => builder(n) && !hasBuildx(deps, n.id)).map((n) => n.name);
+    const message =
+      missing.length > 0
+        ? `No online node can build: ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no docker buildx. Install docker-buildx-plugin there, turn on Can build for another node (Nodes) or use an image source.`
+        : "No online node can build. Turn on Can build for a node (Nodes) or use an image source.";
+    throw new OpError("CONFLICT", message, { reason: "noBuilder" });
   }
   const busy = new Map(
     deps.db
@@ -277,4 +286,9 @@ export function pickBuildNode(deps: Deps, spec: ServiceSpecJson, targetNodeIds: 
     id: string;
     name: string;
   };
+}
+
+/** The agent's last word on docker buildx; unset (agents before 0.2.1) counts as installed. */
+function hasBuildx(deps: Deps, nodeId: string): boolean {
+  return deps.agents.state.get(nodeId)?.facts?.buildx?.installed !== false;
 }

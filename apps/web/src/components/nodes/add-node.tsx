@@ -1,12 +1,13 @@
 // "Add a node" (Nodes.dc.html): a single-use join command to run on the
-// new server, how long it stays valid, and the optional wildcard DNS
-// record for automatic domains. A command is only created when someone
-// asks for one (it is a credential); the token itself is never shown again
-// after this card is gone.
+// new server, how long it stays valid, whether the node builds images,
+// and the optional wildcard DNS record for automatic domains. A command
+// is only created when someone asks for one (it is a credential); the
+// token itself is never shown again after this card is gone.
 
 import { nodes } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
+import { Checkbox } from "@seylo/ui/components/checkbox";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { IconPlus } from "@tabler/icons-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
@@ -23,14 +24,17 @@ export interface AddNodeHandle {
 export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props, ref) {
   const section = useRef<HTMLElement>(null);
   const create = useOpMutation(nodes.createJoinToken);
+  const revoke = useOpMutation(nodes.revokeJoinToken);
   const open = useOp(nodes.listJoinTokens, {}, { retry: false });
   const [now, setNow] = useState(Date.now());
+  // "Build images on this node": stored on the token, so the node that joins cannot change it.
+  const [canBuild, setCanBuild] = useState(true);
   const token = create.data;
 
   useImperativeHandle(ref, () => ({
     start() {
       section.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      if (!create.data && !create.isPending) create.mutate({});
+      if (!create.data && !create.isPending) create.mutate({ canBuild });
     },
   }));
 
@@ -43,6 +47,20 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
 
   const expired = token ? Date.parse(token.expiresAt) <= now : false;
   const otherOpen = (open.data?.tokens ?? []).filter((item) => item.id !== token?.tokenId).length;
+
+  // The choice is part of the command: changing it revokes this one, so only one stays valid.
+  const change = () => {
+    if (!token) return;
+    revoke.mutate(
+      { tokenId: token.tokenId },
+      {
+        onSettled: () => {
+          create.reset();
+          void open.refetch();
+        },
+      },
+    );
+  };
 
   return (
     <section
@@ -62,6 +80,17 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
             <span className="text-xs text-muted-foreground">
               {t("nodes.addCard.singleUse", { expires: formatExpiresIn(token.expiresAt, now) })}
             </span>
+            <span className="text-xs text-muted-foreground">
+              {token.canBuild ? t("nodes.addCard.buildsOn") : t("nodes.addCard.buildsOff")}{" "}
+              <button
+                type="button"
+                disabled={revoke.isPending}
+                onClick={change}
+                className="cursor-pointer border-0 bg-transparent p-0 text-xs font-medium text-link disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("nodes.addCard.changeBuild")}
+              </button>
+            </span>
             {token.insecureTransport && (
               <span role="alert" className="text-xs text-chip-amber-fg">
                 {t("nodes.addCard.insecure")}
@@ -69,14 +98,35 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
             )}
           </>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="dark" disabled={create.isPending} onClick={() => create.mutate({})}>
-              <IconPlus size={15} stroke={2.2} aria-hidden="true" />
-              {expired ? t("nodes.addCard.newCommand") : t("nodes.addCard.createCommand")}
-            </Button>
-            <span className="text-xs text-muted-foreground">{t("nodes.addCard.createHint")}</span>
-          </div>
+          <>
+            <div className="flex max-w-[640px] items-start gap-2 py-0.5">
+              <Checkbox
+                id="add-node-build"
+                aria-describedby="add-node-build-hint"
+                className="mt-px"
+                checked={canBuild}
+                disabled={create.isPending}
+                onCheckedChange={(value) => setCanBuild(value === true)}
+              />
+              <div className="flex flex-col gap-0.5">
+                <label htmlFor="add-node-build" className="cursor-pointer text-[12.5px] leading-4 font-medium text-ink-strong">
+                  {t("nodes.addCard.buildImages")}
+                </label>
+                <span id="add-node-build-hint" className="text-xs text-muted-foreground">
+                  {t("nodes.addCard.buildImagesHint")}
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="dark" disabled={create.isPending} onClick={() => create.mutate({ canBuild })}>
+                <IconPlus size={15} stroke={2.2} aria-hidden="true" />
+                {expired ? t("nodes.addCard.newCommand") : t("nodes.addCard.createCommand")}
+              </Button>
+              <span className="text-xs text-muted-foreground">{t("nodes.addCard.createHint")}</span>
+            </div>
+          </>
         )}
+        <span className="text-xs text-muted-foreground">{t("nodes.addCard.installsDocker")}</span>
         {create.error && !isReauthCancelled(create.error) && <QueryError error={create.error} />}
         {otherOpen > 0 && <span className="text-xs text-muted-foreground">{t("nodes.addCard.otherOpen", { count: otherOpen })}</span>}
       </div>

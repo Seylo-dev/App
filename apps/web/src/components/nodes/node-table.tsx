@@ -156,6 +156,10 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
                         ? t("nodes.noBecause", { reason: node.canBuildWarning })
                         : t("common.no")}
                   </label>
+                  {/* On with a warning (no buildx, a small machine): builds fail or are slow there, so it stays in view. */}
+                  {node.canBuild && node.canBuildWarning && (
+                    <div className="mt-1 pl-6 text-xs leading-4 text-chip-amber-fg">{node.canBuildWarning}</div>
+                  )}
                 </Td>
                 <Td className="text-[12.5px] leading-[18px] text-muted-foreground">
                   {node.wings.detected ? (

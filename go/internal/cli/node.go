@@ -58,7 +58,7 @@ func addJoinFlags(cmd *cobra.Command, join *agent.JoinOptions) func() {
 	f.StringVar(&join.Pin, "pin", "", "panel certificate pin (sha256:<hex>) for a panel without a public certificate")
 	f.BoolVar(&join.TrustOnFirstUse, "trust-on-first-use", false, "pin whatever certificate the panel presents on the first connection")
 	f.StringVar(&join.Name, "name", "", "node name shown in the panel (default: the hostname; a re-join keeps the one in config.yml)")
-	f.BoolVar(&canBuild, "can-build", false, "let this node build; the panel's owner still turns Can build on for it under Nodes (--can-build=false stops them; a re-join without the flag keeps config.yml's setting)")
+	f.BoolVar(&canBuild, "can-build", false, "only sets can_build in config.yml (--can-build=false clears it; a re-join without the flag keeps it). Whether the panel sends builds is chosen when the join command is made, and later under Nodes")
 	f.BoolVar(&join.Force, "force", false, "join again although this node already joined a panel (keeps the rest of config.yml)")
 	f.BoolVar(&join.Insecure, "insecure", false, "accept a plain http:// panel URL on another host (the agent protocol is then unencrypted)")
 	return func() {
@@ -237,7 +237,10 @@ func newHealthCommand(d *deps) *cobra.Command {
 				if panelURL == cfg.PanelURL {
 					pin = cfg.PanelPin
 				}
-				canBuild = func() bool { return cfg.CanBuild }
+				// The same rule as the agent's own run: the panel's decision (the
+				// last desired state the agent stored) or config.yml's can_build.
+				settings := agent.StoredSettings(d.layout)
+				canBuild = func() bool { return agent.BuildsOn(cfg.CanBuild, settings) }
 			}
 			results := nodecheck.Run(cmd.Context(), nodecheck.Default(nodecheck.Env{
 				DataDir: d.layout.Root(), PanelURL: panelURL, PanelPin: pin, GOARCH: runtime.GOARCH, Run: d.run, CanBuild: canBuild,

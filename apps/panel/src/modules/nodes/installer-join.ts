@@ -3,6 +3,8 @@
 // setup token (<data dir>/join-token, one line, 0600). While the panel has
 // no nodes, start() imports it as a join token valid one hour and deletes
 // the file; the local agent then joins first and becomes the panel node.
+// That node builds images: the token says Can build on, as Add node's
+// default does.
 
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -32,7 +34,7 @@ export function importInstallerJoinToken(db: PanelDb, dataDir: string, logger: L
   const tokenHash = hashToken(token);
   if (!db.select({ id: joinTokens.id }).from(joinTokens).where(eq(joinTokens.tokenHash, tokenHash)).get()) {
     db.insert(joinTokens)
-      .values({ tokenHash, createdBy: null, expiresAt: new Date(now.getTime() + ttlMs) })
+      .values({ tokenHash, createdBy: null, expiresAt: new Date(now.getTime() + ttlMs), canBuild: true })
       .run();
   }
   rmSync(path, { force: true });

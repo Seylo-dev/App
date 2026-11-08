@@ -102,6 +102,14 @@ export const joinTokens = sqliteTable(
     usedAt: timestamp("used_at"),
     /** The node created with this token. */
     nodeId: text("node_id").references(() => nodes.id, { onDelete: "set null" }),
+    /**
+     * "Build images on this node" from Add node: a new node that joins with
+     * this token starts with this Can build. A re-join of a known node keeps
+     * its own value. nodes.createJoinToken and the installer's token set it;
+     * the column default (false) is what tokens from before 0.2.1 had.
+     * Added in 0.2.1 (0004).
+     */
+    canBuild: integer("can_build", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("join_tokens_token_hash_unique").on(t.tokenHash)],

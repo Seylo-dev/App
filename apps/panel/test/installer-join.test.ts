@@ -28,6 +28,8 @@ test("the installer's join token is imported once while there are no nodes", () 
   const rows = panel.deps.db.select().from(joinTokens).all();
   expect(rows.map((r) => r.tokenHash)).toEqual([hashToken(token)]);
   expect(rows[0]?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 50 * 60 * 1000);
+  // The panel node builds images, like Add node's default.
+  expect(rows[0]?.canBuild).toBe(true);
   expect(importInstallerJoinToken(panel.deps.db, dir, panel.deps.logger)).toBe(false);
 });
 

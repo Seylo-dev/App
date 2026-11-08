@@ -14,10 +14,11 @@ export function listen(panel: TestPanel): string {
   return `http://127.0.0.1:${panel.app.server?.port}`;
 }
 
-export function addJoinToken(panel: TestPanel, token = `tok-${crypto.randomUUID()}`): string {
+/** A join token; canBuild left out is the column default (off), so joined fake agents build only when a test says so. */
+export function addJoinToken(panel: TestPanel, token = `tok-${crypto.randomUUID()}`, options: { canBuild?: boolean } = {}): string {
   panel.deps.db
     .insert(joinTokens)
-    .values({ tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 3_600_000) })
+    .values({ tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 3_600_000), canBuild: options.canBuild })
     .run();
   return token;
 }

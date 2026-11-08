@@ -129,10 +129,11 @@ Flags:
                        agent's traffic (environment values, registry logins, shells)
                        is then unencrypted
   --name <name>        node name (default: the hostname; a re-join keeps the current one)
-  --can-build          let this node build (join; the panel's owner still turns
-                       Can build on for it under Nodes; the panel node always can)
-  --no-can-build       stop builds on this node (join; a re-join without either flag
-                       keeps the current setting)
+  --can-build          set can_build in config.yml (join)
+  --no-can-build       clear it (join; a re-join without either flag keeps it).
+                       --can-build / --no-can-build only set can_build in config.yml.
+                       Whether the panel sends builds is chosen when the join
+                       command is made, and later under Nodes.
   --force              join again although this node already belongs to a panel
                        (the node keeps its other settings in config.yml);
                        install the panel although another program holds 80/443

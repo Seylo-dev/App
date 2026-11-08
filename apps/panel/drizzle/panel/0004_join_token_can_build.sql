@@ -1,0 +1,1 @@
+ALTER TABLE `join_tokens` ADD `can_build` integer DEFAULT false NOT NULL;
