@@ -5,7 +5,7 @@
 // a test says otherwise.
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { ids } from "./demo/fixtures";
+import { ids, projects, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
 import { stateFile } from "./helpers";
@@ -64,6 +64,76 @@ test.describe("motion", () => {
       const between = tops.filter((y) => y > Math.min(from, to) + 1 && y < Math.max(from, to) - 1);
       expect(between.length, `frames between ${from} and ${to}: ${tops.join(", ")}`).toBeGreaterThan(0);
     }
+  });
+
+  test("a project's page gets the same sliding background, and project rows fade on hover", async ({ page }) => {
+    await installDemo(page);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    const project = page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /^acme-shop/ });
+    // The whole row (chevron and link), what the background covers.
+    const row = project.locator("xpath=..");
+    const from = await top(indicator(page));
+    const tops = await clickAndTrack(page, project);
+    await expect(project).toHaveAttribute("data-status", "active");
+    // Before: the pill left Dashboard and no item had one; only the name turned blue.
+    await expect(indicator(page)).toHaveCount(1);
+    await expect(row.locator('[data-slot="active-indicator"]')).toHaveCount(1);
+    const to = await top(row);
+    expect(Math.abs((await top(indicator(page))) - to)).toBeLessThan(1);
+    const between = tops.filter((y) => y > Math.min(from, to) + 1 && y < Math.max(from, to) - 1);
+    expect(between.length, `frames between ${from} and ${to}: ${tops.join(", ")}`).toBeGreaterThan(0);
+
+    // Hovering a row fades its background in 200ms, like every other sidebar item.
+    const fade = await row.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const props = cs.transitionProperty.split(",").map((p) => p.trim());
+      const durations = cs.transitionDuration.split(",").map((d) => d.trim());
+      const i = props.findIndex((p) => p === "background-color" || p === "all");
+      return i < 0 ? "none" : durations[i % durations.length];
+    });
+    expect(fade).toBe("0.2s");
+  });
+
+  test("a selection pill stays on its item while the page reflows above it", async ({ page }) => {
+    // One open project, so "Expand all" is the selected half of its track. When system.info comes
+    // in (late), the dashboard re-renders the track while the nodes card above it changes height
+    // (no nodes: its placeholders give way to the empty state), in one commit.
+    await installDemo(page, {
+      delay: (opId) => (opId === "system.info" ? 1000 : opId === "metrics.nodes" ? 5000 : 0),
+      overrides: {
+        "projects.list": () => ({ projects: [{ ...projects[0], collapsed: false }] }),
+        "metrics.nodes": () => ({ nodes: [] }),
+        "system.info": () => ({ ...systemInfo, nodes: { total: 0, online: 0 } }),
+      },
+    });
+    await page.goto("/");
+    const expand = page.getByRole("button", { name: "Expand all" });
+    await expect(expand.locator('[data-slot="active-indicator"]')).toHaveCount(1);
+    const samples = await page.evaluate(
+      () =>
+        new Promise<{ button: number; offset: number }[]>((resolve) => {
+          const out: { button: number; offset: number }[] = [];
+          const start = performance.now();
+          const sample = () => {
+            const button = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Expand all");
+            const pill = button?.querySelector('[data-slot="active-indicator"]');
+            if (button && pill) {
+              const b = button.getBoundingClientRect().top;
+              out.push({ button: b, offset: pill.getBoundingClientRect().top - b });
+            }
+            if (performance.now() - start < 2500) requestAnimationFrame(sample);
+            else resolve(out);
+          };
+          requestAnimationFrame(sample);
+        }),
+    );
+    const buttonTops = samples.map((s) => s.button);
+    // The reflow happened while sampling...
+    expect(Math.max(...buttonTops) - Math.min(...buttonTops), JSON.stringify(buttonTops)).toBeGreaterThan(5);
+    // ...and the pill never left its button (before: 19.5px off, sliding after it).
+    const worst = Math.max(...samples.map((s) => Math.abs(s.offset)));
+    expect(worst, JSON.stringify(samples.map((s) => s.offset))).toBeLessThan(1);
   });
 
   test("selected items keep their font weight", async ({ page }) => {
