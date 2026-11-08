@@ -30,7 +30,7 @@ func TestGitTargetAndPolicy(t *testing.T) {
 		}
 	}
 
-	p, err := gitPolicyFor(&agentv1.GitSource{Url: "https://Gitea.lan:3000/a.git", AllowInternalHost: true})
+	p, err := gitPolicyFor(&agentv1.GitSource{Url: "https://Gitea.lan:3000/a.git", AllowInternalHost: true}, GitNodeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +48,11 @@ func TestGitTargetAndPolicy(t *testing.T) {
 			t.Errorf("internalAllowed(%s, %s) = %v", c.host, c.port, got)
 		}
 	}
-	v6, _ := gitPolicyFor(&agentv1.GitSource{Url: "ssh://git@[fd00:0::1]:22/a.git", SshPrivateKey: "k", AllowInternalHost: true})
+	v6, _ := gitPolicyFor(&agentv1.GitSource{Url: "ssh://git@[fd00:0::1]:22/a.git", SshPrivateKey: "k", AllowInternalHost: true}, GitNodeConfig{})
 	if !v6.internalAllowed("fd00::1", "22") || !v6.internalAllowed("[FD00::0001]", "22") {
 		t.Error("an IPv6 host in another spelling is the same host")
 	}
-	off, _ := gitPolicyFor(&agentv1.GitSource{Url: "https://gitea.lan:3000/a.git"})
+	off, _ := gitPolicyFor(&agentv1.GitSource{Url: "https://gitea.lan:3000/a.git"}, GitNodeConfig{})
 	if off.internalAllowed("gitea.lan", "3000") {
 		t.Error("internal addresses without allow_internal_host")
 	}

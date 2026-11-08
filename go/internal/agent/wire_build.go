@@ -26,6 +26,7 @@ func provideBuild(d *Deps) error {
 		ToolsDir: d.Layout.ToolsDir(),
 		Logger:   d.Logger.With("component", "build"),
 		Parallel: 1,
+		Git:      build.GitNodeConfig{ProxyResolves: d.Config.GitProxyResolves, ConfigFile: d.Layout.ConfigFile()},
 	}
 	if d.Events != nil {
 		opts.Emit = d.Events.Emit

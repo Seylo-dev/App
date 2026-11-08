@@ -45,6 +45,14 @@ message NodeFacts {
   // example "Europe/Berlin"; "UTC" when the machine names none. Scheduled
   // cleanup runs in it. added in 0.2 (nodeops)
   string time_zone = 20;
+  // The public addresses on the node's own interfaces (what netguard
+  // counts as public; internal ones are left out), sorted, at most 64. The
+  // agent refuses git connections to them like internal addresses unless
+  // the panel allows internal addresses for the source's host
+  // (GitSource.allow_internal_host), and the panel counts a git host whose
+  // every address is a node's address as internal. Empty from agents
+  // before this field. added in 0.2 (security)
+  repeated string interface_addresses = 21;
 }
 
 // WingsInfo describes a Pelican Wings installation found next to the agent.

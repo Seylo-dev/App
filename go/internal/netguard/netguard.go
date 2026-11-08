@@ -4,7 +4,10 @@
 // with a public address and the node with a private one (split-horizon
 // DNS), a name that rebinds between two lookups, or a redirect to another
 // host cannot reach loopback, private or link-local networks, and there is
-// no window between the check and the connect.
+// no window between the check and the connect. The node's own addresses
+// count as internal too, public ones included: a connection to them stays
+// on the node (over lo), where a firewall that hides a service from the
+// internet does not apply.
 package netguard
 
 import (
@@ -12,6 +15,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -111,17 +116,99 @@ func (e *BlockedError) Error() string {
 	return fmt.Sprintf("%s is %s", e.Addr, e.What)
 }
 
+// interfaceAddrs lists the node's own addresses. Tests replace it.
+var interfaceAddrs = net.InterfaceAddrs
+
+// ownTTL is how long the node's addresses are cached: long enough for one
+// fetch's connections, short enough to see an address added since. Tests
+// change it.
+var ownTTL = 5 * time.Second
+
+var own struct {
+	sync.Mutex
+	at    time.Time
+	addrs map[netip.Addr]struct{}
+}
+
+// readOwn reads the node's interface addresses, unmapped and without zones.
+func readOwn() (map[netip.Addr]struct{}, error) {
+	list, err := interfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[netip.Addr]struct{}, len(list))
+	for _, addr := range list {
+		var ip net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if parsed, ok := netip.AddrFromSlice(ip); ok {
+			set[parsed.Unmap().WithZone("")] = struct{}{}
+		}
+	}
+	return set, nil
+}
+
+// ownAddress says whether a is one of the node's own addresses (an error
+// when they cannot be read: the caller refuses then).
+func ownAddress(a netip.Addr) (bool, error) {
+	own.Lock()
+	defer own.Unlock()
+	if own.addrs == nil || time.Since(own.at) > ownTTL {
+		set, err := readOwn()
+		if err != nil {
+			return false, err
+		}
+		own.addrs, own.at = set, time.Now()
+	}
+	_, ok := own.addrs[a.Unmap().WithZone("")]
+	return ok, nil
+}
+
+// OwnPublicAddresses lists the node's own addresses that Classify counts as
+// public, sorted: the ones Check refuses as "an address of this node"
+// (internal ones it refuses anyway). The agent reports them to the panel
+// (NodeFacts.interface_addresses), which counts a git host on them as
+// internal, so an admin's save of a git server on the node allows it.
+func OwnPublicAddresses() ([]netip.Addr, error) {
+	set, err := readOwn()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]netip.Addr, 0, len(set))
+	for a := range set {
+		if class, _ := Classify(a); class == Public {
+			out = append(out, a)
+		}
+	}
+	slices.SortFunc(out, func(a, b netip.Addr) int { return a.Compare(b) })
+	return out, nil
+}
+
 // Check refuses an "ip:port" the dialer is about to connect to: anything
-// that is not public, unless allowInternal (metadata endpoints even then).
+// that is not public, and the node's own addresses, unless allowInternal
+// (metadata endpoints even then).
 func Check(address string, allowInternal bool) error {
 	ap, err := netip.ParseAddrPort(address)
 	if err != nil {
 		return &BlockedError{What: "not an IP address (" + address + ")"}
 	}
-	class, what := Classify(ap.Addr())
+	addr := ap.Addr().Unmap().WithZone("")
+	class, what := Classify(addr)
 	switch {
 	case class == Metadata, class == Internal && !allowInternal:
-		return &BlockedError{Addr: ap.Addr().Unmap().WithZone(""), What: what}
+		return &BlockedError{Addr: addr, What: what}
+	case class == Public && !allowInternal:
+		mine, err := ownAddress(addr)
+		if err != nil {
+			return &BlockedError{Addr: addr, What: "not known to be another host (the node's own addresses could not be read: " + err.Error() + ")"}
+		}
+		if mine {
+			return &BlockedError{Addr: addr, What: "an address of this node"}
+		}
 	}
 	return nil
 }

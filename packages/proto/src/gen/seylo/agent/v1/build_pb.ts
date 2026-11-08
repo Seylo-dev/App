@@ -302,13 +302,18 @@ export type GitSource = Message<"seylo.agent.v1.GitSource"> & {
 
   /**
    * The panel allows internal addresses (private, loopback, link-local,
-   * reserved) for this source's own host and port: an admin approved the
-   * host for the project (git_internal_hosts) or it is a git provider
-   * connection's host. Without it the agent connects only to public
-   * addresses, checked on the address each connection actually goes to
-   * (after DNS, for redirects and submodules too). Cloud metadata
-   * addresses are refused either way. Agents before this field do not
-   * check addresses on the node.
+   * reserved, and the node's own) for this source's own host and port: an
+   * admin approved the host for the project (git_internal_hosts) or it is
+   * a git provider connection's host the panel sees as internal. Without
+   * it the agent connects only to public addresses that are not its own,
+   * checked on the address each connection actually goes to (after DNS,
+   * for redirects and submodules too), and behind the agent's HTTP proxy
+   * refuses names the node cannot resolve (unless the node's config.yml
+   * sets git_proxy_resolves). The panel counts the nodes' addresses
+   * (NodeFacts.interface_addresses, the admin-set public address) as
+   * internal, so an admin's save of a git server on a node sets this.
+   * Cloud metadata addresses are refused either way. Agents before this
+   * field do not check addresses on the node.
    *
    * added in 0.2 (security)
    *

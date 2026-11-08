@@ -70,7 +70,7 @@ func (s *Service) FetchFile(ctx context.Context, req *agentv1.FetchGitFileReques
 	}
 	defer os.RemoveAll(work)
 	var log bytes.Buffer
-	g, err := newGit(s.opts.Runner, &log, src, work)
+	g, err := newGitOn(s.opts.Git, s.opts.Runner, &log, src, work)
 	if err != nil {
 		return nil, fmt.Errorf("preparing git credentials: %w", err)
 	}

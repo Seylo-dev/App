@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/net/http/httpproxy"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/netguard"
 )
@@ -42,8 +43,15 @@ import (
 // tunnels and plain http requests go on to that proxy, the way curl sent
 // them. The node cannot see where the proxy connects, so then the check is
 // on the target before the request goes out (an IP address exactly; a name
-// by what it resolves to on the node, when it resolves), and the proxy's own
-// rules decide the rest. ssh connects directly, as it did before.
+// by what it resolves to on the node; a name the node cannot resolve only
+// for an allowed internal host, or on a node whose config.yml sets
+// git_proxy_resolves), and the proxy's own rules decide the rest. ssh
+// connects directly, as it did before.
+//
+// The node's own addresses count as internal (netguard), public ones
+// included: a git server on the node, reached by its public name, needs
+// allow_internal_host like one on a private address. The panel counts the
+// nodes' addresses as internal too, so an admin's save allows such a host.
 
 const gitDialTimeout = 30 * time.Second
 
@@ -143,6 +151,28 @@ type gitPolicy struct {
 	// allowInternal is GitSource.allow_internal_host: the source's own
 	// host may have internal addresses.
 	allowInternal bool
+	// node is what the node's own config.yml says about git fetches.
+	node GitNodeConfig
+}
+
+// GitNodeConfig is the part of the node's config.yml that git fetches
+// read. Only someone with root on the node sets it; the panel cannot.
+type GitNodeConfig struct {
+	// ProxyResolves is config.yml's git_proxy_resolves: behind the agent's
+	// HTTP proxy, a name the node cannot resolve goes on to the proxy
+	// unchecked (nodes whose DNS knows no outside names), so the proxy's
+	// own rules decide where it connects. Off, such a name is refused
+	// unless allow_internal_host covers it.
+	ProxyResolves bool
+	// ConfigFile is config.yml's path, for messages. Empty: the default.
+	ConfigFile string
+}
+
+func (n GitNodeConfig) configFile() string {
+	if n.ConfigFile == "" {
+		return brand.DataDir + "/config.yml"
+	}
+	return n.ConfigFile
 }
 
 func (p gitPolicy) internalAllowed(host, port string) bool {
@@ -315,17 +345,47 @@ func (p *gitProxy) refuse(host, port string, blocked *netguard.BlockedError) *Bl
 	switch class, _ := netguard.Classify(blocked.Addr); {
 	case blocked.Addr.IsValid() && class == netguard.Metadata:
 		e.Hint = "Nodes never connect to cloud metadata addresses"
-	case normHost(host) == p.policy.source.host && port == p.policy.source.port:
-		e.Hint = "Nodes clone from public addresses only; an admin can allow internal addresses of this host for the project (git.allowInternalHost)"
+	case p.ownSource(host, port):
+		e.Hint = "Nodes clone only from public addresses other than their own; " + allowHostHint
 	default:
 		e.Hint = "Nodes clone from public addresses only, and from internal ones only for the source's own host when an admin allowed it, never for a redirect or submodule to another host"
 	}
+	return p.record(e)
+}
+
+// allowHostHint is how an admin lets nodes clone the source's host from
+// internal addresses (the node's own included).
+const allowHostHint = "an admin can allow internal addresses of this host for the project " +
+	"(the project's Settings > Internal git hosts, or git.allowInternalHost)"
+
+// refuseUnresolvable refuses a name the node cannot resolve before it goes
+// to the agent's HTTP proxy; the hint names config.yml's opt-in.
+func (p *gitProxy) refuseUnresolvable(host, port, name string) *BlockedHostError {
+	e := &BlockedHostError{
+		Target: net.JoinHostPort(strings.Trim(host, "[]"), port),
+		Reason: "the node cannot resolve " + name + ", so it cannot check where the agent's HTTP proxy would connect",
+		Hint: "If this node relies on its HTTP proxy to resolve names, its root can set git_proxy_resolves: true in " +
+			p.policy.node.configFile() + " and restart the agent (the proxy's own rules then decide where such names go)",
+	}
+	if p.ownSource(host, port) {
+		e.Hint += "; or " + allowHostHint
+	}
+	return p.record(e)
+}
+
+// ownSource says whether host:port is the source's own host and port.
+func (p *gitProxy) ownSource(host, port string) bool {
+	return normHost(host) == p.policy.source.host && port == p.policy.source.port
+}
+
+// record keeps the first refusal and logs every one.
+func (p *gitProxy) record(e *BlockedHostError) *BlockedHostError {
 	p.mu.Lock()
 	if p.refused == nil {
 		p.refused = e
 	}
 	p.mu.Unlock()
-	fmt.Fprintf(p.log, "Refused a git connection to %s: %s\n", target, e.Reason)
+	fmt.Fprintf(p.log, "Refused a git connection to %s: %s\n", e.Target, e.Reason)
 	return e
 }
 
@@ -364,8 +424,10 @@ func (p *gitProxy) upstreamFor(scheme, host, port string) (*url.URL, error) {
 
 // checkBeforeUpstream applies the fetch's policy to a target the agent's
 // HTTP proxy will connect to: an IP address exactly, a name by what it
-// resolves to on the node. A name the node cannot resolve goes on (behind a
-// proxy, often only the proxy can); the proxy resolves it again in any case.
+// resolves to on the node. A name the node cannot resolve goes on only when
+// internal addresses are allowed for it (allow_internal_host) or the node's
+// root said the proxy resolves names (git_proxy_resolves): the proxy could
+// resolve it to anything, an internal address included.
 func (p *gitProxy) checkBeforeUpstream(ctx context.Context, host, port string) error {
 	allowed := p.policy.internalAllowed(host, port)
 	name := strings.Trim(host, "[]")
@@ -379,8 +441,11 @@ func (p *gitProxy) checkBeforeUpstream(ctx context.Context, host, port string) e
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	addrs, err := gitLookup(ctx, name)
-	if err != nil {
-		return nil
+	if err != nil || len(addrs) == 0 {
+		if allowed || p.policy.node.ProxyResolves {
+			return nil
+		}
+		return p.refuseUnresolvable(host, port, name)
 	}
 	for _, a := range addrs {
 		var blocked *netguard.BlockedError
@@ -650,11 +715,11 @@ func GitDial(ctx context.Context, proxy, target string, stdin io.Reader, stdout 
 	return nil
 }
 
-// gitPolicyFor is the policy of one source.
-func gitPolicyFor(src *agentv1.GitSource) (gitPolicy, error) {
+// gitPolicyFor is the policy of one source on this node.
+func gitPolicyFor(src *agentv1.GitSource, node GitNodeConfig) (gitPolicy, error) {
 	t, err := gitTargetOf(src.GetUrl())
 	if err != nil {
 		return gitPolicy{}, err
 	}
-	return gitPolicy{source: t, allowInternal: src.GetAllowInternalHost()}, nil
+	return gitPolicy{source: t, allowInternal: src.GetAllowInternalHost(), node: node}, nil
 }

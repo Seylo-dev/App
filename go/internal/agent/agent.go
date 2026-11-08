@@ -167,7 +167,7 @@ func newDaemon(ctx context.Context, layout datadir.Layout, logger *slog.Logger) 
 	d := &Deps{
 		Layout:      layout,
 		Logger:      logger,
-		Config:      Config{NodeID: cfg.NodeID, PanelURL: cfg.PanelURL, PanelPin: cfg.PanelPin, CanBuild: cfg.CanBuild, AcmeCA: cfg.AcmeCA, AcmeCACertificates: cfg.AcmeCACertificates, AcmeCAServerName: cfg.AcmeCAServerName, NoHostShell: cfg.NoHostShell},
+		Config:      Config{NodeID: cfg.NodeID, PanelURL: cfg.PanelURL, PanelPin: cfg.PanelPin, CanBuild: cfg.CanBuild, AcmeCA: cfg.AcmeCA, AcmeCACertificates: cfg.AcmeCACertificates, AcmeCAServerName: cfg.AcmeCAServerName, NoHostShell: cfg.NoHostShell, GitProxyResolves: cfg.GitProxyResolves},
 		Desired:     desiredStore,
 		DesiredSync: desired,
 		Feed:        feed,
