@@ -333,3 +333,63 @@ test("a disabled node is not caught up", async () => {
   expect(catchUp(panel.deps, node.nodeId)).toBe("offline");
   expect(stepsOf(node.nodeId)[0]?.step.retry).toBe("waiting");
 });
+
+test("a node that drops while UpdateAgent is in flight waits for its reconnect; the run does not fail", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await join("0.8.0");
+  await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+  await runWhileOffline(node);
+  // Back for the catch-up, then gone again before the agent answers.
+  const back = await reconnect(node, "0.8.0");
+  back.handle("UpdateAgent", () => new Promise(() => {}));
+  const draining = drain();
+  await back.waitFor("UpdateAgent");
+  const [original, retry] = stepsOf(node.nodeId);
+  expect(retry?.step.status).toBe("running");
+  await goOffline(back);
+  await draining;
+
+  // Before: the step failed with "The node is offline. Try again when it is back.",
+  // the run failed and nothing tried again.
+  const run = panel.deps.db
+    .select()
+    .from(updateRuns)
+    .where(eq(updateRuns.id, retry?.run.id ?? ""))
+    .get();
+  expect(run).toMatchObject({ trigger: "reconnect", status: "succeeded", error: null });
+  const step = panel.deps.db
+    .select()
+    .from(updateSteps)
+    .where(eq(updateSteps.id, retry?.step.id ?? ""))
+    .get();
+  expect(step).toMatchObject({ status: "skipped", error: "The node is offline; it gets the update when it reconnects.", retry: "waiting" });
+  expect(
+    panel.deps.db
+      .select()
+      .from(updateSteps)
+      .where(eq(updateSteps.id, original?.step.id ?? ""))
+      .get()?.retry,
+  ).toBe("retried");
+
+  // The next reconnect sends it again, in a run of its own.
+  const again = await reconnect(node, "0.8.0");
+  await drain();
+  expect((await again.waitFor("UpdateAgent"))[0]).toMatchObject({ targetVersion: "0.9.0", automatic: true });
+  const steps = stepsOf(node.nodeId);
+  expect(steps).toHaveLength(3);
+  expect(steps[1]?.step).toMatchObject({ retry: "retried", retryRunId: steps[2]?.run.id });
+});
+
+test("a person's run whose node drops mid-call skips it the same way", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await join("0.8.0");
+  await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+  node.handle("UpdateAgent", () => new Promise(() => {}));
+  const run = await ok(callOp(panel, updates.updateNode, { nodeId: node.nodeId }, { cookie: owner.cookie }));
+  const draining = drain();
+  await node.waitFor("UpdateAgent");
+  await goOffline(node);
+  await draining;
+  expect(panel.deps.db.select().from(updateRuns).where(eq(updateRuns.id, run.id)).get()?.status).toBe("succeeded");
+  expect(stepsOf(node.nodeId)[0]?.step).toMatchObject({ status: "skipped", retry: "waiting" });
+});

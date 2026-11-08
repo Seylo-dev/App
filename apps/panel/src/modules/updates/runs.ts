@@ -8,8 +8,10 @@
 //                or a durable UpdateResult arrives
 //   agent step   UpdateAgent with the verified manifest; done when the node
 //                reconnects with the target version or an UpdateResult arrives;
-//                an offline node is skipped with retry "waiting" and gets the
-//                update in a run of its own when it reconnects (catch-up.ts)
+//                a node offline when the step comes up, or that drops while
+//                UpdateAgent is in flight, is skipped with retry "waiting" and
+//                gets the update in a run of its own when it reconnects
+//                (catch-up.ts)
 //   docker step  single-step runs from nodes.updateDocker, finished by UpdateResult
 //
 // A run keeps the verified manifest it installs (update_runs.manifest), so a
@@ -451,6 +453,13 @@ export async function advanceRun(
         });
       } catch (error) {
         const details = error instanceof OpError ? error.details : undefined;
+        // The node dropped while the call was in flight: like a node offline
+        // when its step came up, it gets the update when it reconnects.
+        if (details?.reason === "offline" && !ctx.agents.isOnline(step.nodeId)) {
+          finishStep(db, step.id, "skipped", offlineSkipMessage, { retry: "waiting" });
+          publish();
+          return 0;
+        }
         // An automatic update of a release the agent rolled back, or that
         // failed there within the hour, waits (UpdateAgentRequest.automatic).
         if (details?.agentStatus === "FAILED_PRECONDITION" && details.backoff) {

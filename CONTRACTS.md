@@ -2006,8 +2006,9 @@ release, or a run a person starts (Update now, update everything),
 installs it again and clears the record, and a successful update forgets
 it. UpdateAgent carries `automatic` for every run a person did not start.
 
-A node offline when its step comes up is skipped with `retry: waiting`
-(`modules/updates/catch-up.ts`). A connect queues `updates.catchUp` only
+A node offline when its step comes up, or whose session drops while its
+UpdateAgent is in flight (UNAVAILABLE `offline`), is skipped with `retry:
+waiting` (`modules/updates/catch-up.ts`), and the run goes on. A connect queues `updates.catchUp` only
 when the node has a waiting step (one indexed lookup, so most connects
 write no job); for its newest waiting step the job records `upToDate` (the
 node runs that version or newer), `held` (the node rolled that version
