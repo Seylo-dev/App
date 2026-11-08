@@ -63,7 +63,7 @@ test("join commands use the TLS port with --pin; plain HTTP is flagged", async (
   expect(pinned.body.command).not.toContain("--insecure");
 });
 
-test("join commands install the running panel's own release", async () => {
+test("join commands install the running panel's own release through the verified install host", async () => {
   const panel = testPanel();
   cleanup.push(() => panel.close());
   panel.deps.config.version = "0.2.0-rc.2";
@@ -71,11 +71,11 @@ test("join commands install the running panel's own release", async () => {
   const owner = await createUser(panel, "owner");
   const res = await callOp(panel, nodeOps.createJoinToken, {}, { cookie: owner.cookie });
   expect(res.status).toBe(200);
-  // That release's installer defaults to its own version, so the node gets the agent of this panel,
-  // not the one of the latest stable release the install host serves.
-  const installer = `https://github.com/${githubOrg}/${githubRepo}/releases/download/v0.2.0-rc.2/install.sh`;
-  expect(res.body.command).toStartWith(`curl -fsSL ${installer} | sudo sh -s -- join --panel '`);
-  expect(res.body.command).not.toContain(installUrl);
+  // The install host's verified installer with --version, so the node gets the agent of this panel,
+  // not the latest stable release, and the installer never comes from a plain release asset.
+  expect(res.body.command).toStartWith(`curl -fsSL https://${installUrl} | sudo sh -s -- join --panel '`);
+  expect(res.body.command).toContain(" --version '0.2.0-rc.2'");
+  expect(res.body.command).not.toContain(`github.com/${githubOrg}/${githubRepo}`);
 });
 
 test("the agent endpoint answers on the TLS listener", async () => {

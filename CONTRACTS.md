@@ -1620,11 +1620,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   domain, else the panel node's public address, else its public IPv4, else
   the non-loopback address the caller reached the panel at (`OpCall.origin`),
   else the panel node's private IPv4 (`nodes/join-target.ts` `panelUrl`). The
-  command pipes the installer of the panel's own release into sh
-  (`nodes/join-command.ts`: `https://github.com/<org>/<repo>/releases/download/v<version>/install.sh`),
-  so the node gets the agent of the panel's version; the install host
-  (`https://<installUrl>`) serves the latest stable release only and is
-  used by builds without a release (dev, snapshots, `git describe`).
+  command pipes the install host (`https://<installUrl>`) into sh, which
+  serves install.sh only after checking it against the latest stable
+  release's signed manifest; a release asset is never piped into sh,
+  since anyone who can replace release assets without the signing key
+  would get root on the nodes joined with it. A released panel adds
+  `--version '<version>'` (`nodes/join-command.ts`), so the installer
+  takes the agent from that release's signed manifest and the node gets
+  the panel's version; builds without a release (dev, snapshots, `git
+  describe`) leave it out and install the latest stable release.
 - Deployments keep the env they started with (`deployments.env_sealed`,
   sealed JSON): an app's desired spec uses its target deployment's env, so a
   saved but undeployed env change, or a failed deploy, never reaches the
