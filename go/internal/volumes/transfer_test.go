@@ -87,6 +87,12 @@ func TestRoundtrip(t *testing.T) {
 	if st, err := os.Stat(filepath.Join(out, "empty")); err != nil || st.Mode().Perm() != 0o700 {
 		t.Fatalf("empty dir = %v %v", st, err)
 	}
+	// The moved service's folder is root's only on this node too.
+	for _, p := range []string{filepath.Join(dst.Layout.Root(), "services"), filepath.Dir(filepath.Dir(out))} {
+		if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o700 {
+			t.Fatalf("%s = %v %v", p, st, err)
+		}
+	}
 
 	// Not empty now: refused without replace, works with it.
 	if _, err := dst.Import(ctx, "svc", "svc", "data", false, bytes.NewReader(buf.Bytes())); !errors.Is(err, ErrNotEmpty) {

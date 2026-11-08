@@ -61,7 +61,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 16 checks (kernel, OS, memory, disk, inodes, Docker, cgroups, Docker live-restore, ports 80/443, proxy, route files, DNS, firewall, clock, panel, Wings), read-only Docker socket client | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 17 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker, cgroups, Docker live-restore, ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -662,6 +662,15 @@ local API, join and resume. The areas:
   routed (the service is DEGRADED). Reconcile writes SYSTEM lines into
   the service log (deploy started, healthy and serving, failed, rolled
   back, exited with code N).
+- `services/` and every `services/<id>/` (and `files/`) are 0700
+  (`datadir.PrivateDirMode`, `MakeServiceDir`/`MakeServiceVolume`), under
+  a data dir that is 0711: file mounts are secrets and volumes hold app
+  data. dockerd sets up volumes and bind mounts as root, so containers need
+  no rights on them; file mounts keep their own modes (0644 by default) and
+  volume folders 0755. The agent sets these modes on every start
+  (`SecureServiceDirs`, for folders older agents made 0755), and the
+  `disk.permissions` health check warns when one is open to group or
+  others.
 - `services/<id>/runtime.json` is reconcile's memory across agent restarts
   (crash-policy halt, the crash streak and its latest crash, failed
   generation, sleeping, containers re-attached to another project's

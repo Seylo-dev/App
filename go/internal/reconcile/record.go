@@ -79,7 +79,7 @@ func saveRecord(layout datadir.Layout, id string, rec record) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if _, err := layout.MakeServiceDir(id); err != nil {
 		return err
 	}
 	b, err := json.Marshal(rec)

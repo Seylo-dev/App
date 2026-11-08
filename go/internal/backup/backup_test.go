@@ -439,6 +439,22 @@ func TestVolumeBackupRestoreRetention(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("volume folder siblings = %v", entries)
 	}
+
+	// Restored where the service has no folder yet: services/ and
+	// services/<id>/ are made root's only (volume data is private).
+	services := filepath.Join(r.layout.Root(), "services")
+	must(t, os.RemoveAll(services))
+	_, err = r.runner.Restore(context.Background(), &agentv1.RestoreBackupRequest{ObjectKey: keys[1],
+		Subject: &agentv1.BackupSubject{ServiceId: "app1", What: &agentv1.BackupSubject_Volume{Volume: "files"}}})
+	must(t, err)
+	if b, _ := os.ReadFile(filepath.Join(vol, "a.txt")); string(b) != "v1" {
+		t.Fatalf("a.txt after a restore into a new folder = %q", b)
+	}
+	for _, p := range []string{services, filepath.Dir(filepath.Dir(vol))} {
+		if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o700 {
+			t.Fatalf("%s = %v %v", p, st, err)
+		}
+	}
 }
 
 func TestDatabaseDumpAndFailures(t *testing.T) {

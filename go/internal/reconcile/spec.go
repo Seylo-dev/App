@@ -177,12 +177,10 @@ func panelPublish(s *agentv1.ServiceSpec) []docker.PortPublish {
 func prepareData(ctx context.Context, eng docker.Engine, layout datadir.Layout, s *agentv1.ServiceSpec, scope map[string]string) (binds []string, mounts []docker.VolumeMount, err error) {
 	for _, v := range s.GetVolumes() {
 		owner := volumeOwner(s, v)
-		dir, err := layout.ServiceVolume(owner, v.GetName())
+		// Inside services/<owner>/, which only root may enter.
+		dir, err := layout.MakeServiceVolume(owner, v.GetName())
 		if err != nil {
 			return nil, nil, err
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, nil, fmt.Errorf("creating volume folder: %w", err)
 		}
 		name := docker.VolumeName(owner, v.GetName())
 		labels := map[string]string{docker.LabelService: owner, docker.LabelVolume: v.GetName()}
@@ -203,7 +201,13 @@ func prepareData(ctx context.Context, eng docker.Engine, layout datadir.Layout, 
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		// File mounts are secrets: services/<id>/ and files/ are root's
+		// only. dockerd binds each file as root; the container reads it by
+		// its own mode.
+		if _, err := layout.MakeServiceDir(s.GetId()); err != nil {
+			return nil, nil, err
+		}
+		if err := os.MkdirAll(dir, datadir.PrivateDirMode); err != nil {
 			return nil, nil, fmt.Errorf("creating files folder: %w", err)
 		}
 		for _, f := range s.GetFiles() {

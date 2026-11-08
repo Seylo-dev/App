@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/datadir"
 )
 
 const gib = 1 << 30
@@ -165,6 +167,52 @@ func inodeResult(at string, files, free uint64) *agentv1.NodeCheckResult {
 		return warn(detail, hint)
 	}
 	return pass("%s", detail)
+}
+
+// serviceFolders: services/ and every services/<id>/ are root's only
+// (datadir.PrivateDirMode). File mounts hold secrets and volumes the apps'
+// data, and the data dir is 0711, so a local account that learned a
+// service id (any container's /proc/<pid>/mountinfo names it) could read
+// them through a folder open to group or others.
+func (e *Env) serviceFolders(context.Context) *agentv1.NodeCheckResult {
+	root := datadir.New(e.DataDir).ServicesDir()
+	st, err := os.Stat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return pass("no service folders yet")
+	}
+	if err != nil {
+		return warn("could not read "+root+": "+err.Error(), "")
+	}
+	var open []string
+	if perm := st.Mode().Perm(); perm&0o077 != 0 {
+		open = append(open, fmt.Sprintf("%s is %#o", root, perm))
+	}
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrPermission) && len(open) == 0 {
+		// Not run as root: closed to this account, as it should be.
+		return pass("%s is open to root only", root)
+	}
+	if err != nil {
+		return warn("could not list "+root+": "+err.Error(), "")
+	}
+	n, openServices := 0, 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		n++
+		if info, err := entry.Info(); err == nil && info.Mode().Perm()&0o077 != 0 {
+			openServices++
+		}
+	}
+	if openServices > 0 {
+		open = append(open, fmt.Sprintf("%d of %d service folders are open to other accounts", openServices, n))
+	}
+	if len(open) > 0 {
+		return warn(strings.Join(open, ", ")+": local accounts can read file mounts and volume data",
+			fmt.Sprintf("Restart the agent (`%s restart`), which sets them to 0700, or run `chmod 700 %s %s/*`.", brand.Slug, root, root))
+	}
+	return pass("%d service folders, open to root only", n)
 }
 
 func (e *Env) dockerEngine(ctx context.Context) *agentv1.NodeCheckResult {

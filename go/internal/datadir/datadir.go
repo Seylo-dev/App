@@ -72,12 +72,16 @@ func checkID(kind, id string) error {
 	return nil
 }
 
+// ServicesDir holds one folder per service (ServiceDir). It and every
+// service folder are private to root (PrivateDirMode, services.go).
+func (l Layout) ServicesDir() string { return filepath.Join(l.root, "services") }
+
 // ServiceDir is the folder of one service.
 func (l Layout) ServiceDir(serviceID string) (string, error) {
 	if err := checkID("service", serviceID); err != nil {
 		return "", err
 	}
-	return filepath.Join(l.root, "services", serviceID), nil
+	return filepath.Join(l.ServicesDir(), serviceID), nil
 }
 
 // ServiceVolume is the backing folder of one service volume.

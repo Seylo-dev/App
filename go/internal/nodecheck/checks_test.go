@@ -103,6 +103,9 @@ func TestHealthyMachine(t *testing.T) {
 		t.Errorf("clock detail = %q", results["time.sync"].GetDetail())
 	}
 	// Disk results depend on the test machine; they must at least run.
+	if r := results["disk.permissions"]; r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
+		t.Errorf("disk.permissions = %v", r)
+	}
 	if results["disk.space"].GetDetail() == "" || results["disk.inodes"].GetDetail() == "" {
 		t.Errorf("disk results = %v %v", results["disk.space"], results["disk.inodes"])
 	}
@@ -218,6 +221,46 @@ func TestPortsHeldByWingsForkProxy(t *testing.T) {
 	env.Wings = nil
 	if r := env.ports(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
 		t.Fatalf("ports without Wings detection = %v", r)
+	}
+}
+
+// TestServiceFolders: services/ and services/<id>/ must be open to root
+// only; file mounts and volume data are under them and the data dir is
+// 0711.
+func TestServiceFolders(t *testing.T) {
+	data := t.TempDir()
+	env := Env{DataDir: data}
+	if r := env.serviceFolders(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
+		t.Fatalf("no services = %v", r)
+	}
+	services := filepath.Join(data, "services")
+	for _, dir := range []string{services, filepath.Join(services, "web"), filepath.Join(services, "db")} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := env.serviceFolders(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || !strings.Contains(r.GetDetail(), "2 service folders") {
+		t.Fatalf("private = %v", r)
+	}
+	for _, dir := range []string{services, filepath.Join(services, "web")} {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := env.serviceFolders(context.Background())
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || !strings.Contains(r.GetDetail(), "0755") ||
+		!strings.Contains(r.GetDetail(), "1 of 2 service folders") || !strings.Contains(r.GetFixHint(), "chmod 700") {
+		t.Fatalf("open = %v", r)
+	}
+	// Execute-only still lets an account that knows an id walk in.
+	if err := os.Chmod(services, 0o711); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(services, "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if r := env.serviceFolders(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN {
+		t.Fatalf("traversable = %v", r)
 	}
 }
 

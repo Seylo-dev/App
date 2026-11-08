@@ -95,6 +95,7 @@ func Default(env Env) []Check {
 		check{"system.memory", "Memory", e.memory},
 		check{"disk.space", "Disk space", e.diskSpace},
 		check{"disk.inodes", "Free inodes", e.diskInodes},
+		check{"disk.permissions", "Service folders", e.serviceFolders},
 		check{"docker.engine", "Docker Engine", e.dockerEngine},
 		check{"docker.cgroup", "Control groups", e.cgroups},
 		check{"docker.live-restore", "Docker live-restore", e.liveRestore},

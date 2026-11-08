@@ -74,12 +74,10 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 			return 0, ErrRunning
 		}
 	}
-	dir, err := t.Layout.ServiceVolume(owner, volume)
+	// Inside services/<owner>/, which only root may enter.
+	dir, err := t.Layout.MakeServiceVolume(owner, volume)
 	if err != nil {
 		return 0, err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, fmt.Errorf("creating volume folder: %w", err)
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
