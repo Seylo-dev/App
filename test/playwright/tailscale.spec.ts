@@ -84,6 +84,22 @@ function panelAccess(changes: Input = {}): Input {
   };
 }
 
+/** hostShell.status of the panel node: on, online, nothing open, with changes. */
+const shellStatus = (changes: Input = {}): Input => ({
+  nodeId: ids.de,
+  enabled: true,
+  available: true,
+  canOpen: true,
+  canEnable: true,
+  maxSessions: 2,
+  idleTimeoutSeconds: 900,
+  sessions: [],
+  ...changes,
+});
+
+/** The card titled `title` (a SectionCard is a <section>). */
+const card = (page: Page, title: string) => page.locator("section", { has: page.getByRole("heading", { name: title, level: 2 }) });
+
 /** Op requests the page sent, by op id. */
 function recordOps(page: Page) {
   const sent: Record<string, Input[]> = {};
@@ -119,7 +135,8 @@ test.describe("settings > tailscale", () => {
       overrides: { "tailscale.get": () => status({ detected: false, version: null, backendState: null, tailnet: null, dnsName: null, addresses: [] }) },
     });
     await page.goto("/settings/tailscale");
-    await expect(page.getByText("Not installed")).toBeVisible();
+    // exact: the hint next to the chip ("Tailscale is not installed on ...") holds the words too.
+    await expect(page.getByText("Not installed", { exact: true })).toBeVisible();
     const install = page.getByRole("link", { name: "Install on the server" });
     await expect(install).toHaveAttribute("href", new RegExp(`/nodes\\?.*node=${ids.de}`));
     const href = (await install.getAttribute("href")) ?? "";
@@ -210,12 +227,29 @@ test.describe("settings > tailscale", () => {
   });
 
   test("host shells off: the install command is shown to run over SSH instead", async ({ page }) => {
-    await installDemo(page);
+    // The demo's own answer has host shells on, with a shell open.
+    await installDemo(page, { overrides: { "hostShell.status": () => shellStatus({ enabled: false, canOpen: false }) } });
     await page.goto(`/nodes?node=${ids.de}&view=shell&prefill=tailscale-install`);
     const sheet = page.getByRole("dialog");
     await expect(sheet.getByRole("heading", { name: "Host shells are off for this node" })).toBeVisible();
     await expect(sheet.getByText("Allow host shells to type it into a shell here, or run it over SSH:")).toBeVisible();
     await expect(sheet.getByText(installCommand)).toBeVisible();
+  });
+
+  test("host shells on but the node offline: the note does not ask to allow them, and nothing opens", async ({ page }) => {
+    await installDemo(page, { overrides: { "hostShell.status": () => shellStatus({ available: false }) } });
+    let opened = false;
+    await page.routeWebSocket(/\/api\/streams\/host-shell/, () => {
+      opened = true;
+    });
+    await page.goto(`/nodes?node=${ids.de}&view=shell&prefill=tailscale-install`);
+    const sheet = page.getByRole("dialog");
+    await expect(sheet.getByText("Allowed", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("No shell can open on this node right now. Run it over SSH:")).toBeVisible();
+    await expect(sheet.getByText("The node is offline or its agent is too old for host shells.")).toBeVisible();
+    await expect(sheet.getByText("Allow host shells to type it", { exact: false })).toHaveCount(0);
+    await expect(sheet.getByText(installCommand)).toBeVisible();
+    expect(opened).toBe(false);
   });
 
   test("not signed in: Sign in asks for the link and opens it in a new tab", async ({ page }) => {
@@ -310,8 +344,10 @@ test.describe("settings > tailscale", () => {
 
     answer = status({ agentOnline: false });
     await page.reload();
-    await expect(page.getByText("The panel server's agent is offline. This is what it reported last.")).toBeVisible();
-    await expect(page.getByText("The panel server's agent is offline.", { exact: true })).toHaveCount(0);
+    const statusCard = card(page, "Tailscale on the panel server");
+    await expect(statusCard.getByText("The panel server's agent is offline. This is what it reported last.")).toBeVisible();
+    // The Serve card's switch says the same words as its reason; the status card has the longer one only.
+    await expect(statusCard.getByText("The panel server's agent is offline.", { exact: true })).toHaveCount(0);
 
     answer = status({ disabledOnServer: true });
     await page.reload();
@@ -331,7 +367,8 @@ test.describe("settings > tailscale", () => {
     await expect.poll(() => sent["tailscale.setServe"]).toEqual([{ serve: true }]);
     await expect(toggle).toBeChecked();
     await expect(page.getByText("Active", { exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open" }).first()).toHaveAttribute("href", tailnetUrl);
+    // exact: the status card's "Open access controls" link comes first otherwise.
+    await expect(page.getByRole("link", { name: "Open", exact: true }).first()).toHaveAttribute("href", tailnetUrl);
     await expect(page.getByText(`${machine}:443/ -> unix:/var/lib/seylo/panel/tailnet.sock`)).toBeVisible();
     // Not on the tailnet yet: no chip, and Lock says where to go.
     await expect(page.getByText("You are on the tailnet now")).toHaveCount(0);
@@ -343,6 +380,40 @@ test.describe("settings > tailscale", () => {
     expect(sent["tailscale.setServe"]?.[1]).toEqual({ serve: false });
     await expect(toggle).not.toBeChecked();
     expect(errors).toEqual([]);
+  });
+
+  test("Serve on while tailscaled is gone: the switch stays, so Serve can be turned off", async ({ page }) => {
+    let wanted = true;
+    const gone = () =>
+      status({
+        detected: false,
+        version: null,
+        backendState: null,
+        tailnet: null,
+        dnsName: null,
+        addresses: [],
+        serve: { wanted, state: "off", url: null, message: "", panelAnswers: false },
+      });
+    await installDemo(page, {
+      overrides: {
+        "tailscale.get": gone,
+        "tailscale.setServe": (input) => {
+          wanted = input.serve;
+          return { tailscale: gone(), reopenedUrl: null };
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/tailscale");
+    await expect(page.getByText("Not installed", { exact: true })).toBeVisible();
+    const toggle = page.getByRole("switch", { name: "Serve the panel on my tailnet" });
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
+    await expect.poll(() => sent["tailscale.setServe"]).toEqual([{ serve: false }]);
+    await expect(page.getByText("Tailscale Serve is off for the panel")).toBeVisible();
+    // Off and still not installed: nothing to turn on, so the card goes.
+    await expect(toggle).toHaveCount(0);
   });
 
   test("conflict and waiting states show the agent's words and what is missing", async ({ page }) => {

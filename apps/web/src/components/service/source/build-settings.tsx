@@ -1,9 +1,9 @@
 // How the source is built: Railpack (default), Nixpacks (maintenance mode
 // upstream) or a Dockerfile; paths, command overrides and the build node.
-// Nodes without "Can build" stay in the list, disabled, so the reason a
-// node is not offered is visible.
+// Nodes without "Can build" or docker buildx, or offline, stay in the list,
+// disabled, so the reason a node is not offered is visible.
 
-import { builds, type OpOutput } from "@seylo/ops";
+import { builds, type OpInput, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Input } from "@seylo/ui/components/input";
@@ -21,7 +21,39 @@ import type { ServiceDetail } from "../use-service";
 
 type Settings = OpOutput<typeof builds.getSettings>;
 type Builder = Settings["settings"]["builder"];
+type SettingsInput = OpInput<typeof builds.updateSettings>;
 const auto = "__auto__";
+
+/** Why a node cannot be picked as the build node (builds.updateSettings refuses it); null when it can. */
+export function nodeUnavailable(node: Settings["nodes"][number]) {
+  if (!node.canBuild) return "serviceSource.build.cantBuild" as const;
+  if (node.hasBuildx === false) return "serviceSource.build.noBuildx" as const;
+  if (!node.online) return "serviceSource.build.offline" as const;
+  return null;
+}
+
+/**
+ * What Save sends. The build node goes only when it changed: the panel checks
+ * a new one, and a node that lost buildx (or Can build) since it was picked
+ * must not block saving the other fields.
+ */
+export function settingsInput(
+  serviceId: string,
+  savedNodeId: string | null,
+  buildNodeId: string | null,
+  fields: Required<
+    Pick<SettingsInput, "builder" | "contextPath" | "dockerfilePath" | "installCommand" | "buildCommand" | "startCommand" | "targetStage">
+  >,
+  dockerfileOnly: boolean,
+): SettingsInput {
+  const { targetStage, ...source } = fields;
+  return {
+    serviceId,
+    ...(dockerfileOnly ? {} : source),
+    targetStage,
+    ...(buildNodeId !== savedNodeId ? { buildNodeId } : {}),
+  };
+}
 
 export function BuildSettingsCard({ service, dockerfileOnly = false }: { service: ServiceDetail; dockerfileOnly?: boolean }) {
   const settings = useOp(builds.getSettings, { serviceId: service.id }, { retry: retryOp });
@@ -69,12 +101,15 @@ function BuildForm({ service, data, dockerfileOnly }: { service: ServiceDetail; 
   });
 
   const submit = () =>
-    save.mutate({
-      serviceId: service.id,
-      ...(dockerfileOnly ? {} : { builder, contextPath, dockerfilePath, installCommand, buildCommand, startCommand }),
-      targetStage,
-      buildNodeId,
-    });
+    save.mutate(
+      settingsInput(
+        service.id,
+        s.buildNodeId,
+        buildNodeId,
+        { builder, contextPath, dockerfilePath, installCommand, buildCommand, startCommand, targetStage },
+        dockerfileOnly,
+      ),
+    );
 
   return (
     <form
@@ -149,18 +184,15 @@ function BuildForm({ service, data, dockerfileOnly }: { service: ServiceDetail; 
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={auto}>{t("service.automatic")}</SelectItem>
-              {data.nodes.map((n) => (
-                <SelectItem key={n.id} value={n.id} disabled={!n.canBuild || !n.online}>
-                  {n.name}
-                  {!n.canBuild
-                    ? ` · ${t("serviceSource.build.cantBuild")}`
-                    : !n.online
-                      ? ` · ${t("serviceSource.build.offline")}`
-                      : n.queued > 0
-                        ? ` · ${t("serviceSource.build.queued", { count: n.queued })}`
-                        : ""}
-                </SelectItem>
-              ))}
+              {data.nodes.map((n) => {
+                const why = nodeUnavailable(n);
+                return (
+                  <SelectItem key={n.id} value={n.id} disabled={why !== null}>
+                    {n.name}
+                    {why ? ` · ${t(why)}` : n.queued > 0 ? ` · ${t("serviceSource.build.queued", { count: n.queued })}` : ""}
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         </Field>

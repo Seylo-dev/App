@@ -147,6 +147,7 @@ export default {
     node: "Build node",
     nodeHint: "Automatic uses this service's node when it can build, otherwise the least busy one that can.",
     cantBuild: "can't build",
+    noBuildx: "docker buildx is missing",
     offline: "offline",
     queued: { one: "{count} build queued", other: "{count} builds queued" },
     nextDeploy: "Applies on the next deploy.",

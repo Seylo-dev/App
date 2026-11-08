@@ -180,10 +180,11 @@ test("turning Serve on: the owner from a fresh browser session over HTTP, never 
 });
 
 test("every reason Serve cannot be turned on is a CONFLICT with its details.reason", async () => {
-  const expectBlocked = async (reason: tailscale.ServeBlockedReason) => {
+  const expectBlocked = async (reason: tailscale.ServeBlockedReason, message?: string) => {
     const res = await callOp(panel, tailscale.setServe, { serve: true }, { cookie: owner.cookie });
     expect(res.status).toBe(409);
     expect(res.body.error.details).toMatchObject({ reason });
+    if (message) expect(res.body.error.message).toBe(message);
   };
   await report(null, allCapabilities);
   await expectBlocked("agentTooOld");
@@ -195,10 +196,13 @@ test("every reason Serve cannot be turned on is a CONFLICT with its details.reas
   await expectBlocked("tooOld");
   await report(info({ backendState: "NeedsMachineAuth" }));
   await expectBlocked("needsApproval");
-  for (const backendState of ["NeedsLogin", "Stopped", "Starting"]) {
+  for (const backendState of ["NeedsLogin", "Stopped"]) {
     await report(info({ backendState }));
-    await expectBlocked("notSignedIn");
+    await expectBlocked("notSignedIn", "The server is not signed in to Tailscale. Sign in first.");
   }
+  // Starting is signed in (Sign in refuses it): the message must not send the person there.
+  await report(info({ backendState: "Starting" }));
+  await expectBlocked("notSignedIn", "Tailscale on the server is signed in but not connected yet (Starting). Try again once it is.");
   await report(info({ magicDns: false }));
   await expectBlocked("magicDnsOff");
   await agent.close();

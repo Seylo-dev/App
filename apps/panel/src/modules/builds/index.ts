@@ -84,7 +84,7 @@ function buildNodes(ctx: Parameters<typeof queue.run>[1]) {
     .from(nodes)
     .orderBy(asc(nodes.name))
     .all()
-    .map((n) => ({ ...n, online: ctx.agents.isOnline(n.id), queued: busy.get(n.id) ?? 0 }));
+    .map((n) => ({ ...n, online: ctx.agents.isOnline(n.id), hasBuildx: hasBuildx(ctx, n.id), queued: busy.get(n.id) ?? 0 }));
 }
 
 const getSettings = implement(buildOps.getSettings, (input, ctx) => {
@@ -95,7 +95,8 @@ const getSettings = implement(buildOps.getSettings, (input, ctx) => {
 const updateSettings = implement(buildOps.updateSettings, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (row.kind !== "app" && row.kind !== "cron") throw new OpError("CONFLICT", `A ${row.kind} service is not built.`);
-  if (input.buildNodeId) {
+  // The node it has already is not checked again: that would refuse every other change, and its deploys say why they stop.
+  if (input.buildNodeId && input.buildNodeId !== readSpec(row.spec).build.buildNodeId) {
     const node = ctx.db.select().from(nodes).where(eq(nodes.id, input.buildNodeId)).get();
     if (!node) throw new OpError("NOT_FOUND", "No node with this id.", { field: "buildNodeId" });
     if (!node.canBuild) throw new OpError("BAD_REQUEST", `${node.name} does not have Can build on.`, { field: "buildNodeId" });

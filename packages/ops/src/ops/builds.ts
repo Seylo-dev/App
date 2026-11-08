@@ -43,6 +43,8 @@ export const BuildNode = Type.Object({
   name: Type.String(),
   canBuild: Type.Boolean(),
   online: Type.Boolean(),
+  /** False when the node's agent reports docker buildx missing: builds there fail, and updateSettings refuses it. Agents before 0.2.1 report nothing and count as true. */
+  hasBuildx: Type.Boolean(),
   /** Builds waiting or running there now. */
   queued: Type.Integer({ minimum: 0 }),
 });
@@ -108,7 +110,7 @@ export const updateSettings = defineOp({
   kind: "mutation",
   summary: "Change a service's build settings",
   description:
-    "Changes how a service is built. Omitted fields keep their value. Takes effect on the next deploy. buildNodeId must name a node with Can build on whose agent does not report docker buildx missing, or be null for automatic.",
+    "Changes how a service is built. Omitted fields keep their value. Takes effect on the next deploy. buildNodeId must name a node with Can build on whose agent does not report docker buildx missing, or be null for automatic; the node the service has already is not checked again.",
   input: Type.Object({
     serviceId: Id,
     builder: Type.Optional(Builder),

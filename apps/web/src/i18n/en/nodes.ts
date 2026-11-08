@@ -86,9 +86,10 @@ export default {
     installsDocker: "The command installs Docker when the server has none.",
     buildImages: "Build images on this node",
     buildImagesHint:
-      "Builds get the source code and build-time secrets of the services they build. Untick for servers you do not fully trust.",
-    buildsOn: "The node that joins builds images.",
-    buildsOff: "The node that joins does not build images.",
+      "Builds get the source code and build-time secrets of the services they build. Untick for servers you do not fully trust. A node that joins again (--force) keeps its own Can build setting from the list above.",
+    buildsOn: "A new node that joins builds images. A node that joins again keeps its own Can build setting.",
+    buildsOff:
+      "A new node that joins does not build images. A node that joins again keeps its own Can build setting: turn it off in the list above.",
     changeBuild: "Change",
     insecure:
       "This command connects over plain HTTP (--insecure): anyone on the network path could read the node's traffic. Set a panel domain first, or restart the panel with its agents' TLS port (the installer sets one).",

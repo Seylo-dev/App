@@ -402,8 +402,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "builds.getSettings": (input: Input) => ({
     settings: servicesById[input.serviceId]?.build ?? servicesById[ids.api].build,
     nodes: [
-      { id: de.id, name: de.name, canBuild: true, online: true, queued: 1 },
-      { id: us.id, name: us.name, canBuild: false, online: true, queued: 0 },
+      { id: de.id, name: de.name, canBuild: true, online: true, hasBuildx: true, queued: 1 },
+      { id: us.id, name: us.name, canBuild: false, online: true, hasBuildx: true, queued: 0 },
     ],
   }),
   "metrics.service": (input: Input) => {

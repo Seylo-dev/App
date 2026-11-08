@@ -10594,6 +10594,7 @@
                           "name",
                           "canBuild",
                           "online",
+                          "hasBuildx",
                           "queued"
                         ],
                         "properties": {
@@ -10609,6 +10610,9 @@
                             "type": "boolean"
                           },
                           "online": {
+                            "type": "boolean"
+                          },
+                          "hasBuildx": {
                             "type": "boolean"
                           },
                           "queued": {
@@ -10838,7 +10842,7 @@
       "post": {
         "operationId": "builds.updateSettings",
         "summary": "Change a service's build settings",
-        "description": "Changes how a service is built. Omitted fields keep their value. Takes effect on the next deploy. buildNodeId must name a node with Can build on whose agent does not report docker buildx missing, or be null for automatic.",
+        "description": "Changes how a service is built. Omitted fields keep their value. Takes effect on the next deploy. buildNodeId must name a node with Can build on whose agent does not report docker buildx missing, or be null for automatic; the node the service has already is not checked again.",
         "tags": [
           "builds"
         ],

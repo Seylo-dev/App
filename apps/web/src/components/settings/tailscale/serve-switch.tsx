@@ -23,7 +23,7 @@ import { isReauthCancelled } from "../../../lib/reauth";
 import { invalidateOps } from "../mutation";
 import { toastError } from "../op-state";
 import { SettingRow } from "../page";
-import { serveBlockedReason, type TailscaleStatus } from "./shared";
+import { isConnecting, serveBlockedReason, type TailscaleStatus } from "./shared";
 
 const stateTitles = {
   conflict: "settingsTailscale.serve.conflict",
@@ -50,6 +50,8 @@ export function ServeSwitch({ status }: { status: TailscaleStatus }) {
   });
   const { serve } = status;
   const blocked = serveBlockedReason(status);
+  // The panel says notSignedIn for every state but Running; Starting is signed in already.
+  const blockedText = blocked === "notSignedIn" && isConnecting(status) ? "connecting" : blocked;
   const wanted = setServe.isPending && setServe.variables ? setServe.variables.serve : serve.wanted;
   // On needs the owner and a server that can serve; off is always offered while it is on.
   const canToggle = serve.wanted || (status.canManage && blocked === null);
@@ -61,8 +63,8 @@ export function ServeSwitch({ status }: { status: TailscaleStatus }) {
         description={
           !serve.wanted && !status.canManage
             ? t("settingsTailscale.serve.ownerOnly")
-            : !serve.wanted && blocked
-              ? t(`settingsTailscale.serve.blocked.${blocked}`)
+            : !serve.wanted && blockedText
+              ? t(`settingsTailscale.serve.blocked.${blockedText}`)
               : t("settingsTailscale.serve.toggleHint")
         }
         control={

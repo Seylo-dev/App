@@ -77,7 +77,13 @@ function assertCanServe(ctx: OpContext): { nodeId: string; info: TailscaleInfo }
     throw blocked("needsApproval", "The server waits for approval. Approve it in the Tailscale admin console under Machines first.");
   }
   if (info.backendState !== "Running") {
-    throw blocked("notSignedIn", "The server is not signed in to Tailscale. Sign in first.");
+    // Starting is signed in already: tailscaled has not reached the tailnet yet, and Sign in would refuse.
+    throw blocked(
+      "notSignedIn",
+      signedOutStates.has(info.backendState)
+        ? "The server is not signed in to Tailscale. Sign in first."
+        : `Tailscale on the server is signed in but not connected yet (${info.backendState}). Try again once it is.`,
+    );
   }
   if (!info.magicDns) {
     throw blocked("magicDnsOff", "MagicDNS is off for this tailnet. Turn it on in the Tailscale admin console under DNS first.");

@@ -33,5 +33,8 @@ export default {
   prefillHint: "The shell opens with this command typed in. Check it, then press Enter to run it.",
   prefillTyped: "The command is typed in the shell below. Check it, then press Enter to run it.",
   prefillOff: "Allow host shells to type it into a shell here, or run it over SSH:",
+  prefillOffOwner: "Run it over SSH, or ask the owner to allow host shells here:",
+  prefillUnavailable: "No shell can open on this node right now. Run it over SSH:",
+  prefillCannotOpen: "Your role cannot open host shells. Run it over SSH:",
   prefillCommand: "Install command",
 } as const;

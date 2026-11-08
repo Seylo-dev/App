@@ -29,7 +29,8 @@ function TailscalePage() {
         {(status) => (
           <div className="flex flex-col gap-4">
             <StatusCard status={status} />
-            {status.detected && <ServeSwitch status={status} />}
+            {/* While Serve is on it stays, also with tailscaled gone, so it can be turned off. */}
+            {(status.detected || status.serve.wanted) && <ServeSwitch status={status} />}
             {status.serve.wanted && <LockChecklist status={status} />}
           </div>
         )}

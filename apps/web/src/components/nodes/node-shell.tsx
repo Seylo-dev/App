@@ -9,7 +9,7 @@
 // ready, never with Enter: the person reads it and runs it. Unknown names
 // are dropped by the route's validateSearch.
 
-import { hostShell, tailscale } from "@seylo/ops";
+import { hostShell, type OpOutput, tailscale } from "@seylo/ops";
 import { useOp, useOpClient, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -37,6 +37,14 @@ export type ShellPrefill = keyof typeof shellPrefills;
 
 export function isShellPrefill(value: unknown): value is ShellPrefill {
   return typeof value === "string" && Object.hasOwn(shellPrefills, value);
+}
+
+/** What the prefill note says before the command is typed: why no shell types it here, by cause. */
+export function prefillText(s: Pick<OpOutput<typeof hostShell.status>, "enabled" | "available" | "canOpen" | "canEnable">) {
+  if (!s.enabled) return s.canEnable ? ("nodeShell.prefillOff" as const) : ("nodeShell.prefillOffOwner" as const);
+  if (!s.available) return "nodeShell.prefillUnavailable" as const;
+  if (!s.canOpen) return "nodeShell.prefillCannotOpen" as const;
+  return "nodeShell.prefillHint" as const;
 }
 
 /** The prefill of the nodes route, and a way to drop it from the URL once it is typed. */
@@ -87,7 +95,7 @@ export function NodeShell({ node }: { node: NodeDetail }) {
   const prefillNote = command && (
     <Alert tone="info" title={t("nodeShell.prefillTitle")}>
       <span className="flex flex-col items-start gap-1.5">
-        {typed ? t("nodeShell.prefillTyped") : s.enabled && s.available ? t("nodeShell.prefillHint") : t("nodeShell.prefillOff")}
+        {t(typed ? "nodeShell.prefillTyped" : prefillText(s))}
         <CopyCode code={command} aria-label={t("nodeShell.prefillCommand")} />
       </span>
     </Alert>

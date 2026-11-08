@@ -197,6 +197,48 @@ test.describe("panel access", () => {
       .toEqual([{ onFailure: "stayClosed", savedRecovery: true }, { onFailure: "reopen" }]);
   });
 
+  test("IP access off, opened over the SSH tunnel: the agents' port says why it is locked", async ({ page }) => {
+    const tunnel = {
+      code: "notOnPrivatePath",
+      message: "You opened the panel on http://127.0.0.1:3000. Open https://panel.acme.dev and sign in there, then turn this off from that page.",
+    };
+    await installDemo(page, {
+      overrides: {
+        "settings.panelAccess": () =>
+          access({
+            serveOnIp: false,
+            actual: { ip: "closed", agentPort: "open" },
+            privatePaths: [{ kind: "domain", url: "https://panel.acme.dev", working: true, since: ago(60), usingNow: false }],
+            blocked: [tunnel],
+            agentPortBlocked: [tunnel],
+          }),
+      },
+    });
+    await page.goto("/settings/general");
+    await expect(agentPort(page)).toBeChecked();
+    await expect(agentPort(page)).toBeDisabled();
+    await expect(card(page).getByText("The agents' port stays open for now")).toBeVisible();
+    await expect(card(page).getByText("You opened the panel on http://127.0.0.1:3000.", { exact: false })).toBeVisible();
+  });
+
+  test("keep-closed with the domain the only way in: the domain cannot change, and the card says so first", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "settings.panelAccess": () => access({ serveOnIp: false, onFailure: "stayClosed", actual: { ip: "closed", agentPort: "open" } }),
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await expect(
+      card(page).getByText("The domain is the only way in that works and IP access is set to stay closed, so it cannot change now."),
+    ).toBeVisible();
+    await expect(card(page).getByText("Removing or changing the domain reopens IP access at once")).toHaveCount(0);
+    await card(page).getByLabel("Panel domain").fill("panel2.acme.dev");
+    await expect(card(page).getByRole("button", { name: "Save domain" })).toBeDisabled();
+    await card(page).getByLabel("Panel domain").press("Enter");
+    expect(sent["settings.updateGeneral"]).toBeUndefined();
+  });
+
   test("an admin sees the reasons and cannot choose keep-closed", async ({ page }) => {
     await installDemo(page, {
       overrides: {
