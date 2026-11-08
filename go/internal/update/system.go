@@ -2,9 +2,12 @@ package update
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/seylo-dev/app/go/gen/brand"
@@ -33,6 +36,9 @@ type SystemdSystem struct {
 	Run systemd.Runner
 	// Unit names the guard's transient unit; default GuardUnit.
 	Unit string
+	// AgentUnit is the unit RestartAgent restarts; default
+	// systemd.AgentUnit.
+	AgentUnit string
 }
 
 func (s *SystemdSystem) unit() string {
@@ -45,8 +51,32 @@ func (s *SystemdSystem) unit() string {
 // NewSystemdSystem returns a System that runs the real commands.
 func NewSystemdSystem() *SystemdSystem { return &SystemdSystem{Run: systemd.ExecRunner} }
 
+// RestartAgent runs `systemctl --no-block restart` from inside the agent's
+// own unit. Once systemd starts the restart it stops the unit and kills
+// every process in it, usually before systemctl has exited, so systemctl
+// dying of SIGTERM means the restart is under way: that is success.
+// systemctl missing, an unknown unit or any other exit is an error, and the
+// armed guard restores the old binary.
 func (s *SystemdSystem) RestartAgent(ctx context.Context) error {
-	return s.Run(ctx, io.Discard, "systemctl", "--no-block", "restart", systemd.AgentUnit)
+	unit := s.AgentUnit
+	if unit == "" {
+		unit = systemd.AgentUnit
+	}
+	err := s.Run(ctx, io.Discard, "systemctl", "--no-block", "restart", unit)
+	if err != nil && killedBySIGTERM(err) {
+		return nil
+	}
+	return err
+}
+
+// killedBySIGTERM reports whether err is a command that SIGTERM ended.
+func killedBySIGTERM(err error) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	ws, ok := exit.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGTERM
 }
 
 func (s *SystemdSystem) ArmGuard(ctx context.Context, binary, dataDir string, delay time.Duration) error {
