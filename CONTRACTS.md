@@ -62,7 +62,7 @@ packages use. "Built" means implemented and tested.
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
 | `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 16 checks (kernel, OS, memory, disk, inodes, Docker, cgroups, Docker live-restore, ports 80/443, proxy, route files, DNS, firewall, clock, panel, Wings), read-only Docker socket client | Built (also run against the real test VM) |
-| `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
+| `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
 | `panelapi` | Laptop CLI client for the panel op API (hand-written over the contracts, not generated), saved logins in `~/.config/seylo/config.json`, `SEYLO_PANEL_URL` + `SEYLO_TOKEN` for CI | Built (tested against a fake panel) |
@@ -353,8 +353,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   and a sealed key the master key cannot open stops the panel instead of
   making a new one. Anything that drops `panelId` or `edgeTicketKey` from
   the settings (a new data dir, a restore of another panel's panel.db, a
-  master key rotation that regenerates the edge ticket key) makes every
-  node refuse the panel until it is joined again (`seylo join --force`).
+  master key rotation that regenerates the edge ticket key, together with
+  the agents' TLS key and so the pin) makes every node refuse the panel
+  until it is joined again (`seylo join --force`).
 - Moving to the panel's new address (`agent/move.go`): when
   HelloAccepted names a `panel_url` (https:// only; `panel_pin` empty =
   system roots) that differs from the address the agent dialed, the agent
@@ -966,31 +967,52 @@ Panel:
 - Secrets are sealed with `deps.secrets.seal(value, purpose)` (AES-256-GCM,
   HKDF key per purpose from `master.key`); add new purposes to
   `sealPurposes`. Tokens are stored as SHA-256 hashes only. After a leak,
-  `bun scripts/rotate-master-key.ts` in apps/panel (panel stopped) seals
-  every sealed value of panel.db again under a new `master.key` in one
-  transaction (sealed columns and sealed strings inside JSON such as
-  settings, each purpose found by trying them all; a value no purpose opens
-  aborts with nothing changed), deletes recovery codes (HMACs under the old
-  key) and lists their owners, and replaces `master.key` only after the
-  commit (`master.key.new` until then; a later run finishes or undoes an
-  interrupted one). It refuses to run without exactly one of two flags,
-  because the edge ticket key is also the panel's identity to its nodes
-  (they pin it on the first connect and refuse a panel with another one):
-  `--new-panel-identity` (panel.db leaked, as in a copy of the data dir)
-  drops the edge ticket key and the LB CA and node certificates so the
-  next start makes new ones, keeps `panelId`, and prints every enabled node
-  (name, address) with the re-join steps: a token from Nodes > Add node per
-  node, then that dialog's command with `--force` added, or
-  `sudo seylo join '<url>' --token '<token>' [--pin '<pin>'] --force`
-  on the node; until then the node refuses the panel.
-  `--keep-panel-identity` (only `master.key` leaked, panel.db never did)
-  seals the edge ticket key and the LB CA again like every other value, so
-  nodes keep working. The agents' TLS key stays in both (nodes pin it, and
-  it is not sealed). The panel build also writes it as
-  `apps/panel/dist/rotate-master-key.js`, so on an install it runs from the
-  panel image (`bun apps/panel/dist/rotate-master-key.js` with the panel
-  data dir mounted and `SEYLO_DATA_DIR` set, panel container stopped); the
-  node CLI has no command for it yet.
+  `sudo seylo panel rotate-key --new-panel-identity|--keep-panel-identity`
+  on the panel's node (`go/internal/cli/rotatekey.go`) runs
+  `scripts/rotate-master-key.ts`: it refuses without root, on a node
+  without the panel (no `panel/master.key`/`panel.db` or no panel
+  container) or without exactly one flag; then stops the agent, stops the
+  panel container, runs `bun apps/panel/dist/rotate-master-key.js <flag>
+  --from-cli` from the panel's own image id (`docker run --rm --name
+  seylo-rotate-key --network none`, data dir mounted, `SEYLO_DATA_DIR`
+  set), starts the agent (whose reconcile starts the stopped panel), waits
+  for `/api/health` on the panel's `SEYLO_HOST_PORT` and prints the
+  script's output. Once the agent is stopped every error path starts it
+  again; the script runs in its own process group without the command's
+  context, so Ctrl-C (or SIGHUP) only skips the steps not started yet; a
+  script cut off with `master.key.new` left is run once more. The script
+  (also runnable by hand with the panel stopped) seals every sealed value
+  of panel.db again under a new `master.key` in one transaction (sealed
+  columns and sealed strings inside JSON such as settings, each purpose
+  found by trying them all; a value no purpose opens aborts with nothing
+  changed and the new key files removed), deletes recovery codes (HMACs
+  under the old key) and lists their owners. New key files wait as
+  `master.key.new` and `agent-tls.key.new` until the commit; then
+  `agent-tls.crt` goes, `agent-tls.key.new` replaces `agent-tls.key` and
+  `master.key.new` replaces `master.key` last. A later run that finds
+  `master.key.new` finishes the rotation when any sealed value opens with
+  it (or nothing is sealed), else removes the leftovers and rotates again;
+  the panel's start (`finishInterruptedRotation` in main.ts) finishes a
+  committed one too and refuses to start on one that never committed. The
+  flag is required because the edge ticket key is also the panel's
+  identity to its nodes (they pin it on the first connect and refuse a
+  panel with another one): `--new-panel-identity` (panel.db leaked, as in
+  a copy of the data dir) drops the edge ticket key and the LB CA and node
+  certificates so the next start makes new ones (they are not in the
+  re-seal count), replaces the agents' TLS key (it is in the same copy;
+  its certificate is made again on the next start, so the pin changes),
+  keeps `panelId`, and prints every enabled node with its exact command:
+  `sudo seylo join '<url>' --token '<token>' --pin '<new pin>' --force`
+  with the Add node dialog's URL (`modules/nodes/join-target.ts`, the
+  host and TLS ports from the stored `panelHostPort`/`panelAgentTlsPort`
+  settings), and for the panel's own node
+  `sudo seylo join http://127.0.0.1:<host port> --token '<token>'
+  --can-build --force` (`--can-build` when the node may build); the token
+  is a new one from Nodes > Add node per node, and until then the node
+  refuses the panel. `--keep-panel-identity` (only `master.key` leaked,
+  panel.db never did) seals the edge ticket key and the LB CA again like
+  every other value and leaves `agent-tls.key`, so nodes keep working.
+  The panel build writes the script as `apps/panel/dist/rotate-master-key.js`.
 - Logging: pino JSON with camelCase keys (`opId`, `nodeId`); take the
   logger from deps. Never log secrets, tokens or env values.
 - Config comes from `<SLUG>_*` environment variables (`src/config.ts`);
@@ -1554,7 +1576,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Git and the node's own addresses: a node does not refuse git connections to its own public addresses, and a name the node cannot resolve goes to its HTTP proxy unchecked. Refusing both needs the panel to know every node address (admin-set public address plus the addresses agents report) so an admin's save of a git server on a node records the host, and a node-level opt-in for proxy-only DNS. The panel's address classifier (uptime/targets.ts) also lacks a few ranges netguard has (6to4, IPv4-compatible, fec0::/10, documentation ranges); the node refuses those anyway | Planned for 0.2.1 |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
-| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled by `bun scripts/rotate-master-key.ts --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key and LB CA, so every node is joined again with `seylo join --force`; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
+| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled on the panel's node by `sudo seylo panel rotate-key --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key, LB CA and agents' TLS key, so every node is joined again with the printed `seylo join --force` command and its new pin; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
 
 ### Verification
@@ -1791,7 +1813,9 @@ releasetool's layout (`json.MarshalIndent`, two-space indent);
 with its local release server.
 
 Node CLI on the panel's node: `seylo panel setup-link` writes a new
-setup token and restarts the panel container so it imports it.
+setup token and restarts the panel container so it imports it;
+`seylo panel rotate-key` replaces `master.key` after a leak (TypeScript
+conventions, secrets).
 
 ## Agent hub, node state and desired state
 
