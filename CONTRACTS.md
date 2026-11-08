@@ -1498,6 +1498,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   services count). A push to a stack's repo has no person to check, so it
   may not add references outside the stack other than addresses
   (`compose/references.ts` `assertPushReferences`).
+- A pasted compose file holds its members' `environment:` values, so
+  `compose.get` returns it (`source.yaml`) only to callers with env.view on
+  the stack and every member; anyone else gets an empty yaml with
+  `fileHidden: true`, the same rule env.get applies to the values.
 - Audit events that are not ops: `writeAuditEvent` (`ops/audit.ts`) records
   `mcp.authorizeClient` (the person, with `decision` and `access`) and
   `hostShell.close` (the person, `nodeId`, `nodeName`, `openedAt`,
