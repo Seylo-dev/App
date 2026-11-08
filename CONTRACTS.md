@@ -1086,6 +1086,19 @@ Web:
 - An op the panel answers with NOT_IMPLEMENTED renders "Not built yet" in
   place (`components/query-error.tsx`), never an empty screen.
 
+#### Compression
+
+Neither Bun.serve nor Elysia compresses, so the panel does
+(`http/compress.ts`): the web build writes `.br` (quality 11) and `.gz`
+copies of every compressible file of 1 KiB or more except source maps
+(`apps/web/build/precompress.ts`, a Vite plugin), and `http/static.ts`
+sends the copy the request's Accept-Encoding takes (highest q, brotli on a
+tie; `Vary: Accept-Encoding`). `index.html`, op results (`ops-http.ts`)
+and MCP replies of 1 KiB or more are compressed as they go out (brotli 4,
+else gzip 6). Downloads, streams and WebSockets are left alone. BREACH
+does not apply: an op call signs in only with the session key header or a
+bearer token, which a cross-site page cannot send.
+
 #### Theme and branding injection
 
 The panel rewrites `index.html` on every request

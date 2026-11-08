@@ -9,6 +9,7 @@ import { authenticate, credentialsFrom } from "../../auth/authenticate";
 import type { Principal } from "../../auth/principal";
 import type { Deps } from "../../deps";
 import { clientIp } from "../../http/client-ip";
+import { jsonResponse } from "../../http/compress";
 import { requestOrigin } from "../../http/request-origin";
 import { readPanelName } from "../settings/keys";
 import { readMcpEnabled } from "./keys";
@@ -83,10 +84,11 @@ export async function handleMcp(deps: Deps, request: Request, socketIp: string |
   if (Array.isArray(body)) {
     if (body.length === 0) return Response.json(rpcError(null, -32600, "Empty batch."), { status: 400 });
     const replies = (await Promise.all(body.map((message) => handleMessage(context, message)))).filter((r) => r !== null);
-    return replies.length ? Response.json(replies) : new Response(null, { status: 202 });
+    return replies.length ? jsonResponse(request, replies, new Headers()) : new Response(null, { status: 202 });
   }
   const reply = await handleMessage(context, body);
-  return reply ? Response.json(reply) : new Response(null, { status: 202 });
+  // A tools/list reply is hundreds of KiB of schemas: compressed when the client accepts it.
+  return reply ? jsonResponse(request, reply, new Headers()) : new Response(null, { status: 202 });
 }
 
 interface MessageContext {

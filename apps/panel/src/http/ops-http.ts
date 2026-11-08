@@ -8,6 +8,7 @@ import type { Deps } from "../deps";
 import type { HttpEffects } from "../ops/implement";
 import type { ExecuteOp } from "../ops/pipeline";
 import { clientIp } from "./client-ip";
+import { jsonResponse } from "./compress";
 import { secureSession } from "./https";
 import { isSameOrigin } from "./origin";
 import { requestOrigin } from "./request-origin";
@@ -32,7 +33,7 @@ export function httpOpHandler(execute: ExecuteOp, deps: Pick<Deps, "config" | "d
       http: sessionEffects(headers, secure),
       origin: requestOrigin(request, trusted),
     });
-    if (outcome.ok) return Response.json(outcome.output, { headers });
+    if (outcome.ok) return jsonResponse(request, outcome.output, headers);
     return withRetryAfter(outcome.error, headers);
   };
 }
