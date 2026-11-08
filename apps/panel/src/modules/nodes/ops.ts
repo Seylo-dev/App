@@ -12,11 +12,11 @@ import { joinTokens, type NodeHealthReport, nodes, servicePlacements, updateRuns
 import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
 import { hashToken, prefixedToken } from "../../security/tokens";
-import { getSetting } from "../../settings";
-import { privateIpv4Of, urlHost } from "../domains/lookup";
+import { privateIpv4Of } from "../domains/lookup";
 import { metricsFor } from "../metrics/ingest";
 import { blockedReason } from "../uptime/targets";
 import { joinCommand } from "./join-command";
+import { agentJoinTarget } from "./join-target";
 import { forgetNodeCertificate } from "./lb-tls";
 import { nodeLive } from "./live";
 import { factsOf, toNode, toNodeDetail } from "./view";
@@ -56,66 +56,6 @@ const hostName = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a
 
 function checkName(row: { name: string }, confirmName: string) {
   if (row.name !== confirmName) throw new OpError("BAD_REQUEST", "Type the node's name exactly to confirm.", { field: "confirmName" });
-}
-
-/**
- * The URL agents dial: the panel's domain when it has one, else the panel
- * node's public address (set by the owner or seeded at setup), else its
- * public IPv4, else the address the caller reached the panel at (unless
- * that is loopback), else the panel node's private IPv4. Loopback is the
- * last resort: no other server can dial it.
- */
-export function panelUrl(ctx: Pick<Deps, "db" | "config"> & { origin?: string | null }): string {
-  const domain = getSetting(ctx.db, "panelDomain") ?? null;
-  if (domain) return `https://${domain}`;
-  const port = ctx.config.hostPort ?? ctx.config.port;
-  const panelNode = ctx.db
-    .select({ ipv4: nodes.publicIpv4, ipv6: nodes.publicIpv6, publicAddress: nodes.publicAddress, facts: nodes.facts })
-    .from(nodes)
-    .where(eq(nodes.isPanelNode, true))
-    .get();
-  if (panelNode?.publicAddress) return `http://${urlHost(panelNode.publicAddress)}:${port}`;
-  if (panelNode?.ipv4) return `http://${panelNode.ipv4}:${port}`;
-  // An IPv6-only panel node: its public address, bracketed.
-  if (panelNode?.ipv6) return `http://[${panelNode.ipv6}]:${port}`;
-  const origin = nonLoopbackOrigin(ctx.origin);
-  if (origin) return origin;
-  const privateIp = privateIpv4Of(panelNode?.facts);
-  if (privateIp) return `http://${privateIp}:${port}`;
-  const host = ctx.config.host;
-  return `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`;
-}
-
-/** "http://192.168.1.5:3000" from the request origin, or null for loopback and unknown origins. */
-function nonLoopbackOrigin(origin: string | null | undefined): string | null {
-  if (!origin) return null;
-  try {
-    const url = new URL(origin);
-    const host = url.hostname.replace(/^\[|\]$/g, "");
-    if (host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\./.test(host) || host === "0.0.0.0") return null;
-    return url.origin;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Where a new node's agent dials and how it trusts the panel: the domain
- * over HTTPS with its public certificate; else the agents' TLS port with
- * the panel's pinned key; else plain HTTP, which the join card warns about
- * (anyone on the path could read and inject the agent protocol).
- */
-export function agentJoinTarget(ctx: Pick<Deps, "db" | "config" | "agentTls"> & { origin?: string | null }): {
-  url: string;
-  pin: string | null;
-  insecureTransport: boolean;
-} {
-  const url = panelUrl(ctx);
-  if (url.startsWith("https://")) return { url, pin: null, insecureTransport: false };
-  const host = new URL(url).hostname;
-  if (ctx.agentTls) return { url: `https://${host}:${ctx.agentTls.port}`, pin: ctx.agentTls.pin, insecureTransport: false };
-  const loopback = host === "localhost" || host === "[::1]" || /^127\./.test(host);
-  return { url, pin: null, insecureTransport: !loopback };
 }
 
 const list = implement(nodeOps.list, (_input, ctx) => {

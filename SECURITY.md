@@ -84,6 +84,13 @@ warns when an account already has uid or gid 61000.
 - `setup-token` and `join-token`: the one-time setup link and the panel's
   own node's join token.
 
+If a copy of this folder leaks, run `sudo seylo panel rotate-key
+--new-panel-identity` on the panel's server: it replaces `master.key`, seals
+every secret again, makes new identity keys and a new `agent-tls.key`, and
+prints the `seylo join` command (with the new pin) for each node. With
+`--keep-panel-identity` (only `master.key` leaked) nodes keep working. Both
+delete recovery codes.
+
 On every node, in `/var/lib/seylo/` (owned by root; `agent.key` and
 `state/desired.pb` are mode 0600):
 

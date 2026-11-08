@@ -26,17 +26,31 @@ import (
 
 type fakeUnits struct {
 	calls []string
+	// log, when set, gets every call as "systemctl <call>" too, so a test
+	// sees unit and host commands in one order.
+	log *[]string
+	// fail answers a call ("stop seylo.service") with an error.
+	fail map[string]error
+	// onCall runs after a call is recorded.
+	onCall func(call string)
 }
 
-func (f *fakeUnits) Start(_ context.Context, unit string) error {
-	f.calls = append(f.calls, "start "+unit)
-	return nil
+func (f *fakeUnits) record(call string) error {
+	f.calls = append(f.calls, call)
+	if f.log != nil {
+		*f.log = append(*f.log, "systemctl "+call)
+	}
+	if f.onCall != nil {
+		f.onCall(call)
+	}
+	return f.fail[call]
 }
 
-func (f *fakeUnits) Restart(_ context.Context, unit string) error {
-	f.calls = append(f.calls, "restart "+unit)
-	return nil
-}
+func (f *fakeUnits) Start(_ context.Context, unit string) error { return f.record("start " + unit) }
+
+func (f *fakeUnits) Stop(_ context.Context, unit string) error { return f.record("stop " + unit) }
+
+func (f *fakeUnits) Restart(_ context.Context, unit string) error { return f.record("restart " + unit) }
 
 func (f *fakeUnits) Logs(_ context.Context, unit string, opts systemd.LogsOptions, _ io.Writer) error {
 	f.calls = append(f.calls, "logs "+unit)
@@ -50,21 +64,24 @@ type harness struct {
 	cmds    []string
 	answer  func(cmd string) (string, error)
 	in      string
+	// euid is the user id the commands see (default 1000, not root).
+	euid int
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Setenv(panelapi.EnvConfig, filepath.Join(t.TempDir(), "config.json"))
 	t.Setenv(panelapi.EnvPanelURL, "")
 	t.Setenv(panelapi.EnvToken, "")
-	return &harness{t: t, dataDir: t.TempDir(), units: &fakeUnits{}}
+	return &harness{t: t, dataDir: t.TempDir(), units: &fakeUnits{}, euid: 1000}
 }
 
 func (h *harness) run(args ...string) (string, error) {
 	h.t.Helper()
 	d := &deps{
-		anyOS: true,
-		units: h.units,
-		in:    strings.NewReader(h.in),
+		anyOS:   true,
+		units:   h.units,
+		in:      strings.NewReader(h.in),
+		geteuid: func() int { return h.euid },
 		run: func(_ context.Context, w io.Writer, name string, a ...string) error {
 			cmd := name + " " + strings.Join(a, " ")
 			h.cmds = append(h.cmds, cmd)

@@ -28,11 +28,13 @@ func TestCommands(t *testing.T) {
 	u, calls := recordingUnits("", nil)
 	ctx := context.Background()
 	_ = u.Start(ctx, AgentUnit)
+	_ = u.Stop(ctx, AgentUnit)
 	_ = u.Restart(ctx, AgentUnit)
 	_ = u.Logs(ctx, AgentUnit, LogsOptions{Lines: 50, Follow: true}, io.Discard)
 
 	want := []call{
 		{"systemctl", []string{"start", "seylo.service"}},
+		{"systemctl", []string{"stop", "seylo.service"}},
 		{"systemctl", []string{"restart", "seylo.service"}},
 		{"journalctl", []string{"--unit", "seylo.service", "--no-pager", "--output", "short-iso", "--lines", "50", "--follow"}},
 	}

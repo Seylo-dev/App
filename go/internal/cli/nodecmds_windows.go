@@ -1,8 +1,18 @@
 package cli
 
 import (
+	"context"
+	"io"
+
 	"github.com/spf13/cobra"
+
+	"github.com/seylo-dev/app/go/internal/systemd"
 )
+
+// shieldedRunner is the plain runner here: no node command runs on Windows.
+func shieldedRunner(ctx context.Context, stdout io.Writer, name string, args ...string) error {
+	return systemd.ExecRunner(ctx, stdout, name, args...)
+}
 
 // nodeCommandNames are the commands that run on a node, in help order.
 // The Windows CLI keeps their names so a mistaken `seylo agent` says where
