@@ -3,7 +3,9 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -182,5 +184,74 @@ func TestAgentCrashDuringHealthCheckIsRolledBackOnStart(t *testing.T) {
 		return l == "the agent stopped during the deploy of generation 2 before it was healthy: its containers were removed and generation 1 runs again"
 	}) {
 		t.Fatalf("log = %q", h.logs.text("db"))
+	}
+}
+
+// bindSource is the host file c binds at target.
+func bindSource(t *testing.T, h *harness, name, target string) string {
+	t.Helper()
+	c, ok := h.eng.Get(name)
+	if !ok {
+		t.Fatalf("no container %s", name)
+	}
+	for _, b := range c.Spec.Binds {
+		if src, ok := strings.CutSuffix(b, ":"+target+":ro"); ok {
+			return src
+		}
+	}
+	t.Fatalf("%s binds nothing at %s: %v", name, target, c.Spec.Binds)
+	return ""
+}
+
+// A deploy that changes a file mount and fails leaves the generation that
+// keeps serving with its own file: in recreate mode the rollback starts
+// the old container again, and Docker binds the source path afresh then.
+// Once a generation serves, the files only older ones used go.
+func TestFailedDeployKeepsTheOldFileMount(t *testing.T) {
+	h := newHarness(t)
+	s1 := appSpec("svc", 1, "app:v1")
+	s1.Deploy.Mode = agentv1.DeployMode_DEPLOY_MODE_RECREATE
+	s1.Files = []*agentv1.FileMount{{ContainerPath: "/etc/app.conf", Content: []byte("listen 80\n")}}
+	h.apply(1, s1)
+	if p := h.deployResult("svc", 1); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 1: %v", p)
+	}
+	h.prober.setBad("seylo-svc-2", true) // the new config does not work
+	s2 := cloneSpec(s1, 2, func(s *agentv1.ServiceSpec) { s.Files[0].Content = []byte("listen 8O\n") })
+	h.apply(2, s2)
+	if p := h.deployResult("svc", 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
+		t.Fatalf("gen 2: %v", p)
+	}
+	if got := h.running("svc"); !slices.Equal(got, []string{"seylo-svc-1"}) {
+		t.Fatalf("running = %v", got)
+	}
+	old := bindSource(t, h, "seylo-svc-1", "/etc/app.conf")
+	if data, err := os.ReadFile(old); err != nil || string(data) != "listen 80\n" {
+		t.Fatalf("generation 1 starts with %q (%v), want its own file", data, err)
+	}
+
+	s3 := cloneSpec(s1, 3, func(s *agentv1.ServiceSpec) { s.Files[0].Content = []byte("listen 81\n") })
+	h.apply(3, s3)
+	if p := h.deployResult("svc", 3); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 3: %v", p)
+	}
+	cur := bindSource(t, h, "seylo-svc-3", "/etc/app.conf")
+	if data, err := os.ReadFile(cur); err != nil || string(data) != "listen 81\n" {
+		t.Fatalf("generation 3 binds %q (%v)", data, err)
+	}
+	dir, err := h.layout.ServiceFiles("svc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != SpecHash(s3) {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("files folder holds %v, want only %s", names, SpecHash(s3))
 	}
 }

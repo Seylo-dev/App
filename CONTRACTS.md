@@ -667,6 +667,14 @@ local API, join and resume. The areas:
   generation, sleeping, containers re-attached to another project's
   network, a rollout in flight); it and file mounts are written with
   `state.WriteFileAtomic` (fsync of the file and the folder).
+- File mounts live in `services/<id>/files/<spec hash>/<sha(path)>-<name>`,
+  bound read-only: one folder per spec hash, so every container binds the
+  content it was created with (Docker resolves bind sources again on each
+  start; a deploy that changed a file and failed cannot hand it to the old
+  generation when that one starts again). Folders of hashes no container
+  of the service uses go once a generation serves and the older ones are
+  removed. Files directly in `files/` (agents before 0.2.0-rc.2) are left
+  alone: containers created then bind them; they go with the service.
 - A rollout is recorded (`rolling`: generation, hash, the containers it
   found, the ones recreate mode stops) before it stops or creates
   anything, and cleared once the new generation passed its health check

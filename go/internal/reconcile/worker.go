@@ -432,8 +432,11 @@ func (w *worker) converge(ctx context.Context, spec *agentv1.ServiceSpec, hash s
 	}
 	running := w.running(ctx, mine)
 	if len(running) > 0 || halted {
-		// The desired spec serves: older generations go.
-		w.removeAll(ctx, others, spec.GetContainer().GetStopGracePeriod().AsDuration())
+		// The desired spec serves: older generations go, and so do the
+		// file mounts only they used.
+		if w.removeAll(ctx, others, spec.GetContainer().GetStopGracePeriod().AsDuration()) {
+			w.pruneFiles(hash, mine)
+		}
 	}
 	if w.rec.FailedGeneration != 0 && len(running) > 0 {
 		w.rec.FailedGeneration, w.rec.FailedHash, w.rec.FailedMessage = 0, "", ""
@@ -638,6 +641,18 @@ func (w *worker) removeAll(ctx context.Context, list []docker.Container, grace t
 	wg.Wait()
 	w.forgetReattached(ids)
 	return gone
+}
+
+// pruneFiles drops the file mount folders that neither the desired spec
+// nor any of list uses.
+func (w *worker) pruneFiles(hash string, list []docker.Container) {
+	keep := map[string]bool{hash: true}
+	for _, c := range list {
+		keep[c.Labels[docker.LabelSpecHash]] = true
+	}
+	if err := pruneFiles(w.r.o.Layout, w.id, keep); err != nil {
+		w.log.Warn("removing old file mounts", "err", err)
+	}
 }
 
 // recoverRollout finishes the rollback of a rollout the agent did not see

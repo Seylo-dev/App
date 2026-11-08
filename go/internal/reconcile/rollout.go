@@ -278,9 +278,13 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	// after an agent restart.
 	w.rec.Rolling = nil
 	w.saveRecord()
+	oldGone := true
 	if len(old) > 0 || len(stoppedOld) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_STOPPING_OLD, "")
-		w.removeAll(ctx, append(old, stoppedOld...), grace)
+		oldGone = w.removeAll(ctx, append(old, stoppedOld...), grace)
+	}
+	if oldGone {
+		w.pruneFiles(hash, nil)
 	}
 	if sideBySide {
 		newLive = w.takeCanonicalNames(ctx, renamer, newLive, suffix)
