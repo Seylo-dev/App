@@ -19,7 +19,7 @@ var (
 	}
 	// Kept unless --name or --can-build is given.
 	joinKeepsUnlessFlagged = []string{"node_name", "can_build"}
-	joinKeeps              = []string{"acme_ca", "acme_ca_certificates", "acme_ca_server_name", "no_host_shell"}
+	joinKeeps              = []string{"acme_ca", "acme_ca_certificates", "acme_ca_server_name", "no_host_shell", "git_proxy_resolves"}
 )
 
 // A field added to FileConfig must be sorted into one of the lists above,
@@ -51,6 +51,7 @@ acme_ca_certificates: /etc/ssl/test-ca.pem
 acme_ca_server_name: pebble
 # The owner refused host shells on this server.
 no_host_shell: true
+git_proxy_resolves: true
 future_setting: 42 # a key a newer agent reads
 `
 

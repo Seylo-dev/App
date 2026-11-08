@@ -322,8 +322,8 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `--trust-on-first-use` records the first certificate's pin instead.
 - `seylo join` (`agent.Join`) on a node that has a config.yml (`--force`
   once it joined) keeps every key it does not set: `no_host_shell`,
-  `node_name`, `can_build`, the `acme_ca*` keys and keys this agent does
-  not know, with their comments. It replaces only the connection
+  `git_proxy_resolves`, `node_name`, `can_build`, the `acme_ca*` keys and
+  keys this agent does not know, with their comments. It replaces only the connection
   (`panel_url`, `panel_pin`, `trust_on_first_use`, `insecure_transport`,
   `fallback`), the identity the token gives (`node_id` cleared,
   `join_token`) and the old panel's identity (`panel_id`, `panel_key`,
