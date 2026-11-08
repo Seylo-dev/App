@@ -26,7 +26,8 @@
 # one already is; a pre-release is never made the latest. On a release that
 # is already published it runs the same checks and changes nothing. When a
 # check fails the draft stays, and the output (and GITHUB_STEP_SUMMARY in
-# Actions) says what to do.
+# Actions) says what to do. A published release that is not immutable
+# (GitHub's release immutability is off for the repository) gets a warning.
 #
 # Usage: scripts/release-publish.sh vX.Y.Z[-PRE]
 #        scripts/release-publish.sh --check-image <image>:<tag>[@<digest>]
@@ -418,16 +419,32 @@ check_image "$BRAND_IMAGE" "$version" "$pin" || stop "$todo"
 
 # ---- publish
 
+# Release immutability (Settings > General > Releases): once a release is
+# published, no token, the Draft release job's included, can replace or
+# delete its files or move its tag. Without it a token that writes to the
+# repository can swap install.sh (which `curl ... | sh` runs) on a published
+# release. GitHub applies the setting to releases published after it is on,
+# so this warns (the release is out already) instead of failing.
+warning=
+check_immutable() { # <release json>
+  [ "$(jq -r '.immutable // false' "$1" 2>/dev/null || true)" != true ] || return 0
+  warning="Release $tag is not immutable: a token that can write to $repo can still replace or delete its files (install.sh among them) and move its tag. Turn on release immutability (Settings > General > Releases > Enable release immutability, CONTRIBUTING.md Releases); GitHub applies it to releases published after that."
+  echo "release-publish: warning: $warning" >&2
+  [ "${GITHUB_ACTIONS:-}" != true ] || echo "::warning title=Release is not immutable::$warning"
+}
+
 finish() { # <outcome>
   {
     echo "### $tag: $1"
     echo
     print_checks
+    [ -z "$warning" ] || printf '\nWarning: %s\n' "$warning"
   } >>"$summary"
   echo "release-publish: $tag: $1"
 }
 
 if [ "$draft" != true ]; then
+  check_immutable "$tmp/release.json"
   finish "already published, nothing changed"
   exit 0
 fi
@@ -484,4 +501,10 @@ if ! gh api "${publish[@]}" >"$tmp/published.json" 2>"$tmp/gh.err"; then
 fi
 [ "$(jq -r .draft "$tmp/published.json" 2>/dev/null || true)" = false ] ||
   stop "gh published release $tag ($id), but it still reads as a draft. Check it under Releases, then re-run the Publish job."
+# Read back: immutability is set when the release is published.
+if gh api "repos/$repo/releases/$id" >"$tmp/after.json" 2>"$tmp/gh.err"; then
+  check_immutable "$tmp/after.json"
+else
+  check_immutable "$tmp/published.json"
+fi
 finish "published, $note"

@@ -57,7 +57,8 @@ test-installer: ## install.sh in --root mode against a fake signed release (skip
 	installer/test/run.sh
 	deploy/test/panel-entrypoint.sh
 
-test-release: ## scripts/release-sign.sh and release-publish.sh against fake releases and ghcr.io (skip without minisign or jq)
+test-release: ## No write-token job runs npm (scripts/check-release-workflow.ts); release-sign.sh and release-publish.sh against fake releases and ghcr.io (skip without minisign or jq)
+	bun scripts/check-release-workflow.ts
 	installer/test/release-sign.sh
 	installer/test/release-publish.sh
 
@@ -90,20 +91,34 @@ release-snapshot: ## Build the release binaries and install.sh into dist/ (no pu
 	$(BRAND_ENV) goreleaser release --snapshot --clean --skip=sign,docker,before
 	cp build/install.sh dist/install.sh
 
-release-dry-run: ## goreleaser as a release runs it, publishing nothing: snapshot, one panel image per platform loaded locally, nothing signed
+# goreleaser runs no npm package: the panel image packages apps/web/dist and
+# apps/panel/dist as `make build-ts` left them (in a tag release, the Build
+# and test job's artifact), so the release targets that hold GITHUB_TOKEN run
+# none of the build's npm code. They stop when the build is missing.
+TS_BUILT = test -f apps/web/dist/index.html && test -f apps/panel/dist/main.js || \
+	{ echo "no build in apps/web/dist and apps/panel/dist: run make build-ts first" >&2; exit 1; }
+
+release-dry-run: ## goreleaser as a release runs it, publishing nothing: snapshot, one panel image per platform loaded locally, nothing signed (run make build-ts first)
+	@$(TS_BUILT)
 	$(BRAND_ENV) goreleaser release --snapshot --clean
 
 # The Draft release job of a tag release: everything but the signatures, with
-# no signing key around (the before hooks run every npm build script). The
-# Sign job signs dist/release/ with scripts/release-sign.sh.
-release-draft: ## Draft release from a v* tag, unsigned: goreleaser (draft, image push), manifest.json, dist/release/ (GITHUB_TOKEN, docker login)
+# no signing key around and no npm package run (the web app and the panel are
+# the Build and test job's). The Sign job signs dist/release/ with
+# scripts/release-sign.sh.
+release-draft: ## Draft release from a v* tag, unsigned, of the build in apps/*/dist: goreleaser (draft, image push), manifest.json, dist/release/ (GITHUB_TOKEN, docker login)
 	$(BRAND_ENV) scripts/release-preflight.sh --no-secret-key
+	@$(TS_BUILT)
 	$(BRAND_ENV) goreleaser release --clean
 	$(BRAND_ENV) scripts/release-manifest.sh
 
-# Local fallback for the Draft release and Sign jobs together.
+# Local fallback for the Build and test, Draft release and Sign jobs
+# together, on one machine: it builds the TypeScript itself, with the token
+# and the key around.
 release: ## Signed draft release from a v* tag (GITHUB_TOKEN, MINISIGN_SECRET_KEY, MINISIGN_PASSWORD, docker login)
 	$(BRAND_ENV) scripts/release-preflight.sh
+	bun install --frozen-lockfile
+	bun run build
 	$(BRAND_ENV) goreleaser release --clean
 	$(BRAND_ENV) scripts/release-manifest.sh
 	$(BRAND_ENV) v=$$(jq -r .version dist/metadata.json) && scripts/release-sign.sh sign "$$v" dist/release && \

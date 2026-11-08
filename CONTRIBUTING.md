@@ -53,7 +53,7 @@ A real node agent needs Linux and Docker; see "Tests in a VM" below.
 | `make lint` | `buf lint`, gofmt, `go vet`, staticcheck, Biome, `tsc` |
 | `make breaking` | `buf breaking` against `main` |
 | `make release-snapshot` | Release binaries and `install.sh` into `dist/` (no signing, image or publish) |
-| `make release-dry-run` | goreleaser as a release runs it, in snapshot mode: one panel image per platform loaded into Docker, nothing signed or pushed (`scripts/release-sign.sh` signs) |
+| `make release-dry-run` | goreleaser as a release runs it, in snapshot mode, on the build `make build-ts` left (run that first): one panel image per platform loaded into Docker, nothing signed or pushed (`scripts/release-sign.sh` signs) |
 | `make e2e` | The three-VM end-to-end test (below) |
 
 Before you open a pull request:
@@ -170,16 +170,27 @@ ported from other projects keeps its original notice and is listed in
 ## Releases
 
 Maintainers only. Releases are built by GitHub Actions
-(`.github/workflows/release.yml`) from a pushed `v*` tag, in three jobs:
-the Draft release job builds an unsigned draft release, the Sign job signs
-it, and the Publish job checks the draft on its own and publishes it.
+(`.github/workflows/release.yml`) from a pushed `v*` tag, in four jobs:
+the Build and test job tests the tag and builds the web app and the panel,
+the Draft release job makes an unsigned draft release from that build, the
+Sign job signs it, and the Publish job checks the draft on its own and
+publishes it.
+
+Only the Build and test job runs npm packages (`make install`, `make test`,
+`make build-ts`, about 550 of them). Its token can only read and it gets no
+secret, so a compromised build dependency can spoil the build but cannot
+write to the repository, its releases or ghcr.io. The Draft release job holds
+the token that writes releases and packages: it gets the build as files,
+runs no npm package (goreleaser's before hook only renders `install.sh`, and
+the panel image only packages the built files) and gets no signing secret.
+`scripts/check-release-workflow.ts` (`make test-release`) fails when a job
+that holds a write token or a secret runs bun, npm or node, or when
+goreleaser's hooks do.
 
 The release key is the root of trust for every install and every
-auto-update, so only the Sign job ever sees it. The Draft release job runs
-`bun install` and every npm build script (goreleaser's before hooks), so it
-gets no signing secret at all. The Sign job runs in the `release`
-environment, gets the built files as an artifact, runs no npm, bun or
-goreleaser code, and only hashes, checks and signs them
+auto-update, so only the Sign job ever sees it. The Sign job runs in the
+`release` environment, gets the built files as an artifact, runs no npm, bun
+or goreleaser code, and only hashes, checks and signs them
 (`scripts/release-sign.sh`).
 
 Once, before the first release (owners):
@@ -213,24 +224,35 @@ Once, before the first release (owners):
    Code security), which the link in [SECURITY.md](SECURITY.md) needs, and
    create the `security@seylo.dev` mailbox (or a forward to the maintainers)
    that SECURITY.md names as the fallback channel.
+7. Turn on release immutability (Settings > General > Releases > Enable
+   release immutability). A published release's files and tag can then not
+   be replaced or deleted, also not with a workflow's token. Without it a
+   token that writes to the repository can swap `install.sh` (which
+   `curl ... | sh` runs) on a published release or delete the release.
+   GitHub applies it to releases published after it is on, and drafts stay
+   editable, so the Sign job still attaches its signatures. The Publish job
+   warns on every release that is not immutable.
 
 Each release:
 
 1. Run a dry run on `main`: Actions > Release > Run workflow, or
-   `gh workflow run release.yml -f dry_run=true`. It runs the same checks
-   and builds everything a release attaches (binaries, checksums,
-   `install.sh`, both panel images, the manifest), then hands the files to a
-   second job that signs them with `scripts/release-sign.sh` and a throwaway
-   key made there, as the Sign job does, and publishes nothing. A run
-   started by hand with `dry_run` off is refused: real releases only come
-   from tags.
+   `gh workflow run release.yml -f dry_run=true`. It runs the same Build
+   and test job and builds everything a release attaches from its build
+   (binaries, checksums, `install.sh`, both panel images, the manifest),
+   then hands the files to a third job that signs them with
+   `scripts/release-sign.sh` and a throwaway key made there, as the Sign job
+   does, and publishes nothing. A run started by hand with `dry_run` off is
+   refused: real releases only come from tags.
 2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
-   The Draft release job checks that the tag is on the commit, runs
-   `make install`, `make check-gen` and `make test`, then
-   `make release-draft` for exactly that tag, which makes the draft (nothing
-   signed yet), pushes the image tags (`<version>`, and `latest` unless it
-   is a pre-release) to `ghcr.io/seylo-dev/seylo` and hands the release files
-   to the Sign job as an artifact (kept 14 days). One release runs at a
+   The Build and test job runs `make install`, `make check-gen`,
+   `make test` and `make build-ts` on the tagged commit and hands
+   `apps/web/dist` and `apps/panel/dist` on as an artifact. The Draft
+   release job checks that the tag is on the commit, then runs
+   `make release-draft` for exactly that tag on that build, which makes the
+   draft (nothing signed yet), pushes the image tags (`<version>`, and
+   `latest` unless it is a pre-release) to `ghcr.io/seylo-dev/seylo` and
+   hands the release files to the Sign job as an artifact (kept 14 days).
+   One release runs at a
    time, and a running release is never cancelled by another tag. Re-running
    the job replaces the draft an earlier run made. A `vX.Y.Z-<pre>` tag
    (`v0.1.0-rc.1`) makes a pre-release that installs and the stable update
@@ -298,8 +320,10 @@ publish the draft by hand. Fix the cause on `main`, delete the draft release
 if one was made, delete the tag (`git push origin :refs/tags/v0.1.0` and
 `git tag -d v0.1.0`) and tag again.
 
-`make release` is the local fallback for the Draft release and Sign jobs
-together, on a maintainer's machine that holds the key. It needs the `v*`
+`make release` is the local fallback for the Build and test (without the
+tests), Draft release and Sign jobs together, on a maintainer's machine that
+holds the key: it runs `bun install` and `bun run build` itself, with the
+token and the key around. It needs the `v*`
 tag checked out, `GITHUB_TOKEN`, `MINISIGN_SECRET_KEY` (the path of the key
 file), `MINISIGN_PASSWORD`, `jq`, a `docker login ghcr.io` and a buildx
 builder that builds linux/amd64 and linux/arm64.
@@ -315,6 +339,8 @@ manifest and gathers every release file into `dist/release/`, and
 `scripts/release-sign.sh sign` and `upload` sign and attach the signatures.
 `make release-draft` is the Draft release job's part alone (no key), and
 `make release-dry-run` the goreleaser half of the dry run (no key either).
+Neither runs bun: both package the build `make build-ts` left in
+`apps/web/dist` and `apps/panel/dist`, and stop when there is none.
 
 `scripts/release-publish.sh v0.1.0` is the local fallback for the Publish
 job: the same checks, then the publish, with `gh` logged in to an account
