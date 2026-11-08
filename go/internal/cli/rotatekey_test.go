@@ -252,6 +252,17 @@ func TestRotateKeyStartsTheAgentOnEveryError(t *testing.T) {
 			}
 		}, want: []string{"systemctl stop seylo.service", "docker stop -t 30 c1", "docker run", "docker rm --force seylo-rotate-key", "systemctl start seylo.service"},
 			err: "master.key was replaced, but the script failed afterwards"},
+		// Cut off twice with master.key.new left: the panel's start settles
+		// it (finishes a committed rotation, else removes the file and keeps
+		// the old key), so the message no longer says the panel refuses to start.
+		{name: "the script is cut off twice", edit: func(f *rotateFixture) {
+			f.script = func(context.Context) (string, error) {
+				_ = os.WriteFile(filepath.Join(f.panelDir, "master.key.new"), []byte("k\n"), 0o600)
+				return "", errors.New("docker: signal: killed")
+			}
+		}, want: []string{"systemctl stop seylo.service", "docker stop -t 30 c1", "docker run", "docker rm --force seylo-rotate-key",
+			"docker run", "docker rm --force seylo-rotate-key", "systemctl start seylo.service"},
+			err: "otherwise removes master.key.new and keeps the old key (`seylo panel logs` says which); if the old key stays, run this command again"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRotateFixture(t)

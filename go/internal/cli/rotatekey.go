@@ -183,8 +183,9 @@ func rotatePanelKey(ctx context.Context, d *deps, opts rotateKeyOptions) (err er
 			msg = "master.key was replaced, but the script failed afterwards"
 		}
 		if exists(keyPath + ".new") {
-			msg = "master.key.new is left: the panel finishes the rotation when it starts if the database already uses the new key, " +
-				"and otherwise refuses to start until this command runs again"
+			msg = "master.key.new is left: when the panel starts it finishes the rotation if panel.db already uses the new key, " +
+				"and otherwise removes master.key.new and keeps the old key (`" + brand.Slug + " panel logs` says which); " +
+				"if the old key stays, run this command again"
 		}
 		return fmt.Errorf("the rotation failed (%s): %w", msg, runErr)
 	}

@@ -54,6 +54,8 @@ function parseArgs(args: string[]): { identity: PanelIdentity; fromCli: boolean 
 /** `seylo join` for one node: the panel's own on loopback as the installer joined it, others like the Add node dialog. */
 function joinLine(plan: RejoinPlan, node: RejoinPlan["nodes"][number]): string {
   if (node.panelNode) return `sudo ${slug} join ${plan.localUrl} --token '<token>'${node.canBuild ? " --can-build" : ""} --force`;
+  // The URL could not be worked out here: the placeholders come from the Add node dialog's command.
+  if (!plan.target) return `sudo ${slug} join '<url>' --token '<token>' --pin '<pin>' --force`;
   const { url, pin, insecureTransport } = plan.target;
   return `sudo ${slug} join '${url}' --token '<token>'${pin ? ` --pin '${pin}'` : ""}${insecureTransport ? " --insecure" : ""} --force`;
 }
@@ -67,6 +69,14 @@ function rejoinSteps(plan: RejoinPlan): string[] {
     "the command under the node on that node, with the token in place of <token>:",
     "",
   ];
+  if (!plan.target && plan.nodes.some((n) => !n.panelNode)) {
+    lines.push(
+      `The panel's join URL could not be worked out here (${plan.targetError}). Take <url> and <pin> from`,
+      "the command Nodes > Add node shows (leave out --pin when it has none); if Add node fails too, correct",
+      "the panel node's public address in its settings on the Nodes screen first.",
+      "",
+    );
+  }
   if (plan.nodes.length === 0) lines.push("  (no nodes)");
   for (const node of plan.nodes) {
     lines.push(`  ${node.name}  ${node.address ?? "(no public address known)"}${node.panelNode ? "  (runs the panel)" : ""}`);

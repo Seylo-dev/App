@@ -251,7 +251,7 @@ test("a new-identity run cut off after the commit is finished by the next run, t
   expect(existsSync(file("agent-tls.crt"))).toBe(false);
   expect(existsSync(file("master.key.new"))).toBe(false);
   expect(existsSync(file("agent-tls.key.new"))).toBe(false);
-  expect(result.rejoin?.target.pin).toBe(ensureAgentTls(dir, 3443).pin);
+  expect(result.rejoin?.target?.pin).toBe(ensureAgentTls(dir, 3443).pin);
 });
 
 test("a run cut off before the commit is undone by the next run, which rotates from the old key", () => {
@@ -292,6 +292,32 @@ test("a value sealed with the old key after the commit does not make the next ru
   after.close();
 });
 
+/** The panel node's stored address is no valid host: the Add node URL cannot be worked out. */
+function breakJoinUrl() {
+  const dbs = open();
+  dbs.db.update(nodes).set({ publicAddress: "not a host" }).where(eq(nodes.isPanelNode, true)).run();
+  dbs.close();
+}
+
+test("a join URL that cannot be worked out does not fail the rotation; the plan says why", () => {
+  seed({ agentTls: true });
+  breakJoinUrl();
+  const old = { master: read("master.key"), tls: read("agent-tls.key") };
+  const result = rotateMasterKey(dir, { panelIdentity: "new" });
+  expect(result.rejoin?.target).toBeNull();
+  expect(result.rejoin?.targetError).toBeTruthy();
+  expect(result.rejoin?.nodes.map((n) => n.name)).toEqual(["edge-1", "worker-2"]);
+  expect(result.rejoin?.localUrl).toBe("http://127.0.0.1:3000");
+  expect(read("master.key")).not.toBe(old.master);
+  expect(read("agent-tls.key")).not.toBe(old.tls);
+  expect(existsSync(file("master.key.new"))).toBe(false);
+  expect(existsSync(file("agent-tls.key.new"))).toBe(false);
+  const box = createSecretBox(loadMasterKey(file("master.key"), false));
+  const dbs = open();
+  expect(box.open(dbs.db.select().from(gitCredentials).get()?.secretSealed as string, "git.credential")).toBe("ghp_secret");
+  dbs.close();
+});
+
 describe("the script", () => {
   const script = resolve(import.meta.dir, "../scripts/rotate-master-key.ts");
   const run = (...args: string[]) => {
@@ -328,6 +354,23 @@ describe("the script", () => {
     expect(out.stdout).not.toContain("retired");
     expect(out.stdout).not.toContain("install.seylo.dev");
     expect(out.stdout).toContain("Start the agent now (`sudo systemctl start seylo`); it starts the panel.");
+  });
+
+  test("a join URL it cannot work out: exit 0, the new pin, and the Add node dialog named for the URL", () => {
+    seed({ agentTls: true });
+    breakJoinUrl();
+    const oldKey = read("master.key");
+    const out = run("--new-panel-identity");
+    expect(out.code).toBe(0);
+    expect(read("master.key")).not.toBe(oldKey);
+    const pin = ensureAgentTls(dir, 3443).pin;
+    expect(out.stdout).toContain(`its new pin is ${pin}.`);
+    expect(out.stdout).toContain("The panel's join URL could not be worked out here (");
+    expect(out.stdout).toContain("Take <url> and <pin> from\nthe command Nodes > Add node shows (leave out --pin when it has none)");
+    expect(out.stdout).toContain(
+      "  edge-1  not a host  (runs the panel)\n    sudo seylo join http://127.0.0.1:3000 --token '<token>' --can-build --force\n",
+    );
+    expect(out.stdout).toContain("  worker-2  worker-2.example.com\n    sudo seylo join '<url>' --token '<token>' --pin '<pin>' --force\n");
   });
 
   test("the count it prints leaves out the dropped identity keys", () => {

@@ -986,14 +986,23 @@ Panel:
   columns and sealed strings inside JSON such as settings, each purpose
   found by trying them all; a value no purpose opens aborts with nothing
   changed and the new key files removed), deletes recovery codes (HMACs
-  under the old key) and lists their owners. New key files wait as
-  `master.key.new` and `agent-tls.key.new` until the commit; then
-  `agent-tls.crt` goes, `agent-tls.key.new` replaces `agent-tls.key` and
-  `master.key.new` replaces `master.key` last. A later run that finds
-  `master.key.new` finishes the rotation when any sealed value opens with
-  it (or nothing is sealed), else removes the leftovers and rotates again;
-  the panel's start (`finishInterruptedRotation` in main.ts) finishes a
-  committed one too and refuses to start on one that never committed. The
+  under the old key) and lists their owners. It holds panel.db's write
+  lock (`BEGIN IMMEDIATE`) from before the new key files exist until the
+  commit. New key files wait as `master.key.new` and `agent-tls.key.new`
+  until the commit; then `agent-tls.crt` goes, `agent-tls.key.new`
+  replaces `agent-tls.key` and `master.key.new` replaces `master.key`
+  last. The re-join plan is made inside the transaction, and a join URL
+  that cannot be worked out (a stored address that is no valid host) only
+  turns the other nodes' commands into `'<url>'`/`'<pin>'` placeholders
+  with a line pointing to Nodes > Add node: once the keys are replaced
+  nothing reports the rotation as failed. A later run, and the panel's
+  start (`finishInterruptedRotation` in main.ts, which waits up to 60s for
+  the write lock, so a rotation still running is never taken for a
+  leftover), finish the rotation when `master.key.new` is left and any
+  sealed value opens with it (or nothing is sealed); otherwise the run
+  never committed (or an rc.1 run failed and left the file), and both
+  remove the leftovers: the panel starts on the old key and logs a
+  warning, a run rotates from the old key again. The
   flag is required because the edge ticket key is also the panel's
   identity to its nodes (they pin it on the first connect and refuse a
   panel with another one): `--new-panel-identity` (panel.db leaked, as in
