@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { nodes } from "../src/db/schema";
-import { panelUrl } from "../src/modules/nodes/ops";
+import { panelUrl } from "../src/modules/nodes/join-target";
 import { testPanel } from "./helpers";
 
 const panel = testPanel();

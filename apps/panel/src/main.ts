@@ -8,6 +8,7 @@ import { createLogger } from "./logger";
 import { createPanel } from "./panel";
 import { ensureAgentTls } from "./security/agent-tls";
 import { loadMasterKey } from "./security/master-key";
+import { finishInterruptedRotation } from "./security/rotate-master-key";
 
 // src/main.ts and dist/main.js both sit one level below apps/panel.
 const packageRoot = resolve(import.meta.dir, "..");
@@ -17,6 +18,9 @@ const logger = createLogger(config.logLevel);
 mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
 const panelPath = join(config.dataDir, "panel.db");
 const freshInstall = !existsSync(panelPath);
+// A master-key rotation killed half way: finished here when panel.db is
+// already sealed with the new key; one that never committed stops the panel.
+if (finishInterruptedRotation(config.dataDir)) logger.warn("finished a master-key rotation that stopped before master.key was replaced");
 const masterKey = loadMasterKey(join(config.dataDir, "master.key"), freshInstall);
 const databases = openDatabases({ panelPath, metricsPath: join(config.dataDir, "metrics.db"), migrationsDir: config.migrationsDir });
 

@@ -1,10 +1,11 @@
 // scripts/rotate-master-key.ts on a seeded data dir: every sealed value
 // (columns and sealed fields inside settings) opens with the new key only;
-// with --new-panel-identity the edge ticket key and LB CA are made anew on
-// the next start and the nodes to re-join are listed, with
-// --keep-panel-identity they are sealed again and stay; the script refuses
-// to run without exactly one of the two; recovery codes are cleared with
-// their owners listed; a wrong key or an interrupted run never loses secrets.
+// with --new-panel-identity the edge ticket key, LB CA and agents' TLS key
+// are made anew and the nodes to re-join are listed with their exact
+// `seylo join` commands (the new pin in them), with --keep-panel-identity
+// they are sealed again and stay; the script refuses to run without exactly
+// one of the two; recovery codes are cleared with their owners listed; a
+// wrong key, a failed or an interrupted run never loses secrets.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,6 +16,7 @@ import { issueRecoveryCodes } from "../src/auth/second-factor";
 import { loadConfig } from "../src/config";
 import { openDatabases } from "../src/db/client";
 import { gitCredentials, nodes, recoveryCodes, settings, users } from "../src/db/schema";
+import { ensureAgentTls } from "../src/security/agent-tls";
 import { ensureEdgeTicketKey } from "../src/security/edge-ticket-key";
 import { loadMasterKey } from "../src/security/master-key";
 import { RotationError, rotateMasterKey } from "../src/security/rotate-master-key";
@@ -33,8 +35,12 @@ function open() {
   return openDatabases({ panelPath: join(dir, "panel.db"), metricsPath: join(dir, "metrics.db"), migrationsDir });
 }
 
-/** A data dir with a git token, a sealed setting, the edge ticket key and recovery codes. */
-function seed() {
+/**
+ * A data dir with a git token, a sealed setting, the edge ticket key and
+ * recovery codes; with `agentTls` also the agents' TLS key and the ports the
+ * installed panel stores (host port 3000, agents' TLS port 3443).
+ */
+function seed(options: { agentTls?: boolean } = {}) {
   const key = loadMasterKey(join(dir, "master.key"), true);
   const secrets = createSecretBox(key);
   const dbs = open();
@@ -47,12 +53,20 @@ function seed() {
   ensureEdgeTicketKey(dbs.db, secrets);
   issueRecoveryCodes(dbs.db, secrets, user.id);
   const key32 = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
-  dbs.db.insert(nodes).values({ name: "edge-1", publicKey: key32(), publicIpv4: "203.0.113.7", isPanelNode: true }).run();
+  dbs.db.insert(nodes).values({ name: "edge-1", publicKey: key32(), publicIpv4: "203.0.113.7", isPanelNode: true, canBuild: true }).run();
   dbs.db.insert(nodes).values({ name: "worker-2", publicKey: key32(), publicAddress: "worker-2.example.com" }).run();
   dbs.db.insert(nodes).values({ name: "retired", publicKey: key32(), disabledAt: new Date() }).run();
+  if (options.agentTls) {
+    setSetting(dbs.db, "panelHostPort", 3000);
+    setSetting(dbs.db, "panelAgentTlsPort", 3443);
+  }
   dbs.close();
-  return { key, secrets };
+  const pin = options.agentTls ? ensureAgentTls(dir, 3443).pin : null;
+  return { key, secrets, pin };
 }
+
+const file = (name: string) => join(dir, name);
+const read = (name: string) => readFileSync(file(name), "utf8");
 
 test("--new-panel-identity: every sealed value moves to the new key and the identity keys are made anew", () => {
   const { key: oldKey, secrets: oldBox } = seed();
@@ -65,9 +79,9 @@ test("--new-panel-identity: every sealed value moves to the new key and the iden
 
   const result = rotateMasterKey(dir, { panelIdentity: "new" });
   expect(result.resumed).toBe(false);
-  expect(result.rejoin).toEqual([
-    { name: "edge-1", address: "203.0.113.7", panelNode: true },
-    { name: "worker-2", address: "worker-2.example.com", panelNode: false },
+  expect(result.rejoin?.nodes).toEqual([
+    { name: "edge-1", address: "203.0.113.7", panelNode: true, canBuild: true },
+    { name: "worker-2", address: "worker-2.example.com", panelNode: false, canBuild: false },
   ]);
   expect(result.resealed["git_credentials.secret_sealed"]).toBe(1);
   expect(result.recoveryCodesCleared).toEqual(["owner@example.com"]);
@@ -154,7 +168,7 @@ test("--keep-panel-identity: the edge ticket key and LB CA are sealed again and 
   before.close();
 
   const result = rotateMasterKey(dir, { panelIdentity: "keep" });
-  expect(result.rejoin).toEqual([]);
+  expect(result.rejoin).toBeNull();
   const newBox = createSecretBox(loadMasterKey(join(dir, "master.key"), false));
   const after = open();
   // Same key pair, now readable with the new master key only.
@@ -165,6 +179,116 @@ test("--keep-panel-identity: the edge ticket key and LB CA are sealed again and 
   const ca = after.db.select().from(settings).where(eq(settings.key, "lbTlsCa")).get()?.value as { keySealed: string };
   expect(newBox.open(ca.keySealed, "lb.key")).toBe("ca-key");
   expect(after.db.select().from(recoveryCodes).all()).toHaveLength(0);
+  after.close();
+});
+
+test("--new-panel-identity replaces the agents' TLS key; its certificate is made again on the next start", () => {
+  const { pin: oldPin } = seed({ agentTls: true });
+  const oldKey = read("agent-tls.key");
+  const result = rotateMasterKey(dir, { panelIdentity: "new" });
+  expect(read("agent-tls.key")).not.toBe(oldKey);
+  // The old certificate wrapped the old key: gone, so the panel's start makes one for the new key.
+  expect(existsSync(file("agent-tls.crt"))).toBe(false);
+  expect(existsSync(file("agent-tls.key.new"))).toBe(false);
+  const tls = ensureAgentTls(dir, 3443);
+  expect(tls.pin).not.toBe(oldPin);
+  expect(result.agentTlsPin).toBe(tls.pin);
+  // The re-join target is the Add node dialog's, with the new pin.
+  expect(result.rejoin?.target).toEqual({ url: "https://203.0.113.7:3443", pin: tls.pin, insecureTransport: false });
+  expect(result.rejoin?.localUrl).toBe("http://127.0.0.1:3000");
+});
+
+test("--keep-panel-identity leaves the agents' TLS key and certificate alone", () => {
+  const { pin } = seed({ agentTls: true });
+  const key = read("agent-tls.key");
+  const cert = read("agent-tls.crt");
+  const result = rotateMasterKey(dir, { panelIdentity: "keep" });
+  expect(result.agentTlsPin).toBeNull();
+  expect(read("agent-tls.key")).toBe(key);
+  expect(read("agent-tls.crt")).toBe(cert);
+  expect(ensureAgentTls(dir, 3443).pin).toBe(pin as string);
+});
+
+test("the count leaves out the identity keys a new identity drops", () => {
+  seed();
+  const result = rotateMasterKey(dir, { panelIdentity: "new" });
+  // The edge ticket key and LB CA in settings are deleted, not sealed again.
+  expect(result.resealed).toEqual({ "git_credentials.secret_sealed": 1 });
+});
+
+test("a failed run leaves the old keys and no new key files", () => {
+  seed({ agentTls: true });
+  const dbs = open();
+  // A value no purpose of this master.key opens: the run must stop with nothing changed.
+  const stranger = createSecretBox(crypto.getRandomValues(new Uint8Array(32)));
+  dbs.db
+    .insert(gitCredentials)
+    .values({ name: "foreign", kind: "token", host: "gitlab.com", secretSealed: stranger.seal("x", "git.credential") })
+    .run();
+  dbs.close();
+  const before = { master: read("master.key"), tls: read("agent-tls.key"), cert: read("agent-tls.crt") };
+  expect(() => rotateMasterKey(dir, { panelIdentity: "new" })).toThrow(RotationError);
+  expect({ master: read("master.key"), tls: read("agent-tls.key"), cert: read("agent-tls.crt") }).toEqual(before);
+  expect(existsSync(file("master.key.new"))).toBe(false);
+  expect(existsSync(file("agent-tls.key.new"))).toBe(false);
+});
+
+test("a new-identity run cut off after the commit is finished by the next run, the agents' TLS key included", () => {
+  seed({ agentTls: true });
+  const old = { master: read("master.key"), tls: read("agent-tls.key"), cert: read("agent-tls.crt") };
+  rotateMasterKey(dir, { panelIdentity: "new" });
+  const fresh = { master: read("master.key"), tls: read("agent-tls.key") };
+  // As if the process died after the commit, before any file was replaced.
+  writeFileSync(file("master.key.new"), fresh.master);
+  writeFileSync(file("agent-tls.key.new"), fresh.tls);
+  writeFileSync(file("master.key"), old.master);
+  writeFileSync(file("agent-tls.key"), old.tls);
+  writeFileSync(file("agent-tls.crt"), old.cert);
+  // Whatever flag the next run has, it finishes and still lists the re-joins.
+  const result = rotateMasterKey(dir, { panelIdentity: "keep" });
+  expect(result.resumed).toBe(true);
+  expect({ master: read("master.key"), tls: read("agent-tls.key") }).toEqual(fresh);
+  expect(existsSync(file("agent-tls.crt"))).toBe(false);
+  expect(existsSync(file("master.key.new"))).toBe(false);
+  expect(existsSync(file("agent-tls.key.new"))).toBe(false);
+  expect(result.rejoin?.target.pin).toBe(ensureAgentTls(dir, 3443).pin);
+});
+
+test("a run cut off before the commit is undone by the next run, which rotates from the old key", () => {
+  seed({ agentTls: true });
+  const tls = read("agent-tls.key");
+  writeFileSync(file("master.key.new"), `${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64")}\n`);
+  writeFileSync(file("agent-tls.key.new"), "-");
+  const result = rotateMasterKey(dir, { panelIdentity: "keep" });
+  expect(result.resumed).toBe(false);
+  expect(read("agent-tls.key")).toBe(tls);
+  expect(existsSync(file("agent-tls.key.new"))).toBe(false);
+  const box = createSecretBox(loadMasterKey(file("master.key"), false));
+  const dbs = open();
+  expect(box.open(dbs.db.select().from(gitCredentials).get()?.secretSealed as string, "git.credential")).toBe("ghp_secret");
+  dbs.close();
+});
+
+test("a value sealed with the old key after the commit does not make the next run throw the commit away", () => {
+  const { secrets: oldBox } = seed();
+  const oldText = read("master.key");
+  rotateMasterKey(dir, { panelIdentity: "keep" });
+  const newText = read("master.key");
+  writeFileSync(file("master.key.new"), newText);
+  writeFileSync(file("master.key"), oldText);
+  // A panel started on the old key wrote the first sealed column value again.
+  const dbs = open();
+  dbs.db
+    .update(gitCredentials)
+    .set({ secretSealed: oldBox.seal("rewritten", "git.credential") })
+    .run();
+  dbs.close();
+  expect(rotateMasterKey(dir, { panelIdentity: "keep" }).resumed).toBe(true);
+  expect(read("master.key")).toBe(newText);
+  // The settings sealed in the committed run still open.
+  const after = open();
+  const ca = after.db.select().from(settings).where(eq(settings.key, "lbTlsCa")).get()?.value as { keySealed: string };
+  expect(createSecretBox(loadMasterKey(file("master.key"), false)).open(ca.keySealed, "lb.key")).toBe("ca-key");
   after.close();
 });
 
@@ -187,15 +311,29 @@ describe("the script", () => {
     expect(readFileSync(join(dir, "master.key"), "utf8")).toBe(keyBefore);
   });
 
-  test("--new-panel-identity lists the nodes and the re-join steps", () => {
-    seed();
+  test("--new-panel-identity lists the nodes with the exact re-join command for each, the new pin in it", () => {
+    seed({ agentTls: true });
     const out = run("--new-panel-identity");
     expect(out.code).toBe(0);
-    expect(out.stdout).toContain("edge-1  203.0.113.7  (runs the panel: join it too)");
-    expect(out.stdout).toContain("worker-2  worker-2.example.com");
-    expect(out.stdout).not.toContain("retired");
+    const pin = ensureAgentTls(dir, 3443).pin;
+    expect(out.stdout).toContain(`The agents' TLS key was replaced too; its new pin is ${pin}.`);
     expect(out.stdout).toContain("Nodes > Add node");
-    expect(out.stdout).toContain("join '<url>' --token '<token>' [--pin '<pin>'] --force");
+    // The panel's own node joins on loopback as the installer set it up; the others over the TLS port.
+    expect(out.stdout).toContain(
+      "  edge-1  203.0.113.7  (runs the panel)\n    sudo seylo join http://127.0.0.1:3000 --token '<token>' --can-build --force\n",
+    );
+    expect(out.stdout).toContain(
+      `  worker-2  worker-2.example.com\n    sudo seylo join 'https://203.0.113.7:3443' --token '<token>' --pin '${pin}' --force\n`,
+    );
+    expect(out.stdout).not.toContain("retired");
+    expect(out.stdout).not.toContain("install.seylo.dev");
+    expect(out.stdout).toContain("Start the agent now (`sudo systemctl start seylo`); it starts the panel.");
+  });
+
+  test("the count it prints leaves out the dropped identity keys", () => {
+    seed();
+    const out = run("--new-panel-identity");
+    expect(out.stdout).toContain("New master.key written; 1 sealed values sealed again:\n  git_credentials.secret_sealed: 1\n");
   });
 
   test("--keep-panel-identity says nodes keep working", () => {
@@ -204,5 +342,14 @@ describe("the script", () => {
     expect(out.code).toBe(0);
     expect(out.stdout).toContain("nodes keep working");
     expect(out.stdout).not.toContain("--force");
+  });
+
+  test("--from-cli (seylo panel rotate-key) leaves out the start step the command does itself", () => {
+    seed();
+    const out = run("--keep-panel-identity", "--from-cli");
+    expect(out.code).toBe(0);
+    expect(out.stdout).not.toContain("systemctl start");
+    expect(out.stdout).toContain("Delete old copies of the data dir");
+    expect(run("--from-cli").code).toBe(2);
   });
 });
