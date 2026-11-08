@@ -337,7 +337,7 @@ func TestBadCronKeepsTheDiskTrigger(t *testing.T) {
 func TestUnreadableCronIsReportedOnce(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
 	s := daily(0)
-	s.Cron = "0 4 * * 7"
+	s.Cron = "0 4 * * 8"
 	if err := h.sched.Sync(5, s); err == nil {
 		t.Fatal("day of week 7 must be an error here")
 	}
@@ -383,7 +383,7 @@ func TestUnreadableCronIsReportedOnce(t *testing.T) {
 func TestFixedBeforeReportedIsNotReported(t *testing.T) {
 	h := newHarness(t, time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC))
 	s := daily(0)
-	s.Cron = "0 4 * * 7"
+	s.Cron = "0 4 * * 8"
 	_ = h.sched.Sync(1, s)
 	if err := h.sched.Sync(2, daily(0)); err != nil {
 		t.Fatal(err)

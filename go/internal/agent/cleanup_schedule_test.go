@@ -178,7 +178,7 @@ func TestUnreadableCleanupScheduleIsReported(t *testing.T) {
 	a := startDaemon(t, layout)
 	panel.WaitConnected("")
 	ctx := context.Background()
-	schedule := &agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * 7", Images: true}
+	schedule := &agentv1.CleanupSchedule{Enabled: true, Cron: "0 4 * * 8", Images: true}
 	if _, _, err := a.d.deps.DesiredSync.Sync(ctx, &agentv1.DesiredState{Revision: 3, Settings: &agentv1.NodeSettings{Cleanup: schedule}}); err != nil {
 		t.Fatal(err)
 	}
