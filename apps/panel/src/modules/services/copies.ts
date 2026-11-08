@@ -1,12 +1,14 @@
 // Clone data copies (service_copies rows): what the service page shows
 // about one, and the guard that keeps a clone from deploying (and its
 // source from starting) while the copy reads or writes their folders.
+// Also the guard for a move to another node (services/move.ts) while it
+// copies the service's volumes.
 
 import { OpError, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { serviceCopies } from "../../db/schema";
+import { deployments, serviceCopies } from "../../db/schema";
 
 export type ServiceCopyRow = typeof serviceCopies.$inferSelect;
 export type DataCopy = Static<typeof serviceOps.DataCopy>;
@@ -67,4 +69,43 @@ export function assertNoActiveCopy(db: PanelDb, serviceId: string, options: { an
       : "Its data is being copied to a clone. Wait until the copy ends.",
     { reason: "copying" },
   );
+}
+
+/**
+ * A move of the service to another node that has not ended (services/move.ts);
+ * copying: only while it copies the volumes. During the copy the new node
+ * holds a stopped placement whose folder the copy fills and the old one is
+ * stopped so the copy is consistent; once the new node serves, the old
+ * node's data is deleted.
+ */
+export function activeMove(db: PanelDb, serviceId: string, options: { copying?: boolean } = {}): boolean {
+  return (
+    db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.serviceId, serviceId),
+          eq(deployments.trigger, "move"),
+          options.copying ? eq(deployments.moveCopying, true) : undefined,
+          inArray(deployments.status, ["queued", "building", "deploying"]),
+        ),
+      )
+      .get() !== undefined
+  );
+}
+
+/** activeMove while it copies the volumes. */
+export const moveCopying = (db: PanelDb, serviceId: string): boolean => activeMove(db, serviceId, { copying: true });
+
+/**
+ * CONFLICT while a move copies the service's volumes: starting it, or
+ * changing its nodes or volumes, would run it on (or take away) a folder
+ * the copy is still reading or writing.
+ */
+export function assertNoMoveCopy(db: PanelDb, serviceId: string): void {
+  if (!moveCopying(db, serviceId)) return;
+  throw new OpError("CONFLICT", "Its volumes are being copied to another node. Wait until the move ends, or cancel it.", {
+    reason: "moving",
+  });
 }

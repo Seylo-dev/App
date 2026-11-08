@@ -13,7 +13,7 @@ import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
-import { assertNoActiveCopy } from "./copies";
+import { assertNoActiveCopy, assertNoMoveCopy } from "./copies";
 import { assertNameFree, assertNode, insertService, writeSpec } from "./insert";
 import { entryNodeOf, loadService, nameKey, projectServiceRows, type ServiceRow, toDetail, toSummaries, volumesOf } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
@@ -215,6 +215,8 @@ const setVolumes = implement(serviceOps.setVolumes, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   forbidMemberEdit(row, "volumes");
   if (row.kind === "compose") throw new OpError("CONFLICT", "A stack's volumes come from its compose file.");
+  // A move copies the volumes it read when the copy began, into a placement it already holds.
+  assertNoMoveCopy(ctx.db, row.id);
   const names = input.volumes.map((v) => v.name);
   if (new Set(names).size !== names.length) throw new OpError("BAD_REQUEST", "Volume names must be unique.", { field: "volumes" });
   const paths = input.volumes.map((v) => v.mountPath);
@@ -254,6 +256,8 @@ const setPlacements = implement(serviceOps.setPlacements, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (row.id === panelServiceId) throw new OpError("CONFLICT", "The panel runs once, on the panel node.", { reason: "panel" });
   if (row.kind === "compose") throw new OpError("CONFLICT", "A stack runs where its members run; move the stack instead.");
+  // The move's copy fills a placement on the new node and reads the stopped one on the old.
+  assertNoMoveCopy(ctx.db, row.id);
   const nodeIds = input.placements.map((p) => p.nodeId);
   if (new Set(nodeIds).size !== nodeIds.length) throw new OpError("BAD_REQUEST", "Each node can be listed once.", { field: "placements" });
   for (const id of nodeIds) assertNode(ctx.db, id);
@@ -321,7 +325,10 @@ function members(ctx: OpContext, row: ServiceRow): ServiceRow[] {
 
 const start = implement(serviceOps.start, (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
-  for (const m of members(ctx, row)) assertNoActiveCopy(ctx.db, m.id);
+  for (const m of members(ctx, row)) {
+    assertNoActiveCopy(ctx.db, m.id);
+    assertNoMoveCopy(ctx.db, m.id);
+  }
   if (row.kind !== "compose" && !row.targetDeploymentId) {
     // A clone starts stopped and never deployed: starting it is its first deploy.
     if (!row.stopped) throw new OpError("CONFLICT", "This service was never deployed. Deploy it first.");

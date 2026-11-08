@@ -2249,7 +2249,14 @@ another node with volumes (`services/move.ts`) places the service on the
 new node, stopped, in the same step that stops it on the old one, and
 waits for that desired state before it copies, like a parked clone; a
 failed move removes that placement, and the new node drops the partial
-copy with it. `ServiceDetail.dataCopy` is the
+copy with it. While the move copies (`deployments.moveCopying`),
+`serviceSpecFor` sends the service stopped to both nodes whatever
+`services.stopped` says, and `services.start`, `boxes.open`,
+`services.setPlacements` and `services.setVolumes` refuse it (CONFLICT
+`reason: moving`, `copies.ts` `assertNoMoveCopy`); a clone with
+`data: copy` is refused for the whole move (`reason: moving`), since the
+move deletes the old node's data once the new node serves.
+`ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
 Moves to another project (`services.moveProjectImpact`,
