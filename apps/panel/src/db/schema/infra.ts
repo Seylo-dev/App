@@ -168,9 +168,9 @@ export const updateSteps = sqliteTable(
     finishedAt: timestamp("finished_at"),
     /** Set on an agent step skipped because the node was offline; see UpdateStepRetry. Added in 0002. */
     retry: text("retry").$type<UpdateStepRetry>(),
-    /** The run that updated the node when it reconnected (an update_runs id; runs are never deleted). */
+    /** The run made for the node when it reconnected (an update_runs id; runs are never deleted). */
     retryRunId: text("retry_run_id"),
-    /** When retry last changed from "waiting". */
+    /** When retry last changed from "waiting"; on a waiting step, when the agent's own wait is over (null: on reconnect). */
     retryAt: timestamp("retry_at"),
   },
   (t) => [index("update_steps_run_idx").on(t.runId, t.position), index("update_steps_node_retry_idx").on(t.nodeId, t.retry)],

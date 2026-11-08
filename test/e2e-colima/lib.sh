@@ -148,6 +148,11 @@ api() {
   rm -f "$out"
 }
 
+# panel_migrations: how many migrations this working tree's panel has (the
+# drizzle journal), so as many rows as an up-to-date panel.db records in
+# __drizzle_migrations (check 38 after the upgrade).
+panel_migrations() { jq '.entries | length' "$E2E_ROOT/apps/panel/drizzle/panel/meta/_journal.json"; }
+
 # op_is_query <op>: GET route in openapi.json.
 op_is_query() {
   jq -e --arg p "/api/v1/$1" '.paths[$p].get != null' "$E2E_ROOT/openapi.json" >/dev/null

@@ -35,13 +35,14 @@ import {
   RouteSchema,
   RoutingSchema,
 } from "@seylo/proto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { envPrefix } from "../../config";
-import { deployments, nodes, projects, servicePlacements, services, updateSteps } from "../../db/schema";
+import { deployments, nodes, projects, servicePlacements, services, updateRuns, updateSteps } from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { DesiredContributor } from "../../desired/contributors";
 import { getSetting, setSetting } from "../../settings";
 import { defaultSpec, runSettingsOf, type ServiceSpecJson } from "../services/spec";
+import { runRelease } from "../updates/release-state";
 
 /** Reserved ids, the same as go/internal/docker (PanelProjectID, PanelServiceID). */
 export const panelProjectId = "panelproject0000";
@@ -172,12 +173,18 @@ export function ensurePanelService(deps: Pick<Deps, "db" | "config" | "logger">,
  * at the next generation, and this panel is that image (its version is the
  * running panel step's target). Records it as the live deployment. Returns
  * true when a row changed. Idempotent: a restart later changes nothing.
+ *
+ * The image comes from the manifest of the run that owns the step, so a
+ * check or a switch of the release channel while the image pulled does not
+ * matter. Only a run made before 0.2.0-rc.2 (no manifest of its own) falls
+ * back to the stored check, while that still names this version.
  */
 export function syncPanelImage(deps: Pick<Deps, "db" | "config" | "logger">, now = new Date()): boolean {
   const { db, config } = deps;
-  const step = db
-    .select({ id: updateSteps.id })
+  const owner = db
+    .select({ run: updateRuns })
     .from(updateSteps)
+    .innerJoin(updateRuns, eq(updateRuns.id, updateSteps.runId))
     .where(
       and(
         eq(updateSteps.target, "panel"),
@@ -185,21 +192,15 @@ export function syncPanelImage(deps: Pick<Deps, "db" | "config" | "logger">, now
         eq(updateSteps.toVersion, config.version),
       ),
     )
+    .orderBy(desc(updateRuns.createdAt))
     .get();
-  if (!step) return false;
-  const check = getSetting(db, "updateCheck");
-  if (!check?.manifestBase64 || check.latestVersion !== config.version) return false;
-  let panel: { image?: string; digest?: string } | undefined;
-  try {
-    panel = (JSON.parse(Buffer.from(check.manifestBase64, "base64").toString()) as { panel?: { image?: string; digest?: string } }).panel;
-  } catch {
-    return false;
-  }
-  if (!panel?.image || !panel.digest) return false;
+  if (!owner) return false;
+  const release = runRelease(db, owner.run);
+  if (!release?.panelImage || !release.panelDigest) return false;
+  const image = { reference: release.panelImage, digest: release.panelDigest };
   const svc = db.select().from(services).where(eq(services.id, panelServiceId)).get();
   const live = svc?.targetDeploymentId ? db.select().from(deployments).where(eq(deployments.id, svc.targetDeploymentId)).get() : undefined;
-  if (!svc || !live || live.imageDigest === panel.digest) return false;
-  const image = { reference: panel.image, digest: panel.digest };
+  if (!svc || !live || live.imageDigest === image.digest) return false;
   db.transaction((tx) => {
     tx.update(deployments).set({ status: "superseded" }).where(eq(deployments.id, live.id)).run();
     const generation = live.generation + 1;

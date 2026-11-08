@@ -1213,8 +1213,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. A new
   inline script needs its hash there. Once `panelDomainStatus` is active, page loads on
   any other host (not loopback, not /api) answer 302 to `https://<domain>`. After a successful UpdatePanel the new panel records the
-  release manifest's `panel { image, digest }` at generation + 1 before the
-  flusher starts. Deploy, stop and setPlacements answer CONFLICT `reason: panel`.
+  `panel { image, digest }` of the manifest its update run keeps
+  (`update_runs.manifest`; a run from before rc.2 uses the stored check
+  while it names that version) at generation + 1 before the flusher
+  starts, so a check or a channel switch during the panel step does not
+  matter. Deploy, stop and setPlacements answer CONFLICT `reason: panel`.
 - CLI browser login (`cliLogin.*`): `start` (public) -> user code, device code,
   `/cli/approve?code=` URL (absolute with `OpCall.origin`); a fresh browser session
   approves with a scope and lifetime (`approve`, default 7 days) or denies;
@@ -1630,7 +1633,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by
   version when the node already runs it, is busy updating itself (ABORTED) or
   answers ALREADY_EXISTS, and is skipped with the agent's message when an
-  automatic update waits (FAILED_PRECONDITION with details `backoff`).
+  automatic update waits (FAILED_PRECONDITION with details `backoff`; on a
+  catch-up step also `retry` held or waiting, see Updates).
 
 ### Not built yet
 
@@ -1705,8 +1709,9 @@ update). Checks 32-38 cover the 0.2 features (Docker Hub against the real
 Docker Hub, a Gitea provider with watch paths and `[skip ci]`, the
 disk-triggered cleanup, host shells, clone and project move, Valkey,
 ClickHouse and pgvector) and the update from the 0.1.1 release, built from
-its tag, to this build with real rows (`0001_features` applies, rows and
-keys survive, a cron job saved with 7 for Sunday reads 0 and runs).
+its tag, to this build with real rows (every migration since applies, as
+many as the journal has; rows and keys survive; a cron job saved with 7
+for Sunday reads 0 and runs).
 
 ## Capabilities
 
@@ -2124,16 +2129,30 @@ release, or a run a person starts (Update now, update everything),
 installs it again and clears the record, and a successful update forgets
 it. UpdateAgent carries `automatic` for every run a person did not start.
 
-A node offline when its step comes up is skipped with `retry: waiting`
-(`modules/updates/catch-up.ts`). Every connect queues `updates.catchUp` for
-the node; for its newest waiting step it records `upToDate` (the node runs
-that version or newer), `held` (the node rolled that version back: not
-retried automatically, Update now installs it) or starts a run of trigger
-`reconnect` with one agent step to that run's version and manifest
-(`retried`, `retryRunId`), waiting 30 seconds at a time while another run
-is active. A later run with a step for the node marks older waiting steps
-`superseded`. The agent's own waits end the catch-up step as skipped with
-its message (FAILED_PRECONDITION `backoff`), not as a failure. The steps'
+A node offline when its step comes up, or whose session drops while its
+UpdateAgent is in flight (UNAVAILABLE `offline`), is skipped with `retry:
+waiting` (`modules/updates/catch-up.ts`), and the run goes on. A connect queues `updates.catchUp` only
+when the node has a waiting step (one indexed lookup, so most connects
+write no job); for its newest waiting step the job records `upToDate` (the
+node runs that version or newer), `held` (the node rolled that version
+back: not retried automatically, Update now installs it) or starts a run of
+trigger `reconnect` with one agent step to that run's version and manifest
+(`retried`, `retryRunId`: that run's step says how it went), waiting 30
+seconds at a time while another run is active. A later run with a step for
+the node marks older waiting steps `superseded`. The agent's own waits end
+the catch-up step as skipped with its message (FAILED_PRECONDITION
+`backoff`), not as a failure: `rolledBack` makes it `held`; `failed` makes
+it `waiting` again with `retryAt` the agent's `retryAfter` + 30 s (never
+sooner than 5 minutes, against a slow agent clock, nor later than 24.5
+hours, against one far ahead or a bad value: the agent's longest wait is a
+day) and queues the job for then; connects before that queue nothing. A catch-up step whose node is
+offline again waits for its next reconnect the same way. Steps a panel
+before rc.2 skipped as offline ("it updates itself when it starts", no
+`retry`) are adopted at start (`adoptOldSkips`): a node's newest one
+becomes `waiting` unless a later run has an agent step for the node. Their
+runs kept no manifest, so the catch-up installs the stored release when it
+is the step's version or newer (`held` when the node rolled that one back);
+until a check finds one the step keeps waiting. The steps'
 `retry`, `retryRunId` and `retryAt` and the run's trigger show in the
 history.
 

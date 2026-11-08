@@ -31,7 +31,16 @@ export interface TestPanel extends Panel {
 }
 
 export function testPanel(
-  options: { modules?: readonly PanelModule[]; rateLimiter?: RateLimiter; webDist?: string; proxy?: ProxyTrust; logger?: Logger } = {},
+  options: {
+    modules?: readonly PanelModule[];
+    rateLimiter?: RateLimiter;
+    webDist?: string;
+    proxy?: ProxyTrust;
+    logger?: Logger;
+    /** panel.db on disk, for a test that starts a second panel on it (a restart, with the same masterKey); in memory by default. */
+    panelPath?: string;
+    masterKey?: Uint8Array;
+  } = {},
 ): TestPanel {
   const config = {
     ...loadConfig({}, packageRoot),
@@ -39,9 +48,9 @@ export function testPanel(
     secureCookies: false,
     ...(options.webDist ? { webDist: options.webDist } : { webDist: "/nonexistent" }),
   };
-  const databases = openDatabases({ panelPath: ":memory:", metricsPath: ":memory:", migrationsDir: config.migrationsDir });
-  const masterKey = crypto.getRandomValues(new Uint8Array(32));
-  const panel = createPanel({ config, databases, masterKey, logger: silentLogger(), ...options });
+  const { panelPath = ":memory:", masterKey = crypto.getRandomValues(new Uint8Array(32)), ...rest } = options;
+  const databases = openDatabases({ panelPath, metricsPath: ":memory:", migrationsDir: config.migrationsDir });
+  const panel = createPanel({ config, databases, masterKey, logger: silentLogger(), ...rest });
   return { ...panel, close: () => databases.close() };
 }
 

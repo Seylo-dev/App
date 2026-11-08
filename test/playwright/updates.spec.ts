@@ -45,8 +45,31 @@ const step = (over: Record<string, unknown>) => ({
 });
 
 const at = new Date(Date.now() - 3 * 3600_000).toISOString();
+const soon = new Date(Date.now() + 40 * 60_000).toISOString();
 const history = {
   runs: [
+    {
+      id: "run000000000003",
+      targetVersion: "0.9.4",
+      trigger: "reconnect",
+      status: "succeeded",
+      startedBy: null,
+      error: null,
+      createdAt: at,
+      finishedAt: at,
+      doneSteps: 1,
+      totalSteps: 1,
+      steps: [
+        step({
+          id: "w1",
+          nodeName: "nl-ams-1",
+          status: "skipped",
+          error: "Updating to 0.9.4 failed less than an hour ago; automatic updates to it wait until 2026-11-08 12:30 UTC.",
+          retry: "waiting",
+          retryAt: soon,
+        }),
+      ],
+    },
     {
       id: "run000000000002",
       targetVersion: "0.9.4",
@@ -144,13 +167,17 @@ test.describe("updates", () => {
     await installDemo(page, { overrides: { "updates.status": () => ({ ...updateStatus, activeRun: null }), "updates.history": () => history } });
     await page.goto("/settings/updates");
     const table = page.getByRole("table", { name: "History" });
-    await expect(table.getByText("Node came back")).toBeVisible();
+    await expect(table.getByText("Node came back")).toHaveCount(2);
     const retried = table.getByLabel(/^us-ash-1: Skipped\./);
     await retried.hover();
-    await expect(page.getByRole("tooltip", { name: /It came back and was updated in a run of its own/ })).toBeVisible();
+    await expect(page.getByRole("tooltip", { name: /It came back and got a run of its own .*"Node came back" run/ })).toBeVisible();
     const waiting = table.getByLabel(/^sg-sin-1: Skipped\./);
     await waiting.focus();
     await expect(page.getByRole("tooltip", { name: /It gets 0\.9\.4 when it reconnects\./ })).toBeVisible();
+    // A catch-up the agent asked to wait: its message, and when the panel tries again.
+    const later = table.getByLabel(/^nl-ams-1: Skipped\./);
+    await later.focus();
+    await expect(page.getByRole("tooltip", { name: /Updating to 0\.9\.4 failed less than an hour ago.*the panel tries 0\.9\.4 again after/ })).toBeVisible();
     await page.screenshot({ path: `${shots}/history.png` });
   });
 

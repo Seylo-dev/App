@@ -64,7 +64,7 @@ export default {
   updates: {
     title: "Updates",
     autoUpdate: "Auto-update the panel and all nodes",
-    hint: "The panel updates first, then nodes one at a time. A node that was off updates itself before it reconnects.",
+    hint: "The panel updates first, then nodes one at a time. A node that was offline gets the update when it reconnects.",
     rollingOut: "Rolling out v{version} · {done} of {total} done",
     upToDate: "v{version} · up to date",
     updateTo: "Update to v{version}",

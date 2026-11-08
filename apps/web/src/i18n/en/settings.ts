@@ -150,7 +150,8 @@ export default {
     wasOffline: "The node was offline.",
     retry: {
       waiting: "It gets {version} when it reconnects.",
-      retried: "It came back and was updated in a run of its own ({when}).",
+      waitingUntil: "Its agent asked to wait, so the panel tries {version} again after {when}.",
+      retried: 'It came back and got a run of its own ({when}). The "Node came back" run in this list shows how it went.',
       held: "It came back but had rolled {version} back, so it was not retried. Update now installs it.",
       superseded: "A later update run included it.",
       upToDate: "It came back already running {version} or newer.",

@@ -8,8 +8,10 @@
 //                or a durable UpdateResult arrives
 //   agent step   UpdateAgent with the verified manifest; done when the node
 //                reconnects with the target version or an UpdateResult arrives;
-//                an offline node is skipped with retry "waiting" and gets the
-//                update in a run of its own when it reconnects (catch-up.ts)
+//                a node offline when the step comes up, or that drops while
+//                UpdateAgent is in flight, is skipped with retry "waiting" and
+//                gets the update in a run of its own when it reconnects
+//                (catch-up.ts)
 //   docker step  single-step runs from nodes.updateDocker, finished by UpdateResult
 //
 // A run keeps the verified manifest it installs (update_runs.manifest), so a
@@ -40,7 +42,7 @@ import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { enqueueNext } from "../nodes/recurring";
 import { fetchRelease, ReleaseError } from "./manifest";
-import { releaseChannel, storedCheck } from "./release-state";
+import { type RunRelease, releaseChannel, runRelease, storedCheck, storedRelease } from "./release-state";
 import { forgetRollback, noteUpdateResult, panelKey, panelNodeId, wasRolledBack } from "./rollbacks";
 import "./settings";
 
@@ -183,54 +185,6 @@ export async function checkNow(deps: Pick<Deps, "db" | "logger">): Promise<void>
   }
 }
 
-/** A verified release as a run installs it. */
-export interface RunRelease {
-  version: string;
-  manifest: Uint8Array;
-  signature: Uint8Array;
-  manifestBase64: string;
-  signatureBase64: string;
-  panelImage: string;
-  panelDigest: string;
-}
-
-function decodeRelease(version: string, manifestBase64: string, signatureBase64: string): RunRelease {
-  const bytes = Buffer.from(manifestBase64, "base64");
-  const manifest = JSON.parse(bytes.toString()) as { panel?: { image?: string; digest?: string } };
-  return {
-    version,
-    manifest: new Uint8Array(bytes),
-    signature: new Uint8Array(Buffer.from(signatureBase64, "base64")),
-    manifestBase64,
-    signatureBase64,
-    panelImage: manifest.panel?.image ?? "",
-    panelDigest: manifest.panel?.digest ?? "",
-  };
-}
-
-function storedRelease(db: PanelDb): RunRelease {
-  const check = storedCheck(db);
-  if (!check?.latestVersion || !check.manifestBase64 || !check.signatureBase64) {
-    throw new OpError("CONFLICT", "No verified release is known yet. Check for updates first.");
-  }
-  return decodeRelease(check.latestVersion, check.manifestBase64, check.signatureBase64);
-}
-
-/**
- * The release a run installs: its own copy of the manifest, else (runs made
- * before 0.2.0-rc.2) the stored release while it is still that version.
- * Null when neither is there.
- */
-export function runRelease(db: PanelDb, run: RunRow): RunRelease | null {
-  if (run.manifest && run.manifestSignature) return decodeRelease(run.targetVersion, run.manifest, run.manifestSignature);
-  try {
-    const stored = storedRelease(db);
-    return stored.version === run.targetVersion ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Inserts a run with its steps and queues the job that advances it. A new
  * agent step for a node supersedes its older steps still waiting for it to
@@ -366,8 +320,42 @@ function panelService(db: PanelDb, panelNodeId: string): string | null {
   );
 }
 
+/** The panel never tries again sooner than this after an agent's wait, so an agent whose clock is behind cannot make it loop. */
+export const minAgentWaitMs = 5 * 60_000;
+/**
+ * Nor later than this: the agent's longest wait is a day (and a rolled-back
+ * release is held, not waited for), so a retryAfter past it is a clock far
+ * ahead or a bad value. The catch-up then asks again and waits anew.
+ */
+export const maxAgentWaitMs = 24 * 3_600_000 + 30 * 60_000;
+
+/**
+ * A catch-up step (run trigger "reconnect", catch-up.ts) the agent answered
+ * with its own wait. A release rolled back there is held, like the panel's
+ * own rollback record. One whose automatic update failed there within the
+ * hour waits again (retry "waiting") until the agent's retryAfter (between
+ * minAgentWaitMs and maxAgentWaitMs from now), and the catch-up job is
+ * queued for then.
+ */
+function agentWait(deps: Pick<Deps, "jobs">, step: StepRow, backoff: string, retryAfter: string | undefined): Partial<StepRow> {
+  const now = Date.now();
+  if (backoff === "rolledBack") return { retry: "held", retryAt: new Date(now) };
+  const until = Date.parse(retryAfter ?? "");
+  const wanted = Number.isNaN(until) ? now + 3_600_000 : until + 30_000;
+  const retryAt = new Date(Math.min(Math.max(wanted, now + minAgentWaitMs), now + maxAgentWaitMs));
+  deps.jobs.enqueue(
+    "updates.catchUp",
+    { nodeId: step.nodeId },
+    { runAt: retryAt, dedupeKey: `updates.catchUp:${step.nodeId}:wait:${step.id}` },
+  );
+  return { retry: "waiting", retryAt };
+}
+
 /** Advances a run by one step. Returns the delay before the job should look again, or null when the run is over. */
-export async function advanceRun(ctx: Pick<Deps, "db" | "agents" | "config" | "logger" | "live">, runId: string): Promise<number | null> {
+export async function advanceRun(
+  ctx: Pick<Deps, "db" | "agents" | "config" | "logger" | "live" | "jobs">,
+  runId: string,
+): Promise<number | null> {
   const db = ctx.db;
   const run = db.select().from(updateRuns).where(eq(updateRuns.id, runId)).get();
   if (run?.status !== "running") return null;
@@ -473,10 +461,20 @@ export async function advanceRun(ctx: Pick<Deps, "db" | "agents" | "config" | "l
         });
       } catch (error) {
         const details = error instanceof OpError ? error.details : undefined;
+        // The node dropped while the call was in flight: like a node offline
+        // when its step came up, it gets the update when it reconnects.
+        if (details?.reason === "offline" && !ctx.agents.isOnline(step.nodeId)) {
+          finishStep(db, step.id, "skipped", offlineSkipMessage, { retry: "waiting" });
+          publish();
+          return 0;
+        }
         // An automatic update of a release the agent rolled back, or that
         // failed there within the hour, waits (UpdateAgentRequest.automatic).
         if (details?.agentStatus === "FAILED_PRECONDITION" && details.backoff) {
-          finishStep(db, step.id, "skipped", (error as OpError).message);
+          const retry = run.trigger === "reconnect" ? agentWait(ctx, step, details.backoff, details.retryAfter) : {};
+          // Go error text starts in lower case; the history shows it as a sentence.
+          const message = (error as OpError).message;
+          finishStep(db, step.id, "skipped", message.charAt(0).toUpperCase() + message.slice(1), retry);
           publish();
           return 0;
         }

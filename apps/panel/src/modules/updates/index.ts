@@ -9,7 +9,7 @@ import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
 import { setSetting } from "../../settings";
 import { defineModule } from "../module";
-import { catchUpJob, queueCatchUp } from "./catch-up";
+import { adoptOldSkips, catchUpJob, queueCatchUp } from "./catch-up";
 import { testReleaseOverrides } from "./manifest";
 import { releaseChannel } from "./release-state";
 import {
@@ -78,7 +78,10 @@ function start(deps: Deps) {
   deps.agents.onEvent("updateResult", (nodeId, result, _event, meta) => {
     if (meta.durable) applyUpdateResult(deps, nodeId, result);
   });
-  // A node that was offline during a run gets its update when it is back.
+  // A node that was offline during a run gets its update when it is back,
+  // also one a panel before 0.2.0-rc.2 skipped (before any node connects).
+  const adopted = adoptOldSkips(deps.db);
+  if (adopted > 0) deps.logger.info({ steps: adopted }, "update steps skipped as offline before rc.2 now wait for their node");
   deps.agents.onConnection((nodeId, online) => {
     if (online) queueCatchUp(deps, nodeId);
   });
