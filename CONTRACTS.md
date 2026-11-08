@@ -971,7 +971,10 @@ Panel:
   on the panel's node (`go/internal/cli/rotatekey.go`) runs
   `scripts/rotate-master-key.ts`: it refuses without root, on a node
   without the panel (no `panel/master.key`/`panel.db` or no panel
-  container) or without exactly one flag; then stops the agent, stops the
+  container), without exactly one flag, or when the panel's image is a
+  release before 0.2.0-rc.2 (its `org.opencontainers.image.version`
+  label; that script rejects `--from-cli`, so it says to update the panel
+  first; `dev` or no label runs); then stops the agent, stops the
   panel container, runs `bun apps/panel/dist/rotate-master-key.js <flag>
   --from-cli` from the panel's own image id (`docker run --rm --name
   seylo-rotate-key --network none`, data dir mounted, `SEYLO_DATA_DIR`

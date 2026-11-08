@@ -37,11 +37,13 @@ type rotateFixture struct {
 	// script answers `docker run` (the rotation script): its output and error.
 	script func(ctx context.Context) (string, error)
 	runs   int
+	// imageVersion is the panel image's org.opencontainers.image.version label.
+	imageVersion string
 }
 
 func newRotateFixture(t *testing.T) *rotateFixture {
 	t.Helper()
-	f := &rotateFixture{h: newHarness(t)}
+	f := &rotateFixture{h: newHarness(t), imageVersion: "0.2.0-rc.2"}
 	f.h.euid = 0
 	f.status.Store(http.StatusOK)
 	f.health = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +81,10 @@ func newRotateFixture(t *testing.T) *rotateFixture {
 				"ui1\ttrue\t2026-11-09T00:00:00Z\tsha256:ui\t{\"seylo.role\":\"db-ui\"}\t[]", u.Port()), nil
 		case strings.HasPrefix(cmd, "docker container inspect --format {{.State.Running}} seylo-rotate-key"):
 			return "", errors.New("Error: No such object: seylo-rotate-key")
+		case cmd == "docker image inspect --format {{json .Config.Labels}} sha256:img2":
+			return fmt.Sprintf(`{"org.opencontainers.image.title":"panel","org.opencontainers.image.version":%q}`, f.imageVersion), nil
+		case strings.HasPrefix(cmd, "docker image inspect"):
+			return "", fmt.Errorf("inspected the wrong image: %s", cmd)
 		case strings.HasPrefix(cmd, "docker run"):
 			f.runs++
 			return f.script(context.Background())
@@ -146,6 +152,22 @@ func TestRotateKeyRefuses(t *testing.T) {
 				return answer(cmd)
 			}
 		}, want: "this node does not run the panel: no panel container"},
+		// The installer's "Already installed" path and a rolled back panel
+		// update leave this binary next to an older panel image, whose
+		// script rejects --from-cli with its usage text.
+		{name: "an rc.1 panel image", args: []string{"--keep-panel-identity"}, setup: func(f *rotateFixture) { f.imageVersion = "0.2.0-rc.1" },
+			want: "the panel runs 0.2.0-rc.1, whose image has no rotate-key support (it needs 0.2.0-rc.2 or newer); update the panel first (Settings > Updates)"},
+		{name: "a 0.1 panel image", args: []string{"--new-panel-identity"}, setup: func(f *rotateFixture) { f.imageVersion = "0.1.1" },
+			want: "the panel runs 0.1.1, whose image has no rotate-key support"},
+		{name: "the panel's image cannot be inspected", args: []string{"--new-panel-identity"}, setup: func(f *rotateFixture) {
+			answer := f.h.answer
+			f.h.answer = func(cmd string) (string, error) {
+				if strings.HasPrefix(cmd, "docker image inspect") {
+					return "", errors.New("Error: No such image: sha256:img2")
+				}
+				return answer(cmd)
+			}
+		}, want: "inspecting the panel's image sha256:img2"},
 		{name: "a rotation still running", args: []string{"--new-panel-identity"}, setup: func(f *rotateFixture) {
 			answer := f.h.answer
 			f.h.answer = func(cmd string) (string, error) {
@@ -399,8 +421,37 @@ func TestFindPanelContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ := url.Parse(f.health.URL)
-	if p.image != "sha256:img2" || strings.Join(p.running, ",") != "c1" || fmt.Sprint(p.hostPort) != u.Port() {
+	if p.image != "sha256:img2" || strings.Join(p.running, ",") != "c1" || fmt.Sprint(p.hostPort) != u.Port() || p.version != "0.2.0-rc.2" {
 		t.Fatalf("panel = %+v", p)
+	}
+}
+
+// Releases before rotate-key are refused; newer ones and builds without a
+// release version ("dev", no label) run.
+func TestRotateSupported(t *testing.T) {
+	for _, v := range []string{"0.2.0-rc.2", "0.2.0-rc.10", "0.2.0", "v0.2.1", "1.0.0", "dev", ""} {
+		if err := rotateSupported(v); err != nil {
+			t.Errorf("%q: %v", v, err)
+		}
+	}
+	for _, v := range []string{"0.2.0-rc.1", "v0.2.0-rc.1", "0.1.1", "0.1.0"} {
+		if err := rotateSupported(v); err == nil || !strings.Contains(err.Error(), "update the panel first") {
+			t.Errorf("%q: err = %v", v, err)
+		}
+	}
+}
+
+// A current panel image runs the rotation; a dev build (no release label) too.
+func TestRotateKeyRunsOnACurrentOrDevImage(t *testing.T) {
+	for _, v := range []string{"0.2.0-rc.2", "0.2.0", "dev", ""} {
+		f := newRotateFixture(t)
+		f.imageVersion = v
+		if _, err := f.h.run("panel", "rotate-key", "--keep-panel-identity"); err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+		if f.runs != 1 {
+			t.Fatalf("%q: the script ran %d times", v, f.runs)
+		}
 	}
 }
 
