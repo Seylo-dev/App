@@ -293,7 +293,7 @@ func TestITRolloutUnhealthyRollback(t *testing.T) {
 	e.settle()
 	name4 := docker.ContainerName(id, 4, 0)
 	d, err := e.eng.InspectContainer(context.Background(), name4)
-	if err != nil || d.Image != "docker.io/library/busybox@"+dg {
+	if err != nil || d.Image != "docker.io/library/busybox:1.37@"+dg {
 		t.Fatalf("rollback image = %q, %v", d.Image, err)
 	}
 	if got := get(t, e.ip(name4, "p")); got != "v1" {

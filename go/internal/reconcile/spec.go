@@ -86,8 +86,11 @@ func replicas(s *agentv1.ServiceSpec) int {
 	return int(s.GetReplicas())
 }
 
-// ImageRef returns the reference to run: repo@digest when the spec pins a
-// digest (exact rollbacks), else the reference as given.
+// ImageRef returns the reference to run: repo:tag@digest when the spec
+// pins a digest, else the reference as given. Docker resolves the digest
+// and ignores the tag, so the digest decides what runs (exact rollbacks);
+// the tag only names the container's image, so docker ps shows repo:tag
+// where a digest-only reference shows a bare image id.
 func ImageRef(img *agentv1.ImageRef) (string, error) {
 	ref := img.GetReference()
 	dg := img.GetDigest()
@@ -104,7 +107,11 @@ func ImageRef(img *agentv1.ImageRef) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parsing image reference %q: %w", ref, err)
 	}
-	return reference.TrimNamed(named).String() + "@" + dg, nil
+	out := reference.TrimNamed(named).String()
+	if tagged, ok := named.(reference.Tagged); ok {
+		out += ":" + tagged.Tag()
+	}
+	return out + "@" + dg, nil
 }
 
 // fileName is the on-disk name of a file mount: a short hash of the

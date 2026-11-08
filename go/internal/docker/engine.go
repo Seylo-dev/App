@@ -114,6 +114,9 @@ var (
 	ErrNotFound    = errors.New("docker: not found")
 	ErrConflict    = errors.New("docker: conflict")
 	ErrUnavailable = errors.New("docker: daemon unavailable")
+	// ErrRemoving: the container is being removed, so it cannot be
+	// connected to or disconnected from a network any more.
+	ErrRemoving = errors.New("docker: container is being removed")
 )
 
 // StatsResponse is one usage sample, exactly as the Docker API returns it.

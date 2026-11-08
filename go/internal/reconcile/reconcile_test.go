@@ -68,8 +68,13 @@ func TestImageRef(t *testing.T) {
 		ref, digest, want string
 	}{
 		{"nginx:1.27", "", "nginx:1.27"},
-		{"nginx:1.27", "sha256:" + strings.Repeat("a", 64), "docker.io/library/nginx@sha256:" + strings.Repeat("a", 64)},
-		{"127.0.0.1:5755/svc:4", "sha256:" + strings.Repeat("b", 64), "127.0.0.1:5755/svc@sha256:" + strings.Repeat("b", 64)},
+		// The tag stays next to the digest, so docker ps shows repo:tag.
+		{"nginx:1.27", "sha256:" + strings.Repeat("a", 64), "docker.io/library/nginx:1.27@sha256:" + strings.Repeat("a", 64)},
+		{"127.0.0.1:5755/svc:4", "sha256:" + strings.Repeat("b", 64), "127.0.0.1:5755/svc:4@sha256:" + strings.Repeat("b", 64)},
+		{"ghcr.io/seylo-dev/seylo:0.2.0-rc.2", "sha256:" + strings.Repeat("c", 64), "ghcr.io/seylo-dev/seylo:0.2.0-rc.2@sha256:" + strings.Repeat("c", 64)},
+		{"127.0.0.1:5755/svc", "sha256:" + strings.Repeat("d", 64), "127.0.0.1:5755/svc@sha256:" + strings.Repeat("d", 64)},
+		// The spec's digest wins over one in the reference.
+		{"nginx:1.27@sha256:" + strings.Repeat("e", 64), "sha256:" + strings.Repeat("f", 64), "docker.io/library/nginx:1.27@sha256:" + strings.Repeat("f", 64)},
 	}
 	for _, c := range cases {
 		got, err := ImageRef(&agentv1.ImageRef{Reference: c.ref, Digest: c.digest})
@@ -200,7 +205,7 @@ func TestRollbackToOldDigest(t *testing.T) {
 		t.Fatalf("rollback: %v", p)
 	}
 	c, ok := h.eng.Get("seylo-svc-3")
-	if !ok || c.Spec.Image != "registry.test/app@"+dig1 {
+	if !ok || c.Spec.Image != "registry.test/app:latest@"+dig1 {
 		t.Fatalf("rollback runs %q", c.Spec.Image)
 	}
 	if got := h.names("svc"); !slices.Equal(got, []string{"seylo-svc-3"}) {
