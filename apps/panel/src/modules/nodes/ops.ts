@@ -87,6 +87,9 @@ const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
   // A joined node receives every spec and secret placed on it: a session left
   // open must not attach a machine.
   requireFreshIfSession(ctx);
+  // Where the node joins, first: a closed agents' port refuses (join-target.ts), and a
+  // refused call must not leave a valid token behind.
+  const target = agentJoinTarget(ctx);
   const token = prefixedToken("join");
   const expiresAt = new Date(Date.now() + joinTokenTtlMs);
   // "Build images on this node": the token creator decides, never the machine that joins.
@@ -97,7 +100,6 @@ const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
     .values({ tokenHash: hashToken(token), createdBy: userOf(ctx.principal)?.id ?? null, expiresAt, canBuild })
     .returning({ id: joinTokens.id })
     .get();
-  const target = agentJoinTarget(ctx);
   return {
     tokenId: row.id,
     token,

@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { nodes as nodeOps, OpError } from "@seylo/ops";
-import { nodes } from "../src/db/schema";
+import { joinTokens, nodes } from "../src/db/schema";
 import { agentJoinTarget, panelUrl } from "../src/modules/nodes/join-target";
 import { setSetting } from "../src/settings";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
@@ -74,4 +74,6 @@ test("createJoinToken answers the refusal as CONFLICT", async () => {
   const refused = await callOp(panel, nodeOps.createJoinToken, {}, { cookie });
   expect(refused.status).toBe(409);
   expect(refused.body.error.details.reason).toBe("agentPortClosed");
+  // The refusal leaves no token behind that someone could still join with.
+  expect(panel.deps.db.select().from(joinTokens).all()).toEqual([]);
 });
