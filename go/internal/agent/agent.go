@@ -40,10 +40,12 @@ type JoinOptions struct {
 	// first connection. The join command sets it only when the panel has
 	// neither a public certificate nor a pin to hand out.
 	TrustOnFirstUse bool
-	// Name proposed for the node; empty means the hostname.
+	// Name proposed for the node; empty keeps config.yml's node_name (the
+	// hostname when there is none).
 	Name string
-	// CanBuild allows builds on this node.
-	CanBuild bool
+	// CanBuild allows (true) or stops (false) builds on this node; nil
+	// keeps config.yml's can_build (off for a new node).
+	CanBuild *bool
 	// Force replaces the config of a node that already joined a panel.
 	Force bool
 	// Insecure accepts a plain http:// panel URL on another host
@@ -56,6 +58,15 @@ var ErrAlreadyJoined = errors.New("agent: this node already joined a panel")
 
 // Join writes config.yml for a node that joins with a token. It does not
 // connect; Run does, and records the node id once the panel accepted it.
+//
+// A node that joins again (--force) keeps what its owner set in
+// config.yml: no_host_shell, node_name, can_build, the acme_ca settings
+// and every key this agent does not know. Join replaces only how the node
+// reaches the panel (panel_url, panel_pin, trust_on_first_use,
+// insecure_transport, fallback), the identity the token gives it (node_id,
+// join_token) and the identity of the panel it belonged to (panel_id,
+// panel_key, panel_proves); node_name and can_build change only when
+// --name or --can-build say so.
 func Join(layout datadir.Layout, opts JoinOptions) error {
 	if opts.Token == "" {
 		return errors.New("a join token is required")
@@ -63,14 +74,21 @@ func Join(layout datadir.Layout, opts JoinOptions) error {
 	if old, err := LoadConfig(layout.ConfigFile()); err == nil && old.NodeID != "" && !opts.Force {
 		return fmt.Errorf("%w (node %s at %s); pass --force to join again", ErrAlreadyJoined, old.NodeID, old.PanelURL)
 	}
-	cfg := &FileConfig{
-		PanelURL:        opts.PanelURL,
-		JoinToken:       opts.Token,
-		NodeName:        opts.Name,
-		CanBuild:        opts.CanBuild,
-		TrustOnFirstUse: opts.TrustOnFirstUse,
-		// Only recorded when it matters, so a later move to https:// drops it.
-		InsecureTransport: opts.Insecure && PlainRemote(opts.PanelURL),
+	cfg := &FileConfig{}
+	if prev := readConfigLoose(layout.ConfigFile()); prev != nil {
+		cfg = prev
+	}
+	cfg.PanelURL, cfg.PanelPin, cfg.TrustOnFirstUse = opts.PanelURL, "", opts.TrustOnFirstUse
+	// Only recorded when it matters, so a later move to https:// drops it.
+	cfg.InsecureTransport = opts.Insecure && PlainRemote(opts.PanelURL)
+	cfg.Fallback = nil
+	cfg.NodeID, cfg.JoinToken = "", opts.Token
+	cfg.PanelID, cfg.PanelKey, cfg.PanelProves = "", "", false
+	if opts.Name != "" {
+		cfg.NodeName = opts.Name
+	}
+	if opts.CanBuild != nil {
+		cfg.CanBuild = *opts.CanBuild
 	}
 	if opts.Pin != "" {
 		pin, err := conn.ParsePin(opts.Pin)

@@ -107,9 +107,12 @@ Flags:
   --insecure           join a panel at a plain http:// URL on another server: the
                        agent's traffic (environment values, registry logins, shells)
                        is then unencrypted
-  --name <name>        node name (default: the hostname)
+  --name <name>        node name (default: the hostname; a re-join keeps the current one)
   --can-build          allow builds on this node (join; the panel node always can)
-  --force              join again although this node already belongs to a panel;
+  --no-can-build       stop builds on this node (join; a re-join without either flag
+                       keeps the current setting)
+  --force              join again although this node already belongs to a panel
+                       (the node keeps its other settings in config.yml);
                        install the panel although another program holds 80/443
   --install-docker     install Docker with the official script from get.docker.com if missing
   --no-docker-install  never install Docker; fail if it is missing
@@ -164,7 +167,8 @@ parse_args() {
 		--token) need_value "$@"; TOKEN=$2; shift ;;
 		--pin) need_value "$@"; PIN=$2; shift ;;
 		--name) need_value "$@"; NODE_NAME=$2; shift ;;
-		--can-build) CAN_BUILD=1 ;;
+		--can-build) CAN_BUILD=true ;;
+		--no-can-build) CAN_BUILD=false ;;
 		--install-docker) INSTALL_DOCKER=1 ;;
 		--no-docker-install) NO_DOCKER=1 ;;
 		--yes | -y) INSTALL_DOCKER=1 ;;
@@ -837,7 +841,7 @@ install_join() {
 	set -- join "$PANEL_URL" --token "$TOKEN" --no-start
 	[ -z "$PIN" ] || set -- "$@" --pin "$PIN"
 	[ -z "$NODE_NAME" ] || set -- "$@" --name "$NODE_NAME"
-	[ -z "$CAN_BUILD" ] || set -- "$@" --can-build
+	[ -z "$CAN_BUILD" ] || set -- "$@" "--can-build=$CAN_BUILD"
 	[ -z "$FORCE" ] || set -- "$@" --force
 	[ -z "$INSECURE" ] || set -- "$@" --insecure
 	if can_write; then

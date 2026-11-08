@@ -301,6 +301,18 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (`conn.FormatPin`; `ParsePin` also takes `sha256/<base64>`). The join
   command passes it as `--pin`; config.yml stores it as `panel_pin`.
   `--trust-on-first-use` records the first certificate's pin instead.
+- `seylo join` (`agent.Join`) on a node that has a config.yml (`--force`
+  once it joined) keeps every key it does not set: `no_host_shell`,
+  `node_name`, `can_build`, the `acme_ca*` keys and keys this agent does
+  not know, with their comments. It replaces only the connection
+  (`panel_url`, `panel_pin`, `trust_on_first_use`, `insecure_transport`,
+  `fallback`), the identity the token gives (`node_id` cleared,
+  `join_token`) and the old panel's identity (`panel_id`, `panel_key`,
+  `panel_proves` cleared); `node_name` changes with `--name`, `can_build`
+  with `--can-build` / `--can-build=false` (the installer's `--can-build`
+  / `--no-can-build`). `agent.SaveConfig` (the agent's own writes) keeps
+  unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
+  makes every new FileConfig key pick a side.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
   with jitter (half to full delay); 5 minutes after a rejection that needs
   a person (bad token, unknown node, bad signature, disabled, too old), a
@@ -330,7 +342,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the agent records `panel_id` (ServerHello), `panel_key` (base64 of
   HelloAccepted.edge_ticket_public_key, the panel's Ed25519 identity key)
   and, when HelloAccepted carried a valid `panel_signature`,
-  `panel_proves: true` in config.yml; `seylo join` starts over. On every
+  `panel_proves: true` in config.yml; `seylo join` clears the three. On every
   connect, at any address (moves and fallbacks included): a ServerHello
   naming another `panel_id` gets no ClientHello (nothing is signed for
   it); a HelloAccepted naming another identity key, or with a

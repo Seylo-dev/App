@@ -477,6 +477,18 @@ expect_ok "--insecure reaches the agent's join" "join http://192.0.2.10:3000 --t
 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'http://[::1]:3000' --token t --binary "$T/local-binary"
 expect_ok "a loopback panel URL needs no --insecure" "Joining http://[::1]:3000"
 
+# ---- can_build on a join: given, refused, or left to what config.yml says
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary" --can-build
+expect_ok "--can-build reaches the agent's join" "join https://panel.example.com --token t --no-start --can-build=true"
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary" --no-can-build --force
+expect_ok "--no-can-build turns builds off on a re-join" "join https://panel.example.com --token t --no-start --can-build=false --force"
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary" --force
+if [ "$RC" -eq 0 ] && has "join https://panel.example.com --token t --no-start --force" && ! has "can-build"; then
+  pass "a re-join without either flag leaves can_build to config.yml"
+else
+  flunk "a re-join without either flag leaves can_build to config.yml" "$OUT"
+fi
+
 # ---- scripts/release-preflight.sh (what `make release` checks before it publishes)
 cat >"$shims/gh" <<'EOF'
 #!/bin/sh

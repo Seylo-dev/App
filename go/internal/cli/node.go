@@ -24,6 +24,7 @@ import (
 
 func newAgentCommand(d *deps) *cobra.Command {
 	var join agent.JoinOptions
+	var finishJoin func()
 	cmd := &cobra.Command{
 		Use:     "agent",
 		Short:   "Run the node agent (started by systemd)",
@@ -35,30 +36,42 @@ func newAgentCommand(d *deps) *cobra.Command {
 				if join.PanelURL == "" || join.Token == "" {
 					return errors.New("--join and --token go together")
 				}
+				finishJoin()
 				opts.Join = &join
 			}
 			return agent.Run(cmd.Context(), opts)
 		},
 	}
-	addJoinFlags(cmd, &join)
+	finishJoin = addJoinFlags(cmd, &join)
 	cmd.Flags().StringVar(&join.PanelURL, "join", "", "join this panel before starting (with --token)")
 	return cmd
 }
 
-func addJoinFlags(cmd *cobra.Command, join *agent.JoinOptions) {
+// addJoinFlags binds the join flags to join. Call the returned func before
+// using join: it sets the options whose flag was left out to "keep what
+// config.yml says" (a node joining again keeps its can_build).
+func addJoinFlags(cmd *cobra.Command, join *agent.JoinOptions) func() {
 	f := cmd.Flags()
+	var canBuild bool
 	f.StringVar(&join.Token, "token", "", "single-use join token from the panel's Add node dialog")
 	f.StringVar(&join.Pin, "pin", "", "panel certificate pin (sha256:<hex>) for a panel without a public certificate")
 	f.BoolVar(&join.TrustOnFirstUse, "trust-on-first-use", false, "pin whatever certificate the panel presents on the first connection")
-	f.StringVar(&join.Name, "name", "", "node name shown in the panel (default: the hostname)")
-	f.BoolVar(&join.CanBuild, "can-build", false, "allow builds on this node")
-	f.BoolVar(&join.Force, "force", false, "join again although this node already joined a panel")
+	f.StringVar(&join.Name, "name", "", "node name shown in the panel (default: the hostname; a re-join keeps the one in config.yml)")
+	f.BoolVar(&canBuild, "can-build", false, "allow builds on this node (--can-build=false stops them; a re-join without the flag keeps config.yml's setting)")
+	f.BoolVar(&join.Force, "force", false, "join again although this node already joined a panel (keeps the rest of config.yml)")
 	f.BoolVar(&join.Insecure, "insecure", false, "accept a plain http:// panel URL on another host (the agent protocol is then unencrypted)")
+	return func() {
+		join.CanBuild = nil
+		if f.Changed("can-build") {
+			join.CanBuild = &canBuild
+		}
+	}
 }
 
 func newJoinCommand(d *deps) *cobra.Command {
 	var join agent.JoinOptions
 	var noStart bool
+	var finishJoin func()
 	cmd := &cobra.Command{
 		Use:     "join <panel-url> --token <token>",
 		Short:   "Join this node to a panel and start the agent",
@@ -66,6 +79,7 @@ func newJoinCommand(d *deps) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			join.PanelURL = args[0]
+			finishJoin()
 			if err := agent.Join(d.layout, join); err != nil {
 				return err
 			}
@@ -80,7 +94,7 @@ func newJoinCommand(d *deps) *cobra.Command {
 			return err
 		},
 	}
-	addJoinFlags(cmd, &join)
+	finishJoin = addJoinFlags(cmd, &join)
 	cmd.Flags().BoolVar(&noStart, "no-start", false, "only write the config")
 	_ = cmd.MarkFlagRequired("token")
 	return cmd

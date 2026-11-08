@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -112,15 +113,119 @@ func LoadConfig(path string) (*FileConfig, error) {
 	return cfg, nil
 }
 
+// readConfigLoose reads config.yml without Validate, for Join to start
+// from: a node joining again keeps its owner's settings even when the old
+// file would not load (no node id and no token, a malformed pin). A field
+// of the wrong type is skipped, the rest is read. Nil when there is no
+// file or it is not YAML.
+func readConfigLoose(path string) *FileConfig {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	cfg := &FileConfig{}
+	if err := yaml.Unmarshal(b, cfg); err != nil {
+		var typeErr *yaml.TypeError
+		if !errors.As(err, &typeErr) {
+			return nil
+		}
+	}
+	return cfg
+}
+
+// configHeader is the first line of config.yml.
+const configHeader = "# Written by the agent. Changes take effect on restart."
+
 // SaveConfig writes config.yml atomically with mode 0600 (it may hold the
-// join token).
+// join token). The keys of FileConfig get cfg's values (an empty one is
+// removed); every other key in the file, and the comments, stay as the
+// owner wrote them, so a key this agent does not know (one a newer agent
+// reads, say) survives the agent's own writes and a re-join.
 func SaveConfig(path string, cfg *FileConfig) error {
-	b, err := yaml.Marshal(cfg)
+	var fresh yaml.Node
+	if err := fresh.Encode(cfg); err != nil {
+		return fmt.Errorf("encoding config: %w", err)
+	}
+	out := &fresh
+	if b, err := os.ReadFile(path); err == nil {
+		var doc yaml.Node
+		if yaml.Unmarshal(b, &doc) == nil && doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
+			out = mergeConfig(doc.Content[0], &fresh)
+			out.HeadComment = dropHeader(doc.HeadComment + "\n" + out.HeadComment)
+			if doc.FootComment != "" {
+				out.FootComment = strings.TrimSpace(out.FootComment + "\n" + doc.FootComment)
+			}
+		}
+	}
+	if len(out.Content) > 0 {
+		out.Content[0].HeadComment = dropHeader(out.Content[0].HeadComment)
+	}
+	b, err := yaml.Marshal(out)
 	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)
 	}
-	header := "# Written by the agent. Changes take effect on restart.\n"
-	return state.WriteFileAtomic(path, append([]byte(header), b...), 0o600)
+	return state.WriteFileAtomic(path, append([]byte(configHeader+"\n"), b...), 0o600)
+}
+
+// mergeConfig is old (the mapping in the file) with the keys of FileConfig
+// taken from fresh (cfg encoded): a known key keeps its place and comments
+// and gets fresh's value, or goes when fresh has none; unknown keys stay;
+// known keys the file did not have follow at the end.
+func mergeConfig(old, fresh *yaml.Node) *yaml.Node {
+	known := configKeys()
+	values := map[string]*yaml.Node{}
+	for i := 0; i+1 < len(fresh.Content); i += 2 {
+		values[fresh.Content[i].Value] = fresh.Content[i+1]
+	}
+	merged := *old
+	merged.Content = nil
+	seen := map[string]bool{}
+	for i := 0; i+1 < len(old.Content); i += 2 {
+		k, v := old.Content[i], old.Content[i+1]
+		if !known[k.Value] {
+			merged.Content = append(merged.Content, k, v)
+			continue
+		}
+		if seen[k.Value] {
+			continue
+		}
+		seen[k.Value] = true
+		if nv, ok := values[k.Value]; ok {
+			if nv.LineComment == "" {
+				nv.LineComment = v.LineComment
+			}
+			merged.Content = append(merged.Content, k, nv)
+		}
+	}
+	for i := 0; i+1 < len(fresh.Content); i += 2 {
+		if !seen[fresh.Content[i].Value] {
+			merged.Content = append(merged.Content, fresh.Content[i], fresh.Content[i+1])
+		}
+	}
+	return &merged
+}
+
+// configKeys are the YAML keys of FileConfig.
+func configKeys() map[string]bool {
+	keys := map[string]bool{}
+	t := reflect.TypeFor[FileConfig]()
+	for i := range t.NumField() {
+		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ","); name != "" && name != "-" {
+			keys[name] = true
+		}
+	}
+	return keys
+}
+
+// dropHeader removes configHeader (SaveConfig writes it again) from a comment.
+func dropHeader(comment string) string {
+	var keep []string
+	for _, line := range strings.Split(comment, "\n") {
+		if strings.TrimSpace(line) != configHeader && line != "" {
+			keep = append(keep, line)
+		}
+	}
+	return strings.Join(keep, "\n")
 }
 
 // Validate checks the fields the agent cannot work without. A node that

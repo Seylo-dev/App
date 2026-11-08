@@ -285,7 +285,8 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 	}
 
 	host, _ := os.Hostname()
-	if err := agent.Join(d.layout, agent.JoinOptions{PanelURL: local, Token: joinToken, Name: host, CanBuild: true}); err != nil {
+	canBuild := true
+	if err := agent.Join(d.layout, agent.JoinOptions{PanelURL: local, Token: joinToken, Name: host, CanBuild: &canBuild}); err != nil {
 		return fmt.Errorf("joining the local panel: %w", err)
 	}
 	ip := outboundIP()
