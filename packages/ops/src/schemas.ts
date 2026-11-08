@@ -25,3 +25,17 @@ export const GitUrl = Type.String({
   description: "https://, ssh:// or git@host:path URL, without a token or password in it (use a git credential).",
   errorMessage: "put no user name, token or password in a git URL; store it as a git credential and pick that instead",
 });
+
+/**
+ * A public https:// git URL, for Boxes: no user name or token in it, for the
+ * same reason as GitUrl (Boxes have no git credential to pick; private
+ * repositories are cloned from the Box's own terminal).
+ */
+export const HttpsGitUrl = Type.String({
+  minLength: 1,
+  maxLength: 500,
+  pattern: "^https://[^/@\\s]+(/\\S*)?$",
+  description: "https:// git URL, without a user name or token in it.",
+  errorMessage:
+    "put no user name or token in a repository URL: everyone who can view the Box would see it. Clone a private repository from the Box's terminal instead",
+});

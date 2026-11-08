@@ -51,7 +51,15 @@ What Seylo protects, and what it does not:
   is root on every node.
 - A compromised node can lie about its own services, but cannot reach other
   nodes, their secrets or the panel's privileges. A node only receives what
-  the services placed on it need.
+  the services placed on it need. Backups and restores go straight from the
+  node to the bucket, but nodes never get a backup destination's keys: the
+  panel presigns each request of a running backup or restore for that
+  run's own object only (and makes the multipart start, finish and abort
+  steps and the keepLast deletes itself), so a compromised node can reach
+  the backups of the services it runs, not other nodes' backups. The panel
+  only records, restores and deletes an object named for the backup run it
+  belongs to. Older agents (before 0.2) cannot back up to a 0.2 panel
+  until the node is updated, because they would need the keys.
 - Agents dial the panel over TLS: the panel's domain certificate, or the
   agents' TLS port (3443) with the panel's key pinned by the join command.
   Plain HTTP between a node and a panel on another host needs `--insecure`.

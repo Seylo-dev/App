@@ -35,6 +35,7 @@ import {
   type UnaryMethodName,
   wireMethodName,
 } from "./calls";
+import { capFields, capServiceStatus, reportFieldLimits } from "./field-caps";
 import { createNodeStateStore, type NodeStateStore } from "./node-state";
 import type { PanelServiceHandlers } from "./panel-service-types";
 import { isRawMethod, isStreamingMethod, messageStream, type OpenedStream, rawStream } from "./streams";
@@ -285,6 +286,12 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
     emitEvent(nodeId, original, meta = { durable: false, outboxId: null }) {
       const event = scoped(nodeId, original, meta.durable);
       if (!event) return;
+      // The state store keeps these for the process lifetime (field-caps.ts).
+      if (event.payload.case === "stateDelta" && event.payload.value.change.case === "serviceUpdated") {
+        capServiceStatus(event.payload.value.change.value);
+      } else if (event.payload.case === "healthChanged") {
+        capFields(event.payload.value, reportFieldLimits);
+      }
       safely(() => track(nodeId, event));
       for (const listener of listeners) safely(() => listener(nodeId, event, meta));
       const kind = event.payload.case;
@@ -436,6 +443,7 @@ export function createAgentHub(onError: (error: unknown) => void): AgentHub {
           const snapshot = scope
             ? { ...res.snapshot, services: res.snapshot.services.filter((s) => scope.has(s.serviceId)) }
             : res.snapshot;
+          for (const status of snapshot.services) capServiceStatus(status);
           state.applySnapshot(nodeId, snapshot as typeof res.snapshot);
         },
         (error) => {

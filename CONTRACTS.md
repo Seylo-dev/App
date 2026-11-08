@@ -83,7 +83,7 @@ packages use. "Built" means implemented and tested.
 | `console`, `shell` | Attach to the main process with history replay; PTY shells, database clients (via `dbtools`) and one-shot Exec through docker exec, with a marker-based process sweep; `ConsoleInfo` and the first `ShellResponse.info` carry user and working directory; `console/dockerapi` is the small Docker client the observe area shares (kept apart from `docker.Engine` on purpose, see Not built yet) | Built (verified in the VM) |
 | `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract. No write, chmod or extract leaves setuid/setgid (FsChmod and FsWrite keep the permission and sticky bits only; replacing or appending to a setuid file drops the bits first). New files and folders take their folder's owner, except that a root-owned (or unreadable) folder gives them to nobody (65534:65534), so the file manager never makes a root-owned entry; a replaced file keeps its owner | Built (escape fuzzing run as root in the VM) |
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
-| `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO (minio-go), `keep_last` retention, restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
+| `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO: with URLs the panel presigns for the run when the destination comes without keys (`SignedStore`, `signing_id`; the panel makes the multipart create/complete/abort steps and retention), else with the keys through minio-go and `keep_last` retention (older panels), restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
 | `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun`; an expression it cannot read is one failed `CleanupRun` per changed schedule | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
 | `hostshell` | Root login shells on the node itself for HostShell: a PTY from /dev/ptmx (`golang.org/x/sys/unix`), the agent user's login shell from /etc/passwd in a new session with a clean environment, `Manager` with the `Allowed` gate, at most 2, 15 minutes idle, `CloseAll` when the setting turns off, hang-up of the process group on close; Linux only | Built (PTY, cap, idle and close-all verified as root in the VM) |
@@ -208,9 +208,17 @@ Summary; the full rules are in `proto/README.md` and the comments of
   node's scope for a second (a service missing from it is looked up again
   after 100 ms); durable reports and snapshots use a fresh one. A metrics
   event keeps one entry per service, and a live series at most 600 points.
-  NodeFacts (hello and `nodeFacts` events) are capped (strings 256 chars,
-  256 capabilities of 128) and `nodes.facts` is written, and the node
-  published, at most every 2 s per node and only when they changed. Limits per connection
+  Every string of the ClientHello, its NodeFacts included, and
+  `nodeFacts` events are capped (strings 256 chars, 256 capabilities of
+  128; `agent_version` 64 chars, since it is stored in
+  `nodes.agent_version` and shown) and `nodes.facts` is written, and the node
+  published, at most every 2 s per node and only when they changed. The
+  ServiceStatus of every snapshot entry and `serviceUpdated` delta is
+  capped before the state store keeps it (`capServiceStatus` in
+  `agent-hub/field-caps.ts`: strings 2048 chars, lists 128 entries;
+  instance, port and route ids, names, digests and issuers 256 chars), and
+  `healthChanged` like a durable report, so a node pins a few hundred KiB
+  per placed service at most. Limits per connection
   (`agentLimits` in `agent-hub/session.ts`): ClientHello within 10 s,
   agent-opened stream windows clamped to 1 MiB, WINDOW grants past
   2^31-1 are a protocol error, 64 agent-opened streams and 256 calls in
@@ -967,7 +975,21 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   panel), and the account gets one `security_change` alert per streak.
   Address groups that gave the right password for that email in the last
   30 days skip the brake, so a campaign does not keep the owner out
-  (`users.enable` clears the brake too). At most 4 password verifications
+  (`users.enable` clears the brake too). A second brake per account counts
+  wrong second-factor codes from every address (`auth.verifySecondFactor`,
+  `auth.reauth`, `auth.totpDisable`, `auth.regenerateRecoveryCodes`): from
+  the 10th within the forgiveness window, authenticator codes for the
+  account are checked at most once every 2.5 s, doubling with every further
+  10 wrong codes up to once a minute (the rest answer RATE_LIMITED with
+  `retryAfter` and spend no ticket attempt), with one `security_change`
+  alert ("many wrong authenticator codes") per streak. A right code does
+  not end the streak. Address groups where the account finished a sign-in
+  (both factors, or a passkey) in the last 30 days skip it; the right
+  password alone does not count, since a code guesser has it. Recovery
+  codes are not braked (50 bits each), so the owner always has a way in
+  from a new address; their failures still count (`codeThrottle` in
+  `src/auth/lockout.ts`, `modules/auth/code-check.ts`; `users.enable`
+  clears it). At most 4 password verifications
   (argon2id, about 64 MiB each) run at once, 32 wait, and the rest answer
   RATE_LIMITED (`src/security/password.ts` `verifyLimits`). Recovery codes are stored as HMACs (`secrets.sign(code,
   "recovery-code")`), not bare SHA-256: they carry only 50 bits.
@@ -988,7 +1010,7 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   warning per failed sign-in (UNAUTHENTICATED from a public op, "sign-in
   failed"), FORBIDDEN ("op refused", re-auth refusals carry `reason:
   reauth`) and RATE_LIMITED ("op rate limited", locks carry `reason:
-  locked`, the per-email brake `accountBrake`), with `opId`, `ip`, `actor`
+  locked`, the per-email and per-account code brakes `accountBrake`), with `opId`, `ip`, `actor`
   (the person when known), `transport` and `code`, never input. A rejected
   agent hello logs `remoteIp` with its reason and node id.
 - Setup link: the installer writes a `<slug>_setup_...` token to
@@ -1169,6 +1191,14 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   with backoff, it is not a sign-out). One socket follows at most 200 topics
   (`maxTopicsPerSocket`); a subscribe past that answers an `error`
   BAD_REQUEST for the topic.
+- Text frames on every panel socket (live, terminals, the host shell,
+  agents) are checked before Elysia JSON.parses them
+  (`src/http/ws-guard.ts`, the `websocket` option of both listeners in
+  `main.ts`): Bun takes frames up to 16 MiB, which agents need for binary
+  frames, so a text frame over 16 KiB closes the socket with 1009, and each
+  socket gets 256 KiB of text, then 64 KiB a second; frames past that are
+  dropped unread. Browsers send only small JSON text (subscribe, resize),
+  terminal input is binary and agents send binary frames only.
 - MCP: `POST /mcp` (Streamable HTTP, stateless JSON replies, protocol
   2025-03-26 to 2025-11-25), MCP tokens only (`api_keys.kind = "mcp"`).
   OAuth: `/.well-known/oauth-authorization-server`,
@@ -1408,7 +1438,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   reaches a spec or the audit log; the stored spec schema still loads
   sources saved before (`services/spec.ts` `StoredGitUrl`) and every
   answer that shows one drops it (`services/git-url.ts`: `toDetail`,
-  `compose.get`, compose read errors). Input errors inside a union name
+  `compose.get`, compose read errors). A Box's `repository`
+  (`boxes.create`) is an `HttpsGitUrl`: https:// only, no user name or
+  token (Boxes have no git credential; private repositories are cloned
+  from the Box's terminal); `boxes.get` and clones drop one saved before,
+  and only the Box's own `BOX_REPOSITORY` keeps it. Input errors inside a union name
   the field of the variant the caller picked (`ops/validate.ts`). A git
   credential only goes to its own host and a registry login to its own
   registry (checked on save and again before the token leaves the panel at
@@ -1633,8 +1667,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   active (pointing at the IP:port address before a domain exists) and
   `syncWebhookConfig` moves it to the panel domain with the panel's secret
   when the domain changes. Deploy trigger URLs allow 10 calls then one per
-  6 s per trigger; a call while a deploy is queued joins it (a newer
-  `?commit=` replaces its commit).
+  6 s per trigger; a call while a deploy from a trigger URL (`trigger:
+  webhook`) has not started joins it (a newer `?commit=` replaces its
+  commit, and its log says so). Any other queued deployment (a node move
+  copying volumes, a project move's switch, a rollback, a manual or
+  template deploy) ships what it was made for, so the call queues its own
+  deploy behind it, like push deploys (`queuePushDeploy`).
 - Registry GC: every successful deploy enqueues `deployments.registryGc`; a daily
   `deployments.registryGcSweep` retries services whose old images are still in
   the registry.
@@ -1671,11 +1709,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   domain, else the panel node's public address, else its public IPv4, else
   the non-loopback address the caller reached the panel at (`OpCall.origin`),
   else the panel node's private IPv4 (`nodes/join-target.ts` `panelUrl`). The
-  command pipes the installer of the panel's own release into sh
-  (`nodes/join-command.ts`: `https://github.com/<org>/<repo>/releases/download/v<version>/install.sh`),
-  so the node gets the agent of the panel's version; the install host
-  (`https://<installUrl>`) serves the latest stable release only and is
-  used by builds without a release (dev, snapshots, `git describe`).
+  command pipes the install host (`https://<installUrl>`) into sh, which
+  serves install.sh only after checking it against the latest stable
+  release's signed manifest; a release asset is never piped into sh,
+  since anyone who can replace release assets without the signing key
+  would get root on the nodes joined with it. A released panel adds
+  `--version '<version>'` (`nodes/join-command.ts`), so the installer
+  takes the agent from that release's signed manifest and the node gets
+  the panel's version; builds without a release (dev, snapshots, `git
+  describe`) leave it out and install the latest stable release.
   `publicIpv4`/`publicIpv6` hold the facts' own public addresses first and
   the public address the agent connected from only when the facts have
   none; that connect address is also kept on its own, per node, in the
@@ -1706,6 +1748,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
 | An admin opt-in for plain-HTTP git servers: `GitSource.allow_plain_http` exists, but the panel stores no `http://` git source, so it never sets it | Saving an `http://` git URL is BAD_REQUEST; 0.2 agents refuse `http://` without the flag |
+| Signed backups against real providers: presigned PUT/UploadPart/GET/DELETE and the panel's own multipart and list/delete steps match minio-go's signer (vectors in `apps/panel/test/fixtures/s3-presign-vectors.json`) and Bun's, and ran against fake buckets; not yet against AWS S3, R2 or MinIO through a real panel and agent. The multipart steps and retention need the panel to reach the bucket (as the connection test already does) | Unit and fake-bucket tests |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
@@ -1803,6 +1846,7 @@ or the method descriptor's options (TS). Current names:
 | `panel.desired.v1` | GetDesiredState |
 | `panel.registry-tunnel.v1` | RegistryTunnel |
 | `panel.edge-access.v1` | CheckEdgeAccess |
+| `panel.backup-sign.v1` | SignBackupRequests |
 
 An agent advertises a capability only once every method in it works.
 
@@ -1816,6 +1860,7 @@ the node is offline (`modules/databases/capability.ts`).
 | Capability | Means |
 |---|---|
 | `database.engines.v2` | Valkey, KeyDB, Dragonfly and ClickHouse (`DatabaseEngine` 6-9): shells, web UIs, backups and TLS on the exposed port. The panel creates, moves or clones such a database only onto a node that advertised it, refuses exposure elsewhere, and the desired state never sends their exposure to an agent without it (an older one would relay the port without TLS) |
+| `backup.signed.v1` | Backup destinations without keys (`BackupDestination.signing_id`): the agent asks `PanelService.SignBackupRequests` for each S3 step (`backup.SignedStore`). The panel sends backups and restores only to agents that advertised it |
 
 ## Releases and updates
 
@@ -1949,10 +1994,12 @@ install, and a re-run of the panel installer on a node that has a panel
 folder, warn when an account on the server has uid or gid 61000
 (`getent`); the agent warns on every node after that (see "Docker resources").
 Join: `install.sh join --panel
-<url> --token <t> [--pin sha256:<hex>] [--can-build|--no-can-build]` runs
+<url> --token <t> [--version <v>] [--pin sha256:<hex>] [--can-build|--no-can-build]` runs
 `seylo join --no-start`, then starts `seylo.service`. An installer from a
-release defaults to that release (`--version` picks another), which is how
-the panel's join command pins the agent to the panel's version. Re-runs update the binary and units and keep the
+release defaults to that release (`--version` picks another and takes the
+agent from that release's signed manifest), which is how the panel's join
+command, piped from the install host, pins the agent to the panel's
+version. Re-runs update the binary and units and keep the
 node, but never to an older release than the node runs: when the installed
 agent (`seylo version`), or on the panel's node the running panel (the
 `org.opencontainers.image.version` label of its `seylo.service=panel00000000000`
@@ -2042,8 +2089,9 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
 - Handshake: agents older than `deps.agents.minimumAgentVersion()` (panel
   version N-2 minor, raised by the release manifest's `minAgent`) get
   `HelloRejected { AGENT_TOO_OLD, min_agent_version }`; dev builds always
-  connect. ServerHello advertises `panel.report.v1`, `panel.desired.v1` and
-  `panel.registry-tunnel.v1` once the nodes module attached PanelService.
+  connect. ServerHello advertises `panel.report.v1`, `panel.desired.v1`,
+  `panel.registry-tunnel.v1`, `panel.edge-access.v1` and
+  `panel.backup-sign.v1` once the nodes module attached PanelService.
   HelloAccepted carries `panel_url = https://<panel domain>` and an empty
   `panel_pin` on every connect of a node that is not the panel node, once
   `panelDomainStatus` is `active` for the current domain (the hourly check
@@ -2066,7 +2114,9 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   the node's daily report budget, then fan out; GetDesiredState returns the
   current state unless the agent has that revision; RegistryTunnel relays
   to `Tunnel(RegistryTarget)` on the node with `nodes.is_panel_node` (the
-  first node that joins).
+  first node that joins); CheckEdgeAccess answers whether an edge tool
+  session may stay open; SignBackupRequests serves the S3 steps of a
+  backup or restore running on the node (`modules/backups/signing.ts`).
 
 Events. Subscribe in your module's `start(deps)`:
 `deps.agents.onEvent("deployProgress", (nodeId, progress, event, meta) => ...)`
@@ -2186,7 +2236,14 @@ and the run. A run keeps the manifest it installs (`update_runs.manifest`,
 `manifest_signature`; a run from before rc.2 gets the stored one while it
 is still that version), so a later check or a channel switch never changes
 what its steps send. `nodes.updateDocker` is a one-step run finished by
-its `UpdateResult`. The release check runs every 6 hours (schedule
+its `UpdateResult`; the `updates.run` job watches it (every 30 s; the node
+going offline is expected while Docker restarts) and fails it when no
+result came within an hour (`dockerStepTimeoutMs`: the agent reports only
+after the package manager is done and keeps nothing across a restart) or
+its node was removed, so it never holds other runs and catch-ups back for
+good. A late result still finishes a step that failed for lack of one. On
+start the panel queues `updates.run` for every running run without a
+waiting job (runs older panels left running). The release check runs every 6 hours (schedule
 `updates.check`) and starts a run when auto-update is on. That automatic
 run leaves out a node whose update to the release was rolled back (any
 rolled-back agent `UpdateResult`, also from the agent's own update on
@@ -2299,7 +2356,12 @@ volume ExportVolume -> ImportVolume through the panel (`relayVolume` with
 While a copy runs, `queueDeploy`, `services.start` and `boxes.open` refuse
 the clone and a source it stopped, and `services.move` (to another node)
 refuses the clone and any source it reads (CONFLICT `reason: copying`,
-`copies.ts`); a second copy from the same source is refused. `ServiceDetail.dataCopy` is the
+`copies.ts`); a second copy from the same source is refused. Deleting
+the clone or the source ends a copy that has not ended (`failed`, "The
+clone was deleted." or "The source service was deleted.", in the delete's
+transaction, `services/delete.ts`) and starts a source the copy stopped; a
+copy whose clone is gone never holds anything back, so rows older panels
+left `queued` release their source. `ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
 Moves to another project (`services.moveProjectImpact`,
@@ -2497,7 +2559,30 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `tunnels.expire`; restores run as the `backups.restore` job (one
   attempt). Backup results come from durable `BackupResult` events;
   `backup_id` is the policy id, or `manual` for one-off runs (kept until
-  deleted).
+  deleted). A result's `object_key` must name that run's object,
+  `[<prefix>/]<service id>/<backup id>/<UTC time>-<run id><ext>` with one
+  of the agent's extensions (`ownObjectKey` in `modules/backups/runs.ts`;
+  the prefix is not compared, it may have been edited): any other key
+  fails the run, and a key recorded earlier that does not match is never
+  restored (the restore fails) or deleted from the bucket (`deleteRun`
+  only drops the row). `RunBackup` and `RestoreBackup` carry the
+  destination without its keys and `signing_id` (the run's id, the
+  restore's id for a restore), only to agents that advertised
+  `backup.signed.v1`; any other agent's run fails with "too old for
+  backups" (CONFLICT `agentTooOld`). The node asks
+  `PanelService.SignBackupRequests` (`modules/backups/signing.ts`) for each
+  S3 step: for a running backup on the node it ran on, presigned (1 hour,
+  SigV4 query auth, `modules/backups/presign.ts`) PUT, UploadPart and
+  DELETE URLs of the run's own object, and the multipart create, complete
+  and abort steps, which the panel makes itself with header signing (R2
+  takes no presigned POST); for a running restore on the service's node,
+  the GET of the restored object. Anything else refuses the whole call
+  (PERMISSION_DENIED); at most 32 steps and 1 MiB per call, 600 calls burst
+  and 50 per second per node. `keep_last` is always 0 for such agents:
+  after a policy run succeeds, and when its keepLast changes, the
+  `backups.prune` job (3 attempts) lists the policy's folder with the
+  panel's keys and deletes the objects past keepLast, newest kept by the
+  time in the key, only names the agent writes, never in sub-folders.
 - Database engines (`modules/databases/engines.ts`, listed by the
   `databases.engines` op): Postgres 18 (default, data at
   `/var/lib/postgresql`), 17, 16, 15 and the `pgvector` variant of each

@@ -14,6 +14,7 @@ import { edgeToolLink } from "../databases/edge-ticket";
 import { queueDeploy } from "../deployments/queue";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
 import { assertNoActiveCopy } from "../services/copies";
+import { withoutCredentials } from "../services/git-url";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
 import { defaultContainer } from "../services/spec";
@@ -56,7 +57,8 @@ function toBox(ctx: OpContext, serviceId: string): Box {
     nodeId: node?.id ?? "",
     nodeName: node?.name ?? "",
     state: boxState(ctx, service),
-    repository: row.repository,
+    // Boxes made before URLs with a token were refused may still have one.
+    repository: row.repository ? withoutCredentials(row.repository) : null,
     idleMinutes: row.idleMinutes,
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),

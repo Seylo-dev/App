@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { users } from "../db/schema";
 import type { OpContext } from "../ops/implement";
 import { createChallenge } from "./challenges";
-import { clearFailures, emailKey, userKey } from "./lockout";
+import { clearFailures, emailKey, rememberSignedInAddress, userKey } from "./lockout";
 import type { PrincipalUser } from "./principal";
 import { confirmedTotp } from "./second-factor";
 import { createSession, sessionLifetimeMs } from "./sessions";
@@ -46,7 +46,7 @@ export function finishSignIn(ctx: OpContext, user: UserRow, options: { skipSecon
   return { status: "signedIn", viewer: toViewer(user) };
 }
 
-/** Creates the session, sets the cookie and forgives this address's failure streaks. */
+/** Creates the session, sets the cookie, forgives this address's failure streaks and remembers it as signed in. */
 export function startSession(ctx: OpContext, userId: string): void {
   if (!ctx.http) throw new OpError("BAD_REQUEST", "Signing in is only available in the browser.");
   const user = ctx.db.select().from(users).where(eq(users.id, userId)).get();
@@ -55,6 +55,8 @@ export function startSession(ctx: OpContext, userId: string): void {
   ctx.db.update(users).set({ lastLoginAt: new Date(), failedLogins: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
   clearFailures(ctx.db, userKey(userId, ctx.ip));
   if (user) clearFailures(ctx.db, emailKey(user.email, ctx.ip));
+  // This address passed every factor the account has: it skips the code brake.
+  rememberSignedInAddress(ctx.db, userId, ctx.ip);
   ctx.http.setSession({ token: session.token, key: session.key, maxAgeSeconds: sessionLifetimeMs / 1000 });
 }
 

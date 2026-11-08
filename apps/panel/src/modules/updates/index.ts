@@ -23,6 +23,7 @@ import {
   startRun,
   toRun,
   updateStatus,
+  watchRunningRuns,
 } from "./runs";
 import "./settings";
 
@@ -87,6 +88,9 @@ function start(deps: Deps) {
   });
   // Every few hours; "Check now" (updates.check) does it on demand.
   deps.schedules.ensure({ key: "updates.check", jobType: "updates.check", intervalSeconds: checkIntervalSeconds, jitterSeconds: 600 });
+  // Docker update runs from older panels had no job watching them, and
+  // stayed running when their result never came: watch every run now.
+  watchRunningRuns(deps);
 }
 
 export default defineModule({

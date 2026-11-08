@@ -1,10 +1,10 @@
-// S3-compatible storage from the panel's side: the destination as agents
-// get it (secret opened), the connection test (write, read, delete a small
+// S3-compatible storage from the panel's side: the destination with its
+// secret opened (for the panel's own requests and for signing nodes'
+// requests, signing.ts), the connection test (write, read, delete a small
 // object) and deleting a backup object by hand. Uploads and downloads of
-// backups themselves go straight from the node to the bucket.
+// backups themselves go straight from the node to the bucket, with URLs the
+// panel presigned; nodes never get the keys.
 
-import type { MessageInitShape } from "@bufbuild/protobuf";
-import type { BackupDestinationSchema } from "@seylo/proto";
 import type { backupDestinations } from "../../db/schema";
 import type { SecretBox } from "../../security/secret-box";
 
@@ -29,18 +29,6 @@ export function storageConfig(secrets: SecretBox, row: DestinationRow): StorageC
     pathStyle: row.pathStyle,
     accessKeyId: row.accessKeyId,
     secretAccessKey: secrets.open(row.secretAccessKeySealed, "backup.destination") ?? "",
-  };
-}
-
-export function protoDestination(config: StorageConfig): MessageInitShape<typeof BackupDestinationSchema> {
-  return {
-    endpoint: config.endpoint,
-    region: config.region,
-    bucket: config.bucket,
-    prefix: config.pathPrefix,
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    pathStyle: config.pathStyle,
   };
 }
 
@@ -131,7 +119,21 @@ export async function testStorage(config: StorageConfig): Promise<TestResult> {
   };
 }
 
-/** Deletes one backup object. The key is the full key the agent reported. */
+/** Deletes one backup object. The key is the full key the agent reported, checked by ownObjectKey. */
 export async function deleteObject(config: StorageConfig, key: string): Promise<void> {
   await client(config).delete(key);
+}
+
+/** Every key under `prefix` (ListObjectsV2, all pages). */
+export async function listObjects(config: StorageConfig, prefix: string): Promise<string[]> {
+  const s3 = client(config);
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const result = await s3.list({ prefix, continuationToken });
+    for (const object of result.contents ?? []) if (object.key.startsWith(prefix)) keys.push(object.key);
+    if (!result.isTruncated || !result.nextContinuationToken) return keys;
+    continuationToken = result.nextContinuationToken;
+  }
+  throw new Error(`listing ${prefix}: more than 1000 pages`);
 }

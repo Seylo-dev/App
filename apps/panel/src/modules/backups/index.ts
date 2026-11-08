@@ -21,7 +21,7 @@ import {
   updateDestination,
   updatePolicy,
 } from "./ops";
-import { type RestorePayload, recordBackupResult, runRestore, sweepStaleBackups } from "./runs";
+import { pruneBackups, pruneJobType, type RestorePayload, recordBackupResult, runRestore, sweepStaleBackups } from "./runs";
 import { runDueBackups } from "./schedule";
 
 const scheduleType = "backups.schedule";
@@ -44,6 +44,14 @@ const restoreJob = defineJob<RestorePayload>({
   run: (payload, ctx) => runRestore(ctx, payload),
 });
 
+const pruneJob = defineJob<{ policyId: string }>({
+  type: pruneJobType,
+  maxAttempts: 3,
+  run: async (payload, ctx) => {
+    await pruneBackups(ctx, payload.policyId);
+  },
+});
+
 export default defineModule({
   name: "backups",
   ops: [
@@ -61,7 +69,7 @@ export default defineModule({
     restore,
     deleteRun,
   ],
-  jobs: [scheduleJob, restoreJob],
+  jobs: [scheduleJob, restoreJob, pruneJob],
   start(deps) {
     deps.agents.onEvent("backupResult", (nodeId, result) => {
       recordBackupResult(deps, nodeId, result);

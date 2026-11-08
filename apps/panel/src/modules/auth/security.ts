@@ -24,6 +24,7 @@ import { hashPassword, verifyPassword } from "../../security/password";
 import { newTotpSecret, otpauthUrl } from "../../security/totp";
 import { getSetting } from "../../settings";
 import { raiseSecurityChange } from "../alerts/security";
+import { checkSecondFactorCode, codeMethod } from "./code-check";
 import { endUserSessions } from "./end-sessions";
 
 export const security = implement(auth.security, (_input, ctx) => {
@@ -119,9 +120,7 @@ export const totpConfirm = implement(auth.totpConfirm, (input, ctx) => {
 export const totpDisable = implement(auth.totpDisable, (input, ctx) => {
   const { userId, sessionId, user } = requireSession(ctx);
   if (!confirmedTotp(ctx.db, userId)) throw new OpError("CONFLICT", "Two-factor sign-in is not on.");
-  assertNotLocked(ctx.db, userKey(userId, ctx.ip));
-  if (!checkAnySecondFactor(ctx.db, ctx.secrets, userId, input.code)) {
-    recordFailure(ctx.db, userKey(userId, ctx.ip));
+  if (!checkSecondFactorCode(ctx, user, codeMethod(input.code), () => checkAnySecondFactor(ctx.db, ctx.secrets, userId, input.code))) {
     throw new OpError("BAD_REQUEST", "That code is wrong.", { field: "code" });
   }
   removeSecondFactor(ctx.db, userId);
@@ -131,11 +130,9 @@ export const totpDisable = implement(auth.totpDisable, (input, ctx) => {
 });
 
 export const regenerateRecoveryCodes = implement(auth.regenerateRecoveryCodes, (input, ctx) => {
-  const { userId } = requireSession(ctx);
+  const { userId, user } = requireSession(ctx);
   if (!confirmedTotp(ctx.db, userId)) throw new OpError("CONFLICT", "Two-factor sign-in is not on.");
-  assertNotLocked(ctx.db, userKey(userId, ctx.ip));
-  if (!checkTotpCode(ctx.db, ctx.secrets, userId, input.code)) {
-    recordFailure(ctx.db, userKey(userId, ctx.ip));
+  if (!checkSecondFactorCode(ctx, user, "totp", () => checkTotpCode(ctx.db, ctx.secrets, userId, input.code))) {
     throw new OpError("BAD_REQUEST", "That code is wrong.", { field: "code" });
   }
   return { recoveryCodes: issueRecoveryCodes(ctx.db, ctx.secrets, userId) };

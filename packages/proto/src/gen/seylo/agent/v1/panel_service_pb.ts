@@ -2,8 +2,8 @@
 // @generated from file seylo/agent/v1/panel_service.proto (package seylo.agent.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { DesiredState } from "./desired_pb";
 import { file_seylo_agent_v1_desired } from "./desired_pb";
 import type { CrashReport, Event } from "./events_pb";
@@ -17,7 +17,160 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/panel_service.proto.
  */
 export const file_seylo_agent_v1_panel_service: GenFile = /*@__PURE__*/
-  fileDesc("CiJzZXlsby9hZ2VudC92MS9wYW5lbF9zZXJ2aWNlLnByb3RvEg5zZXlsby5hZ2VudC52MSI6ChZDaGVja0VkZ2VBY2Nlc3NSZXF1ZXN0Eg8KB3N1YmplY3QYASABKAkSDwoHdXNlcl9pZBgCIAEoCSIqChdDaGVja0VkZ2VBY2Nlc3NSZXNwb25zZRIPCgdhbGxvd2VkGAEgASgIIlQKElJlcG9ydENyYXNoUmVxdWVzdBIRCglvdXRib3hfaWQYASABKAQSKwoGcmVwb3J0GAIgASgLMhsuc2V5bG8uYWdlbnQudjEuQ3Jhc2hSZXBvcnQiFQoTUmVwb3J0Q3Jhc2hSZXNwb25zZSJNChJSZXBvcnRFdmVudFJlcXVlc3QSEQoJb3V0Ym94X2lkGAEgASgEEiQKBWV2ZW50GAIgASgLMhUuc2V5bG8uYWdlbnQudjEuRXZlbnQiFQoTUmVwb3J0RXZlbnRSZXNwb25zZSIwChZHZXREZXNpcmVkU3RhdGVSZXF1ZXN0EhYKDmtub3duX3JldmlzaW9uGAEgASgEIkYKF0dldERlc2lyZWRTdGF0ZVJlc3BvbnNlEisKBXN0YXRlGAEgASgLMhwuc2V5bG8uYWdlbnQudjEuRGVzaXJlZFN0YXRlMuQECgxQYW5lbFNlcnZpY2USawoLUmVwb3J0Q3Jhc2gSIi5zZXlsby5hZ2VudC52MS5SZXBvcnRDcmFzaFJlcXVlc3QaIy5zZXlsby5hZ2VudC52MS5SZXBvcnRDcmFzaFJlc3BvbnNlIhPK8xgPcGFuZWwucmVwb3J0LnYxEmsKC1JlcG9ydEV2ZW50EiIuc2V5bG8uYWdlbnQudjEuUmVwb3J0RXZlbnRSZXF1ZXN0GiMuc2V5bG8uYWdlbnQudjEuUmVwb3J0RXZlbnRSZXNwb25zZSITyvMYD3BhbmVsLnJlcG9ydC52MRJ4Cg9HZXREZXNpcmVkU3RhdGUSJi5zZXlsby5hZ2VudC52MS5HZXREZXNpcmVkU3RhdGVSZXF1ZXN0Gicuc2V5bG8uYWdlbnQudjEuR2V0RGVzaXJlZFN0YXRlUmVzcG9uc2UiFMrzGBBwYW5lbC5kZXNpcmVkLnYxEoEBCg5SZWdpc3RyeVR1bm5lbBIlLnNleWxvLmFnZW50LnYxLlJlZ2lzdHJ5VHVubmVsUmVxdWVzdBomLnNleWxvLmFnZW50LnYxLlJlZ2lzdHJ5VHVubmVsUmVzcG9uc2UiIMDzGAPK8xgYcGFuZWwucmVnaXN0cnktdHVubmVsLnYxEnwKD0NoZWNrRWRnZUFjY2VzcxImLnNleWxvLmFnZW50LnYxLkNoZWNrRWRnZUFjY2Vzc1JlcXVlc3QaJy5zZXlsby5hZ2VudC52MS5DaGVja0VkZ2VBY2Nlc3NSZXNwb25zZSIYyvMYFHBhbmVsLmVkZ2UtYWNjZXNzLnYxQrwBChJjb20uc2V5bG8uYWdlbnQudjFCEVBhbmVsU2VydmljZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_seylo_agent_v1_desired, file_seylo_agent_v1_events, file_seylo_agent_v1_options, file_seylo_agent_v1_tunnel]);
+  fileDesc("CiJzZXlsby9hZ2VudC92MS9wYW5lbF9zZXJ2aWNlLnByb3RvEg5zZXlsby5hZ2VudC52MSJnChlTaWduQmFja3VwUmVxdWVzdHNSZXF1ZXN0EhIKCnNpZ25pbmdfaWQYASABKAkSNgoIcmVxdWVzdHMYAiADKAsyJC5zZXlsby5hZ2VudC52MS5CYWNrdXBTdG9yYWdlUmVxdWVzdCKrAQoUQmFja3VwU3RvcmFnZVJlcXVlc3QSKwoCb3AYASABKA4yHy5zZXlsby5hZ2VudC52MS5CYWNrdXBTdG9yYWdlT3ASCwoDa2V5GAIgASgJEhEKCXVwbG9hZF9pZBgDIAEoCRITCgtwYXJ0X251bWJlchgEIAEoDRIxCgVwYXJ0cxgFIAMoCzIiLnNleWxvLmFnZW50LnYxLkJhY2t1cFVwbG9hZGVkUGFydCI3ChJCYWNrdXBVcGxvYWRlZFBhcnQSEwoLcGFydF9udW1iZXIYASABKA0SDAoEZXRhZxgCIAEoCSJUChpTaWduQmFja3VwUmVxdWVzdHNSZXNwb25zZRI2CghyZXF1ZXN0cxgBIAMoCzIkLnNleWxvLmFnZW50LnYxLlNpZ25lZFN0b3JhZ2VSZXF1ZXN0IkYKFFNpZ25lZFN0b3JhZ2VSZXF1ZXN0Eg4KBm1ldGhvZBgBIAEoCRILCgN1cmwYAiABKAkSEQoJdXBsb2FkX2lkGAMgASgJIjoKFkNoZWNrRWRnZUFjY2Vzc1JlcXVlc3QSDwoHc3ViamVjdBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJIioKF0NoZWNrRWRnZUFjY2Vzc1Jlc3BvbnNlEg8KB2FsbG93ZWQYASABKAgiVAoSUmVwb3J0Q3Jhc2hSZXF1ZXN0EhEKCW91dGJveF9pZBgBIAEoBBIrCgZyZXBvcnQYAiABKAsyGy5zZXlsby5hZ2VudC52MS5DcmFzaFJlcG9ydCIVChNSZXBvcnRDcmFzaFJlc3BvbnNlIk0KElJlcG9ydEV2ZW50UmVxdWVzdBIRCglvdXRib3hfaWQYASABKAQSJAoFZXZlbnQYAiABKAsyFS5zZXlsby5hZ2VudC52MS5FdmVudCIVChNSZXBvcnRFdmVudFJlc3BvbnNlIjAKFkdldERlc2lyZWRTdGF0ZVJlcXVlc3QSFgoOa25vd25fcmV2aXNpb24YASABKAQiRgoXR2V0RGVzaXJlZFN0YXRlUmVzcG9uc2USKwoFc3RhdGUYASABKAsyHC5zZXlsby5hZ2VudC52MS5EZXNpcmVkU3RhdGUqpAIKD0JhY2t1cFN0b3JhZ2VPcBIhCh1CQUNLVVBfU1RPUkFHRV9PUF9VTlNQRUNJRklFRBAAEhkKFUJBQ0tVUF9TVE9SQUdFX09QX1BVVBABEiYKIkJBQ0tVUF9TVE9SQUdFX09QX0NSRUFURV9NVUxUSVBBUlQQAhIhCh1CQUNLVVBfU1RPUkFHRV9PUF9VUExPQURfUEFSVBADEigKJEJBQ0tVUF9TVE9SQUdFX09QX0NPTVBMRVRFX01VTFRJUEFSVBAEEiUKIUJBQ0tVUF9TVE9SQUdFX09QX0FCT1JUX01VTFRJUEFSVBAFEhkKFUJBQ0tVUF9TVE9SQUdFX09QX0dFVBAGEhwKGEJBQ0tVUF9TVE9SQUdFX09QX0RFTEVURRAHMuwFCgxQYW5lbFNlcnZpY2USawoLUmVwb3J0Q3Jhc2gSIi5zZXlsby5hZ2VudC52MS5SZXBvcnRDcmFzaFJlcXVlc3QaIy5zZXlsby5hZ2VudC52MS5SZXBvcnRDcmFzaFJlc3BvbnNlIhPK8xgPcGFuZWwucmVwb3J0LnYxEmsKC1JlcG9ydEV2ZW50EiIuc2V5bG8uYWdlbnQudjEuUmVwb3J0RXZlbnRSZXF1ZXN0GiMuc2V5bG8uYWdlbnQudjEuUmVwb3J0RXZlbnRSZXNwb25zZSITyvMYD3BhbmVsLnJlcG9ydC52MRJ4Cg9HZXREZXNpcmVkU3RhdGUSJi5zZXlsby5hZ2VudC52MS5HZXREZXNpcmVkU3RhdGVSZXF1ZXN0Gicuc2V5bG8uYWdlbnQudjEuR2V0RGVzaXJlZFN0YXRlUmVzcG9uc2UiFMrzGBBwYW5lbC5kZXNpcmVkLnYxEoEBCg5SZWdpc3RyeVR1bm5lbBIlLnNleWxvLmFnZW50LnYxLlJlZ2lzdHJ5VHVubmVsUmVxdWVzdBomLnNleWxvLmFnZW50LnYxLlJlZ2lzdHJ5VHVubmVsUmVzcG9uc2UiIMDzGAPK8xgYcGFuZWwucmVnaXN0cnktdHVubmVsLnYxEnwKD0NoZWNrRWRnZUFjY2VzcxImLnNleWxvLmFnZW50LnYxLkNoZWNrRWRnZUFjY2Vzc1JlcXVlc3QaJy5zZXlsby5hZ2VudC52MS5DaGVja0VkZ2VBY2Nlc3NSZXNwb25zZSIYyvMYFHBhbmVsLmVkZ2UtYWNjZXNzLnYxEoUBChJTaWduQmFja3VwUmVxdWVzdHMSKS5zZXlsby5hZ2VudC52MS5TaWduQmFja3VwUmVxdWVzdHNSZXF1ZXN0Giouc2V5bG8uYWdlbnQudjEuU2lnbkJhY2t1cFJlcXVlc3RzUmVzcG9uc2UiGMrzGBRwYW5lbC5iYWNrdXAtc2lnbi52MUK8AQoSY29tLnNleWxvLmFnZW50LnYxQhFQYW5lbFNlcnZpY2VQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_seylo_agent_v1_desired, file_seylo_agent_v1_events, file_seylo_agent_v1_options, file_seylo_agent_v1_tunnel]);
+
+/**
+ * @generated from message seylo.agent.v1.SignBackupRequestsRequest
+ */
+export type SignBackupRequestsRequest = Message<"seylo.agent.v1.SignBackupRequestsRequest"> & {
+  /**
+   * BackupDestination.signing_id of the run.
+   *
+   * @generated from field: string signing_id = 1;
+   */
+  signingId: string;
+
+  /**
+   * At most 32 per call.
+   *
+   * @generated from field: repeated seylo.agent.v1.BackupStorageRequest requests = 2;
+   */
+  requests: BackupStorageRequest[];
+};
+
+/**
+ * Describes the message seylo.agent.v1.SignBackupRequestsRequest.
+ * Use `create(SignBackupRequestsRequestSchema)` to create a new message.
+ */
+export const SignBackupRequestsRequestSchema: GenMessage<SignBackupRequestsRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 0);
+
+/**
+ * BackupStorageRequest is one S3 step of a backup or restore.
+ *
+ * @generated from message seylo.agent.v1.BackupStorageRequest
+ */
+export type BackupStorageRequest = Message<"seylo.agent.v1.BackupStorageRequest"> & {
+  /**
+   * @generated from field: seylo.agent.v1.BackupStorageOp op = 1;
+   */
+  op: BackupStorageOp;
+
+  /**
+   * The full object key (prefix included).
+   *
+   * @generated from field: string key = 2;
+   */
+  key: string;
+
+  /**
+   * UPLOAD_PART, COMPLETE_MULTIPART, ABORT_MULTIPART: the upload id that
+   * CREATE_MULTIPART returned.
+   *
+   * @generated from field: string upload_id = 3;
+   */
+  uploadId: string;
+
+  /**
+   * UPLOAD_PART: 1 to 10000.
+   *
+   * @generated from field: uint32 part_number = 4;
+   */
+  partNumber: number;
+
+  /**
+   * COMPLETE_MULTIPART: every uploaded part, in order.
+   *
+   * @generated from field: repeated seylo.agent.v1.BackupUploadedPart parts = 5;
+   */
+  parts: BackupUploadedPart[];
+};
+
+/**
+ * Describes the message seylo.agent.v1.BackupStorageRequest.
+ * Use `create(BackupStorageRequestSchema)` to create a new message.
+ */
+export const BackupStorageRequestSchema: GenMessage<BackupStorageRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 1);
+
+/**
+ * BackupUploadedPart is one part of a multipart upload.
+ *
+ * @generated from message seylo.agent.v1.BackupUploadedPart
+ */
+export type BackupUploadedPart = Message<"seylo.agent.v1.BackupUploadedPart"> & {
+  /**
+   * @generated from field: uint32 part_number = 1;
+   */
+  partNumber: number;
+
+  /**
+   * The ETag header UploadPart answered with.
+   *
+   * @generated from field: string etag = 2;
+   */
+  etag: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.BackupUploadedPart.
+ * Use `create(BackupUploadedPartSchema)` to create a new message.
+ */
+export const BackupUploadedPartSchema: GenMessage<BackupUploadedPart> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 2);
+
+/**
+ * @generated from message seylo.agent.v1.SignBackupRequestsResponse
+ */
+export type SignBackupRequestsResponse = Message<"seylo.agent.v1.SignBackupRequestsResponse"> & {
+  /**
+   * One per request, in the same order.
+   *
+   * @generated from field: repeated seylo.agent.v1.SignedStorageRequest requests = 1;
+   */
+  requests: SignedStorageRequest[];
+};
+
+/**
+ * Describes the message seylo.agent.v1.SignBackupRequestsResponse.
+ * Use `create(SignBackupRequestsResponseSchema)` to create a new message.
+ */
+export const SignBackupRequestsResponseSchema: GenMessage<SignBackupRequestsResponse> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 3);
+
+/**
+ * SignedStorageRequest answers one BackupStorageRequest. For a presigned
+ * request (SigV4 query authentication) send it with this method to this
+ * URL, adding only Content-Length and Content-Type (and the body of a PUT):
+ * no other header is signed. The steps the panel made itself have no URL.
+ *
+ * @generated from message seylo.agent.v1.SignedStorageRequest
+ */
+export type SignedStorageRequest = Message<"seylo.agent.v1.SignedStorageRequest"> & {
+  /**
+   * @generated from field: string method = 1;
+   */
+  method: string;
+
+  /**
+   * @generated from field: string url = 2;
+   */
+  url: string;
+
+  /**
+   * CREATE_MULTIPART: the new upload's id.
+   *
+   * @generated from field: string upload_id = 3;
+   */
+  uploadId: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.SignedStorageRequest.
+ * Use `create(SignedStorageRequestSchema)` to create a new message.
+ */
+export const SignedStorageRequestSchema: GenMessage<SignedStorageRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_service, 4);
 
 /**
  * @generated from message seylo.agent.v1.CheckEdgeAccessRequest
@@ -43,7 +196,7 @@ export type CheckEdgeAccessRequest = Message<"seylo.agent.v1.CheckEdgeAccessRequ
  * Use `create(CheckEdgeAccessRequestSchema)` to create a new message.
  */
 export const CheckEdgeAccessRequestSchema: GenMessage<CheckEdgeAccessRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 0);
+  messageDesc(file_seylo_agent_v1_panel_service, 5);
 
 /**
  * @generated from message seylo.agent.v1.CheckEdgeAccessResponse
@@ -64,7 +217,7 @@ export type CheckEdgeAccessResponse = Message<"seylo.agent.v1.CheckEdgeAccessRes
  * Use `create(CheckEdgeAccessResponseSchema)` to create a new message.
  */
 export const CheckEdgeAccessResponseSchema: GenMessage<CheckEdgeAccessResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 1);
+  messageDesc(file_seylo_agent_v1_panel_service, 6);
 
 /**
  * @generated from message seylo.agent.v1.ReportCrashRequest
@@ -88,7 +241,7 @@ export type ReportCrashRequest = Message<"seylo.agent.v1.ReportCrashRequest"> & 
  * Use `create(ReportCrashRequestSchema)` to create a new message.
  */
 export const ReportCrashRequestSchema: GenMessage<ReportCrashRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 2);
+  messageDesc(file_seylo_agent_v1_panel_service, 7);
 
 /**
  * @generated from message seylo.agent.v1.ReportCrashResponse
@@ -101,7 +254,7 @@ export type ReportCrashResponse = Message<"seylo.agent.v1.ReportCrashResponse"> 
  * Use `create(ReportCrashResponseSchema)` to create a new message.
  */
 export const ReportCrashResponseSchema: GenMessage<ReportCrashResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 3);
+  messageDesc(file_seylo_agent_v1_panel_service, 8);
 
 /**
  * @generated from message seylo.agent.v1.ReportEventRequest
@@ -123,7 +276,7 @@ export type ReportEventRequest = Message<"seylo.agent.v1.ReportEventRequest"> & 
  * Use `create(ReportEventRequestSchema)` to create a new message.
  */
 export const ReportEventRequestSchema: GenMessage<ReportEventRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 4);
+  messageDesc(file_seylo_agent_v1_panel_service, 9);
 
 /**
  * @generated from message seylo.agent.v1.ReportEventResponse
@@ -136,7 +289,7 @@ export type ReportEventResponse = Message<"seylo.agent.v1.ReportEventResponse"> 
  * Use `create(ReportEventResponseSchema)` to create a new message.
  */
 export const ReportEventResponseSchema: GenMessage<ReportEventResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 5);
+  messageDesc(file_seylo_agent_v1_panel_service, 10);
 
 /**
  * @generated from message seylo.agent.v1.GetDesiredStateRequest
@@ -155,7 +308,7 @@ export type GetDesiredStateRequest = Message<"seylo.agent.v1.GetDesiredStateRequ
  * Use `create(GetDesiredStateRequestSchema)` to create a new message.
  */
 export const GetDesiredStateRequestSchema: GenMessage<GetDesiredStateRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 6);
+  messageDesc(file_seylo_agent_v1_panel_service, 11);
 
 /**
  * @generated from message seylo.agent.v1.GetDesiredStateResponse
@@ -174,7 +327,74 @@ export type GetDesiredStateResponse = Message<"seylo.agent.v1.GetDesiredStateRes
  * Use `create(GetDesiredStateResponseSchema)` to create a new message.
  */
 export const GetDesiredStateResponseSchema: GenMessage<GetDesiredStateResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_service, 7);
+  messageDesc(file_seylo_agent_v1_panel_service, 12);
+
+/**
+ * BackupStorageOp names the S3 step of a BackupStorageRequest.
+ *
+ * @generated from enum seylo.agent.v1.BackupStorageOp
+ */
+export enum BackupStorageOp {
+  /**
+   * @generated from enum value: BACKUP_STORAGE_OP_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * PutObject, presigned: a whole object in one request.
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_PUT = 1;
+   */
+  PUT = 1,
+
+  /**
+   * CreateMultipartUpload, made by the panel; answers upload_id.
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_CREATE_MULTIPART = 2;
+   */
+  CREATE_MULTIPART = 2,
+
+  /**
+   * UploadPart, presigned (PUT <key>?partNumber=<n>&uploadId=<id>).
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_UPLOAD_PART = 3;
+   */
+  UPLOAD_PART = 3,
+
+  /**
+   * CompleteMultipartUpload, made by the panel with the parts given.
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_COMPLETE_MULTIPART = 4;
+   */
+  COMPLETE_MULTIPART = 4,
+
+  /**
+   * AbortMultipartUpload, made by the panel.
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_ABORT_MULTIPART = 5;
+   */
+  ABORT_MULTIPART = 5,
+
+  /**
+   * GetObject, presigned.
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_GET = 6;
+   */
+  GET = 6,
+
+  /**
+   * DeleteObject, presigned.
+   *
+   * @generated from enum value: BACKUP_STORAGE_OP_DELETE = 7;
+   */
+  DELETE = 7,
+}
+
+/**
+ * Describes the enum seylo.agent.v1.BackupStorageOp.
+ */
+export const BackupStorageOpSchema: GenEnum<BackupStorageOp> = /*@__PURE__*/
+  enumDesc(file_seylo_agent_v1_panel_service, 0);
 
 /**
  * PanelService is implemented by the panel and called by agents.
@@ -238,6 +458,23 @@ export const PanelService: GenService<{
     methodKind: "unary";
     input: typeof CheckEdgeAccessRequestSchema;
     output: typeof CheckEdgeAccessResponseSchema;
+  },
+  /**
+   * The S3 requests of a backup or restore the panel started on this node
+   * (BackupDestination.signing_id), so the node moves the bytes straight to
+   * the bucket without holding the destination's keys: the panel presigns
+   * the requests the node sends (PUT, UPLOAD_PART, GET, DELETE) and makes
+   * the multipart create, complete and abort steps itself. Only for that
+   * run's own object (a restore: the restored backup's GET); anything else,
+   * a finished run or another node's run is PERMISSION_DENIED for the whole
+   * call. Added in 0.2.
+   *
+   * @generated from rpc seylo.agent.v1.PanelService.SignBackupRequests
+   */
+  signBackupRequests: {
+    methodKind: "unary";
+    input: typeof SignBackupRequestsRequestSchema;
+    output: typeof SignBackupRequestsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_seylo_agent_v1_panel_service, 0);

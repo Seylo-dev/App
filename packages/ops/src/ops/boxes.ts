@@ -5,7 +5,7 @@
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
 import { permission } from "../permission";
-import { Id, Timestamp } from "../schemas";
+import { HttpsGitUrl, Id, Timestamp } from "../schemas";
 import { ServiceName } from "./services";
 
 export const BoxState = Type.Union([Type.Literal("running"), Type.Literal("starting"), Type.Literal("sleeping"), Type.Literal("stopped")]);
@@ -37,8 +37,8 @@ export const create = defineOp({
     projectId: Id,
     name: ServiceName,
     nodeId: Id,
-    /** HTTPS git URL cloned into the workspace on first start. */
-    repository: Type.Optional(Type.String({ maxLength: 500, pattern: "^https://" })),
+    /** HTTPS git URL cloned into the workspace on first start, without a user name or token. */
+    repository: Type.Optional(HttpsGitUrl),
     /** Default 30. */
     idleMinutes: Type.Optional(Type.Integer({ minimum: 0, maximum: 1440 })),
   }),

@@ -8,7 +8,7 @@ import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { getService, invalidateService } from "../domains/lookup";
-import { applyRetention, checkTarget, nextRun, type PolicyRow, type RunRow, startBackup, toRun } from "./runs";
+import { applyRetention, checkTarget, nextRun, ownObjectKey, type PolicyRow, queuePrune, type RunRow, startBackup, toRun } from "./runs";
 import { type DestinationRow, deleteObject, type StorageConfig, storageConfig, testStorage } from "./storage";
 
 type Destination = Static<typeof backupOps.Destination>;
@@ -253,7 +253,10 @@ export const updatePolicy = implement(backupOps.updatePolicy, (input, ctx) => {
     .where(eq(backupPolicies.id, current.id))
     .returning()
     .get();
-  if (input.keepLast !== undefined) applyRetention(ctx.db, row.id);
+  if (input.keepLast !== undefined) {
+    applyRetention(ctx.db, row.id);
+    queuePrune(ctx, row.id);
+  }
   afterPolicyChange(ctx, input.serviceId);
   return toPolicies(ctx, [row])[0] as Policy;
 });
@@ -379,7 +382,10 @@ export const deleteRun = implement(backupOps.deleteRun, async (input, ctx) => {
       });
     }
     try {
-      await deleteObject(storageConfig(ctx.secrets, destination), row.objectKey);
+      // A key recorded before the panel checked keys may name another
+      // service's object: drop the row, leave that object alone.
+      if (ownObjectKey(row, row.objectKey)) await deleteObject(storageConfig(ctx.secrets, destination), row.objectKey);
+      else ctx.logger.warn({ runId: row.id, serviceId: row.serviceId }, "not deleting a backup object outside its run's folder");
     } catch (error) {
       ctx.logger.warn({ err: error, runId: row.id }, "deleting a backup object failed");
       throw new OpError("UNAVAILABLE", "The bucket did not accept the delete. Try again, or test the destination.", { reason: "storage" });

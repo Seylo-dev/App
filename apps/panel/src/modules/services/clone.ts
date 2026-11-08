@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { parseEnv } from "@seylo/env-analyzer";
 import { OpError, services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import {
   type DomainMiddlewares,
@@ -56,7 +56,8 @@ import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
-import { toDataCopy } from "./copies";
+import { copyRunning, toDataCopy } from "./copies";
+import { withoutCredentials } from "./git-url";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
 import { assertNode, insertService, writeSpec } from "./insert";
 import { relayVolume, waitStopped } from "./move";
@@ -337,7 +338,9 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
     const busy = ctx.db
       .select({ id: serviceCopies.id })
       .from(serviceCopies)
-      .where(and(eq(serviceCopies.sourceServiceId, svc.id), inArray(serviceCopies.status, ["queued", "copying"])))
+      .where(
+        and(eq(serviceCopies.sourceServiceId, svc.id), inArray(serviceCopies.status, [...copyRunning]), isNotNull(serviceCopies.serviceId)),
+      )
       .get();
     if (busy)
       throw new OpError("CONFLICT", `${svc.name}'s data is already being copied. Wait until that copy ends.`, { reason: "copying" });
@@ -394,7 +397,11 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
       }
     }
     const box = tx.select().from(serviceBoxes).where(eq(serviceBoxes.serviceId, svc.id)).get();
-    if (box) tx.insert(serviceBoxes).values({ serviceId: id, repository: box.repository, idleMinutes: box.idleMinutes }).run();
+    // A token in an older Box's URL stays with that Box.
+    if (box)
+      tx.insert(serviceBoxes)
+        .values({ serviceId: id, repository: box.repository ? withoutCredentials(box.repository) : null, idleMinutes: box.idleMinutes })
+        .run();
     let domain: string | null = null;
     if (input.autoDomain && plan.autoDomain) {
       domain = insertDomain(ctx, tx, {
@@ -473,10 +480,17 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
     if (!row || (row.status !== "queued" && row.status !== "copying")) return;
     const clone = row.serviceId ? deps.db.select().from(services).where(eq(services.id, row.serviceId)).get() : undefined;
     const source = row.sourceServiceId ? deps.db.select().from(services).where(eq(services.id, row.sourceServiceId)).get() : undefined;
+    // Only while the copy has not ended: deleting the clone or the source
+    // ends it (services/delete.ts), and a late "done" must not undo that.
     const save = (set: Partial<typeof serviceCopies.$inferInsert>) => {
-      deps.db.update(serviceCopies).set(set).where(eq(serviceCopies.id, row.id)).run();
+      deps.db
+        .update(serviceCopies)
+        .set(set)
+        .where(and(eq(serviceCopies.id, row.id), inArray(serviceCopies.status, [...copyRunning])))
+        .run();
       if (clone) publishService(deps, clone);
     };
+    const ended = () => !copyRunning.some((s) => s === load()?.status);
     const startSource = () => {
       if (!source || !load()?.sourceStopped) return;
       deps.db.transaction((tx) => {
@@ -486,7 +500,10 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
       deps.agents.desired.markDirty({ serviceId: source.id });
       publishService(deps, source);
     };
-    if (!clone) return startSource();
+    if (!clone) {
+      save({ status: "failed", error: "The clone was deleted.", finishedAt: new Date() });
+      return startSource();
+    }
     if (!source) {
       save({ status: "failed", error: "The source service was deleted.", finishedAt: new Date() });
       return;
@@ -507,6 +524,7 @@ export const cloneDataJob = defineJob<{ copyId: string }>({
       }
       let total = 0;
       for (const volume of row.volumes) {
+        if (ended()) return;
         total += await relayVolume(deps, { serviceId: source.id, volume, from: row.fromNodeId, to: row.toNodeId, toServiceId: clone.id });
         save({ bytesCopied: total });
       }

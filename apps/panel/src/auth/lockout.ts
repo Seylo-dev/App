@@ -13,6 +13,11 @@
 // 30 days skip the brake, so a campaign against the owner's email does not
 // keep the owner out; they still have their own per-address lock.
 //
+// A third brake counts wrong second-factor codes per account from every
+// address (see codeThrottle): the right password is exactly what a code
+// guesser has, and every new address would otherwise buy a fresh ticket and
+// a fresh per-address lock.
+//
 // Keyed by address, so a stranger who types wrong passwords for the owner's
 // email only locks themselves out, never the owner. Keyed by the email as
 // typed (account or not), so a locked account and an unknown email answer
@@ -93,6 +98,7 @@ export function clearAllFailures(db: PanelDb, subject: { email?: string; userId?
   const map = streaks(db);
   for (const key of [...map.keys()]) if (prefixes.some((p) => key.startsWith(p))) map.delete(key);
   if (subject.email) accounts(db).delete(accountKey(subject.email));
+  if (subject.userId) state(db).codes.delete(subject.userId);
 }
 
 /** The per-email brake; tests change the numbers. */
@@ -113,6 +119,10 @@ interface AccountState {
   inFlight: Map<string, number>;
   /** "email|address group" -> when the right password last came from there. */
   goodAddresses: Map<string, number>;
+  /** Wrong second-factor codes per account id, from every address. */
+  codes: Map<string, AccountStreak>;
+  /** "user id|address group" -> when that account last finished a sign-in from there. */
+  signedIn: Map<string, number>;
 }
 
 const accountsByPanel = new WeakMap<PanelDb, AccountState>();
@@ -120,7 +130,7 @@ const accountsByPanel = new WeakMap<PanelDb, AccountState>();
 function state(db: PanelDb): AccountState {
   let value = accountsByPanel.get(db);
   if (!value) {
-    value = { streaks: new Map(), inFlight: new Map(), goodAddresses: new Map() };
+    value = { streaks: new Map(), inFlight: new Map(), goodAddresses: new Map(), codes: new Map(), signedIn: new Map() };
     accountsByPanel.set(db, value);
   }
   return value;
@@ -204,6 +214,91 @@ export function recordAccountFailure(db: PanelDb, email: string, now = Date.now(
   if (alert) streak.alerted = true;
   map.delete(key);
   map.set(key, streak);
+  while (map.size > maxEntries) map.delete(map.keys().next().value as string);
+  return alert;
+}
+
+/**
+ * The per-account brake on second-factor codes. Past `failures` wrong codes
+ * for one account within the 15-minute forgiveness window, from any number
+ * of addresses, authenticator codes for it are checked at most once every
+ * `intervalMs`, doubling with every further `failures` wrong codes up to
+ * `maxIntervalMs`; the rest answer RATE_LIMITED and spend no ticket attempt.
+ * One security_change alert per streak. A success does not end the streak
+ * (the attacker's next guesses would start free again); 15 quiet minutes do.
+ *
+ * Addresses where the account finished a sign-in (both factors, or a
+ * passkey) in the last 30 days skip the brake, so a campaign does not keep
+ * the owner out. The password alone earns nothing here: the attacker has it.
+ * Recovery codes are not braked either: 50 bits each are out of reach of any
+ * guessing rate, and they are the owner's way in from a new address while
+ * someone else holds the brake on. Their failures still count.
+ */
+export const codeThrottle = { failures: 10, intervalMs: 2500, maxIntervalMs: 60_000 };
+
+function liveCodeStreak(db: PanelDb, userId: string, now: number): AccountStreak | null {
+  const streak = state(db).codes.get(userId);
+  return streak && now - streak.lastFailureAt <= maxLockMs ? streak : null;
+}
+
+/** Whether the per-account code brake is on for this account. */
+export function codesBraked(db: PanelDb, userId: string, now = Date.now()): boolean {
+  const streak = liveCodeStreak(db, userId, now);
+  return !!streak && streak.failures >= codeThrottle.failures;
+}
+
+/** Remembers that `userId` finished a sign-in from `ip`; that address group skips the code brake. */
+export function rememberSignedInAddress(db: PanelDb, userId: string, ip: string | null, now = Date.now()): void {
+  const map = state(db).signedIn;
+  const key = `${userId}|${addressKey(ip)}`;
+  map.delete(key);
+  map.set(key, now);
+  while (map.size > maxEntries) map.delete(map.keys().next().value as string);
+}
+
+function signedInFrom(db: PanelDb, userId: string, ip: string | null, now: number): boolean {
+  const at = state(db).signedIn.get(`${userId}|${addressKey(ip)}`);
+  return at !== undefined && now - at <= goodAddressTtlMs;
+}
+
+function codeInterval(failures: number): number {
+  const doublings = Math.floor((failures - codeThrottle.failures) / codeThrottle.failures);
+  return Math.min(codeThrottle.intervalMs * 2 ** Math.max(0, doublings), codeThrottle.maxIntervalMs);
+}
+
+/**
+ * Call right before checking an authenticator code for `userId`. While the
+ * brake is on, lets one check through per interval and throws RATE_LIMITED
+ * (with retryAfter) for the rest. Code checks run synchronously, so one at a
+ * time holds without counting them.
+ */
+export function beginCodeCheck(db: PanelDb, userId: string, ip: string | null, now = Date.now()): void {
+  const streak = liveCodeStreak(db, userId, now);
+  if (!streak || streak.failures < codeThrottle.failures || signedInFrom(db, userId, ip, now)) return;
+  if (now < streak.nextCheckAt) {
+    const seconds = Math.max(1, Math.ceil((streak.nextCheckAt - now) / 1000));
+    throw new OpError("RATE_LIMITED", `Too many wrong codes for this account. Try again in ${seconds} seconds.`, {
+      retryAfter: String(seconds),
+      reason: "accountBrake",
+    });
+  }
+  streak.nextCheckAt = now + codeInterval(streak.failures);
+}
+
+/**
+ * Counts a wrong second-factor code for this account from any address. True
+ * exactly once per streak, when the brake comes on: the caller raises the alert.
+ */
+export function recordCodeFailure(db: PanelDb, userId: string, now = Date.now()): boolean {
+  const map = state(db).codes;
+  const before = liveCodeStreak(db, userId, now);
+  const streak = before
+    ? { ...before, failures: before.failures + 1, lastFailureAt: now }
+    : { failures: 1, lastFailureAt: now, alerted: false, nextCheckAt: 0 };
+  const alert = streak.failures >= codeThrottle.failures && !streak.alerted;
+  if (alert) streak.alerted = true;
+  map.delete(userId);
+  map.set(userId, streak);
   while (map.size > maxEntries) map.delete(map.keys().next().value as string);
   return alert;
 }

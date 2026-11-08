@@ -57,10 +57,14 @@ type Options struct {
 	Suspend SuspendFunc
 	// Progress receives best-effort progress; may be nil.
 	Progress func(*agentv1.BackupProgress)
-	// OpenStore opens a destination; nil means OpenS3.
+	// OpenStore opens a destination; nil means OpenSigned with Signer for a
+	// destination without keys (signing_id set), else OpenS3.
 	OpenStore func(*agentv1.BackupDestination) (Store, error)
-	Logger    *slog.Logger
-	Now       func() time.Time
+	// Signer presigns the requests of keyless destinations (the panel
+	// connection); nil refuses them.
+	Signer Signer
+	Logger *slog.Logger
+	Now    func() time.Time
 	// MaxParallel backups at once; more wait. 0 means 2.
 	MaxParallel int
 }
@@ -88,7 +92,13 @@ func NewLocal(opts Options) *Local {
 		opts.Now = time.Now
 	}
 	if opts.OpenStore == nil {
-		opts.OpenStore = func(d *agentv1.BackupDestination) (Store, error) { return OpenS3(d) }
+		signer := opts.Signer
+		opts.OpenStore = func(d *agentv1.BackupDestination) (Store, error) {
+			if d.GetSigningId() != "" {
+				return OpenSigned(signer, d)
+			}
+			return OpenS3(d)
+		}
 	}
 	if opts.MaxParallel <= 0 {
 		opts.MaxParallel = 2

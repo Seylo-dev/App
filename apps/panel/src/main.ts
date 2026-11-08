@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./config";
 import { openDatabases } from "./db/client";
+import { panelWebsocket } from "./http/ws-guard";
 import { createLogger } from "./logger";
 import { createPanel } from "./panel";
 import { ensureAgentTls } from "./security/agent-tls";
@@ -34,9 +35,15 @@ const agentTls = config.agentTlsPort ? ensureAgentTls(config.dataDir, config.age
 const panel = createPanel({ config, databases, masterKey, logger, agentTls: agentTls && { port: agentTls.port, pin: agentTls.pin } });
 panel.runner.start(panel.deps);
 panel.deps.proxy.start();
-panel.app.listen({ hostname: config.host, port: config.port });
+// Both listeners check text frames before Elysia parses them (http/ws-guard.ts).
+panel.app.listen({ hostname: config.host, port: config.port, websocket: panelWebsocket });
 if (agentTls) {
-  panel.agentApp.listen({ hostname: config.host, port: agentTls.port, tls: { cert: agentTls.certPem, key: agentTls.keyPem } });
+  panel.agentApp.listen({
+    hostname: config.host,
+    port: agentTls.port,
+    tls: { cert: agentTls.certPem, key: agentTls.keyPem },
+    websocket: panelWebsocket,
+  });
   logger.info({ port: agentTls.port, pin: agentTls.pin }, "agent TLS listener ready");
 }
 logger.info({ host: config.host, port: config.port, version: config.version, dataDir: config.dataDir }, "panel listening");

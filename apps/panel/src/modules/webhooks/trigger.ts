@@ -16,7 +16,9 @@ import type { Deps } from "../../deps";
 import { bodyRefused } from "../../http/body";
 import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { hashToken } from "../../security/tokens";
+import { appendLog } from "../deployments/logs";
 import { queueDeploy } from "../deployments/queue";
+import { publishDeploymentChange } from "../deployments/store";
 import { readSpec } from "../services/spec";
 import { changesFromPushPayload, firstLine, type PushChanges } from "./changes";
 import { compareForSource } from "./compare";
@@ -105,15 +107,30 @@ export function triggerRoute(deps: Deps) {
         notes = gate.logLines;
       }
 
+      // Only a deploy from a trigger URL that has not started yet takes the
+      // call over (like queuePushDeploy and push deploys). Any other queued
+      // deployment (a node move copying volumes, a project move's switch, a
+      // rollback, a manual or template deploy) ships what it was made for,
+      // so the call queues its own deploy behind it.
       const waiting = deps.db
         .select()
         .from(deployments)
-        .where(and(eq(deployments.serviceId, trigger.serviceId), eq(deployments.status, "queued")))
+        .where(and(eq(deployments.serviceId, trigger.serviceId), eq(deployments.status, "queued"), eq(deployments.trigger, "webhook")))
         .get();
       if (waiting) {
-        // Join the queued deploy; a newer commit replaces the one it would build.
-        if (commitSha && waiting.trigger === "webhook" && waiting.commitSha !== commitSha) {
-          deps.db.update(deployments).set({ commitSha }).where(eq(deployments.id, waiting.id)).run();
+        // A newer commit replaces the one it would build.
+        const replaced = commitSha !== null && waiting.commitSha !== commitSha;
+        if (replaced) {
+          deps.db
+            .update(deployments)
+            .set({ commitSha, commitMessage: firstLine(changes?.headMessage) ?? null })
+            .where(eq(deployments.id, waiting.id))
+            .run();
+          appendLog(deps, trigger.serviceId, waiting.id, "clone", [
+            `A newer call to the deploy URL arrived before this deploy started: it builds ${commitSha.slice(0, 7)} now.`,
+            ...notes,
+          ]);
+          publishDeploymentChange(deps, trigger.serviceId, waiting.id);
         }
         recordDelivery(deps.db, {
           source: "trigger",
@@ -121,7 +138,11 @@ export function triggerRoute(deps: Deps) {
           event: "trigger",
           serviceId: trigger.serviceId,
           outcome: "ignored",
-          detail: commitSha ? "A deploy was already queued; it builds this commit now." : "A deploy was already queued.",
+          detail: replaced
+            ? "A deploy from this URL was already queued; it builds this commit now."
+            : commitSha
+              ? "A deploy of this commit from this URL was already queued."
+              : "A deploy from this URL was already queued.",
           deploymentId: waiting.id,
         });
         return json(200, { deploymentId: waiting.id, queued: false });

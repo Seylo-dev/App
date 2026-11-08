@@ -4,13 +4,13 @@
 // before the rule never show one again.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { compose, GitUrl, git, projects, services as serviceOps } from "@seylo/ops";
+import { boxes as boxOps, compose, GitUrl, git, HttpsGitUrl, projects, services as serviceOps } from "@seylo/ops";
 import { Value } from "@sinclair/typebox/value";
 import { eq } from "drizzle-orm";
-import { auditLog, services } from "../src/db/schema";
+import { auditLog, serviceBoxes, services } from "../src/db/schema";
 import { withoutCredentials } from "../src/modules/services/git-url";
 import { readSpec } from "../src/modules/services/spec";
-import { createUser, type TestPanel, testPanel } from "./helpers";
+import { createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { call } from "./people-helpers";
 import { seedNode, seedService } from "./seed-helpers";
 
@@ -90,4 +90,47 @@ test("a source saved with a token before the rule is shown without it", async ()
   expect(withoutCredentials("ssh://git:hunter2@host/a.git")).toBe("ssh://git@host/a.git");
   expect(withoutCredentials("ssh://git@host/a.git")).toBe("ssh://git@host/a.git");
   expect(withoutCredentials("git@github.com:a/b.git")).toBe("git@github.com:a/b.git");
+});
+
+describe("a Box repository URL", () => {
+  test("with a user name or token is refused by boxes.create and never stored or audited", async () => {
+    const member = await createUser(panel, "member");
+    grant(panel, member.user.id, "project", projectId, ["services.create", "services.view"]);
+    const refused = await call(panel, boxOps.create, { projectId, name: "dev", nodeId, repository: withToken }, { cookie: member.cookie });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error?.details?.field).toBe("repository");
+    expect(refused.body.error?.message).toContain("user name or token");
+    expect(JSON.stringify(panel.deps.db.select().from(serviceBoxes).all())).not.toContain(token);
+    expect(JSON.stringify(panel.deps.db.select().from(auditLog).all())).not.toContain(token);
+
+    const created = await call(
+      panel,
+      boxOps.create,
+      { projectId, name: "dev", nodeId, repository: "https://github.com/acme/site.git" },
+      { cookie: member.cookie },
+    );
+    expect(created.status).toBe(200);
+    expect(created.body.repository).toBe("https://github.com/acme/site.git");
+    for (const url of ["https://github.com/acme/site.git", "https://git.example.com:8443/a/b"])
+      expect(Value.Check(HttpsGitUrl, url)).toBe(true);
+    for (const url of [withToken, "https://ghp_x@github.com/a/b.git", "ssh://git@github.com/a/b.git", "http://github.com/a/b.git"])
+      expect(Value.Check(HttpsGitUrl, url)).toBe(false);
+  });
+
+  test("saved with a token before the rule is shown and cloned without it", async () => {
+    const box = await call(panel, boxOps.create, { projectId, name: "old", nodeId }, { cookie });
+    const serviceId = box.body.serviceId as string;
+    panel.deps.db.update(serviceBoxes).set({ repository: withToken }).where(eq(serviceBoxes.serviceId, serviceId)).run();
+    const viewer = await createUser(panel, "member");
+    grant(panel, viewer.user.id, "project", projectId, ["services.view"]);
+    const got = await call(panel, boxOps.get, { serviceId }, { cookie: viewer.cookie });
+    expect(got.status).toBe(200);
+    expect(got.body.repository).toBe("https://github.com/acme/site.git");
+    expect(JSON.stringify(got.body)).not.toContain(token);
+
+    const clone = await call(panel, serviceOps.clone, { serviceId, projectId, nodeId }, { cookie });
+    expect(clone.status).toBe(200);
+    const copied = panel.deps.db.select().from(serviceBoxes).where(eq(serviceBoxes.serviceId, clone.body.service.id)).get();
+    expect(copied?.repository).toBe("https://github.com/acme/site.git");
+  });
 });

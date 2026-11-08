@@ -72,7 +72,8 @@ export default {
   preview: "Preview",
   thisCreates: "This creates",
   repository: "Repository (optional)",
-  repositoryHint: "An HTTPS git URL, cloned into the workspace on first start.",
+  repositoryHint:
+    "A public HTTPS git URL, cloned into the workspace on first start. No token in it: clone private repositories from the Box's terminal.",
   deployNow: "Deploy right away",
   creating: "Creating",
   created: "{name} created.",

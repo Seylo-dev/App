@@ -4,14 +4,15 @@
 
 import { OpError, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { serviceCopies } from "../../db/schema";
 
 export type ServiceCopyRow = typeof serviceCopies.$inferSelect;
 export type DataCopy = Static<typeof serviceOps.DataCopy>;
 
-const running = ["queued", "copying"] as const;
+/** Statuses of a copy that has not ended. */
+export const copyRunning = ["queued", "copying"] as const;
 
 export function toDataCopy(row: ServiceCopyRow): DataCopy {
   return {
@@ -37,7 +38,8 @@ export function latestCopy(db: PanelDb, serviceId: string): DataCopy | null {
  * writes into, or as the source it reads. Only a copy that stops the
  * source holds the source back from starting; anySource also counts one
  * that reads it while it runs (moving it to another node removes the
- * folder being read).
+ * folder being read). A copy whose clone is gone holds nothing back
+ * (services.delete ends such copies; rows left by older panels stay queued).
  */
 export function activeCopy(
   db: PanelDb,
@@ -50,7 +52,13 @@ export function activeCopy(
   const row = db
     .select()
     .from(serviceCopies)
-    .where(and(inArray(serviceCopies.status, [...running]), or(eq(serviceCopies.serviceId, serviceId), asSource)))
+    .where(
+      and(
+        inArray(serviceCopies.status, [...copyRunning]),
+        isNotNull(serviceCopies.serviceId),
+        or(eq(serviceCopies.serviceId, serviceId), asSource),
+      ),
+    )
     .get();
   if (!row) return null;
   return { row, role: row.serviceId === serviceId ? "clone" : "source" };
