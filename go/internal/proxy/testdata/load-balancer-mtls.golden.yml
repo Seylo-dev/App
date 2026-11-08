@@ -51,11 +51,12 @@ http:
         query: /_seylo/page/status/svc7
   services:
     seylo-svc7:
-      loadBalancer:
-        servers:
-          - url: http://seylo-svc7-4:3000
-          - url: https://198.51.100.2:5757
-        serversTransport: seylo-svc7-remote
+      weighted:
+        services:
+          - name: seylo-svc7-local
+            weight: 1
+          - name: seylo-svc7-node-n2
+            weight: 1
     seylo-svc7-edge:
       loadBalancer:
         servers:
@@ -64,6 +65,11 @@ http:
       loadBalancer:
         servers:
           - url: http://seylo-svc7-4:3000
+    seylo-svc7-node-n2:
+      loadBalancer:
+        servers:
+          - url: https://198.51.100.2:5757
+        serversTransport: seylo-svc7-node-n2
     seylo-svc7-retry:
       failover:
         service: seylo-svc7
@@ -73,7 +79,7 @@ http:
             - 502-504
           maxRequestBodyBytes: 1048576
   serversTransports:
-    seylo-svc7-remote:
+    seylo-svc7-node-n2:
       serverName: lb.seylo.internal
       rootCAs:
         - |

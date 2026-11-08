@@ -106,6 +106,7 @@ func Build(in BuildInput) (Built, error) {
 		Middlewares: map[string]*middleware{},
 		Services:    map[string]*service{},
 	}}}
+	b.remotes = b.remoteCopies()
 
 	if err := b.build(); err != nil {
 		return Built{}, err
@@ -140,6 +141,43 @@ type builder struct {
 	in  BuildInput
 	n   namer
 	cfg *dynamicConfig
+	// remotes are the copies on other nodes this node balances to.
+	remotes []remoteCopy
+}
+
+// remoteCopy is a copy of the service on another node. Each has a Traefik
+// service and serversTransport of its own (both named name), because the
+// transport carries the name the peer is verified by and Traefik sets it
+// per service, not per server.
+type remoteCopy struct {
+	url       string
+	name      string
+	transport *serversTransport
+}
+
+// remoteCopies returns the copies on other nodes, in the panel's order,
+// leaving out nodes the LB TLS settings list no certificate for
+// (lbTransport). Plain http:// URLs get no transport.
+func (b *builder) remoteCopies() []remoteCopy {
+	lb := lbTLSOf(b.in.Settings)
+	var out []remoteCopy
+	used := map[string]bool{}
+	for _, r := range b.spec().GetLoadBalancer().GetRemoteUpstreams() {
+		transport, ok := lbTransport(lb, r.GetNodeId())
+		if !ok {
+			continue
+		}
+		if !strings.HasPrefix(r.GetUrl(), "https://") {
+			transport = nil
+		}
+		name := b.n.svc("node-" + nodeKey(r.GetNodeId()))
+		for i := 2; used[name]; i++ {
+			name = b.n.svc(fmt.Sprintf("node-%s-%d", nodeKey(r.GetNodeId()), i))
+		}
+		used[name] = true
+		out = append(out, remoteCopy{url: r.GetUrl(), name: name, transport: transport})
+	}
+	return out
 }
 
 // raiseOwned gives the routers of owned hosts priorityOwned plus their
@@ -226,7 +264,7 @@ func (b *builder) mode() mode {
 	if global || spec.GetRouting().GetMaintenance().GetEnabled() {
 		return modeMaintenance
 	}
-	if len(b.in.Upstreams) == 0 && len(spec.GetLoadBalancer().GetRemoteUpstreams()) == 0 {
+	if len(b.in.Upstreams) == 0 && len(b.remotes) == 0 {
 		return modeStatus
 	}
 	return modeUpstream
@@ -312,35 +350,49 @@ func ToolHost(kind, serviceID, wildcard string) string {
 
 func (b *builder) addUpstreamServices() {
 	spec := b.spec()
-	var servers, local []lbServer
+	local := make([]lbServer, 0, len(b.in.Upstreams))
 	for _, u := range b.in.Upstreams {
-		servers = append(servers, lbServer(u))
 		local = append(local, lbServer(u))
 	}
-	remoteTLS := false
-	for _, r := range spec.GetLoadBalancer().GetRemoteUpstreams() {
-		servers = append(servers, lbServer{URL: r.GetUrl()})
-		remoteTLS = remoteTLS || strings.HasPrefix(r.GetUrl(), "https://")
-	}
-	main := &loadBalancer{Servers: servers}
+	// The cookie of the main service picks a node's copy (or, without
+	// copies elsewhere, a replica here); the local service's own picks a
+	// replica here, so the two levels never overwrite each other, also on
+	// the node that takes another node's forwarded traffic.
+	var mainSticky, localSticky *sticky
 	if spec.GetLoadBalancer().GetStickySessions() {
-		main.Sticky = &sticky{Cookie: &stickyCookie{Name: brand.Slug + "_" + spec.GetId(), Secure: true, HTTPOnly: true, SameSite: "lax"}}
-	}
-	if remoteTLS {
-		// Other nodes answer on their LB entry point: verified against the
-		// panel's LB CA with this node's client certificate (lbtls.go), or
-		// only encrypted without lb_tls.
-		name := b.n.svc("remote")
-		if b.cfg.HTTP.ServersTransports == nil {
-			b.cfg.HTTP.ServersTransports = map[string]*serversTransport{}
+		cookie := func(name string) *sticky {
+			return &sticky{Cookie: &stickyCookie{Name: name, Secure: true, HTTPOnly: true, SameSite: "lax"}}
 		}
-		b.cfg.HTTP.ServersTransports[name] = lbTransport(lbTLSOf(b.in.Settings))
-		main.ServersTransport = name
+		mainSticky, localSticky = cookie(brand.Slug+"_"+spec.GetId()), cookie(brand.Slug+"_"+spec.GetId()+"_r")
 	}
-	b.cfg.HTTP.Services[b.n.svc("")] = &service{LoadBalancer: main}
 	if len(local) > 0 {
-		b.cfg.HTTP.Services[b.n.svc("local")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: main.Sticky}}
+		b.cfg.HTTP.Services[b.n.svc("local")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: localSticky}}
 	}
+	if len(b.remotes) == 0 {
+		b.cfg.HTTP.Services[b.n.svc("")] = &service{LoadBalancer: &loadBalancer{Servers: local, Sticky: mainSticky}}
+		return
+	}
+	// Copies on other nodes answer on their LB entry point: each verified
+	// by its own name against the panel's LB CA with this node's client
+	// certificate (lbtls.go), or only encrypted without lb_tls. The weights
+	// keep the old spread: one share per replica here, one per node.
+	var children []weightedService
+	if len(local) > 0 {
+		children = append(children, weightedService{Name: b.n.svc("local"), Weight: len(local)})
+	}
+	for _, rc := range b.remotes {
+		lb := &loadBalancer{Servers: []lbServer{{URL: rc.url}}}
+		if rc.transport != nil {
+			if b.cfg.HTTP.ServersTransports == nil {
+				b.cfg.HTTP.ServersTransports = map[string]*serversTransport{}
+			}
+			b.cfg.HTTP.ServersTransports[rc.name] = rc.transport
+			lb.ServersTransport = rc.name
+		}
+		b.cfg.HTTP.Services[rc.name] = &service{LoadBalancer: lb}
+		children = append(children, weightedService{Name: rc.name, Weight: 1})
+	}
+	b.cfg.HTTP.Services[b.n.svc("")] = &service{Weighted: &weighted{Services: children, Sticky: mainSticky}}
 }
 
 // upstreamService returns the Traefik service a route sends to: the main
@@ -349,33 +401,57 @@ func (b *builder) addUpstreamServices() {
 // keep their URL: their LB entry point routes by host. local picks the
 // local-only variant (LB routers).
 func (b *builder) upstreamService(r *agentv1.Route, local bool) string {
-	base := ""
-	if local {
-		base = "local"
-	}
 	port := r.GetTargetPort()
 	if port == 0 || b.localPortsAre(port) {
-		return b.n.svc(base)
+		if local {
+			return b.n.svc("local")
+		}
+		return b.n.svc("")
 	}
-	suffix := fmt.Sprintf("p%d", port)
 	if local {
-		suffix = "local-" + suffix
+		return b.localPortService(port)
 	}
-	name := b.n.svc(suffix)
+	name := b.n.svc(fmt.Sprintf("p%d", port))
 	if _, ok := b.cfg.HTTP.Services[name]; ok {
 		return name
 	}
-	src := b.cfg.HTTP.Services[b.n.svc(base)].LoadBalancer
-	lb := *src
-	lb.Servers = make([]lbServer, len(src.Servers))
-	for i, srv := range src.Servers {
-		if i < len(b.in.Upstreams) {
-			srv.URL = withPort(srv.URL, port)
+	main := b.cfg.HTTP.Services[b.n.svc("")]
+	if main.Weighted != nil {
+		w := *main.Weighted
+		w.Services = slices.Clone(w.Services)
+		for i := range w.Services {
+			if w.Services[i].Name == b.n.svc("local") {
+				w.Services[i].Name = b.localPortService(port)
+			}
 		}
-		lb.Servers[i] = srv
+		b.cfg.HTTP.Services[name] = &service{Weighted: &w}
+		return name
 	}
+	lb := *main.LoadBalancer
+	lb.Servers = withPorts(main.LoadBalancer.Servers, port)
 	b.cfg.HTTP.Services[name] = &service{LoadBalancer: &lb}
 	return name
+}
+
+// localPortService is the local service with every server on port.
+func (b *builder) localPortService(port uint32) string {
+	name := b.n.svc(fmt.Sprintf("local-p%d", port))
+	if _, ok := b.cfg.HTTP.Services[name]; ok {
+		return name
+	}
+	src := b.cfg.HTTP.Services[b.n.svc("local")].LoadBalancer
+	lb := *src
+	lb.Servers = withPorts(src.Servers, port)
+	b.cfg.HTTP.Services[name] = &service{LoadBalancer: &lb}
+	return name
+}
+
+func withPorts(servers []lbServer, port uint32) []lbServer {
+	out := make([]lbServer, len(servers))
+	for i, srv := range servers {
+		out[i] = lbServer{URL: withPort(srv.URL, port)}
+	}
+	return out
 }
 
 // localPortsAre reports whether every local upstream URL uses port.
@@ -518,8 +594,8 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 	if b.lbRouters() && m == modeUpstream && len(b.in.Upstreams) > 0 && len(r.GetAllowedSourceCidrs()) == 0 {
 		// Traffic another node forwards here goes to local replicas only.
 		// The entry node already applied the rate limit and redirects, and
-		// only sibling nodes (a client certificate from the panel's LB CA,
-		// see lbRouters) get here, so those middlewares are left out (here the
+		// only sibling nodes (a client certificate the panel issued to a
+		// current node, see lbtls.go) get here, so those middlewares are left out (here the
 		// client is the other node, so they would throttle everyone as
 		// one). Routes with an IP allowlist are left out too: the list
 		// could not be checked against the other node.
@@ -581,7 +657,7 @@ func (b *builder) putRouter(name string, rt *router, retry string) {
 // another node went away: that node answers 503, see the LB routers, or
 // is unreachable). "" otherwise.
 func (b *builder) retryService(r *agentv1.Route, target string) string {
-	if len(b.in.Upstreams) == 0 || len(b.spec().GetLoadBalancer().GetRemoteUpstreams()) == 0 || b.in.LBOnly {
+	if len(b.in.Upstreams) == 0 || len(b.remotes) == 0 || b.in.LBOnly {
 		return ""
 	}
 	if target != b.upstreamService(r, false) {
