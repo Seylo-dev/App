@@ -2,7 +2,8 @@
 // "Serve on IP address" and "Agents' port" switches in their states (open
 // and blocked, open and allowed, closed, reopened by itself), the confirm
 // dialog before turning IP access off, and "Keep IP access closed", which
-// needs the tick that the recovery commands are saved. The ops are
+// needs the tick that the recovery commands are saved; the domain's state
+// with "Check now" and a Cloudflare-proxied domain. The ops are
 // answered in the browser, so the requests the page sends are checked
 // here; the panel's own tests (apps/panel/test/panel-access.test.ts,
 // ip-access.test.ts) cover the server.
@@ -10,6 +11,7 @@
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { installDemo } from "./demo/routes";
+import { fixtures as settingsFixtures } from "./demo/settings";
 import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
@@ -213,5 +215,102 @@ test.describe("panel access", () => {
     const choice = card(page).getByRole("radiogroup", { name: "If the domain stops working" });
     await expect(choice.getByRole("radio", { name: /Keep IP access closed/ })).toBeDisabled();
     await expect(choice.getByText("Only the owner can choose this, from a browser.")).toBeVisible();
+  });
+});
+
+const cloudflareWait =
+  "panel.acme.dev is proxied by Cloudflare, and https://panel.acme.dev does not answer through it yet. In Cloudflare, point the record at 203.0.113.10, set SSL/TLS to Full (strict) and turn off Always Use HTTPS: Let's Encrypt gets the certificate over http://panel.acme.dev/.well-known/acme-challenge/, and the panel redirects to HTTPS itself.";
+
+const generalFixture = settingsFixtures["settings.general"] as Input;
+const checkNow = (page: Page) => card(page).getByRole("button", { name: "Check now" });
+
+/** settings.general whose domain status checkDomain moves on: the proxied domain becomes active on the first check. */
+function checkedDomain() {
+  let status: Input = { state: "issuing_certificate", message: cloudflareWait, checkedAt: ago(4), proxied: true };
+  return {
+    "settings.general": () => ({ ...generalFixture, domainStatus: status }),
+    "settings.checkDomain": () => {
+      status = { state: "active", message: "", checkedAt: new Date().toISOString(), proxied: true };
+      return status;
+    },
+  };
+}
+
+test.describe("panel domain check", () => {
+  test.use({ storageState: stateFile });
+
+  test("Check now runs the check and the card shows the fresh state", async ({ page }) => {
+    await installDemo(page, {
+      overrides: { ...statefulAccess(access()), ...checkedDomain() },
+      delay: (opId) => (opId === "settings.checkDomain" ? 600 : 0),
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("Getting a certificate")).toBeVisible();
+    await expect(card(page).getByText("Proxied by Cloudflare", { exact: true })).toBeVisible();
+    await expect(card(page).getByText("Checked 4 min ago")).toBeVisible();
+    await expect(card(page).getByTestId("domain-message")).toHaveText(cloudflareWait);
+    await page.screenshot({ path: `${shots}/cloudflare-waiting.png`, fullPage: true });
+
+    await checkNow(page).click();
+    const checking = card(page).getByRole("button", { name: "Checking..." });
+    await expect(checking).toBeDisabled();
+    await expect(card(page).getByText("Active", { exact: true })).toBeVisible();
+    await expect(card(page).getByText("Checked just now")).toBeVisible();
+    await expect(card(page).getByTestId("domain-message")).toHaveCount(0);
+    await expect(card(page).getByText("Proxied by Cloudflare", { exact: true })).toBeVisible();
+    await expect(checkNow(page)).toBeEnabled();
+    expect(sent["settings.checkDomain"]).toEqual([{}]);
+    await page.screenshot({ path: `${shots}/cloudflare-active.png`, fullPage: true });
+  });
+
+  test("a typed domain is saved first; a refusal shows the panel's words", async ({ page }) => {
+    await installDemo(page, { overrides: statefulAccess(access()) });
+    await page.route(/\/api\/v1\/settings\.checkDomain$/, (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "retry-after": "7" },
+        body: JSON.stringify({
+          error: {
+            code: "RATE_LIMITED",
+            message: "The domain was checked a moment ago. Try again in 7 seconds.",
+            details: { reason: "domainCheck", retryAfter: "7" },
+          },
+        }),
+      }),
+    );
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("Checked 12 min ago")).toBeVisible();
+    const input = card(page).getByLabel("Panel domain");
+    await input.fill("panel2.acme.dev");
+    await expect(checkNow(page)).toBeDisabled();
+    await input.fill("panel.acme.dev");
+    await expect(checkNow(page)).toBeEnabled();
+
+    await checkNow(page).click();
+    await expect(page.getByText("The domain was checked a moment ago. Try again in 7 seconds.")).toBeVisible();
+    await expect(checkNow(page)).toBeEnabled();
+    expect(sent["settings.checkDomain"]).toEqual([{}]);
+    expect(sent["settings.updateGeneral"]).toBeUndefined();
+  });
+
+  test("no domain: nothing to check", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        ...statefulAccess(access({ privatePaths: [] })),
+        "settings.general": () => ({
+          ...generalFixture,
+          domain: null,
+          publicUrl: "http://203.0.113.10:3000",
+          domainStatus: { state: "none", message: "", checkedAt: null, proxied: false },
+        }),
+      },
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("No domain")).toBeVisible();
+    await expect(checkNow(page)).toHaveCount(0);
+    await expect(card(page).getByTestId("domain-checked")).toHaveCount(0);
   });
 });

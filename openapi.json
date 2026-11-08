@@ -62243,6 +62243,103 @@
         "x-mcp": false
       }
     },
+    "/api/v1/settings.checkDomain": {
+      "post": {
+        "operationId": "settings.checkDomain",
+        "summary": "Check the panel domain now",
+        "description": "Runs the panel domain's DNS and HTTPS check now instead of at the next scheduled one (every 5 minutes until it is active, hourly after) and returns the fresh state. A domain proxied by Cloudflare passes once https://<domain> answers through Cloudflare. Allowed once every 10 seconds (RATE_LIMITED with details.retryAfter otherwise); CONFLICT when the panel has no domain.",
+        "tags": [
+          "settings"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "message",
+                    "checkedAt",
+                    "proxied"
+                  ],
+                  "properties": {
+                    "state": {
+                      "anyOf": [
+                        {
+                          "const": "none",
+                          "type": "string"
+                        },
+                        {
+                          "const": "pending_dns",
+                          "type": "string"
+                        },
+                        {
+                          "const": "issuing_certificate",
+                          "type": "string"
+                        },
+                        {
+                          "const": "active",
+                          "type": "string"
+                        },
+                        {
+                          "const": "error",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "checkedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "proxied": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": true
+      }
+    },
     "/api/v1/settings.general": {
       "get": {
         "operationId": "settings.general",
@@ -62301,7 +62398,9 @@
                       "type": "object",
                       "required": [
                         "state",
-                        "message"
+                        "message",
+                        "checkedAt",
+                        "proxied"
                       ],
                       "properties": {
                         "state": {
@@ -62330,6 +62429,20 @@
                         },
                         "message": {
                           "type": "string"
+                        },
+                        "checkedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "proxied": {
+                          "type": "boolean"
                         }
                       }
                     },
@@ -63334,7 +63447,9 @@
                       "type": "object",
                       "required": [
                         "state",
-                        "message"
+                        "message",
+                        "checkedAt",
+                        "proxied"
                       ],
                       "properties": {
                         "state": {
@@ -63363,6 +63478,20 @@
                         },
                         "message": {
                           "type": "string"
+                        },
+                        "checkedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "proxied": {
+                          "type": "boolean"
                         }
                       }
                     },

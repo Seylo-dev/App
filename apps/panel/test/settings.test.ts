@@ -56,7 +56,9 @@ test("general: name, default node, and a domain that goes from DNS to active", a
   expect((await checkDomain(panel.deps))?.state).toBe("issuing_certificate");
   https = true;
   expect((await checkDomain(panel.deps))?.state).toBe("active");
-  expect((await callOp(panel, settings.general, {}, { cookie })).body.domainStatus).toEqual({ state: "active", message: "" });
+  const active = (await callOp(panel, settings.general, {}, { cookie })).body.domainStatus;
+  expect(active).toEqual({ state: "active", message: "", checkedAt: expect.any(String), proxied: false });
+  expect(Date.parse(active.checkedAt)).toBe(getSetting(panel.deps.db, "panelDomainStatus")?.checkedAt as number);
 
   const member = await createUser(panel, "member");
   expect((await callOp(panel, settings.general, {}, { cookie: member.cookie })).status).toBe(403);

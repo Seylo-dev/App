@@ -27,12 +27,14 @@ export const fixtures: Record<string, unknown> = {
   "settings.general": {
     name: "Acme Cloud",
     domain: "panel.acme.dev",
-    domainStatus: { state: "active", message: "" },
+    domainStatus: { state: "active", message: "", checkedAt: ago(12), proxied: false },
     defaultNodeId: world.de,
     publicUrl: "https://panel.acme.dev",
     uptimeAllowInternalTargets: false,
     auditRetentionDays: 365,
   },
+  // Check now on the Panel domain card: the demo domain is still active.
+  "settings.checkDomain": () => ({ state: "active", message: "", checkedAt: new Date().toISOString(), proxied: false }),
 
   "updates.history": {
     runs: [

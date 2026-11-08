@@ -35,15 +35,26 @@ export const DomainState = Type.Union([
 /** How long the audit log keeps entries, in days. */
 export const AuditRetentionDays = Type.Integer({ minimum: 30, maximum: 3650 });
 
+export const PanelDomainStatus = Type.Object({
+  state: DomainState,
+  /** Plain explanation for pending and error states; empty otherwise. */
+  message: Type.String(),
+  /** When the panel last checked the domain; null before its first check. added in 0.2.1 */
+  checkedAt: Type.Union([Timestamp, Type.Null()]),
+  /**
+   * Every A/AAAA record of the domain was a Cloudflare proxy address at
+   * the last check (the orange cloud). Cloudflare hides the node's address
+   * then, so the HTTPS check through Cloudflare alone decides. added in 0.2.1
+   */
+  proxied: Type.Boolean(),
+});
+export type PanelDomainStatus = Static<typeof PanelDomainStatus>;
+
 export const GeneralSettings = Type.Object({
   name: PanelName,
   /** Panel domain; null while the panel is only reachable on IP:port. */
   domain: Type.Union([Hostname, Type.Null()]),
-  domainStatus: Type.Object({
-    state: DomainState,
-    /** Plain explanation for pending and error states; empty otherwise. */
-    message: Type.String(),
-  }),
+  domainStatus: PanelDomainStatus,
   /** Where new services go when the person does not pick a node. */
   defaultNodeId: Type.Union([Id, Type.Null()]),
   /** The URL people and agents use to reach the panel right now. */
@@ -89,6 +100,19 @@ export const updateGeneral = defineOp({
     auditRetentionDays: Type.Optional(Type.Union([AuditRetentionDays, Type.Null()])),
   }),
   output: GeneralSettings,
+  permission: permission.global("settings.manage"),
+  mcp: true,
+  audit: true,
+});
+
+export const checkDomain = defineOp({
+  id: "settings.checkDomain",
+  kind: "mutation",
+  summary: "Check the panel domain now",
+  description:
+    "Runs the panel domain's DNS and HTTPS check now instead of at the next scheduled one (every 5 minutes until it is active, hourly after) and returns the fresh state. A domain proxied by Cloudflare passes once https://<domain> answers through Cloudflare. Allowed once every 10 seconds (RATE_LIMITED with details.retryAfter otherwise); CONFLICT when the panel has no domain.",
+  input: Empty,
+  output: PanelDomainStatus,
   permission: permission.global("settings.manage"),
   mcp: true,
   audit: true,

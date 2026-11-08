@@ -1,7 +1,8 @@
-// Settings > General > Panel domain: the domain and its status, and panel
-// access (added in 0.2.1): "Serve on IP address" and "Agents' port" (each
-// turn off asks first, each change restarts the panel), what happens when
-// the domain stops working, and the commands that get the owner back in.
+// Settings > General > Panel domain: the domain and its status (when it
+// was checked, "Check now", Cloudflare's proxy), and panel access (added
+// in 0.2.1): "Serve on IP address" and "Agents' port" (each turn off asks
+// first, each change restarts the panel), what happens when the domain
+// stops working, and the commands that get the owner back in.
 // The panel decides and refuses (settings.panelAccess / updatePanelAccess);
 // the card shows its reasons and never guesses.
 
@@ -24,6 +25,7 @@ import { useId, useState } from "react";
 import { t } from "../../i18n/t";
 import { formatAgo, formatExpiresIn } from "../../lib/format";
 import { isReauthCancelled } from "../../lib/reauth";
+import { useNow } from "../service/use-now";
 import { useSettingsMutation } from "./mutation";
 import { QueryView } from "./op-state";
 import { Field, SettingRow } from "./page";
@@ -96,11 +98,12 @@ function DomainForm({ general, closed }: { general: General; closed: boolean }) 
           </Button>
         </div>
       </Field>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-medium text-ink-strong">{t("settings.general.domainState")}</span>
-        <Chip tone={domainTones[general.domainStatus.state]}>{t(`settings.general.domainStates.${general.domainStatus.state}`)}</Chip>
-      </div>
-      {general.domainStatus.message && <p className="m-0 text-[12.5px] text-muted-foreground">{general.domainStatus.message}</p>}
+      <DomainState general={general} dirty={dirty} />
+      {general.domainStatus.message && (
+        <p data-testid="domain-message" className="m-0 text-[12.5px] text-muted-foreground">
+          {general.domainStatus.message}
+        </p>
+      )}
       <CopyField value={general.publicUrl} aria-label={t("settings.general.publicUrl")} />
       <p className="m-0 text-[12.5px] text-muted-foreground">
         {t("settings.general.updatesHint")}{" "}
@@ -109,6 +112,45 @@ function DomainForm({ general, closed }: { general: General; closed: boolean }) 
         </Link>
       </p>
     </form>
+  );
+}
+
+/**
+ * The domain's state, Cloudflare's proxy when every record is one of its
+ * addresses, when it was last checked, and "Check now" (the panel allows
+ * one check per 10 seconds and answers with the fresh state; scheduled
+ * checks refresh the card over the live socket).
+ */
+function DomainState({ general, dirty }: { general: General; dirty: boolean }) {
+  const status = general.domainStatus;
+  const now = useNow(30_000);
+  const check = useSettingsMutation(settings.checkDomain, { invalidates: [settings.general, settings.panelAccess] });
+  const checkedAt = status.checkedAt;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[13px] font-medium text-ink-strong">{t("settings.general.domainState")}</span>
+      <Chip tone={domainTones[status.state]}>{t(`settings.general.domainStates.${status.state}`)}</Chip>
+      {status.proxied && <Chip tone="gray">{t("settings.general.domainCard.proxied")}</Chip>}
+      {checkedAt && (
+        <span data-testid="domain-checked" className="text-[12.5px] text-muted-foreground">
+          {now - Date.parse(checkedAt) < 60_000
+            ? t("settings.general.domainCard.checkedJustNow")
+            : t("settings.general.domainCard.checked", { when: formatAgo(checkedAt, now) })}
+        </span>
+      )}
+      {general.domain && (
+        <Button
+          type="button"
+          size="sm"
+          className="ml-auto bg-muted shadow-none"
+          // A typed but unsaved domain is not what the panel checks: Save domain checks it.
+          disabled={check.isPending || dirty}
+          onClick={() => check.mutate({})}
+        >
+          {check.isPending ? t("settings.general.domainCard.checking") : t("settings.general.domainCard.checkNow")}
+        </Button>
+      )}
+    </div>
   );
 }
 

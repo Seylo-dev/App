@@ -6,44 +6,12 @@
 // plus IPv6, CNAMEs, the records to create and the Cloudflare DNS link.
 
 import { Resolver } from "node:dns/promises";
-import { BlockList, isIPv4, isIPv6 } from "node:net";
+import { isIPv4, isIPv6 } from "node:net";
+import { isCloudflareAddress } from "../../http/cloudflare";
 
-/** Cloudflare's published proxy ranges: a record there means the orange cloud is on. */
-const cloudflareRanges = {
-  v4: [
-    "173.245.48.0/20",
-    "103.21.244.0/22",
-    "103.22.200.0/22",
-    "103.31.4.0/22",
-    "141.101.64.0/18",
-    "108.162.192.0/18",
-    "190.93.240.0/20",
-    "188.114.96.0/20",
-    "197.234.240.0/22",
-    "198.41.128.0/17",
-    "162.158.0.0/15",
-    "104.16.0.0/13",
-    "104.24.0.0/14",
-    "172.64.0.0/13",
-    "131.0.72.0/22",
-  ],
-  v6: ["2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32"],
-};
-
-const cloudflare = new BlockList();
-for (const range of cloudflareRanges.v4) {
-  const [net, bits] = range.split("/");
-  cloudflare.addSubnet(net ?? "", Number(bits), "ipv4");
-}
-for (const range of cloudflareRanges.v6) {
-  const [net, bits] = range.split("/");
-  cloudflare.addSubnet(net ?? "", Number(bits), "ipv6");
-}
-
+/** An address in Cloudflare's published proxy ranges (one list, http/cloudflare.ts): a record there means the orange cloud is on. */
 export function isCloudflareIp(ip: string): boolean {
-  if (isIPv4(ip)) return cloudflare.check(ip, "ipv4");
-  if (isIPv6(ip)) return cloudflare.check(ip, "ipv6");
-  return false;
+  return isCloudflareAddress(ip);
 }
 
 export type DnsStatus = "ok" | "missing" | "wrongTarget" | "proxied";
@@ -212,7 +180,8 @@ function dnsMessage(status: DnsStatus | "unknown", host: string, expected: DnsRe
     case "missing":
       return `No A record for ${host} yet. Create one pointing at ${target}.`;
     case "proxied":
-      return `${host} is proxied by Cloudflare. It works once the origin is reachable; turn the proxy off (DNS only) to check it here.`;
+      // Let's Encrypt checks over plain HTTP: Always Use HTTPS sends it to port 443, where the challenge is not answered.
+      return `${host} is proxied by Cloudflare, so the panel cannot see where it points. In Cloudflare, point it at ${target}, set SSL/TLS to Full (strict) and turn off Always Use HTTPS so Let's Encrypt can reach the node. Turn the proxy off (DNS only) to check the record here.`;
     case "wrongTarget":
       return `${host} points somewhere else. Change its A record to ${target}.`;
     case "unknown":

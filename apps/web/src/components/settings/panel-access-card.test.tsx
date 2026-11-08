@@ -3,10 +3,12 @@ import { nodes, settings } from "@seylo/ops";
 import { renderStatic } from "../../test/render";
 import { PanelDomainCard } from "./panel-access-card";
 
-const general = {
+type General = Parameters<typeof PanelDomainCard>[0]["general"];
+
+const general: General = {
   name: "Acme",
   domain: "panel.acme.dev",
-  domainStatus: { state: "active" as const, message: "" },
+  domainStatus: { state: "active", message: "", checkedAt: new Date(Date.now() - 5 * 60_000).toISOString(), proxied: false },
   defaultNodeId: null,
   publicUrl: "https://panel.acme.dev",
   uptimeAllowInternalTargets: false,
@@ -38,9 +40,9 @@ const panelNode = {
   publicIpv6: null,
 };
 
-const render = (state: Record<string, unknown>) =>
+const render = (state: Record<string, unknown>, data: General = general) =>
   renderStatic(
-    () => <PanelDomainCard general={general} />,
+    () => <PanelDomainCard general={data} />,
     [
       [settings.panelAccess, {}, state],
       [nodes.list, {}, { nodes: [panelNode] }],
@@ -109,4 +111,37 @@ test("closed, reopened by itself, and no agents' port", async () => {
 
   const rolling = text(await render(access({ serveOnIp: false, actual: { ip: "unknown", agentPort: "open" } })));
   expect(rolling).toContain("The panel restarts to apply this.");
+});
+
+test("the domain's state: when it was checked, Check now and Cloudflare's proxy", async () => {
+  const active = text(await render(access()));
+  expect(active).toContain("Active");
+  expect(active).toContain("Checked 5 min ago");
+  expect(active).toContain("Check now");
+  expect(active).not.toContain("Proxied by Cloudflare");
+
+  const message =
+    "panel.acme.dev is proxied by Cloudflare, and https://panel.acme.dev does not answer through it yet. In Cloudflare, point the record at 203.0.113.10, set SSL/TLS to Full (strict) and turn off Always Use HTTPS: Let's Encrypt gets the certificate over http://panel.acme.dev/.well-known/acme-challenge/, and the panel redirects to HTTPS itself.";
+  const proxied = text(
+    await render(access(), {
+      ...general,
+      domainStatus: { state: "issuing_certificate", message, checkedAt: new Date().toISOString(), proxied: true },
+    }),
+  );
+  expect(proxied).toContain("Getting a certificate");
+  expect(proxied).toContain("Proxied by Cloudflare");
+  expect(proxied).toContain("Checked just now");
+  expect(proxied).toContain("set SSL/TLS to Full (strict) and turn off Always Use HTTPS");
+
+  // Nothing to check without a domain, and no time before the first check.
+  const none = text(
+    await render(access({ privatePaths: [] }), {
+      ...general,
+      domain: null,
+      domainStatus: { state: "none", message: "", checkedAt: null, proxied: false },
+    }),
+  );
+  expect(none).toContain("No domain");
+  expect(none).not.toContain("Check now");
+  expect(none).not.toContain("Checked");
 });

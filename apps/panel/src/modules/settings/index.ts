@@ -17,6 +17,7 @@ import { applyIpAccessFile } from "./ip-access-file";
 import {
   appearanceOp,
   brandingOp,
+  checkDomainOp,
   generalOp,
   removeBrandAsset,
   telemetryOp,
@@ -64,6 +65,7 @@ export default defineModule({
     boot,
     generalOp,
     updateGeneral,
+    checkDomainOp,
     brandingOp,
     updateBranding,
     uploadBrandAsset,

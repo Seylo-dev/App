@@ -1,7 +1,7 @@
-// Handlers of the settings ops: general (name, domain, default node),
-// branding (name, sign-in message, logos and favicon on disk), appearance
-// (theme preset, color mode, accent, owner-only custom CSS) and the
-// telemetry opt-in. A domain change also decides IP access again
+// Handlers of the settings ops: general (name, domain, default node, and
+// the domain's "Check now"), branding (name, sign-in message, logos and
+// favicon on disk), appearance (theme preset, color mode, accent,
+// owner-only custom CSS) and the telemetry opt-in. A domain change also decides IP access again
 // (ip-access.ts): the old domain stops counting as a private path at once.
 // The panel access ops are in panel-access.ts.
 
@@ -16,7 +16,7 @@ import { readAuditRetentionDays, writeAuditRetentionDays } from "../audit/retent
 import { assertHostUnclaimed } from "../domains/ownership";
 import { syncWebhookConfig } from "../github/app";
 import { readTelemetry, syncTelemetrySchedule } from "../telemetry";
-import { domainCheckJobType, nodeExists, readDomainStatus } from "./domain";
+import { checkDomainNow, domainCheckJobType, nodeExists, readDomainStatus } from "./domain";
 import { brandingDir } from "./http";
 import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "./ip-access";
 import { brandAssetUrl, readAppearance, readBranding, readPanelName } from "./keys";
@@ -104,11 +104,42 @@ export const updateGeneral = implement(settings.updateGeneral, (input, ctx) => {
     });
     if (after.closed !== before.closed) ctx.auditDetails?.({ ipAccess: after.closed ? "closed" : "reopened" });
   }
-  // Saving the domain again (changed or not) checks it now instead of at the next 5-minute run.
-  if (input.domain) ctx.jobs.enqueue(domainCheckJobType, {}, { dedupeKey: "settings.checkDomain.now" });
+  // Saving the domain again (changed or not) checks it now instead of at the next 5-minute run,
+  // an active one too (forced past its hourly re-check).
+  if (input.domain) ctx.jobs.enqueue(domainCheckJobType, { force: true }, { dedupeKey: "settings.checkDomain.now" });
   bootChanged(ctx);
   ctx.live.publish("panel", { type: "invalidate", ops: ["system.features", "mcp.info", "settings.panelAccess"] });
   return general(ctx);
+});
+
+/** "Check now" runs at most once in this window per panel; the DNS and HTTPS probes take up to ~16 seconds. */
+export const domainCheckWindowMs = 10_000;
+
+const lastChecks = new WeakMap<object, number>();
+
+/**
+ * "Check now" on the Panel domain card: the scheduled check, run in this
+ * request (through the job's single flight, so a scheduled run at the same
+ * moment is one probe, not two) so the answer is the fresh state. The
+ * window is taken before the probes, so a double click or a script sending
+ * several at once gets RATE_LIMITED instead of queueing more.
+ */
+export const checkDomainOp = implement(settings.checkDomain, async (_input, ctx) => {
+  if (!getSetting(ctx.db, "panelDomain")) {
+    throw new OpError("CONFLICT", "The panel has no domain to check. Save one first.", { reason: "noDomain" });
+  }
+  const now = Date.now();
+  const last = lastChecks.get(ctx.db);
+  if (last !== undefined && now - last < domainCheckWindowMs) {
+    const wait = Math.max(1, Math.ceil((domainCheckWindowMs - (now - last)) / 1000));
+    throw new OpError("RATE_LIMITED", `The domain was checked a moment ago. Try again in ${wait} ${wait === 1 ? "second" : "seconds"}.`, {
+      reason: "domainCheck",
+      retryAfter: String(wait),
+    });
+  }
+  lastChecks.set(ctx.db, now);
+  await checkDomainNow(ctx);
+  return readDomainStatus(ctx);
 });
 
 /**
