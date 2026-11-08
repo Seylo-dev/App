@@ -166,7 +166,10 @@ type Options struct {
 	// project's network keeps its old network after the route switched,
 	// so requests already on the way finish (default 2s).
 	ReattachDrain time.Duration
-	Now           func() time.Time
+	// EtcDir holds the passwd and group files read for accounts that share
+	// the panel's uid or gid (default /etc).
+	EtcDir string
+	Now    func() time.Time
 }
 
 // Runtime is the Engine implementation: one worker goroutine per service
@@ -247,6 +250,9 @@ func New(o Options) (*Runtime, error) {
 	}
 	if o.ReattachDrain <= 0 {
 		o.ReattachDrain = 2 * time.Second
+	}
+	if o.EtcDir == "" {
+		o.EtcDir = "/etc"
 	}
 	if o.Now == nil {
 		o.Now = time.Now

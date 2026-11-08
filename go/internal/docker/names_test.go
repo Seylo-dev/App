@@ -1,6 +1,11 @@
 package docker
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+)
 
 func TestNames(t *testing.T) {
 	tests := map[string]string{
@@ -43,5 +48,33 @@ func TestNetworkOptionsNameTheEdgeBridge(t *testing.T) {
 	}
 	if got := NetworkOptions(ProjectNetwork("0123456789abcdef")); got != nil {
 		t.Fatalf("a name longer than an interface name got options %v", got)
+	}
+}
+
+func TestPanelIDHolders(t *testing.T) {
+	etc := t.TempDir()
+	if got := PanelIDHolders(etc); len(got) != 0 {
+		t.Fatalf("no passwd or group file: %v, want none", got)
+	}
+	passwd := "root:x:0:0:root:/root:/bin/bash\n" +
+		"# panel:x:61000:61000::/:/bin/false (a comment)\n" +
+		"ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n" +
+		"ops:x:61000:100::/home/ops:/bin/bash\n" +
+		"broken line\n"
+	group := "root:x:0:\nubuntu:x:1000:\nshared:x:61000:ops\n"
+	for name, data := range map[string]string{"passwd": passwd, "group": group} {
+		if err := os.WriteFile(filepath.Join(etc, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := PanelIDHolders(etc), []string{"user ops", "group shared"}; !slices.Equal(got, want) {
+		t.Fatalf("PanelIDHolders = %v, want %v", got, want)
+	}
+	// uid 1000 or a gid of 61000 in passwd is no holder by itself.
+	if err := os.WriteFile(filepath.Join(etc, "passwd"), []byte("ubuntu:x:1000:61000::/home/ubuntu:/bin/bash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := PanelIDHolders(etc), []string{"group shared"}; !slices.Equal(got, want) {
+		t.Fatalf("PanelIDHolders = %v, want %v", got, want)
 	}
 }

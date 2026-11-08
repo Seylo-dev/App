@@ -2,6 +2,10 @@ package docker
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/seylo-dev/app/go/gen/brand"
 )
@@ -68,6 +72,39 @@ const (
 
 // PanelUser is the panel container's --user.
 var PanelUser = fmt.Sprintf("%d:%d", PanelUID, PanelGID)
+
+// PanelIDHolders names the entries in <etcDir>/passwd and <etcDir>/group
+// that have the panel's uid or gid, as "user <name>" and "group <name>".
+// Such an account owns the panel's folder, so it can read master.key and
+// panel.db. The installer's check_panel_uid warns about the same thing
+// with getent on a new install; reconcile and the node health check use
+// this on every node, upgrades included. Only the files are read (the
+// agent is built without cgo, like os/user then): accounts from a
+// directory service are not seen. A file that cannot be read has no
+// entries.
+func PanelIDHolders(etcDir string) []string {
+	var out []string
+	for _, db := range []struct {
+		file, kind string
+		id         int
+	}{{"passwd", "user", PanelUID}, {"group", "group", PanelGID}} {
+		data, err := os.ReadFile(filepath.Join(etcDir, db.file))
+		if err != nil {
+			continue
+		}
+		id := strconv.Itoa(db.id)
+		for line := range strings.SplitSeq(string(data), "\n") {
+			fields := strings.Split(strings.TrimSpace(line), ":")
+			if len(fields) < 3 || fields[0] == "" || strings.HasPrefix(fields[0], "#") {
+				continue
+			}
+			if fields[2] == id {
+				out = append(out, db.kind+" "+fields[0])
+			}
+		}
+	}
+	return out
+}
 
 // IsPanelService reports whether a service is the protected panel itself.
 func IsPanelService(serviceID string, protected bool) bool {

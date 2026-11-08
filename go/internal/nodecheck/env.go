@@ -106,6 +106,7 @@ func Default(env Env) []Check {
 		check{"time.sync", "Clock", e.clock},
 		check{"panel.reachable", "Panel connection", e.panel},
 		check{"wings.detected", "Pelican Wings", e.wings},
+		check{"panel.files", "Panel files", e.panelFiles},
 	}
 }
 
