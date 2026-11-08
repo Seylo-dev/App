@@ -7,13 +7,14 @@
 // link: owner only, memory only, never in the audit log, a log line or
 // panel.db.
 
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { type OpInput, tailscale } from "@seylo/ops";
 import { StatusCode } from "@seylo/proto";
 import { desc, eq } from "drizzle-orm";
 import pino from "pino";
 import { alerts, auditLog, sessions, settings as settingsTable } from "../src/db/schema";
-import * as ipAccess from "../src/modules/settings/ip-access";
+import { ensurePanelService } from "../src/modules/nodes/panel-service";
+import { panelPublishBindCapability } from "../src/modules/settings/ip-access";
 import { freshSignInLink } from "../src/modules/tailscale/sign-in";
 import type { OpCall } from "../src/ops/pipeline";
 import { getSetting, setSetting } from "../src/settings";
@@ -23,7 +24,8 @@ import { joinAgent, listen } from "./hub-helpers";
 
 const dnsName = "panel.tail1234.ts.net";
 const loginUrl = "https://login.tailscale.com/a/5f3e9c1d2b";
-const capabilities = [...allCapabilities, "tailnet.serve.v1"];
+// The panel node can publish the panel port on 127.0.0.1 only, so IP access really closes and reopens.
+const capabilities = [...allCapabilities, "tailnet.serve.v1", panelPublishBindCapability];
 
 let panel: TestPanel;
 let url: string;
@@ -236,8 +238,10 @@ test("turning Serve on reaches the agent, raises a security alert and audits the
   expect(agent.requests("SyncDesired").at(-1)?.state?.settings?.tailnet).toBeUndefined();
 });
 
-/** Serve on and working (reported active with the panel answering), IP access closed. */
+/** Serve on and working (reported active with the panel answering), IP access closed on a panel its agent runs. */
 async function closedOverTailnet(onFailure: "reopen" | "stayClosed") {
+  panel.deps.config.image = `ghcr.io/seylo-dev/seylo:0.2.1@sha256:${"c".repeat(64)}`;
+  expect(ensurePanelService(panel.deps)).toBe("created");
   setSetting(panel.deps.db, "tailscaleServe", true);
   await report(info({ serve: { state: 3, url: `https://${dnsName}`, panelAnswers: true, proxy: "unix:/x/tailnet.sock" } }));
   setSetting(panel.deps.db, "panelServeOnIp", false);
@@ -247,23 +251,19 @@ async function closedOverTailnet(onFailure: "reopen" | "stayClosed") {
 
 test("Serve off while the tailnet is the only way in: reopen mode reopens and says where", async () => {
   await closedOverTailnet("reopen");
-  // Stands in for WP-F2b's rule: no working path in reopen mode opens IP access.
-  const apply = spyOn(ipAccess, "applyPanelIpAccess").mockImplementation((deps, reason) => {
-    const applied = { closed: false, agentPortClosed: false, at: Date.now(), reason };
-    setSetting(deps.db, "panelIpAccessApplied", applied);
-    return applied;
+  const res = await callOp(panel, tailscale.setServe, { serve: false }, { cookie: owner.cookie });
+  expect(res.status).toBe(200);
+  expect(res.body.reopenedUrl).toMatch(/^http:\/\/.+:\d+$/);
+  expect(getSetting(panel.deps.db, "tailscaleSeen")?.working).toBe(false);
+  // No working path in reopen mode opens IP access, and the change is the owner's, not the system's.
+  expect(getSetting(panel.deps.db, "panelIpAccessApplied")).toMatchObject({
+    closed: false,
+    reason: "Tailscale Serve was turned off",
+    by: owner.user.email,
   });
-  try {
-    const res = await callOp(panel, tailscale.setServe, { serve: false }, { cookie: owner.cookie });
-    expect(res.status).toBe(200);
-    expect(res.body.reopenedUrl).toMatch(/^http:\/\/.+:\d+$/);
-    expect(apply).toHaveBeenCalledWith(expect.anything(), "Tailscale Serve was turned off");
-    expect(getSetting(panel.deps.db, "tailscaleSeen")?.working).toBe(false);
-    // The owner's choice is theirs to change: reopen mode does not flip it.
-    expect(getSetting(panel.deps.db, "panelServeOnIp")).toBe(false);
-  } finally {
-    apply.mockRestore();
-  }
+  expect(audits().filter((row) => row.opId === "settings.ipAccessChanged")).toEqual([]);
+  // The owner's choice is theirs to change: reopen mode does not flip it.
+  expect(getSetting(panel.deps.db, "panelServeOnIp")).toBe(false);
 });
 
 test("Serve off while the tailnet is the only way in: stayClosed refuses unless IP access reopens too", async () => {
@@ -276,8 +276,11 @@ test("Serve off while the tailnet is the only way in: stayClosed refuses unless 
 
   const reopen = await callOp(panel, tailscale.setServe, { serve: false, reopenIpAccess: true }, { cookie: owner.cookie });
   expect(reopen.status).toBe(200);
+  expect(reopen.body.reopenedUrl).toMatch(/^http:\/\/.+:\d+$/);
   expect(getSetting(panel.deps.db, "panelServeOnIp")).toBe(true);
   expect(getSetting(panel.deps.db, "tailscaleServe")).toBe(false);
+  expect(getSetting(panel.deps.db, "panelAccessChoice")).toMatchObject({ by: owner.user.email });
+  expect(getSetting(panel.deps.db, "panelIpAccessApplied")).toMatchObject({ closed: false, by: owner.user.email });
 });
 
 test("Serve off when another way in works, or IP access is open: just off", async () => {

@@ -42,7 +42,8 @@ beforeEach(() => {
   online = true;
   panel.deps.agents.isOnline = () => online;
   applies = [];
-  // Records what WP-F2b's applyPanelIpAccess is asked; a test sets what it answers.
+  // Records what applyPanelIpAccess (settings/ip-access.ts) is asked; a test sets what it
+  // answers. tailnet-ip-access.test.ts runs the real rule.
   apply = spyOn(ipAccess, "applyPanelIpAccess").mockImplementation((deps, reason) => {
     applies.push(reason);
     return ipAccess.readIpAccessApplied(deps);

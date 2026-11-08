@@ -13,7 +13,7 @@ import { requireFreshSignIn } from "../../auth/fresh";
 import { requireSession } from "../../auth/sign-in";
 import { implement, type OpContext } from "../../ops/implement";
 import { setSetting } from "../../settings";
-import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "../settings/ip-access";
+import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted, writePanelAccessChoice } from "../settings/ip-access";
 import { privatePathSources } from "../settings/private-paths";
 import { panelIpUrl } from "../settings/public-url";
 import { serveOnAlert } from "./alerts";
@@ -113,6 +113,9 @@ export const setServe = implement(tailscale.setServe, (input, ctx) => {
   }
 
   if (!wanted) return { tailscale: tailscaleView(ctx), reopenedUrl: null };
+  // A change of IP access that follows is this person's doing, in this op's audit row.
+  const by = ctx.principal.type === "anonymous" ? "someone" : ctx.principal.user.email;
+  let reopened = false;
   // Turning it off while the tailnet is the only way into a closed panel.
   const applied = readIpAccessApplied(ctx);
   const otherPath = privatePathSources().some((source) => source.kind !== "tailnet" && source.state(ctx).working);
@@ -126,13 +129,18 @@ export const setServe = implement(tailscale.setServe, (input, ctx) => {
         );
       }
       // The owner's switch goes back on: IP access does not depend on a path any more.
-      setSetting(ctx.db, "panelServeOnIp", true);
+      writePanelAccessChoice(
+        ctx,
+        { serveOnIp: true },
+        { reason: "Serve on IP address turned on with Tailscale Serve turned off", by, at: Date.now() },
+      );
+      reopened = true;
     }
   }
   setSetting(ctx.db, "tailscaleServe", false);
   if (nodeId) ctx.agents.desired.markDirty({ nodeId });
   serveTurnedOff(ctx);
-  const after = applyPanelIpAccess(ctx, "Tailscale Serve was turned off");
+  const after = applyPanelIpAccess(ctx, "Tailscale Serve was turned off", { by, resetHold: reopened });
   invalidateTailscale(ctx);
   return { tailscale: tailscaleView(ctx), reopenedUrl: applied.closed && !after.closed ? panelIpUrl(ctx) : null };
 });

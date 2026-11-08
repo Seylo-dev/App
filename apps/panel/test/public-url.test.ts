@@ -29,7 +29,8 @@ beforeEach(() => {
     })
     .run();
   panel.deps.agents.isOnline = () => true;
-  // IP access is what each test sets, not what WP-F2b would decide from it.
+  // IP access is what each test sets, not what settings/ip-access.ts would decide from it
+  // (tailnet-ip-access.test.ts runs the real rule).
   apply = spyOn(ipAccess, "applyPanelIpAccess").mockImplementation((deps) => ipAccess.readIpAccessApplied(deps));
 });
 afterEach(() => {
