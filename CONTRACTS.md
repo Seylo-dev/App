@@ -1387,7 +1387,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   Traefik and a Cloudflare proxy in Full mode too, or Host equal to the
   panel domain) whatever `SECURE_COOKIES` says, and a plain one on IP:port
   (see Credentials); HTTPS responses carry
-  `strict-transport-security: max-age=31536000`; every response carries
+  `strict-transport-security: max-age=31536000`, except on the tailnet
+  listener (since 0.2.1: the agent moves Serve between https:// and
+  http:// when the tailnet's HTTPS certificates change, and a remembered
+  HSTS would lock browsers out of the http:// name; WireGuard encrypts
+  that path anyway); every response carries
   `x-frame-options: DENY`, nosniff and `referrer-policy: same-origin`. The
   web app's pages carry `appContentSecurityPolicy`
   (`modules/settings/boot.ts`): scripts only from the panel's own files and

@@ -93,13 +93,13 @@ test.describe("Add node: build images by default", () => {
     await page.goto("/nodes");
     const card = page.getByRole("region", { name: "Add a node" });
     await card.getByRole("button", { name: "Create join command" }).click();
-    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins builds images.")).toBeVisible();
 
     await card.getByRole("button", { name: "Change", exact: true }).click();
     await expect(card.getByText("The panel could not be reached.")).toBeVisible();
     expect(sent["nodes.revokeJoinToken"]).toEqual([{ tokenId: "token00000000001" }]);
     await expect(card.getByText(/Single use · expires in/)).toBeVisible();
-    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins builds images.")).toBeVisible();
     await expect(card.getByRole("checkbox", { name: "Build images on this node", exact: true })).toHaveCount(0);
     await page.screenshot({ path: `${shots}/revoke-failed.png` });
 
@@ -142,7 +142,7 @@ test.describe("Add node: build images by default", () => {
     // A new command clears the note.
     await box.click();
     await card.getByRole("button", { name: "Create join command" }).click();
-    await expect(card.getByText("The node that joins does not build images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins does not build images.")).toBeVisible();
     await expect(note).toHaveCount(0);
     expect(errors).toEqual([]);
   });
