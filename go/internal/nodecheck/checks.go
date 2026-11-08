@@ -313,7 +313,10 @@ func (e *Env) liveRestore(ctx context.Context) *agentv1.NodeCheckResult {
 }
 
 // buildx checks for the buildx plugin on a node that builds: every build
-// runs on a buildx builder, and there is no fallback without it.
+// runs on a buildx builder, and there is no fallback without it. It runs
+// docker the way builds do (DOCKER_CONFIG under the builds folder), like
+// the agent's buildx facts the panel reads: a plugin only in root's
+// ~/.docker/cli-plugins is not found by builds, so it does not pass here.
 func (e *Env) buildx(ctx context.Context) *agentv1.NodeCheckResult {
 	if e.CanBuild == nil {
 		return skipped("not checked here")
@@ -321,10 +324,16 @@ func (e *Env) buildx(ctx context.Context) *agentv1.NodeCheckResult {
 	if !e.CanBuild() {
 		return skipped("builds are off on this node")
 	}
-	out, err := e.output(ctx, "docker", "buildx", "version")
+	layout := datadir.Default()
+	if e.DataDir != "" {
+		layout = datadir.New(e.DataDir)
+	}
+	// Run takes no environment, so env(1) sets it.
+	out, err := e.output(ctx, "env", "DOCKER_CONFIG="+layout.BuildsDockerConfig(), "DOCKER_CLI_HINTS=false", "docker", "buildx", "version")
 	if err != nil {
 		return fail("docker buildx is not installed: every build on this node fails",
-			"Install the docker-buildx-plugin package (Docker from get.docker.com has it), then run the checks again.")
+			"Install the docker-buildx-plugin package (Docker from get.docker.com has it), then run the checks again. "+
+				"A plugin only in ~/.docker/cli-plugins is not used by builds.")
 	}
 	version, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 	return pass("%s", version)

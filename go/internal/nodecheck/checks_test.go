@@ -592,10 +592,12 @@ func TestPanelCheckWithPin(t *testing.T) {
 }
 
 func TestBuildxCheck(t *testing.T) {
+	// The builds' docker config, as internal/build and the agent's buildx facts use it.
+	const want = "DOCKER_CONFIG=/srv/seylo/builds/docker DOCKER_CLI_HINTS=false docker buildx version"
 	run := func(installed bool) func(context.Context, io.Writer, string, ...string) error {
 		return func(_ context.Context, w io.Writer, name string, args ...string) error {
-			if name != "docker" || strings.Join(args, " ") != "buildx version" {
-				return errors.New("unexpected command")
+			if name != "env" || strings.Join(args, " ") != want {
+				return fmt.Errorf("unexpected command %s %s", name, strings.Join(args, " "))
 			}
 			if !installed {
 				return errors.New("exit status 1")
@@ -616,16 +618,39 @@ func TestBuildxCheck(t *testing.T) {
 		{"missing", yes, false, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL},
 		{"installed", yes, true, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS},
 	} {
-		e := &Env{CanBuild: tc.canBuild, Run: run(tc.installed)}
+		e := &Env{DataDir: "/srv/seylo", CanBuild: tc.canBuild, Run: run(tc.installed)}
 		r := e.buildx(context.Background())
 		if r.GetStatus() != tc.want {
 			t.Errorf("%s: %v %q", tc.name, r.GetStatus(), r.GetDetail())
 		}
-		if tc.want == agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL && !strings.Contains(r.GetFixHint(), "docker-buildx-plugin") {
+		if tc.want == agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL &&
+			(!strings.Contains(r.GetFixHint(), "docker-buildx-plugin") || !strings.Contains(r.GetFixHint(), "~/.docker/cli-plugins is not used by builds")) {
 			t.Errorf("%s: hint %q", tc.name, r.GetFixHint())
 		}
 		if tc.installed && r.GetDetail() != "github.com/docker/buildx v0.29.1 abc123" {
 			t.Errorf("%s: detail %q", tc.name, r.GetDetail())
 		}
+	}
+}
+
+// With the real runner, docker gets the builds' DOCKER_CONFIG and HOME
+// plays no part: a buildx plugin only in root's ~/.docker/cli-plugins,
+// which builds never see, does not pass the check.
+func TestBuildxCheckRunsDockerTheWayBuildsDo(t *testing.T) {
+	bin := t.TempDir()
+	// A stand-in docker that answers like `docker buildx version` and says which config it got.
+	script := "#!/bin/sh\necho \"github.com/docker/buildx v0.29.1 config=$DOCKER_CONFIG hints=$DOCKER_CLI_HINTS\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DOCKER_CONFIG", "/root/.docker")
+	dataDir := t.TempDir()
+	e := &Env{DataDir: dataDir, CanBuild: func() bool { return true }}
+	e.defaults()
+	r := e.buildx(context.Background())
+	wantDetail := "github.com/docker/buildx v0.29.1 config=" + filepath.Join(dataDir, "builds", "docker") + " hints=false"
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || r.GetDetail() != wantDetail {
+		t.Fatalf("got %v %q, want pass %q", r.GetStatus(), r.GetDetail(), wantDetail)
 	}
 }

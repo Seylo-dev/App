@@ -61,7 +61,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 19 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker, cgroups, Docker live-restore, Docker buildx on nodes with can_build (builds have no fallback without it; a build fails with what to install), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 19 checks (kernel, OS, memory, disk, inodes, service folder modes, Docker, cgroups, Docker live-restore, Docker buildx on nodes that build (builds have no fallback without it; a build fails with what to install; run with the builds' DOCKER_CONFIG like NodeFacts.buildx, so a plugin only in ~/.docker/cli-plugins fails), ports 80/443 (free, our Traefik, or the Wings fork's proxy container from Wings detection), proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client; `seylo health`, `seylo troubleshoot` and the agent all pass Wings detection | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -346,13 +346,17 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `join_token`) and the old panel's identity (`panel_id`, `panel_key`,
   `panel_proves` cleared); `node_name` changes with `--name`, `can_build`
   with `--can-build` / `--can-build=false` (the installer's `--can-build`
-  / `--no-can-build`). The panel reads `can_build` (NodeFacts) only when the
-  installer's panel node first joins: any other new node starts with Can
-  build off until the owner turns it on (`nodes.setCanBuild`), because a
-  build node gets the source, git credentials and build env of whatever it
-  builds, from any project (the service's own node first, else the least
-  busy builder), and pushes the images other nodes run; a deployment
-  records it as `builtOn`. `agent.SaveConfig` (the agent's own writes) keeps
+  / `--no-can-build`). Since 0.2.1 `can_build` decides nothing on the
+  panel (NodeFacts only reports it): the join token does. Its `canBuild`
+  (`nodes.createJoinToken`, default true, written into the audit row even
+  when the caller leaves it out; true on the installer's panel-node token)
+  is copied to the new node's row, a re-join of a known node keeps the
+  row's value, and the owner changes it with `nodes.setCanBuild`. It is a
+  choice, because a build node gets the source, git credentials and build
+  env of whatever it builds, from any project (the service's own node
+  first, else the least busy builder; automatic picks skip a node whose
+  agent reports no docker buildx), and pushes the images other nodes run;
+  a deployment records it as `builtOn`. `agent.SaveConfig` (the agent's own writes) keeps
   unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
   makes every new FileConfig key pick a side.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s

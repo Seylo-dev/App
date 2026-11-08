@@ -4,7 +4,7 @@
 // is only created when someone asks for one (it is a credential); the
 // token itself is never shown again after this card is gone.
 
-import { nodes } from "@seylo/ops";
+import { nodes, OpError } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
@@ -15,6 +15,11 @@ import { t } from "../../i18n/t";
 import { formatExpiresIn } from "../../lib/format";
 import { isReauthCancelled } from "../../lib/reauth";
 import { QueryError } from "../query-error";
+
+/** revokeJoinToken's NOT_FOUND: the command was used, so a node joined with it. */
+function isUsed(error: unknown): boolean {
+  return error instanceof OpError && error.code === "NOT_FOUND";
+}
 
 export interface AddNodeHandle {
   /** Scrolls the card into view and creates a join command if there is none. */
@@ -31,10 +36,15 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
   const [canBuild, setCanBuild] = useState(true);
   const token = create.data;
 
+  const createCommand = () => {
+    revoke.reset();
+    create.mutate({ canBuild });
+  };
+
   useImperativeHandle(ref, () => ({
     start() {
       section.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      if (!create.data && !create.isPending) create.mutate({ canBuild });
+      if (!create.data && !create.isPending) createCommand();
     },
   }));
 
@@ -49,15 +59,18 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
   const otherOpen = (open.data?.tokens ?? []).filter((item) => item.id !== token?.tokenId).length;
 
   // The choice is part of the command: changing it revokes this one, so only one stays valid.
+  // Only a revoked command leaves the screen: after a failed revoke it still works.
+  // A used one is gone too: a node joined with it, and only Can build under Nodes changes that now.
   const change = () => {
     if (!token) return;
     revoke.mutate(
       { tokenId: token.tokenId },
       {
-        onSettled: () => {
-          create.reset();
-          void open.refetch();
+        onSuccess: () => create.reset(),
+        onError: (error) => {
+          if (isUsed(error)) create.reset();
         },
+        onSettled: () => void open.refetch(),
       },
     );
   };
@@ -118,7 +131,7 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="dark" disabled={create.isPending} onClick={() => create.mutate({ canBuild })}>
+              <Button variant="dark" disabled={create.isPending} onClick={createCommand}>
                 <IconPlus size={15} stroke={2.2} aria-hidden="true" />
                 {expired ? t("nodes.addCard.newCommand") : t("nodes.addCard.createCommand")}
               </Button>
@@ -128,6 +141,14 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
         )}
         <span className="text-xs text-muted-foreground">{t("nodes.addCard.installsDocker")}</span>
         {create.error && !isReauthCancelled(create.error) && <QueryError error={create.error} />}
+        {revoke.error &&
+          (isUsed(revoke.error) ? (
+            <span role="status" className="text-xs text-chip-amber-fg">
+              {t("nodes.addCard.used")}
+            </span>
+          ) : (
+            <QueryError error={revoke.error} />
+          ))}
         {otherOpen > 0 && <span className="text-xs text-muted-foreground">{t("nodes.addCard.otherOpen", { count: otherOpen })}</span>}
       </div>
       <div className="flex flex-col gap-[7px] border-t border-divider pt-3.5">

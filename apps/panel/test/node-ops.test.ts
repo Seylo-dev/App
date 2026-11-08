@@ -7,10 +7,11 @@ import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { cleanup, files, logs, metrics, nodes as nodeOps, terminals, updates } from "@seylo/ops";
 import { NodeCheckStatus, ReportEventRequestSchema, ReportEventResponseSchema, StatusCode, UpdateTarget } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { auditLog, nodes, servicePlacements, updateSteps, volumes } from "../src/db/schema";
+import { freshSignInMs } from "../src/auth/fresh";
+import { auditLog, nodes, servicePlacements, sessions, updateSteps, volumes } from "../src/db/schema";
 import { releaseSource } from "../src/modules/updates/manifest";
 import { type FakeAgent, FakeStatus } from "./fake-agent";
-import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
+import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { joinAgent, listen, seedProject, seedService } from "./hub-helpers";
 
 let panel: TestPanel;
@@ -122,6 +123,29 @@ describe("nodes", () => {
       .all();
     expect(audited.map((r) => r.input)).toEqual([{ canBuild: false }, { canBuild: true }]);
     expect(audited.every((r) => r.actor === owner.user.id)).toBe(true);
+  });
+
+  test("a join token asked for with {} is audited as the build node it makes", async () => {
+    // The 0.2.0 shape, still valid for API keys: before 0.2.1 it made a node that does not build.
+    const bearer = createApiKey(panel, owner.user.id);
+    const token = await ok(callOp(panel, nodeOps.createJoinToken, {}, { bearer }));
+    expect(token.canBuild).toBe(true);
+    // A refused attempt (no fresh sign-in on this session) says what it asked for too.
+    const stale = await createUser(panel, "owner");
+    const signedIn = new Date(Date.now() - freshSignInMs - 60_000);
+    panel.deps.db.update(sessions).set({ createdAt: signedIn, reauthAt: null }).where(eq(sessions.userId, stale.user.id)).run();
+    const refused = await callOp(panel, nodeOps.createJoinToken, {}, { cookie: stale.cookie });
+    expect(refused.body.error?.details?.reason).toBe("reauth");
+
+    const audited = panel.deps.db
+      .select({ input: auditLog.input, actor: auditLog.actorId, error: auditLog.errorCode })
+      .from(auditLog)
+      .where(eq(auditLog.opId, "nodes.createJoinToken"))
+      .all();
+    expect(audited).toEqual([
+      { input: { canBuild: true }, actor: owner.user.id, error: null },
+      { input: { canBuild: true }, actor: stale.user.id, error: "FORBIDDEN" },
+    ]);
   });
 
   test("settings changes are audited, published and reach the agent", async () => {

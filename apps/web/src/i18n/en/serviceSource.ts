@@ -148,6 +148,7 @@ export default {
     nodeHint: "Automatic uses this service's node when it can build, otherwise the least busy one that can.",
     cantBuild: "can't build",
     offline: "offline",
+    noBuildx: "no docker buildx",
     queued: { one: "{count} build queued", other: "{count} builds queued" },
     nextDeploy: "Applies on the next deploy.",
     envNixpacks:

@@ -43,6 +43,12 @@ export const BuildNode = Type.Object({
   name: Type.String(),
   canBuild: Type.Boolean(),
   online: Type.Boolean(),
+  /**
+   * False when the node's agent reports no docker buildx: automatic picks
+   * skip it and it cannot be the build node. Agents before 0.2.1 report
+   * nothing, which counts as true. Added in 0.2.1.
+   */
+  hasBuildx: Type.Boolean(),
   /** Builds waiting or running there now. */
   queued: Type.Integer({ minimum: 0 }),
 });

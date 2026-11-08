@@ -90,6 +90,7 @@ export default {
     buildsOn: "The node that joins builds images.",
     buildsOff: "The node that joins does not build images.",
     changeBuild: "Change",
+    used: "That command was already used, so it can't be changed. Set Can build for the node that ran it in the list above.",
     insecure:
       "This command connects over plain HTTP (--insecure): anyone on the network path could read the node's traffic. Set a panel domain first, or restart the panel with its agents' TLS port (the installer sets one).",
     otherOpen: { one: "{count} other unused join command is still valid.", other: "{count} other unused join commands are still valid." },
