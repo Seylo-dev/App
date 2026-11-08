@@ -7,7 +7,9 @@
 // project right there, after a confirm step; a member sees who to ask.
 // DeployHostAction offers the same under a failed deployment the node
 // refused for its git host (a name internal only at the nodes, a node behind
-// an HTTP proxy), where an admin meets it. InternalGitHosts lists a
+// an HTTP proxy, an address only the node knows is its own, a git provider
+// connection: the provider form gets no such refusal, since the panel never
+// refuses a provider's host), where an admin meets it. InternalGitHosts lists a
 // project's hosts for admins, who can allow one or take one off.
 
 import { auth, git, gitProviders, OpError, type OpOutput, projects } from "@seylo/ops";
