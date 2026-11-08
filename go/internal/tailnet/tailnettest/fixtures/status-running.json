@@ -1,0 +1,87 @@
+{
+	"Version": "1.104.5-t2c6a4f1e8-g9b1d2c3e4",
+	"TUN": true,
+	"BackendState": "Running",
+	"HaveNodeKey": true,
+	"AuthURL": "",
+	"TailscaleIPs": [
+		"100.101.102.103",
+		"fd7a:115c:a1e0::9001:6667"
+	],
+	"Self": {
+		"ID": "nXk3Fq7CNTRL",
+		"PublicKey": "nodekey:3c1f9d2a7b4e6c8d0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e",
+		"HostName": "panel",
+		"DNSName": "panel.tail1234.ts.net.",
+		"OS": "linux",
+		"UserID": 7212345678901234,
+		"TailscaleIPs": [
+			"100.101.102.103",
+			"fd7a:115c:a1e0::9001:6667"
+		],
+		"AllowedIPs": [
+			"100.101.102.103/32",
+			"fd7a:115c:a1e0::9001:6667/128"
+		],
+		"Addrs": [
+			"203.0.113.7:41641"
+		],
+		"CurAddr": "",
+		"Relay": "fra",
+		"PeerRelay": "",
+		"RxBytes": 0,
+		"TxBytes": 0,
+		"Created": "2026-10-30T09:12:44.123456789Z",
+		"LastWrite": "0001-01-01T00:00:00Z",
+		"LastSeen": "0001-01-01T00:00:00Z",
+		"LastHandshake": "0001-01-01T00:00:00Z",
+		"Online": true,
+		"ExitNode": false,
+		"ExitNodeOption": false,
+		"Active": false,
+		"PeerAPIURL": [
+			"http://100.101.102.103:41093",
+			"http://[fd7a:115c:a1e0::9001:6667]:41093"
+		],
+		"TaildropTarget": 0,
+		"NoFileSharingReason": "",
+		"Capabilities": [
+			"https",
+			"https://tailscale.com/cap/file-sharing",
+			"https://tailscale.com/cap/is-admin",
+			"https://tailscale.com/cap/ssh"
+		],
+		"CapMap": {
+			"https": null,
+			"https://tailscale.com/cap/file-sharing": null,
+			"https://tailscale.com/cap/is-admin": null,
+			"https://tailscale.com/cap/ssh": null
+		},
+		"InNetworkMap": true,
+		"InMagicSock": false,
+		"InEngine": false,
+		"KeyExpiry": "2027-04-28T09:12:44Z"
+	},
+	"Health": [],
+	"MagicDNSSuffix": "tail1234.ts.net",
+	"CurrentTailnet": {
+		"Name": "owner@example.com",
+		"StableID": "T1a2b3CNTRL",
+		"MagicDNSSuffix": "tail1234.ts.net",
+		"MagicDNSEnabled": true
+	},
+	"CertDomains": [
+		"panel.tail1234.ts.net"
+	],
+	"ExtraRecords": null,
+	"Peer": null,
+	"User": {
+		"7212345678901234": {
+			"ID": 7212345678901234,
+			"LoginName": "owner@example.com",
+			"DisplayName": "Owner",
+			"ProfilePicURL": ""
+		}
+	},
+	"ClientVersion": null
+}
