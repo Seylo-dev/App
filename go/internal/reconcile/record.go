@@ -38,6 +38,36 @@ type record struct {
 	// container id. Their labels still name the old project and spec
 	// hash; this says which network they are on and which spec they run.
 	Reattached map[string]reattachment `json:"reattached,omitempty"`
+	// Rolling is a rollout whose new containers were not verified yet. It
+	// is written before the rollout stops or creates anything and cleared
+	// once the new generation passed its health check and route check, or
+	// once a failed rollout's rollback finished. A record still set when a
+	// pass starts means the agent stopped or crashed mid rollout and the
+	// rollback did not run to the end: recoverRollout finishes it before
+	// anything is adopted.
+	Rolling *rolloutRecord `json:"rolling,omitempty"`
+}
+
+// rolloutRecord is an unfinished rollout (record.Rolling).
+type rolloutRecord struct {
+	Generation uint64 `json:"generation"`
+	Hash       string `json:"hash"`
+	// Old are the service's containers when the rollout began. Every other
+	// container of the service was created by the rollout and never
+	// verified.
+	Old []string `json:"old,omitempty"`
+	// Stopped are old containers the rollout stops (recreate mode) and
+	// starts again when it fails.
+	Stopped []string `json:"stopped,omitempty"`
+	// PanelDir is who owned the panel's folder before the rollout gave it
+	// to the panel user (panel only, when that changed it).
+	PanelDir *panelDirRecord `json:"panel_dir,omitempty"`
+}
+
+// panelDirRecord is panelDirOwner on disk.
+type panelDirRecord struct {
+	UID int `json:"uid"`
+	GID int `json:"gid"`
 }
 
 // reattachment is where a re-attached container lives now.

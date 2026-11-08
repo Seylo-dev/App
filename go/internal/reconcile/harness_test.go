@@ -233,6 +233,9 @@ type harness struct {
 	done    chan error
 	// drain is Options.ReattachDrain from the next start (default 1ms).
 	drain time.Duration
+	// engine, when set, is the Docker the runtime gets instead of eng (a
+	// wrapper around it).
+	engine docker.Engine
 }
 
 func newHarness(t *testing.T) *harness {
@@ -243,6 +246,12 @@ func newHarness(t *testing.T) *harness {
 // newHarnessWith lets a test set up the fake Docker before the runtime
 // starts (its clock, for example).
 func newHarnessWith(t *testing.T, setup func(*dockertest.Fake)) *harness {
+	t.Helper()
+	return newHarnessEngine(t, setup, nil)
+}
+
+// newHarnessEngine also lets the runtime see the fake through a wrapper.
+func newHarnessEngine(t *testing.T, setup func(*dockertest.Fake), wrap func(*dockertest.Fake) docker.Engine) *harness {
 	t.Helper()
 	eng := dockertest.New()
 	if setup != nil {
@@ -258,6 +267,9 @@ func newHarnessWith(t *testing.T, setup func(*dockertest.Fake)) *harness {
 		desired: &memDesired{},
 		layout:  datadir.New(t.TempDir()),
 		logs:    &memLogs{},
+	}
+	if wrap != nil {
+		h.engine = wrap(eng)
 	}
 	h.start()
 	t.Cleanup(h.stop)
@@ -276,8 +288,12 @@ func (h *harness) start() {
 	if os.Getenv("SEYLO_TEST_LOG") != "" {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
+	var eng docker.Engine = h.eng
+	if h.engine != nil {
+		eng = h.engine
+	}
 	rt, err := New(Options{
-		Docker:        h.eng,
+		Docker:        eng,
 		Prober:        h.prober,
 		Crash:         crash.NewTracker(nil),
 		Layout:        h.layout,

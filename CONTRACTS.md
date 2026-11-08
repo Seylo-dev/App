@@ -665,8 +665,20 @@ local API, join and resume. The areas:
 - `services/<id>/runtime.json` is reconcile's memory across agent restarts
   (crash-policy halt, the crash streak and its latest crash, failed
   generation, sleeping, containers re-attached to another project's
-  network); it and file mounts are written with
+  network, a rollout in flight); it and file mounts are written with
   `state.WriteFileAtomic` (fsync of the file and the folder).
+- A rollout is recorded (`rolling`: generation, hash, the containers it
+  found, the ones recreate mode stops) before it stops or creates
+  anything, and cleared once the new generation passed its health check
+  and route check, or once a failed rollout's rollback finished. The
+  rollback runs on a context of its own (30 s), so an agent that stops
+  during the health check (update, `seylo restart`, SIGTERM) still removes
+  the unverified containers and starts the stopped old ones before it
+  exits; the next start deploys again. A record still set when a pass
+  starts (a crash, or Docker refused the rollback) is finished first: the
+  containers the rollout created are removed and the old ones it stopped
+  start again, so an unverified generation is never adopted as serving,
+  never replaces the old one and is never reported SUCCEEDED.
 - A service moved to another project (`services.moveProject`) arrives as a
   spec whose `project_id` changed. When that is the only change
   (`SpecHash` with the old project equals the container's), reconcile

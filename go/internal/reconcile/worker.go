@@ -293,6 +293,15 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 	}
 	defer w.publishStatus(ctx, spec)
 
+	if w.rec.Rolling != nil {
+		list = w.recoverRollout(ctx, spec, list)
+		if w.rec.Rolling != nil {
+			w.message = "rolling back an interrupted deploy"
+			w.retryLater(5 * time.Second)
+			return false
+		}
+	}
+
 	hash := SpecHash(spec)
 	if w.rec.HaltedHash != "" && w.rec.HaltedHash != hash {
 		w.rec.HaltedHash = ""
@@ -599,7 +608,9 @@ func (w *worker) stopRemove(ctx context.Context, id string, grace time.Duration)
 	}
 }
 
-func (w *worker) removeAll(ctx context.Context, list []docker.Container, grace time.Duration) {
+// removeAll stops and removes list in parallel. It reports whether every
+// container is gone.
+func (w *worker) removeAll(ctx context.Context, list []docker.Container, grace time.Duration) bool {
 	var wg sync.WaitGroup
 	ids := make([]string, 0, len(list))
 	for _, c := range list {
@@ -609,18 +620,84 @@ func (w *worker) removeAll(ctx context.Context, list []docker.Container, grace t
 		delete(w.seenRunning, c.ID)
 		ids = append(ids, c.ID)
 	}
+	var mu sync.Mutex
+	gone := true
 	for _, id := range ids {
 		wg.Go(func() {
 			if err := w.r.o.Docker.StopContainer(ctx, id, grace); err != nil && !errors.Is(err, docker.ErrNotFound) {
 				w.log.Warn("stopping container", "container", id, "err", err)
 			}
-			if err := w.r.o.Docker.RemoveContainer(ctx, id); err != nil {
+			if err := w.r.o.Docker.RemoveContainer(ctx, id); err != nil && !errors.Is(err, docker.ErrNotFound) {
 				w.log.Warn("removing container", "container", id, "err", err)
+				mu.Lock()
+				gone = false
+				mu.Unlock()
 			}
 		})
 	}
 	wg.Wait()
 	w.forgetReattached(ids)
+	return gone
+}
+
+// recoverRollout finishes the rollback of a rollout the agent did not see
+// to the end (record.Rolling still set: it stopped or crashed while the new
+// generation was being checked, and the rollback did not run or failed).
+// The containers that rollout created were never verified, so they go;
+// the old containers it stopped start again, unless the service should not
+// run now. It returns the containers that are left. The record stays when
+// Docker refused part of it, so the next pass tries again.
+func (w *worker) recoverRollout(ctx context.Context, spec *agentv1.ServiceSpec, list []docker.Container) []docker.Container {
+	r := w.rec.Rolling
+	old := map[string]bool{}
+	for _, id := range r.Old {
+		old[id] = true
+	}
+	var kept, unverified []docker.Container
+	for _, c := range list {
+		if old[c.ID] {
+			kept = append(kept, c)
+		} else {
+			unverified = append(unverified, c)
+		}
+	}
+	w.log.Warn("finishing the rollback of an interrupted deploy", "generation", r.Generation, "unverified", len(unverified))
+	done := w.removeAll(ctx, unverified, 0)
+	if r.PanelDir != nil {
+		panelDirOwner{uid: r.PanelDir.UID, gid: r.PanelDir.GID, changed: true}.revert(w.r.o.Layout)
+	}
+	run := !spec.GetStopped() && !w.rec.Sleeping && spec.GetKind() != agentv1.ServiceKind_SERVICE_KIND_CRON
+	started := false
+	for _, id := range r.Stopped {
+		i := slices.IndexFunc(kept, func(c docker.Container) bool { return c.ID == id })
+		if !run || i < 0 || kept[i].State == agentv1.InstanceState_INSTANCE_STATE_RUNNING {
+			continue
+		}
+		if err := w.r.o.Docker.StartContainer(ctx, id); err != nil {
+			w.log.Error("starting the old version again", "container", kept[i].Name, "err", err)
+			if !errors.Is(err, docker.ErrNotFound) {
+				done = false
+			}
+			continue
+		}
+		kept[i].State = agentv1.InstanceState_INSTANCE_STATE_RUNNING
+		w.watches[id] = health.NewWatch(spec.GetHealthCheck(), w.r.o.Now())
+		w.seenRunning[id] = true
+		started = true
+	}
+	if !done {
+		return kept
+	}
+	w.rec.Rolling = nil
+	w.saveRecord()
+	msg := "the agent stopped during the deploy of generation %d before it was healthy: its containers were removed"
+	if started {
+		msg += " and generation %d runs again"
+		w.systemLine(r.Generation, msg, r.Generation, oldGeneration(kept))
+	} else {
+		w.systemLine(r.Generation, msg, r.Generation)
+	}
+	return kept
 }
 
 // teardown removes a service that left the desired state.
