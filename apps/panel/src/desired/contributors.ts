@@ -18,6 +18,27 @@ import type { PanelDb } from "../db/client";
 import type { services } from "../db/schema";
 import type { SecretBox } from "../security/secret-box";
 
+/**
+ * Values shared by every service of one compile, built on first use: one
+ * compile reads the database at one moment, so what is the same for many
+ * services (a project's env graph) is built once instead of per service.
+ */
+export interface CompileMemo {
+  get<T>(key: string, build: () => T): T;
+}
+
+export function compileMemo(): CompileMemo {
+  const values = new Map<string, unknown>();
+  return {
+    get<T>(key: string, build: () => T): T {
+      if (values.has(key)) return values.get(key) as T;
+      const value = build();
+      values.set(key, value);
+      return value;
+    },
+  };
+}
+
 export interface ServiceContribution {
   db: PanelDb;
   secrets: SecretBox;
@@ -25,6 +46,8 @@ export interface ServiceContribution {
   service: typeof services.$inferSelect;
   /** The spec as compiled so far; change it in place. */
   spec: ServiceSpec;
+  /** Shared by the services of this compile (compileMemo). */
+  memo: CompileMemo;
 }
 
 export interface NodeContribution {

@@ -38,6 +38,7 @@ import { nodes, servicePlacements, services } from "../db/schema";
 import type { Logger } from "../logger";
 import type { SecretBox } from "../security/secret-box";
 import { type CompileOptions, compileDesiredState, compileServiceSpec } from "./compile";
+import { compileMemo } from "./contributors";
 import type { DesiredTarget, RefusedSpec } from "./dirty";
 
 export interface FlusherDeps {
@@ -239,8 +240,14 @@ export function startDesiredFlusher(
     const known = sent.get(nodeId) ?? new Map<string, string>();
     sent.set(nodeId, known);
     const reported = agents.state.get(nodeId)?.services;
-    for (const serviceId of [...serviceIds].sort()) {
-      const spec = compileServiceSpec(db, nodeId, serviceId, compileOptions(revision));
+    // Compiled together before the first send: one moment of the database and one env graph
+    // per project, not one per service (a later change marks the services again).
+    const options = compileOptions(revision);
+    const memo = compileMemo();
+    const ids = [...serviceIds].sort();
+    const specs = ids.map((serviceId) => compileServiceSpec(db, nodeId, serviceId, options, memo));
+    for (const [i, serviceId] of ids.entries()) {
+      const spec = specs[i] ?? null;
       try {
         if (spec) {
           const res = await call(nodeId, "applyService", { revision, service: spec });

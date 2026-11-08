@@ -23,11 +23,12 @@ import type { DesiredContributor } from "../../desired/contributors";
 import { boxRuntime } from "../boxes/desired";
 import { databaseRuntime } from "../databases/desired";
 import { deploymentEnv, resolveServiceEnv } from "../env/desired";
+import { buildEnvGraph } from "../env/graph";
 import { globalMaintenance, serviceNetworking } from "./desired";
 
 export const networkingContributor: DesiredContributor = {
   name: "networking-env-data",
-  service({ db, secrets, nodeId, service, spec }) {
+  service({ db, secrets, nodeId, service, spec, memo }) {
     const deps = { db, secrets };
     const net = serviceNetworking(deps, service.id, nodeId);
     spec.routing = create(RoutingSchema, net.routing);
@@ -42,12 +43,20 @@ export const networkingContributor: DesiredContributor = {
       }
     }
     // Apps run the env their target deployment started with (a failed deploy
-    // must not hand its new env to the live one); databases and Boxes have
-    // no deployment and get the current env.
+    // must not hand its new env to the live one); databases, Boxes and
+    // parked clones have no deployment and get the current env, from one
+    // env graph per project per compile (building it reads every service
+    // of the project).
     const target = service.targetDeploymentId
       ? db.select({ envSealed: deployments.envSealed }).from(deployments).where(eq(deployments.id, service.targetDeploymentId)).get()
       : undefined;
-    const env = deploymentEnv(deps, target?.envSealed ?? null) ?? resolveServiceEnv(deps, service.id);
+    const env =
+      deploymentEnv(deps, target?.envSealed ?? null) ??
+      resolveServiceEnv(
+        deps,
+        service.id,
+        memo.get(`env-graph:${service.projectId}`, () => buildEnvGraph(deps, service.projectId)),
+      );
     spec.env = env.map((v) => create(EnvVarSchema, v));
     const database = databaseRuntime(deps, service.id, nodeId);
     if (database) spec.kindSpec = { case: "database", value: create(DatabaseSpecSchema, database.database) };

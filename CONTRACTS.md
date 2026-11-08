@@ -2052,9 +2052,14 @@ The compiler (`desired/compile.ts`) starts from the services module's
 contributors. A module that owns rows agents need registers one in its
 `start()`: `deps.agents.desired.contribute({ name, service(ctx), node(ctx) })`
 (`desired/contributors.ts`); `ctx.spec` / `ctx.settings` are changed in
-place, in registration order. The networking contributor
+place, in registration order. `ctx.memo` lives for one compile (a full
+state, or the specs one ApplyService pass compiles together before its
+first send) and holds what many services share. The networking contributor
 (`modules/domains/contributor.ts`) sets env, routing, dev access, public
-ports, database/Box specs and the global maintenance page.
+ports, database/Box specs and the global maintenance page; services
+without a sealed deployment env (databases, Boxes, parked clones) resolve
+theirs from one env graph per project per compile (`ctx.memo`), not one
+per service.
 
 Live topics the nodes module publishes (`modules/nodes/live.ts`): `panel` invalidates
 `nodes.list`, `system.info`, `updates.status` on node changes and
