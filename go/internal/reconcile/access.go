@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"strconv"
 	"strings"
@@ -430,7 +431,9 @@ func redactLines(lines []string, spec *agentv1.ServiceSpec) []string {
 
 // Resolve returns the address ("10.0.3.4:5432") of a running instance of
 // the service's current spec on its project network, for relaying to
-// containerPort. Replicas take turns.
+// containerPort. Replicas take turns. While a deploy has not switched the
+// route yet, its new containers are used only when nothing older runs:
+// they may not listen yet, while the old generation still serves.
 func (r *Runtime) Resolve(ctx context.Context, serviceID string, containerPort uint32) (string, error) {
 	spec := r.spec(serviceID)
 	if spec == nil {
@@ -444,7 +447,8 @@ func (r *Runtime) Resolve(ctx context.Context, serviceID string, containerPort u
 		return "", err
 	}
 	hash := SpecHash(spec)
-	var addrs, fallback []string
+	starting := r.notSwitched(serviceID, hash)
+	var addrs, fallback, pending []string
 	for _, c := range list {
 		if !docker.IsServiceInstance(c.Labels) || c.State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
 			continue
@@ -461,9 +465,12 @@ func (r *Runtime) Resolve(ctx context.Context, serviceID string, containerPort u
 		if v, ok := r.reattached.Load(c.ID); ok {
 			served = v.(reattachment).Hash
 		}
-		if served == hash {
+		switch {
+		case starting[c.ID]:
+			pending = append(pending, a)
+		case served == hash:
 			addrs = append(addrs, a)
-		} else {
+		default:
 			// An older generation while a deploy is in flight or failed.
 			fallback = append(fallback, a)
 		}
@@ -472,8 +479,28 @@ func (r *Runtime) Resolve(ctx context.Context, serviceID string, containerPort u
 		addrs = fallback
 	}
 	if len(addrs) == 0 {
+		addrs = pending
+	}
+	if len(addrs) == 0 {
 		return "", fmt.Errorf("%w: no running instance of %s", ErrNotRunning, serviceID)
 	}
 	n := r.resolveTurn.Add(1)
 	return addrs[int(n%uint64(len(addrs)))], nil
+}
+
+// notSwitched returns the containers a rollout of hash started for the
+// service that the route does not point at yet (nil when there are none).
+func (r *Runtime) notSwitched(serviceID, hash string) map[string]bool {
+	r.mu.Lock()
+	w := r.workers[serviceID]
+	r.mu.Unlock()
+	if w == nil {
+		return nil
+	}
+	w.rollMu.Lock()
+	defer w.rollMu.Unlock()
+	if !w.rolling || w.rollSwitched || w.rollHash != hash || len(w.rollIDs) == 0 {
+		return nil
+	}
+	return maps.Clone(w.rollIDs)
 }

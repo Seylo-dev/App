@@ -38,12 +38,14 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	defer cancel(nil)
 	w.rollMu.Lock()
 	w.rolling, w.rollGen, w.rollHash, w.rollIDs, w.rollCancel = true, gen, hash, map[string]bool{}, cancel
+	w.rollSwitched = false
 	w.rollMu.Unlock()
 	defer func() {
 		w.rollMu.Lock()
-		w.rolling, w.rollIDs, w.rollCancel = false, nil, nil
+		w.rolling, w.rollIDs, w.rollCancel, w.rollSwitched = false, nil, nil, false
 		w.rollMu.Unlock()
 		w.phase = agentv1.ServicePhase_SERVICE_PHASE_UNSPECIFIED
+		w.gateSwitched()
 	}()
 
 	oldRunning := w.running(ctx, old)
@@ -261,6 +263,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		w.failDeploy(ctx, rollCtx, spec, hash, "switching the route: "+err.Error(), nil)
 		return
 	}
+	w.setSwitched(true)
 	if rt := w.r.o.Router; rt != nil && len(spec.GetRouting().GetRoutes()) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_VERIFYING, "")
 		vctx, vcancel := context.WithTimeout(rollCtx, w.r.o.VerifyTimeout)
@@ -287,6 +290,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	if len(old) > 0 || len(stoppedOld) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_STOPPING_OLD, "")
 		oldGone = w.removeAll(ctx, append(old, stoppedOld...), grace)
+		w.gateSwitched()
 	}
 	if oldGone {
 		w.pruneFiles(hash, nil)
@@ -398,9 +402,28 @@ func findLive(list []liveInstance, id string) (liveInstance, bool) {
 	return liveInstance{}, false
 }
 
+// setSwitched records whether the route points at the rollout's new
+// containers and tells the portgate that the service's traffic moved.
+func (w *worker) setSwitched(on bool) {
+	w.rollMu.Lock()
+	w.rollSwitched = on
+	w.rollMu.Unlock()
+	w.gateSwitched()
+}
+
+// gateSwitched tells the portgate (when it is the Gate) that the service's
+// traffic moved, so its IP:port relay looks the service up again instead
+// of dialing an address that is going away.
+func (w *worker) gateSwitched() {
+	if g, ok := w.r.o.Gate.(interface{ Switched(serviceID string) }); ok {
+		g.Switched(w.id)
+	}
+}
+
 // revertRoutes points the routes back at the old generation after a failed
 // switch.
 func (w *worker) revertRoutes(ctx context.Context, spec *agentv1.ServiceSpec, old []liveInstance) {
+	w.setSwitched(false)
 	if err := w.syncRoutes(ctx, spec, old, true); err != nil {
 		w.log.Error("restoring the old route", "err", err)
 	}

@@ -60,6 +60,13 @@ type Config struct {
 	// database listeners use DatabaseIdleTimeout unless this is set.
 	IdleTimeout time.Duration
 	ResolveTTL  time.Duration
+	// ConnectTimeout is how long an accepted connection may wait for its
+	// service: lookups and dials, tried again while a deploy switches
+	// containers. Zero means DefaultConnectTimeout.
+	ConnectTimeout time.Duration
+	// Dial connects to a container address; nil uses a net.Dialer (tests
+	// replace it).
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // Defaults of the Config limits.
@@ -71,9 +78,26 @@ const (
 	// connections open between queries.
 	DatabaseIdleTimeout = 2 * time.Hour
 	DefaultResolveTTL   = 2 * time.Second
-	// resolveErrorTTL keeps a failed lookup for a moment, so a service
-	// that is down does not turn every connection into Docker calls.
+	// DefaultConnectTimeout bounds the wait of one connection for its
+	// service, as the relay always did.
+	DefaultConnectTimeout = 5 * time.Second
+	// resolveErrorTTL keeps a failed lookup (or a looked-up address that
+	// failed to dial) for a moment, so a service that is down does not turn
+	// every connection into Docker calls. Waiting connections share it and
+	// look again once it is over.
 	resolveErrorTTL = time.Second
+	// cachedDialTimeout bounds a dial to an address from an earlier
+	// lookup. A container removed since may not refuse but swallow the SYN
+	// (its address is gone from the bridge), and one on the node's own
+	// network answers far sooner.
+	cachedDialTimeout = time.Second
+	// A connection that found nothing to dial waits retryPause before it
+	// tries again, twice as long each time up to retryPauseMax.
+	retryPause    = 50 * time.Millisecond
+	retryPauseMax = 400 * time.Millisecond
+	// unreachableWarnEvery limits the warning about connections a listener
+	// gave up on (each one is logged at debug level).
+	unreachableWarnEvery = time.Minute
 )
 
 // ErrNoAllowList refuses a timed expose without source addresses.
@@ -129,6 +153,10 @@ type active struct {
 	// sources counts clients per source address (MaxConnsPerSource).
 	sources map[netip.Addr]int
 	done    bool
+
+	// warnedAt is when the last "cannot reach the service" warning went
+	// out (UnixNano).
+	warnedAt atomic.Int64
 }
 
 // New returns a manager. It loads picked ports from cfg.PortsFile.
@@ -148,6 +176,13 @@ func New(cfg Config) *Manager {
 	}
 	if cfg.ResolveTTL <= 0 {
 		cfg.ResolveTTL = DefaultResolveTTL
+	}
+	if cfg.ConnectTimeout <= 0 {
+		cfg.ConnectTimeout = DefaultConnectTimeout
+	}
+	if cfg.Dial == nil {
+		var d net.Dialer
+		cfg.Dial = d.DialContext
 	}
 	m := &Manager{cfg: cfg, log: log, open: map[string]map[string]*active{}, picked: map[string]uint32{}, res: map[string]*resolved{}}
 	if cfg.PortsFile != "" {
@@ -569,11 +604,16 @@ func (m *Manager) relay(a *active, client net.Conn) {
 	if m.cfg.Resolve == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.ConnectTimeout)
 	upstream, err := m.dial(ctx, a)
 	cancel()
 	if err != nil {
 		m.log.Debug("portgate relay failed", "service_id", a.svc, "listener", a.lid, "err", err)
+		if now := time.Now().UnixNano(); now-a.warnedAt.Load() > int64(unreachableWarnEvery) {
+			a.warnedAt.Store(now)
+			m.log.Warn("portgate cannot reach the service; closing the connections it cannot serve",
+				"service_id", a.svc, "listener", a.lid, "port", a.port, "waited", m.cfg.ConnectTimeout, "err", err)
+		}
 		return
 	}
 	if !a.track(upstream) {
@@ -587,21 +627,102 @@ func (m *Manager) relay(a *active, client net.Conn) {
 
 // dial connects to the service's container port: the address of a
 // recent Resolve, or a fresh one when that address no longer answers (a
-// new generation or a restart moved it).
+// new generation or a restart moved it; a cached address gets only
+// cachedDialTimeout, since a removed container may not refuse). A failed
+// lookup, or an address that refuses, is tried again with a short pause
+// until ctx ends or the listener closes: around a deploy the lookup can
+// fail for a moment, or find the new container before it listens, and the
+// client's request can still be served a moment later. It used to be
+// closed at once, unread, which the client saw as a connection reset.
 func (m *Manager) dial(ctx context.Context, a *active) (net.Conn, error) {
-	var d net.Dialer
-	target, cached, err := m.resolve(ctx, a.svc, a.cport, false)
-	if err != nil {
-		return nil, err
+	fresh := false
+	pause := retryPause
+	for {
+		target, cached, err := m.resolve(ctx, a.svc, a.cport, fresh)
+		fresh = false
+		if err == nil {
+			dctx, cancel := ctx, context.CancelFunc(func() {})
+			if cached {
+				dctx, cancel = context.WithTimeout(ctx, cachedDialTimeout)
+			}
+			var conn net.Conn
+			conn, err = m.cfg.Dial(dctx, "tcp", target)
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			m.dialFailed(a.svc, a.cport, target, err, cached)
+			if cached && ctx.Err() == nil {
+				// An address from an earlier lookup: look it up again at once.
+				fresh = true
+				continue
+			}
+		}
+		if a.closing() {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(pause):
+		}
+		pause = min(2*pause, retryPauseMax)
 	}
-	conn, err := d.DialContext(ctx, "tcp", target)
-	if err == nil || !cached {
-		return conn, err
+}
+
+func (a *active) closing() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.done
+}
+
+func resolveKey(svc string, cport uint32) string {
+	return svc + "/" + strconv.FormatUint(uint64(cport), 10)
+}
+
+// lookedUp is a closed channel, the ready of results made without a lookup.
+var lookedUp = func() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()
+
+// dialFailed updates the shared lookup of an address that just failed to
+// dial. One from an earlier lookup (cached) is dropped, so the next
+// connection looks the service up again. One the lookup had just found
+// becomes a failed lookup: the connections of the next resolveErrorTTL
+// wait for a new lookup instead of dialing it too, and Docker is still
+// asked once per moment while the service does not answer.
+func (m *Manager) dialFailed(svc string, cport uint32, target string, cause error, cached bool) {
+	key := resolveKey(svc, cport)
+	m.resMu.Lock()
+	defer m.resMu.Unlock()
+	e := m.res[key]
+	if e == nil {
+		return
 	}
-	if target, _, err = m.resolve(ctx, a.svc, a.cport, true); err != nil {
-		return nil, err
+	select {
+	case <-e.ready:
+	default:
+		return // a new lookup is running
 	}
-	return d.DialContext(ctx, "tcp", target)
+	if e.err != nil || e.target != target {
+		return
+	}
+	if cached {
+		delete(m.res, key)
+		return
+	}
+	m.res[key] = &resolved{err: fmt.Errorf("dialing %s: %w", target, cause), at: m.cfg.Now(), ready: lookedUp}
+}
+
+// Switched drops what the gate looked up for a service, also failed
+// lookups: its traffic moved to other containers (reconcile calls it when
+// a deploy switches the route, rolls it back, and once the old generation
+// is gone), so new connections look the service up again instead of
+// dialing an address that is going away.
+func (m *Manager) Switched(serviceID string) {
+	m.forgetResolved(serviceID)
 }
 
 // resolve returns the target of a service's container port. Results are
@@ -610,7 +731,7 @@ func (m *Manager) dial(ctx context.Context, a *active) (net.Conn, error) {
 // connections costs one Docker lookup per TTL. fresh skips a finished
 // result. cached reports that the answer came from an earlier lookup.
 func (m *Manager) resolve(ctx context.Context, svc string, cport uint32, fresh bool) (target string, cached bool, err error) {
-	key := svc + "/" + strconv.FormatUint(uint64(cport), 10)
+	key := resolveKey(svc, cport)
 	m.resMu.Lock()
 	if e := m.res[key]; e != nil {
 		select {
@@ -637,7 +758,11 @@ func (m *Manager) resolve(ctx context.Context, svc string, cport uint32, fresh b
 	e := &resolved{ready: make(chan struct{})}
 	m.res[key] = e
 	m.resMu.Unlock()
-	e.target, e.err = m.cfg.Resolve(ctx, svc, cport)
+	// Shared: the connection that started it giving up must not fail it
+	// for the others.
+	lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.cfg.ConnectTimeout)
+	e.target, e.err = m.cfg.Resolve(lctx, svc, cport)
+	cancel()
 	e.at = m.cfg.Now()
 	close(e.ready)
 	return e.target, false, e.err
