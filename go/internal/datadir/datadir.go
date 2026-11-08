@@ -45,6 +45,13 @@ func (l Layout) PanelDatabase() string { return filepath.Join(l.root, "panel", "
 // BuildsDir holds build workspaces and uploaded build contexts.
 func (l Layout) BuildsDir() string { return filepath.Join(l.root, "builds") }
 
+// BuildsDockerConfig is DOCKER_CONFIG for every docker command of a build
+// (internal/build: <BuildsDir>/docker). The docker CLI then finds plugins in
+// its cli-plugins and the system plugin folders, never in root's
+// ~/.docker/cli-plugins. The buildx facts and the buildx health check run
+// with it too, so they see what builds see.
+func (l Layout) BuildsDockerConfig() string { return filepath.Join(l.BuildsDir(), "docker") }
+
 // ToolsDir holds pinned helper binaries (Railpack, Nixpacks).
 func (l Layout) ToolsDir() string { return filepath.Join(l.root, "tools") }
 

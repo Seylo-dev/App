@@ -15,7 +15,8 @@ import (
 // Env is everything the checks read from the machine. Paths are roots so
 // tests can point them at a fake tree.
 type Env struct {
-	// DataDir is the node data dir (disk checks run on its file system).
+	// DataDir is the node data dir (disk checks run on its file system, and
+	// the buildx check uses the builds' docker config under it).
 	DataDir string
 	// PanelURL is the panel's base URL; empty before the node joined.
 	PanelURL string

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,7 +46,7 @@ func provideBuild(d *Deps) error {
 // collector.
 func wireBuild(reg *Registry, d *Deps) error {
 	log := d.Logger.With("component", "build")
-	wireBuildxFacts(d, dockerBuildxVersion(filepath.Join(d.Layout.BuildsDir(), "docker")))
+	wireBuildxFacts(d, dockerBuildxVersion(d.Layout.BuildsDockerConfig()))
 
 	var teed sync.Map // build id -> struct{}: output already copied to the log store
 	rpc.HandleStream(reg, "Build", func(ctx context.Context, req *agentv1.BuildRequest, s *rpc.TypedStream[*agentv1.BuildRequest, *agentv1.BuildResponse]) error {

@@ -2,7 +2,9 @@ package agent
 
 // Buildx facts (NodeFacts.buildx): whether `docker buildx version` works
 // here, run the way builds run docker (internal/build: DOCKER_CONFIG under
-// the builds folder, so a plugin only in root's ~/.docker does not count).
+// the builds folder, datadir.BuildsDockerConfig, so a plugin only in root's
+// ~/.docker does not count). The buildx health check (nodecheck) runs it
+// the same way.
 // The panel picks no automatic builds for a node that reports it missing
 // and refuses it as an explicit build node, so a node with distro Docker
 // and no plugin is not handed builds that would fail. Agents before 0.2.1

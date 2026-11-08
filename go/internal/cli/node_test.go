@@ -48,7 +48,8 @@ func TestHealthBuildxFollowsTheStoredDesiredState(t *testing.T) {
 		if !strings.Contains(out, "Docker buildx") {
 			t.Fatalf("no buildx line in:\n%s", out)
 		}
-		return slices.Contains(h.cmds, "docker buildx version")
+		// With the builds' docker config, as builds and the agent's buildx facts run it.
+		return slices.Contains(h.cmds, "env DOCKER_CONFIG="+layout.BuildsDockerConfig()+" DOCKER_CLI_HINTS=false docker buildx version")
 	}
 	if !ranBuildx(t, 2, false) {
 		t.Error("the panel sends builds, config.yml has no can_build: the buildx check was skipped")
