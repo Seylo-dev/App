@@ -94,6 +94,152 @@ export const updateGeneral = defineOp({
   audit: true,
 });
 
+// ---------------------------------------------------------------- panel access (added in 0.2.1)
+//
+// Whether the panel answers on http://<ip>:<panel port> and on the agents'
+// TLS port, or only on a private path (the panel domain, or the owner's
+// tailnet: tailscale.ts). The agent publishes the closed port on 127.0.0.1
+// only, which Docker does without ufw. Closing is owner-only, from a
+// browser that reached the panel over a working private path; reopening is
+// always allowed. When the private path stops working the port reopens by
+// itself (onFailure "reopen", the default) unless the owner chose
+// "stayClosed" and saved the recovery commands.
+
+export const PanelAccessOnFailure = Type.Union([Type.Literal("reopen"), Type.Literal("stayClosed")], {
+  description:
+    'What happens when every private path stops working while IP access is closed: "reopen" opens IP:port again (and closes it once a path has worked for an hour), "stayClosed" keeps it closed.',
+});
+export type PanelAccessOnFailure = Static<typeof PanelAccessOnFailure>;
+
+/** A way into the panel that does not need the public IP:port. */
+export const PrivatePathKind = Type.Union([Type.Literal("domain"), Type.Literal("tailnet")]);
+export type PrivatePathKind = Static<typeof PrivatePathKind>;
+
+export const PrivatePath = Type.Object({
+  kind: PrivatePathKind,
+  /** "https://panel.example.com" or "https://<machine>.<tailnet>.ts.net". */
+  url: Type.String(),
+  /** After the debounce: the domain is down after 2 failed checks in a row, the tailnet after 5 minutes of reports from an online agent. */
+  working: Type.Boolean(),
+  /** When `working` last changed; null when unknown. */
+  since: Type.Union([Timestamp, Type.Null()]),
+  /** This request came over this path. */
+  usingNow: Type.Boolean(),
+});
+export type PrivatePath = Static<typeof PrivatePath>;
+
+/**
+ * Why closing IP access (or the agents' port) is refused right now.
+ * updatePanelAccess answers CONFLICT with details.reason set to one of
+ * these.
+ */
+export const panelAccessBlockCodes = [
+  /** Only the owner closes IP access. */
+  "notOwner",
+  /** Only from a browser session: not an API key. */
+  "notBrowserSession",
+  /** No private path works: the domain is not active and the tailnet does not serve the panel. */
+  "noPrivatePath",
+  /** This page was opened over IP:port (or a path that is not working): open it over the domain or the tailnet first. */
+  "notOnPrivatePath",
+  /** The panel node's agent is offline. */
+  "panelNodeOffline",
+  /** The panel node's agent cannot publish on 127.0.0.1 only (it lacks panel.publish-bind.v1): update it. */
+  "agentTooOld",
+  /** A panel update is running. */
+  "updateRunning",
+  /** Enabled nodes (online or offline) connect over plain http://; nodeIds names them. Join them again with the https command (--force). */
+  "plainHttpNodes",
+  /** The agents' port only: other enabled nodes connect over it, not over https://<domain>; nodeIds names them. */
+  "nodesOnAgentPort",
+  /** The agents' port only: the panel has no agents' TLS port. */
+  "noAgentPort",
+] as const;
+export type PanelAccessBlockCode = (typeof panelAccessBlockCodes)[number];
+export const PanelAccessBlockCode = Type.Union(panelAccessBlockCodes.map((code) => Type.Literal(code)));
+
+export const PanelAccessBlock = Type.Object({
+  code: PanelAccessBlockCode,
+  /** Plain words with the fix, for example "node b1 connects over http://203.0.113.5:3000 - run the https join command with --force on it". */
+  message: Type.String(),
+  nodeIds: Type.Optional(Type.Array(Id)),
+});
+export type PanelAccessBlock = Static<typeof PanelAccessBlock>;
+
+export const PanelAccess = Type.Object({
+  /** The owner's choice: answer on http://<ip>:<panel port>. On by default (0.2.0's behavior). */
+  serveOnIp: Type.Boolean(),
+  /** The owner's choice: keep the agents' TLS port open. On by default. It closes only while IP access is closed too. */
+  agentPortOpen: Type.Boolean(),
+  onFailure: PanelAccessOnFailure,
+  /** The panel's host port (the installer's --port, 3000 by default). */
+  panelPort: Type.Integer({ minimum: 1, maximum: 65535 }),
+  /** The agents' TLS port (the installer's --agent-tls-port, 3443 by default); null when it is off. */
+  agentPort: Type.Union([Type.Integer({ minimum: 1, maximum: 65535 }), Type.Null()]),
+  /** What the panel node's agent applied, which can differ from the choices above (a path stopped working, a failed roll). */
+  actual: Type.Object({
+    ip: Type.Union([Type.Literal("open"), Type.Literal("closed"), Type.Literal("unknown")]),
+    agentPort: Type.Union([Type.Literal("open"), Type.Literal("closed"), Type.Literal("off"), Type.Literal("unknown")]),
+  }),
+  privatePaths: Type.Array(PrivatePath),
+  /** Why turning serveOnIp off is refused right now; empty when it is allowed. */
+  blocked: Type.Array(PanelAccessBlock),
+  /** Why turning agentPortOpen off is refused right now; empty when it is allowed. */
+  agentPortBlocked: Type.Array(PanelAccessBlock),
+  /** After an automatic reopen: when IP access closes again if a path keeps working; null otherwise. */
+  reclosesAt: Type.Union([Timestamp, Type.Null()]),
+  lastChange: Type.Union([
+    Type.Object({
+      at: Timestamp,
+      /** For example "the panel domain stopped working" or "turned off in Settings". */
+      reason: Type.String(),
+      /** "system" for automatic changes, else who made it. */
+      by: Type.String(),
+    }),
+    Type.Null(),
+  ]),
+  /** Ways back in that work while IP access is closed. */
+  recovery: Type.Object({
+    /** For example "ssh -L 3000:127.0.0.1:3000 root@203.0.113.10", then open http://127.0.0.1:3000. */
+    sshTunnel: Type.String(),
+    /** The command to run as root on the panel's server, for example "sudo seylo panel ip-access on". */
+    cli: Type.String(),
+  }),
+});
+export type PanelAccess = Static<typeof PanelAccess>;
+
+export const panelAccess = defineOp({
+  id: "settings.panelAccess",
+  kind: "query",
+  summary: "Get panel access",
+  description:
+    "Returns whether the panel answers on IP:port and on the agents' TLS port, what the panel node applied, the private paths (panel domain, tailnet) and whether each works, why closing is refused right now, and the recovery commands.",
+  input: Empty,
+  output: PanelAccess,
+  permission: permission.global("settings.view"),
+  mcp: false,
+  audit: false,
+});
+
+export const updatePanelAccess = defineOp({
+  id: "settings.updatePanelAccess",
+  kind: "mutation",
+  summary: "Change panel access",
+  description:
+    'Turns serving on IP:port and on the TLS port for agents on or off, and chooses what happens when the private path stops working. Each change restarts the panel once (a few seconds). Turning anything off needs the owner, from a browser session that signed in or confirmed it is them in the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise), over a private path that works; a refusal is CONFLICT with details.reason one of the blocked codes. onFailure "stayClosed" also needs savedRecovery: true. Turning things back on is always allowed. Omitted fields keep their value.',
+  input: Type.Object({
+    serveOnIp: Type.Optional(Type.Boolean()),
+    agentPortOpen: Type.Optional(Type.Boolean()),
+    onFailure: Type.Optional(PanelAccessOnFailure),
+    /** The person ticked that they saved the recovery commands. Needed for onFailure "stayClosed". */
+    savedRecovery: Type.Optional(Type.Boolean()),
+  }),
+  output: PanelAccess,
+  permission: permission.global("settings.manage"),
+  mcp: false,
+  audit: true,
+});
+
 // ---------------------------------------------------------------- branding
 
 export const brandAssetKinds = ["logoLight", "logoDark", "favicon"] as const;

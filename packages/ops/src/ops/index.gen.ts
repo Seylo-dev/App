@@ -39,6 +39,7 @@ import * as services from "./services";
 import * as settings from "./settings";
 import * as setup from "./setup";
 import * as system from "./system";
+import * as tailscale from "./tailscale";
 import * as telemetry from "./telemetry";
 import * as templates from "./templates";
 import * as terminals from "./terminals";
@@ -48,7 +49,7 @@ import * as uptime from "./uptime";
 import * as users from "./users";
 import * as webhooks from "./webhooks";
 
-export { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
+export { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
 
 /** Every op module by name; the name is the id prefix of its ops. */
-export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;
+export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;

@@ -102,6 +102,9 @@ const createJoinToken = implement(nodeOps.createJoinToken, (_input, ctx) => {
     command: joinCommand(ctx.config.version, target.url, token, target.pin, target.insecureTransport),
     expiresAt: expiresAt.toISOString(),
     insecureTransport: target.insecureTransport,
+    // Until join_tokens stores the choice (WP-F1a), the handshake decides as
+    // in 0.2.0: a node that joins with this token starts with Can build off.
+    canBuild: false,
   };
 });
 
@@ -118,6 +121,8 @@ const listJoinTokens = implement(nodeOps.listJoinTokens, (_input, ctx) => {
       createdAt: t.createdAt.toISOString(),
       expiresAt: t.expiresAt.toISOString(),
       createdBy: t.createdBy,
+      // See createJoinToken: stored per token from WP-F1a on.
+      canBuild: false,
     })),
   };
 });

@@ -39,6 +39,7 @@ import services from "./services";
 import settings from "./settings";
 import setup from "./setup";
 import system from "./system";
+import tailscale from "./tailscale";
 import telemetry from "./telemetry";
 import templates from "./templates";
 import terminals from "./terminals";
@@ -49,4 +50,4 @@ import users from "./users";
 import webhooks from "./webhooks";
 
 /** Every panel feature module; each one's default export is a defineModule() result. */
-export const modules = [ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;
+export const modules = [ai, alerts, apiKeys, approvals, audit, auth, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;

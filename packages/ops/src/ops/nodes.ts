@@ -180,6 +180,8 @@ export const JoinToken = Type.Object({
   createdAt: Timestamp,
   expiresAt: Timestamp,
   createdBy: Nullable(Id),
+  /** The node that joins with it starts with Can build on (added in 0.2.1). */
+  canBuild: Type.Boolean(),
 });
 
 export const list = defineOp({
@@ -235,8 +237,11 @@ export const createJoinToken = defineOp({
   kind: "mutation",
   summary: "Create a join token",
   description:
-    'Creates a single-use token that lets a new server join this panel within one hour, and the install command to run on it as root. From a browser session it needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise); API keys need none.',
-  input: Empty,
+    'Creates a single-use token that lets a new server join this panel within one hour, and the install command to run on it as root. canBuild (default true) is whether the node that joins with it starts with Can build on: a build node gets the source code, git credentials and build-time values of every service it builds, from any project. The node cannot change it; nodes.setCanBuild can later. A re-join of a known node keeps its value. From a browser session it needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise); API keys need none.',
+  input: Type.Object({
+    /** Default true. False makes a node that only runs services. */
+    canBuild: Type.Optional(Type.Boolean()),
+  }),
   output: Type.Object({
     tokenId: Id,
     token: Type.String(),
@@ -250,6 +255,8 @@ export const createJoinToken = defineOp({
      * suggest setting a panel domain first.
      */
     insecureTransport: Type.Boolean(),
+    /** What the token decided: the joining node starts with Can build on. */
+    canBuild: Type.Boolean(),
   }),
   permission: permission.global("nodes.manage"),
   sensitive: { output: ["token", "command"] },

@@ -42593,7 +42593,7 @@
       "post": {
         "operationId": "nodes.createJoinToken",
         "summary": "Create a join token",
-        "description": "Creates a single-use token that lets a new server join this panel within one hour, and the install command to run on it as root. From a browser session it needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise); API keys need none.",
+        "description": "Creates a single-use token that lets a new server join this panel within one hour, and the install command to run on it as root. canBuild (default true) is whether the node that joins with it starts with Can build on: a build node gets the source code, git credentials and build-time values of every service it builds, from any project. The node cannot change it; nodes.setCanBuild can later. A re-join of a known node keeps its value. From a browser session it needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise); API keys need none.",
         "tags": [
           "nodes"
         ],
@@ -42612,7 +42612,11 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "canBuild": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
@@ -42629,7 +42633,8 @@
                     "token",
                     "command",
                     "expiresAt",
-                    "insecureTransport"
+                    "insecureTransport",
+                    "canBuild"
                   ],
                   "properties": {
                     "tokenId": {
@@ -42648,6 +42653,9 @@
                       "type": "string"
                     },
                     "insecureTransport": {
+                      "type": "boolean"
+                    },
+                    "canBuild": {
                       "type": "boolean"
                     }
                   }
@@ -43870,7 +43878,8 @@
                           "id",
                           "createdAt",
                           "expiresAt",
-                          "createdBy"
+                          "createdBy",
+                          "canBuild"
                         ],
                         "properties": {
                           "id": {
@@ -43897,6 +43906,9 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "canBuild": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -62365,6 +62377,375 @@
         "x-mcp": true
       }
     },
+    "/api/v1/settings.panelAccess": {
+      "get": {
+        "operationId": "settings.panelAccess",
+        "summary": "Get panel access",
+        "description": "Returns whether the panel answers on IP:port and on the agents' TLS port, what the panel node applied, the private paths (panel domain, tailnet) and whether each works, why closing is refused right now, and the recovery commands.",
+        "tags": [
+          "settings"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "serveOnIp",
+                    "agentPortOpen",
+                    "onFailure",
+                    "panelPort",
+                    "agentPort",
+                    "actual",
+                    "privatePaths",
+                    "blocked",
+                    "agentPortBlocked",
+                    "reclosesAt",
+                    "lastChange",
+                    "recovery"
+                  ],
+                  "properties": {
+                    "serveOnIp": {
+                      "type": "boolean"
+                    },
+                    "agentPortOpen": {
+                      "type": "boolean"
+                    },
+                    "onFailure": {
+                      "description": "What happens when every private path stops working while IP access is closed: \"reopen\" opens IP:port again (and closes it once a path has worked for an hour), \"stayClosed\" keeps it closed.",
+                      "anyOf": [
+                        {
+                          "const": "reopen",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stayClosed",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "panelPort": {
+                      "minimum": 1,
+                      "maximum": 65535,
+                      "type": "integer"
+                    },
+                    "agentPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "actual": {
+                      "type": "object",
+                      "required": [
+                        "ip",
+                        "agentPort"
+                      ],
+                      "properties": {
+                        "ip": {
+                          "anyOf": [
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "closed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unknown",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "agentPort": {
+                          "anyOf": [
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "closed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unknown",
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "privatePaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "url",
+                          "working",
+                          "since",
+                          "usingNow"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "domain",
+                                "type": "string"
+                              },
+                              {
+                                "const": "tailnet",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "working": {
+                            "type": "boolean"
+                          },
+                          "since": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "usingNow": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "blocked": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "notOwner",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowserSession",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notOnPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "agentTooOld",
+                                "type": "string"
+                              },
+                              {
+                                "const": "updateRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "plainHttpNodes",
+                                "type": "string"
+                              },
+                              {
+                                "const": "nodesOnAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noAgentPort",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "agentPortBlocked": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "notOwner",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowserSession",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notOnPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "agentTooOld",
+                                "type": "string"
+                              },
+                              {
+                                "const": "updateRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "plainHttpNodes",
+                                "type": "string"
+                              },
+                              {
+                                "const": "nodesOnAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noAgentPort",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "reclosesAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastChange": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "at",
+                            "reason",
+                            "by"
+                          ],
+                          "properties": {
+                            "at": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "by": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "recovery": {
+                      "type": "object",
+                      "required": [
+                        "sshTunnel",
+                        "cli"
+                      ],
+                      "properties": {
+                        "sshTunnel": {
+                          "type": "string"
+                        },
+                        "cli": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "settings.view",
+        "x-mcp": false
+      }
+    },
     "/api/v1/settings.removeBrandAsset": {
       "post": {
         "operationId": "settings.removeBrandAsset",
@@ -63019,6 +63400,408 @@
         "x-op-kind": "mutation",
         "x-permission": "settings.manage",
         "x-mcp": true
+      }
+    },
+    "/api/v1/settings.updatePanelAccess": {
+      "post": {
+        "operationId": "settings.updatePanelAccess",
+        "summary": "Change panel access",
+        "description": "Turns serving on IP:port and on the TLS port for agents on or off, and chooses what happens when the private path stops working. Each change restarts the panel once (a few seconds). Turning anything off needs the owner, from a browser session that signed in or confirmed it is them in the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise), over a private path that works; a refusal is CONFLICT with details.reason one of the blocked codes. onFailure \"stayClosed\" also needs savedRecovery: true. Turning things back on is always allowed. Omitted fields keep their value.",
+        "tags": [
+          "settings"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "serveOnIp": {
+                    "type": "boolean"
+                  },
+                  "agentPortOpen": {
+                    "type": "boolean"
+                  },
+                  "onFailure": {
+                    "description": "What happens when every private path stops working while IP access is closed: \"reopen\" opens IP:port again (and closes it once a path has worked for an hour), \"stayClosed\" keeps it closed.",
+                    "anyOf": [
+                      {
+                        "const": "reopen",
+                        "type": "string"
+                      },
+                      {
+                        "const": "stayClosed",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "savedRecovery": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "serveOnIp",
+                    "agentPortOpen",
+                    "onFailure",
+                    "panelPort",
+                    "agentPort",
+                    "actual",
+                    "privatePaths",
+                    "blocked",
+                    "agentPortBlocked",
+                    "reclosesAt",
+                    "lastChange",
+                    "recovery"
+                  ],
+                  "properties": {
+                    "serveOnIp": {
+                      "type": "boolean"
+                    },
+                    "agentPortOpen": {
+                      "type": "boolean"
+                    },
+                    "onFailure": {
+                      "description": "What happens when every private path stops working while IP access is closed: \"reopen\" opens IP:port again (and closes it once a path has worked for an hour), \"stayClosed\" keeps it closed.",
+                      "anyOf": [
+                        {
+                          "const": "reopen",
+                          "type": "string"
+                        },
+                        {
+                          "const": "stayClosed",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "panelPort": {
+                      "minimum": 1,
+                      "maximum": 65535,
+                      "type": "integer"
+                    },
+                    "agentPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "actual": {
+                      "type": "object",
+                      "required": [
+                        "ip",
+                        "agentPort"
+                      ],
+                      "properties": {
+                        "ip": {
+                          "anyOf": [
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "closed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unknown",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "agentPort": {
+                          "anyOf": [
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "closed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unknown",
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "privatePaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "url",
+                          "working",
+                          "since",
+                          "usingNow"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "domain",
+                                "type": "string"
+                              },
+                              {
+                                "const": "tailnet",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "working": {
+                            "type": "boolean"
+                          },
+                          "since": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "usingNow": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "blocked": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "notOwner",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowserSession",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notOnPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "agentTooOld",
+                                "type": "string"
+                              },
+                              {
+                                "const": "updateRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "plainHttpNodes",
+                                "type": "string"
+                              },
+                              {
+                                "const": "nodesOnAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noAgentPort",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "agentPortBlocked": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "notOwner",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowserSession",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notOnPrivatePath",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "agentTooOld",
+                                "type": "string"
+                              },
+                              {
+                                "const": "updateRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "plainHttpNodes",
+                                "type": "string"
+                              },
+                              {
+                                "const": "nodesOnAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noAgentPort",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "reclosesAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastChange": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "at",
+                            "reason",
+                            "by"
+                          ],
+                          "properties": {
+                            "at": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "by": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "recovery": {
+                      "type": "object",
+                      "required": [
+                        "sshTunnel",
+                        "cli"
+                      ],
+                      "properties": {
+                        "sshTunnel": {
+                          "type": "string"
+                        },
+                        "cli": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": false
       }
     },
     "/api/v1/settings.updateTelemetry": {
@@ -64043,6 +64826,967 @@
         "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": true
+      }
+    },
+    "/api/v1/tailscale.get": {
+      "get": {
+        "operationId": "tailscale.get",
+        "summary": "Get Tailscale on the panel server",
+        "description": "Returns what the panel node's agent sees of the server's own Tailscale: installed or not, signed in, the tailnet and machine name, HTTPS and MagicDNS, key expiry, and the panel's Serve entry with its URL.",
+        "tags": [
+          "tailscale"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detected",
+                    "agentOnline",
+                    "agentSupported",
+                    "version",
+                    "minVersion",
+                    "versionOk",
+                    "backendState",
+                    "tailnet",
+                    "dnsName",
+                    "addresses",
+                    "loginName",
+                    "tags",
+                    "magicDns",
+                    "https",
+                    "acceptDns",
+                    "exitNodeInUse",
+                    "advertisesRoutes",
+                    "keyExpiry",
+                    "disabledOnServer",
+                    "serve",
+                    "owned",
+                    "viaTailnet",
+                    "canManage",
+                    "installCommand",
+                    "grantSnippet",
+                    "signInUrl"
+                  ],
+                  "properties": {
+                    "detected": {
+                      "type": "boolean"
+                    },
+                    "agentOnline": {
+                      "type": "boolean"
+                    },
+                    "agentSupported": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "minVersion": {
+                      "type": "string"
+                    },
+                    "versionOk": {
+                      "type": "boolean"
+                    },
+                    "backendState": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tailnet": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "dnsName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "loginName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "magicDns": {
+                      "type": "boolean"
+                    },
+                    "https": {
+                      "type": "boolean"
+                    },
+                    "acceptDns": {
+                      "type": "boolean"
+                    },
+                    "exitNodeInUse": {
+                      "type": "boolean"
+                    },
+                    "advertisesRoutes": {
+                      "type": "boolean"
+                    },
+                    "keyExpiry": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "disabledOnServer": {
+                      "type": "boolean"
+                    },
+                    "serve": {
+                      "type": "object",
+                      "required": [
+                        "wanted",
+                        "state",
+                        "url",
+                        "message",
+                        "panelAnswers"
+                      ],
+                      "properties": {
+                        "wanted": {
+                          "type": "boolean"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "applying",
+                              "type": "string"
+                            },
+                            {
+                              "const": "active",
+                              "type": "string"
+                            },
+                            {
+                              "const": "conflict",
+                              "type": "string"
+                            },
+                            {
+                              "const": "error",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unsupported",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "url": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "panelAnswers": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "owned": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "hostPort",
+                            "path",
+                            "proxy"
+                          ],
+                          "properties": {
+                            "hostPort": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "proxy": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "viaTailnet": {
+                      "type": "boolean"
+                    },
+                    "canManage": {
+                      "type": "boolean"
+                    },
+                    "installCommand": {
+                      "type": "string"
+                    },
+                    "grantSnippet": {
+                      "type": "string"
+                    },
+                    "signInUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "settings.view",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/tailscale.setDns": {
+      "post": {
+        "operationId": "tailscale.setDns",
+        "summary": "Turn off Tailscale DNS on the server",
+        "description": "Makes the server stop using Tailscale DNS (like `tailscale set --accept-dns=false`), so MagicDNS and the tailnet's resolvers no longer answer the server's own lookups. Only the owner, from a browser session with a fresh sign-in. Nothing else in the server's Tailscale settings changes.",
+        "tags": [
+          "tailscale"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "acceptDns"
+                ],
+                "properties": {
+                  "acceptDns": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "detected",
+                    "agentOnline",
+                    "agentSupported",
+                    "version",
+                    "minVersion",
+                    "versionOk",
+                    "backendState",
+                    "tailnet",
+                    "dnsName",
+                    "addresses",
+                    "loginName",
+                    "tags",
+                    "magicDns",
+                    "https",
+                    "acceptDns",
+                    "exitNodeInUse",
+                    "advertisesRoutes",
+                    "keyExpiry",
+                    "disabledOnServer",
+                    "serve",
+                    "owned",
+                    "viaTailnet",
+                    "canManage",
+                    "installCommand",
+                    "grantSnippet",
+                    "signInUrl"
+                  ],
+                  "properties": {
+                    "detected": {
+                      "type": "boolean"
+                    },
+                    "agentOnline": {
+                      "type": "boolean"
+                    },
+                    "agentSupported": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "minVersion": {
+                      "type": "string"
+                    },
+                    "versionOk": {
+                      "type": "boolean"
+                    },
+                    "backendState": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tailnet": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "dnsName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "loginName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "magicDns": {
+                      "type": "boolean"
+                    },
+                    "https": {
+                      "type": "boolean"
+                    },
+                    "acceptDns": {
+                      "type": "boolean"
+                    },
+                    "exitNodeInUse": {
+                      "type": "boolean"
+                    },
+                    "advertisesRoutes": {
+                      "type": "boolean"
+                    },
+                    "keyExpiry": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "disabledOnServer": {
+                      "type": "boolean"
+                    },
+                    "serve": {
+                      "type": "object",
+                      "required": [
+                        "wanted",
+                        "state",
+                        "url",
+                        "message",
+                        "panelAnswers"
+                      ],
+                      "properties": {
+                        "wanted": {
+                          "type": "boolean"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "applying",
+                              "type": "string"
+                            },
+                            {
+                              "const": "active",
+                              "type": "string"
+                            },
+                            {
+                              "const": "conflict",
+                              "type": "string"
+                            },
+                            {
+                              "const": "error",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unsupported",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "url": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "panelAnswers": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "owned": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "hostPort",
+                            "path",
+                            "proxy"
+                          ],
+                          "properties": {
+                            "hostPort": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "proxy": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "viaTailnet": {
+                      "type": "boolean"
+                    },
+                    "canManage": {
+                      "type": "boolean"
+                    },
+                    "installCommand": {
+                      "type": "string"
+                    },
+                    "grantSnippet": {
+                      "type": "string"
+                    },
+                    "signInUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/tailscale.setServe": {
+      "post": {
+        "operationId": "tailscale.setServe",
+        "summary": "Serve the panel on the tailnet",
+        "description": "Adds or removes the one Tailscale Serve entry that sends https://<machine>.<tailnet>.ts.net to the panel. Nothing restarts and nothing closes. Turning it on needs the owner from a browser session with a fresh sign-in, and a server that is signed in, new enough and has MagicDNS on (CONFLICT details.reason one of serveBlockedReasons otherwise). Turning it off while it is the only working way in and IP access is closed reopens IP access (\"reopen\" mode, reopenedUrl says where), or is CONFLICT in \"stayClosed\" mode unless reopenIpAccess is true.",
+        "tags": [
+          "tailscale"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serve"
+                ],
+                "properties": {
+                  "serve": {
+                    "type": "boolean"
+                  },
+                  "reopenIpAccess": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tailscale",
+                    "reopenedUrl"
+                  ],
+                  "properties": {
+                    "tailscale": {
+                      "type": "object",
+                      "required": [
+                        "detected",
+                        "agentOnline",
+                        "agentSupported",
+                        "version",
+                        "minVersion",
+                        "versionOk",
+                        "backendState",
+                        "tailnet",
+                        "dnsName",
+                        "addresses",
+                        "loginName",
+                        "tags",
+                        "magicDns",
+                        "https",
+                        "acceptDns",
+                        "exitNodeInUse",
+                        "advertisesRoutes",
+                        "keyExpiry",
+                        "disabledOnServer",
+                        "serve",
+                        "owned",
+                        "viaTailnet",
+                        "canManage",
+                        "installCommand",
+                        "grantSnippet",
+                        "signInUrl"
+                      ],
+                      "properties": {
+                        "detected": {
+                          "type": "boolean"
+                        },
+                        "agentOnline": {
+                          "type": "boolean"
+                        },
+                        "agentSupported": {
+                          "type": "boolean"
+                        },
+                        "version": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minVersion": {
+                          "type": "string"
+                        },
+                        "versionOk": {
+                          "type": "boolean"
+                        },
+                        "backendState": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tailnet": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dnsName": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "addresses": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "loginName": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "magicDns": {
+                          "type": "boolean"
+                        },
+                        "https": {
+                          "type": "boolean"
+                        },
+                        "acceptDns": {
+                          "type": "boolean"
+                        },
+                        "exitNodeInUse": {
+                          "type": "boolean"
+                        },
+                        "advertisesRoutes": {
+                          "type": "boolean"
+                        },
+                        "keyExpiry": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disabledOnServer": {
+                          "type": "boolean"
+                        },
+                        "serve": {
+                          "type": "object",
+                          "required": [
+                            "wanted",
+                            "state",
+                            "url",
+                            "message",
+                            "panelAnswers"
+                          ],
+                          "properties": {
+                            "wanted": {
+                              "type": "boolean"
+                            },
+                            "state": {
+                              "anyOf": [
+                                {
+                                  "const": "off",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "applying",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "active",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "conflict",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "error",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "unsupported",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "url": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "panelAnswers": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "owned": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "hostPort",
+                                "path",
+                                "proxy"
+                              ],
+                              "properties": {
+                                "hostPort": {
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "proxy": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "viaTailnet": {
+                          "type": "boolean"
+                        },
+                        "canManage": {
+                          "type": "boolean"
+                        },
+                        "installCommand": {
+                          "type": "string"
+                        },
+                        "grantSnippet": {
+                          "type": "string"
+                        },
+                        "signInUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "reopenedUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/tailscale.signIn": {
+      "post": {
+        "operationId": "tailscale.signIn",
+        "summary": "Get a Tailscale sign-in link for the server",
+        "description": "Asks the server's tailscaled for an interactive sign-in link. Whoever opens it puts the server on their tailnet, so only the owner gets it, from a browser session with a fresh sign-in, and only while the server is not signed in. The first sign-in from the panel turns Tailscale DNS off on the server. The link is kept in memory for 10 minutes and never stored or audited.",
+        "tags": [
+          "tailscale"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "url",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": false
       }
     },
     "/api/v1/telemetry.preview": {

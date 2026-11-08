@@ -20,6 +20,7 @@ import {
   updateTelemetry,
   uploadBrandAsset,
 } from "./ops";
+import { panelAccessOp, updatePanelAccess } from "./panel-access";
 
 function start(deps: Deps) {
   deps.schedules.ensure({
@@ -45,6 +46,8 @@ export default defineModule({
     updateAppearance,
     telemetryOp,
     updateTelemetry,
+    panelAccessOp,
+    updatePanelAccess,
   ],
   jobs: [domainCheckJob],
   http: brandingRoutes,

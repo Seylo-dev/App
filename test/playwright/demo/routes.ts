@@ -42,7 +42,7 @@ const worldHandlers: Record<string, Handler> = {
   "cleanup.runs": (input) => world.cleanupRuns(String(input.nodeId ?? "")),
   "hostShell.status": (input) => world.hostShellStatus(String(input.nodeId ?? "")),
   "nodes.listJoinTokens": () => ({ tokens: [] }),
-  "nodes.createJoinToken": () => ({
+  "nodes.createJoinToken": (input) => ({
     tokenId: "token00000000001",
     token: "seylo_join_8Kq2fT9xLw4mZp",
     // The shape nodes/join-command.ts gives: the install host, pinned to the panel's release with --version.
@@ -50,7 +50,43 @@ const worldHandlers: Record<string, Handler> = {
       "curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token 'seylo_join_8Kq2fT9xLw4mZp' --version '0.2.0' --pin 'sha256:9f2c4e1b7a3d5f60c8e2b4a6d1f3e5c7a9b0d2f4e6c8a1b3d5f7e9c0a2b4d6f8'",
     insecureTransport: false,
     expiresAt: new Date(Date.now() + 58 * 60_000).toISOString(),
+    // Build images on this node: on unless the form unticked it (added in 0.2.1).
+    canBuild: input.canBuild !== false,
   }),
+  // Settings > General > Panel domain: open, as after an install with an active domain (added in 0.2.1).
+  "settings.panelAccess": () => panelAccess,
+  "settings.updatePanelAccess": (input) => {
+    panelAccess = {
+      ...panelAccess,
+      ...Object.fromEntries(Object.entries(input).filter(([key]) => key !== "savedRecovery")),
+    };
+    const closed = !panelAccess.serveOnIp;
+    panelAccess.actual = {
+      ip: closed ? "closed" : "open",
+      agentPort: closed && !panelAccess.agentPortOpen ? "closed" : "open",
+    };
+    panelAccess.lastChange = { at: new Date().toISOString(), reason: "changed in Settings", by: "You" };
+    return panelAccess;
+  },
+  // Settings > Tailscale: signed in to the owner's tailnet, Serve off (added in 0.2.1).
+  "tailscale.get": () => tailscaleStatus,
+  "tailscale.setServe": (input) => {
+    tailscaleStatus = {
+      ...tailscaleStatus,
+      serve: input.serve
+        ? { wanted: true, state: "active", url: "https://de-fsn-1.tail4f2a9c.ts.net", message: "", panelAnswers: true }
+        : { wanted: false, state: "off", url: null, message: "", panelAnswers: false },
+      owned: input.serve
+        ? { hostPort: "de-fsn-1.tail4f2a9c.ts.net:443", path: "/", proxy: "unix:/var/lib/seylo/panel/tailnet.sock" }
+        : null,
+    };
+    return { tailscale: tailscaleStatus, reopenedUrl: null };
+  },
+  "tailscale.signIn": () => ({ url: "https://login.tailscale.com/a/1a2b3c4d5e6f", expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() }),
+  "tailscale.setDns": () => {
+    tailscaleStatus = { ...tailscaleStatus, acceptDns: false };
+    return tailscaleStatus;
+  },
   "metrics.nodes": (input) => world.metricsNodes(String(input.range ?? "1h")),
   "metrics.node": (input) => world.metricsNode(String(input.nodeId ?? ""), String(input.range ?? "1h")),
   "projects.list": () => ({ projects: world.projects }),
@@ -80,6 +116,74 @@ const worldHandlers: Record<string, Handler> = {
     },
   }),
 };
+
+/** settings.panelAccess as the demo panel (de-fsn-1, panel.acme.dev active) answers it; updatePanelAccess changes it. */
+const openPanelAccess = () => ({
+  serveOnIp: true,
+  agentPortOpen: true,
+  onFailure: "reopen",
+  panelPort: 3000,
+  agentPort: 3443,
+  actual: { ip: "open", agentPort: "open" },
+  privatePaths: [{ kind: "domain", url: "https://panel.acme.dev", working: true, since: new Date(Date.now() - 3 * 86_400_000).toISOString(), usingNow: false }],
+  blocked: [
+    {
+      code: "notOnPrivatePath",
+      message: "You opened the panel on http://203.0.113.10:3000. Open https://panel.acme.dev and sign in there first.",
+    },
+  ],
+  agentPortBlocked: [
+    {
+      code: "nodesOnAgentPort",
+      message: "us-ash-1 connects over the agents' port. It moves to the domain by itself; wait until it shows Connects over the domain.",
+      nodeIds: [world.ids.us],
+    },
+  ],
+  reclosesAt: null,
+  lastChange: null,
+  recovery: {
+    sshTunnel: "ssh -L 3000:127.0.0.1:3000 root@203.0.113.10",
+    cli: "sudo seylo panel ip-access on",
+  },
+});
+let panelAccess: Record<string, any> = openPanelAccess();
+
+/** tailscale.get for the demo panel node: Running, MagicDNS and HTTPS on, Serve off. */
+const runningTailscale = () => ({
+  detected: true,
+  agentOnline: true,
+  agentSupported: true,
+  version: "1.104.5",
+  minVersion: "1.104.4",
+  versionOk: true,
+  backendState: "Running",
+  tailnet: "acme.dev",
+  dnsName: "de-fsn-1.tail4f2a9c.ts.net",
+  addresses: ["100.101.42.7", "fd7a:115c:a1e0::6a01:2a07"],
+  loginName: "owner@acme.dev",
+  tags: [],
+  magicDns: true,
+  https: true,
+  acceptDns: true,
+  exitNodeInUse: false,
+  advertisesRoutes: false,
+  keyExpiry: new Date(Date.now() + 150 * 86_400_000).toISOString(),
+  disabledOnServer: false,
+  serve: { wanted: false, state: "off", url: null, message: "", panelAnswers: false },
+  owned: null,
+  viaTailnet: false,
+  canManage: true,
+  installCommand: "curl -fsSL https://tailscale.com/install.sh | sh",
+  grantSnippet: '{\n  "grants": [{ "src": ["owner@acme.dev"], "dst": ["de-fsn-1"], "ip": ["tcp:443"] }]\n}',
+  signInUrl: null,
+});
+let tailscaleStatus: Record<string, any> = runningTailscale();
+
+/** Puts the panel access and Tailscale demo state back (installDemo runs it for every page). */
+function resetDemoState() {
+  panelAccess = openPanelAccess();
+  tailscaleStatus = runningTailscale();
+}
 
 const settingsHandlers: Record<string, Handler> = Object.fromEntries(
   Object.entries(settingsFixtures).map(([id, value]) => [id, typeof value === "function" ? (value as Handler) : () => value]),
@@ -131,6 +235,7 @@ export interface DemoOptions {
 }
 
 export async function installDemo(page: Page, options: DemoOptions = {}): Promise<void> {
+  resetDemoState();
   const tables: Record<string, Handler>[] = [
     options.overrides ?? {},
     options.preset
