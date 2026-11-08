@@ -15,7 +15,7 @@ let panel: TestPanel;
 beforeEach(() => {
   panel = testPanel({ modules: [] });
   setSetting(panel.deps.db, "uptimeAllowInternalTargets", false);
-  setTargetResolver(async (host) => ({ "lan.example.com": ["10.0.0.5"], "node.example.com": ["203.0.113.7"] })[host] ?? []);
+  setTargetResolver(async (host) => ({ "lan.example.com": ["10.0.0.5"], "node.example.com": ["93.184.216.7"] })[host] ?? []);
 });
 afterEach(() => {
   setTargetResolver(null);
@@ -38,8 +38,8 @@ test("a private address an agent reports as its public one does not make it a ta
 });
 
 test("the address an admin set for a node is allowed; a public reported address passes as public", async () => {
-  const row = node({ publicIpv4: "203.0.113.7" });
-  expect(await checkTarget(panel.deps, "http://node.example.com/")).toEqual({ ok: true, address: "203.0.113.7", byName: false });
+  const row = node({ publicIpv4: "93.184.216.7" });
+  expect(await checkTarget(panel.deps, "http://node.example.com/")).toEqual({ ok: true, address: "93.184.216.7", byName: false });
   panel.deps.db.update(nodes).set({ publicAddress: "10.0.0.5" }).where(eq(nodes.id, row.id)).run();
   expect(await checkTarget(panel.deps, "http://10.0.0.5:8080/")).toEqual({ ok: true, address: "10.0.0.5", byName: false });
   expect(await checkTarget(panel.deps, "http://lan.example.com/")).toEqual({ ok: true, address: "10.0.0.5", byName: false });

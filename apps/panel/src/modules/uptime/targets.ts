@@ -55,19 +55,31 @@ export function setTargetResolver(next: Resolver | null): void {
 
 const v4 = (a: number, b: number, c: number, d: number) => ((a << 24) >>> 0) + (b << 16) + (c << 8) + d;
 
+// The same ranges as the agent's go/internal/netguard (rules), in the same
+// order; go/internal/netguard/testdata/addresses.json is a table both test
+// suites read, so the two lists cannot drift.
+
 /** [network, prefix length, reason]; checked in order, so the metadata host wins over link-local. */
 const v4Ranges: [number, number, BlockReason][] = [
   [v4(169, 254, 169, 254), 32, "metadata"],
   [v4(100, 100, 100, 200), 32, "metadata"],
-  [v4(127, 0, 0, 0), 8, "loopback"],
-  [v4(169, 254, 0, 0), 16, "linkLocal"],
   [v4(0, 0, 0, 0), 8, "reserved"],
   [v4(10, 0, 0, 0), 8, "private"],
+  // Carrier-grade NAT.
   [v4(100, 64, 0, 0), 10, "private"],
+  [v4(127, 0, 0, 0), 8, "loopback"],
+  [v4(169, 254, 0, 0), 16, "linkLocal"],
   [v4(172, 16, 0, 0), 12, "private"],
   [v4(192, 0, 0, 0), 24, "reserved"],
+  // Documentation (TEST-NET-1).
+  [v4(192, 0, 2, 0), 24, "reserved"],
   [v4(192, 168, 0, 0), 16, "private"],
+  // Benchmarking.
   [v4(198, 18, 0, 0), 15, "reserved"],
+  // Documentation (TEST-NET-2, TEST-NET-3).
+  [v4(198, 51, 100, 0), 24, "reserved"],
+  [v4(203, 0, 113, 0), 24, "reserved"],
+  // Multicast.
   [v4(224, 0, 0, 0), 4, "reserved"],
   [v4(240, 0, 0, 0), 4, "reserved"],
 ];
@@ -111,11 +123,40 @@ function parseV6(address: string): bigint | null {
   return out;
 }
 
-const inV6 = (value: bigint, network: string, bits: number) => {
-  const net = parseV6(network) as bigint;
+/** [network, prefix length, reason], checked in order after unmapping (blockedReason). */
+const v6Ranges: [bigint, number, BlockReason][] = (
+  [
+    ["fd00:ec2::254", 128, "metadata"],
+    ["::", 128, "reserved"],
+    ["::1", 128, "loopback"],
+    // IPv4-compatible (deprecated): never a real internet host.
+    ["::", 96, "reserved"],
+    // Local-use NAT64 (RFC 8215): the IPv4 address it carries is a local one.
+    ["64:ff9b:1::", 48, "reserved"],
+    // Discard-only.
+    ["100::", 64, "reserved"],
+    // Documentation.
+    ["2001:db8::", 32, "reserved"],
+    // Unique-local.
+    ["fc00::", 7, "private"],
+    ["fe80::", 10, "linkLocal"],
+    // Site-local (deprecated).
+    ["fec0::", 10, "private"],
+    // Multicast.
+    ["ff00::", 8, "reserved"],
+  ] as const
+).map(([network, bits, reason]) => [parseV6(network) as bigint, bits, reason]);
+
+const inV6 = (value: bigint, network: bigint, bits: number) => {
   const shift = BigInt(128 - bits);
-  return value >> shift === net >> shift;
+  return value >> shift === network >> shift;
 };
+
+const mapped = parseV6("::ffff:0:0") as bigint;
+const nat64 = parseV6("64:ff9b::") as bigint;
+const sixToFour = parseV6("2002::") as bigint;
+
+const dottedV4 = (n: number) => `${n >>> 24}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`;
 
 /** Why this address is not a public internet address, or null when it is one. */
 export function blockedReason(address: string): BlockReason | null {
@@ -127,22 +168,16 @@ export function blockedReason(address: string): BlockReason | null {
       const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
       if ((n & mask) >>> 0 === network) return reason;
     }
-    return n === 0xffffffff ? "reserved" : null;
+    return null;
   }
   if (kind === 6) {
     const n = parseV6(address);
     if (n === null) return "reserved";
-    // IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) carry an IPv4 address.
-    if (inV6(n, "::ffff:0:0", 96) || inV6(n, "64:ff9b::", 96)) {
-      const embedded = Number(n & 0xffffffffn);
-      return blockedReason(`${embedded >>> 24}.${(embedded >>> 16) & 255}.${(embedded >>> 8) & 255}.${embedded & 255}`);
-    }
-    if (n === 0n) return "reserved";
-    if (n === 1n) return "loopback";
-    if (n === (parseV6("fd00:ec2::254") as bigint)) return "metadata";
-    if (inV6(n, "fe80::", 10)) return "linkLocal";
-    if (inV6(n, "fc00::", 7)) return "private";
-    if (inV6(n, "ff00::", 8)) return "reserved";
+    // IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) carry an IPv4 address in their
+    // last 32 bits, 6to4 (2002:aabb:ccdd::) right after the prefix: judged by that address.
+    if (inV6(n, mapped, 96) || inV6(n, nat64, 96)) return blockedReason(dottedV4(Number(n & 0xffffffffn)));
+    if (inV6(n, sixToFour, 16)) return blockedReason(dottedV4(Number((n >> 80n) & 0xffffffffn)));
+    for (const [network, bits, reason] of v6Ranges) if (inV6(n, network, bits)) return reason;
     return null;
   }
   return "reserved";

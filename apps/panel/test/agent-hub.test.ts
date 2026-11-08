@@ -89,7 +89,7 @@ describe("decideHello: re-join, panel node, NAT address", () => {
       .run();
     const remote = decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "remote", agentKey(), "remote"), {
       panelNodeFromInstallerOnly: true,
-      remoteIp: "198.51.100.20",
+      remoteIp: "93.184.216.20",
     });
     const row = panel.deps.db
       .select()
@@ -98,7 +98,7 @@ describe("decideHello: re-join, panel node, NAT address", () => {
       .get();
     expect(row?.isPanelNode).toBe(false);
     // Facts had no public address (1:1 NAT): the address it connected from stands in.
-    expect(row?.publicIpv4).toBe("198.51.100.20");
+    expect(row?.publicIpv4).toBe("93.184.216.20");
     addJoinToken("installer");
     const local = decideHello(panel.deps.db, panel.deps.panelId, nonce, joinHello(nonce, "installer", agentKey(), "local"), {
       panelNodeFromInstallerOnly: true,

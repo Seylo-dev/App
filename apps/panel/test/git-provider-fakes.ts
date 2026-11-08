@@ -43,7 +43,7 @@ export function recorded(kind: "gitlab" | "gitea" | "bitbucket"): RecordedEntry[
 }
 
 /** The address every name resolves to in these tests (TEST-NET-3, public). */
-export const fakeAddress = "203.0.113.10";
+export const fakeAddress = "93.184.216.10";
 
 export class FakeProviders {
   readonly sent: SentRequest[] = [];
