@@ -362,6 +362,76 @@ func TestPanelBootstrap(t *testing.T) {
 	}
 }
 
+// With --link-file (what the installer passes) the setup link and its
+// notes go to the file, one per line, and not to the output: the installer
+// shows them in its closing block (installer/install.sh.tmpl panel_ready).
+func TestPanelBootstrapLinkFile(t *testing.T) {
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer health.Close()
+	saved := publicAddresses
+	t.Cleanup(func() { publicAddresses = saved })
+	publicAddresses = func() (string, string) { return "203.0.113.9", "" }
+	h := newHarness(t)
+	d := &deps{anyOS: true, units: h.units, run: func(ctx context.Context, w io.Writer, name string, a ...string) error {
+		cmd := name + " " + strings.Join(a, " ")
+		switch {
+		case strings.HasPrefix(cmd, "docker version"):
+			_, _ = io.WriteString(w, "29.0.0")
+		case strings.HasPrefix(cmd, "docker inspect"), strings.HasPrefix(cmd, "docker network inspect"):
+			return errors.New("No such object")
+		}
+		return nil
+	}}
+	var out bytes.Buffer
+	d.out = &out
+	// "version" fills d's layout from --data-dir, like TestPanelBootstrap.
+	// The installer looks for the flag in the help before it passes it, so
+	// an older agent (--version, --binary) still prints the link itself.
+	for _, args := range [][]string{{"version"}, {"panel", "bootstrap", "--help"}} {
+		root := newRootCommand(d)
+		root.SetOut(&out)
+		root.SetArgs(append([]string{"--data-dir", h.dataDir}, args...))
+		if err := root.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(out.String(), "--link-file") {
+		t.Fatalf("panel bootstrap --help does not list --link-file:\n%s", out.String())
+	}
+	out.Reset()
+	linkFile := filepath.Join(t.TempDir(), "setup-link")
+	if err := bootstrapPanel(context.Background(), d, bootstrapOptions{
+		Image: "img", Port: 3000, AgentTLSPort: 3443, LinkFile: linkFile, healthBase: health.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(linkFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(linkFile); info.Mode().Perm() != 0o600 {
+		t.Fatalf("link file mode = %v, want 0600 (it carries the setup token)", info.Mode())
+	}
+	setupToken, _ := os.ReadFile(filepath.Join(h.dataDir, "panel", "setup-token"))
+	ip := outboundIP()
+	base := panelBase(ip, 3000)
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	want := []string{
+		base + "/setup?t=" + strings.TrimSpace(string(setupToken)),
+		setupLinkAddressNote(ip),
+		strings.Join(strings.Fields(plainHTTPWarning(base)), " "),
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("link file:\n%s\nwant:\n%s", data, strings.Join(want, "\n"))
+	}
+	if strings.Contains(out.String(), "/setup?t=") || strings.Contains(out.String(), "within an hour") {
+		t.Fatalf("the link was printed as well:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Starting the panel (img)...") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
 func TestPanelRunArgsWithoutAgentTLS(t *testing.T) {
 	args := strings.Join(panelRunArgs("/var/lib/seylo", "img", 3000, 0), " ")
 	if strings.Contains(args, "AGENT_TLS_PORT") || strings.Count(args, "--publish") != 1 {

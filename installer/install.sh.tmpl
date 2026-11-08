@@ -66,12 +66,153 @@ WORK=
 # --release-url or <PREFIX>_RELEASE_URL override it.
 eval "RELEASE_URL=\${${ENV_PREFIX}_RELEASE_URL:-}"
 
+# ---- output
+# Plain text unless stdout is a terminal, so logs, pipes and CI read as they
+# always did. On a terminal, success lines get a check mark and the block
+# that ends a run gets box lines (ASCII ones on the Linux console) and wrapped
+# text; colors come on top unless TERM is "dumb" or NO_COLOR is set
+# (https://no-color.org). Line based: no
+# spinners and no cursor movement, so it reads the same over SSH and in logs.
+# INSTALLER_TEST_COLOR=1 acts as a terminal (installer/test/run.sh).
+TTY=
+C_RESET='' C_BOLD='' C_DIM='' C_BRAND='' C_OK='' C_CMD='' C_LINK='' C_WARN=''
+E_RESET='' E_BOLD='' E_WARN='' E_ERR=''
+OK_MARK=''
+F_TOP='' F_BAR='|' F_BOTTOM=''
+# How many warnings this run printed (the closing block points at them).
+WARNINGS=0
+
+# terminal <fd>: the file descriptor is a terminal, or the tests say so.
+terminal() { [ -t "$1" ] || [ "${INSTALLER_TEST_COLOR:-}" = 1 ]; }
+colors() { terminal "$1" && [ "${TERM:-}" != dumb ] && [ -z "${NO_COLOR:-}" ]; }
+
+setup_output() {
+	esc=$(printf '\033')
+	top=+ bar='|' bottom=+ rule=-
+	if terminal 1; then
+		TTY=1
+		# UTF-8 written as octal escapes: a check mark and rounded box lines.
+		# The Linux console (a cloud provider's web console too) has neither
+		# in its fonts, so it keeps the ASCII ones.
+		if [ "${TERM:-}" != linux ]; then
+			OK_MARK="$(printf '\342\234\223') "
+			top=$(printf '\342\225\255') bar=$(printf '\342\224\202') bottom=$(printf '\342\225\260') rule=$(printf '\342\224\200')
+		fi
+	fi
+	F_BAR=$bar
+	F_TOP=$top
+	F_BOTTOM=$bottom
+	i=0
+	while [ "$i" -lt 72 ]; do
+		F_TOP=$F_TOP$rule
+		F_BOTTOM=$F_BOTTOM$rule
+		i=$((i + 1))
+	done
+	if colors 1; then
+		C_RESET="${esc}[0m" C_BOLD="${esc}[1m" C_DIM="${esc}[2m" C_OK="${esc}[32m" C_CMD="${esc}[36m" C_LINK="${esc}[4;36m" C_WARN="${esc}[33m"
+		# The brand blue (#2563eb, the UI's --primary): exact where the
+		# terminal has 24-bit color, else the nearest of the 256 colors,
+		# else plain ANSI blue.
+		case ${COLORTERM:-} in
+		truecolor | 24bit) C_BRAND="${esc}[38;2;37;99;235m" ;;
+		*)
+			case ${TERM:-} in
+			*256col*) C_BRAND="${esc}[38;5;27m" ;;
+			*) C_BRAND="${esc}[34m" ;;
+			esac
+			;;
+		esac
+	fi
+	# Warnings and errors go to stderr, which may be a log while stdout is not.
+	if colors 2; then
+		E_RESET="${esc}[0m" E_BOLD="${esc}[1m" E_WARN="${esc}[33m" E_ERR="${esc}[31m"
+	fi
+}
+
 say() { printf '%s\n' "$*"; }
-step() { printf '\n==> %s\n' "$*"; }
-warn() { printf 'warning: %s\n' "$*" >&2; }
+step() { printf '\n%s==> %s%s\n' "$C_BOLD$C_BRAND" "$*" "$C_RESET"; }
+# ok: something that worked (a green check on a terminal).
+ok() { printf '%s%s%s%s\n' "$C_OK" "$OK_MARK" "$C_RESET" "$*"; }
+# note: a side remark (dim on a terminal).
+note() { printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+# trace: a command that --dry-run or --root prints instead of running.
+trace() { printf '%s+ %s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+warn() {
+	WARNINGS=$((WARNINGS + 1))
+	printf '%swarning:%s%s %s%s\n' "$E_BOLD$E_WARN" "$E_RESET" "$E_WARN" "$*" "$E_RESET" >&2
+}
 die() {
-	printf 'error: %s\n' "$*" >&2
+	printf '%serror:%s%s %s%s\n' "$E_BOLD$E_ERR" "$E_RESET" "$E_ERR" "$*" "$E_RESET" >&2
 	exit 1
+}
+
+# banner: the first line of a run, with the product, the release and what
+# the run does.
+banner() {
+	case $VERSION in
+	latest) release="installer (latest release)" ;;
+	*) release="$VERSION installer" ;;
+	esac
+	case $MODE in
+	panel) what="the panel and a node on this server" ;;
+	join) what="add this server to the panel at $PANEL_URL" ;;
+	*) what="remove the agent from this server" ;;
+	esac
+	[ -z "$DRY_RUN" ] || what="$what (dry run: nothing changes)"
+	printf '%s%s%s %s%s - %s%s\n' "$C_BOLD$C_BRAND" "$NAME" "$C_RESET$C_BOLD" "$release" "$C_RESET$C_DIM" "$what" "$C_RESET"
+}
+
+# The block that ends a run: frame_open, frame_* lines, frame_end. On a
+# terminal it has box lines and its text wraps at 72 columns; plain output
+# keeps every line whole, so a log can be searched for a sentence.
+frame_open() { printf '\n%s%s%s\n' "$C_BRAND" "$F_TOP" "$C_RESET"; }
+# frame_line <style> <text>: a paragraph; style is title, text, note or
+# warn. An empty text is an empty line.
+frame_line() {
+	case $1 in
+	title) fs=$C_BOLD ;;
+	note) fs=$C_DIM ;;
+	warn) fs=$C_WARN ;;
+	*) fs= ;;
+	esac
+	if [ -z "$2" ]; then
+		printf '%s%s%s\n' "$C_BRAND" "$F_BAR" "$C_RESET"
+		return
+	fi
+	printf '%s\n' "$2" | frame_wrap | while IFS= read -r fl; do
+		printf '%s%s%s %s%s%s\n' "$C_BRAND" "$F_BAR" "$C_RESET" "$fs" "$fl" "${fs:+$C_RESET}"
+	done
+}
+frame_wrap() {
+	if [ -z "$TTY" ]; then
+		cat
+		return
+	fi
+	awk -v w=72 '{
+		n = split($0, words, " ")
+		line = ""
+		for (i = 1; i <= n; i++) {
+			if (line == "") line = words[i]
+			else if (length(line) + 1 + length(words[i]) <= w) line = line " " words[i]
+			else { print line; line = words[i] }
+		}
+		print line
+	}'
+}
+# frame_link <url>: a link on its own line, never wrapped, so it can be
+# copied (and found by grep) whole.
+frame_link() { printf '%s%s%s   %s%s%s\n' "$C_BRAND" "$F_BAR" "$C_RESET" "$C_LINK" "$1" "$C_RESET"; }
+# frame_cmd <label> <command>: "label command", the command in cyan.
+frame_cmd() { printf '%s%s%s %s %s%s%s\n' "$C_BRAND" "$F_BAR" "$C_RESET" "$1" "$C_CMD" "$2" "$C_RESET"; }
+# frame_end: the warnings of the run, the docs and the bottom line.
+frame_end() {
+	case $WARNINGS in
+	0) ;;
+	1) frame_line warn "1 warning above: read it before you go on." ;;
+	*) frame_line warn "$WARNINGS warnings above: read them before you go on." ;;
+	esac
+	printf '%s%s%s Docs: %s%s%s\n' "$C_BRAND" "$F_BAR" "$C_RESET" "$C_LINK" "$BRAND_DOCS_URL" "$C_RESET"
+	printf '%s%s%s\n' "$C_BRAND" "$F_BOTTOM" "$C_RESET"
 }
 
 usage() {
@@ -124,6 +265,9 @@ Flags:
   --root <dir>         write files under <dir> instead of / and run no system commands (testing)
   --dry-run            print what would be done and change nothing
   -h, --help           this help
+
+Output is colored on a terminal; NO_COLOR=1 turns the colors off. Logs and
+pipes get plain text.
 
 Docs: $BRAND_DOCS_URL
 EOF
@@ -240,7 +384,7 @@ plain_remote() {
 # --root prints it too, because only files under the root may change.
 run() {
 	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ]; then
-		say "+ $*"
+		trace "$*"
 		return 0
 	fi
 	"$@"
@@ -319,7 +463,7 @@ check_docker() {
 			warn "Docker $docker_version works, but $RECOMMENDED_DOCKER_MAJOR or newer is recommended"
 		;;
 	esac
-	say "Docker $docker_version is running"
+	ok "Docker $docker_version is running"
 }
 
 wings_node() {
@@ -392,7 +536,7 @@ ensure_live_restore() {
 		# cat keeps the owner and mode of an existing file.
 		cat "$new" >"$conf"
 	else
-		say "+ write $conf with \"live-restore\": true"
+		trace "write $conf with \"live-restore\": true"
 	fi
 	run systemctl reload docker || {
 		warn "systemctl reload docker failed; live-restore applies at Docker's next restart"
@@ -464,8 +608,19 @@ sha256_of() {
 work_dir() {
 	if [ -z "$WORK" ]; then
 		WORK=$(mktemp -d)
-		trap 'rm -rf "$WORK"' EXIT
+		trap on_exit EXIT
 	fi
+}
+
+# on_exit removes $WORK. A run that fails after the panel started (the
+# restart of the agent, say) never reaches its closing block, so the setup
+# link is printed here first: nothing else showed it.
+on_exit() {
+	rc=$?
+	if [ "$rc" -ne 0 ] && [ -n "$LINK_FILE" ] && [ -s "$LINK_FILE" ]; then
+		printf '\nThe panel is running. Open this link within an hour to create the owner account:\n\n  %s\n' "$(sed -n 1p "$LINK_FILE")"
+	fi
+	rm -rf "$WORK"
 }
 
 # release_key prints the minisign public key this installer trusts, or
@@ -594,7 +749,7 @@ fetch_release() {
 	[ -n "$need_binary$need_image" ] || return 0
 	step "Checking the release"
 	if [ -n "$DRY_RUN" ]; then
-		say "+ download $(release_url manifest.json) and check its signature"
+		trace "download $(release_url manifest.json) and check its signature"
 		return
 	fi
 	if [ -z "$(release_key)" ] && [ -z "$ALLOW_UNSIGNED" ]; then
@@ -610,7 +765,7 @@ fetch_release() {
 			die "could not download the release signature $(release_url manifest.json.minisig)"
 		verify_signature "$manifest" "$manifest.minisig" ||
 			die "the release manifest is not signed by the $NAME release key; refusing to install it"
-		say "Release signature verified"
+		ok "Release signature verified"
 	fi
 	v=$(manifest_top version "$manifest")
 	case $v in
@@ -735,7 +890,7 @@ install_binary() {
 		[ -f "$BINARY" ] || die "--binary $BINARY does not exist"
 		cp "$BINARY" "$WORK/$asset"
 	elif [ -n "$DRY_RUN" ]; then
-		say "+ download $(release_url "$asset") and check it against the signed release manifest"
+		trace "download $(release_url "$asset") and check it against the signed release manifest"
 		return
 	else
 		download "$(release_url "$asset")" "$WORK/$asset" || die "could not download $(release_url "$asset")"
@@ -751,7 +906,11 @@ install_binary() {
 		cp "$WORK/$asset" "$BIN.new"
 		mv -f "$BIN.new" "$BIN"
 	fi
-	say "$("$BIN" version 2>/dev/null || echo "$SLUG (dry run)") -> /usr/local/bin/$SLUG"
+	if [ -n "$DRY_RUN" ]; then
+		say "$SLUG (dry run) -> /usr/local/bin/$SLUG"
+	else
+		ok "$("$BIN" version 2>/dev/null || echo "$SLUG") -> /usr/local/bin/$SLUG"
+	fi
 }
 
 go_arch_of_host() {
@@ -769,7 +928,7 @@ seylo() {
 	elif [ -n "$BINARY" ]; then
 		"$BINARY" --data-dir "$DATA" "$@"
 	else
-		say "+ $SLUG $*"
+		trace "$SLUG $*"
 	fi
 }
 
@@ -784,7 +943,7 @@ install_units() {
 			seylo install-units --dir "$UNIT_DIR" --binary "/usr/local/bin/$SLUG" --agent-data-dir "$DATA_DIR"
 		fi
 	else
-		say "+ $SLUG install-units --dir $UNIT_DIR"
+		trace "$SLUG install-units --dir $UNIT_DIR"
 	fi
 	run systemctl enable "$SLUG.service"
 }
@@ -819,7 +978,7 @@ check_ports() {
 		[ -n "$holder" ] || continue
 		if [ "$holder" = docker-proxy ] && ours "$p"; then continue; fi
 		if wings_node; then
-			say "Port $p is held by $holder; on a Wings server $NAME shares Wings' Traefik"
+			note "Port $p is held by $holder; on a Wings server $NAME shares Wings' Traefik"
 			continue
 		fi
 		msg="port $p is used by $holder, but $NAME's Traefik needs 80 and 443 for domains. Stop and disable it (for example systemctl disable --now $holder)"
@@ -872,8 +1031,8 @@ open_firewall() {
 		[ "$MODE" != panel ] || run ufw allow "$PORT/tcp" comment "$SLUG panel"
 		[ "$MODE" != panel ] || [ "$AGENT_TLS_PORT" = 0 ] || run ufw allow "$AGENT_TLS_PORT/tcp" comment "$SLUG agents"
 		[ -z "$ip" ] || run ufw allow from "$ip" to any port 5757 proto tcp comment "$SLUG load balancing"
-		say "Load balancing between nodes uses port 5757: allow it from your other nodes only."
-		say "The IP:port addresses the panel shows (new services, timed expose, exposed databases) are served by the agent, so ufw applies: open each with ufw allow <port>/tcp (the panel shows the command)."
+		note "Load balancing between nodes uses port 5757: allow it from your other nodes only."
+		note "The IP:port addresses the panel shows (new services, timed expose, exposed databases) are served by the agent, so ufw applies: open each with ufw allow <port>/tcp (the panel shows the command)."
 	elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
 		step "Opening ports in firewalld"
 		run firewall-cmd --permanent --add-service=http --add-service=https
@@ -885,8 +1044,8 @@ open_firewall() {
 		*) run firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$ip port port=5757 protocol=tcp accept" ;;
 		esac
 		run firewall-cmd --reload
-		say "Load balancing between nodes uses port 5757: allow it from your other nodes only."
-		say "The IP:port addresses the panel shows (new services, timed expose, exposed databases) are served by the agent, so firewalld applies: open each with firewall-cmd --permanent --add-port=<port>/tcp (the panel shows the command)."
+		note "Load balancing between nodes uses port 5757: allow it from your other nodes only."
+		note "The IP:port addresses the panel shows (new services, timed expose, exposed databases) are served by the agent, so firewalld applies: open each with firewall-cmd --permanent --add-port=<port>/tcp (the panel shows the command)."
 	fi
 }
 
@@ -897,8 +1056,7 @@ install_panel() {
 		# panel's uid) or an account made since the install.
 		[ ! -d "$DATA/panel" ] || check_panel_uid
 		run systemctl restart "$SLUG.service"
-		say "The agent was updated and restarted. The panel keeps its data."
-		say "Status: $SLUG status    Panel: $SLUG panel status"
+		END=panel-updated
 		return
 	fi
 	# The release's image pinned by the digest in its signed manifest
@@ -913,12 +1071,73 @@ install_panel() {
 	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || ! docker image inspect "$image" >/dev/null 2>&1; then
 		run docker pull "$image"
 	fi
+	work_dir
+	LINK_FILE=$WORK/setup-link
 	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ]; then
-		say "+ $SLUG panel bootstrap --image $image --port $PORT --agent-tls-port $AGENT_TLS_PORT"
+		trace "$SLUG panel bootstrap --image $image --port $PORT --agent-tls-port $AGENT_TLS_PORT"
+		# --root (tests): a stand-in for the link bootstrap writes.
+		[ -n "$DRY_RUN" ] ||
+			printf 'http://<server-ip>:%s/setup?t=<setup token>\n%s\n' "$PORT" \
+				"With --root the panel did not start, so this link is a stand-in." >"$LINK_FILE"
 	else
-		seylo panel bootstrap --image "$image" --port "$PORT" --agent-tls-port "$AGENT_TLS_PORT"
+		set -- --image "$image" --port "$PORT" --agent-tls-port "$AGENT_TLS_PORT"
+		# Since 0.2.1 bootstrap writes the link to a file for the closing
+		# block; an older agent (--version, --binary) prints it itself.
+		if seylo panel bootstrap --help 2>/dev/null | grep -q -- --link-file; then
+			set -- "$@" --link-file "$LINK_FILE"
+		fi
+		# The panel takes the token when it starts, after this, and keeps it
+		# for an hour from then. date -d @<seconds> works in GNU and BusyBox.
+		LINK_UNTIL=$(date -d "@$(($(date +%s) + 3600))" '+%H:%M %Z' 2>/dev/null || true)
+		seylo panel bootstrap "$@"
 	fi
 	run systemctl restart "$SLUG.service"
+	END=panel-new
+}
+
+# What the closing block reports: panel-new, panel-updated, join-new or
+# join-updated (set by install_panel and install_join).
+END=
+# The file `seylo panel bootstrap --link-file` writes, and until when its
+# link works ("21:34 UTC", empty when date cannot say).
+LINK_FILE=
+LINK_UNTIL=
+
+# panel_ready: the block at the end of a new panel install. LINK_FILE holds
+# the setup link on its first line, then one note per line.
+panel_ready() {
+	frame_open
+	if [ -s "$LINK_FILE" ]; then
+		frame_line title "The panel is running. Open this link to create the owner account:"
+		frame_line text ""
+		frame_link "$(sed -n 1p "$LINK_FILE")"
+		frame_line text ""
+		frame_line text "It works once, within an hour${LINK_UNTIL:+ (until $LINK_UNTIL)}."
+		sed -n '2,$p' "$LINK_FILE" | while IFS= read -r n; do
+			[ -z "$n" ] || frame_line note "$n"
+		done
+		frame_line text ""
+		frame_line text "Next: open it in a browser, create the owner account and follow the setup wizard."
+	else
+		frame_line title "The panel is running."
+		frame_line text ""
+		frame_line text "Next: open the setup link printed above, create the owner account and follow the setup wizard."
+	fi
+	frame_cmd "A new link when this one expires:" "$SLUG panel setup-link"
+	frame_end
+}
+
+# panel_updated: the block at the end of a re-run on the panel's node.
+panel_updated() {
+	frame_open
+	frame_line title "The agent was updated and restarted. The panel keeps its data."
+	frame_line text ""
+	frame_cmd "Status:" "$SLUG status"
+	frame_cmd "Panel:" "$SLUG panel status"
+	# The panel keeps a setup token there only while it has no owner.
+	[ ! -f "$DATA/panel/setup-token" ] ||
+		frame_cmd "No owner account yet. A new setup link:" "$SLUG panel setup-link"
+	frame_end
 }
 
 # check_panel_uid warns when an account on this server has the panel's
@@ -940,7 +1159,7 @@ install_join() {
 		fi
 		step "Already joined to $PANEL_URL"
 		run systemctl restart "$SLUG.service"
-		say "The agent was updated and restarted; the join token was not needed."
+		END=join-updated
 		return
 	fi
 	step "Joining $PANEL_URL"
@@ -953,16 +1172,19 @@ install_join() {
 	if can_write; then
 		seylo "$@"
 	else
-		say "+ $SLUG join $PANEL_URL --token <token> --no-start"
+		trace "$SLUG join $PANEL_URL --token <token> --no-start"
 	fi
 	run systemctl restart "$SLUG.service"
 	wait_connected
+	END=join-new
 }
 
 # How long a join waits for the agent's first connection. Tests shorten it.
 JOIN_WAIT=${INSTALLER_TEST_JOIN_WAIT:-60}
-# Set when the join finished without the agent connected (main says so last).
+# Set when the join finished without the agent connected: rejected when the
+# panel refused the node, else waiting. JOIN_HINT says what to do next.
 NOT_CONNECTED=
+JOIN_HINT=
 
 # panel_address prints the host:port the agent dials for PANEL_URL.
 panel_address() {
@@ -980,12 +1202,13 @@ panel_address() {
 }
 
 # wait_connected waits up to JOIN_WAIT seconds for the agent's first
-# connection to the panel (seylo status). When it does not connect, it says
-# why (the status error) and what to check, and the join still exits 0: the
-# agent keeps trying, and the token stays valid until it expires.
+# connection to the panel (seylo status). When it does not connect, it warns
+# with the reason (the status error) and sets JOIN_HINT, what join_done says
+# to check. The join still exits 0: the agent keeps trying, and the token
+# stays valid until it expires.
 wait_connected() {
 	if [ -n "$DRY_RUN" ]; then
-		say "+ $SLUG status (until the agent is connected, up to ${JOIN_WAIT}s)"
+		trace "$SLUG status (until the agent is connected, up to ${JOIN_WAIT}s)"
 		return 0
 	fi
 	step "Waiting for the agent to connect to the panel"
@@ -994,7 +1217,7 @@ wait_connected() {
 		status=$(seylo status 2>&1) || true
 		case $status in
 		*"(connected"*)
-			say "Connected: the node shows up in the panel now."
+			ok "Connected: the node shows up in the panel now."
 			return 0
 			;;
 		*"(rejected"*) break ;;
@@ -1003,24 +1226,54 @@ wait_connected() {
 		sleep 2
 		waited=$((waited + 2))
 	done
-	NOT_CONNECTED=1
 	# The status error, else what seylo status itself said (the agent's socket is not up yet).
 	reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
 	[ -n "$reason" ] || reason=$(printf '%s\n' "$status" | sed -n "s/^$SLUG: //p" | head -1)
 	case $status in
 	*"(rejected"*)
+		NOT_CONNECTED=rejected
 		warn "the panel refused this node${reason:+: $reason}"
-		say "Make a new join command in the panel's Add node dialog and run it here."
+		JOIN_HINT="Make a new join command in the panel's Add node dialog and run it here."
 		;;
 	*)
+		NOT_CONNECTED=waiting
 		warn "the agent has not connected to the panel at $PANEL_URL after $JOIN_WAIT seconds"
 		[ -z "$reason" ] || say "Last error: $reason"
 		addr=$(panel_address)
-		say "Check that this server can reach $addr: the panel's server must accept connections on port ${addr##*:} (3443 is the agents' port of a panel without a domain), and no firewall or cloud security group on the way may block it."
-		say "The agent keeps trying in the background. The join token works until it expires, an hour after it was made; after that make a new join command in the panel's Add node dialog."
+		JOIN_HINT="Check that this server can reach $addr: the panel's server must accept connections on port ${addr##*:} (3443 is the agents' port of a panel without a domain), and no firewall or cloud security group on the way may block it."
 		;;
 	esac
-	say "Check again with: $SLUG status"
+	# join_done is about this warning: it does not count as one more above.
+	WARNINGS=$((WARNINGS - 1))
+}
+
+# join_done: the block at the end of a join, connected or not.
+join_done() {
+	frame_open
+	if [ -n "$NOT_CONNECTED" ]; then
+		frame_line title "Installed, but not connected to the panel yet."
+		frame_line text ""
+		frame_line text "$JOIN_HINT"
+		[ "$NOT_CONNECTED" = rejected ] ||
+			frame_line note "The agent keeps trying in the background. The join token works until it expires, an hour after it was made; after that make a new join command in the panel's Add node dialog."
+		frame_line text ""
+		frame_cmd "Check again with:" "$SLUG status"
+	else
+		frame_line title "This server is a node of the panel now."
+		frame_line text ""
+		frame_line text "Next: find it under Nodes in the panel."
+		frame_cmd "Status:" "$SLUG status"
+	fi
+	frame_end
+}
+
+# join_updated: the block at the end of a re-run on a joined node.
+join_updated() {
+	frame_open
+	frame_line title "The agent was updated and restarted; the join token was not needed."
+	frame_line text ""
+	frame_cmd "Status:" "$SLUG status"
+	frame_end
 }
 
 uninstall() {
@@ -1031,7 +1284,7 @@ uninstall() {
 	if can_write; then
 		rm -f "$UNIT_DIR/$SLUG.service" "$UNIT_DIR/$SLUG.slice"
 	else
-		say "+ rm $UNIT_DIR/$SLUG.service $UNIT_DIR/$SLUG.slice"
+		trace "rm $UNIT_DIR/$SLUG.service $UNIT_DIR/$SLUG.slice"
 	fi
 	run systemctl daemon-reload
 	if [ -n "$PURGE" ]; then
@@ -1046,26 +1299,28 @@ uninstall() {
 			# The slice stays loaded until stopped, even with its unit file gone.
 			systemctl stop "$SLUG.slice" 2>/dev/null || true
 		else
-			say "+ docker rm/network rm/volume rm everything labeled $SLUG.managed=true"
+			trace "docker rm/network rm/volume rm everything labeled $SLUG.managed=true"
 		fi
-		if can_write; then rm -rf "$DATA"; else say "+ rm -rf $DATA"; fi
+		if can_write; then rm -rf "$DATA"; else trace "rm -rf $DATA"; fi
 		# Drop-ins for our units (for example an environment override) go too.
 		if can_write; then
 			rm -rf "$UNIT_DIR/$SLUG.service.d" "$UNIT_DIR/$SLUG.slice.d"
 		else
-			say "+ rm -rf $UNIT_DIR/$SLUG.service.d $UNIT_DIR/$SLUG.slice.d"
+			trace "rm -rf $UNIT_DIR/$SLUG.service.d $UNIT_DIR/$SLUG.slice.d"
 		fi
 		run systemctl daemon-reload
 	else
 		say "Your services keep running until they stop or the server reboots, and $DATA_DIR is kept."
-		say "Run again with --purge to remove them and every file."
+		note "Run again with --purge to remove them and every file."
 	fi
-	if can_write; then rm -f "$BIN"; else say "+ rm $BIN"; fi
-	say "Done."
+	if can_write; then rm -f "$BIN"; else trace "rm $BIN"; fi
+	ok "Done."
 }
 
 main() {
+	setup_output
 	parse_args "$@"
+	banner
 	if [ "$MODE" = uninstall ]; then
 		uninstall
 		return
@@ -1084,12 +1339,17 @@ main() {
 	panel) install_panel ;;
 	join) install_join ;;
 	esac
-	if [ -n "$NOT_CONNECTED" ]; then
-		step "Installed, but not connected to the panel yet (see above)"
-	else
-		step "Done"
+	if [ -n "$DRY_RUN" ]; then
+		step "Dry run done: nothing was changed"
+		say "Docs: $C_LINK$BRAND_DOCS_URL$C_RESET"
+		return
 	fi
-	say "Docs: $BRAND_DOCS_URL"
+	case $END in
+	panel-new) panel_ready ;;
+	panel-updated) panel_updated ;;
+	join-new) join_done ;;
+	join-updated) join_updated ;;
+	esac
 }
 
 main "$@"
