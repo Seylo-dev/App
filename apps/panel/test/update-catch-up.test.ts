@@ -393,3 +393,33 @@ test("a person's run whose node drops mid-call skips it the same way", async () 
   expect(panel.deps.db.select().from(updateRuns).where(eq(updateRuns.id, run.id)).get()?.status).toBe("succeeded");
   expect(stepsOf(node.nodeId)[0]?.step).toMatchObject({ status: "skipped", retry: "waiting" });
 });
+
+test("an agent's wait far in the future is capped: the panel asks again within a day", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await join("0.8.0");
+  await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+  await runWhileOffline(node);
+  const back = await reconnect(node, "0.8.0");
+  // A bad clock on the node, or a bad retryAfter.
+  back.handle("UpdateAgent", () => {
+    throw new FakeStatus(StatusCode.FAILED_PRECONDITION, "updating to 0.9.0 failed less than an hour ago", {
+      backoff: "failed",
+      retryAfter: "2126-01-01T00:00:00Z",
+    });
+  });
+  const asked = Date.now();
+  await drain();
+  const { maxAgentWaitMs } = await import("../src/modules/updates/runs");
+  const waiting = stepsOf(node.nodeId)[1]?.step;
+  expect(waiting).toMatchObject({ status: "skipped", retry: "waiting" });
+  // Before: retryAt was 2126 and the node never caught up.
+  const retryAt = waiting?.retryAt?.getTime() ?? 0;
+  expect(retryAt).toBeGreaterThanOrEqual(asked + maxAgentWaitMs);
+  expect(retryAt).toBeLessThanOrEqual(Date.now() + maxAgentWaitMs);
+  const queued = panel.deps.db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.type, "updates.catchUp"), eq(jobs.status, "queued")))
+    .all();
+  expect(queued.map((j) => j.runAt.getTime())).toEqual([retryAt]);
+});

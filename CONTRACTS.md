@@ -2020,8 +2020,9 @@ the node marks older waiting steps `superseded`. The agent's own waits end
 the catch-up step as skipped with its message (FAILED_PRECONDITION
 `backoff`), not as a failure: `rolledBack` makes it `held`; `failed` makes
 it `waiting` again with `retryAt` the agent's `retryAfter` + 30 s (never
-sooner than 5 minutes, against a slow agent clock) and queues the job for
-then; connects before that queue nothing. A catch-up step whose node is
+sooner than 5 minutes, against a slow agent clock, nor later than 24.5
+hours, against one far ahead or a bad value: the agent's longest wait is a
+day) and queues the job for then; connects before that queue nothing. A catch-up step whose node is
 offline again waits for its next reconnect the same way. Steps a panel
 before rc.2 skipped as offline ("it updates itself when it starts", no
 `retry`) are adopted at start (`adoptOldSkips`): a node's newest one

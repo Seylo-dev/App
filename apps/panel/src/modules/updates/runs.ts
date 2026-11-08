@@ -322,19 +322,27 @@ function panelService(db: PanelDb, panelNodeId: string): string | null {
 
 /** The panel never tries again sooner than this after an agent's wait, so an agent whose clock is behind cannot make it loop. */
 export const minAgentWaitMs = 5 * 60_000;
+/**
+ * Nor later than this: the agent's longest wait is a day (and a rolled-back
+ * release is held, not waited for), so a retryAfter past it is a clock far
+ * ahead or a bad value. The catch-up then asks again and waits anew.
+ */
+export const maxAgentWaitMs = 24 * 3_600_000 + 30 * 60_000;
 
 /**
  * A catch-up step (run trigger "reconnect", catch-up.ts) the agent answered
  * with its own wait. A release rolled back there is held, like the panel's
  * own rollback record. One whose automatic update failed there within the
- * hour waits again (retry "waiting") until the agent's retryAfter, and the
- * catch-up job is queued for then.
+ * hour waits again (retry "waiting") until the agent's retryAfter (between
+ * minAgentWaitMs and maxAgentWaitMs from now), and the catch-up job is
+ * queued for then.
  */
 function agentWait(deps: Pick<Deps, "jobs">, step: StepRow, backoff: string, retryAfter: string | undefined): Partial<StepRow> {
   const now = Date.now();
   if (backoff === "rolledBack") return { retry: "held", retryAt: new Date(now) };
   const until = Date.parse(retryAfter ?? "");
-  const retryAt = new Date(Math.max(Number.isNaN(until) ? now + 3_600_000 : until + 30_000, now + minAgentWaitMs));
+  const wanted = Number.isNaN(until) ? now + 3_600_000 : until + 30_000;
+  const retryAt = new Date(Math.min(Math.max(wanted, now + minAgentWaitMs), now + maxAgentWaitMs));
   deps.jobs.enqueue(
     "updates.catchUp",
     { nodeId: step.nodeId },
