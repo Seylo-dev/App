@@ -424,15 +424,18 @@ func TestServiceFoldersArePrivate(t *testing.T) {
 	h.apply(1, s1)
 	h.deployResult("svc", 1)
 	files, _ := h.layout.ServiceFiles("svc")
+	// File mounts live in a folder per spec hash (filesDir).
+	specFiles, _ := filesDir(h.layout, "svc", SpecHash(s1))
 	vol, _ := h.layout.ServiceVolume("svc", "data")
 	want := map[string]os.FileMode{
-		services: 0o700,
-		dir:      0o700,
-		files:    0o700,
-		vol:      0o755,
-		filepath.Join(files, fileName("/etc/app/config.yml")): 0o644,
-		filepath.Join(files, fileName("/etc/app/secret.key")): 0o600,
-		filepath.Join(dir, "runtime.json"):                    0o600,
+		services:  0o700,
+		dir:       0o700,
+		files:     0o700,
+		specFiles: 0o700,
+		vol:       0o755,
+		filepath.Join(specFiles, fileName("/etc/app/config.yml")): 0o644,
+		filepath.Join(specFiles, fileName("/etc/app/secret.key")): 0o600,
+		filepath.Join(dir, "runtime.json"):                        0o600,
 	}
 	for p, mode := range want {
 		st, err := os.Stat(p)
