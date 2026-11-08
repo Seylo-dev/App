@@ -5,8 +5,10 @@
 // meant to be), hourly otherwise.
 //
 // As a private path (private-paths.ts) the domain is debounced: once it
-// worked it counts as down only after 2 failed checks in a row, so one
-// slow answer does not reopen IP access (ip-access.ts). The job calls
+// worked it counts as down only after 2 failed checks in a row, at least 4
+// minutes apart, so one slow answer does not reopen IP access
+// (ip-access.ts), and neither does a check on demand (saving the domain
+// again) that lands in the same blip as a scheduled one. The job calls
 // applyPanelIpAccess when that debounced state changes.
 
 import { resolve4, resolve6 } from "node:dns/promises";
@@ -39,12 +41,20 @@ export interface StoredDomainStatus {
   working?: boolean;
   /** Epoch milliseconds `working` last changed (absent on rows from before 0.2.1). */
   since?: number;
-  /** Checks in a row that did not find the domain active. */
+  /** Checks in a row that did not find the domain active, counting only those domainFailureGapMs apart. */
   failedChecks?: number;
+  /** Epoch milliseconds of the last failed check that counted in failedChecks. */
+  lastFailedAt?: number;
 }
 
 /** Failed checks in a row after which a domain that worked counts as down (5-10 minutes at one check per 5 minutes). */
 export const domainDownAfter = 2;
+/**
+ * A failed check counts toward domainDownAfter only this long after the
+ * last one that counted: the schedule's checks are 4.5 to 5.5 minutes
+ * apart, a check on demand can come seconds after one.
+ */
+export const domainFailureGapMs = 4 * 60_000;
 
 /** The debounced private-path view of a stored status; not working when it is about another domain. */
 export function domainWorking(status: StoredDomainStatus | undefined, domain: string | null): { working: boolean; since: number | null } {
@@ -157,9 +167,15 @@ export async function checkDomain(
     const before = getSetting(deps.db, "panelDomainStatus");
     const previous = before?.domain === domain ? before : undefined;
     const was = domainWorking(previous, domain);
-    const failedChecks = state === "active" ? 0 : Math.min((previous?.failedChecks ?? 0) + 1, 99);
+    const failedBefore = previous?.failedChecks ?? 0;
+    const lastFailedAt = previous?.lastFailedAt;
+    // A failure soon after the last one that counted is the same blip, seen twice.
+    const counts =
+      state !== "active" && (failedBefore === 0 || lastFailedAt === undefined || now.getTime() - lastFailedAt >= domainFailureGapMs);
+    const failedChecks = state === "active" ? 0 : counts ? Math.min(failedBefore + 1, 99) : failedBefore;
     const working = state === "active" || (was.working && failedChecks < domainDownAfter);
     const since = !previous || working !== was.working ? now.getTime() : was.since;
+    const failedAt = counts ? now.getTime() : state === "active" ? undefined : lastFailedAt;
     const status: StoredDomainStatus = {
       domain,
       state,
@@ -168,6 +184,7 @@ export async function checkDomain(
       working,
       ...(since !== null ? { since } : {}),
       failedChecks,
+      ...(failedAt !== undefined ? { lastFailedAt: failedAt } : {}),
     };
     // The domain may have changed while DNS was resolving.
     if ((getSetting(deps.db, "panelDomain") ?? null) !== domain) return status;

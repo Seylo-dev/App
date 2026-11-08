@@ -12,6 +12,7 @@ import (
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	"github.com/seylo-dev/app/go/internal/datadir"
+	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/panelapi"
 	"github.com/seylo-dev/app/go/internal/systemd"
 )
@@ -46,6 +47,8 @@ type deps struct {
 	profile string
 	// openClient replaces panelapi.Open in tests.
 	openClient func(profile string) (*panelapi.Client, error)
+	// agentStatus replaces asking the local agent's socket in tests.
+	agentStatus func(ctx context.Context) (localapi.NodeStatus, error)
 	// anyOS lets tests run the node commands off Linux.
 	anyOS bool
 }

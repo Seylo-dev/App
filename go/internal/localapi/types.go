@@ -20,6 +20,10 @@ type NodeStatus struct {
 	AppliedRevision uint64 `json:"appliedRevision"`
 	// RecentErrors are the last connection and outbox errors, newest last.
 	RecentErrors []ErrorEntry `json:"recentErrors"`
+	// Busy names the node operation in progress ("agent update", "panel
+	// update", "Docker update", "reboot"), or "" (added in 0.2.1: an older
+	// agent leaves it empty).
+	Busy string `json:"busy,omitempty"`
 }
 
 // ConnectionStatus describes the panel connection.

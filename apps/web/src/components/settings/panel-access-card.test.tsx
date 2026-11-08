@@ -24,6 +24,8 @@ const access = (over: Record<string, unknown> = {}) => ({
   blocked: [],
   agentPortBlocked: [],
   reclosesAt: null,
+  openReason: null,
+  oldDocker: null,
   lastChange: null,
   recovery: { sshTunnel: "ssh -L 3000:127.0.0.1:8080 root@203.0.113.10", cli: "sudo seylo panel ip-access on" },
   ...over,
@@ -109,4 +111,27 @@ test("closed, reopened by itself, and no agents' port", async () => {
 
   const rolling = text(await render(access({ serveOnIp: false, actual: { ip: "unknown", agentPort: "open" } })));
   expect(rolling).toContain("The panel restarts to apply this.");
+});
+
+test("kept open by a node on plain http://: the panel's reason, not the old reopen", async () => {
+  const out = text(
+    await render(
+      access({
+        serveOnIp: false,
+        openReason: "node b2 connects over http://203.0.113.5:3000 and closing would cut it off",
+        lastChange: { at: new Date().toISOString(), reason: "the panel domain panel.acme.dev stopped working", by: "system" },
+      }),
+    ),
+  );
+  expect(out).toContain("IP access is open again: node b2 connects over http://203.0.113.5:3000 and closing would cut it off.");
+  expect(out).not.toContain("stopped working");
+});
+
+test("Docker older than 28 on the panel's server: the card warns while IP access is off", async () => {
+  const warning =
+    "The panel's server runs Docker 26.1.4. Before Docker 28, machines on the same local network may still reach ports on 127.0.0.1.";
+  const closed = text(await render(access({ serveOnIp: false, oldDocker: "26.1.4", actual: { ip: "closed", agentPort: "open" } })));
+  expect(closed).toContain(warning);
+  // Open on every address, the warning is the confirm dialog's (not rendered here).
+  expect(text(await render(access({ oldDocker: "26.1.4" })))).not.toContain(warning);
 });

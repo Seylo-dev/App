@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/seylo-dev/app/go/gen/brand"
+	"github.com/seylo-dev/app/go/internal/agent"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/localapi"
 )
@@ -56,6 +60,8 @@ func newPanelIPAccessCommand(d *deps) *cobra.Command {
 // "If the domain stops working" back to reopen), deletes it and sends the
 // agent a new panel generation with the ports on every address: the
 // second restart. A panel that is not running reads it when it starts.
+// Only the agent applies that second restart, so the command says when the
+// agent is down, not connected or busy with an update that holds it.
 func panelIPAccessOn(ctx context.Context, d *deps) error {
 	if d.euid() != 0 {
 		return fmt.Errorf("run it as root: sudo %s panel ip-access on", brand.Slug)
@@ -67,8 +73,15 @@ func panelIPAccessOn(ctx context.Context, d *deps) error {
 	if err := writePanelFile(panelDir, ipAccessOnFile, []byte("on\n")); err != nil {
 		return err
 	}
+	// Asked before the restart, which drops the agent's panel connection for a few seconds.
+	status, agentErr := d.localAgentStatus(ctx)
 	container, err := runningPanelContainer(ctx, d)
 	if errors.Is(err, errNoRunningPanel) {
+		if agentErr != nil {
+			_, err = fmt.Fprintf(d.out, "The panel is not running, and neither is the agent on this server (%v).\n"+
+				"Start the agent: sudo %s start. It starts the panel, which opens IP access again.\n", agentErr, brand.Slug)
+			return err
+		}
 		_, err = fmt.Fprintf(d.out, "The panel is not running. It opens IP access again when it starts: %s panel start\n", brand.Slug)
 		return err
 	}
@@ -78,10 +91,80 @@ func panelIPAccessOn(ctx context.Context, d *deps) error {
 	if _, err := d.output(ctx, "docker", "restart", container); err != nil {
 		return fmt.Errorf("restarting the panel (it opens IP access on its next start): %w", err)
 	}
-	_, err = fmt.Fprintf(d.out, "The panel restarted and turns \"Serve on IP address\" and the agents' port back on.\n"+
-		"In a few seconds it restarts once more, with its port open on every address.\n"+
-		"Check with: %s panel status\n", brand.Slug)
+	if _, err := fmt.Fprintf(d.out, "The panel restarted and turns \"Serve on IP address\" and the agents' port back on.\n"); err != nil {
+		return err
+	}
+	tunnel := fmt.Sprintf("Until then the SSH tunnel reaches the panel: ssh -L 3000:127.0.0.1:%d root@<this server>, then open http://127.0.0.1:3000\n",
+		panelLocalPort(d))
+	switch {
+	case agentErr != nil:
+		_, err = fmt.Fprintf(d.out, "The agent on this server is not running (%v), and only it opens the port again.\n"+
+			"Start it: sudo %s start (sudo %s logs shows why it stopped). The port opens on every address once it connects.\n%s",
+			agentErr, brand.Slug, brand.Slug, tunnel)
+	case !status.PanelConnected:
+		_, err = fmt.Fprintf(d.out, "The agent on this server is not connected to the panel (%s), and only it opens the port again.\n"+
+			"The port opens on every address once it connects. Check with: %s status\n%s",
+			connectionText(status.Connection), brand.Slug, tunnel)
+	case status.Busy != "":
+		_, err = fmt.Fprintf(d.out, "This server is busy with %s. The port opens on every address once it finished.\n"+
+			"Check with: %s panel status\n%s", withArticle(status.Busy), brand.Slug, tunnel)
+	default:
+		_, err = fmt.Fprintf(d.out, "In a few seconds it restarts once more, with its port open on every address.\n"+
+			"Check with: %s panel status\n", brand.Slug)
+	}
 	return err
+}
+
+// localAgentStatus asks this node's agent how it stands (`seylo status`).
+func (d *deps) localAgentStatus(ctx context.Context) (localapi.NodeStatus, error) {
+	if d.agentStatus != nil {
+		return d.agentStatus(ctx)
+	}
+	client := localapi.NewClient(d.layout)
+	if !localapi.Available(client.Socket()) {
+		return localapi.NodeStatus{}, fmt.Errorf("no agent socket at %s", client.Socket())
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return client.Status(ctx)
+}
+
+// withArticle is "a Docker update", "an agent update".
+func withArticle(what string) string {
+	if what != "" && strings.ContainsRune("aeiou", rune(what[0])) {
+		return "an " + what
+	}
+	return "a " + what
+}
+
+// connectionText is "waiting: <last error>", or the state alone.
+func connectionText(c localapi.ConnectionStatus) string {
+	state := c.State
+	if state == "" {
+		state = "disconnected"
+	}
+	if c.LastError != "" {
+		return state + ": " + c.LastError
+	}
+	return state
+}
+
+// panelLocalPort is the panel's host port as this node's agent dials it
+// (http://127.0.0.1:<port> in config.yml); 3000, the installer's default,
+// when that says nothing.
+func panelLocalPort(d *deps) int {
+	cfg, err := agent.LoadConfig(d.layout.ConfigFile())
+	if err != nil {
+		return 3000
+	}
+	u, err := url.Parse(cfg.PanelURL)
+	if err != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost") {
+		return 3000
+	}
+	if port, err := strconv.Atoi(u.Port()); err == nil && port > 0 {
+		return port
+	}
+	return 3000
 }
 
 // errNoRunningPanel: no panel container is running on this node.

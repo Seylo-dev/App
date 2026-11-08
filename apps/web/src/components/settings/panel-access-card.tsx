@@ -170,6 +170,11 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
         />
         {serveOnIp && access.blocked.length > 0 && <Blocks title={t("settings.general.domainCard.blockedTitle")} blocks={access.blocked} />}
         <IpState access={access} ipUrl={ipUrl} />
+        {access.oldDocker && !serveOnIp && (
+          <Alert tone="warning" className="mb-3">
+            {t("settings.general.domainCard.oldDocker", { version: access.oldDocker })}
+          </Alert>
+        )}
 
         {access.agentPort === null ? (
           <SettingRow
@@ -225,6 +230,7 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
         onConfirm={() => turnOff({ serveOnIp: false })}
       >
         <Alert tone="warning">{t("settings.general.domainCard.confirmCloseWarning", { url: ipUrl, domain: domainUrl })}</Alert>
+        {access.oldDocker && <Alert tone="warning">{t("settings.general.domainCard.oldDocker", { version: access.oldDocker })}</Alert>}
         <div className="flex flex-col gap-1.5">
           <span className="text-[12.5px] text-muted-foreground">{t("settings.general.domainCard.confirmCloseSsh")}</span>
           <CodeBlock code={access.recovery.sshTunnel} tone="dark" />
@@ -278,8 +284,8 @@ function IpState({ access, ipUrl }: { access: PanelAccess; ipUrl: string }) {
   const lines: string[] = [];
   if (access.actual.ip === "unknown" || access.actual.agentPort === "unknown") lines.push(t("settings.general.domainCard.restarting"));
   else if (access.actual.ip === "closed") lines.push(t("settings.general.domainCard.closedNow", { url: ipUrl }));
-  else if (!access.serveOnIp && access.lastChange) {
-    lines.push(t("settings.general.domainCard.reopenedNow", { reason: access.lastChange.reason }));
+  else if (!access.serveOnIp && (access.openReason || access.lastChange)) {
+    lines.push(t("settings.general.domainCard.reopenedNow", { reason: access.openReason ?? access.lastChange?.reason ?? "" }));
   }
   if (access.reclosesAt) lines.push(t("settings.general.domainCard.reclosesAt", { when: formatExpiresIn(access.reclosesAt) }));
   if (access.lastChange && (access.actual.ip === "closed" || access.serveOnIp)) {

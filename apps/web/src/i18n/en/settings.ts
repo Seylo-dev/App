@@ -90,6 +90,8 @@ export default {
       restarting: "The panel restarts to apply this. It takes a few seconds.",
       closedNow: "IP access is closed: {url} only answers on the server.",
       agentPortClosedNow: "The agents' port is closed: nodes reach the panel over the domain.",
+      oldDocker:
+        "The panel's server runs Docker {version}. Before Docker 28, machines on the same local network may still reach ports on 127.0.0.1. Update Docker from the panel node's page.",
       reopenedNow: "IP access is open again: {reason}.",
       reclosesAt: "It closes again {when} if a private path keeps working.",
       lastChange: "Last change {when}: {reason}.",

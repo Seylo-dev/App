@@ -245,9 +245,11 @@ func (e *Env) dockerEngine(ctx context.Context) *agentv1.NodeCheckResult {
 // loopbackSafeDockerMajor is the Docker release from which ports published
 // on 127.0.0.1 are kept from other machines on the same local network.
 // Before it, a neighbour that routes 127.0.0.1 to this server may reach
-// them (Docker's DNAT rules with route_localnet); not yet reproduced on our
-// VMs, so it only warns, and only while the panel's port is loopback-only
-// ("Serve on IP address" off).
+// them (Docker's DNAT rules with route_localnet; Docker's docs say so for
+// releases older than 28.0.0). It warns, here and on the panel's Panel
+// domain card (apps/panel/src/modules/settings/ip-access.ts, same number),
+// only while the panel's port is loopback-only ("Serve on IP address" off):
+// closing still keeps the panel from everyone farther away.
 const loopbackSafeDockerMajor = 28
 
 // panelLoopbackPorts lists the panel container's ports that Docker

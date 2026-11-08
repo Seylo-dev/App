@@ -190,6 +190,19 @@ export const PanelAccess = Type.Object({
   agentPortBlocked: Type.Array(PanelAccessBlock),
   /** After an automatic reopen: when IP access closes again if a path keeps working; null otherwise. */
   reclosesAt: Type.Union([Timestamp, Type.Null()]),
+  /**
+   * Why IP access is open while serveOnIp is off, when the panel says so
+   * right now, for example "node b1 connects over http://203.0.113.5:3000
+   * and closing would cut it off (...)"; null otherwise (and while the
+   * anti-flap wait runs: see reclosesAt).
+   */
+  openReason: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The panel node's Docker version when it is older than 28, where other
+   * machines on the same local network may still reach ports published on
+   * 127.0.0.1; null when it is newer or unknown.
+   */
+  oldDocker: Type.Union([Type.String(), Type.Null()]),
   lastChange: Type.Union([
     Type.Object({
       at: Timestamp,

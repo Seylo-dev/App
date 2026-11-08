@@ -15,7 +15,12 @@ import { createSession } from "../src/auth/sessions";
 import { auditLog, nodes, sessions, updateRuns, users } from "../src/db/schema";
 import { createProxyTrust } from "../src/http/proxy-trust";
 import { ensurePanelService } from "../src/modules/nodes/panel-service";
-import { panelPublishBindCapability, readIpAccessApplied, readPanelAccessWanted } from "../src/modules/settings/ip-access";
+import {
+  applyPanelIpAccess,
+  panelPublishBindCapability,
+  readIpAccessApplied,
+  readPanelAccessWanted,
+} from "../src/modules/settings/ip-access";
 import { getSetting, setSetting } from "../src/settings";
 import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
 import { type FakeAgent, fakeAgent } from "./seed-helpers";
@@ -303,6 +308,70 @@ test("turning things back on is always allowed: an admin, an API key, from IP:po
   // A member cannot change settings at all.
   const member = await createUser(panel, "member");
   expect((await update({ serveOnIp: true }, member.cookie)).status).toBe(403);
+});
+
+/** The domain fails its checks and IP access reopens by itself; then the domain works again. */
+function reopenAutomatically() {
+  setSetting(panel.deps.db, "panelDomainStatus", {
+    domain,
+    state: "issuing_certificate",
+    message: "",
+    checkedAt: Date.now(),
+    working: false,
+    since: Date.now(),
+    failedChecks: 2,
+  });
+  expect(applyPanelIpAccess(panel.deps, "the panel domain stopped working")).toMatchObject({ closed: false });
+  activeDomain();
+}
+
+test("after an automatic reopen, only the owner's turn-off skips the hour: not a re-save, reopen or a turn-on", async () => {
+  expect((await update({ serveOnIp: false, agentPortOpen: false })).status).toBe(200);
+  reopenAutomatically();
+  const reopenedAt = readIpAccessApplied(panel.deps).reopenedAt;
+  expect(reopenedAt).toBeNumber();
+
+  ageSessions();
+  const admin = await createUser(panel, "admin");
+  const key = createApiKey(panel, admin.user.id);
+  for (const [input, credentials] of [
+    [{ onFailure: "reopen" }, { cookie: admin.cookie }],
+    [{ agentPortOpen: true }, { cookie: admin.cookie }],
+    [{}, { bearer: key }],
+    [{ onFailure: "reopen" }, { cookie: owner.cookie }],
+  ] as const) {
+    const saved = await callOp(panel, settings.updatePanelAccess, input, credentials);
+    expect(saved.status).toBe(200);
+    expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: false, reopenedAt });
+    expect(saved.body.reclosesAt).not.toBeNull();
+  }
+
+  // The owner, over the domain and freshly signed in, closes it now.
+  const fresh = await createUser(panel, "owner");
+  expect((await update({ serveOnIp: false }, fresh.cookie)).status).toBe(200);
+  expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: true, by: fresh.user.email });
+  expect(readIpAccessApplied(panel.deps).reopenedAt).toBeUndefined();
+});
+
+test("the card says why IP access stays open, and warns about Docker older than 28", async () => {
+  expect((await update({ serveOnIp: false })).status).toBe(200);
+  let view = await callOp(panel, settings.panelAccess, {}, { cookie: owner.cookie, headers: overDomain });
+  expect(view.body).toMatchObject({ openReason: null, oldDocker: null });
+
+  reopenAutomatically();
+  const b2 = addNode("b2");
+  recordDialedUrl(panel.deps.db, b2, "http://203.0.113.5:3000");
+  view = await callOp(panel, settings.panelAccess, {}, { cookie: owner.cookie, headers: overDomain });
+  expect(view.body.openReason).toContain("node b2 connects over http://203.0.113.5:3000 and closing would cut it off");
+  expect(view.body.reclosesAt).toBeNull();
+
+  const facts = panel.deps.agents.state.get(panelNode)?.facts;
+  panel.deps.agents.state.setFacts(
+    panelNode,
+    create(NodeFactsSchema, { hostname: "fake", capabilities: facts?.capabilities ?? [], dockerVersion: "27.5.1" }),
+  );
+  view = await callOp(panel, settings.panelAccess, {}, { cookie: owner.cookie, headers: overDomain });
+  expect(view.body.oldDocker).toBe("27.5.1");
 });
 
 test("from IP:port the card lists why closing is refused, with the domain to open", async () => {
