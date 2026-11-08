@@ -220,6 +220,36 @@ describe("nodes", () => {
     expect((await callOp(panel, nodeOps.list, {}, { cookie: member.cookie })).status).toBe(403);
     expect((await callOp(panel, nodeOps.createJoinToken, {}, { cookie: member.cookie })).status).toBe(403);
   });
+
+  test("nodes.choices offers members who may create services the nodes, without addresses", async () => {
+    const agent = await join();
+    panel.deps.db.update(nodes).set({ name: "edge", wildcardDomain: "apps.example.com", publicIpv4: "203.0.113.7" }).where(eq(nodes.id, agent.nodeId)).run();
+    const off = panel.deps.db
+      .insert(nodes)
+      .values({ name: "spare", publicKey: Buffer.alloc(32, 1), disabledAt: new Date() })
+      .returning()
+      .get();
+    const project = seedProject(panel);
+
+    const creator = await createUser(panel, "member");
+    grant(panel, creator.user.id, "project", project.id, ["*"]);
+    const offered = await ok(callOp(panel, nodeOps.choices, {}, { cookie: creator.cookie }));
+    // The disabled node is not offered, and a choice carries no address, usage or settings.
+    expect(offered.nodes).toEqual([
+      { id: agent.nodeId, name: "edge", status: "online", wildcardDomain: "apps.example.com", arch: "amd64" },
+    ]);
+    expect(offered.nodes.some((n) => n.id === off.id)).toBe(false);
+
+    // Viewers and accounts without grants cannot create anything, so they get nothing.
+    const viewer = await createUser(panel, "member");
+    grant(panel, viewer.user.id, "project", project.id, ["services.view"]);
+    expect(await ok(callOp(panel, nodeOps.choices, {}, { cookie: viewer.cookie }))).toEqual({ nodes: [] });
+    const stranger = await createUser(panel, "member");
+    expect(await ok(callOp(panel, nodeOps.choices, {}, { cookie: stranger.cookie }))).toEqual({ nodes: [] });
+
+    const all = await ok(callOp(panel, nodeOps.choices, {}, { cookie: owner.cookie }));
+    expect(all.nodes.map((n) => n.name)).toEqual(["edge"]);
+  });
 });
 
 describe("cleanup", () => {

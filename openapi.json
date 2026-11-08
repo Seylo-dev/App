@@ -42467,6 +42467,104 @@
         "x-mcp": true
       }
     },
+    "/api/v1/nodes.choices": {
+      "get": {
+        "operationId": "nodes.choices",
+        "summary": "List nodes to place a service on",
+        "description": "Lists the nodes a new service can go on (every node that is not disabled, panel node first) with only what a create form needs: name, online or offline, wildcard domain and CPU architecture. For anyone who may create services somewhere (services.create on a project) and for nodes.view; anyone else gets an empty list. nodes.list has the full rows.",
+        "tags": [
+          "nodes"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "nodes"
+                  ],
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "status",
+                          "wildcardDomain",
+                          "arch"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "const": "online",
+                                "type": "string"
+                              },
+                              {
+                                "const": "offline",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "wildcardDomain": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "arch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": true
+      }
+    },
     "/api/v1/nodes.createJoinToken": {
       "post": {
         "operationId": "nodes.createJoinToken",

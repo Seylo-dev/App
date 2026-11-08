@@ -1,6 +1,8 @@
 // Node and project pickers for create forms (new service, templates). The
 // node list shows each node's status, so nobody puts a service on a node
-// that is down without noticing.
+// that is down without noticing. Nodes come from nodes.choices, which
+// members who may create a service read too (nodes.list needs nodes.view,
+// an owner and admin action).
 
 import { nodes, projects } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -11,8 +13,8 @@ import { t } from "../i18n/t";
 import { QueryError } from "./query-error";
 
 export function NodePicker({ id, value, onChange }: { id: string; value: string; onChange: (nodeId: string) => void }) {
-  const list = useOp(nodes.list, {});
-  const options = list.data?.nodes.filter((node) => node.status !== "disabled") ?? [];
+  const list = useOp(nodes.choices, {});
+  const options = list.data?.nodes ?? [];
   const first = options.find((node) => node.status === "online") ?? options[0];
 
   // Preselect the first online node so the common case is one click.

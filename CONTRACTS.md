@@ -1413,7 +1413,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `services.create` or `services.update` on some project or service,
   notification channels and
   backup destination choices `services.view` (or the edit action) somewhere;
-  a key counts only its own actions and projects. `apiKeys.list all` and
+  a key counts only its own actions and projects. The node field of every
+  create form (`NodePicker`, the Docker Hub dialog's architecture) reads
+  `nodes.choices`: nodes that are not disabled with id, name, online or
+  offline, wildcard domain and arch only, for `services.create` somewhere
+  or `nodes.view`, else an empty list; `nodes.list` (addresses, usage,
+  settings) stays `nodes.view`, which members never hold. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
 - Git addresses (`modules/git/targets.ts` `assertGitTarget`): a generic git
   source (service, compose stack, clone) must resolve to public addresses
@@ -2057,7 +2062,7 @@ place, in registration order. The networking contributor
 ports, database/Box specs and the global maintenance page.
 
 Live topics the nodes module publishes (`modules/nodes/live.ts`): `panel` invalidates
-`nodes.list`, `system.info`, `updates.status` on node changes and
+`nodes.list`, `nodes.choices`, `system.info`, `updates.status` on node changes and
 `metrics.nodes`, `metrics.summary` on each metrics sample (about every
 10 s); `node:<id>` invalidates `nodes.get`, `nodes.healthReport`,
 `metrics.node`; `service:<id>` invalidates `metrics.service`, and
@@ -2481,8 +2486,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - Shared helpers: `lib/theme.ts` (`refreshBoot()` after an appearance or
   branding save, `useBoot()`), `lib/format.ts`, `lib/types.ts`,
   `lib/service-display.ts`, `components/query-error.tsx` (`QueryError`
-  renders 501 as "not built yet"), `components/pickers.tsx` (`NodePicker`,
-  `ProjectPicker`). In `components/service/`: `editor/code-editor.tsx`
+  renders 501 as "not built yet"), `components/pickers.tsx` (`NodePicker` from
+  `nodes.choices`, `ProjectPicker`). In `components/service/`: `editor/code-editor.tsx`
   (`CodeEditor`, lazy Monaco with only the editor worker),
   `editor/env-editor.tsx` (.env editor with env-analyzer markers, hovers,
   completions), `terminal/xterm-view.tsx` +

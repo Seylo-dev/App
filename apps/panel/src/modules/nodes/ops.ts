@@ -65,6 +65,23 @@ const list = implement(nodeOps.list, (_input, ctx) => {
 
 const get = implement(nodeOps.get, (input, ctx) => toNodeDetail(ctx, nodeRow(ctx, input.nodeId)));
 
+// The node field of the create forms. Members who may create a service
+// somewhere pick its node here: nodes.list (addresses, usage, settings)
+// stays with nodes.view, which only owners and admins hold.
+const choices = implement(nodeOps.choices, (_input, ctx) => {
+  if (!ctx.access.can("nodes.view") && !ctx.access.canSomewhere(["services.create"])) return { nodes: [] };
+  const rows = ctx.db.select().from(nodes).where(isNull(nodes.disabledAt)).orderBy(desc(nodes.isPanelNode), asc(nodes.name)).all();
+  return {
+    nodes: rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      status: ctx.agents.isOnline(row.id) ? ("online" as const) : ("offline" as const),
+      wildcardDomain: row.wildcardDomain,
+      arch: factsOf(ctx, row)?.arch || null,
+    })),
+  };
+});
+
 const createJoinToken = implement(nodeOps.createJoinToken, (_input, ctx) => {
   // A joined node receives every spec and secret placed on it: a session left
   // open must not attach a machine.
@@ -304,6 +321,7 @@ const agentLogs = implement(nodeOps.agentLogs, async (input, ctx) => {
 export const nodeHandlers = [
   list,
   get,
+  choices,
   createJoinToken,
   listJoinTokens,
   revokeJoinToken,

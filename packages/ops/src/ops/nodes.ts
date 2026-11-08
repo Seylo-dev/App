@@ -206,6 +206,30 @@ export const get = defineOp({
   audit: false,
 });
 
+/** A node as the create forms offer it: no addresses, usage or settings. */
+export const NodeChoice = Type.Object({
+  id: Id,
+  name: Type.String(),
+  status: Type.Union([Type.Literal("online"), Type.Literal("offline")]),
+  /** The node's wildcard record (automatic domains land under it); null when it has none. */
+  wildcardDomain: Nullable(Type.String()),
+  /** "amd64" or "arm64" from the agent's facts; null until the agent first connected. */
+  arch: Nullable(Type.String()),
+});
+
+export const choices = defineOp({
+  id: "nodes.choices",
+  kind: "query",
+  summary: "List nodes to place a service on",
+  description:
+    "Lists the nodes a new service can go on (every node that is not disabled, panel node first) with only what a create form needs: name, online or offline, wildcard domain and CPU architecture. For anyone who may create services somewhere (services.create on a project) and for nodes.view; anyone else gets an empty list. nodes.list has the full rows.",
+  input: Empty,
+  output: Type.Object({ nodes: Type.Array(NodeChoice) }),
+  permission: permission.signedIn(),
+  mcp: true,
+  audit: false,
+});
+
 export const createJoinToken = defineOp({
   id: "nodes.createJoinToken",
   kind: "mutation",
