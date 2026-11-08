@@ -2682,7 +2682,14 @@ from the engine's `finish`) unless the old project is gone or took the name.
 A stopped or never-deployed service just changes project (no deployment).
 `compose.preview` and `templates.preview` are POST mutations (bodies too
 large for a query string) that change nothing. Project collapse and order
-are per person (`project_prefs`). Global `templates.manage` gates custom
+are per person (`project_prefs`). Hidden projects (0.2.1) are per person
+too, in `auth.preferences.hiddenProjectIds` (at most 200 distinct ids;
+`modules/auth/profile.ts` keeps only projects that exist and the caller
+holds `projects.view` on, on every read and write, so deleted projects and
+lost access drop out and the key is left out when nothing is hidden). The
+sidebar and the dashboard grid leave them out (`Hidden (N)` and `Show
+hidden` show them without unhiding); `projects.list`, the command palette
+and the project pages ignore the list. Global `templates.manage` gates custom
 templates.
 
 APIs for other modules (all in `apps/panel/src/modules/`):

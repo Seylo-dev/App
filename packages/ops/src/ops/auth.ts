@@ -115,15 +115,40 @@ export const updateProfile = defineOp({
   audit: true,
 });
 
-export const Preferences = Type.Record(Type.String(), Type.Unknown(), {
-  description: "Per-person UI choices that follow them across browsers, for example collapsed projects or color mode.",
+/** Projects the person hid from their sidebar and home page (added in 0.2.1). */
+export const HiddenProjectIds = Type.Array(Id, {
+  maxItems: 200,
+  uniqueItems: true,
+  description:
+    "Projects hidden from this person's sidebar and home page, by id. Only projects the person can see are kept; deleted projects drop out. The project pages, links and search still show them.",
 });
+
+/** Keys without a shape of their own stay free-form, as before 0.2.1. */
+const AnyKeys = Type.Record(Type.String(), Type.Unknown());
+
+export const Preferences = Type.Intersect([Type.Object({ hiddenProjectIds: Type.Optional(HiddenProjectIds) }), AnyKeys], {
+  description:
+    "Per-person UI choices that follow them across browsers, for example hidden projects or color mode. Keys not listed here are free-form.",
+});
+
+/** What auth.updatePreferences takes: the same keys, each of them null to remove it. */
+const PreferencesChange = Type.Intersect(
+  [
+    Type.Object({
+      hiddenProjectIds: Type.Optional(
+        Type.Union([HiddenProjectIds, Type.Null()], { errorMessage: "must be a list of distinct project ids (at most 200), or null" }),
+      ),
+    }),
+    AnyKeys,
+  ],
+  { description: "The keys to change; a key set to null is removed." },
+);
 
 export const preferences = defineOp({
   id: "auth.preferences",
   kind: "query",
   summary: "Get your UI preferences",
-  description: "Returns the signed-in person's UI preferences (collapsed projects, color mode and similar).",
+  description: "Returns the signed-in person's UI preferences (hidden projects, color mode and similar).",
   input: Empty,
   output: Type.Object({ preferences: Preferences }),
   permission: permission.account(),
@@ -135,8 +160,9 @@ export const updatePreferences = defineOp({
   id: "auth.updatePreferences",
   kind: "mutation",
   summary: "Change your UI preferences",
-  description: "Merges the given keys into the signed-in person's preferences; a key set to null is removed. At most 16 KB in total.",
-  input: Type.Object({ preferences: Preferences }),
+  description:
+    "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. At most 16 KB in total.",
+  input: Type.Object({ preferences: PreferencesChange }),
   output: Type.Object({ preferences: Preferences }),
   permission: permission.account(),
   mcp: false,

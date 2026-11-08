@@ -6267,7 +6267,7 @@
       "get": {
         "operationId": "auth.preferences",
         "summary": "Get your UI preferences",
-        "description": "Returns the signed-in person's UI preferences (collapsed projects, color mode and similar).",
+        "description": "Returns the signed-in person's UI preferences (hidden projects, color mode and similar).",
         "tags": [
           "auth"
         ],
@@ -6293,11 +6293,31 @@
                   ],
                   "properties": {
                     "preferences": {
-                      "description": "Per-person UI choices that follow them across browsers, for example collapsed projects or color mode.",
-                      "type": "object",
-                      "patternProperties": {
-                        "^(.*)$": {}
-                      }
+                      "description": "Per-person UI choices that follow them across browsers, for example hidden projects or color mode. Keys not listed here are free-form.",
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "hiddenProjectIds": {
+                              "maxItems": 200,
+                              "uniqueItems": true,
+                              "description": "Projects hidden from this person's sidebar and home page, by id. Only projects the person can see are kept; deleted projects drop out. The project pages, links and search still show them.",
+                              "type": "array",
+                              "items": {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "patternProperties": {
+                            "^(.*)$": {}
+                          }
+                        }
+                      ]
                     }
                   }
                 }
@@ -6986,7 +7006,7 @@
       "post": {
         "operationId": "auth.updatePreferences",
         "summary": "Change your UI preferences",
-        "description": "Merges the given keys into the signed-in person's preferences; a key set to null is removed. At most 16 KB in total.",
+        "description": "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. At most 16 KB in total.",
         "tags": [
           "auth"
         ],
@@ -7010,11 +7030,39 @@
                 ],
                 "properties": {
                   "preferences": {
-                    "description": "Per-person UI choices that follow them across browsers, for example collapsed projects or color mode.",
-                    "type": "object",
-                    "patternProperties": {
-                      "^(.*)$": {}
-                    }
+                    "description": "The keys to change; a key set to null is removed.",
+                    "allOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "hiddenProjectIds": {
+                            "errorMessage": "must be a list of distinct project ids (at most 200), or null",
+                            "anyOf": [
+                              {
+                                "maxItems": 200,
+                                "uniqueItems": true,
+                                "description": "Projects hidden from this person's sidebar and home page, by id. Only projects the person can see are kept; deleted projects drop out. The project pages, links and search still show them.",
+                                "type": "array",
+                                "items": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "patternProperties": {
+                          "^(.*)$": {}
+                        }
+                      }
+                    ]
                   }
                 }
               }
@@ -7033,11 +7081,31 @@
                   ],
                   "properties": {
                     "preferences": {
-                      "description": "Per-person UI choices that follow them across browsers, for example collapsed projects or color mode.",
-                      "type": "object",
-                      "patternProperties": {
-                        "^(.*)$": {}
-                      }
+                      "description": "Per-person UI choices that follow them across browsers, for example hidden projects or color mode. Keys not listed here are free-form.",
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "hiddenProjectIds": {
+                              "maxItems": 200,
+                              "uniqueItems": true,
+                              "description": "Projects hidden from this person's sidebar and home page, by id. Only projects the person can see are kept; deleted projects drop out. The project pages, links and search still show them.",
+                              "type": "array",
+                              "items": {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "patternProperties": {
+                            "^(.*)$": {}
+                          }
+                        }
+                      ]
                     }
                   }
                 }

@@ -1,17 +1,43 @@
 // The signed-in person's name and UI preferences.
 
 import { auth, OpError } from "@seylo/ops";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { requireSession, toViewer } from "../../auth/sign-in";
-import { users } from "../../db/schema";
+import { projects, users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 
 /** Preferences are small UI choices; anything bigger is a bug or abuse. */
 const maxPreferencesBytes = 16 * 1024;
+const maxHiddenProjects = auth.HiddenProjectIds.maxItems as number;
 
 function currentUserId(ctx: OpContext): string {
   if (ctx.principal.type === "anonymous") throw new OpError("UNAUTHENTICATED", "Sign in first.");
   return ctx.principal.user.id;
+}
+
+/**
+ * hiddenProjectIds keeps only projects that exist and the caller can see,
+ * in the stored order. Deleted projects, projects the caller lost access to
+ * and anything that is not an id drop out; an empty list leaves the key out.
+ * Preferences were free-form before hiddenProjectIds had a shape, so the
+ * stored value may be anything.
+ */
+function withVisibleHidden(ctx: OpContext, preferences: Record<string, unknown>): Record<string, unknown> {
+  const { hiddenProjectIds: stored, ...rest } = preferences;
+  if (stored === undefined) return preferences;
+  const ids = Array.isArray(stored) ? [...new Set(stored.filter((id): id is string => typeof id === "string"))] : [];
+  const existing = new Set(
+    ids.length === 0
+      ? []
+      : ctx.db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(inArray(projects.id, ids))
+          .all()
+          .map((row) => row.id),
+  );
+  const kept = ids.filter((id) => existing.has(id) && ctx.access.can("projects.view", { type: "project", id })).slice(0, maxHiddenProjects);
+  return kept.length > 0 ? { ...rest, hiddenProjectIds: kept } : rest;
 }
 
 export const updateProfile = implement(auth.updateProfile, (input, ctx) => {
@@ -27,18 +53,20 @@ export const preferences = implement(auth.preferences, (_input, ctx) => {
     .from(users)
     .where(eq(users.id, currentUserId(ctx)))
     .get();
-  return { preferences: row?.preferences ?? {} };
+  return { preferences: withVisibleHidden(ctx, row?.preferences ?? {}) };
 });
 
 export const updatePreferences = implement(auth.updatePreferences, (input, ctx) => {
   const userId = currentUserId(ctx);
   return ctx.db.transaction((tx) => {
     const row = tx.select({ preferences: users.preferences }).from(users).where(eq(users.id, userId)).get();
-    const merged: Record<string, unknown> = { ...(row?.preferences ?? {}) };
+    let merged: Record<string, unknown> = { ...(row?.preferences ?? {}) };
     for (const [key, value] of Object.entries(input.preferences)) {
       if (value === null) delete merged[key];
       else merged[key] = value;
     }
+    // Stored as it is answered: ids of other people's or deleted projects are not kept.
+    merged = withVisibleHidden(ctx, merged);
     if (new TextEncoder().encode(JSON.stringify(merged)).length > maxPreferencesBytes) {
       throw new OpError("BAD_REQUEST", "Preferences are limited to 16 KB.");
     }

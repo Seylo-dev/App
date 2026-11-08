@@ -1,7 +1,9 @@
 // Projects in the sidebar (Sidebar.dc.html), each collapsible, with its
-// services under it. Collapsed state and order are per person and stored
-// by the panel (projects.setCollapsed, projects.reorder), so they follow
-// the person across browsers. Drag a project to move it.
+// services under it. Collapsed state, order and hidden projects are per
+// person and stored by the panel (projects.setCollapsed, projects.reorder,
+// auth.preferences), so they follow the person across browsers. Drag a
+// project to move it; its "..." menu hides it. Hidden projects wait under
+// a folded "Hidden (N)" row at the end.
 
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -15,7 +17,10 @@ import { useState } from "react";
 import { t } from "../../i18n/t";
 import { useLiveTopic } from "../../lib/live";
 import { isBusy, statusDisplay } from "../../lib/service-display";
+import type { Project } from "../../lib/types";
+import { splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
 import { useProjectPrefs } from "../../lib/use-project-prefs";
+import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { useShell } from "./shell-context";
 
@@ -23,8 +28,20 @@ export function ProjectsTree() {
   const shell = useShell();
   const { data, isPending } = useOp(projects.list, {});
   const prefs = useProjectPrefs();
+  const hiding = useHiddenProjects();
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  // The list waits for the hidden projects too, so none of them shows for a moment.
+  const loading = isPending || hiding.pending;
+  const list = loading ? undefined : data?.projects;
+  const { shown, hidden } = splitHidden(list ?? [], hiding.hidden);
+  const HiddenChevron = showHidden ? IconChevronDown : IconChevronRight;
+  const setHidden = (project: Project, hide: boolean) => {
+    // Unhiding the last one folds the row, so the next hidden project starts out of sight.
+    if (!hide && hidden.length === 1) setShowHidden(false);
+    hiding.setHidden(project, hide);
+  };
 
   return (
     <>
@@ -41,8 +58,8 @@ export function ProjectsTree() {
       </div>
 
       <ul aria-label={t("nav.projects")} className="-mt-2 m-0 flex list-none flex-col gap-px p-0">
-        {data?.projects.length === 0 && <li className="px-2.5 py-1.5 text-[12.5px] text-ink-ghost">{t("sidebar.noProjects")}</li>}
-        {isPending && (
+        {list?.length === 0 && <li className="px-2.5 py-1.5 text-[12.5px] text-ink-ghost">{t("sidebar.noProjects")}</li>}
+        {loading && (
           <li>
             <LoadingRegion label={t("common.loading")} className="flex flex-col gap-px">
               {[0, 1, 2].map((i) => (
@@ -55,71 +72,124 @@ export function ProjectsTree() {
             </LoadingRegion>
           </li>
         )}
-        {data?.projects.map((project) => {
-          const open = !project.collapsed;
-          const Chevron = open ? IconChevronDown : IconChevronRight;
-          return (
-            <li
-              key={project.id}
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                setDragging(project.id);
-              }}
-              onDragOver={(event) => {
-                if (!dragging) return;
-                event.preventDefault();
-                setOver(project.id);
-              }}
-              onDragLeave={() => setOver((id) => (id === project.id ? null : id))}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (dragging) prefs.moveBefore(dragging, project.id);
-                setOver(null);
-              }}
-              onDragEnd={() => {
-                setDragging(null);
-                setOver(null);
-              }}
-              className={cn(
-                "flex flex-col rounded-control",
-                over === project.id && dragging !== project.id && "shadow-[inset_0_2px_0_var(--primary)]",
-              )}
+        {shown.map((project) => (
+          <li
+            key={project.id}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              setDragging(project.id);
+            }}
+            onDragOver={(event) => {
+              if (!dragging) return;
+              event.preventDefault();
+              setOver(project.id);
+            }}
+            onDragLeave={() => setOver((id) => (id === project.id ? null : id))}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (dragging) prefs.moveBefore(dragging, project.id);
+              setOver(null);
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setOver(null);
+            }}
+            className={cn(
+              "flex flex-col rounded-control",
+              over === project.id && dragging !== project.id && "shadow-[inset_0_2px_0_var(--primary)]",
+            )}
+          >
+            <ProjectRow project={project} hidden={false} onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
+          </li>
+        ))}
+        {/* Hidden projects wait at the end, folded; opening the row shows them without unhiding them. */}
+        {hidden.length > 0 && (
+          <li className="flex flex-col">
+            <button
+              type="button"
+              aria-expanded={showHidden}
+              onClick={() => setShowHidden((open) => !open)}
+              className="flex cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent py-[7px] pr-2.5 pl-2.5 text-left text-[12.5px] text-muted-foreground transition-interactive hover:bg-muted hover:text-foreground"
             >
-              {/* The row is the indicator's box: it covers the chevron too. */}
-              <div className="relative isolate flex items-center rounded-control transition-interactive hover:bg-muted">
-                <button
-                  type="button"
-                  onClick={() => prefs.setCollapsed(project.id, open)}
-                  aria-expanded={open}
-                  aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
-                  className="flex cursor-pointer border-0 bg-transparent py-[7px] pr-1 pl-2.5 text-ink-faint"
-                >
-                  <Chevron size={14} stroke={2} aria-hidden="true" />
-                </button>
-                <Link
-                  to="/p/$projectId"
-                  params={{ projectId: project.id }}
-                  activeOptions={{ exact: true, includeSearch: false }}
-                  className="flex min-w-0 flex-1 items-center gap-[9px] py-[7px] pr-2.5 pl-1 text-[13.5px] font-medium text-foreground hover:text-foreground data-[status=active]:text-accent-foreground"
-                >
-                  {({ isActive }) => (
-                    <>
-                      {/* The same sliding background as the main navigation and the service rows. It
-                          follows the link's own active state, so it moves in the same commit as theirs. */}
-                      {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-                      <ProjectTile id={project.id} name={project.name} isProtected={project.protected} />
-                      <span className="truncate">{project.name}</span>
-                      <span className="ml-auto text-xs font-normal text-muted-foreground">{project.serviceCount}</span>
-                    </>
-                  )}
-                </Link>
-              </div>
-              {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} />}
-            </li>
-          );
-        })}
+              <HiddenChevron size={14} stroke={2} aria-hidden="true" className="text-ink-faint" />
+              {t("sidebar.hidden", { count: hidden.length })}
+            </button>
+            {showHidden && (
+              <ul aria-label={t("sidebar.hidden", { count: hidden.length })} className="m-0 flex list-none flex-col gap-px p-0">
+                {hidden.map((project) => (
+                  <li key={project.id} className="flex flex-col rounded-control">
+                    <ProjectRow project={project} hidden onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )}
       </ul>
+    </>
+  );
+}
+
+/**
+ * One project: the chevron that collapses it, its link and its "..." menu.
+ * The menu button sits over the service count and shows on hover or focus,
+ * so the row looks the same until then; a touch screen always shows it,
+ * after the count.
+ */
+function ProjectRow({
+  project,
+  hidden,
+  onToggle,
+  onHiddenChange,
+}: {
+  project: Project;
+  hidden: boolean;
+  onToggle: (projectId: string, collapsed: boolean) => void;
+  onHiddenChange: (project: Project, hidden: boolean) => void;
+}) {
+  const open = !project.collapsed;
+  const Chevron = open ? IconChevronDown : IconChevronRight;
+  return (
+    <>
+      {/* The row is the indicator's box: it covers the chevron too. */}
+      <div className="group/row relative isolate flex items-center rounded-control transition-interactive hover:bg-muted">
+        <button
+          type="button"
+          onClick={() => onToggle(project.id, open)}
+          aria-expanded={open}
+          aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
+          className="flex cursor-pointer border-0 bg-transparent py-[7px] pr-1 pl-2.5 text-ink-faint"
+        >
+          <Chevron size={14} stroke={2} aria-hidden="true" />
+        </button>
+        <Link
+          to="/p/$projectId"
+          params={{ projectId: project.id }}
+          activeOptions={{ exact: true, includeSearch: false }}
+          className="flex min-w-0 flex-1 items-center gap-[9px] py-[7px] pr-2.5 pl-1 text-[13.5px] font-medium text-foreground hover:text-foreground data-[status=active]:text-accent-foreground"
+        >
+          {({ isActive }) => (
+            <>
+              {/* The same sliding background as the main navigation and the service rows. It
+                  follows the link's own active state, so it moves in the same commit as theirs. */}
+              {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+              <ProjectTile id={project.id} name={project.name} isProtected={project.protected} />
+              <span className={cn("truncate", hidden && "text-muted-foreground")}>{project.name}</span>
+              <span className="ml-auto text-xs font-normal text-muted-foreground transition-opacity group-hover/row:opacity-0 group-has-[[data-project-menu]:focus-visible]/row:opacity-0 group-has-[[data-project-menu][data-state=open]]/row:opacity-0 pointer-coarse:opacity-100!">
+                {project.serviceCount}
+              </span>
+            </>
+          )}
+        </Link>
+        <ProjectMenu
+          name={project.name}
+          hidden={hidden}
+          onHiddenChange={(hide) => onHiddenChange(project, hide)}
+          className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100"
+        />
+      </div>
+      {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} />}
     </>
   );
 }

@@ -1,6 +1,7 @@
 // The dashboard's project grid (Main.dc.html): one collapsible card per
 // project with its services, their status and current usage. Collapsing
-// is the same per-person preference the sidebar uses.
+// and hiding are the same per-person preferences the sidebar uses; hidden
+// projects come back with "Show hidden" without being unhidden.
 
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
@@ -10,24 +11,37 @@ import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skel
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconFolder } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { t } from "../../i18n/t";
 import { formatUsage } from "../../lib/format";
 import { useLiveTopic } from "../../lib/live";
 import { kindTag, placementLine, statusDisplay } from "../../lib/service-display";
 import type { Project, ServiceSummary } from "../../lib/types";
 import type { ServicesByProject } from "../../lib/use-all-services";
+import { splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
 import { useProjectPrefs } from "../../lib/use-project-prefs";
 import { KindBadge } from "../new-service/kinds";
+import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { QueryError } from "../query-error";
 import { useShell } from "../shell/shell-context";
 
 export function ProjectCards({ data }: { data: ServicesByProject }) {
   const prefs = useProjectPrefs();
+  const hiding = useHiddenProjects();
   const shell = useShell();
-  const allOpen = data.projects.every((project) => !project.collapsed);
-  const allClosed = data.projects.length > 0 && data.projects.every((project) => project.collapsed);
+  const [showHidden, setShowHidden] = useState(false);
+  const { shown, hidden } = splitHidden(data.projects, hiding.hidden);
+  const cards = showHidden ? data.projects : shown;
+  const allOpen = cards.every((project) => !project.collapsed);
+  const allClosed = cards.length > 0 && cards.every((project) => project.collapsed);
+  // The grid waits for the hidden projects too, so none of them shows for a moment.
+  const loading = data.projects.length === 0 ? data.pending : hiding.pending;
+  const setHidden = (project: Project, hide: boolean) => {
+    // Unhiding the last one turns "Show hidden" off, so the next hidden project leaves the grid.
+    if (!hide && hidden.length === 1) setShowHidden(false);
+    hiding.setHidden(project, hide);
+  };
 
   return (
     <section aria-label={t("nav.projects")} className="flex flex-col gap-3">
@@ -38,16 +52,23 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
           aria-label={t("dashboard.expandCollapse")}
           className="m-0 ml-auto inline-flex min-w-0 border-0 gap-0.5 rounded-control bg-track p-[3px]"
         >
-          <TrackButton active={allOpen} onClick={() => prefs.setAllCollapsed(false)}>
+          <TrackButton active={allOpen} onClick={() => prefs.setAllCollapsed(false, cards)}>
             {t("dashboard.expandAll")}
           </TrackButton>
-          <TrackButton active={allClosed} onClick={() => prefs.setAllCollapsed(true)}>
+          <TrackButton active={allClosed} onClick={() => prefs.setAllCollapsed(true, cards)}>
             {t("dashboard.collapseAll")}
           </TrackButton>
         </fieldset>
+        {hidden.length > 0 && (
+          <div className="inline-flex rounded-control bg-track p-[3px]">
+            <TrackButton active={showHidden} onClick={() => setShowHidden((on) => !on)} layoutId="dashboard-hidden">
+              {t("dashboard.showHidden", { count: hidden.length })}
+            </TrackButton>
+          </div>
+        )}
       </div>
 
-      {data.pending && data.projects.length === 0 && (
+      {loading && (
         <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <ProjectCardSkeleton rows={3} />
           <ProjectCardSkeleton rows={2} />
@@ -70,28 +91,46 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
         </div>
       )}
       {data.error && data.projects.length > 0 && data.services.size === 0 && <QueryError error={data.error} />}
+      {!loading && data.projects.length > 0 && cards.length === 0 && (
+        <p className="m-0 rounded-card bg-card px-4 py-3 text-[12.5px] text-muted-foreground shadow-card">{t("dashboard.allHidden")}</p>
+      )}
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {data.projects.map((project) => (
-          <ProjectCard
-            key={project.id}
-            project={project}
-            services={data.services.get(project.id)}
-            onToggle={() => prefs.setCollapsed(project.id, !project.collapsed)}
-          />
-        ))}
+        {!loading &&
+          cards.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              services={data.services.get(project.id)}
+              hidden={hiding.hidden.has(project.id)}
+              onToggle={() => prefs.setCollapsed(project.id, !project.collapsed)}
+              onHiddenChange={(hide) => setHidden(project, hide)}
+            />
+          ))}
       </div>
     </section>
   );
 }
 
-function ProjectCard({ project, services, onToggle }: { project: Project; services: ServiceSummary[] | undefined; onToggle: () => void }) {
+function ProjectCard({
+  project,
+  services,
+  hidden,
+  onToggle,
+  onHiddenChange,
+}: {
+  project: Project;
+  services: ServiceSummary[] | undefined;
+  hidden: boolean;
+  onToggle: () => void;
+  onHiddenChange: (hidden: boolean) => void;
+}) {
   const open = !project.collapsed;
   // Service changes are published on the project topic.
   useLiveTopic(`project:${project.id}`);
   const rows = services?.filter((service) => service.parentId === null) ?? [];
   return (
-    <article className="min-w-0 overflow-hidden rounded-card bg-card shadow-card">
+    <article className="group/card min-w-0 overflow-hidden rounded-card bg-card shadow-card">
       <div className="flex items-center gap-2.5 px-4 py-[15px]">
         <ProjectTile id={project.id} name={project.name} isProtected={project.protected} size="md" />
         <Link
@@ -106,15 +145,29 @@ function ProjectCard({ project, services, onToggle }: { project: Project; servic
             {t("dashboard.nodeCount", { count: project.nodeCount })}
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
-          className="ml-auto flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint hover:bg-muted"
-        >
-          <IconChevronDown size={14} stroke={2} aria-hidden="true" className={cn("transition-transform", !open && "-rotate-90")} />
-        </button>
+        {hidden && (
+          <Chip tone="track" className="shrink-0 px-[7px] py-0.5 text-[11.5px]">
+            {t("dashboard.hiddenChip")}
+          </Chip>
+        )}
+        <div className="ml-auto flex items-center gap-0.5">
+          {/* Shows on hover or focus, so a card looks the same until then; a touch screen always shows it. */}
+          <ProjectMenu
+            name={project.name}
+            hidden={hidden}
+            onHiddenChange={onHiddenChange}
+            className="opacity-0 transition-opacity hover:bg-muted group-hover/card:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
+          />
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={t(open ? "sidebar.collapse" : "sidebar.expand", { name: project.name })}
+            className="flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint hover:bg-muted"
+          >
+            <IconChevronDown size={14} stroke={2} aria-hidden="true" className={cn("transition-transform", !open && "-rotate-90")} />
+          </button>
+        </div>
       </div>
       {open && (
         <div className="flex flex-col px-2 pb-2">
@@ -209,7 +262,17 @@ function ServiceRow({ service }: { service: ServiceSummary }) {
   );
 }
 
-function TrackButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function TrackButton({
+  active,
+  onClick,
+  children,
+  layoutId = "dashboard-expand",
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+  layoutId?: string;
+}) {
   return (
     <button
       type="button"
@@ -220,7 +283,7 @@ function TrackButton({ active, onClick, children }: { active: boolean; onClick: 
         active ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >
-      {active && <SegmentPill layoutId="dashboard-expand" />}
+      {active && <SegmentPill layoutId={layoutId} />}
       {children}
     </button>
   );
