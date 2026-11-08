@@ -1106,4 +1106,71 @@ describe("data copy guards", () => {
     await fleet.settle();
     expect(row(id)?.stopped).toBe(false);
   });
+
+  test("a clone deleted while its copy is still queued ends the copy: the source deploys, starts and clones again", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    expect(res.status).toBe(200);
+    const cloneId = res.body.service.id as string;
+    // The clone goes before the copy job got a slot.
+    expect((await callOp(panel, serviceOps.remove, { serviceId: cloneId, confirmName: "files-copy" }, { cookie })).status).toBe(200);
+    const ended = panel.deps.db.select().from(serviceCopies).all();
+    expect(ended.map((c) => [c.status, c.error, c.serviceId])).toEqual([["failed", "The clone was deleted.", null]]);
+    await panel.runner.runDue(panel.deps);
+    await fleet.settle();
+    expect(panel.deps.db.select().from(serviceCopies).get()?.status).toBe("failed");
+
+    expect((await callOp(panel, deploymentOps.deploy, { serviceId: id }, { cookie })).status).toBe(200);
+    await fleet.settle();
+    expect((await callOp(panel, serviceOps.stop, { serviceId: id }, { cookie })).status).toBe(200);
+    expect((await callOp(panel, serviceOps.start, { serviceId: id }, { cookie })).status).toBe(200);
+    const again = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    expect(again.status).toBe(200);
+  });
+
+  test("a row an older panel left queued with its clone gone holds nothing back; the job ends it", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    const copyId = res.body.dataCopy.id as string;
+    // What services.delete left before it ended copies: the clone row gone, the copy still queued.
+    panel.deps.db.delete(services).where(eq(services.id, res.body.service.id)).run();
+    expect(panel.deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, copyId)).get()).toMatchObject({
+      status: "queued",
+      serviceId: null,
+    });
+    expect((await callOp(panel, deploymentOps.deploy, { serviceId: id }, { cookie })).status).toBe(200);
+    await cloneDataJob.run({ copyId }, { ...panel.deps, jobId: `clone-data:${copyId}`, attempt: 1 });
+    expect(panel.deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, copyId)).get()).toMatchObject({
+      status: "failed",
+      error: "The clone was deleted.",
+    });
+  });
+
+  test("deleting the clone mid-copy starts the source the copy stopped at once; deleting the source ends its copy too", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    const res = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    const cloneId = res.body.service.id as string;
+    const copyId = res.body.dataCopy.id as string;
+    panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, id)).run();
+    panel.deps.db.update(serviceCopies).set({ status: "copying", sourceStopped: true }).where(eq(serviceCopies.id, copyId)).run();
+    expect((await callOp(panel, serviceOps.remove, { serviceId: cloneId, confirmName: "files-copy" }, { cookie })).status).toBe(200);
+    expect(row(id)?.stopped).toBe(false);
+    expect(panel.deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, copyId)).get()).toMatchObject({
+      status: "failed",
+      sourceStopped: false,
+    });
+    // Deleting the source of a running copy ends it too.
+    const other = await app(shop, "other", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(other);
+    const second = await callOp(panel, serviceOps.clone, { serviceId: other, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
+    expect((await callOp(panel, serviceOps.remove, { serviceId: other, confirmName: "other" }, { cookie })).status).toBe(200);
+    expect(panel.deps.db.select().from(serviceCopies).where(eq(serviceCopies.id, second.body.dataCopy.id)).get()).toMatchObject({
+      status: "failed",
+      error: "The source service was deleted.",
+    });
+    expect((await callOp(panel, deploymentOps.deploy, { serviceId: second.body.service.id }, { cookie })).status).toBe(200);
+  });
 });

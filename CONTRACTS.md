@@ -2221,7 +2221,12 @@ volume ExportVolume -> ImportVolume through the panel (`relayVolume` with
 While a copy runs, `queueDeploy`, `services.start` and `boxes.open` refuse
 the clone and a source it stopped, and `services.move` (to another node)
 refuses the clone and any source it reads (CONFLICT `reason: copying`,
-`copies.ts`); a second copy from the same source is refused. `ServiceDetail.dataCopy` is the
+`copies.ts`); a second copy from the same source is refused. Deleting
+the clone or the source ends a copy that has not ended (`failed`, "The
+clone was deleted." or "The source service was deleted.", in the delete's
+transaction, `services/delete.ts`) and starts a source the copy stopped; a
+copy whose clone is gone never holds anything back, so rows older panels
+left `queued` release their source. `ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
 Moves to another project (`services.moveProjectImpact`,

@@ -5,14 +5,15 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { OpError, services as serviceOps } from "@seylo/ops";
-import { and, eq, inArray, isNotNull, isNull, like } from "drizzle-orm";
-import { deployments, grants, previews, servicePlacements, services, sourceUploads } from "../../db/schema";
+import { and, eq, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
+import { deployments, grants, previews, serviceCopies, servicePlacements, services, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
 import { registryGcJobType } from "../deployments/registry-gc";
 import { registryRelay } from "../deployments/source";
 import { dropHooks } from "../gitProviders/hooks";
 import { metricsFor } from "../metrics/ingest";
+import { copyRunning } from "./copies";
 import { publishService } from "./ops";
 import { loadService, type ServiceRow } from "./rows";
 
@@ -71,14 +72,50 @@ export async function deleteServiceTree(deps: Deps, root: ServiceRow): Promise<v
     .all();
   // Repository webhooks go from the providers too (in the background; the rows go with the services).
   dropHooks(deps, ids);
+  const restarted: string[] = [];
   deps.db.transaction((tx) => {
     tx.delete(grants)
       .where(and(eq(grants.scopeType, "service"), inArray(grants.scopeId, ids)))
       .run();
+    // Data copies into or out of these services end here: a copy whose
+    // clone is gone would otherwise stay queued and hold its source back
+    // from deploying, starting and moving for good. A source the copy
+    // stopped is started again.
+    const copies = tx
+      .select()
+      .from(serviceCopies)
+      .where(
+        and(
+          inArray(serviceCopies.status, [...copyRunning]),
+          or(inArray(serviceCopies.serviceId, ids), inArray(serviceCopies.sourceServiceId, ids)),
+        ),
+      )
+      .all();
+    for (const copy of copies) {
+      const cloneGone = copy.serviceId !== null && ids.includes(copy.serviceId);
+      tx.update(serviceCopies)
+        .set({
+          status: "failed",
+          error: cloneGone ? "The clone was deleted." : "The source service was deleted.",
+          finishedAt: new Date(),
+          sourceStopped: false,
+        })
+        .where(eq(serviceCopies.id, copy.id))
+        .run();
+      if (copy.sourceStopped && copy.sourceServiceId && !ids.includes(copy.sourceServiceId)) {
+        tx.update(services).set({ stopped: false }).where(eq(services.id, copy.sourceServiceId)).run();
+        restarted.push(copy.sourceServiceId);
+      }
+    }
     // Members cascade with their stack; delete children first so restrict-style references never block.
     for (const row of [...rows].reverse()) tx.delete(services).where(eq(services.id, row.id)).run();
   });
   for (const nodeId of nodeIds) deps.agents.desired.markDirty({ nodeId });
+  for (const id of restarted) {
+    deps.agents.desired.markDirty({ serviceId: id });
+    const source = deps.db.select().from(services).where(eq(services.id, id)).get();
+    if (source) publishService(deps, source);
+  }
   for (const id of ids) {
     const digests = images.filter((i) => i.serviceId === id).map((i) => i.digest as string);
     if (digests.length > 0) deps.jobs.enqueue(registryGcJobType, { deleted: { repository: id, digests } });
