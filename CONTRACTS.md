@@ -1117,7 +1117,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   fields (or `@daily` and friends) in UTC. Each due schedule enqueues one job
   with dedupe key `schedule:<key>`, so a slow run is never doubled; calling
   `ensure` again with the same timing keeps `nextRunAt`. `remove(key)`,
-  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`.
+  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`. Every run is a job
+  row; the runner deletes jobs that finished more than 7 days ago at start
+  and then once an hour (`jobs/queue.ts`), so a panel that runs for months
+  holds about a week of them.
 - Alerts: `deps.alerts.raise({ event, key, title, message?, serviceId?,
   projectId?, nodeId?, link?, severity? })` (`modules/alerts/sink.ts`). One
   row per `key` ("<incident kind>:<subject>:<start>"); mutes and the

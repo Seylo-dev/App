@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { jobs } from "../src/db/schema";
-import { defineJob, retryDelayMs } from "../src/jobs/queue";
+import { defineJob, finishedPruneEveryMs, retryDelayMs } from "../src/jobs/queue";
 import { type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -62,4 +62,24 @@ test("a job type without a handler fails instead of retrying forever", async () 
   const id = panel.runner.enqueue("test.unknown", {}) as string;
   await panel.runner.runDue(panel.deps);
   expect(row(id)).toMatchObject({ status: "failed", lastError: "no handler registered for job type test.unknown" });
+});
+
+test("finished jobs are deleted a week after they finished, also while the panel keeps running", async () => {
+  panel.runner.register([defineJob({ type: "test.done", run: async () => {} })]);
+  const old = panel.runner.enqueue("test.done", {}) as string;
+  const recent = panel.runner.enqueue("test.done", {}, { dedupeKey: "recent" }) as string;
+  await panel.runner.runDue(panel.deps);
+  const waiting = panel.runner.enqueue("test.done", {}, { runAt: new Date(Date.now() + 365 * 86_400_000) }) as string;
+  // The first two finished; one of them eight days ago.
+  const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000);
+  panel.deps.db.update(jobs).set({ runAt: eightDaysAgo, finishedAt: eightDaysAgo }).where(eq(jobs.id, old)).run();
+  expect(row(old)?.status).toBe("succeeded");
+
+  // Within the hour nothing is deleted again; an hour later the old row goes.
+  await panel.runner.runDue(panel.deps, new Date(Date.now() + 60_000));
+  expect(row(old)).toBeDefined();
+  await panel.runner.runDue(panel.deps, new Date(Date.now() + finishedPruneEveryMs + 60_000));
+  expect(row(old)).toBeUndefined();
+  expect(row(recent)?.status).toBe("succeeded");
+  expect(row(waiting)?.status).toBe("queued");
 });
