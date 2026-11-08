@@ -37,6 +37,17 @@ type DockerContainer struct {
 	State  string            `json:"State"`
 	Status string            `json:"Status"`
 	Labels map[string]string `json:"Labels"`
+	// Ports are the ports a running container publishes on the host.
+	Ports []DockerPort `json:"Ports"`
+}
+
+// DockerPort is one entry of a container's Ports in GET /containers/json.
+type DockerPort struct {
+	// IP is the host address ("0.0.0.0", "::", "127.0.0.1").
+	IP          string `json:"IP"`
+	PrivatePort uint16 `json:"PrivatePort"`
+	PublicPort  uint16 `json:"PublicPort"`
+	Type        string `json:"Type"`
 }
 
 // Name is the container name without the leading slash.
