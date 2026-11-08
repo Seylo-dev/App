@@ -51,7 +51,7 @@ export function PanelDomainCard({ general }: { general: General }) {
   const access = useOp(settings.panelAccess, {});
   return (
     <SectionCard title={t("settings.general.domainCard.title")} description={t("settings.general.domainCard.description")}>
-      <DomainForm key={general.domain ?? ""} general={general} closed={access.data?.actual.ip === "closed"} />
+      <DomainForm key={general.domain ?? ""} general={general} access={access.data} />
       <QueryView query={access} skeleton={<AccessSkeleton />} className="flex flex-col gap-3">
         {(data) => <AccessControls access={data} domain={general.domain} />}
       </QueryView>
@@ -59,7 +59,27 @@ export function PanelDomainCard({ general }: { general: General }) {
   );
 }
 
-function DomainForm({ general, closed }: { general: General; closed: boolean }) {
+/**
+ * What changing the domain does to IP access, the way updateGeneral decides
+ * it: closed IP access reopens, unless it is set to stay closed; and while
+ * the domain is the only way in that works, keep-closed refuses the change.
+ */
+function domainChange(access: PanelAccess | undefined): "open" | "reopens" | "staysClosed" | "refused" {
+  if (access?.actual.ip !== "closed") return "open";
+  if (access.onFailure !== "stayClosed") return "reopens";
+  const domainWorks = access.privatePaths.some((path) => path.kind === "domain" && path.working);
+  const otherWorks = access.privatePaths.some((path) => path.kind !== "domain" && path.working);
+  return domainWorks && !otherWorks ? "refused" : "staysClosed";
+}
+
+const domainHints = {
+  open: "settings.general.domainHint",
+  reopens: "settings.general.domainCard.removeReopens",
+  staysClosed: "settings.general.domainCard.domainStaysClosed",
+  refused: "settings.general.domainCard.domainLocked",
+} as const;
+
+function DomainForm({ general, access }: { general: General; access: PanelAccess | undefined }) {
   const [domain, setDomain] = useState(general.domain ?? "");
   const save = useSettingsMutation(settings.updateGeneral, {
     invalidates: [settings.general, settings.panelAccess, settings.boot],
@@ -68,21 +88,17 @@ function DomainForm({ general, closed }: { general: General; closed: boolean }) 
   const trimmed = domain.trim().toLowerCase();
   const error = trimmed !== "" && !hostnamePattern.test(trimmed) ? t("settings.general.domainInvalid") : null;
   const dirty = (trimmed || null) !== general.domain;
+  const change = domainChange(access);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (error) return;
+    if (error || change === "refused") return;
     save.mutate({ domain: trimmed === "" ? null : trimmed });
   }
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <Field
-        label={t("settings.general.domain")}
-        hint={closed ? t("settings.general.domainCard.removeReopens") : t("settings.general.domainHint")}
-        error={error}
-        htmlFor="general-domain"
-      >
+      <Field label={t("settings.general.domain")} hint={t(domainHints[change])} error={error} htmlFor="general-domain">
         <div className="flex flex-wrap gap-2">
           <Input
             id="general-domain"
@@ -93,7 +109,7 @@ function DomainForm({ general, closed }: { general: General; closed: boolean }) 
             autoCapitalize="off"
             onChange={(e) => setDomain(e.target.value)}
           />
-          <Button type="submit" variant="primary" disabled={!dirty || save.isPending || !!error}>
+          <Button type="submit" variant="primary" disabled={!dirty || save.isPending || !!error || change === "refused"}>
             {save.isPending ? t("settings.saving") : t("settings.general.domainCard.saveDomain")}
           </Button>
         </div>
@@ -242,16 +258,11 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
             }
           />
         )}
+        {/* The IP list above only shows while Serve on IP address is on, so this one has every reason. */}
         {!serveOnIp && agentPortOpen && access.agentPortBlocked.length > 0 && (
-          <Blocks
-            title={t("settings.general.domainCard.agentPortBlockedTitle")}
-            // What blocks IP access is already listed above it.
-            blocks={access.agentPortBlocked.filter((b) => !access.blocked.some((ip) => ip.code === b.code && ip.message === b.message))}
-          />
+          <Blocks title={t("settings.general.domainCard.agentPortBlockedTitle")} blocks={access.agentPortBlocked} />
         )}
-        {access.actual.agentPort === "closed" && (
-          <p className="m-0 pb-3 text-[12.5px] text-muted-foreground">{t("settings.general.domainCard.agentPortClosedNow")}</p>
-        )}
+        <AgentPortState access={access} wantedOpen={agentPortOpen} />
       </div>
 
       <OnFailure
@@ -318,6 +329,26 @@ function Blocks({ title, blocks }: { title: string; blocks: readonly Block[] }) 
         ))}
       </ul>
     </Alert>
+  );
+}
+
+/** The agents' port as it runs: closed, or open although it is turned off (and why). */
+function AgentPortState({ access, wantedOpen }: { access: PanelAccess; wantedOpen: boolean }) {
+  if (access.actual.agentPort === "closed") {
+    return <p className="m-0 pb-3 text-[12.5px] text-muted-foreground">{t("settings.general.domainCard.agentPortClosedNow")}</p>;
+  }
+  if (wantedOpen || access.actual.agentPort !== "open") return null;
+  // It only closes with IP access, and only while every node connects over the domain.
+  const onAgentPort = access.agentPortBlocked.filter((block) => block.code === "nodesOnAgentPort");
+  if (access.actual.ip === "closed" && onAgentPort.length > 0) {
+    return <Blocks title={t("settings.general.domainCard.agentPortBlockedTitle")} blocks={onAgentPort} />;
+  }
+  return (
+    <p className="m-0 pb-3 text-[12.5px] text-muted-foreground">
+      {access.actual.ip === "closed"
+        ? t("settings.general.domainCard.agentPortOpenNow")
+        : t("settings.general.domainCard.agentPortOpenWithIp")}
+    </p>
   );
 }
 

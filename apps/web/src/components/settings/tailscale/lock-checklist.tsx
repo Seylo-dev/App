@@ -17,7 +17,7 @@ import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconCircleCheck, IconCircleDashed } from "@tabler/icons-react";
+import { IconArrowRight, IconCircleCheck, IconCircleDashed } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
@@ -28,15 +28,27 @@ import { commands, type TailscaleStatus } from "./shared";
 
 type PanelAccess = settings.PanelAccess;
 
-function Row({ ok, children }: { ok: boolean; children: ReactNode }) {
-  const Icon = ok ? IconCircleCheck : IconCircleDashed;
+/** A condition that has to be true (done or not yet), or something the lock will change. */
+type RowState = "done" | "notYet" | "changes";
+
+const rowIcons = { done: IconCircleCheck, notYet: IconCircleDashed, changes: IconArrowRight } as const;
+
+function Row({ state, children }: { state: RowState; children: ReactNode }) {
+  const Icon = rowIcons[state];
+  const done = state === "done";
   return (
     <li className="flex items-start gap-2 text-[13px]">
-      <Icon size={17} stroke={1.9} aria-hidden="true" className={cn("mt-px shrink-0", ok ? "text-status-ok" : "text-ink-faint")} />
-      <span className={cn("min-w-0 [overflow-wrap:anywhere]", ok ? "text-ink-strong" : "text-muted-foreground")}>{children}</span>
+      <Icon size={17} stroke={1.9} aria-hidden="true" className={cn("mt-px shrink-0", done ? "text-status-ok" : "text-ink-faint")} />
+      <span className={cn("min-w-0 [overflow-wrap:anywhere]", done ? "text-ink-strong" : "text-muted-foreground")}>
+        {/* The icon says it on screen; this says it to a screen reader. */}
+        <span className="sr-only">{t(`settingsTailscale.lock.rowStates.${state}`)} </span>
+        {children}
+      </span>
     </li>
   );
 }
+
+const condition = (ok: boolean): RowState => (ok ? "done" : "notYet");
 
 export function LockChecklist({ status }: { status: TailscaleStatus }) {
   const access = useOp(settings.panelAccess, {});
@@ -85,9 +97,17 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
   return (
     <>
       <ul aria-label={t("settingsTailscale.lock.title")} className="m-0 flex list-none flex-col gap-2 p-0">
-        <Row ok={running}>{t("settingsTailscale.lock.rows.running")}</Row>
-        <Row ok={serving}>{url ? t("settingsTailscale.lock.rows.serving", { url }) : t("settingsTailscale.lock.rows.servingOff")}</Row>
-        <Row ok={status.viaTailnet}>
+        <Row state={condition(running)}>
+          {running ? t("settingsTailscale.lock.rows.running") : t("settingsTailscale.lock.rows.notRunning")}
+        </Row>
+        <Row state={condition(serving)}>
+          {serving && url
+            ? t("settingsTailscale.lock.rows.serving", { url })
+            : url
+              ? t("settingsTailscale.lock.rows.notServing", { url })
+              : t("settingsTailscale.lock.rows.servingOff")}
+        </Row>
+        <Row state={condition(status.viaTailnet)}>
           {status.viaTailnet ? (
             t("settingsTailscale.lock.rows.onTailnet")
           ) : url ? (
@@ -101,8 +121,8 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
             t("settingsTailscale.lock.rows.notOnTailnetNoUrl")
           )}
         </Row>
-        <Row ok={false}>{t("settingsTailscale.lock.rows.serveOnIp", { port: access.panelPort })}</Row>
-        <Row ok={false}>
+        <Row state="changes">{t("settingsTailscale.lock.rows.serveOnIp", { port: access.panelPort })}</Row>
+        <Row state="changes">
           {access.agentPort === null
             ? t("settingsTailscale.lock.rows.agentPortOff")
             : onAgentPort
@@ -123,14 +143,15 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
             </label>
           </li>
         ) : (
-          <Row ok>{t("settingsTailscale.lock.rows.noDomain")}</Row>
+          <Row state="done">{t("settingsTailscale.lock.rows.noDomain")}</Row>
         )}
       </ul>
 
       <div className="flex flex-col gap-2">
         <h3 className="m-0 text-[13.5px] font-semibold">{t("settingsTailscale.lock.recoveryTitle")}</h3>
         <p className="m-0 text-[12.5px] text-muted-foreground">{t("settingsTailscale.lock.recoveryHint")}</p>
-        <CodeBlock title={t("settingsTailscale.lock.sshTunnel", { port: access.panelPort })} code={access.recovery.sshTunnel} tone="dark" />
+        {/* The tunnel's local end is always 3000 (settings.panelAccess), whatever port the panel has on the server. */}
+        <CodeBlock title={t("settingsTailscale.lock.sshTunnel")} code={access.recovery.sshTunnel} tone="dark" />
         <CodeBlock title={t("settingsTailscale.lock.reopenCli")} code={access.recovery.cli} tone="dark" />
         <CodeBlock title={t("settingsTailscale.lock.statusCli")} code={commands.status} tone="dark" />
         <div className="flex items-center gap-2">
@@ -179,18 +200,24 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
   );
 }
 
+const lockedTones = { closed: "green", unknown: "blue", open: "amber" } as const;
+
 function Locked({ access, domain }: { access: PanelAccess; domain: string | null }) {
+  // "unknown": the change still rolls out (or the panel node's agent has not reported since the restart).
+  const ip = access.actual.ip;
   return (
     <div className="flex flex-col items-start gap-2 text-[13px]">
       <div className="flex flex-wrap items-center gap-2">
-        <Chip tone={access.actual.ip === "closed" ? "green" : "amber"}>{t("settingsTailscale.lock.title")}</Chip>
+        <Chip tone={lockedTones[ip]}>{t("settingsTailscale.lock.title")}</Chip>
         <span className="text-ink-strong">
-          {access.actual.ip === "closed"
+          {ip === "closed"
             ? t("settingsTailscale.lock.locked", { domain: domain ? t("settingsTailscale.lock.lockedDomain", { domain }) : "" })
-            : t("settingsTailscale.lock.lockedOpen")}
+            : ip === "unknown"
+              ? t("settings.general.domainCard.restarting")
+              : t("settingsTailscale.lock.lockedOpen")}
         </span>
       </div>
-      {access.lastChange && access.actual.ip !== "closed" && <span className="text-muted-foreground">{access.lastChange.reason}</span>}
+      {access.lastChange && ip === "open" && <span className="text-muted-foreground">{access.lastChange.reason}</span>}
       <span className="text-muted-foreground">
         {t("settingsTailscale.lock.reopenHint")}{" "}
         <Link to="/settings/general" className="text-link hover:text-link-hover">

@@ -3,8 +3,11 @@
 // node's Shell tab with the command typed in) and the command to copy. Not
 // signed in: Sign in to Tailscale (the link opens in a new tab). Stopped
 // (signed in, `tailscale down`): the command that starts it on the server,
-// with no sign-in. Needs approval: the admin console. Running: the tailnet, the machine, key expiry,
-// HTTPS and MagicDNS, the warnings, and the access rule to paste.
+// with no sign-in. Needs approval: the admin console. Signed in but not on
+// the tailnet yet (Starting): Connecting. Running: the tailnet, the machine,
+// key expiry, HTTPS and MagicDNS, the warnings, and the access rule to
+// paste. While the agent is offline the card shows its last report, and the
+// buttons that need the agent are disabled.
 
 import { nodes, tailscale } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -22,7 +25,7 @@ import { t } from "../../../i18n/t";
 import { formatDate } from "../format";
 import { invalidateOps } from "../mutation";
 import { toastError } from "../op-state";
-import { adminConsole, commands, installShellSearch, isSignedOut, isStopped, type TailscaleStatus } from "./shared";
+import { adminConsole, commands, installShellSearch, isConnecting, isSignedOut, isStopped, type TailscaleStatus } from "./shared";
 
 const keyExpirySoonMs = 14 * 86_400_000;
 
@@ -82,6 +85,8 @@ function StatusBody({ status }: { status: TailscaleStatus }) {
         <Stopped />
       ) : isSignedOut(status) ? (
         <SignedOut status={status} />
+      ) : isConnecting(status) ? (
+        <Connecting />
       ) : (
         <Running status={status} />
       )}
@@ -132,7 +137,8 @@ function SignedOut({ status }: { status: TailscaleStatus }) {
         <span className="text-muted-foreground">{t("settingsTailscale.status.notSignedInHint")}</span>
       </div>
       {status.canManage ? (
-        <Button variant="primary" disabled={signIn.isPending} onClick={() => signIn.mutate({})}>
+        // The panel refuses it while the agent is offline (the alert above says so).
+        <Button variant="primary" disabled={signIn.isPending || !status.agentOnline} onClick={() => signIn.mutate({})}>
           {signIn.isPending ? t("settingsTailscale.status.signingIn") : t("settingsTailscale.status.signIn")}
         </Button>
       ) : (
@@ -161,6 +167,16 @@ function Stopped() {
         <span className="text-muted-foreground">{t("settingsTailscale.status.stoppedHint")}</span>
       </div>
       <CopyCode code={commands.signIn} />
+    </div>
+  );
+}
+
+/** Signed in, but tailscaled has not reached the tailnet yet (BackendState Starting). */
+function Connecting() {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[13px]">
+      <Chip tone="blue">{t("settingsTailscale.status.connecting")}</Chip>
+      <span className="text-muted-foreground">{t("settingsTailscale.status.connectingHint")}</span>
     </div>
   );
 }
@@ -233,7 +249,7 @@ function Running({ status }: { status: TailscaleStatus }) {
           tone="warning"
           action={
             status.canManage && (
-              <Button size="sm" disabled={setDns.isPending} onClick={() => setDns.mutate({ acceptDns: false })}>
+              <Button size="sm" disabled={setDns.isPending || !status.agentOnline} onClick={() => setDns.mutate({ acceptDns: false })}>
                 {t("settingsTailscale.status.turnOffDns")}
               </Button>
             )

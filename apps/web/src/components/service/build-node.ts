@@ -15,7 +15,8 @@ type BuildNode = Settings["nodes"][number];
 export function cantBuildNote(node: BuildNode): string | null {
   if (!node.canBuild) return t("serviceSource.build.cantBuild");
   if (!node.online) return t("serviceSource.build.offline");
-  if (!node.hasBuildx) return t("serviceSource.build.noBuildx");
+  // An older fixture or agent without the field counts as having it, as in the panel.
+  if (node.hasBuildx === false) return t("serviceSource.build.noBuildx");
   return null;
 }
 
@@ -30,7 +31,7 @@ export function buildNodeText(
   const chosen = data.settings.buildNodeId ? data.nodes.find((n) => n.id === data.settings.buildNodeId) : undefined;
   if (chosen) {
     // pickBuildNode refuses it, and the deploy stops with the same words.
-    if (!chosen.hasBuildx) return t("serviceDeploys.facts.chosenNoBuildx", { node: chosen.name });
+    if (chosen.hasBuildx === false) return t("serviceDeploys.facts.chosenNoBuildx", { node: chosen.name });
     return t("serviceDeploys.facts.buildsOn", { node: chosen.name });
   }
   const placed = service.placements.flatMap((p) => data.nodes.filter((n) => n.id === p.nodeId));

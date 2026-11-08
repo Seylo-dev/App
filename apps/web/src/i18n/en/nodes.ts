@@ -88,9 +88,10 @@ export default {
       "This pre-release panel's command runs the latest stable installer, which asks before it installs Docker and stops without a terminal. For a server without Docker, add --install-docker at the end.",
     buildImages: "Build images on this node",
     buildImagesHint:
-      "Builds get the source code and build-time secrets of the services they build. Untick for servers you do not fully trust.",
-    buildsOn: "The node that joins builds images.",
-    buildsOff: "The node that joins does not build images.",
+      "Builds get the source code and build-time secrets of the services they build. Untick for servers you do not fully trust. A node that joins again (--force) keeps its own Can build setting from the list above.",
+    buildsOn: "A new node that joins builds images. A node that joins again keeps its own Can build setting.",
+    buildsOff:
+      "A new node that joins does not build images. A node that joins again keeps its own Can build setting: turn it off in the list above.",
     changeBuild: "Change",
     used: "That command was already used, so it can't be changed. Set Can build for the node that ran it in the list above.",
     insecure:

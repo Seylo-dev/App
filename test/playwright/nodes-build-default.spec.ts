@@ -39,11 +39,13 @@ test.describe("Add node: build images by default", () => {
     const box = card.getByRole("checkbox", { name: "Build images on this node", exact: true });
     await expect(box).toBeChecked();
     await expect(box).toHaveAccessibleDescription(/Untick for servers you do not fully trust\./);
+    // A re-join (Nodes > Add node with --force on a known node) keeps the node's own value.
+    await expect(box).toHaveAccessibleDescription(/A node that joins again \(--force\) keeps its own Can build setting/);
     await expect(card.getByText("The command installs Docker when the server has none.")).toBeVisible();
 
     await card.getByRole("button", { name: "Create join command" }).click();
     await expect(card.getByText(/Single use · expires in/)).toBeVisible();
-    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins builds images.")).toBeVisible();
     await expect(box).toHaveCount(0);
     await page.screenshot({ path: `${shots}/ticked.png` });
     expect(sent["nodes.createJoinToken"]).toEqual([{ canBuild: true }]);
@@ -62,7 +64,8 @@ test.describe("Add node: build images by default", () => {
     await box.click();
     await expect(box).not.toBeChecked();
     await card.getByRole("button", { name: "Create join command" }).click();
-    await expect(card.getByText("The node that joins does not build images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins does not build images.")).toBeVisible();
+    await expect(card.getByText("A node that joins again keeps its own Can build setting: turn it off in the list above.")).toBeVisible();
     await page.screenshot({ path: `${shots}/unticked.png` });
     expect(sent["nodes.createJoinToken"]).toEqual([{ canBuild: false }]);
 
@@ -75,7 +78,7 @@ test.describe("Add node: build images by default", () => {
 
     await box.click();
     await card.getByRole("button", { name: "Create join command" }).click();
-    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins builds images.")).toBeVisible();
     expect(sent["nodes.createJoinToken"]).toEqual([{ canBuild: false }, { canBuild: true }]);
     expect(errors).toEqual([]);
   });
@@ -150,7 +153,7 @@ test.describe("Add node: build images by default", () => {
     await page.goto("/nodes");
     await page.getByRole("button", { name: "Add node", exact: true }).click();
     const card = page.getByRole("region", { name: "Add a node" });
-    await expect(card.getByText("The node that joins builds images.")).toBeVisible();
+    await expect(card.getByText("A new node that joins builds images.")).toBeVisible();
     expect(sent["nodes.createJoinToken"]).toEqual([{ canBuild: true }]);
   });
 });

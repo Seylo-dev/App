@@ -33,6 +33,17 @@ export function isStopped(status: Pick<TailscaleStatus, "backendState">): boolea
   return status.backendState === "Stopped";
 }
 
+/**
+ * Signed in, but not Running, Stopped or waiting for approval: tailscaled is
+ * still reaching the tailnet (Starting), which lasts while it cannot reach
+ * Tailscale's servers. Serve and Sign in both wait for it.
+ */
+export function isConnecting(status: Pick<TailscaleStatus, "backendState">): boolean {
+  return (
+    !isSignedOut(status) && !isStopped(status) && status.backendState !== "Running" && status.backendState !== "NeedsMachineAuth"
+  );
+}
+
 /** Why tailscale.setServe would refuse to turn Serve on, in the order the panel checks; null when it can. */
 export function serveBlockedReason(status: TailscaleStatus): tailscale.ServeBlockedReason | null {
   if (!status.agentOnline) return "offline";

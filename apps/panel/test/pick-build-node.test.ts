@@ -134,3 +134,37 @@ test("the build settings list says which nodes have no buildx, by the rule the p
   // The service runs on de-1, and the automatic pick goes elsewhere: the list shows why.
   expect(pickBuildNode(panel.deps, spec(), [without.nodeId]).id).not.toBe(without.nodeId);
 });
+
+test("the build settings say which nodes have buildx, and a build node that lost it since does not block other changes", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const pinned = await builder("de-1", installed);
+  const without = await builder("de-2", missing);
+  await builder("de-3");
+  const service = seedService(panel, { projectId: seedProject(panel).id, name: "web", nodeIds: [pinned.nodeId] });
+  const settings = await callOp(panel, builds.getSettings, { serviceId: service.id }, { cookie });
+  expect(settings.body.nodes.map((n: { name: string; hasBuildx: boolean }) => [n.name, n.hasBuildx])).toEqual([
+    ["de-1", true],
+    ["de-2", false],
+    ["de-3", true],
+  ]);
+
+  expect((await callOp(panel, builds.updateSettings, { serviceId: service.id, buildNodeId: pinned.nodeId }, { cookie })).status).toBe(200);
+  // buildx goes away on the pinned node.
+  pinned.event({ payload: { case: "nodeFacts", value: { hostname: "de-1", capabilities: allCapabilities, buildx: missing } } });
+  const deadline = Date.now() + 2000;
+  while (panel.deps.agents.state.get(pinned.nodeId)?.facts?.buildx?.installed !== false && Date.now() < deadline) await Bun.sleep(10);
+  expect(panel.deps.agents.state.get(pinned.nodeId)?.facts?.buildx?.installed).toBe(false);
+
+  // The same node with another change goes through; a new node without buildx still does not.
+  const kept = await callOp(
+    panel,
+    builds.updateSettings,
+    { serviceId: service.id, buildNodeId: pinned.nodeId, buildCommand: "bun run build" },
+    { cookie },
+  );
+  expect(kept.status).toBe(200);
+  expect(kept.body).toMatchObject({ buildNodeId: pinned.nodeId, buildCommand: "bun run build" });
+  const refused = await callOp(panel, builds.updateSettings, { serviceId: service.id, buildNodeId: without.nodeId }, { cookie });
+  expect(refused.status).toBe(400);
+  expect(refused.body.error.message).toBe("de-2 has no docker buildx. Install docker-buildx-plugin on it.");
+});

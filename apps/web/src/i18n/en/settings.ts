@@ -79,6 +79,9 @@ export default {
       checkedJustNow: "Checked just now",
       proxied: "Proxied by Cloudflare",
       removeReopens: "Removing or changing the domain reopens IP access at once, unless the tailnet keeps working.",
+      domainStaysClosed: "IP access stays closed when you remove or change the domain: it is set to stay closed.",
+      domainLocked:
+        'The domain is the only way in that works and IP access is set to stay closed, so it cannot change now. Switch "If the domain stops working" to Reopen IP access first.',
       youAreHere: "You are here",
       paths: "Ways in without IP:port",
       pathKinds: { domain: "Domain", tailnet: "Tailnet" },
@@ -97,6 +100,8 @@ export default {
       agentPortClosedNow: "The agents' port is closed: nodes reach the panel over the domain.",
       oldDocker:
         "The panel's server runs Docker {version}. Before Docker 28, machines on the same local network may still reach ports on 127.0.0.1. Update Docker from the panel node's page.",
+      agentPortOpenNow: "The agents' port is open right now, although it is turned off.",
+      agentPortOpenWithIp: "The agents' port is open right now: it only closes while IP access is closed.",
       reopenedNow: "IP access is open again: {reason}.",
       reclosesAt: "It closes again {when} if a private path keeps working.",
       lastChange: "Last change {when}: {reason}.",
