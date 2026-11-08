@@ -22,11 +22,24 @@ function trackErrors(page: Page): string[] {
   return errors;
 }
 
-/** The text of the dialog's .env editor (Monaco renders lines as divs). */
+/**
+ * The text of the dialog's .env editor. Monaco renders lines as divs. When
+ * its chunk failed to load, the editor is a plain textarea with the same
+ * text (code-editor.tsx): Chrome aborts in-flight requests with
+ * ERR_NETWORK_CHANGED when the host's network changes, even to 127.0.0.1, and
+ * a module that failed once stays failed for the page. This spec is about the
+ * form's contents, so it reads either; editor.spec.ts covers Monaco itself.
+ */
 async function envText(page: Page): Promise<string> {
-  const lines = page.getByRole("dialog").locator(".monaco-editor .view-line");
-  await expect(lines.first()).toBeVisible({ timeout: 15_000 });
-  return (await lines.allTextContents()).join("\n").replace(/ /g, " ");
+  const dialog = page.getByRole("dialog");
+  const lines = dialog.locator(".monaco-editor .view-line");
+  const fallback = dialog.locator('textarea[aria-label="Environment variables (.env)"]:not(.inputarea)');
+  await expect(lines.first().or(fallback)).toBeVisible({ timeout: 15_000 });
+  if (await fallback.isVisible()) {
+    test.info().annotations.push({ type: "warning", description: "Monaco did not load: read the fallback textarea" });
+    return fallback.inputValue();
+  }
+  return (await lines.allTextContents()).join("\n").replace(/\u00a0/g, " ");
 }
 
 test("search Docker Hub, pick an image and a tag, create it from the prefilled form", async ({ page }) => {
