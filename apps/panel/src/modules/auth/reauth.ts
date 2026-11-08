@@ -15,6 +15,7 @@ import { requireSession } from "../../auth/sign-in";
 import { passkeys, users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { verifyPassword } from "../../security/password";
+import { checkSecondFactorCode, codeMethod } from "./code-check";
 import { requireRp, verifyAssertion } from "./passkeys";
 
 export const reauthPasskeyBegin = implement(auth.reauthPasskeyBegin, async (_input, ctx) => {
@@ -43,7 +44,7 @@ function wrong(ctx: OpContext, userId: string, field: "password" | "code" | "pas
 }
 
 export const reauth = implement(auth.reauth, async (input, ctx) => {
-  const { userId, sessionId } = requireSession(ctx);
+  const { userId, sessionId, user: person } = requireSession(ctx);
   const given = [input.password !== undefined, input.code !== undefined, input.passkey !== undefined].filter(Boolean).length;
   if (given !== 1) throw new OpError("BAD_REQUEST", "Confirm with exactly one of: your password, a code or a passkey.");
   const key = userKey(userId, ctx.ip);
@@ -56,8 +57,11 @@ export const reauth = implement(auth.reauth, async (input, ctx) => {
       throw wrong(ctx, userId, "password", "The password is wrong.");
     }
   } else if (input.code !== undefined) {
-    if (!confirmedTotp(ctx.db, userId) || !checkAnySecondFactor(ctx.db, ctx.secrets, userId, input.code)) {
-      throw wrong(ctx, userId, "code", "That code is wrong.");
+    const code = input.code;
+    if (!confirmedTotp(ctx.db, userId)) throw wrong(ctx, userId, "code", "That code is wrong.");
+    // Counts toward the lock and the account's code brake itself.
+    if (!checkSecondFactorCode(ctx, person, codeMethod(code), () => checkAnySecondFactor(ctx.db, ctx.secrets, userId, code))) {
+      throw new OpError("BAD_REQUEST", "That code is wrong.", { field: "code" });
     }
   } else if (input.passkey) {
     const rp = requireRp(ctx.db);

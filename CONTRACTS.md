@@ -957,7 +957,21 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   panel), and the account gets one `security_change` alert per streak.
   Address groups that gave the right password for that email in the last
   30 days skip the brake, so a campaign does not keep the owner out
-  (`users.enable` clears the brake too). At most 4 password verifications
+  (`users.enable` clears the brake too). A second brake per account counts
+  wrong second-factor codes from every address (`auth.verifySecondFactor`,
+  `auth.reauth`, `auth.totpDisable`, `auth.regenerateRecoveryCodes`): from
+  the 10th within the forgiveness window, authenticator codes for the
+  account are checked at most once every 2.5 s, doubling with every further
+  10 wrong codes up to once a minute (the rest answer RATE_LIMITED with
+  `retryAfter` and spend no ticket attempt), with one `security_change`
+  alert ("many wrong authenticator codes") per streak. A right code does
+  not end the streak. Address groups where the account finished a sign-in
+  (both factors, or a passkey) in the last 30 days skip it; the right
+  password alone does not count, since a code guesser has it. Recovery
+  codes are not braked (50 bits each), so the owner always has a way in
+  from a new address; their failures still count (`codeThrottle` in
+  `src/auth/lockout.ts`, `modules/auth/code-check.ts`; `users.enable`
+  clears it). At most 4 password verifications
   (argon2id, about 64 MiB each) run at once, 32 wait, and the rest answer
   RATE_LIMITED (`src/security/password.ts` `verifyLimits`). Recovery codes are stored as HMACs (`secrets.sign(code,
   "recovery-code")`), not bare SHA-256: they carry only 50 bits.
@@ -978,7 +992,7 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   warning per failed sign-in (UNAUTHENTICATED from a public op, "sign-in
   failed"), FORBIDDEN ("op refused", re-auth refusals carry `reason:
   reauth`) and RATE_LIMITED ("op rate limited", locks carry `reason:
-  locked`, the per-email brake `accountBrake`), with `opId`, `ip`, `actor`
+  locked`, the per-email and per-account code brakes `accountBrake`), with `opId`, `ip`, `actor`
   (the person when known), `transport` and `code`, never input. A rejected
   agent hello logs `remoteIp` with its reason and node id.
 - Setup link: the installer writes a `<slug>_setup_...` token to

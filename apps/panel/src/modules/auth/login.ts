@@ -20,6 +20,7 @@ import { users } from "../../db/schema";
 import { implement } from "../../ops/implement";
 import { verifyPassword } from "../../security/password";
 import { raiseSecurityChange } from "../alerts/security";
+import { checkSecondFactorCode } from "./code-check";
 
 const wrongCredentials = () => new OpError("UNAUTHENTICATED", "The email or password is wrong.");
 
@@ -74,15 +75,16 @@ export const verifySecondFactor = implement(auth.verifySecondFactor, (input, ctx
     throw expired();
   }
   ctx.auditAs?.(user);
-  const lockKey = userKey(user.id, ctx.ip);
-  assertNotLocked(ctx.db, lockKey);
 
-  const ok =
+  // Behind the per-address lock and the per-account brake: a known password
+  // buys a fresh ticket from every address, so the ticket's own attempts
+  // bound nothing on their own. A refused check spends no attempt.
+  const ok = checkSecondFactorCode(ctx, user, input.method, () =>
     input.method === "totp"
       ? checkTotpCode(ctx.db, ctx.secrets, user.id, input.code.trim())
-      : useRecoveryCode(ctx.db, ctx.secrets, user.id, input.code);
+      : useRecoveryCode(ctx.db, ctx.secrets, user.id, input.code),
+  );
   if (!ok) {
-    recordFailure(ctx.db, lockKey);
     const left = failChallenge(ctx.db, challenge);
     throw new OpError("UNAUTHENTICATED", left > 0 ? "That code is wrong." : "Too many wrong codes. Sign in again.", {
       attemptsLeft: String(left),
