@@ -28,7 +28,7 @@ function SettingsLayout() {
         {settingsNav.map((item) => (
           <NavLink key={item.to} item={item} />
         ))}
-        <GroupLabel className="md:mt-3">{t("settings.accountGroup")}</GroupLabel>
+        <GroupLabel className="md:mt-5">{t("settings.accountGroup")}</GroupLabel>
         {accountNav.map((item) => (
           <NavLink key={item.to} item={item} />
         ))}
@@ -40,8 +40,19 @@ function SettingsLayout() {
   );
 }
 
+// A heading over a group of links, styled so it cannot pass for one of them
+// (it looked like a nav item that does nothing): small caps, faint, no hover.
 function GroupLabel({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <span className={cn("hidden px-2.5 pt-1 pb-2 text-xs font-medium text-muted-foreground md:block", className)}>{children}</span>;
+  return (
+    <span
+      className={cn(
+        "hidden cursor-default select-none px-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-faint md:block",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
 }
 
 function NavLink({ item }: { item: SettingsNavItem }) {
