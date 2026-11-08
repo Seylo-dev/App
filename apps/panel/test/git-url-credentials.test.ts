@@ -95,7 +95,8 @@ test("a source saved with a token before the rule is shown without it", async ()
 describe("a Box repository URL", () => {
   test("with a user name or token is refused by boxes.create and never stored or audited", async () => {
     const member = await createUser(panel, "member");
-    grant(panel, member.user.id, "project", projectId, ["services.create", "services.view"]);
+    // A Box starts right away, so creating one also needs services.deploy (create-rights.ts).
+    grant(panel, member.user.id, "project", projectId, ["services.create", "services.deploy", "services.view"]);
     const refused = await call(panel, boxOps.create, { projectId, name: "dev", nodeId, repository: withToken }, { cookie: member.cookie });
     expect(refused.status).toBe(400);
     expect(refused.body.error?.details?.field).toBe("repository");
