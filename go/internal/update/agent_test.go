@@ -301,10 +301,12 @@ func TestAgentUpdateRefusals(t *testing.T) {
 	t.Run("busy", func(t *testing.T) {
 		f := newAgentFixture(t, "1.2.0")
 		lock := &Lock{}
-		release, _ := lock.TryAcquire("panel update")
+		release, _ := lock.TryAcquire(holdPanelUpdate)
 		defer release()
-		u, _ := NewAgentUpdater(AgentOptions{DataDir: f.dataDir, Executable: f.exe, CurrentVersion: "1.1.0", PublicKey: f.key.publicText(t), System: f.system}, lock)
-		if err := u.Update(ctx, f.request(testManifest("1.2.0", f.binary, f.server.URL))); !errors.Is(err, ErrBusy) {
+		u, _ := NewAgentUpdater(AgentOptions{DataDir: f.dataDir, Executable: f.exe, CurrentVersion: "1.1.0", PublicKey: f.key.publicText(t),
+			System: f.system, BusyWait: 30 * time.Millisecond}, lock)
+		err := u.Update(ctx, f.request(testManifest("1.2.0", f.binary, f.server.URL)))
+		if !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "(panel update)") {
 			t.Fatalf("err = %v", err)
 		}
 	})

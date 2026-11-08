@@ -3,7 +3,6 @@ package update
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os/exec"
 	"time"
@@ -70,9 +69,9 @@ func (s *Service) Reboot(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		delay = DefaultRebootDelay
 	}
-	release, ok := s.Lock.TryAcquire("reboot")
+	release, ok := s.Lock.TryAcquire(holdReboot)
 	if !ok {
-		return fmt.Errorf("%w (%s)", ErrBusy, s.Lock.Holder())
+		return busy(s.Lock.Holder())
 	}
 	logger := s.Logger
 	if logger == nil {

@@ -234,13 +234,20 @@ func wireNode(reg *Registry, d *Deps) error {
 				d.Logger.Error("confirming the agent update", "err", err)
 			}
 			// On the panel node the reconnect usually happens while the panel
-			// swap still holds the update lock: wait for it instead of giving up.
-			for range autoUpdateBusyTries {
+			// swap still holds the update lock; the update waits for a swap by
+			// itself (AgentOptions.BusyWait). Another update, or a swap that
+			// takes longer, is tried again for a while instead of giving up.
+			until := time.Now().Add(autoUpdateBusyFor)
+			for {
 				err := svc.Agent.CheckOnConnect(ctx, info.PanelVersion, autoUpdateEnabled(d.Feed.Settings()))
 				if !errors.Is(err, update.ErrBusy) {
 					if err != nil {
 						d.Logger.Warn("automatic agent update failed", "err", err)
 					}
+					return
+				}
+				if time.Now().After(until) {
+					d.Logger.Warn("automatic agent update skipped: the node stayed busy", "err", err, "waited", autoUpdateBusyFor)
 					return
 				}
 				select {
@@ -403,10 +410,11 @@ func nodeChecks(d *Deps) []nodecheck.Check {
 	return nodecheck.Default(env)
 }
 
-// How long an automatic update on connect waits for a busy update lock.
+// How long an automatic update on connect keeps trying while the update
+// lock is busy, and the pause between tries.
 const (
-	autoUpdateBusyTries = 40
-	autoUpdateBusyWait  = 15 * time.Second
+	autoUpdateBusyFor  = 10 * time.Minute
+	autoUpdateBusyWait = 15 * time.Second
 )
 
 // autoUpdateEnabled reads the panel's auto-update switch; missing means off.

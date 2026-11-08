@@ -116,7 +116,24 @@ type AgentOptions struct {
 	Unverified func() int
 	// RolloutWait bounds that wait. Default DefaultRolloutWait.
 	RolloutWait time.Duration
+	// BusyWait is how long an update waits for a panel swap on this node
+	// to release the update lock before it answers busy. Default
+	// DefaultBusyWait.
+	BusyWait time.Duration
 }
+
+// DefaultBusyWait covers the end of a panel swap. On the panel node the
+// panel's update run sends UpdateAgent as soon as the new panel answers,
+// while the swap still holds the lock for the health check and its report
+// (usually a second or less). Answering busy right away left the agent
+// step of that run waiting for a version that never came.
+const DefaultBusyWait = time.Minute
+
+// busyReserve is the part of a call's deadline the wait for the lock
+// leaves to the download and checks, so a panel that gives UpdateAgent
+// the default 30-second deadline (0.2.0) gets the busy answer in time
+// instead of a timeout.
+const busyReserve = 30 * time.Second
 
 // DefaultRolloutWait is how long an update waits for deploys to be
 // verified before it restarts the agent anyway: the default health check
@@ -187,6 +204,9 @@ func NewAgentUpdater(opts AgentOptions, lock *Lock) (*AgentUpdater, error) {
 	if opts.RolloutWait <= 0 {
 		opts.RolloutWait = DefaultRolloutWait
 	}
+	if opts.BusyWait <= 0 {
+		opts.BusyWait = DefaultBusyWait
+	}
 	if lock == nil {
 		lock = &Lock{}
 	}
@@ -216,6 +236,10 @@ func (u *AgentUpdater) path(name string) string {
 // request (req.automatic) first checks the waits of automatic updates and
 // returns a *WaitError, reporting nothing, while one applies.
 //
+// A panel swap holding the node's update lock is waited for (BusyWait,
+// within ctx's deadline less busyReserve); any other holder answers ErrBusy
+// at once.
+//
 // While a deploy on the node is unverified (AgentOptions.Unverified),
 // Update returns once the download is checked, and the swap, the guard
 // and the restart follow in the background when no deploy is left
@@ -227,9 +251,9 @@ func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentReque
 			return err
 		}
 	}
-	release, ok := u.lock.TryAcquire("agent update")
+	release, holder, ok := u.lock.AcquireWithin(ctx, holdAgentUpdate, u.busyWait(ctx), panelSwapHolds)
 	if !ok {
-		return fmt.Errorf("%w (%s)", ErrBusy, u.lock.Holder())
+		return busy(holder)
 	}
 	started := u.opts.Now()
 	m, staged, err := u.stage(ctx, req)
@@ -251,6 +275,16 @@ func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentReque
 		return nil
 	}
 	return u.swapAndRestart(ctx, req, m, staged, started, release, false)
+}
+
+// busyWait is how long Update may wait for a panel swap: BusyWait, and
+// never into the last busyReserve of the call's deadline.
+func (u *AgentUpdater) busyWait(ctx context.Context) time.Duration {
+	wait := u.opts.BusyWait
+	if dl, ok := ctx.Deadline(); ok {
+		wait = min(wait, time.Until(dl)-busyReserve)
+	}
+	return wait
 }
 
 // swapAndRestart installs the staged binary and schedules the restart
