@@ -25,4 +25,9 @@ test("both Monaco loaders take the curated contributions, not every one Monaco h
   ]) {
     expect(imports.filter((path) => path.includes(left))).toEqual([]);
   }
+  // register.all had these and the compose, Dockerfile, notes and file editors used them:
+  // clickable URLs and Ctrl+G. They are a few kB, so they stay.
+  for (const kept of ["monaco-editor/features/links/register", "monaco-editor/features/gotoLine/register"]) {
+    expect(imports, kept).toContain(kept);
+  }
 });

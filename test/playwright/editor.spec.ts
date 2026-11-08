@@ -2,7 +2,8 @@
 // apps/web/src/components/service/editor/monaco-features.ts. This checks
 // the env editor still has what people use there: the reference hover,
 // completions, find, the context menu, line comments and the problem
-// markers' navigation, on the demo data.
+// markers' navigation, that the other editors keep URL links and Ctrl+G,
+// and the CSS editor's color swatches, on the demo data.
 
 import { expect, test } from "@playwright/test";
 import { ids } from "./demo/fixtures";
@@ -55,6 +56,37 @@ test("the env editor keeps hover, completions, find, the context menu and commen
   await line("QUEUE_CONCURRENCY").click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: /^Copy/ })).toBeVisible();
   await page.keyboard.press("Escape");
+
+  expect(errors).toEqual([]);
+});
+
+test("the notes editor underlines URLs and goes to a line with Ctrl+G", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await installDemo(page);
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/notes`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  const editor = page.locator(".monaco-editor").first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  const line = (text: string) => editor.locator(".view-line", { hasText: text });
+  await expect(line("Runbook")).toBeVisible();
+
+  // The links contribution: the editor worker finds the URL and Monaco underlines it (Ctrl+click opens it).
+  await line("cache:stats").click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- Status: https://status.example.com/acme");
+  await expect(line("status.example.com").locator(".detected-link")).toHaveCount(1);
+
+  // Go to line: Ctrl+G opens the quick input with the line prompt, and Enter moves the cursor there.
+  await page.keyboard.press("Control+g");
+  const quick = page.locator(".quick-input-widget");
+  await expect(quick).toBeVisible();
+  await page.keyboard.type("1");
+  await page.keyboard.press("Enter");
+  await expect(quick).toBeHidden();
+  await page.keyboard.type("x");
+  await expect(editor.locator(".view-line").first()).toContainText("x## Runbook");
 
   expect(errors).toEqual([]);
 });

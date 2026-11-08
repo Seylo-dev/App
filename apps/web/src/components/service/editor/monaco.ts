@@ -1,7 +1,7 @@
 // Monaco, loaded on demand (it is large) with only what our editors use:
-// the core editor, the contributions in monaco-features.ts (hover,
-// suggest, quick fixes, find and the editing basics), the editor worker and
-// a few languages. No language servers, so no TypeScript or JSON workers.
+// the core editor, the contributions in monaco-features.ts (hover, suggest,
+// quick fixes, find, links, go to line and the editing basics), the editor
+// worker and a few languages. No language servers, so no TypeScript or JSON workers.
 // Import this module only through loadMonaco() so it lands in its own chunk.
 
 import * as monaco from "monaco-editor/editor/editor.api";
