@@ -4,11 +4,11 @@
 // update: durable agent events and crash reports (also capped per node, so
 // one node cannot fill the disk; agent-hub/report-budget.ts bounds a day of
 // them as they arrive), webhook deliveries,
-// notification deliveries, resolved alerts and the build and deploy output
+// notification deliveries, alerts and the build and deploy output
 // of old deployments. Deployments themselves stay (they are the history and
 // the rollback targets); only their log lines go.
 
-import { and, desc, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { reportLaneSql } from "../../agent-hub/report-budget";
 import type { PanelDb } from "../../db/client";
 import {
@@ -43,6 +43,12 @@ export const retention = {
   rejectedDeliveriesMs: day,
   notificationDeliveriesMs: 30 * day,
   resolvedAlertsMs: 180 * day,
+  /**
+   * Alerts nothing resolves go this long after they were raised: deploys,
+   * builds, backups, cleanups and updates are events, not incidents, and an
+   * incident can stay open (a crash nothing followed up).
+   */
+  unresolvedAlertsMs: 180 * day,
   deploymentLogsMs: 30 * day,
   /** The newest deployments of a service keep their logs, whatever their age. */
   deploymentLogsKeep: 20,
@@ -108,6 +114,9 @@ export function pruneTables(db: PanelDb, now = Date.now()): void {
     .run();
   db.delete(alerts)
     .where(and(isNotNull(alerts.resolvedAt), lt(alerts.resolvedAt, before(retention.resolvedAlertsMs))))
+    .run();
+  db.delete(alerts)
+    .where(and(isNull(alerts.resolvedAt), lt(alerts.createdAt, before(retention.unresolvedAlertsMs))))
     .run();
 
   // Log lines of old deployments, except each service's newest ones and the one it runs.

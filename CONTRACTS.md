@@ -231,8 +231,10 @@ Summary; the full rules are in `proto/README.md` and the comments of
   newest agent reports of each report lane up to its budget (75,000 and
   32 MiB; 10,000 and 8 MiB for backup, cleanup and update results) and
   32 MiB of crash reports, webhook deliveries 30 days
-  (rejected ones 1 day), notification deliveries 30 days, resolved alerts
-  180 days, deploy log lines of failed/cancelled/superseded deployments
+  (rejected ones 1 day), notification deliveries 30 days, alerts 180 days
+  after they were resolved, or after they were raised when nothing resolved
+  them (deploy, build, backup, cleanup and update results are events, not
+  incidents), deploy log lines of failed/cancelled/superseded deployments
   after 30 days (newest 20 per service and the live one keep theirs); a
   service keeps its two newest source uploads.
 - Proto changes are add-only within v1 (`proto/README.md`).
@@ -1126,7 +1128,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   row per `key` ("<incident kind>:<subject>:<start>"); mutes and the
   notification rules decide who is told; delivery is a retried job per
   channel. `deps.alerts.resolve(keyPrefix, recovered?)` closes the incident
-  and can record the good news (feed only). Agent events (deploy/build
+  and can record the good news (feed only); it and `isOpen(keyPrefix)`
+  match keys as a range on the unique `event_key` index. Agent events (deploy/build
   results, health, backups, node alerts, updates, crashes via
   `agents.onCrash`, node offline after a 60 s grace) become alerts in
   `modules/alerts/events.ts`.
