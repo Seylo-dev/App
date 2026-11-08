@@ -98,7 +98,7 @@ const createJoinToken = implement(nodeOps.createJoinToken, (_input, ctx) => {
   return {
     tokenId: row.id,
     token,
-    // The installer of this panel's own release, so the node gets the agent of this version.
+    // The install host's verified installer, pinned to this panel's release with --version (join-command.ts).
     command: joinCommand(ctx.config.version, target.url, token, target.pin, target.insecureTransport),
     expiresAt: expiresAt.toISOString(),
     insecureTransport: target.insecureTransport,
