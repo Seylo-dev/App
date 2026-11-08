@@ -64,8 +64,10 @@ export interface CopyFieldProps {
 
 /**
  * A read-only value that copies itself when clicked, or with Enter or Space
- * on the keyboard (install commands, connection URLs, API keys). The whole
- * field is the button, so one click copies; the text stays selectable.
+ * on the keyboard (install commands, connection URLs, API keys). A click
+ * anywhere on the field copies, the copy icon included (it used to be
+ * decoration, so clicking it did nothing); only the eye button of a secret
+ * does something else. The text stays selectable.
  * Focus alone never copies: tabbing across a page must not put its secrets
  * on the clipboard. Keyboard focus on the value rings the whole field, the
  * same 2px ring the kit's :focus-visible draws around a button.
@@ -78,10 +80,16 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
   const dark = tone === "terminal";
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the value button inside is the keyboard path; its click bubbles here.
+    // biome-ignore lint/a11y/noStaticElementInteractions: same: the field only widens the value button's click area.
     <div
       data-slot="copy-field"
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("[data-slot=copy-field-reveal]")) return;
+        void copy(value);
+      }}
       className={cn(
-        "group relative flex h-[38px] min-w-0 items-center gap-1 rounded-control pr-1 pl-3 text-[13px]",
+        "group relative flex h-[38px] min-w-0 cursor-pointer items-center gap-1 rounded-control pr-1 pl-3 text-[13px]",
         "has-[[data-slot=copy-field-value]:focus-visible]:outline-2 has-[[data-slot=copy-field-value]:focus-visible]:outline-offset-2 has-[[data-slot=copy-field-value]:focus-visible]:outline-ring",
         dark ? "bg-terminal text-terminal-foreground" : "bg-field text-foreground shadow-[inset_0_0_0_1px_var(--input)]",
         className,
@@ -92,7 +100,6 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
         type="button"
         data-slot="copy-field-value"
         aria-label={rest["aria-label"] ? `${labels.copy}: ${rest["aria-label"]}` : labels.copy}
-        onClick={() => void copy(value)}
         className={cn(
           "min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent p-0 text-left text-inherit outline-none select-text",
           mono && "font-mono text-[12.5px]",
@@ -103,6 +110,7 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
       {secret && (
         <button
           type="button"
+          data-slot="copy-field-reveal"
           aria-label={revealed ? labels.hide : labels.show}
           aria-pressed={revealed}
           onClick={() => setRevealed((r) => !r)}

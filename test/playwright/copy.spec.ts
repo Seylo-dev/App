@@ -41,6 +41,27 @@ test.describe("copy", () => {
     expect(await clipboard(page)).toBe("clickhouse://ch_k3v9q2m8x1:Wd4nB8sKq1Pz7Hv2@events:9000/events");
   });
 
+  // The copy icon at the end of the field was decoration with no click
+  // handler, so clicking it (the obvious target) copied nothing; only the
+  // text did. The eye button of a secret still only shows or hides it.
+  test("clicking the copy icon copies; the eye button does not", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(`/p/${ids.acme}/s/${svc.clickhouse}/connection`);
+    const internal = page.getByRole("region", { name: "Internal connection" });
+    const url = internal.getByRole("button", { name: "Copy: Connection URL" });
+    const field = url.locator('xpath=ancestor::*[@data-slot="copy-field"][1]');
+    await expect(url).toBeVisible();
+
+    await setClipboard(page, "what was there before");
+    await field.getByRole("button", { name: "Show" }).click();
+    await page.waitForTimeout(300);
+    expect(await clipboard(page)).toBe("what was there before");
+
+    await field.locator("[aria-live=polite]").click();
+    await expect(field.getByText("Copied")).toBeVisible();
+    expect(await clipboard(page)).toBe("clickhouse://ch_k3v9q2m8x1:Wd4nB8sKq1Pz7Hv2@events:9000/events");
+  });
+
   test("keyboard focus on a copy field shows where focus is", async ({ page }) => {
     await installDemo(page);
     await page.goto(`/p/${ids.acme}/s/${svc.clickhouse}/connection`);
