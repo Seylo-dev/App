@@ -156,6 +156,56 @@ func TestObserveFilesOverRPC(t *testing.T) {
 	}
 }
 
+// TestObserveFilesKeepServiceFoldersPrivate: the file manager can be the
+// first to touch a service on a node (a stopped clone never deployed here,
+// a first deploy that failed before reconcile made the folder). The folders
+// it creates are private like reconcile's: services/ and services/<id>/
+// 0700, the volume folder 0755. They used to come out 0755, so a local
+// account could read what was uploaded until the next agent restart.
+func TestObserveFilesKeepServiceFoldersPrivate(t *testing.T) {
+	d, reg := observeTestDeps(t)
+	panel := rpctest.NewPeer(t, reg)
+	ctx := context.Background()
+	services := d.Layout.ServicesDir()
+	if _, err := os.Lstat(services); err == nil {
+		t.Fatal("services/ exists before the file manager touched a volume")
+	}
+	for _, root := range []*agentv1.FsRoot{{ServiceId: "svc1", Volume: "data"}, {ServiceId: "svc1", Volume: "shared"}} {
+		var list agentv1.FsListResponse
+		if err := panel.Call(ctx, "FsList", &agentv1.FsListRequest{Root: root, Path: "/"}, &list); err != nil {
+			t.Fatalf("list %s/%s: %v", root.GetServiceId(), root.GetVolume(), err)
+		}
+	}
+	data, _ := d.Layout.ServiceVolume("svc1", "data")
+	shared, _ := d.Layout.ServiceVolume("svc2", "shared")
+	for _, dir := range []string{services, filepath.Join(services, "svc1"), filepath.Join(services, "svc2")} {
+		st, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o700 {
+			t.Errorf("%s is %v after the file manager made it, want 0700", dir, st.Mode().Perm())
+		}
+	}
+	for _, dir := range []string{data, shared} {
+		st, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o755 {
+			t.Errorf("volume folder %s is %v, want 0755", dir, st.Mode().Perm())
+		}
+	}
+	// An unknown volume creates nothing.
+	err := panel.Call(ctx, "FsList", &agentv1.FsListRequest{Root: &agentv1.FsRoot{ServiceId: "ghost", Volume: "data"}}, &agentv1.FsListResponse{})
+	if code(err) != agentv1.StatusCode_STATUS_CODE_NOT_FOUND {
+		t.Fatalf("unknown service = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(services, "ghost")); err == nil {
+		t.Fatal("an unknown service got a folder")
+	}
+}
+
 func TestObserveLogsOverRPC(t *testing.T) {
 	d, reg := observeTestDeps(t)
 	panel := rpctest.NewPeer(t, reg)

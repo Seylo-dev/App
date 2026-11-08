@@ -46,7 +46,11 @@ func provideObserve(d *Deps) error {
 }
 
 // resolveVolume finds a volume in the desired state; the folder belongs to
-// the volume's owner service (compose members share one).
+// the volume's owner service (compose members share one). A folder that is
+// not there yet (a stopped clone never deployed here, a first deploy that
+// failed before reconcile made it) is created through MakeServiceVolume,
+// so services/ and services/<owner>/ are private to root like the ones
+// reconcile makes.
 func resolveVolume(d *Deps, root *agentv1.FsRoot) (string, error) {
 	svc := desiredService(d, root.GetServiceId())
 	for _, v := range svc.GetVolumes() {
@@ -57,7 +61,7 @@ func resolveVolume(d *Deps, root *agentv1.FsRoot) (string, error) {
 		if owner == "" {
 			owner = svc.GetId()
 		}
-		return d.Layout.ServiceVolume(owner, v.GetName())
+		return d.Layout.MakeServiceVolume(owner, v.GetName())
 	}
 	return "", fs.ErrUnknownVolume
 }

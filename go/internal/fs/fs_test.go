@@ -531,3 +531,27 @@ func TestNewEntriesNeverRootOwned(t *testing.T) {
 		t.Errorf("replaced rootfile is owned by %d, want it kept", uid)
 	}
 }
+
+// TestVolumeRootsOpenMakesNoFolders: Open never creates the volume folder
+// or its parents. It used to MkdirAll them 0755, which made services/ and
+// services/<id>/ open to every local account when the file manager was
+// the first to touch a service (a stopped clone never deployed on the
+// node); creating them is Resolve's job (datadir.MakeServiceVolume).
+func TestVolumeRootsOpenMakesNoFolders(t *testing.T) {
+	base := t.TempDir()
+	services := filepath.Join(base, "services")
+	vol := filepath.Join(services, "clone0000000001", "volumes", "data")
+	roots := VolumeRoots{Resolve: func(*agentv1.FsRoot) (string, error) { return vol, nil }}
+	f, err := roots.Open(&agentv1.FsRoot{ServiceId: "clone0000000001", Volume: "data"})
+	if err == nil {
+		f.Close()
+		t.Fatal("Open of a missing volume folder succeeded")
+	}
+	if !errors.Is(err, iofs.ErrNotExist) {
+		t.Fatalf("Open of a missing volume folder = %v, want not exist", err)
+	}
+	if _, err := os.Lstat(services); !errors.Is(err, iofs.ErrNotExist) {
+		st, _ := os.Lstat(services)
+		t.Fatalf("Open created %s (%v)", services, st.Mode().Perm())
+	}
+}
