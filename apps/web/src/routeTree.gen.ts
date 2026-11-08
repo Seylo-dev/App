@@ -36,6 +36,7 @@ import { Route as AppSettingsMaintenanceRouteImport } from "./routes/_app/settin
 import { Route as AppSettingsNotificationsRouteImport } from "./routes/_app/settings/notifications"
 import { Route as AppSettingsPeopleRouteImport } from "./routes/_app/settings/people"
 import { Route as AppSettingsSecurityRouteImport } from "./routes/_app/settings/security"
+import { Route as AppSettingsTailscaleRouteImport } from "./routes/_app/settings/tailscale"
 import { Route as AppSettingsTelemetryRouteImport } from "./routes/_app/settings/telemetry"
 import { Route as AppSettingsUpdatesRouteImport } from "./routes/_app/settings/updates"
 import { Route as AppPProjectIdIndexRouteImport } from "./routes/_app/p/$projectId/index"
@@ -194,6 +195,11 @@ const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   path: "/security",
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsTailscaleRoute = AppSettingsTailscaleRouteImport.update({
+  id: "/tailscale",
+  path: "/tailscale",
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsTelemetryRoute = AppSettingsTelemetryRouteImport.update({
   id: "/telemetry",
   path: "/telemetry",
@@ -349,6 +355,7 @@ export interface FileRoutesByFullPath {
   "/settings/notifications": typeof AppSettingsNotificationsRoute
   "/settings/people": typeof AppSettingsPeopleRoute
   "/settings/security": typeof AppSettingsSecurityRoute
+  "/settings/tailscale": typeof AppSettingsTailscaleRoute
   "/settings/telemetry": typeof AppSettingsTelemetryRoute
   "/settings/updates": typeof AppSettingsUpdatesRoute
   "/settings/": typeof AppSettingsIndexRoute
@@ -398,6 +405,7 @@ export interface FileRoutesByTo {
   "/settings/notifications": typeof AppSettingsNotificationsRoute
   "/settings/people": typeof AppSettingsPeopleRoute
   "/settings/security": typeof AppSettingsSecurityRoute
+  "/settings/tailscale": typeof AppSettingsTailscaleRoute
   "/settings/telemetry": typeof AppSettingsTelemetryRoute
   "/settings/updates": typeof AppSettingsUpdatesRoute
   "/settings": typeof AppSettingsIndexRoute
@@ -449,6 +457,7 @@ export interface FileRoutesById {
   "/_app/settings/notifications": typeof AppSettingsNotificationsRoute
   "/_app/settings/people": typeof AppSettingsPeopleRoute
   "/_app/settings/security": typeof AppSettingsSecurityRoute
+  "/_app/settings/tailscale": typeof AppSettingsTailscaleRoute
   "/_app/settings/telemetry": typeof AppSettingsTelemetryRoute
   "/_app/settings/updates": typeof AppSettingsUpdatesRoute
   "/_app/settings/": typeof AppSettingsIndexRoute
@@ -501,6 +510,7 @@ export interface FileRouteTypes {
     | "/settings/notifications"
     | "/settings/people"
     | "/settings/security"
+    | "/settings/tailscale"
     | "/settings/telemetry"
     | "/settings/updates"
     | "/settings/"
@@ -550,6 +560,7 @@ export interface FileRouteTypes {
     | "/settings/notifications"
     | "/settings/people"
     | "/settings/security"
+    | "/settings/tailscale"
     | "/settings/telemetry"
     | "/settings/updates"
     | "/settings"
@@ -600,6 +611,7 @@ export interface FileRouteTypes {
     | "/_app/settings/notifications"
     | "/_app/settings/people"
     | "/_app/settings/security"
+    | "/_app/settings/tailscale"
     | "/_app/settings/telemetry"
     | "/_app/settings/updates"
     | "/_app/settings/"
@@ -826,6 +838,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    "/_app/settings/tailscale": {
+      id: "/_app/settings/tailscale"
+      path: "/tailscale"
+      fullPath: "/settings/tailscale"
+      preLoaderRoute: typeof AppSettingsTailscaleRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     "/_app/settings/telemetry": {
       id: "/_app/settings/telemetry"
       path: "/telemetry"
@@ -997,6 +1016,7 @@ interface AppSettingsRouteChildren {
   AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
   AppSettingsPeopleRoute: typeof AppSettingsPeopleRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
+  AppSettingsTailscaleRoute: typeof AppSettingsTailscaleRoute
   AppSettingsTelemetryRoute: typeof AppSettingsTelemetryRoute
   AppSettingsUpdatesRoute: typeof AppSettingsUpdatesRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
@@ -1016,6 +1036,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
   AppSettingsPeopleRoute: AppSettingsPeopleRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
+  AppSettingsTailscaleRoute: AppSettingsTailscaleRoute,
   AppSettingsTelemetryRoute: AppSettingsTelemetryRoute,
   AppSettingsUpdatesRoute: AppSettingsUpdatesRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,

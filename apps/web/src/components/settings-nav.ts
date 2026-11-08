@@ -17,6 +17,7 @@ export const settingsNav = [
   { to: "/settings/github", label: "settings.sections.github" },
   { to: "/settings/git-providers", label: "settings.sections.gitProviders" },
   { to: "/settings/cloudflare", label: "settings.sections.cloudflare" },
+  { to: "/settings/tailscale", label: "settingsTailscale.nav" },
   { to: "/settings/notifications", label: "settings.sections.notifications" },
   { to: "/settings/backups", label: "settings.sections.backups" },
   { to: "/settings/cleanup", label: "settings.sections.cleanup" },

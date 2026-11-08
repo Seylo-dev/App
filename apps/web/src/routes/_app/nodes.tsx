@@ -9,6 +9,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { AddNodeCard, type AddNodeHandle } from "../../components/nodes/add-node";
 import { NodeSheet, type NodeView } from "../../components/nodes/node-sheet";
+import { isShellPrefill, type ShellPrefill } from "../../components/nodes/node-shell";
 import { NodeTable } from "../../components/nodes/node-table";
 import { UpdatesBanner } from "../../components/nodes/updates-banner";
 import { PageHeader } from "../../components/page-header";
@@ -20,6 +21,8 @@ interface NodesSearch {
   node?: string;
   view?: NodeView;
   add?: boolean;
+  /** The Shell view types this command in, from a fixed list (node-shell.tsx). */
+  prefill?: ShellPrefill;
 }
 
 export const Route = createFileRoute("/_app/nodes")({
@@ -27,6 +30,7 @@ export const Route = createFileRoute("/_app/nodes")({
     node: typeof search.node === "string" && /^[a-z0-9]{16}$/.test(search.node) ? search.node : undefined,
     view: views.includes(search.view as NodeView) ? (search.view as NodeView) : undefined,
     add: search.add === true || search.add === "true" ? true : undefined,
+    prefill: isShellPrefill(search.prefill) ? search.prefill : undefined,
   }),
   component: NodesPage,
 });

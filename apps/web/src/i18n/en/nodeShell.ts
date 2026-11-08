@@ -29,4 +29,9 @@ export default {
   confirmHint:
     "Anyone with the owner or admin role can then run any command as root on this server, after confirming it is them. The agent refuses shells again as soon as you turn this off.",
   loading: "Loading the host shell state",
+  prefillTitle: "Install Tailscale",
+  prefillHint: "The shell opens with this command typed in. Check it, then press Enter to run it.",
+  prefillTyped: "The command is typed in the shell below. Check it, then press Enter to run it.",
+  prefillOff: "Allow host shells to type it into a shell here, or run it over SSH:",
+  prefillCommand: "Install command",
 } as const;
