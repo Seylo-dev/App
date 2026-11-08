@@ -1169,6 +1169,14 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   with backoff, it is not a sign-out). One socket follows at most 200 topics
   (`maxTopicsPerSocket`); a subscribe past that answers an `error`
   BAD_REQUEST for the topic.
+- Text frames on every panel socket (live, terminals, the host shell,
+  agents) are checked before Elysia JSON.parses them
+  (`src/http/ws-guard.ts`, the `websocket` option of both listeners in
+  `main.ts`): Bun takes frames up to 16 MiB, which agents need for binary
+  frames, so a text frame over 16 KiB closes the socket with 1009, and each
+  socket gets 256 KiB of text, then 64 KiB a second; frames past that are
+  dropped unread. Browsers send only small JSON text (subscribe, resize),
+  terminal input is binary and agents send binary frames only.
 - MCP: `POST /mcp` (Streamable HTTP, stateless JSON replies, protocol
   2025-03-26 to 2025-11-25), MCP tokens only (`api_keys.kind = "mcp"`).
   OAuth: `/.well-known/oauth-authorization-server`,

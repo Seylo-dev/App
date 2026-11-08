@@ -3,13 +3,14 @@
 
 import { eq } from "drizzle-orm";
 import { deployments, joinTokens, projects, servicePlacements, services } from "../src/db/schema";
+import { panelWebsocket } from "../src/http/ws-guard";
 import { flusherFor } from "../src/modules/nodes/index";
 import { hashToken } from "../src/security/tokens";
 import { allCapabilities, FakeAgent, type FakeAgentOptions } from "./fake-agent";
 import type { TestPanel } from "./helpers";
 
 export function listen(panel: TestPanel): string {
-  panel.app.listen({ hostname: "127.0.0.1", port: 0 });
+  panel.app.listen({ hostname: "127.0.0.1", port: 0, websocket: panelWebsocket });
   return `http://127.0.0.1:${panel.app.server?.port}`;
 }
 
