@@ -352,9 +352,12 @@ test("a failed close puts the switch back on and holds; a failed reopen records 
   const stuck = readIpAccessApplied(panel.deps);
   expect(stuck.closed).toBe(true);
   expect(stuck.reason).toContain("did not start with the port open");
-  // Held for a while, then it tries again.
+  // Held for a while from when the failure came in (its own clock, a few ms after `now`), then it tries again.
+  const holdUntil = stuck.holdUntil ?? 0;
+  expect(holdUntil).toBeGreaterThanOrEqual(now + failedRollHoldMs);
   expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: now + 60_000 }).closed).toBe(true);
-  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: now + failedRollHoldMs + 1 }).closed).toBe(false);
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: holdUntil - 1 }).closed).toBe(true);
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check", { now: holdUntil }).closed).toBe(false);
 });
 
 test("a change that follows the switches names who set them, also when it applies later", () => {
