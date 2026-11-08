@@ -9,7 +9,6 @@ export default {
   saved: "Saved.",
   save: "Save",
   saving: "Saving",
-  loading: "Loading",
   cancel: "Cancel",
   close: "Close",
   edit: "Edit",

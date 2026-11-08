@@ -112,6 +112,23 @@ test.describe("database engines", () => {
     await page.screenshot({ path: `${shots}/clickhouse-connection.png`, fullPage: true });
   });
 
+  test("short values are never cut off at desktop width", async ({ page }) => {
+    /** Elements whose text is wider than their box (cut off with an ellipsis or clipped). */
+    const cutOff = (selector: string) =>
+      page.locator(selector).evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
+    await installDemo(page);
+    await page.goto(connection(svc.clickhouse));
+    const internal = page.getByRole("region", { name: "Internal connection" });
+    // The generated user name is 13 characters of 13px mono in a tile of about 118px.
+    await expect(internal.getByText("ch_k3v9q2m8x1", { exact: true })).toBeVisible();
+    expect(await cutOff('section[aria-label="Internal connection"] .grid > div > span:last-child')).toEqual([]);
+
+    // KeyValue grids: the Box repository on its overview.
+    await page.goto(`/p/${ids.acme}/s/${svc.box}`);
+    await expect(page.locator("main dd").filter({ hasText: "https://github.com/acme/shop-api" })).toBeVisible();
+    expect(await cutOff("main dd")).toEqual([]);
+  });
+
   test("KeyDB asks for allowed IPs before it is exposed", async ({ page }) => {
     let exposure: Record<string, unknown> | null = null;
     const keydb = () => ({

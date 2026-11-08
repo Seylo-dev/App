@@ -3,31 +3,42 @@ import { Select as SelectPrimitive } from "radix-ui";
 import type * as React from "react";
 import { popperMotion } from "../lib/overlay-motion";
 import { cn } from "../lib/utils";
+import { SkeletonText } from "./skeleton";
 
 export const Select = SelectPrimitive.Root;
 export const SelectGroup = SelectPrimitive.Group;
 export const SelectValue = SelectPrimitive.Value;
 
-/** Looks like Input: 38px, white, hairline border. size="sm" for toolbars. */
+/**
+ * Looks like Input: 38px, white, hairline border. size="sm" for toolbars.
+ * `loading` while the options are on their way: a skeleton line stands in
+ * for the value (never a "Loading" placeholder) and the trigger stays shut.
+ */
 export function SelectTrigger({
   className,
   children,
   size = "default",
+  loading = false,
+  disabled,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Trigger> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<typeof SelectPrimitive.Trigger> & { size?: "default" | "sm"; loading?: boolean }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
+      aria-busy={loading || undefined}
+      disabled={disabled || loading}
       className={cn(
         "flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-control border border-input bg-card px-3 text-left text-[13.5px] text-foreground outline-none transition-interactive",
         "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[placeholder]:text-ink-ghost",
         "[&>span]:truncate",
         size === "sm" ? "h-8 text-[12.5px]" : "h-[38px]",
+        // A loading trigger is shut, not unavailable: no faded look.
+        loading && "disabled:cursor-progress disabled:opacity-100",
         className,
       )}
       {...props}
     >
-      {children}
+      {loading ? <SkeletonText className="w-28" /> : children}
       <SelectPrimitive.Icon asChild>
         <IconChevronDown size={15} className="shrink-0 text-ink-faint" />
       </SelectPrimitive.Icon>

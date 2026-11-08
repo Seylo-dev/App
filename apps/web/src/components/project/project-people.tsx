@@ -155,8 +155,8 @@ export function ShareDialog({
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="share-user">{t("project.people.person")}</Label>
               <Select value={userId} onValueChange={setUserId} disabled={members.length === 0}>
-                <SelectTrigger id="share-user">
-                  <SelectValue placeholder={people.isPending ? t("common.loading") : t("project.people.noMembers")} />
+                <SelectTrigger id="share-user" loading={people.isPending}>
+                  <SelectValue placeholder={t("project.people.noMembers")} />
                 </SelectTrigger>
                 <SelectContent>
                   {members.map((user) => (

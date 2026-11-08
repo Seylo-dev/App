@@ -9,6 +9,7 @@ export default {
   rootDirHint: "Folder inside the repository to build. Empty is the root.",
   deployOnPush: "Deploy on push",
   deployOnPushHint: "Every push to this branch deploys the service.",
+  noBranches: "No branches yet",
   types: {
     github: { name: "GitHub", hint: "A repository through the panel's GitHub App" },
     gitlab: { name: "GitLab", hint: "gitlab.com or your own GitLab, through a connection" },

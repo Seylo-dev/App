@@ -48,16 +48,16 @@ i18n section. Without the provider each label shows its own key.
 | `chip` | `Chip` tinted labels, `StatusDot` | tones blue, sky, red, violet, gray, green, amber, track |
 | `alert` | `Alert` / `Callout` info, success, warning, danger, neutral | optional title and action |
 | `empty-state` | `EmptyState` icon, title, description, action | `compact` inside tables |
-| `key-value` | `KeyValue` rows or grid of label and value | `mono` values |
+| `key-value` | `KeyValue` rows or grid of label and value | `mono` values; long values wrap, never an ellipsis |
 | `stat-tile` | `StatTile` label, value, unit, delta, sparkline | `bare` inside another card |
 | `data-table` | `DataTable` sortable columns, empty state, skeleton rows, row-actions menu, row click | client-side sort (`lib/sort`), `minWidth` scrolls sideways |
 | `input`, `textarea` | `Input`, `Label`, `Textarea` (`mono`) | |
-| `select` | `Select`, `SelectTrigger` (size sm), `SelectContent`, `SelectItem`, ... | looks like `Input` |
+| `select` | `Select`, `SelectTrigger` (size sm, `loading`), `SelectContent`, `SelectItem`, ... | looks like `Input`; `loading` shows a skeleton line until the options are in, never a "Loading" placeholder |
 | `switch`, `checkbox`, `radio-group` | `Switch` (size sm), `Checkbox` (indeterminate), `RadioGroup`, `RadioGroupItem`, `RadioCard` | `RadioCard` for big choices (builders, plans) |
 | `segmented` | `Segmented`, `SegmentedItem` | single-choice track (ranges, views) |
 | `tabs` | `TabList`, `tabClassName` | underlined route tabs |
-| `copy-field` | `CopyField` copies on click or focus; `secret` masks with an eye toggle; `copyText`, `useCopy` | works on plain HTTP too |
-| `code-block` | `CodeBlock` light or dark, title, copy | no syntax colors (Monaco edits) |
+| `copy-field` | `CopyField` copies on click (or Enter/Space), never on focus alone; `secret` masks with an eye toggle; `copyText`, `useCopy` | works on plain HTTP too |
+| `code-block` | `CodeBlock` light or dark, title, copy, `wrap`; `CopyCode` an inline code chip that wraps, with a copy button | no syntax colors (Monaco edits); every command shown gets one of the two |
 | `dropdown-menu` | `DropdownMenu*` items, checkbox/radio items, labels, separators, sub menus | `destructive` items |
 | `popover`, `tooltip` | `Popover*`; `Tooltip*` and the `Tip` shorthand | |
 | `dialog`, `sheet` | `Dialog*`; `Sheet*` right, left or bottom with header, body, footer | |

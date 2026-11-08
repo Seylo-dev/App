@@ -13,7 +13,9 @@ import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
+import { CodeBlock } from "@seylo/ui/components/code-block";
 import { Input, Label } from "@seylo/ui/components/input";
+import { EnterOnChange } from "@seylo/ui/components/motion";
 import { SegmentPill } from "@seylo/ui/components/segmented";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
@@ -129,7 +131,10 @@ function SetupPage() {
           </li>
         ))}
       </ol>
-      {body}
+      {/* Each step fades in as the one before it is done, like a tab's screen. */}
+      <EnterOnChange motionKey={finishing ? "finish" : (step ?? "")} className="flex w-full flex-col items-center">
+        {body}
+      </EnterOnChange>
     </AuthFrame>
   );
 }
@@ -539,7 +544,8 @@ function SkipOnly({ onSkip }: { onSkip: () => void }) {
 function BadLink() {
   return (
     <Panel label={t("setup.badLinkTitle")} className="w-full max-w-[560px] flex-none">
-      <Heading title={t("setup.badLinkTitle")} hint={t("setup.badLinkHint", { command: `${slug} panel setup-link` })} />
+      <Heading title={t("setup.badLinkTitle")} hint={t("setup.badLinkHint")} />
+      <CodeBlock code={`${slug} panel setup-link`} tone="dark" wrap />
     </Panel>
   );
 }

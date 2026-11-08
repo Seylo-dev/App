@@ -258,9 +258,9 @@ function BranchSelect({
   const branches = useOp(github.branches, { projectId, installationId, repo }, { retry: retryOp });
   const list = branches.data?.branches ?? (value ? [value] : []);
   return (
-    <Select value={value ?? undefined} onValueChange={onChange} disabled={branches.isPending && !value}>
-      <SelectTrigger aria-label={t("serviceSource.github.branch")} className="font-mono">
-        <SelectValue placeholder={branches.isError ? t("service.notBuilt.title") : t("service.loading")} />
+    <Select value={value ?? undefined} onValueChange={onChange} disabled={list.length === 0}>
+      <SelectTrigger aria-label={t("serviceSource.github.branch")} className="font-mono" loading={branches.isPending && !value}>
+        <SelectValue placeholder={branches.isError ? t("service.notBuilt.title") : t("serviceSource.noBranches")} />
       </SelectTrigger>
       <SelectContent>
         {list.map((b) => (

@@ -67,8 +67,8 @@ export function ScopePicker({
             setServiceId(wholeProject);
           }}
         >
-          <SelectTrigger aria-label={t("settingsPeople.grants.project")}>
-            <SelectValue placeholder={projectList.isPending ? t("common.loading") : t("settingsPeople.grants.pickProject")} />
+          <SelectTrigger aria-label={t("settingsPeople.grants.project")} loading={projectList.isPending}>
+            <SelectValue placeholder={t("settingsPeople.grants.pickProject")} />
           </SelectTrigger>
           <SelectContent>
             {projectList.data?.projects.map((p) => (

@@ -3,14 +3,15 @@
 // service's kind. Tabs render even when services.get fails, so a screen
 // whose own ops work is still reachable.
 
-import { projects, services } from "@seylo/ops";
+import { projects } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { SkeletonText } from "@seylo/ui/components/skeleton";
 import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
 import { createFileRoute, Link, Outlet, useChildMatches, useRouterState } from "@tanstack/react-router";
 import { DataCopyNote } from "../../../../../components/service/copy/data-copy-note";
-import { OpErrorNote, retryOp } from "../../../../../components/service/op-state";
+import { OpErrorNote } from "../../../../../components/service/op-state";
+import { ParentCrumb } from "../../../../../components/service/parent-crumb";
 import { ServiceHeader } from "../../../../../components/service/service-header";
 import { ServiceHeaderSkeleton, UsageStripSkeleton } from "../../../../../components/service/service-skeletons";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
@@ -79,19 +80,6 @@ function ServiceLayout() {
       <EnterOnChange motionKey={tabMatch} subtle className="flex min-w-0 flex-1 flex-col gap-5">
         <Outlet />
       </EnterOnChange>
-    </>
-  );
-}
-
-/** Compose members show their stack in the breadcrumb. */
-function ParentCrumb({ projectId, parentId }: { projectId: string; parentId: string }) {
-  const parent = useOp(services.get, { serviceId: parentId }, { retry: retryOp });
-  return (
-    <>
-      <span aria-hidden="true">/</span>
-      <Link to="/p/$projectId/s/$serviceId" params={{ projectId, serviceId: parentId }} className="text-muted-foreground">
-        {parent.data?.name ?? parentId}
-      </Link>
     </>
   );
 }

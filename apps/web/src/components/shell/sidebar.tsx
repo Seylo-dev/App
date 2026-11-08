@@ -12,6 +12,7 @@ import { useOp } from "@seylo/ops/react";
 import { Chip } from "@seylo/ui/components/chip";
 import { Kbd } from "@seylo/ui/components/kbd";
 import { ActiveIndicator } from "@seylo/ui/components/motion";
+import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconMenu2, IconSearch, IconX } from "@tabler/icons-react";
 import { Link, useRouterState } from "@tanstack/react-router";
@@ -53,10 +54,13 @@ export function Sidebar() {
       <div className="flex items-center gap-2.5 px-1.5 py-0.5">
         <BrandMark />
         <span className="text-base font-semibold tracking-[-0.015em]">{info.data?.name ?? displayName}</span>
-        {info.data && (
+        {info.data ? (
           <Chip tone="blue" mono className="ml-auto px-[7px] py-0.5 text-[11px]">
             {info.data.version === "dev" ? "dev" : `v${info.data.version}`}
           </Chip>
+        ) : (
+          // The version chip's own size, so the brand row does not move when it arrives.
+          info.isPending && <Skeleton className="ml-auto h-5 w-[52px] rounded-chip" />
         )}
         <button
           type="button"
@@ -66,7 +70,7 @@ export function Sidebar() {
           onClick={() => setMenuOpen((open) => !open)}
           className={cn(
             "flex cursor-pointer rounded-control border-0 bg-transparent p-1.5 text-ink-strong hover:bg-muted md:hidden",
-            !info.data && "ml-auto",
+            !info.data && !info.isPending && "ml-auto",
           )}
         >
           {menuOpen ? <IconX size={19} stroke={1.8} /> : <IconMenu2 size={19} stroke={1.8} />}
@@ -116,7 +120,7 @@ export function Sidebar() {
         <ProjectsTree />
 
         <div className="flex-1" />
-        <NodesCard online={info.data?.nodes.online} total={info.data?.nodes.total} />
+        <NodesCard online={info.data?.nodes.online} total={info.data?.nodes.total} loading={info.isPending} />
         <UserRow />
       </div>
     </m.nav>

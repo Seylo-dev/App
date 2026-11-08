@@ -23,8 +23,8 @@ export function NodePicker({ id, value, onChange }: { id: string; value: string;
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
   return (
     <Select value={value} onValueChange={onChange} disabled={options.length === 0}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={list.isPending ? t("common.loading") : t("pickers.noNodes")} />
+      <SelectTrigger id={id} loading={list.isPending}>
+        <SelectValue placeholder={t("pickers.noNodes")} />
       </SelectTrigger>
       <SelectContent>
         {options.map((node) => (
@@ -64,8 +64,8 @@ export function ProjectPicker({
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
   return (
     <Select value={value} onValueChange={onChange} disabled={options.length === 0}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder={list.isPending ? t("common.loading") : t("pickers.noProjects")} />
+      <SelectTrigger id={id} loading={list.isPending}>
+        <SelectValue placeholder={t("pickers.noProjects")} />
       </SelectTrigger>
       <SelectContent>
         {options.map((project) => (

@@ -6,6 +6,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { hostShellStatus, ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
+import { ids as svc } from "./demo/service";
 import { stateFile } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
@@ -181,6 +182,66 @@ test.describe("loading placeholders", () => {
       expectClose(cell.x, before[i]?.x ?? Number.NaN, `th ${i} x`, 5);
       expectClose(cell.width, before[i]?.width ?? Number.NaN, `th ${i} width`, 5);
     });
+  });
+
+  test("notifications: a placeholder channel card is as tall as a channel card", async ({ page }) => {
+    await slowDemo(page, 1500, (opId) => opId === "notifications.channels");
+    await page.goto("/settings/notifications");
+    const channels = page.getByRole("region", { name: "Channels" });
+    const card = channels.locator('[data-slot="card"]').first();
+    await expect(card).toBeVisible();
+    // Read at once, while the answer is held back. Before: one blank card pulsing on its own (animate-pulse), 8px short of a real one.
+    expect(await channels.locator(".animate-pulse").count()).toBe(0);
+    await expect(channels.getByRole("status")).toHaveAttribute("aria-busy", "true");
+    await expect(card.locator('[data-slot="skeleton"]').first()).toBeVisible();
+    const before = await box(card);
+    await expect(channels.getByText("Ops Discord")).toBeVisible({ timeout: 15_000 });
+    expectClose((await box(card)).height, before.height, "channel card height");
+  });
+
+  test("the shell and the dashboard show placeholders, not made-up numbers, until they know", async ({ page }) => {
+    await slowDemo(page, 2500);
+    await page.goto("/");
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+    const nodesCard = sidebar.getByRole("link", { name: "Nodes and updates" });
+    const header = page.locator('[data-slot="page-header"]');
+    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    // Read at once, while the answers are held back. Before: "0 nodes online", "not available yet" and "0 projects".
+    expect(await nodesCard.textContent()).not.toMatch(/0 nodes online|not available yet/);
+    expect(await header.textContent()).not.toContain("0 projects");
+    await expect(nodesCard).toHaveAttribute("aria-busy", "true");
+    await expect(nodesCard.locator('[data-slot="skeleton"]')).toHaveCount(3);
+    await expect(header.locator('[data-slot="skeleton"]')).toHaveCount(1);
+    // The version chip's place next to the brand is held while system.info loads.
+    const brandRow = sidebar.locator("div").first();
+    const placeholder = await box(brandRow.locator('[data-slot="skeleton"]'));
+
+    await expect(nodesCard).toContainText("3 nodes online", { timeout: 15_000 });
+    await expect(nodesCard).not.toHaveAttribute("aria-busy");
+    await expect(header).toContainText(/3 nodes · \d+ services/, { timeout: 15_000 });
+    const chip = await box(brandRow.locator('[data-slot="chip"]'));
+    expectClose(chip.height, placeholder.height, "version chip height");
+    expectClose(chip.x + chip.width, placeholder.x + placeholder.width, "version chip right edge");
+  });
+
+  test("pickers and the overview's Domains show placeholders, not the word Loading", async ({ page }) => {
+    await slowDemo(page, 1500, (opId) => opId === "nodes.list" || opId === "domains.list");
+    await page.goto("/settings/cleanup");
+    const picker = page.getByRole("combobox", { name: "Node" });
+    await expect(picker).toBeVisible();
+    // Read at once, while nodes.list is held back.
+    expect(await picker.textContent()).not.toContain("Loading");
+    await expect(picker).toHaveAttribute("aria-busy", "true");
+    await expect(picker.locator('[data-slot="skeleton"]')).toBeVisible();
+    await expect(picker).toContainText(/de-fsn-1|Pick a node/, { timeout: 15_000 });
+    await expect(picker).not.toHaveAttribute("aria-busy");
+
+    await page.goto(`/p/${ids.acme}/s/${svc.api}`);
+    const domainsCard = page.locator('[data-slot="card"]').filter({ has: page.getByRole("heading", { name: "Domains", exact: true }) });
+    await expect(domainsCard).toBeVisible();
+    expect(await domainsCard.textContent()).not.toContain("Loading");
+    await expect(domainsCard.getByRole("status")).toHaveAttribute("aria-busy", "true");
+    await expect(domainsCard.locator("li").first()).toBeVisible({ timeout: 15_000 });
   });
 
   test("a checkbox that is checked when the screen opens does not animate", async ({ page }) => {
