@@ -4,7 +4,7 @@
 
 import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconInfoCircle, IconX } from "@tabler/icons-react";
 import { AnimatePresence, m, useReducedMotionConfig } from "motion/react";
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type ToastItem, type ToastStore, type ToastTone, toastStore } from "../lib/toast-store";
 import { useUiLabels } from "./labels";
 
@@ -22,6 +22,8 @@ export function Toaster({ store = toastStore }: { store?: ToastStore }) {
   const items = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [paused, setPaused] = useState(false);
   const labels = useUiLabels();
+  // One function for every render: a card restarts its timer when onDismiss changes.
+  const dismiss = useCallback((id: string) => store.dismiss(id), [store]);
   return (
     <section
       aria-label={labels.notifications}
@@ -32,7 +34,7 @@ export function Toaster({ store = toastStore }: { store?: ToastStore }) {
     >
       <AnimatePresence initial={false}>
         {items.map((item) => (
-          <ToastCard key={item.id} item={item} paused={paused} onDismiss={() => store.dismiss(item.id)} dismissLabel={labels.dismiss} />
+          <ToastCard key={item.id} item={item} paused={paused} onDismiss={dismiss} dismissLabel={labels.dismiss} />
         ))}
       </AnimatePresence>
     </section>
@@ -47,22 +49,24 @@ function ToastCard({
 }: {
   item: ToastItem;
   paused: boolean;
-  onDismiss: () => void;
+  onDismiss: (id: string) => void;
   dismissLabel: string;
 }) {
-  // Remaining time survives pauses; a replaced toast (same id, new createdAt) starts over.
-  const [remaining, setRemaining] = useState(item.duration);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: createdAt changes when the toast is replaced, which restarts the timer.
-  useEffect(() => setRemaining(item.duration), [item.duration, item.createdAt]);
+  // The time left survives pauses. A ref, not state: the timer's cleanup
+  // writes it, and as state it re-ran this effect from its own cleanup, a
+  // render loop for as long as each render took a millisecond or more.
+  const left = useRef({ createdAt: item.createdAt, ms: item.duration });
   useEffect(() => {
+    // A replaced toast (same id, new createdAt) starts over.
+    if (left.current.createdAt !== item.createdAt) left.current = { createdAt: item.createdAt, ms: item.duration };
     if (paused || item.duration === 0) return;
     const started = Date.now();
-    const timer = setTimeout(onDismiss, remaining);
+    const timer = setTimeout(() => onDismiss(item.id), left.current.ms);
     return () => {
       clearTimeout(timer);
-      setRemaining((r) => Math.max(0, r - (Date.now() - started)));
+      left.current.ms = Math.max(0, left.current.ms - (Date.now() - started));
     };
-  }, [paused, remaining, item.duration, onDismiss]);
+  }, [paused, item.id, item.createdAt, item.duration, onDismiss]);
   const reduced = useReducedMotionConfig();
 
   // Rises in from the bottom, fades and shrinks away; the rest of the stack slides into place (layout).
@@ -86,7 +90,7 @@ function ToastCard({
           type="button"
           onClick={() => {
             item.action?.onClick();
-            onDismiss();
+            onDismiss(item.id);
           }}
           className="h-7 shrink-0 cursor-pointer rounded-chip border-0 bg-muted px-2.5 text-[12.5px] font-medium text-foreground transition-interactive hover:bg-track"
         >
@@ -96,7 +100,7 @@ function ToastCard({
       <button
         type="button"
         aria-label={dismissLabel}
-        onClick={onDismiss}
+        onClick={() => onDismiss(item.id)}
         className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent text-ink-faint transition-interactive hover:bg-muted hover:text-foreground"
       >
         <IconX size={13} stroke={2.2} />
