@@ -2172,7 +2172,12 @@ default 3000, `--user 61000:61000` with the `seylo.user` label), waits for
 `panel_url: http://127.0.0.1:<port>` and the join token, then prints
 `http://<ip>:<port>/setup?t=<setup token>` (`<ip>`: the IPv4 route's
 source, else the IPv6 route's in brackets, else a public interface
-address; `<server-ip>` with a hint only when there is none). A new panel
+address; `<server-ip>` with a hint only when there is none). With
+`--link-file <path>` (the installer passes it when `panel bootstrap --help`
+lists it, so an older agent still prints) it writes the link and its notes
+there instead (0600: the link on the first line, then the address note and
+the plain-HTTP note, one per line), and the installer shows them in the
+block that ends its run. A new panel
 install, and a re-run of the panel installer on a node that has a panel
 folder, warn when an account on the server has uid or gid 61000
 (`getent`); the agent warns on every node after that (see "Docker resources").
@@ -2196,6 +2201,17 @@ another program holds 80 or 443 (named from `ss -ltnp`) unless `--force`,
 and when the panel port is taken; our own containers (a Traefik or panel
 left by an earlier install) and Wings' Traefik on a Wings server pass, and
 joins only warn.
+Output: a one-line banner (product, release, what the run does), `==>` step
+headers, and a closing block (new panel: the setup link on its own line,
+how long it works, the next step; join: connected or not and what to check;
+re-runs: status commands). Off a terminal (logs, pipes, CI) it is plain
+ASCII with every sentence on one line; on a terminal success lines get a
+check mark and the block box lines (ASCII ones on the Linux console,
+`TERM=linux`) with text wrapped at 72 columns, and colors come on top unless
+`TERM=dumb` or `NO_COLOR` is set. Line based, no spinners or cursor
+movement. A run that fails after the panel started (so before its closing
+block) prints the setup link on exit. `INSTALLER_TEST_COLOR=1` acts as a
+terminal (installer/test/run.sh).
 
 Docker preflight: the installer refuses snap Docker (root dir under
 `/var/snap` or the binary under `/snap`), a Docker without a

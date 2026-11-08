@@ -116,6 +116,10 @@ type bootstrapOptions struct {
 	// published on the same host port); 0 leaves it off.
 	AgentTLSPort int
 	Timeout      time.Duration
+	// LinkFile, when set, gets the setup link and the notes that go with
+	// it (see writeSetupLinkFile) instead of the output: the installer
+	// shows them in the block that ends its run.
+	LinkFile string
 	// healthBase replaces http://127.0.0.1:<port> in tests.
 	healthBase string
 	http       *http.Client
@@ -137,6 +141,8 @@ func newPanelBootstrapCommand(d *deps) *cobra.Command {
 	cmd.Flags().IntVar(&opts.AgentTLSPort, "agent-tls-port", DefaultAgentTLSPort,
 		"host port where other nodes' agents reach the panel over TLS with a pinned key until it has a domain (0: off, agents join over plain HTTP)")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 3*time.Minute, "how long to wait for the panel to answer")
+	cmd.Flags().StringVar(&opts.LinkFile, "link-file", "",
+		"write the setup link and its notes to this file (mode 0600) instead of printing them; the installer shows them")
 	return cmd
 }
 
@@ -299,14 +305,48 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 		return fmt.Errorf("joining the local panel: %w", err)
 	}
 	ip := outboundIP()
+	if opts.LinkFile != "" {
+		return writeSetupLinkFile(opts.LinkFile, panelBase(ip, opts.Port), setupToken, ip)
+	}
 	fmt.Fprintf(d.out, "\nThe panel is running. Open this link within an hour to create the owner account:\n\n  %s/setup?t=%s\n\n", panelBase(ip, opts.Port), setupToken)
 	fmt.Fprint(d.out, plainHTTPWarning(panelBase(ip, opts.Port)))
-	if ip == "" {
-		fmt.Fprintf(d.out, "Replace %s with this server's public address (an IPv6 address goes in brackets, like [2001:db8::1]).\n", serverIPPlaceholder)
-	} else {
-		fmt.Fprintf(d.out, "If %s is not this server's public address, use the public one with the same path.\n", ip)
-	}
+	fmt.Fprintln(d.out, setupLinkAddressNote(ip))
 	return nil
+}
+
+// setupLinkAddressNote goes under the setup link bootstrap prints: its
+// address is the route's source address (or a placeholder), which may not
+// be the one the owner's browser reaches.
+func setupLinkAddressNote(ip string) string {
+	if ip == "" {
+		return fmt.Sprintf("Replace %s with this server's public address (an IPv6 address goes in brackets, like [2001:db8::1]).", serverIPPlaceholder)
+	}
+	return fmt.Sprintf("If %s is not this server's public address, use the public one with the same path.", ip)
+}
+
+// writeSetupLinkFile writes --link-file for the installer
+// (installer/install.sh.tmpl panel_ready): the setup link on the first
+// line, then one note per line, each a paragraph on one line (the address
+// note, then the plain-HTTP note). Mode 0600: the link carries the setup
+// token.
+func writeSetupLinkFile(path, base, token, ip string) error {
+	lines := []string{base + "/setup?t=" + token, setupLinkAddressNote(ip)}
+	if note := strings.Join(strings.Fields(plainHTTPWarning(base)), " "); note != "" {
+		lines = append(lines, note)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("writing the setup link: %w", err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := io.WriteString(f, strings.Join(lines, "\n")+"\n"); err != nil {
+		f.Close()
+		return fmt.Errorf("writing the setup link: %w", err)
+	}
+	return f.Close()
 }
 
 // plainHTTPWarning goes under a plain-HTTP setup link: until the panel has a

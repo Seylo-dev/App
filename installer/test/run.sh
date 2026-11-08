@@ -213,7 +213,10 @@ grep -q "^BRAND_MINISIGN_PUBLIC_KEY='${BRAND_PLACEHOLDER_PREFIX}" "$PLACEHOLDER_
 
 # run_installer <verifier> <installer> [join|uninstall] <args...>: sets OUT, RC,
 # R (the --root dir). PRESEED=<dir> is copied into the root first;
-# EXTRA_PATH adds tools (jq, python3).
+# EXTRA_PATH adds tools (jq, python3). TEST_COLOR=1 makes the installer act
+# as on a terminal (INSTALLER_TEST_COLOR); TEST_NO_COLOR, TEST_TERM and
+# TEST_COLORTERM become NO_COLOR, TERM and COLORTERM (all empty otherwise,
+# whatever this shell has).
 run_installer() {
   local verifier=$1 installer=$2 mode=panel
   shift 2
@@ -236,6 +239,7 @@ run_installer() {
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     FAKE_STATUS="${FAKE_STATUS:-}" FAKE_STATUS_EXIT="${FAKE_STATUS_EXIT:-}" INSTALLER_TEST_JOIN_WAIT="${INSTALLER_TEST_JOIN_WAIT:-}" \
+    INSTALLER_TEST_COLOR="${TEST_COLOR:-}" NO_COLOR="${TEST_NO_COLOR:-}" TERM="${TEST_TERM:-}" COLORTERM="${TEST_COLORTERM:-}" \
     "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
   RC=$?
   set -e
@@ -617,7 +621,8 @@ fi
 # Before: it printed "joins the panel; the node shows up there in a few
 # seconds" and exit 0 also when the node could not reach the panel at all.
 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
-expect_ok "a join that connects says so" "Waiting for the agent to connect to the panel" "Connected: the node shows up in the panel now." "==> Done"
+expect_ok "a join that connects says so" "Waiting for the agent to connect to the panel" "Connected: the node shows up in the panel now." \
+  "| This server is a node of the panel now." "| Next: find it under Nodes in the panel." "| Status: $SLUG status"
 unreachable="Node:    n1 (n1)
 Agent:   $V
 Panel:   https://192.0.2.10:3443 (waiting)
@@ -626,10 +631,12 @@ FAKE_STATUS=$unreachable INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHO
 expect_ok "a join whose agent cannot reach the panel exits 0 but says it is not connected, why, and what to check" \
   "warning: the agent has not connected to the panel at https://192.0.2.10:3443 after 0 seconds" \
   "Last error: dial panel 192.0.2.10:3443: connect: no route to host (retrying at 17:04:05)" \
-  "Check that this server can reach 192.0.2.10:3443: the panel's server must accept connections on port 3443" \
-  "firewall or cloud security group" "The join token works until it expires, an hour after it was made" \
-  "Check again with: $SLUG status" "==> Installed, but not connected to the panel yet (see above)"
-has "==> Done" && flunk "a join that did not connect does not say Done" "$OUT" || pass "a join that did not connect does not say Done"
+  "| Check that this server can reach 192.0.2.10:3443: the panel's server must accept connections on port 3443" \
+  "firewall or cloud security group" "| The agent keeps trying in the background. The join token works until it expires, an hour after it was made" \
+  "| Check again with: $SLUG status" "| Installed, but not connected to the panel yet."
+has "a node of the panel now" && flunk "a join that did not connect does not say it joined" "$OUT" || pass "a join that did not connect does not say it joined"
+has "warning above" && flunk "the closing block does not count the not-connected warning it explains" "$OUT" ||
+  pass "the closing block does not count the not-connected warning it explains"
 has "Connected:" && flunk "a join that did not connect does not say Connected" "$OUT" || pass "a join that did not connect does not say Connected"
 FAKE_STATUS="$SLUG: no agent socket at $BRAND_DATA_DIR/agent.sock: is the agent running? Try \`$SLUG start\`" FAKE_STATUS_EXIT=1 \
   INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
@@ -643,7 +650,9 @@ Error:   the panel refused the join: the token is unknown, used or expired" INST
   run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
 expect_ok "a refused join stops waiting and says to make a new join command" \
   "warning: the panel refused this node: the panel refused the join: the token is unknown, used or expired" \
-  "Make a new join command in the panel's Add node dialog" "==> Installed, but not connected to the panel yet"
+  "| Make a new join command in the panel's Add node dialog" "| Installed, but not connected to the panel yet."
+has "keeps trying in the background" && flunk "a refused join does not say the agent keeps trying" "$OUT" ||
+  pass "a refused join does not say the agent keeps trying"
 [ $(($(date +%s) - started)) -lt 15 ] && pass "a refused join does not wait out the full time" || flunk "a refused join waited the full time"
 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary" --dry-run
 expect_ok "a dry-run join only shows the wait" "+ $SLUG status (until the agent is connected, up to 60s)"
@@ -719,6 +728,177 @@ has "installing it with the official script" && flunk "a running Docker is not i
 "$SH" "$INSTALLER" --help >"$T/help.txt" 2>&1 || true
 grep -q "installs Docker with the official script" "$T/help.txt" && grep -q -- "--no-docker-install" "$T/help.txt" &&
   pass "--help says Docker is installed when missing and how to opt out" || flunk "--help on installing Docker" "$(cat "$T/help.txt")"
+
+# ---- output: plain text off a terminal, colors and box lines on one
+# Every run above is plain output, what logs, pipes and CI get: the same
+# lines as before 0.2.1 plus a banner and a closing block, no escape code
+# and only ASCII. INSTALLER_TEST_COLOR=1 (TEST_COLOR) stands in for a
+# terminal; NO_COLOR and TERM=dumb take the colors away again.
+E=$(printf '\033')
+CHECK=$(printf '\342\234\223')
+BAR=$(printf '\342\224\202')
+has_esc() { printf '%s' "$OUT" | grep -q "$E"; }
+non_ascii() { printf '%s' "$OUT" | LC_ALL=C tr -d '\000-\177' | wc -c | tr -d ' '; }
+strip_esc() { printf '%s\n' "$OUT" | sed "s/$E\[[0-9;]*m//g"; }
+rule=+$(printf '%72s' '' | tr ' ' -)
+expect_plain() { # name
+  if [ "$RC" -ne 0 ]; then flunk "$1 (exit $RC)" "$OUT"; return; fi
+  if has_esc || [ "$(non_ascii)" != 0 ]; then flunk "$1: escape codes or non-ASCII in plain output" "$OUT"; return; fi
+  pass "$1"
+}
+
+fresh_release
+run_installer minisign "$INSTALLER" --version "$V"
+expect_plain "a panel install off a terminal prints plain ASCII without escape codes"
+first=$(printf '%s\n' "$OUT" | head -1)
+[ "$first" = "$BRAND_DISPLAY_NAME $V installer - the panel and a node on this server" ] &&
+  pass "the run starts with a one-line banner: product, release, what it does" || flunk "the banner" "$first"
+# The end of a panel install: a framed block with the setup link on its own
+# line, how long it works and the next step. --root writes a stand-in link.
+cat >"$T/want-panel-end" <<EOF
+$rule
+| The panel is running. Open this link to create the owner account:
+|
+|   http://<server-ip>:3000/setup?t=<setup token>
+|
+| It works once, within an hour.
+| With --root the panel did not start, so this link is a stand-in.
+|
+| Next: open it in a browser, create the owner account and follow the setup wizard.
+| A new link when this one expires: $SLUG panel setup-link
+| 1 warning above: read it before you go on.
+| Docs: $BRAND_DOCS_URL
+$rule
+EOF
+printf '%s\n' "$OUT" | tail -n "$(wc -l <"$T/want-panel-end")" >"$T/got-panel-end"
+cmp -s "$T/want-panel-end" "$T/got-panel-end" &&
+  pass "a panel install ends with the setup link framed, how long it works and the next step" ||
+  flunk "the closing block of a panel install" "$(diff "$T/want-panel-end" "$T/got-panel-end" || true)"
+
+TEST_COLOR=1 run_installer minisign "$INSTALLER" --version "$V"
+if [ "$RC" -eq 0 ] && has_esc; then pass "INSTALLER_TEST_COLOR=1 turns colors on"; else flunk "INSTALLER_TEST_COLOR=1 turns colors on" "$OUT"; fi
+for want in \
+  "banner, product in bold brand blue|${E}[1m${E}[34m$BRAND_DISPLAY_NAME${E}[0m${E}[1m $V installer${E}[0m${E}[2m - the panel and a node on this server${E}[0m" \
+  "step header in bold brand blue|${E}[1m${E}[34m==> Docker${E}[0m" \
+  "success line with a green check|${E}[32m$CHECK ${E}[0mRelease signature verified" \
+  "warning in yellow, the label bold|${E}[1m${E}[33mwarning:${E}[0m${E}[33m TEST BUILD" \
+  "dim command trace|${E}[2m+ systemctl reload docker${E}[0m" \
+  "the setup link underlined in cyan|${E}[4;36mhttp://<server-ip>:3000/setup?t=<setup token>${E}[0m" \
+  "a command in cyan|${E}[36m$SLUG panel setup-link${E}[0m" \
+  "a note in dim|${E}[2mWith --root the panel did not start" \
+  "rounded box lines|$(printf '\342\225\255\342\224\200\342\224\200')" \
+  "the box's bar|$BAR${E}[0m ${E}[1mThe panel is running."; do
+  has "${want#*|}" && pass "colors: ${want%%|*}" || flunk "colors: ${want%%|*}" "$(printf '%s' "$OUT" | od -c | head -40)"
+done
+strip_esc | grep -qxF "$BAR   http://<server-ip>:3000/setup?t=<setup token>" &&
+  pass "colors: the setup link is on its own line" || flunk "colors: the setup link is on its own line" "$(strip_esc)"
+TEST_COLOR=1 TEST_TERM=xterm-256color run_installer minisign "$INSTALLER" --version "$V"
+has "${E}[38;5;27m==>" && pass "colors: a 256-color terminal gets the nearest brand blue (27)" || flunk "colors: 256-color brand blue" "$OUT"
+TEST_COLOR=1 TEST_TERM=xterm-256color TEST_COLORTERM=truecolor run_installer minisign "$INSTALLER" --version "$V"
+has "${E}[38;2;37;99;235m==>" && pass "colors: a 24-bit terminal gets the brand blue itself" || flunk "colors: 24-bit brand blue" "$OUT"
+TEST_COLOR=1 TEST_NO_COLOR=1 run_installer minisign "$INSTALLER" --version "$V"
+if [ "$RC" -eq 0 ] && ! has_esc && has "$CHECK Release signature verified" && has "$BAR The panel is running."; then
+  pass "NO_COLOR removes every escape code (the check mark and box lines stay)"
+else
+  flunk "NO_COLOR removes every escape code" "$OUT"
+fi
+TEST_COLOR=1 TEST_TERM=dumb run_installer minisign "$INSTALLER" --version "$V"
+[ "$RC" -eq 0 ] && ! has_esc && pass "TERM=dumb gets no escape codes" || flunk "TERM=dumb gets no escape codes" "$OUT"
+# The Linux console's fonts have no check mark or rounded corners: colors, ASCII lines.
+TEST_COLOR=1 TEST_TERM=linux run_installer minisign "$INSTALLER" --version "$V"
+if [ "$RC" -eq 0 ] && has_esc && [ "$(non_ascii)" = 0 ] && strip_esc | grep -qxF "$rule"; then
+  pass "TERM=linux gets colors with ASCII box lines and no check mark"
+else
+  flunk "TERM=linux gets colors with ASCII box lines and no check mark" "$OUT"
+fi
+TEST_COLOR=1 run_installer minisign "$INSTALLER" --port nope
+expect_fail "colors: an error still fails" "--port must be a number"
+has "${E}[1m${E}[31merror:${E}[0m${E}[31m --port must be a number${E}[0m" && pass "colors: errors in red, the label bold" ||
+  flunk "colors: errors in red" "$OUT"
+TEST_COLOR=1 TEST_NO_COLOR=1 run_installer minisign "$INSTALLER" --port nope
+[ "$RC" -ne 0 ] && ! has_esc && has "error: --port must be a number" && pass "NO_COLOR: errors without escape codes" ||
+  flunk "NO_COLOR: errors without escape codes" "$OUT"
+
+# On a terminal the closing block wraps at 72 columns (a link stays whole);
+# plain output keeps each sentence on one line, so logs can be searched.
+FAKE_STATUS=$unreachable INSTALLER_TEST_JOIN_WAIT=0 TEST_COLOR=1 \
+  run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+long=$(strip_esc | LC_ALL=C awk -v bar="$BAR" 'index($0, bar) == 1 && length($0) > length(bar) + 73' || true)
+joined=$(strip_esc | sed -n "s/^$BAR //p" | tr '\n' ' ')
+if [ "$RC" -eq 0 ] && [ -z "$long" ] &&
+  printf '%s' "$joined" | grep -qF "Check that this server can reach 192.0.2.10:3443: the panel's server must accept connections on port 3443"; then
+  pass "on a terminal the closing block wraps its text at 72 columns"
+else
+  flunk "on a terminal the closing block wraps its text at 72 columns" "$long
+$(strip_esc)"
+fi
+has "${E}[1m${E}[33mwarning:${E}[0m${E}[33m the agent has not connected" && has "${E}[1mInstalled, but not connected to the panel yet.${E}[0m" &&
+  pass "colors: a join that did not connect" || flunk "colors: a join that did not connect" "$OUT"
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_plain "a join off a terminal prints plain ASCII"
+tail -n 1 <<<"$OUT" | grep -qxF "$rule" && pass "a join ends with its closing block" || flunk "a join ends with its closing block" "$OUT"
+printf '%s\n' "$OUT" | head -1 | grep -qxF "$BRAND_DISPLAY_NAME installer (latest release) - add this server to the panel at https://192.0.2.10:3443" &&
+  pass "a join's banner says what it joins" || flunk "a join's banner" "$OUT"
+
+# Re-runs end with a block too; on a panel without an owner it points at a new setup link.
+seed=$T/seed-no-owner
+mkdir -p "$seed/var/lib/$SLUG/panel"
+printf 'panel_url: http://127.0.0.1:3000\nnode_id: n1\n' >"$seed/var/lib/$SLUG/config.yml"
+PRESEED=$seed run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "a re-run on the panel's node ends with a block" "| The agent was updated and restarted. The panel keeps its data." \
+  "| Status: $SLUG status" "| Panel: $SLUG panel status"
+has "No owner account yet" && flunk "a panel with an owner gets no setup link hint" "$OUT" || pass "a panel with an owner gets no setup link hint"
+printf '%s\n' "${SLUG}_setup_x" >"$seed/var/lib/$SLUG/panel/setup-token"
+PRESEED=$seed run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "a re-run on a panel without an owner says how to get a new setup link" \
+  "| No owner account yet. A new setup link: $SLUG panel setup-link"
+seed_node "$T/seed-rejoin" "$V" https://192.0.2.10:3443
+PRESEED=$T/seed-rejoin run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a re-run on a joined node ends with a block" "| The agent was updated and restarted; the join token was not needed." "| Status: $SLUG status"
+
+run_installer minisign "$INSTALLER" --version "$V" --dry-run
+expect_plain "a dry run prints plain ASCII"
+has "(dry run: nothing changes)" && has "==> Dry run done: nothing was changed" && ! has "$rule" &&
+  pass "a dry run says so at the start and the end, without a closing block" || flunk "a dry run's banner and end" "$OUT"
+run_installer none "$PLACEHOLDER_INSTALLER" uninstall
+expect_plain "an uninstall prints plain ASCII"
+has "$BRAND_DISPLAY_NAME installer (latest release) - remove the agent from this server" && pass "an uninstall's banner" ||
+  flunk "an uninstall's banner" "$OUT"
+grep -q "NO_COLOR=1 turns the colors off" "$T/help.txt" && pass "--help says NO_COLOR turns the colors off" ||
+  flunk "--help on NO_COLOR" "$(cat "$T/help.txt")"
+grep -q -- "--link-file" "$INSTALLER" && grep -q '"link-file"' "$root/go/internal/cli/panel.go" &&
+  pass "the installer passes bootstrap's --link-file, which panel.go defines" || flunk "--link-file in the installer and panel.go"
+
+# on_exit: a run that fails after the panel started never reaches its
+# closing block, so the exit trap prints the setup link; a run that ends
+# well, or fails before there is a link, prints nothing more. --root never
+# fails there, so the function runs on its own.
+sed -n '/^on_exit() {$/,/^}$/p' "$INSTALLER" >"$T/on-exit.sh"
+cat >>"$T/on-exit.sh" <<'EOF'
+WORK=$3
+LINK_FILE=$WORK/setup-link
+mkdir -p "$WORK"
+[ -z "$1" ] || printf '%s\nA note.\n' "$1" >"$LINK_FILE"
+trap on_exit EXIT
+exit "$2"
+EOF
+link="http://203.0.113.9:3000/setup?t=${SLUG}_setup_x"
+set +e
+lost=$("$SH" "$T/on-exit.sh" "$link" 1 "$T/exit-1" 2>&1)
+lost_rc=$?
+ended=$("$SH" "$T/on-exit.sh" "$link" 0 "$T/exit-2" 2>&1)
+early=$("$SH" "$T/on-exit.sh" "" 1 "$T/exit-3" 2>&1)
+early_rc=$?
+set -e
+if [ "$lost_rc" = 1 ] && printf '%s\n' "$lost" | grep -qxF "  $link" && ! printf '%s' "$lost" | grep -q "A note" && [ ! -e "$T/exit-1" ]; then
+  pass "a run that fails after the panel started still prints the setup link, keeps its exit code and removes its folder"
+else
+  flunk "a run that fails after the panel started still prints the setup link" "rc $lost_rc: $lost"
+fi
+[ -z "$ended$early" ] && [ "$early_rc" = 1 ] && [ ! -e "$T/exit-2" ] && [ ! -e "$T/exit-3" ] &&
+  pass "the exit trap prints nothing after the closing block or before the panel started" ||
+  flunk "the exit trap prints nothing after the closing block or before the panel started" "$ended
+$early"
 
 if [ "$failures" -gt 0 ]; then
   echo "installer tests: $failures failed"
