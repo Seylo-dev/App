@@ -152,6 +152,18 @@ func TestLaptopCommandsNeedALogin(t *testing.T) {
 	}
 }
 
+// The login help names the settings page where API keys are made and
+// revoked as the web app labels it (apps/web/src/i18n/en/settings.ts).
+func TestLoginHelpNamesTheKeysSettingsPage(t *testing.T) {
+	out, err := newHarness(t).run("login", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Settings > API keys and MCP") {
+		t.Fatalf("login --help does not name Settings > API keys and MCP:\n%s", out)
+	}
+}
+
 func TestLoginAndEnvList(t *testing.T) {
 	panel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer seylo_key_ok" {
