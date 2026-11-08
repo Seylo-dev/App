@@ -8,7 +8,11 @@ import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Id, Timestamp } from "../schemas";
 
-/** A full HTML document; served as is from the node's edge listener with a strict CSP (no scripts). */
+/**
+ * A full HTML document; served as is from the node's edge listener with a strict CSP
+ * (go/internal/proxy PageContentSecurityPolicy): no scripts or frames, styles, images
+ * and fonts inline or over HTTPS.
+ */
 export const PageHtml = Type.String({ minLength: 1, maxLength: 524288 });
 
 export const Message = Type.String({ maxLength: 500, description: "Short text shown on the default page." });
@@ -54,7 +58,7 @@ export const setGlobal = defineOp({
   kind: "mutation",
   summary: "Set the global maintenance page",
   description:
-    "Turns panel-wide maintenance mode on or off and sets the global page and message. Fields left out keep their value; html null goes back to the built-in page. The Panel project is never put in maintenance.",
+    "Turns panel-wide maintenance mode on or off and sets the global page and message. Fields left out keep their value; html null goes back to the built-in page. The Panel project is never put in maintenance. Custom HTML is served with a Content-Security-Policy that blocks scripts and frames; styles, images and fonts load inline or over HTTPS.",
   input: Type.Object({
     enabled: Type.Optional(Type.Boolean()),
     message: Type.Optional(Message),
@@ -85,7 +89,7 @@ export const set = defineOp({
   kind: "mutation",
   summary: "Set a service's maintenance page",
   description:
-    "Turns a service's maintenance mode on or off and sets its own page or message. Fields left out keep their value; html null falls back to the global page. Takes effect on the node right away, without a deploy.",
+    "Turns a service's maintenance mode on or off and sets its own page or message. Fields left out keep their value; html null falls back to the global page. Takes effect on the node right away, without a deploy. The page is also the down page, and custom HTML is served with a Content-Security-Policy that blocks scripts and frames; styles, images and fonts load inline or over HTTPS.",
   input: Type.Object({
     serviceId: Id,
     enabled: Type.Optional(Type.Boolean()),

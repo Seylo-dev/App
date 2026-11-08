@@ -41,6 +41,14 @@ const (
 	ProbePath = InternalPrefix + "/probe"
 )
 
+// PageContentSecurityPolicy is sent with every page the edge serves on a
+// service's domains (maintenance, status and its own default pages): a
+// custom page is HTML anyone with the right to edit the service uploads,
+// and it must not run scripts on the app's origin, frame, or be framed.
+// Styles, images and fonts may come inline or over HTTPS. The panel's
+// docs and the maintenance ops promise exactly this.
+const PageContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline' https:; img-src https: data:; font-src https: data:; frame-ancestors 'none'"
+
 // Headers Traefik sets on requests it forwards to the edge, and the probe.
 var (
 	// HeaderTool names the tool ("box:<id>", "db-ui:<id>") a request to the

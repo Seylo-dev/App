@@ -40995,7 +40995,7 @@
       "post": {
         "operationId": "maintenance.set",
         "summary": "Set a service's maintenance page",
-        "description": "Turns a service's maintenance mode on or off and sets its own page or message. Fields left out keep their value; html null falls back to the global page. Takes effect on the node right away, without a deploy.",
+        "description": "Turns a service's maintenance mode on or off and sets its own page or message. Fields left out keep their value; html null falls back to the global page. Takes effect on the node right away, without a deploy. The page is also the down page, and custom HTML is served with a Content-Security-Policy that blocks scripts and frames; styles, images and fonts load inline or over HTTPS.",
         "tags": [
           "maintenance"
         ],
@@ -41136,7 +41136,7 @@
       "post": {
         "operationId": "maintenance.setGlobal",
         "summary": "Set the global maintenance page",
-        "description": "Turns panel-wide maintenance mode on or off and sets the global page and message. Fields left out keep their value; html null goes back to the built-in page. The Panel project is never put in maintenance.",
+        "description": "Turns panel-wide maintenance mode on or off and sets the global page and message. Fields left out keep their value; html null goes back to the built-in page. The Panel project is never put in maintenance. Custom HTML is served with a Content-Security-Policy that blocks scripts and frames; styles, images and fonts load inline or over HTTPS.",
         "tags": [
           "maintenance"
         ],
