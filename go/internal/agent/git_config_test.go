@@ -123,10 +123,15 @@ func TestInterfaceAddressesInFacts(t *testing.T) {
 	for i := range 70 {
 		many = append(many, netip.AddrFrom4([4]byte{93, 184, 216, byte(i)}))
 	}
+	// Sorted like OwnPublicAddresses: every IPv4 address before the IPv6 ones.
+	many = append(many, netip.MustParseAddr("2a01:4f8::1"), netip.MustParseAddr("2a01:4f8::2"))
 	ownPublicAddresses = func() ([]netip.Addr, error) { return many, nil }
 	f := &agentv1.NodeFacts{}
 	refreshVolatileFacts(f, t.TempDir())
-	if got := f.GetInterfaceAddresses(); len(got) != maxInterfaceAddresses || got[0] != "93.184.216.0" || got[63] != "93.184.216.63" {
+	// At most 64 per family: the IPv6 addresses are still there (before: cut after the 64th IPv4 one).
+	got := f.GetInterfaceAddresses()
+	if len(got) != maxInterfaceAddresses+2 || got[0] != "93.184.216.0" || got[63] != "93.184.216.63" ||
+		got[64] != "2a01:4f8::1" || got[65] != "2a01:4f8::2" {
 		t.Fatalf("interface addresses: %v", got)
 	}
 	ownPublicAddresses = func() ([]netip.Addr, error) { return nil, errors.New("no netlink") }

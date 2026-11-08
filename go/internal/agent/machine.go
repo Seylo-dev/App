@@ -77,7 +77,8 @@ func refreshVolatileFacts(f *agentv1.NodeFacts, dataDir string) {
 	f.InterfaceAddresses = interfaceAddresses()
 }
 
-// maxInterfaceAddresses caps NodeFacts.interface_addresses.
+// maxInterfaceAddresses caps NodeFacts.interface_addresses per address
+// family, so a node with many IPv4 addresses still reports its IPv6 ones.
 const maxInterfaceAddresses = 64
 
 // ownPublicAddresses lists the node's public interface addresses. Tests
@@ -93,11 +94,17 @@ func interfaceAddresses() []string {
 	if err != nil {
 		return nil
 	}
-	if len(addrs) > maxInterfaceAddresses {
-		addrs = addrs[:maxInterfaceAddresses]
-	}
-	out := make([]string, 0, len(addrs))
+	out := make([]string, 0, min(len(addrs), 2*maxInterfaceAddresses))
+	var v4, v6 int
 	for _, a := range addrs {
+		n := &v6
+		if a.Unmap().Is4() {
+			n = &v4
+		}
+		if *n == maxInterfaceAddresses {
+			continue
+		}
+		*n++
 		out = append(out, a.String())
 	}
 	return out

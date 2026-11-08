@@ -65,12 +65,14 @@ type NodeFacts struct {
 	// cleanup runs in it. added in 0.2 (nodeops)
 	TimeZone string `protobuf:"bytes,20,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
 	// The public addresses on the node's own interfaces (what netguard
-	// counts as public; internal ones are left out), sorted, at most 64. The
-	// agent refuses git connections to them like internal addresses unless
-	// the panel allows internal addresses for the source's host
-	// (GitSource.allow_internal_host), and the panel counts a git host whose
-	// every address is a node's address as internal. Empty from agents
-	// before this field. added in 0.2 (security)
+	// counts as public; internal ones are left out), sorted, at most 64 of
+	// each family. The agent refuses git connections to them like internal
+	// addresses unless the panel allows internal addresses for the source's
+	// host (GitSource.allow_internal_host). The panel counts a git host whose
+	// every address is a node's address as internal where an admin stands
+	// behind the outcome (an admin's save records it, a provider connection,
+	// the upgrade seed), never to refuse a member: an agent can report any
+	// address. Empty from agents before this field. added in 0.2 (security)
 	InterfaceAddresses []string `protobuf:"bytes,21,rep,name=interface_addresses,json=interfaceAddresses,proto3" json:"interface_addresses,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
