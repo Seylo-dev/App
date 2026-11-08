@@ -117,6 +117,27 @@ describe("decideHello: re-join, panel node, NAT address", () => {
 describe("decideHello", () => {
   const nonce = crypto.getRandomValues(new Uint8Array(32));
 
+  test("a joining node cannot make itself a build node; the installer's panel node can", () => {
+    const builderHello = (token: string, name: string) => {
+      const hello = joinHello(nonce, token, agentKey(), name);
+      if (hello.facts) hello.facts.canBuild = true;
+      return hello;
+    };
+    const row = (decision: ReturnType<typeof decideHello>) =>
+      panel.deps.db
+        .select()
+        .from(nodes)
+        .where(eq(nodes.id, (decision as { nodeId: string }).nodeId))
+        .get();
+    addJoinToken("installer");
+    const local = decideHello(panel.deps.db, panel.deps.panelId, nonce, builderHello("installer", "local"));
+    expect(row(local)).toMatchObject({ isPanelNode: true, canBuild: true });
+    // Before: canBuild true, so other projects' builds (source, git tokens, build secrets) went to it.
+    addJoinToken("worker");
+    const worker = decideHello(panel.deps.db, panel.deps.panelId, nonce, builderHello("worker", "worker"));
+    expect(row(worker)).toMatchObject({ isPanelNode: false, canBuild: false });
+  });
+
   test("a valid join creates the node and consumes the token", () => {
     const key = agentKey();
     addJoinToken("tok");

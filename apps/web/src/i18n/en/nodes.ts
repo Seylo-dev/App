@@ -168,7 +168,8 @@ export default {
     logSize: "Logs per service (MB)",
     logDays: "Keep logs (days)",
     canBuild: "Build images on this node",
-    canBuildHint: "Images built here run on every node. Small nodes usually leave this off.",
+    canBuildHint:
+      "This node then gets the source, git credentials and build secrets of everything it builds, from any project, and the images it builds run on every node. Turn it on only for nodes you trust like the panel. Small nodes usually leave this off.",
     gamesFirst: "Game servers first",
     gamesFirstHint: "Wings runs on this node: give game servers CPU priority over this panel's services when the CPU is busy.",
     saved: "Node saved.",

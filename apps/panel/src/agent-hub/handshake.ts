@@ -114,9 +114,13 @@ export function decideHello(
         // token for it; a hand-run panel keeps "the first node".
         const noPanelNode = !tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get();
         const isPanelNode = noPanelNode && (!options.panelNodeFromInstallerOnly || row.createdBy === null);
+        // A build node gets the source, git credentials and build secrets of whatever it builds, from any
+        // project, and pushes the images other nodes run: only the owner turns Can build on (Nodes), not
+        // the machine that joins (`seylo join --can-build`). The installer's panel node builds from the start.
+        const canBuild = isPanelNode && (hello.facts?.canBuild ?? false);
         const node = tx
           .insert(nodes)
-          .values({ name, publicKey: Buffer.from(publicKey), canBuild: hello.facts?.canBuild ?? false, isPanelNode, ...report })
+          .values({ name, publicKey: Buffer.from(publicKey), canBuild, isPanelNode, ...report })
           .returning({ id: nodes.id })
           .get();
         tx.update(joinTokens).set({ nodeId: node.id }).where(eq(joinTokens.id, row.id)).run();

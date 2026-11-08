@@ -51,7 +51,13 @@ What Seylo protects, and what it does not:
   is root on every node.
 - A compromised node can lie about its own services, but cannot reach other
   nodes, their secrets or the panel's privileges. A node only receives what
-  the services placed on it need.
+  the services placed on it need, unless it builds: a node with Can build
+  on also receives the source, git credentials and build-time variables of
+  every service it builds, from any project, and pushes the images other
+  nodes then run. Treat build nodes like the panel. Only the owner turns
+  Can build on (the installer's panel node starts with it); a node that
+  joins cannot make itself one, and each deployment shows which node built
+  it.
 - Agents dial the panel over TLS: the panel's domain certificate, or the
   agents' TLS port (3443) with the panel's key pinned by the join command.
   Plain HTTP between a node and a panel on another host needs `--insecure`.

@@ -329,7 +329,13 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `join_token`) and the old panel's identity (`panel_id`, `panel_key`,
   `panel_proves` cleared); `node_name` changes with `--name`, `can_build`
   with `--can-build` / `--can-build=false` (the installer's `--can-build`
-  / `--no-can-build`). `agent.SaveConfig` (the agent's own writes) keeps
+  / `--no-can-build`). The panel reads `can_build` (NodeFacts) only when the
+  installer's panel node first joins: any other new node starts with Can
+  build off until the owner turns it on (`nodes.setCanBuild`), because a
+  build node gets the source, git credentials and build env of whatever it
+  builds, from any project (the service's own node first, else the least
+  busy builder), and pushes the images other nodes run; a deployment
+  records it as `builtOn`. `agent.SaveConfig` (the agent's own writes) keeps
   unknown keys and comments the same way. `TestJoinDecidesEveryConfigKey`
   makes every new FileConfig key pick a side.
 - Agent connection policy: reconnect with exponential backoff 1 s to 60 s
