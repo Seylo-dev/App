@@ -2021,7 +2021,13 @@ the catch-up step as skipped with its message (FAILED_PRECONDITION
 it `waiting` again with `retryAt` the agent's `retryAfter` + 30 s (never
 sooner than 5 minutes, against a slow agent clock) and queues the job for
 then; connects before that queue nothing. A catch-up step whose node is
-offline again waits for its next reconnect the same way. The steps'
+offline again waits for its next reconnect the same way. Steps a panel
+before rc.2 skipped as offline ("it updates itself when it starts", no
+`retry`) are adopted at start (`adoptOldSkips`): a node's newest one
+becomes `waiting` unless a later run has an agent step for the node. Their
+runs kept no manifest, so the catch-up installs the stored release when it
+is the step's version or newer (`held` when the node rolled that one back);
+until a check finds one the step keeps waiting. The steps'
 `retry`, `retryRunId` and `retryAt` and the run's trigger show in the
 history.
 
