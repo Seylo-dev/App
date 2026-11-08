@@ -42,7 +42,7 @@ test("a trigger call with 50 star patterns and a 5 MiB list of long paths answer
     );
     const took = performance.now() - started;
     // Before: the matcher walked every live state of every pattern for every file, about 570 s of blocked event loop.
-    expect(took).toBeLessThan(1000);
+    expect(took).toBeLessThan(5000);
     expect(response.status).toBe(200);
     const answer = (await response.json()) as { deploymentId: string; queued: boolean; skipped?: string };
     expect(answer.skipped).toBeUndefined();

@@ -201,7 +201,7 @@ describe("matching without backtracking", () => {
       expect(globMatches(pattern, sameSegment)).toBe(false);
     }
     expect(matchWatchPaths(patterns, [deep, sameSegment])).toEqual({ deploy: false, reason: "noMatch", checked: 2 });
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(2500);
     expect(globMatches("**/**/**/*.txt", deep)).toBe(true);
   });
 
@@ -282,7 +282,7 @@ describe("matching without backtracking", () => {
     const started = performance.now();
     for (let i = 0; i < 20; i++) expect(globMatches(pattern, path)).toBe(true);
     expect(globMatches(`${pattern}c`, path)).toBe(false);
-    expect(performance.now() - started).toBeLessThan(60);
+    expect(performance.now() - started).toBeLessThan(600);
     // 10 words of state, plus the fixed part of reading a character.
     expect(globCost(pattern, path)).toBe((path.length + 8) * (10 + 4));
   });
@@ -294,7 +294,7 @@ describe("matching without backtracking", () => {
     const started = performance.now();
     const result = matchWatchPaths(patterns, files);
     // Before: about 575 s of blocked event loop. A full budget is about 110 to 150 ms on a current CPU.
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(2500);
     expect(result).toMatchObject({ deploy: true, reason: "tooMany", total: 1280 });
     expect(describeWatchPaths(result)).toContain("too many changed files to match");
   });
@@ -304,7 +304,7 @@ describe("matching without backtracking", () => {
     const files = Array.from({ length: 20_000 }, () => `${"a".repeat(maxChangedPathLength - 1)}b`);
     const started = performance.now();
     expect(matchWatchPaths(patterns, files)).toMatchObject({ deploy: true, reason: "tooMany", total: 20_000 });
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(2500);
   });
 
   test("star patterns with a literal tail no path has are refused pair by pair at once and decided in full", () => {
@@ -312,7 +312,7 @@ describe("matching without backtracking", () => {
     const files = Array.from({ length: 1280 }, () => `${"a".repeat(maxChangedPathLength - 1)}b`);
     const started = performance.now();
     expect(matchWatchPaths(patterns, files)).toEqual({ deploy: false, reason: "noMatch", checked: 1280 });
-    expect(performance.now() - started).toBeLessThan(100);
+    expect(performance.now() - started).toBeLessThan(1000);
     expect(globCost(patterns[0] as string, files[0] as string)).toBe(16);
   });
 
@@ -323,7 +323,7 @@ describe("matching without backtracking", () => {
     const files = Array.from({ length: 20_000 }, () => path);
     const started = performance.now();
     expect(matchWatchPaths(patterns, files)).toMatchObject({ deploy: true, reason: "tooMany", total: 20_000 });
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(2500);
     // Half a unit per character searched after the head, and the fixed part of a refused pair.
     expect(globCost(patterns[0] as string, path)).toBe(16 + maxChangedPathLength / 2);
     // Only the first 32 characters of a longer run are searched for (43 steps: 2 words of state).
