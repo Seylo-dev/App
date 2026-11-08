@@ -19,7 +19,7 @@ var (
 	}
 	// Kept unless --name or --can-build is given.
 	joinKeepsUnlessFlagged = []string{"node_name", "can_build"}
-	joinKeeps              = []string{"acme_ca", "acme_ca_certificates", "acme_ca_server_name", "no_host_shell", "git_proxy_resolves"}
+	joinKeeps              = []string{"acme_ca", "acme_ca_certificates", "acme_ca_server_name", "no_host_shell", "git_proxy_resolves", "no_tailnet", "tailscale_socket"}
 )
 
 // A field added to FileConfig must be sorted into one of the lists above,
@@ -52,6 +52,9 @@ acme_ca_server_name: pebble
 # The owner refused host shells on this server.
 no_host_shell: true
 git_proxy_resolves: true
+# The owner keeps the panel off this server's tailnet.
+no_tailnet: true
+tailscale_socket: /run/tailscale/tailscaled.sock
 future_setting: 42 # a key a newer agent reads
 `
 
@@ -101,7 +104,7 @@ func TestJoinForceKeepsTheOwnersSettings(t *testing.T) {
 		}
 	}
 	raw, _ := os.ReadFile(layout.ConfigFile())
-	for _, s := range []string{"# The owner refused host shells on this server.", "# a key a newer agent reads"} {
+	for _, s := range []string{"# The owner refused host shells on this server.", "# The owner keeps the panel off this server's tailnet.", "# a key a newer agent reads"} {
 		if !strings.Contains(string(raw), s) {
 			t.Errorf("the comment %q is gone:\n%s", s, raw)
 		}
@@ -113,7 +116,8 @@ func TestJoinForceKeepsTheOwnersSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.NoHostShell || !cfg.CanBuild || cfg.NodeName != "edge-owner" || cfg.AcmeCA != "staging" || cfg.NodeID != "" || cfg.PanelKey != "" {
+	if !cfg.NoHostShell || !cfg.NoTailnet || cfg.TailscaleSocket != "/run/tailscale/tailscaled.sock" || !cfg.CanBuild || cfg.NodeName != "edge-owner" ||
+		cfg.AcmeCA != "staging" || cfg.NodeID != "" || cfg.PanelKey != "" {
 		t.Fatalf("loaded config = %+v", cfg)
 	}
 }

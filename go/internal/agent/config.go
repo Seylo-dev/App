@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -88,6 +89,15 @@ type FileConfig struct {
 	// addresses for it (GitSource.allow_internal_host). Only someone with
 	// root on the node can set it.
 	GitProxyResolves bool `yaml:"git_proxy_resolves,omitempty"`
+	// NoTailnet keeps the panel off this server's tailnet whatever the
+	// panel says (`seylo panel tailscale off` sets it): the agent removes
+	// its Tailscale Serve entry, adds none, refuses TailscaleLogin and
+	// TailscaleSetDns and reports disabled_on_server. Tailscale itself
+	// keeps running. Only someone with root on the node can set it.
+	NoTailnet bool `yaml:"no_tailnet,omitempty"`
+	// TailscaleSocket is tailscaled's LocalAPI socket when it is not at
+	// /var/run/tailscale/tailscaled.sock (an absolute path).
+	TailscaleSocket string `yaml:"tailscale_socket,omitempty"`
 }
 
 // PanelAddress is one way to reach the panel, as config.yml stores it.
@@ -254,6 +264,9 @@ func (c *FileConfig) Validate() error {
 	}
 	if c.NodeID == "" && c.JoinToken == "" {
 		return errors.New("neither node_id nor join_token is set: join the node again")
+	}
+	if c.TailscaleSocket != "" && !filepath.IsAbs(c.TailscaleSocket) {
+		return fmt.Errorf("tailscale_socket %q must be an absolute path", c.TailscaleSocket)
 	}
 	if c.PanelKey != "" {
 		if _, err := decodePanelKey(c.PanelKey); err != nil {
