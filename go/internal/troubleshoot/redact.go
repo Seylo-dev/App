@@ -47,6 +47,12 @@ var secretRules = []rule{
 	whole(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`),
 	// Our own API keys, MCP tokens and join tokens.
 	whole(`\b` + regexp.QuoteMeta(brand.Slug) + `_(?:key|mcp|join|setup)_[A-Za-z0-9_-]{8,}`),
+	// Tailscale: auth, API and OAuth client keys, and sign-in links, which
+	// put the server on whichever tailnet opens them: login.tailscale.com/a/<id>
+	// and a control server's /register/<id> (Headscale).
+	whole(`\btskey-[A-Za-z0-9_-]{4,}`),
+	keepFirst(`(?i)(\b(?:login|controlplane)\.tailscale\.com/a/)[A-Za-z0-9_-]+`),
+	keepFirst(`(/register/)[^\s"'<>,;]+`),
 	// Setup and ticket links: ?t=... carries a secret.
 	keepFirst(`([?&](?:t|token|ticket|code|key|secret|signature|sig)=)[^\s&"'#]+`),
 	// user:password@host in URLs.
