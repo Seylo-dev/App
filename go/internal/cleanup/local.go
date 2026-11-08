@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/datadir"
 	"github.com/seylo-dev/app/go/internal/jobrun"
+	"github.com/seylo-dev/app/go/internal/volumes"
 )
 
 // Docker is the inventory cleanup needs (*jobrun.Docker in the agent).
@@ -44,6 +46,8 @@ type Options struct {
 	// Cache may be nil.
 	Cache  CachePruner
 	Logger *slog.Logger
+	// Now is the clock; default time.Now.
+	Now func() time.Time
 }
 
 // Local is the agent's Pruner.
@@ -59,6 +63,9 @@ var _ Pruner = (*Local)(nil)
 func NewLocal(opts Options) *Local {
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
 	}
 	return &Local{opts: opts}
 }
@@ -80,6 +87,11 @@ func (l *Local) Prune(ctx context.Context, req *agentv1.PruneRequest) (*agentv1.
 			continue
 		}
 		if err := l.remove(ctx, it); err != nil {
+			if errors.Is(err, volumes.ErrIncoming) || errors.Is(err, volumes.ErrInUse) {
+				// Changed since the plan was made: not a failure.
+				resp.Removed = append(resp.Removed, fmt.Sprintf("kept %s %s: %v", it.Kind, it.Name, err))
+				continue
+			}
 			l.opts.Logger.Warn("cleanup could not remove", "kind", it.Kind, "name", it.Name, "err", err)
 			resp.Removed = append(resp.Removed, fmt.Sprintf("not removed: %s %s: %v", it.Kind, it.Name, err))
 			continue
@@ -107,7 +119,7 @@ func (l *Local) Prune(ctx context.Context, req *agentv1.PruneRequest) (*agentv1.
 }
 
 func (l *Local) snapshot(ctx context.Context, req *agentv1.PruneRequest) (Snapshot, error) {
-	s := Snapshot{Desired: l.opts.Desired()}
+	s := Snapshot{Desired: l.opts.Desired(), Now: l.opts.Now()}
 	var err error
 	// Containers decide what is in use, so every kind needs them.
 	if s.Containers, err = l.opts.Docker.ContainersWithSize(ctx); err != nil {
@@ -161,7 +173,7 @@ func (l *Local) serviceDirs(ctx context.Context) ([]ServiceDir, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ServiceDir{ServiceID: e.Name(), Path: p, Size: size})
+		out = append(out, ServiceDir{ServiceID: e.Name(), Path: p, Size: size, Incoming: volumes.IncomingAt(p)})
 	}
 	return out, nil
 }
@@ -195,6 +207,10 @@ func (l *Local) remove(ctx context.Context, it Item) error {
 	case KindImage:
 		return l.opts.Docker.RemoveImage(ctx, it.ID)
 	case KindVolume:
+		// The plan's desired state is from before the slow size walk.
+		if it.ServiceID != "" && !l.stillOrphan(it.ServiceID) {
+			return volumes.ErrInUse
+		}
 		return l.opts.Docker.RemoveVolume(ctx, it.ID)
 	case KindNetwork:
 		return l.opts.Docker.RemoveNetwork(ctx, it.ID)
@@ -204,7 +220,25 @@ func (l *Local) remove(ctx context.Context, it Item) error {
 		if err != nil || want != it.ID {
 			return fmt.Errorf("refusing to delete %s", it.ID)
 		}
-		return os.RemoveAll(it.ID)
+		// Rechecked right before the removal, with imports into it held
+		// off: a move may have started copying into it since the plan.
+		return volumes.RemoveServiceDir(it.ID, l.opts.Now(), func() bool { return l.stillOrphan(it.Name) })
 	}
 	return fmt.Errorf("unknown item kind %q", it.Kind)
+}
+
+// stillOrphan reports whether the current desired state still names
+// neither the service nor a volume it owns.
+func (l *Local) stillOrphan(serviceID string) bool {
+	for _, svc := range l.opts.Desired().GetServices() {
+		if svc.GetId() == serviceID {
+			return false
+		}
+		for _, v := range svc.GetVolumes() {
+			if v.GetOwnerServiceId() == serviceID {
+				return false
+			}
+		}
+	}
+	return true
 }

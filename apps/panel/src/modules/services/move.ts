@@ -1,8 +1,10 @@
 // Moving a service to another node. Without volumes it is a rollout on both
 // nodes, after which the old placement goes (zero downtime). With volumes
-// the old copy stops first, every volume is copied through the panel
-// (ExportVolume on the old node piped into ImportVolume on the new one,
-// since nodes share no network), and then the new node starts it. Progress
+// the old copy stops first and the new node gets the service placed but
+// stopped (so its cleanup never sweeps the folder being filled), every
+// volume is copied through the panel (ExportVolume on the old node piped
+// into ImportVolume on the new one, since nodes share no network), and then
+// the new node starts it. Progress
 // is a deployment with trigger "move"; on failure the service stays on (or
 // goes back to) the old node. With volumes, the old node keeps its stopped
 // copy and its data until the new node is live, so a failed move loses
@@ -165,7 +167,14 @@ export const moveJob = defineJob<{ deploymentId: string; toNodeId: string }>({
         .set({ startedAt: new Date(), steps: setStep(d.steps, "ship", "running") })
         .where(eq(deployments.id, d.id))
         .run();
-      deps.db.update(services).set({ stopped: true }).where(eq(services.id, svc.id)).run();
+      const replicas = deps.db.select().from(servicePlacements).where(eq(servicePlacements.serviceId, svc.id)).get()?.replicas ?? 1;
+      deps.db.transaction((tx) => {
+        tx.update(services).set({ stopped: true }).where(eq(services.id, svc.id)).run();
+        // The new node gets the service now, stopped, so the folder the copy fills is in its desired
+        // state and its cleanup never takes it for an orphan's (clone.ts parks a clone the same way).
+        // A failed move (restoreMove) removes this placement and the partial copy with it.
+        tx.insert(servicePlacements).values({ serviceId: svc.id, nodeId: payload.toNodeId, replicas }).onConflictDoNothing().run();
+      });
       deps.agents.desired.markDirty({ serviceId: svc.id });
       publishDeploymentChange(deps, svc.id, d.id);
       log(`Stopping ${svc.name} on ${names.get(from)} so the copy is consistent.`);
@@ -181,7 +190,6 @@ export const moveJob = defineJob<{ deploymentId: string; toNodeId: string }>({
 
       d = deps.db.select().from(deployments).where(eq(deployments.id, payload.deploymentId)).get();
       if (d?.status !== "queued") return;
-      const replicas = deps.db.select().from(servicePlacements).where(eq(servicePlacements.serviceId, svc.id)).get()?.replicas ?? 1;
       deps.db.transaction((tx) => {
         // The old node keeps its (stopped) copy and data until the new node is live; see desired.ts.
         tx.insert(servicePlacements).values({ serviceId: svc.id, nodeId: payload.toNodeId, replicas }).onConflictDoNothing().run();

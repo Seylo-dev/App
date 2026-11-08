@@ -265,11 +265,21 @@ describe("moving services", () => {
     const id = await liveImageService("db", [{ name: "data", mountPath: "/data" }]);
     fleet.volumes.set(nodeA, new Map([[`${id}/data`, new TextEncoder().encode("tar.gz bytes of the volume")]]));
     fleet.reportRunning(nodeA, id, 1, "", 8 /* STOPPED */);
+    // What the new node's desired state says about the service while the copy fills its folder.
+    let duringCopy: ReturnType<typeof serviceSpecFor> | undefined;
+    const openRaw = fleet.hub.openRaw.bind(fleet.hub);
+    fleet.hub.openRaw = ((nodeId: string, method: string, request: unknown) => {
+      if (nodeId === nodeB && method === "importVolume") duringCopy = serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeB);
+      return openRaw(nodeId as never, method as never, request as never);
+    }) as typeof fleet.hub.openRaw;
     const res = await callOp(panel, serviceOps.move, { serviceId: id, toNodeId: nodeB }, { cookie });
     expect(res.status).toBe(200);
     await panel.runner.runDue(panel.deps);
     await fleet.settle();
     expect(new TextDecoder().decode(fleet.volumes.get(nodeB)?.get(`${id}/data`))).toBe("tar.gz bytes of the volume");
+    // Placed there and stopped before the copy began, so the new node's cleanup never takes the
+    // folder being filled for an orphan's.
+    expect(duringCopy?.stopped).toBe(true);
     const placed = () =>
       panel.deps.db
         .select()
@@ -315,6 +325,29 @@ describe("moving services", () => {
     expect(spec?.stopped).toBe(false);
     expect(spec?.generation).toBe(1n);
     expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeB)).toBeNull();
+  });
+
+  test("a move with volumes whose copy fails takes the stopped placement off the new node", async () => {
+    const id = await liveImageService("db", [{ name: "data", mountPath: "/data" }]);
+    fleet.reportRunning(nodeA, id, 1, "", 8 /* STOPPED */);
+    const res = await callOp(panel, serviceOps.move, { serviceId: id, toNodeId: nodeB }, { cookie });
+    expect(res.status).toBe(200);
+    // The old node drops off before the copy can start.
+    fleet.online.delete(nodeA);
+    await panel.runner.runDue(panel.deps);
+    await fleet.settle();
+    const d = (await callOp(panel, deploymentOps.get, { serviceId: id, deploymentId: res.body.deploymentId }, { cookie })).body.deployment;
+    expect(d.status).toBe("failed");
+    expect(
+      panel.deps.db
+        .select()
+        .from(servicePlacements)
+        .where(eq(servicePlacements.serviceId, id))
+        .all()
+        .map((p) => p.nodeId),
+    ).toEqual([nodeA]);
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeB)).toBeNull();
+    expect(serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA)?.stopped).toBe(false);
   });
 
   test("a failed move puts the service back on its node", async () => {

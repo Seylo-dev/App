@@ -78,6 +78,17 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 	if err != nil {
 		return 0, err
 	}
+	// Until the panel places the service here, nothing in the desired
+	// state names this folder: the marker keeps cleanup's hands off it.
+	serviceDir, err := t.Layout.ServiceDir(owner)
+	if err != nil {
+		return 0, err
+	}
+	end, err := beginImport(serviceDir)
+	if err != nil {
+		return 0, fmt.Errorf("marking the service folder: %w", err)
+	}
+	defer end()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, fmt.Errorf("creating volume folder: %w", err)
 	}
