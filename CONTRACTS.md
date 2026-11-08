@@ -208,9 +208,17 @@ Summary; the full rules are in `proto/README.md` and the comments of
   node's scope for a second (a service missing from it is looked up again
   after 100 ms); durable reports and snapshots use a fresh one. A metrics
   event keeps one entry per service, and a live series at most 600 points.
-  NodeFacts (hello and `nodeFacts` events) are capped (strings 256 chars,
-  256 capabilities of 128) and `nodes.facts` is written, and the node
-  published, at most every 2 s per node and only when they changed. Limits per connection
+  Every string of the ClientHello, its NodeFacts included, and
+  `nodeFacts` events are capped (strings 256 chars, 256 capabilities of
+  128; `agent_version` 64 chars, since it is stored in
+  `nodes.agent_version` and shown) and `nodes.facts` is written, and the node
+  published, at most every 2 s per node and only when they changed. The
+  ServiceStatus of every snapshot entry and `serviceUpdated` delta is
+  capped before the state store keeps it (`capServiceStatus` in
+  `agent-hub/field-caps.ts`: strings 2048 chars, lists 128 entries;
+  instance, port and route ids, names, digests and issuers 256 chars), and
+  `healthChanged` like a durable report, so a node pins a few hundred KiB
+  per placed service at most. Limits per connection
   (`agentLimits` in `agent-hub/session.ts`): ClientHello within 10 s,
   agent-opened stream windows clamped to 1 MiB, WINDOW grants past
   2^31-1 are a protocol error, 64 agent-opened streams and 256 calls in

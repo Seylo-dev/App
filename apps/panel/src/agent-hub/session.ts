@@ -45,7 +45,7 @@ import {
   type StreamOptions,
 } from "./calls";
 import { Channel, ProtocolViolation } from "./channel";
-import { capFields, factsLimits } from "./field-caps";
+import { capFields, factsLimits, maxAgentVersionLength } from "./field-caps";
 import { decideHello } from "./handshake";
 import type { AgentHub, AgentTransport, ConnectedAgent } from "./hub";
 import { PanelServiceError } from "./panel-service-types";
@@ -329,6 +329,11 @@ export class AgentSession {
       return;
     }
     const hello = handshake.step.value;
+    // Every string of the hello is stored or shown (nodes.agent_version, the
+    // node's name, its facts) and none is signed: cut them all first, facts
+    // included, so a new field cannot miss the cut.
+    capFields(hello, factsLimits);
+    hello.agentVersion = hello.agentVersion.slice(0, maxAgentVersionLength);
 
     const minimum = this.deps.hub.minimumAgentVersion();
     if (!agentVersionAllowed(hello.agentVersion, minimum)) {
@@ -340,8 +345,6 @@ export class AgentSession {
       return;
     }
 
-    // Facts are stored (nodes.facts) and shown; they are not signed, so cut them first.
-    if (hello.facts) capFields(hello.facts, factsLimits);
     const decision = decideHello(this.deps.db, this.deps.panelId, this.nonce, hello, {
       remoteIp: this.remoteIp,
       panelNodeFromInstallerOnly: this.deps.panelNodeFromInstallerOnly ?? false,
