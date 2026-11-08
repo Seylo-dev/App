@@ -20,11 +20,12 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
 import type { UpdateResult } from "@seylo/proto";
-import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { isNewer, parseVersion } from "../../agent-hub/version";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import {
+  jobs,
   nodes,
   servicePlacements,
   services,
@@ -47,6 +48,18 @@ import "./settings";
 /** A step not finished in this long fails the run. */
 export const stepTimeoutMs = 10 * 60_000;
 const pollMs = 5_000;
+/**
+ * How long a Docker update (nodes.updateDocker) may go without its
+ * UpdateResult. The agent reports only once the package manager is done and
+ * keeps nothing across a restart, so a restart mid-upgrade, a dead node or
+ * a removed one would otherwise leave the run, which holds every other
+ * update run and catch-up back, running for good.
+ */
+export const dockerStepTimeoutMs = 60 * 60_000;
+const dockerPollMs = 30_000;
+export const dockerNoResultError =
+  "No result from the node within an hour: its agent restarted during the Docker update or the node is gone. Check `docker version` on the node.";
+const dockerNodeRemovedError = "The node was removed before its Docker update reported back.";
 export const checkIntervalSeconds = 6 * 3600;
 
 export type RunRow = typeof updateRuns.$inferSelect;
@@ -96,6 +109,24 @@ export function toRun(db: PanelDb, run: RunRow) {
       retryAt: iso(step.retryAt),
     })),
   };
+}
+
+/** Queues the run job for every running run that has none waiting (panel start). */
+export function watchRunningRuns(deps: Pick<Deps, "db" | "jobs">): void {
+  for (const run of deps.db.select({ id: updateRuns.id }).from(updateRuns).where(eq(updateRuns.status, "running")).all()) {
+    const waiting = deps.db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.type, "updates.run"),
+          inArray(jobs.status, ["queued", "running"]),
+          sql`json_extract(${jobs.payload}, '$.runId') = ${run.id}`,
+        ),
+      )
+      .get();
+    if (!waiting) deps.jobs.enqueue("updates.run", { runId: run.id }, { dedupeKey: `updates.run:${run.id}:watch` });
+  }
 }
 
 export function activeRun(db: PanelDb): RunRow | undefined {
@@ -384,6 +415,20 @@ export async function advanceRun(ctx: Pick<Deps, "db" | "agents" | "config" | "l
   }
   const publish = () => ctx.live.publish("panel", { type: "invalidate", ops: ["updates.status", "updates.history", "nodes.list"] });
 
+  if (step.status === "running" && step.target === "docker") {
+    // Only its UpdateResult finishes a Docker step (applyUpdateResult); the
+    // node going offline is expected while Docker restarts.
+    const error = !step.nodeId
+      ? dockerNodeRemovedError
+      : step.startedAt && Date.now() - step.startedAt.getTime() > dockerStepTimeoutMs
+        ? dockerNoResultError
+        : null;
+    if (!error) return dockerPollMs;
+    finishStep(db, step.id, "failed", error);
+    publish();
+    return 0;
+  }
+
   if (step.status === "running") {
     const doneByVersion =
       (step.target === "panel" && ctx.config.version === step.toVersion) ||
@@ -542,7 +587,9 @@ export function applyUpdateResult(deps: Pick<Deps, "db" | "jobs" | "live">, node
   // Also results no step names (the agent updating itself on connect).
   noteUpdateResult(deps.db, nodeId, result, panelNodeId(deps.db));
   const step = deps.db.select().from(updateSteps).where(eq(updateSteps.id, result.updateId)).get();
-  if (!step || !["pending", "running"].includes(step.status)) return;
+  // A Docker step the panel stopped waiting for still takes its late result.
+  const lateDocker = step?.target === "docker" && step.status === "failed" && step.error === dockerNoResultError;
+  if (!step || (!["pending", "running"].includes(step.status) && !lateDocker)) return;
   const runsOn = step.nodeId ?? deps.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get()?.id ?? null;
   if (runsOn !== nodeId) return;
   const status: UpdateStepStatus = result.success ? "succeeded" : result.rolledBack ? "rolled_back" : "failed";

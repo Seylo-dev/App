@@ -2122,7 +2122,14 @@ and the run. A run keeps the manifest it installs (`update_runs.manifest`,
 `manifest_signature`; a run from before rc.2 gets the stored one while it
 is still that version), so a later check or a channel switch never changes
 what its steps send. `nodes.updateDocker` is a one-step run finished by
-its `UpdateResult`. The release check runs every 6 hours (schedule
+its `UpdateResult`; the `updates.run` job watches it (every 30 s; the node
+going offline is expected while Docker restarts) and fails it when no
+result came within an hour (`dockerStepTimeoutMs`: the agent reports only
+after the package manager is done and keeps nothing across a restart) or
+its node was removed, so it never holds other runs and catch-ups back for
+good. A late result still finishes a step that failed for lack of one. On
+start the panel queues `updates.run` for every running run without a
+waiting job (runs older panels left running). The release check runs every 6 hours (schedule
 `updates.check`) and starts a run when auto-update is on. That automatic
 run leaves out a node whose update to the release was rolled back (any
 rolled-back agent `UpdateResult`, also from the agent's own update on

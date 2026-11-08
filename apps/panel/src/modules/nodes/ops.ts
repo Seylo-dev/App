@@ -209,6 +209,9 @@ const updateDocker = implement(nodeOps.updateDocker, async (input, ctx) => {
       .set({ fromVersion: res.fromVersion || null, toVersion: res.toVersion || "latest" })
       .where(eq(updateSteps.id, step.id))
       .run();
+    // The update run job watches it until the result comes, and fails it
+    // when none comes in time or the node is removed (updates/runs.ts).
+    ctx.jobs.enqueue("updates.run", { runId: run.id }, { dedupeKey: `updates.run:${run.id}` });
     return { fromVersion: res.fromVersion, toVersion: res.toVersion, runId: run.id, warning: res.warning };
   } catch (error) {
     const message = error instanceof OpError ? error.message : "The node failed to update Docker.";
