@@ -194,12 +194,20 @@ func TestAttacherReattachesOnRecreate(t *testing.T) {
 	f.mu.Unlock()
 	f.events <- "destroy"
 	f.events <- "start"
-	waitIP(t, ips)
-	f.mu.Lock()
-	n := f.connects
-	f.mu.Unlock()
-	if n != 2 {
-		t.Fatalf("connects = %d", n)
+	// The first attach can report its address twice (for "create" and for
+	// "start"), so wait for the second connect instead of the next report.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		f.mu.Lock()
+		n := f.connects
+		f.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		if n > 2 || time.Now().After(deadline) {
+			t.Fatalf("connects = %d", n)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
 	if err := <-done; err != nil {
