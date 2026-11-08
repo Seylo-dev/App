@@ -112,7 +112,13 @@ info)
   ;;
 version) echo "${FAKE_DOCKER_VERSION:-27.3.1}" ;;
 image) exit 1 ;;
-ps) [ -z "${FAKE_OUR_PROXY:-}" ] || echo 0123456789ab ;;
+ps)
+  case "$*" in
+  # The running panel's version (FAKE_PANEL_VERSION), read from its image label.
+  *image.version*) [ -z "${FAKE_PANEL_VERSION:-}" ] || echo "$FAKE_PANEL_VERSION" ;;
+  *) [ -z "${FAKE_OUR_PROXY:-}" ] || echo 0123456789ab ;;
+  esac
+  ;;
 esac
 exit 0
 EOF
@@ -222,7 +228,7 @@ run_installer() {
   OUT=$(env -i PATH="$path" HOME="$T" TMPDIR="$T" FAKE_RELEASE="$REL" SHIM_LOG="$T/log" \
     FAKE_LIVE_RESTORE="${FAKE_LIVE_RESTORE:-}" FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT:-}" FAKE_SWARM="${FAKE_SWARM:-}" \
     FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" \
-    FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" \
+    FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" FAKE_PANEL_VERSION="${FAKE_PANEL_VERSION:-}" \
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
@@ -456,11 +462,85 @@ run_installer minisign "$INSTALLER" join --panel https://192.0.2.10:3443 --token
 expect_ok "join without --version from the latest installer follows latest" "$SLUG $VN (test) -> /usr/local/bin/$SLUG"
 fresh_release
 
+# ---- re-runs never install an older release than the node runs
+# The installer the install host serves is the latest stable release. On a
+# node that runs a pre-release (or a release the panel updated it to) a
+# re-run must stop before it changes anything, unless --downgrade.
+version_cmp_of() { ( eval "$(sed -n '/^version_cmp() {/,/^}/p' "$INSTALLER")" && version_cmp "$1" "$2" ); }
+cmp_bad=
+for c in "0.1.1 0.2.0-rc.2 -1" "0.2.0-rc.2 0.1.1 1" "0.2.0-rc.2 0.2.0 -1" "0.2.0 0.2.0-rc.2 1" "0.2.0-rc.2 0.2.0-rc.10 -1" \
+  "0.2.0-alpha 0.2.0-alpha.1 -1" "0.2.0-alpha.1 0.2.0-alpha.beta -1" "0.2.0-beta.11 0.2.0-rc.1 -1" "0.10.0 0.9.9 1" \
+  "1.0.0+build.1 1.0.0 0" "0.2.0-rc.2 0.2.0-rc.2 0" "dev 0.1.0 " "latest 0.1.0 " "0.1 0.1.0 "; do
+  set -- $c
+  got=$(version_cmp_of "$1" "$2" 2>/dev/null || true)
+  [ "$got" = "${3:-}" ] || cmp_bad="$cmp_bad $1/$2=$got(want ${3:-nothing})"
+done
+[ -z "$cmp_bad" ] && pass "version_cmp orders releases by semantic versioning" || flunk "version_cmp" "$cmp_bad"
+
+# seed_node <dir> <agent version> [panel url]: a joined node whose installed agent reports that version.
+seed_node() {
+  rm -rf "$1"
+  mkdir -p "$1/usr/local/bin" "$1$BRAND_DATA_DIR"
+  fake_binary "$1/usr/local/bin/$SLUG" "$2"
+  printf 'node_id: n1\npanel_url: %s\n' "${3:-http://127.0.0.1:3000}" >"$1$BRAND_DATA_DIR/config.yml"
+}
+installed() { "$R/usr/local/bin/$SLUG" version 2>/dev/null || true; }
+NEWER=0.2.0-rc.2
+seed_node "$T/seed-newer" "$NEWER"
+RELEASE_INSTALLER=$T/install-v$V.sh
+INSTALLER_TEST_PUBLIC_KEY=$KEY "$root/scripts/render-installer.sh" "$V" "$RELEASE_INSTALLER" >/dev/null
+PRESEED=$T/seed-newer run_installer minisign "$RELEASE_INSTALLER"
+expect_fail "re-running a release's installer on a node with a newer agent stops" \
+  "this node's agent runs $BRAND_DISPLAY_NAME $NEWER, newer than $V, the release this installer would install, so nothing was changed"
+has "re-run with --version $NEWER" && has "add --downgrade" && pass "the refusal says how to reinstall or go back" ||
+  flunk "the refusal says how to reinstall or go back" "$OUT"
+case $(installed) in
+*" $NEWER "*) [ ! -e "$R/etc/docker/daemon.json" ] && ! curl_log | grep -q "/${SLUG}_linux_" &&
+  pass "a refused downgrade changes nothing (binary, Docker settings) and downloads no binary" ||
+  flunk "a refused downgrade changed something" "$(installed; curl_log)" ;;
+*) flunk "a refused downgrade replaced the binary" "$(installed)" ;;
+esac
+PRESEED=$T/seed-newer run_installer minisign "$INSTALLER"
+expect_fail "latest resolving to an older release than the agent stops" "this node's agent runs $BRAND_DISPLAY_NAME $NEWER, newer than $V"
+PRESEED=$T/seed-newer run_installer minisign "$INSTALLER" --version "$V"
+expect_fail "--version older than the agent stops too" "newer than $V"
+PRESEED=$T/seed-newer run_installer minisign "$INSTALLER" --version "$V" --dry-run
+expect_fail "--dry-run shows the refusal" "newer than $V"
+PRESEED=$T/seed-newer run_installer minisign "$RELEASE_INSTALLER" --downgrade
+expect_ok "--downgrade installs the older release" "warning: --downgrade: this node's agent runs $NEWER; installing the older $V" \
+  "$SLUG $V (test) -> /usr/local/bin/$SLUG" "The agent was updated and restarted"
+seed_node "$T/seed-newer-join" "$NEWER" https://192.0.2.10:3443
+PRESEED=$T/seed-newer-join run_installer minisign "$RELEASE_INSTALLER" join --panel https://192.0.2.10:3443 --token t
+expect_fail "re-running a join on a node with a newer agent stops" "this node's agent runs $BRAND_DISPLAY_NAME $NEWER, newer than $V"
+case $(installed) in *" $NEWER "*) pass "a refused join downgrade keeps the agent" ;; *) flunk "a refused join downgrade replaced the agent" "$(installed)" ;; esac
+PRESEED=$T/seed-newer-join run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a --binary is installed as given" "Already joined to https://192.0.2.10:3443"
+
+for agent in "$V" 0.0.9 "$V-rc.1" dev; do
+  seed_node "$T/seed-$agent" "$agent"
+  PRESEED=$T/seed-$agent run_installer minisign "$RELEASE_INSTALLER"
+  expect_ok "a node whose agent runs $agent takes $V" "$SLUG $V (test) -> /usr/local/bin/$SLUG" "Already installed"
+done
+
+seed_node "$T/seed-panel" "$V"
+PRESEED=$T/seed-panel FAKE_PANEL_VERSION=$NEWER run_installer minisign "$RELEASE_INSTALLER"
+expect_fail "on the panel's node, a panel newer than the release stops the re-run" \
+  "the panel on this node runs $BRAND_DISPLAY_NAME $NEWER, newer than $V"
+grep -q "label=$SLUG.service=panel00000000000" "$T/log.docker" && pass "the panel's version is read from its own containers" ||
+  flunk "the panel's version is read from its own containers" "$(cat "$T/log.docker")"
+PRESEED=$T/seed-panel FAKE_PANEL_VERSION=$V run_installer minisign "$RELEASE_INSTALLER"
+expect_ok "a panel on the release's version lets the re-run through" "Already installed"
+
 # ---- the panel's uid (go/internal/docker PanelUID) belongs to no account
 panel_uid=$(sed -n 's/^PANEL_UID=//p' "$INSTALLER")
 nodes_uid=$(sed -n 's/^[[:space:]]*PanelUID[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$root/go/internal/docker/names.go")
 [ -n "$panel_uid" ] && [ "$panel_uid" = "$nodes_uid" ] && pass "installer panel uid ($panel_uid) is docker.PanelUID ($nodes_uid)" ||
   flunk "installer panel uid '$panel_uid' differs from docker.PanelUID '$nodes_uid'"
+panel_service=$(sed -n 's/^PANEL_SERVICE_ID=//p' "$INSTALLER")
+nodes_service=$(sed -n 's/^[[:space:]]*PanelServiceID[[:space:]]*=[[:space:]]*"\([a-z0-9]*\)".*/\1/p' "$root/go/internal/docker/names.go")
+[ -n "$panel_service" ] && [ "$panel_service" = "$nodes_service" ] &&
+  pass "installer panel service id ($panel_service) is docker.PanelServiceID ($nodes_service)" ||
+  flunk "installer panel service id '$panel_service' differs from docker.PanelServiceID '$nodes_service'"
 with_getent=$T/with-getent
 mkdir -p "$with_getent"
 cat >"$with_getent/getent" <<'SHIM'

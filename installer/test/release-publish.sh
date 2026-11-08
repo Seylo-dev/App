@@ -88,9 +88,10 @@ not_found() {
 }
 release() { # <id>: the release as the REST API answers it
   d=$FAKE_GH/rel/$1
-  draft=false pre=false
+  draft=false pre=false immutable=false
   [ ! -e "$d/draft" ] || draft=true
   [ ! -e "$d/prerelease" ] || pre=true
+  [ ! -e "$d/immutable" ] || immutable=true
   for p in "$d"/assets/*; do
     [ -f "$p" ] || continue
     f=${p##*/}
@@ -98,8 +99,8 @@ release() { # <id>: the release as the REST API answers it
     printf '{"id":%s,"name":"%s","size":%s,"state":"uploaded","digest":"sha256:%s","updated_at":"2026-11-07T10:00:00Z"}\n' \
       "$(asset_id "$1" "$f" "$s")" "$f" "$(wc -c <"$p" | tr -d ' ')" "$s"
   done | jq -s --argjson id "$1" --arg tag "$(cat "$d/tag")" --arg created "$(cat "$d/created")" \
-    --argjson draft "$draft" --argjson pre "$pre" \
-    '{id: $id, tag_name: $tag, draft: $draft, prerelease: $pre, created_at: $created, assets: .}'
+    --argjson draft "$draft" --argjson pre "$pre" --argjson immutable "$immutable" \
+    '{id: $id, tag_name: $tag, draft: $draft, prerelease: $pre, immutable: $immutable, created_at: $created, assets: .}'
 }
 releases=repos/$FAKE_REPO/releases
 case $method:$path in
@@ -138,7 +139,12 @@ case $method:$path in
 "PATCH:$releases/"*)
   id=${path##*/}
   [ -d "$FAKE_GH/rel/$id" ] || not_found
-  case " $fields " in *" draft=false "*) rm -f "$FAKE_GH/rel/$id/draft" ;; esac
+  case " $fields " in *" draft=false "*)
+    rm -f "$FAKE_GH/rel/$id/draft"
+    # Release immutability on (the repository setting): publishing locks it.
+    [ ! -e "$FAKE_GH/immutable-releases" ] || touch "$FAKE_GH/rel/$id/immutable"
+    ;;
+  esac
   case " $fields " in *" make_latest=true "*) echo "$id" >"$FAKE_GH/latest" ;; esac
   release "$id"
   ;;
@@ -330,6 +336,12 @@ downloads() { grep -c "^api repos/$REPO/releases/assets/[0-9][0-9]* -H Accept: a
 make_release "$V"
 publish "v$V"
 expect_ok "a draft that passes every check is published" "release-publish: v$V: published, the latest release"
+# GitHub's release immutability is off in the fake repository.
+if has "warning: Release v$V is not immutable" && grep -qF "Warning: Release v$V is not immutable" "$T/summary.md"; then
+  pass "publishing without release immutability warns, in the output and the run summary"
+else
+  flunk "publishing without release immutability warns" "$OUT"
+fi
 if [ "$(edits)" = "api -X PATCH repos/$REPO/releases/$ID -F draft=false -f make_latest=true" ] && [ ! -e "$REL/draft" ] &&
   [ ! -e "$REL/prerelease" ]; then
   pass "the checked release is published by its id, made the latest, the pre-release flag untouched"
@@ -359,6 +371,22 @@ fi
 publish "v$V"
 expect_ok "an already published release passes the checks and exits 0" "release-publish: v$V: already published, nothing changed"
 if [ -z "$(edits)" ]; then pass "an already published release is not edited"; else flunk "an already published release was edited" "$(edits)"; fi
+has "is not immutable" && pass "an already published mutable release still warns" || flunk "an already published mutable release warns" "$OUT"
+
+# Release immutability on: published releases are locked and nothing warns.
+touch "$GH/immutable-releases"
+make_release "$V"
+publish "v$V"
+expect_ok "with release immutability on, the draft is published" "release-publish: v$V: published, the latest release"
+if [ -e "$REL/immutable" ] && ! has "immutable" && ! grep -q "Warning:" "$T/summary.md"; then
+  pass "with release immutability on, publishing does not warn"
+else
+  flunk "with release immutability on, publishing does not warn" "$OUT"
+fi
+publish "v$V"
+expect_ok "an already published immutable release passes the checks" "already published, nothing changed"
+has "immutable" && flunk "an already published immutable release warned" "$OUT" || pass "an already published immutable release does not warn"
+rm -f "$GH/immutable-releases"
 
 # ---- one release per tag, acted on by id
 make_release "$V"

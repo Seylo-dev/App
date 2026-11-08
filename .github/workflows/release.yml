@@ -1,12 +1,18 @@
 name: Release
 
-# A pushed v* tag makes a GitHub release in three jobs:
+# A pushed v* tag makes a GitHub release in four jobs:
 #
-# - Draft release: tests the tagged commit and runs `make release-draft`: the
-#   binaries, checksums.txt, install.sh, openapi.json, the multi-arch panel
-#   image on ghcr.io and manifest.json, as a DRAFT release with nothing
-#   signed. goreleaser's before hooks run every npm build script, so this job
-#   never gets the release key.
+# - Build and test: tests the tagged commit and builds the web app and the
+#   panel (`make build-ts`: apps/web/dist and apps/panel/dist). It runs
+#   every npm package of the build and the tests, so its token can only
+#   read and it gets no secret. It hands the build to the next job as an
+#   artifact.
+# - Draft release: gets that build as files and runs no npm package:
+#   `make release-draft` builds the Go binaries, checksums.txt, install.sh,
+#   openapi.json, the multi-arch panel image on ghcr.io (which only packages
+#   the built files) and manifest.json, as a DRAFT release with nothing
+#   signed. It holds the token that writes releases and packages, and never
+#   the release key.
 # - Sign: the only job that sees the release key (MINISIGN_SECRET_KEY and
 #   MINISIGN_PASSWORD of the "release" environment). It gets the built files
 #   as an artifact, runs no npm, bun or goreleaser code, checks the files,
@@ -17,10 +23,14 @@ name: Release
 #   it only when every check passes; otherwise the draft stays and the run
 #   summary says what to do (CONTRIBUTING.md, Releases).
 #
+# scripts/check-release-workflow.ts (make test-release) fails when a job
+# that holds a write token or a secret runs bun, npm or node, or when
+# goreleaser's hooks do.
+#
 # Run by hand (workflow_dispatch) it is a dry run that publishes nothing: the
-# same checks, goreleaser config and signing script in snapshot mode, the
-# signing in its own job with a throwaway key made there, and no secrets.
-# Real releases only come from tags.
+# same Build and test job, goreleaser in snapshot mode on its build, the
+# signing script in its own job with a throwaway key made there, and no
+# secrets. Real releases only come from tags.
 
 on:
   push:
@@ -61,28 +71,35 @@ jobs:
           echo "::error::A run started by hand is always a dry run. Release by pushing a v* tag (CONTRIBUTING.md, Releases)."
           exit 1
 
-  dry-run:
-    name: "Dry run: build (publishes nothing)"
-    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+  build:
+    name: Build and test
+    # A pushed v* tag, or a dry run started by hand.
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # This job runs every npm package of the build and the tests (make
+    # install, make test, make build-ts), so its token only reads and it gets
+    # no secret: a bad dependency can spoil the build, which the jobs after
+    # it package, but it cannot write to the repository, its releases or
+    # ghcr.io. Keep it that way (scripts/check-release-workflow.ts).
     permissions:
       contents: read
     concurrency:
-      group: release-dry-run-${{ github.ref }}
-      cancel-in-progress: true
-    outputs:
-      version: ${{ steps.manifest.outputs.version }}
+      # Dry runs of one ref replace each other; a tag's build is never cancelled.
+      group: release-build-${{ github.event_name }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # goreleaser reads tags and the changelog from history
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
-          check-latest: true # the newest 1.27.x: a release ships its stdlib
+          check-latest: true # the newest 1.27.x, as the release jobs build with
           cache: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -111,6 +128,60 @@ jobs:
             echo "::error::the checks left changes in the tree; goreleaser would refuse to release"
             exit 1
           fi
+
+      # The web app and the panel, which the panel image packages
+      # (deploy/panel.Dockerfile compiles nothing).
+      - run: make build-ts
+
+      - name: The build changed no tracked file
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            echo "::error::make build-ts changed tracked files; the release would not be built from the tagged tree"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: panel-build
+          path: |
+            apps/web/dist/
+            apps/panel/dist/
+          if-no-files-found: error
+          retention-days: 14 # a failed Draft release job may be re-run later
+
+  dry-run:
+    name: "Dry run: package (publishes nothing)"
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: release-dry-run-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
+    # As the Draft release job: no bun, no npm package, the build from the
+    # Build and test job.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads tags and the changelog from history
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          check-latest: true # the newest 1.27.x: a release ships its stdlib
+          cache: false
+
+      # apps/web/dist and apps/panel/dist (the artifact's root is apps/).
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: panel-build
+          path: apps
 
       - name: Preflight, as the Draft release job runs it (no secret key)
         run: |
@@ -268,9 +339,15 @@ jobs:
 
   release:
     name: Draft release
+    needs: build
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # The token that writes releases and ghcr.io packages, so this job runs
+    # no npm package: no bun, no make install or make test. The web app and
+    # the panel come from the Build and test job as files, which goreleaser
+    # only copies into the panel image, and goreleaser's before hook only
+    # renders install.sh (scripts/check-release-workflow.ts keeps it so).
     permissions:
       contents: write # the draft release and its files
       packages: write # the panel image on ghcr.io
@@ -305,32 +382,12 @@ jobs:
           check-latest: true # the newest 1.27.x: a release ships its stdlib
           cache: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      # apps/web/dist and apps/panel/dist from the Build and test job (the
+      # artifact's root is apps/). Data here: nothing in them runs.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          bun-version: 1.4.4
-          no-cache: true
-
-      - uses: bufbuild/buf-action@37ac33d8960807670a6e9719080e885197b09cc6 # v1.7.0
-        with:
-          version: 1.75.0
-          setup_only: true
-
-      # minisign, dash and jq are for the installer and release script tests;
-      # this job signs nothing.
-      - name: Release tools
-        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
-
-      - run: make install
-      - run: make check-gen
-      - run: make test
-
-      - name: Tree is clean
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            git status --short
-            echo "::error::the checks left changes in the tree; goreleaser would refuse to release"
-            exit 1
-          fi
+          name: panel-build
+          path: apps
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
@@ -355,7 +412,8 @@ jobs:
           install-only: true
 
       # Preflight (without the secret key), goreleaser (draft release, image
-      # push), manifest.json, and dist/release/ for the Sign job.
+      # push) on the downloaded build, manifest.json, and dist/release/ for
+      # the Sign job.
       - name: make release-draft
         env:
           # Release exactly the pushed tag, not the highest tag on the commit.

@@ -29,12 +29,12 @@ openapi.json              generated from the op registry (scripts/gen-openapi.ts
 biome.json                TypeScript/CSS formatting and lint rules
 scripts/                  codegen helpers and the generated-code check
 deploy/panel.Dockerfile   panel image: Bun runtime + the built panel and web app (`make panel-image`)
-.goreleaser.yaml          release build (signs nothing); scripts/release-manifest.sh writes the update manifest and scripts/release-sign.sh signs it and checksums.txt
+.goreleaser.yaml          release build (signs nothing, runs no npm: it packages `make build-ts`'s apps/*/dist); scripts/release-manifest.sh writes the update manifest and scripts/release-sign.sh signs it and checksums.txt
 test/e2e-colima/          three-VM end-to-end harness and checklist (`make e2e`, results in RESULTS.md)
 test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/ci.yml  CI on GitHub's runners: check-gen, lint, test, build (publishes nothing)
 .github/workflows/security.yml  govulncheck, osv-scanner (triaged ignores in osv-scanner.toml) and zizmor on push, pull request and weekly
-.github/workflows/release.yml   tag releases: Draft release (unsigned), Sign (the only job with the release key, environment `release`), Publish
+.github/workflows/release.yml   tag releases: Build and test (read-only token, the only job that runs npm), Draft release (unsigned, from that build), Sign (the only job with the release key, environment `release`), Publish; scripts/check-release-workflow.ts keeps npm out of jobs with a write token or a secret
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
 templates/                one-click template catalog (meta.yaml + index.ts per app; README.md has the format)
 ```
@@ -1820,8 +1820,9 @@ the node is offline (`modules/databases/capability.ts`).
 ## Releases and updates
 
 Release assets (GitHub release `v<version>` of `<githubOrg>/<githubRepo>`,
-built by the Release workflow: `make release-draft`, then
-`scripts/release-sign.sh` in the Sign job; `make release` does both locally):
+built by the Release workflow: `make build-ts` in the read-only Build and
+test job, `make release-draft` on that build, then `scripts/release-sign.sh`
+in the Sign job; `make release` does all three locally):
 
 - `<slug>_linux_amd64`, `<slug>_linux_arm64`: static agent binaries, and
   the laptop CLI as `<slug>_darwin_amd64`, `<slug>_darwin_arm64`,
@@ -1952,7 +1953,13 @@ Join: `install.sh join --panel
 `seylo join --no-start`, then starts `seylo.service`. An installer from a
 release defaults to that release (`--version` picks another), which is how
 the panel's join command pins the agent to the panel's version. Re-runs update the binary and units and keep the
-node; `uninstall [--purge]` removes the agent (and with `--purge` every
+node, but never to an older release than the node runs: when the installed
+agent (`seylo version`), or on the panel's node the running panel (the
+`org.opencontainers.image.version` label of its `seylo.service=panel00000000000`
+containers), is newer than the release to install, the installer stops
+before it changes anything unless `--downgrade` (`--binary` is not checked);
+versions compare by semantic versioning, a pre-release before its release.
+`uninstall [--purge]` removes the agent (and with `--purge` every
 `seylo.managed` container, network, volume and the data dir).
 Port check (before anything changes): a new panel install stops when
 another program holds 80 or 443 (named from `ss -ltnp`) unless `--force`,

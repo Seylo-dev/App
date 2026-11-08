@@ -134,9 +134,11 @@ same before every update and refuse an unsigned or mismatching release.
 release.
 
 Releases are built by GitHub Actions from a pushed `v*` tag
-([.github/workflows/release.yml](.github/workflows/release.yml)): a build job
-with no access to the key makes a draft, the Sign job signs it, and the
-Publish job verifies every signature and hash against the key in
+([.github/workflows/release.yml](.github/workflows/release.yml)): a job whose
+token can only read, and that gets no secret, tests the tag and builds the
+web app and the panel (the only job that runs npm packages); a job with no
+access to the key packages that build into a draft; the Sign job signs it;
+and the Publish job verifies every signature and hash against the key in
 `brand.json` before it publishes the draft.
 
 ## Verify a download by hand

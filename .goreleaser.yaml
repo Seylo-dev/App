@@ -5,10 +5,16 @@
 # pushed image's digest, so scripts/release-manifest.sh writes and uploads it
 # after this run.
 #
-# Nothing here signs. The before hooks run every npm build script, so this
-# run never gets the release key: scripts/release-sign.sh signs
-# checksums.txt and manifest.json afterwards, in a tag release in its own
-# job (.github/workflows/release.yml, Sign).
+# goreleaser runs no npm package: the panel image packages apps/web/dist and
+# apps/panel/dist built beforehand (`make build-ts`; in a tag release the
+# Build and test job, whose token only reads), and the before hook only
+# renders install.sh. So the run that holds the token that writes releases
+# and ghcr.io packages runs none of the build's npm code
+# (scripts/check-release-workflow.ts checks the hooks and the workflow).
+#
+# Nothing here signs: scripts/release-sign.sh signs checksums.txt and
+# manifest.json afterwards, in a tag release in its own job
+# (.github/workflows/release.yml, Sign).
 #
 # Brand values come from installer/brand.env as BRAND_* environment
 # variables, and GO_MODULE from go/go.mod; run through the Makefile
@@ -18,10 +24,8 @@ project_name: "{{ .Env.BRAND_SLUG }}"
 
 before:
   hooks:
-    - bun install --frozen-lockfile
-    - bun run build
     # Not into dist/: goreleaser refuses a dist/ that is not empty after
-    # these hooks.
+    # these hooks. No bun or npm here (see the top).
     - scripts/render-installer.sh {{ .Version }} build/install.sh
 
 builds:
