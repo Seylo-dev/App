@@ -11,7 +11,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { api, credentials, expect, openDashboard, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, test, totp } from "./helpers";
+import { api, credentials, expect, openDashboard, plainHttpNoticeStorage, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, test, totp } from "./helpers";
 
 const shots = process.env.SHOTS_DIR ?? "shots";
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -85,13 +85,12 @@ test.describe("plain HTTP", () => {
   const insecure = () => Object.defineProperty(window, "isSecureContext", { get: () => false });
 
   // One page load only: the sign-in page's setup.status shares the anonymous sign-in limit with the specs after this one.
-  test("signed-out pages warn that the connection is not encrypted", async ({ page }) => {
+  test("signed-out pages show no plain-HTTP notice (it scared people during setup)", async ({ page }) => {
     await page.addInitScript(insecure);
     await page.goto("/login");
-    const warning = page.getByTestId("plain-http-warning");
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText("This connection is not encrypted");
-    await expect(warning).toContainText(/ssh -L \d+:localhost:\d+ 127\.0\.0\.1/);
+    await expect(page.getByLabel("Email")).toBeVisible();
+    await expect(page.getByTestId("plain-http-notice")).toHaveCount(0);
+    await expect(page.getByText(/not encrypted|HTTPS is off/)).toHaveCount(0);
     await page.screenshot({ path: `${shots}/login-plain-http.png`, fullPage: true });
   });
 });
@@ -99,14 +98,45 @@ test.describe("plain HTTP", () => {
 test.describe("signed in", () => {
   test.use({ storageState: stateFile });
 
-  test("the app shell warns on plain HTTP too, loopback does not", async ({ page, browser }) => {
+  test("the app shell shows a calm plain-HTTP notice that stays dismissed, loopback shows none", async ({ page, browser }) => {
     await openDashboard(page);
-    await expect(page.getByTestId("plain-http-warning")).toHaveCount(0);
+    await expect(page.getByTestId("plain-http-notice")).toHaveCount(0);
     const context = await browser.newContext({ storageState: stateFile });
     const other = await context.newPage();
     await other.addInitScript(() => Object.defineProperty(window, "isSecureContext", { get: () => false }));
     await openDashboard(other);
-    await expect(other.getByTestId("plain-http-warning")).toBeVisible();
+    const notice = other.getByTestId("plain-http-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("HTTPS is off until the panel has a domain.");
+    await expect(notice).not.toContainText("ssh -L");
+    await other.screenshot({ path: `${shots}/dashboard-plain-http.png`, fullPage: true });
+
+    // "More" shows the SSH tunnel for this address and port; "Less" hides it again.
+    const more = notice.getByRole("button", { name: "More" });
+    await more.click();
+    await expect(notice.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
+    await expect(notice).toContainText(/ssh -L (\d+):localhost:\1 127\.0\.0\.1/);
+    await expect(notice).toContainText(/Then open http:\/\/localhost:\d+ in this browser\./);
+    await other.screenshot({ path: `${shots}/dashboard-plain-http-more.png`, fullPage: true });
+    await notice.getByRole("button", { name: "Less" }).click();
+    await expect(notice).not.toContainText("ssh -L");
+    // Phone width: the buttons wrap under the line.
+    await other.setViewportSize({ width: 390, height: 844 });
+    await expect(notice).toBeVisible();
+    await other.screenshot({ path: `${shots}/dashboard-plain-http-phone.png` });
+    await other.setViewportSize({ width: 1440, height: 1000 });
+
+    // "Set a domain" (the owner can) opens Settings > General, where the notice stays.
+    await notice.getByRole("link", { name: "Set a domain" }).click();
+    await expect(other).toHaveURL(/\/settings\/general$/);
+    await expect(other.getByTestId("plain-http-notice")).toBeVisible();
+
+    // Dismissed: gone, and still gone after a reload in this browser.
+    await other.getByTestId("plain-http-notice").getByRole("button", { name: "Dismiss" }).click();
+    await expect(other.getByTestId("plain-http-notice")).toHaveCount(0);
+    await openDashboard(other);
+    await expect(other.getByTestId("plain-http-notice")).toHaveCount(0);
+    expect(await other.evaluate((name) => window.localStorage.getItem(name), plainHttpNoticeStorage)).toBe("1");
     await context.close();
   });
 

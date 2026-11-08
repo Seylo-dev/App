@@ -337,8 +337,9 @@ func TestPanelBootstrap(t *testing.T) {
 	if strings.TrimSpace(string(joinFile)) != cfg.JoinToken || !strings.Contains(out.String(), ":3000/setup?t="+strings.TrimSpace(string(setupFile))) {
 		t.Fatalf("token files %q %q, output %s", joinFile, setupFile, out.String())
 	}
-	if !strings.Contains(out.String(), "This link is plain HTTP") || !strings.Contains(out.String(), "ssh -L 3000:localhost:3000") {
-		t.Fatalf("the bootstrap output has no plain-HTTP warning:\n%s", out.String())
+	// One calm tip under the link, last, plain text (the output is not a terminal).
+	if tip := plainHTTPTip("http://x:3000", false); !strings.HasSuffix(out.String(), "\n"+tip) || strings.Contains(out.String(), "\033[") {
+		t.Fatalf("the bootstrap output does not end with the plain-HTTP tip:\n%s", out.String())
 	}
 	if info, _ := os.Stat(filepath.Join(h.dataDir, "panel", "setup-token")); info.Mode().Perm() != 0o600 {
 		t.Fatalf("setup-token mode = %v", info.Mode())
@@ -419,7 +420,7 @@ func TestPanelBootstrapLinkFile(t *testing.T) {
 	want := []string{
 		base + "/setup?t=" + strings.TrimSpace(string(setupToken)),
 		setupLinkAddressNote(ip),
-		strings.Join(strings.Fields(plainHTTPWarning(base)), " "),
+		strings.Join(strings.Fields(plainHTTPTip(base, false)), " "),
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("link file:\n%s\nwant:\n%s", data, strings.Join(want, "\n"))
@@ -476,15 +477,50 @@ func TestPanelSetupLink(t *testing.T) {
 	if !strings.Contains(out, ":38117/setup?t="+strings.TrimSpace(string(token))) || strings.Contains(out, "127.0.0.1") {
 		t.Fatalf("output = %s", out)
 	}
-	// A plain-HTTP link says so, with the tunnel for its port.
-	if !strings.Contains(out, "This link is plain HTTP") || !strings.Contains(out, "ssh -L 38117:localhost:38117") {
-		t.Fatalf("no plain-HTTP warning in:\n%s", out)
+	// A plain-HTTP link ends with the one-line tip, no warning block.
+	if !strings.HasSuffix(out, "sign in instead.\n"+plainHTTPTip("http://x", false)) || strings.Contains(out, "unencrypted") {
+		t.Fatalf("no plain-HTTP tip at the end of:\n%s", out)
 	}
 	if h.cmds[len(h.cmds)-1] != "docker restart seylo-panel00000000000-3" {
 		t.Fatalf("commands = %v", h.cmds)
 	}
 }
 func datadirOf(p string) datadir.Layout { return datadir.New(p) }
+
+// The tip under a setup link: one line for plain HTTP, nothing for HTTPS,
+// dim only when asked (a terminal that takes colors).
+func TestPlainHTTPTip(t *testing.T) {
+	const tip = "Tip: the panel uses plain HTTP until it has a domain. Add one in the setup wizard to switch to HTTPS.\n"
+	if got := plainHTTPTip("http://203.0.113.5:3000", false); got != tip {
+		t.Fatalf("plain tip = %q", got)
+	}
+	if got := plainHTTPTip("http://[2001:db8::7]:3000", true); got != "\033[2m"+strings.TrimSuffix(tip, "\n")+"\033[0m\n" {
+		t.Fatalf("dim tip = %q", got)
+	}
+	for _, base := range []string{"https://panel.example.com", "https://203.0.113.5:3443", "::bad"} {
+		if got := plainHTTPTip(base, true); got != "" {
+			t.Errorf("plainHTTPTip(%q) = %q, want nothing", base, got)
+		}
+	}
+	if dimOn(&bytes.Buffer{}) {
+		t.Fatal("a buffer is not a terminal")
+	}
+	env := func(vars map[string]string) func(string) string { return func(k string) string { return vars[k] } }
+	for _, c := range []struct {
+		vars map[string]string
+		want bool
+	}{
+		{map[string]string{"TERM": "xterm-256color"}, true},
+		{map[string]string{}, true},
+		{map[string]string{"TERM": "xterm", "NO_COLOR": ""}, true}, // empty is unset (no-color.org)
+		{map[string]string{"TERM": "xterm", "NO_COLOR": "1"}, false},
+		{map[string]string{"TERM": "dumb"}, false},
+	} {
+		if got := colorEnv(env(c.vars)); got != c.want {
+			t.Errorf("colorEnv(%v) = %v, want %v", c.vars, got, c.want)
+		}
+	}
+}
 
 // An IPv6-only host prints its address in brackets, never a placeholder;
 // with no address at all the placeholder comes with a hint.
