@@ -32,8 +32,11 @@ export function factsOf(deps: Deps, row: NodeRow): NodeFacts | null {
 
 const twoGiB = 2 * 1024 ** 3;
 
+/** Why building here fails or is a bad idea. Shown next to Can build whether it is on or off. */
 export function canBuildWarning(facts: NodeFacts | null): string | null {
   if (!facts) return null;
+  // Every build needs it, so it comes first; unset (agents before 0.2.1) says nothing.
+  if (facts.buildx?.installed === false) return "docker buildx is missing";
   if (facts.memoryTotalBytes > 0n && facts.memoryTotalBytes < BigInt(twoGiB)) return "Less than 2 GB of memory";
   if (facts.cpuCores === 1) return "Only one CPU core";
   return null;
