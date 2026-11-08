@@ -1387,7 +1387,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   FetchGitFile count the trusted ones only, so a lying agent cannot refuse
   members a public host such as github.com there; a member's source on an
   address only an agent reported fails at that node instead, which refuses
-  its own addresses, with the hint to ask an admin. A lying agent can still
+  its own addresses, with the hint to ask an admin. `public_address` is set
+  by hand in Node settings (the installer leaves it empty), and the panel's
+  own node connects over the Docker network (a private address, so no
+  connect address), so on a default single-node install no trusted address
+  is known: there a member's source on the node's public name saves and
+  fails at the node with that hint, rather than at the save. A lying agent can still
   make an admin's save of a public host record it (and so send
   `allow_internal_host` for it to the project's nodes), a known trade-off:
   it takes a compromised node and DNS control at another node to use. A

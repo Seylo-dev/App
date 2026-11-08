@@ -59,7 +59,7 @@ beforeEach(async () => {
   panel = testPanel();
   fleet = new FakeFleet(panel);
   nodeA = fleet.addNode("node-a", { canBuild: true, panelNode: true });
-  // The admin set the node's public address at install (the single-node install does); the agent
+  // The admin set the node's public address in Node settings (the installer leaves it empty); the agent
   // reports a second address on its interfaces and an IPv6 one.
   panel.deps.db
     .update(nodes)
