@@ -1490,8 +1490,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   online node. Plain `http://` git is refused when saved (services,
   compose stacks, provider connections and Box repositories take
   `https://`, `ssh://` or `git@` only), so the panel never sets
-  `GitSource.allow_plain_http`. Moving a service to another project does not record its host
-  there: its next build needs the host allowed in the new project.
+  `GitSource.allow_plain_http`. Moving a service to another project
+  (`services.moveProject`) checks its git host for the new project
+  (`gitHostForMove`): an internal host, or one allowed in the old project,
+  is recorded there when the caller has git.manage, and is an `access`
+  blocker in `services.moveProjectImpact` (FORBIDDEN on the move) for
+  anyone else, since its builds there would be refused.
 - Env references (`modules/env/ops.ts` `checkEnvReferences`): a `${{svc.VAR}}`
   the caller may not read (env.view on the target, databases.credentials for
   database credentials; addresses are fine) is refused with FORBIDDEN

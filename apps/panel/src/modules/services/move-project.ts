@@ -24,9 +24,11 @@ import { appendLog } from "../deployments/logs";
 import { initialSteps, publishDeploymentChange, setStep } from "../deployments/store";
 import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv } from "../env/store";
+import { gitCaller, gitHostForMove, recordGitHostForMove } from "../git/targets";
 import { invitesNaming, moveImpact, needsConfirm } from "./impact";
 import { actorOf, publishService } from "./ops";
 import { loadService, type ServiceRow } from "./rows";
+import { readSpec } from "./spec";
 
 /** NOT_FOUND for a missing project; FORBIDDEN without services.create there. */
 export function requireTargetProject(ctx: OpContext, projectId: string): { id: string; name: string } {
@@ -41,10 +43,29 @@ export function requireTargetProject(ctx: OpContext, projectId: string): { id: s
   return project;
 }
 
-export const moveProjectImpact = implement(serviceOps.moveProjectImpact, (input, ctx) => {
+/**
+ * The move's impact with the git host check (git/targets.ts gitHostForMove),
+ * which needs DNS and so is not part of moveImpact.
+ */
+async function impactWithGitHost(ctx: OpContext, svc: ServiceRow, projectId: string) {
+  const impact = moveImpact(ctx, svc, projectId);
+  const git =
+    projectId === svc.projectId
+      ? { problem: null, record: null }
+      : await gitHostForMove(ctx.db, {
+          fromProjectId: svc.projectId,
+          toProjectId: projectId,
+          source: readSpec(svc.spec).source,
+          caller: gitCaller(ctx),
+        });
+  if (git.problem) impact.blockers.push({ reason: "access", message: git.problem });
+  return { impact, gitHost: git.record };
+}
+
+export const moveProjectImpact = implement(serviceOps.moveProjectImpact, async (input, ctx) => {
   const svc = loadService(ctx.db, input.serviceId);
   requireTargetProject(ctx, input.projectId);
-  return moveImpact(ctx, svc, input.projectId);
+  return (await impactWithGitHost(ctx, svc, input.projectId)).impact;
 });
 
 /** Tells both projects' screens (and everyone's sidebar) the service changed place. */
@@ -56,10 +77,10 @@ function publishMove(ctx: OpContext, svc: Pick<ServiceRow, "id">, fromProjectId:
   }
 }
 
-export const moveProject = implement(serviceOps.moveProject, (input, ctx) => {
+export const moveProject = implement(serviceOps.moveProject, async (input, ctx) => {
   const svc = loadService(ctx.db, input.serviceId);
   const target = requireTargetProject(ctx, input.projectId);
-  const impact = moveImpact(ctx, svc, input.projectId);
+  const { impact, gitHost } = await impactWithGitHost(ctx, svc, input.projectId);
   const blocker = impact.blockers[0];
   if (blocker) {
     throw new OpError(blocker.reason === "access" ? "FORBIDDEN" : "CONFLICT", blocker.message, { reason: blocker.reason });
@@ -103,6 +124,8 @@ export const moveProject = implement(serviceOps.moveProject, (input, ctx) => {
         .run();
     }
     tx.update(services).set({ projectId: input.projectId, updatedAt: new Date() }).where(eq(services.id, svc.id)).run();
+    // An admin's move allows the service's internal git host in the new project, as saving the source there would.
+    recordGitHostForMove(tx, input.projectId, gitHost, userOf(ctx.principal)?.id ?? null);
     if (!switches || !live) return { deployment: null, removedGrants };
     const steps = setStep(initialSteps(false), "ship", "pending", { detail: `Switch to ${target.name}'s network` });
     const deployment = tx
