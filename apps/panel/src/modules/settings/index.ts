@@ -1,13 +1,19 @@
 // Panel settings: general (name, domain, default node), branding and white
-// label, appearance, telemetry opt-in, and the boot payload injected into
+// label, appearance, telemetry opt-in, panel access (IP access and the
+// agents' port, ip-access.ts) and the boot payload injected into
 // index.html (boot.ts). The panel domain is re-checked by a recurring job
-// (domain.ts). Contracts: packages/ops/src/ops/settings.ts.
+// (domain.ts); IP access by a 1-minute one, plus the panel node's connects
+// and failed rolls. Contracts: packages/ops/src/ops/settings.ts.
 
+import { watchDialedUrls } from "../../agent-hub/dialed";
 import type { Deps } from "../../deps";
+import { defineJob } from "../../jobs/queue";
 import { defineModule } from "../module";
 import { boot } from "./boot-op";
 import { domainCheckJob, domainCheckJobType } from "./domain";
 import { brandingRoutes } from "./http";
+import { applyPanelIpAccess, ipAccessJobType, watchPanelIpAccess } from "./ip-access";
+import { applyIpAccessFile } from "./ip-access-file";
 import {
   appearanceOp,
   brandingOp,
@@ -22,6 +28,17 @@ import {
 } from "./ops";
 import { panelAccessOp, updatePanelAccess } from "./panel-access";
 
+/** The 1-minute IP access job: the domain debounce, the tailnet's reports and the anti-flap wait all end on a timer. */
+const ipAccessJob = defineJob<Record<string, never>>({
+  type: ipAccessJobType,
+  maxAttempts: 1,
+  async run(_payload, ctx) {
+    // The marker of `seylo panel ip-access on`, in case the panel restart it asked for did not happen.
+    if (applyIpAccessFile(ctx)) return;
+    applyPanelIpAccess(ctx, "a scheduled check");
+  },
+});
+
 function start(deps: Deps) {
   deps.schedules.ensure({
     key: "settings.checkDomain",
@@ -30,6 +47,15 @@ function start(deps: Deps) {
     jitterSeconds: 30,
     missedRun: "skip",
   });
+  watchDialedUrls(deps);
+  watchPanelIpAccess(deps);
+  // `seylo panel ip-access on` restarted this panel: reopen before anything else decides.
+  try {
+    applyIpAccessFile(deps);
+  } catch (error) {
+    deps.logger.error({ err: error }, "reading the ip-access-on marker failed");
+  }
+  deps.schedules.ensure({ key: ipAccessJobType, jobType: ipAccessJobType, intervalSeconds: 60, missedRun: "skip" });
 }
 
 export default defineModule({
@@ -49,7 +75,7 @@ export default defineModule({
     panelAccessOp,
     updatePanelAccess,
   ],
-  jobs: [domainCheckJob],
+  jobs: [domainCheckJob, ipAccessJob],
   http: brandingRoutes,
   start,
 });

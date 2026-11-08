@@ -1,6 +1,13 @@
 // The panel domain's state: pending_dns until the hostname resolves to a
 // node of this panel, issuing_certificate until HTTPS answers with this
-// panel's health endpoint, then active. A recurring job re-checks it.
+// panel's health endpoint, then active. A recurring job re-checks it:
+// every 5 minutes while it is not active or while IP access is closed (or
+// meant to be), hourly otherwise.
+//
+// As a private path (private-paths.ts) the domain is debounced: once it
+// worked it counts as down only after 2 failed checks in a row, so one
+// slow answer does not reopen IP access (ip-access.ts). The job calls
+// applyPanelIpAccess when that debounced state changes.
 
 import { resolve4, resolve6 } from "node:dns/promises";
 import { readFileSync } from "node:fs";
@@ -14,6 +21,7 @@ import { healthPath } from "../../http/health";
 import { defineJob } from "../../jobs/queue";
 import { getSetting, setSetting } from "../../settings";
 import { testReleaseOverrides } from "../updates/manifest";
+import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "./ip-access";
 import "./keys";
 
 export type DomainState = "none" | "pending_dns" | "issuing_certificate" | "active" | "error";
@@ -23,6 +31,25 @@ export interface StoredDomainStatus {
   state: DomainState;
   message: string;
   checkedAt: number;
+  /**
+   * The domain as a private path, after the debounce: true once a check
+   * found it active, false again after domainDownAfter failed checks in a
+   * row. Absent on rows from before 0.2.1: then the state decides.
+   */
+  working?: boolean;
+  /** Epoch milliseconds `working` last changed (absent on rows from before 0.2.1). */
+  since?: number;
+  /** Checks in a row that did not find the domain active. */
+  failedChecks?: number;
+}
+
+/** Failed checks in a row after which a domain that worked counts as down (5-10 minutes at one check per 5 minutes). */
+export const domainDownAfter = 2;
+
+/** The debounced private-path view of a stored status; not working when it is about another domain. */
+export function domainWorking(status: StoredDomainStatus | undefined, domain: string | null): { working: boolean; since: number | null } {
+  if (!status || !domain || status.domain !== domain) return { working: false, since: null };
+  return { working: status.working ?? status.state === "active", since: status.since ?? null };
 }
 
 declare module "../../settings" {
@@ -126,14 +153,27 @@ export async function checkDomain(
 ): Promise<StoredDomainStatus | null> {
   const domain = getSetting(deps.db, "panelDomain") ?? null;
   if (!domain) return null;
-  const save = (state: DomainState, message: string) => {
-    const status = { domain, state, message, checkedAt: now.getTime() };
+  const save = (state: DomainState, message: string): StoredDomainStatus => {
+    const before = getSetting(deps.db, "panelDomainStatus");
+    const previous = before?.domain === domain ? before : undefined;
+    const was = domainWorking(previous, domain);
+    const failedChecks = state === "active" ? 0 : Math.min((previous?.failedChecks ?? 0) + 1, 99);
+    const working = state === "active" || (was.working && failedChecks < domainDownAfter);
+    const since = !previous || working !== was.working ? now.getTime() : was.since;
+    const status: StoredDomainStatus = {
+      domain,
+      state,
+      message,
+      checkedAt: now.getTime(),
+      working,
+      ...(since !== null ? { since } : {}),
+      failedChecks,
+    };
     // The domain may have changed while DNS was resolving.
     if ((getSetting(deps.db, "panelDomain") ?? null) !== domain) return status;
-    const before = getSetting(deps.db, "panelDomainStatus");
     setSetting(deps.db, "panelDomainStatus", status);
-    if (before?.state !== state || before?.domain !== domain) {
-      deps.live.publish("panel", { type: "invalidate", ops: ["settings.general", "system.features", "mcp.info"] });
+    if (before?.state !== state || before?.domain !== domain || working !== was.working) {
+      deps.live.publish("panel", { type: "invalidate", ops: ["settings.general", "settings.panelAccess", "system.features", "mcp.info"] });
     }
     return status;
   };
@@ -163,17 +203,34 @@ export async function checkDomain(
   return save("active", "");
 }
 
+/**
+ * Whether the domain is checked on every run (5 minutes): while IP access
+ * is closed or meant to be, the domain is what keeps the panel reachable,
+ * and the debounce needs its second check within minutes, not an hour.
+ */
+export function checksOftenForIpAccess(deps: Pick<Deps, "db">): boolean {
+  return !readPanelAccessWanted(deps).serveOnIp || readIpAccessApplied(deps).closed;
+}
+
 export const domainCheckJob = defineJob<Record<string, unknown>>({
   type: domainCheckJobType,
   maxAttempts: 1,
   async run(_payload, ctx) {
     const status = getSetting(ctx.db, "panelDomainStatus");
     const domain = getSetting(ctx.db, "panelDomain") ?? null;
-    // Active domains are re-checked hourly; pending ones on every run.
-    if (domain && status?.domain === domain && status.state === "active" && Date.now() - status.checkedAt < 60 * 60 * 1000) return;
+    // Active domains are re-checked hourly while IP access is open; pending ones on every run.
+    const hourly = !checksOftenForIpAccess(ctx);
+    if (hourly && domain && status?.domain === domain && status.state === "active" && Date.now() - status.checkedAt < 60 * 60 * 1000)
+      return;
+    const before = domainWorking(status, domain);
     const after = await checkDomain(ctx);
     // The domain just went live, so nodes that joined over an IP address move to it now.
     if (after?.state === "active" && !(status?.state === "active" && status.domain === after.domain)) askNodesToMove(ctx);
+    // The domain is a private path: IP access may close or reopen with it.
+    const now = domainWorking(getSetting(ctx.db, "panelDomainStatus"), getSetting(ctx.db, "panelDomain") ?? null);
+    if (now.working !== before.working) {
+      applyPanelIpAccess(ctx, now.working ? "the panel domain works again" : "the panel domain stopped working");
+    }
   },
 });
 

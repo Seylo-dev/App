@@ -144,6 +144,8 @@ export const panelAccessBlockCodes = [
   "notOnPrivatePath",
   /** The panel node's agent is offline. */
   "panelNodeOffline",
+  /** The panel does not run as its node's protected panel service (a development or hand-started panel), so nothing can publish its port on 127.0.0.1 only. */
+  "panelNotManaged",
   /** The panel node's agent cannot publish on 127.0.0.1 only (it lacks panel.publish-bind.v1): update it. */
   "agentTooOld",
   /** A panel update is running. */

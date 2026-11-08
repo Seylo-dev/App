@@ -1,7 +1,9 @@
 // Handlers of the settings ops: general (name, domain, default node),
 // branding (name, sign-in message, logos and favicon on disk), appearance
 // (theme preset, color mode, accent, owner-only custom CSS) and the
-// telemetry opt-in.
+// telemetry opt-in. A domain change also decides IP access again
+// (ip-access.ts): the old domain stops counting as a private path at once.
+// The panel access ops are in panel-access.ts.
 
 import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -16,7 +18,9 @@ import { syncWebhookConfig } from "../github/app";
 import { readTelemetry, syncTelemetrySchedule } from "../telemetry";
 import { domainCheckJobType, nodeExists, readDomainStatus } from "./domain";
 import { brandingDir } from "./http";
+import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "./ip-access";
 import { brandAssetUrl, readAppearance, readBranding, readPanelName } from "./keys";
+import { domainPath, privatePathSources } from "./private-paths";
 import { panelPublicUrl } from "./public-url";
 import "../uptime/targets";
 
@@ -64,33 +68,59 @@ export const updateGeneral = implement(settings.updateGeneral, (input, ctx) => {
   if (input.defaultNodeId && !nodeExists(ctx, input.defaultNodeId)) {
     throw new OpError("BAD_REQUEST", "There is no such node.", { field: "defaultNodeId" });
   }
-  if (input.name !== undefined) setSetting(ctx.db, "panelName", input.name);
-  if (input.defaultNodeId !== undefined) setSetting(ctx.db, "defaultNodeId", input.defaultNodeId);
-  if (input.uptimeAllowInternalTargets !== undefined) setSetting(ctx.db, "uptimeAllowInternalTargets", input.uptimeAllowInternalTargets);
+  const domainChanges = input.domain !== undefined && input.domain !== (getSetting(ctx.db, "panelDomain") ?? null);
+  if (domainChanges && keptClosedByDomain(ctx)) {
+    throw new OpError(
+      "CONFLICT",
+      'IP access is closed and set to stay closed, and the panel domain is the only way in that works. Switch "If the domain stops working" to Reopen IP access first.',
+      { field: "domain", reason: "stayClosed" },
+    );
+  }
   if (input.auditRetentionDays !== undefined) {
     // A shorter retention deletes history: not something a model may do on its own.
     const fromModel = (ctx.transport ?? "http") !== "http" || (ctx.principal.type === "apiKey" && ctx.principal.keyKind === "mcp");
     if (fromModel)
       throw new OpError("FORBIDDEN", "Change how long the activity log keeps entries in the panel, not through MCP or the assistant.");
-    writeAuditRetentionDays(ctx.db, input.auditRetentionDays);
   }
-  if (input.domain !== undefined && input.domain !== (getSetting(ctx.db, "panelDomain") ?? null)) {
-    // A service routing the same host would share (and fight over) the panel's route.
-    if (input.domain) assertHostUnclaimed(ctx.db, input.domain, { field: "domain", panel: true });
+  // A service routing the same host would share (and fight over) the panel's route.
+  if (domainChanges && input.domain) assertHostUnclaimed(ctx.db, input.domain, { field: "domain", panel: true });
+  // Every refusal comes before the first write, so a refused save changes nothing.
+  if (input.name !== undefined) setSetting(ctx.db, "panelName", input.name);
+  if (input.defaultNodeId !== undefined) setSetting(ctx.db, "defaultNodeId", input.defaultNodeId);
+  if (input.uptimeAllowInternalTargets !== undefined) setSetting(ctx.db, "uptimeAllowInternalTargets", input.uptimeAllowInternalTargets);
+  if (input.auditRetentionDays !== undefined) writeAuditRetentionDays(ctx.db, input.auditRetentionDays);
+  if (input.domain !== undefined && domainChanges) {
     setSetting(ctx.db, "panelDomain", input.domain);
-    // The old domain's status must not count for anything (redirects, agent moves) any more.
+    // The old domain's status must not count for anything (redirects, agent moves, IP access) any more.
     deleteSetting(ctx.db, "panelDomainStatus");
     // The panel's own route lives on its node; agents also learn the new URL from the desired state.
     ctx.agents.desired.markDirty({ all: true });
     // GitHub's webhook follows the domain (best effort; polling covers a failure).
     void syncWebhookConfig(ctx);
+    // Without its old domain IP access reopens at once, unless another private path works.
+    const before = readIpAccessApplied(ctx);
+    const after = applyPanelIpAccess(ctx, input.domain ? `the panel domain changed to ${input.domain}` : "the panel domain was removed", {
+      by: ctx.principal.type === "anonymous" ? "someone" : ctx.principal.user.email,
+    });
+    if (after.closed !== before.closed) ctx.auditDetails?.({ ipAccess: after.closed ? "closed" : "reopened" });
   }
   // Saving the domain again (changed or not) checks it now instead of at the next 5-minute run.
   if (input.domain) ctx.jobs.enqueue(domainCheckJobType, {}, { dedupeKey: "settings.checkDomain.now" });
   bootChanged(ctx);
-  ctx.live.publish("panel", { type: "invalidate", ops: ["system.features", "mcp.info"] });
+  ctx.live.publish("panel", { type: "invalidate", ops: ["system.features", "mcp.info", "settings.panelAccess"] });
   return general(ctx);
 });
+
+/**
+ * IP access is closed in "stay closed" mode and the panel domain is the
+ * only private path that works: changing or removing the domain would lock
+ * the panel to the SSH tunnel and the server's command line.
+ */
+function keptClosedByDomain(ctx: OpContext): boolean {
+  if (readPanelAccessWanted(ctx).onFailure !== "stayClosed" || !readIpAccessApplied(ctx).closed) return false;
+  if (!domainPath.state(ctx).working) return false;
+  return !privatePathSources().some((source) => source.kind !== "domain" && source.state(ctx).working);
+}
 
 export const brandingOp = implement(settings.branding, (_input, ctx) => branding(ctx));
 
