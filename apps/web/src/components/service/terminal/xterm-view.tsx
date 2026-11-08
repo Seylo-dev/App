@@ -9,6 +9,7 @@ import { type ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { cn } from "@seylo/ui/lib/utils";
 import { useEffect, useRef } from "react";
+import { TERMINAL_SCROLLBACK } from "./scrollback";
 import { WriteBatcher } from "./write-batcher";
 
 export interface XtermHandle {
@@ -32,6 +33,7 @@ export interface XtermViewProps {
   onData?: (data: string) => void;
   onResize?: (size: { columns: number; rows: number }) => void;
   onReady?: (handle: XtermHandle) => void;
+  /** Lines of history; see scrollback.ts for what each line costs. */
   scrollback?: number;
   className?: string;
   "aria-label": string;
@@ -69,7 +71,7 @@ export function themeFromCss(): ITheme {
   };
 }
 
-export function XtermView({ onData, onResize, onReady, scrollback = 10_000, className, ...rest }: XtermViewProps) {
+export function XtermView({ onData, onResize, onReady, scrollback = TERMINAL_SCROLLBACK, className, ...rest }: XtermViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef({ onData, onResize, onReady });
   latest.current = { onData, onResize, onReady };

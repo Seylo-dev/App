@@ -145,7 +145,6 @@ export function TerminalPanel({
         <XtermView
           aria-label={label}
           className="flex-1"
-          scrollback={keyboard ? 10_000 : 100_000}
           onData={keyboard ? (d) => session.input(d) : undefined}
           onResize={keyboard ? (size) => session.resize(size) : undefined}
           onReady={(h) => {
