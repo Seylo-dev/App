@@ -83,15 +83,18 @@ const choices = implement(nodeOps.choices, (_input, ctx) => {
   };
 });
 
-const createJoinToken = implement(nodeOps.createJoinToken, (_input, ctx) => {
+const createJoinToken = implement(nodeOps.createJoinToken, (input, ctx) => {
   // A joined node receives every spec and secret placed on it: a session left
   // open must not attach a machine.
   requireFreshIfSession(ctx);
   const token = prefixedToken("join");
   const expiresAt = new Date(Date.now() + joinTokenTtlMs);
+  // "Build images on this node": the token creator decides, never the machine that joins.
+  // The audit row keeps the input, so who made a build-enabled token is logged.
+  const canBuild = input.canBuild ?? true;
   const row = ctx.db
     .insert(joinTokens)
-    .values({ tokenHash: hashToken(token), createdBy: userOf(ctx.principal)?.id ?? null, expiresAt })
+    .values({ tokenHash: hashToken(token), createdBy: userOf(ctx.principal)?.id ?? null, expiresAt, canBuild })
     .returning({ id: joinTokens.id })
     .get();
   const target = agentJoinTarget(ctx);
@@ -102,9 +105,7 @@ const createJoinToken = implement(nodeOps.createJoinToken, (_input, ctx) => {
     command: joinCommand(ctx.config.version, target.url, token, target.pin, target.insecureTransport),
     expiresAt: expiresAt.toISOString(),
     insecureTransport: target.insecureTransport,
-    // Until join_tokens stores the choice (WP-F1a), the handshake decides as
-    // in 0.2.0: a node that joins with this token starts with Can build off.
-    canBuild: false,
+    canBuild,
   };
 });
 
@@ -121,8 +122,7 @@ const listJoinTokens = implement(nodeOps.listJoinTokens, (_input, ctx) => {
       createdAt: t.createdAt.toISOString(),
       expiresAt: t.expiresAt.toISOString(),
       createdBy: t.createdBy,
-      // See createJoinToken: stored per token from WP-F1a on.
-      canBuild: false,
+      canBuild: t.canBuild,
     })),
   };
 });

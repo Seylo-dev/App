@@ -63,11 +63,13 @@ const sample = (at: Date, cpu: number, rx: bigint, services: { serviceId: string
 
 describe("nodes", () => {
   test("join token, list and detail with live facts, usage and services", async () => {
+    // "Build images on this node" is on by default.
     const token = await ok(callOp(panel, nodeOps.createJoinToken, {}, { cookie: owner.cookie }));
     expect(token.command).toContain(token.token);
     expect(token.command).toContain("join --panel");
+    expect(token.canBuild).toBe(true);
     const open = await ok(callOp(panel, nodeOps.listJoinTokens, {}, { cookie: owner.cookie }));
-    expect(open.tokens.map((t: { id: string }) => t.id)).toEqual([token.tokenId]);
+    expect(open.tokens.map((t: { id: string; canBuild: boolean }) => [t.id, t.canBuild])).toEqual([[token.tokenId, true]]);
 
     const agent = await join({
       token: token.token,
@@ -85,6 +87,7 @@ describe("nodes", () => {
       status: "online",
       isPanelNode: true,
       serviceCount: 1,
+      canBuild: true,
       canBuildWarning: "Less than 2 GB of memory",
     });
     expect(list.nodes[0].usage.cpuPercent).toBe(12.5);
@@ -94,6 +97,31 @@ describe("nodes", () => {
     expect(detail.capabilities).toContain("fs.basic.v1");
     expect(detail.services).toMatchObject([{ serviceId: web.id, serviceName: "web", replicas: 1 }]);
     expect(detail.desiredRevision).toBeGreaterThan(0);
+  });
+
+  test("an unticked Build images makes a node that does not build, and the audit row says who chose it", async () => {
+    const off = await ok(callOp(panel, nodeOps.createJoinToken, { canBuild: false }, { cookie: owner.cookie }));
+    expect(off.canBuild).toBe(false);
+    const on = await ok(callOp(panel, nodeOps.createJoinToken, { canBuild: true }, { cookie: owner.cookie }));
+    const open = await ok(callOp(panel, nodeOps.listJoinTokens, {}, { cookie: owner.cookie }));
+    expect(Object.fromEntries(open.tokens.map((t: { id: string; canBuild: boolean }) => [t.id, t.canBuild]))).toEqual({
+      [off.tokenId]: false,
+      [on.tokenId]: true,
+    });
+
+    // The node asks to build (config.yml can_build): the token decides.
+    const agent = await join({ token: off.token, facts: { hostname: "edge", canBuild: true, agentVersion: "dev" } });
+    expect(panel.deps.db.select().from(nodes).where(eq(nodes.id, agent.nodeId)).get()?.canBuild).toBe(false);
+    await panel.deps.agents.desired.settled();
+    expect((await agent.waitFor("SyncDesired")).at(-1).state.settings.maxParallelBuilds).toBe(0);
+
+    const audited = panel.deps.db
+      .select({ input: auditLog.input, actor: auditLog.actorId })
+      .from(auditLog)
+      .where(eq(auditLog.opId, "nodes.createJoinToken"))
+      .all();
+    expect(audited.map((r) => r.input)).toEqual([{ canBuild: false }, { canBuild: true }]);
+    expect(audited.every((r) => r.actor === owner.user.id)).toBe(true);
   });
 
   test("settings changes are audited, published and reach the agent", async () => {

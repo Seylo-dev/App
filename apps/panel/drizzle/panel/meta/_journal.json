@@ -29,6 +29,13 @@
       "when": 1794110346017,
       "tag": "0003_perf_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794163379395,
+      "tag": "0004_join_token_can_build",
+      "breakpoints": true
     }
   ]
 }

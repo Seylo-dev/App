@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { slug } from "@seylo/brand";
 import { OpError } from "@seylo/ops";
 import {
   CallSchema,
@@ -26,6 +30,7 @@ import { decideHello } from "../src/agent-hub/handshake";
 import { helloSignedBytes } from "../src/agent-hub/signature";
 import { joinTokens, nodes, projects, servicePlacements, services, users } from "../src/db/schema";
 import { flusherFor } from "../src/modules/nodes/index";
+import { importInstallerJoinToken, installerJoinTokenFile } from "../src/modules/nodes/installer-join";
 import { hashToken } from "../src/security/tokens";
 import { getSetting } from "../src/settings";
 import { type TestPanel, testPanel } from "./helpers";
@@ -44,10 +49,11 @@ function agentKey() {
   return { privateKey, publicKey: new Uint8Array(Buffer.from(publicKey.export({ format: "jwk" }).x as string, "base64url")) };
 }
 
-function addJoinToken(token: string, expiresInMs = 3_600_000) {
+/** A join token as Add node stores it; canBuild left out is the column default (off), as before 0.2.1. */
+function addJoinToken(token: string, expiresInMs = 3_600_000, options: { canBuild?: boolean } = {}) {
   panel.deps.db
     .insert(joinTokens)
-    .values({ tokenHash: hashToken(token), expiresAt: new Date(Date.now() + expiresInMs) })
+    .values({ tokenHash: hashToken(token), expiresAt: new Date(Date.now() + expiresInMs), canBuild: options.canBuild })
     .run();
 }
 
@@ -139,11 +145,11 @@ describe("decideHello: re-join, panel node, NAT address", () => {
 describe("decideHello", () => {
   const nonce = crypto.getRandomValues(new Uint8Array(32));
 
-  test("a joining node cannot make itself a build node; the installer's panel node can", () => {
-    const builderHello = (token: string, name: string) => {
-      const hello = joinHello(nonce, token, agentKey(), name);
-      if (hello.facts) hello.facts.canBuild = true;
-      return hello;
+  describe("Can build comes from the join token, never from the node", () => {
+    const hello = (token: string, name: string, factsCanBuild: boolean, key = agentKey()) => {
+      const h = joinHello(nonce, token, key, name);
+      if (h.facts) h.facts.canBuild = factsCanBuild;
+      return h;
     };
     const row = (decision: ReturnType<typeof decideHello>) =>
       panel.deps.db
@@ -151,13 +157,64 @@ describe("decideHello", () => {
         .from(nodes)
         .where(eq(nodes.id, (decision as { nodeId: string }).nodeId))
         .get();
-    addJoinToken("installer");
-    const local = decideHello(panel.deps.db, panel.deps.panelId, nonce, builderHello("installer", "local"));
-    expect(row(local)).toMatchObject({ isPanelNode: true, canBuild: true });
-    // Before: canBuild true, so other projects' builds (source, git tokens, build secrets) went to it.
-    addJoinToken("worker");
-    const worker = decideHello(panel.deps.db, panel.deps.panelId, nonce, builderHello("worker", "worker"));
-    expect(row(worker)).toMatchObject({ isPanelNode: false, canBuild: false });
+
+    test("a token with Can build on gives a builder, although the node's config.yml says no", () => {
+      addJoinToken("first", 3_600_000, { canBuild: true });
+      expect(row(decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("first", "panel", false)))).toMatchObject({
+        isPanelNode: true,
+        canBuild: true,
+      });
+      addJoinToken("on", 3_600_000, { canBuild: true });
+      expect(row(decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("on", "worker", false)))).toMatchObject({
+        isPanelNode: false,
+        canBuild: true,
+      });
+    });
+
+    test("a token with Can build off gives a non-builder, although the node asks (seylo join --can-build)", () => {
+      // Before 0.2: facts.canBuild decided, so any machine could pull other projects' builds (source, git tokens, build secrets).
+      addJoinToken("first");
+      decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("first", "panel", true));
+      addJoinToken("off", 3_600_000, { canBuild: false });
+      expect(row(decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("off", "worker", true)))).toMatchObject({
+        isPanelNode: false,
+        canBuild: false,
+      });
+    });
+
+    test("the installer's token makes a building panel node", () => {
+      const dir = mkdtempSync(join(tmpdir(), "hub-installer-"));
+      try {
+        const token = `${slug}_join_${"b".repeat(43)}`;
+        writeFileSync(join(dir, installerJoinTokenFile), `${token}\n`);
+        expect(importInstallerJoinToken(panel.deps.db, dir, panel.deps.logger)).toBe(true);
+        const local = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello(token, "local", false), {
+          panelNodeFromInstallerOnly: true,
+        });
+        expect(row(local)).toMatchObject({ isPanelNode: true, canBuild: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test("a re-join keeps the node's own value, both ways", () => {
+      // Master-key rotation and install.sh --force re-join with a fresh token: the owner's choice under Nodes stays.
+      const builder = agentKey();
+      const worker = agentKey();
+      addJoinToken("builder", 3_600_000, { canBuild: true });
+      const b = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("builder", "builder", false, builder));
+      addJoinToken("worker", 3_600_000, { canBuild: false });
+      const w = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("worker", "worker", true, worker));
+      expect([row(b)?.canBuild, row(w)?.canBuild]).toEqual([true, false]);
+
+      addJoinToken("builder-again", 3_600_000, { canBuild: false });
+      const b2 = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("builder-again", "builder", false, builder));
+      addJoinToken("worker-again", 3_600_000, { canBuild: true });
+      const w2 = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello("worker-again", "worker", true, worker));
+      expect(b2).toMatchObject({ ok: true, joined: false, nodeId: (b as { nodeId: string }).nodeId });
+      expect(w2).toMatchObject({ ok: true, joined: false, nodeId: (w as { nodeId: string }).nodeId });
+      expect([row(b2)?.canBuild, row(w2)?.canBuild]).toEqual([true, false]);
+    });
   });
 
   test("a valid join creates the node and consumes the token", () => {
