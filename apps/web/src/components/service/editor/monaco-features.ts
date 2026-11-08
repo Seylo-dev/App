@@ -4,7 +4,8 @@
 // settings/appearance/monaco-css.ts) import this, so they share one chunk.
 // monaco-editor/features/register.all would add every contribution
 // (inline completions, sticky scroll, code lens, inlay hints, the color
-// picker, the GPU renderer, the command palette...): 3.9 MB minified.
+// picker, the GPU renderer, the command palette...): 3.9 MB minified. The
+// custom CSS editor adds the color picker on its own.
 //
 // features/suggest/register pulls in inline completions as well, so the
 // suggest widget comes from its controller directly.

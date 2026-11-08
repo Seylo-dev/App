@@ -58,3 +58,20 @@ test("the env editor keeps hover, completions, find, the context menu and commen
 
   expect(errors).toEqual([]);
 });
+
+test("the custom CSS editor shows a swatch next to a color", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await installDemo(page, {
+    overrides: {
+      "settings.appearance": () => ({ preset: "seylo", colorMode: "system", accent: null, customCss: ":root {\n  --primary: #e11d48;\n}\n" }),
+    },
+  });
+  await page.goto("/settings/appearance");
+  const editor = page.locator(".monaco-editor").first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect(editor.locator(".view-line", { hasText: "#e11d48" })).toBeVisible();
+  // Monaco's default color provider (the color picker contribution) draws it.
+  await expect(editor.locator(".colorpicker-color-decoration")).toHaveCount(1);
+  expect(errors).toEqual([]);
+});

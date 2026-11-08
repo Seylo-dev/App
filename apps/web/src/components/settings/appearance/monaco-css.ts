@@ -6,6 +6,9 @@
 
 import * as monaco from "monaco-editor/editor/editor.api";
 import "../../service/editor/monaco-features";
+// Color swatches and the color picker on hover, for colors in the CSS (Monaco's default color provider).
+// Only here, so the service editors' chunk does not carry it.
+import "monaco-editor/features/colorPicker/register";
 import "monaco-editor/languages/definitions/css/register";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 
