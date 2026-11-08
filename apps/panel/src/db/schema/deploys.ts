@@ -112,8 +112,20 @@ export const deployments = sqliteTable(
     finishedAt: timestamp("finished_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("deployments_service_created_idx").on(t.serviceId, t.createdAt)],
+  (t) => [
+    index("deployments_service_created_idx").on(t.serviceId, t.createdAt),
+    // Deployments are never deleted (history, rollback targets); what a node may report on and pull
+    // looks at the few in flight (agent-hub/service-scope.ts). deploymentInFlight must match this.
+    index("deployments_in_flight_idx").on(t.status).where(sql`${t.status} in ('queued', 'building', 'deploying')`),
+  ],
 );
+
+/**
+ * Deployments still in flight, written with literals: SQLite uses a partial
+ * index only for a condition that matches its own, and a bound list
+ * (inArray) never does.
+ */
+export const deploymentInFlight = sql`${deployments.status} in ('queued', 'building', 'deploying')`;
 
 export type Builder = "railpack" | "nixpacks" | "dockerfile";
 export type BuildStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -135,8 +147,15 @@ export const builds = sqliteTable(
     finishedAt: timestamp("finished_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("builds_deployment_idx").on(t.deploymentId)],
+  (t) => [
+    index("builds_deployment_idx").on(t.deploymentId),
+    // The registry scope of a node's tunnel: what it builds now (agent-hub/panel-service.ts). buildInFlight must match this.
+    index("builds_in_flight_idx").on(t.nodeId).where(sql`${t.status} in ('queued', 'running')`),
+  ],
 );
+
+/** Builds still queued or running, written with literals for builds_in_flight_idx (see deploymentInFlight). */
+export const buildInFlight = sql`${builds.status} in ('queued', 'running')`;
 
 /** PR preview environments; each one is a real service in the same project (same env = same database). */
 export const previews = sqliteTable(

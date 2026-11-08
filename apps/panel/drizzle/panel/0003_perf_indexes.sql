@@ -1,0 +1,2 @@
+CREATE INDEX `builds_in_flight_idx` ON `builds` (`node_id`) WHERE "builds"."status" in ('queued', 'running');--> statement-breakpoint
+CREATE INDEX `deployments_in_flight_idx` ON `deployments` (`status`) WHERE "deployments"."status" in ('queued', 'building', 'deploying');

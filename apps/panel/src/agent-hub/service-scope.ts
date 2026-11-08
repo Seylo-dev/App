@@ -5,10 +5,11 @@
 // service pages. A node runs a service when it has a placement there, or a
 // deployment in flight targets it or moves the service away from it.
 
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { PanelDb } from "../db/client";
-import { deployments, servicePlacements } from "../db/schema";
+import { deploymentInFlight, deployments, servicePlacements } from "../db/schema";
 
+/** Asked for every durable report; deploymentInFlight keeps it on deployments_in_flight_idx (deployments are never deleted). */
 export function servicesOnNode(db: PanelDb, nodeId: string): Set<string> {
   const placed = db.select({ id: servicePlacements.serviceId }).from(servicePlacements).where(eq(servicePlacements.nodeId, nodeId)).all();
   const moving = db
@@ -16,7 +17,7 @@ export function servicesOnNode(db: PanelDb, nodeId: string): Set<string> {
     .from(deployments)
     .where(
       and(
-        inArray(deployments.status, ["queued", "building", "deploying"]),
+        deploymentInFlight,
         or(
           eq(deployments.movedFromNodeId, nodeId),
           sql`exists (select 1 from json_each(${deployments.targetNodeIds}) where value = ${nodeId})`,

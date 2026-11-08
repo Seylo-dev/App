@@ -206,7 +206,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   snapshots and metrics about other services are dropped, and an update
   result finishes only a step of that node. Best-effort events reuse the
   node's scope for a second (a service missing from it is looked up again
-  after 100 ms); durable reports and snapshots use a fresh one. A metrics
+  after 100 ms); durable reports and snapshots use a fresh one. The scope
+  and the registry tunnel's (`registryScope`) read deployments and builds
+  in flight through partial indexes (`deployments_in_flight_idx`,
+  `builds_in_flight_idx`, migration 0003), since deployments are never
+  deleted; their conditions are the literal `deploymentInFlight` /
+  `buildInFlight` (a bound `inArray` list never matches a partial index). A metrics
   event keeps one entry per service, and a live series at most 600 points.
   NodeFacts (hello and `nodeFacts` events) are capped (strings 256 chars,
   256 capabilities of 128) and `nodes.facts` is written, and the node
