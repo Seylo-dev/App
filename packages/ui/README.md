@@ -63,7 +63,7 @@ i18n section. Without the provider each label shows its own key.
 | `segmented` | `Segmented`, `SegmentedItem` | single-choice track (ranges, views); `ref` reaches the track |
 | `tabs` | `TabList`, `tabClassName` | underlined route tabs; wraps by default |
 | `copy-field` | `CopyField` copies on click or focus; `secret` masks with an eye toggle; `copyText`, `useCopy` | works on plain HTTP too |
-| `code-block` | `CodeBlock` light or dark, title, copy | no syntax colors (Monaco edits) |
+| `code-block` | `CodeBlock` light or dark, title, copy | wraps long lines (`noWrap` scrolls sideways); no syntax colors (Monaco edits) |
 | `dropdown-menu` | `DropdownMenu*` items, checkbox/radio items, labels, separators, sub menus | `destructive` items |
 | `popover`, `tooltip` | `Popover*`; `Tooltip*` and the `Tip` shorthand | |
 | `dialog`, `sheet` | `Dialog*`; `Sheet*` right, left or bottom with header, body, footer | |

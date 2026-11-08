@@ -12,14 +12,18 @@ export interface CodeBlockProps {
   tone?: "light" | "dark";
   /** Hide the copy button. */
   noCopy?: boolean;
-  /** Wrap long lines instead of scrolling sideways. */
-  wrap?: boolean;
+  /**
+   * Keep long lines whole and scroll sideways. Off by default: commands,
+   * JSON an approval shows and process output wrap, so nothing sits off
+   * screen on a phone.
+   */
+  noWrap?: boolean;
   className?: string;
   maxHeight?: number;
 }
 
 /** Monospace code or config with a copy button. No syntax colors; use Monaco for editing. */
-export function CodeBlock({ code, title, tone = "light", noCopy = false, wrap = false, className, maxHeight }: CodeBlockProps) {
+export function CodeBlock({ code, title, tone = "light", noCopy = false, noWrap = false, className, maxHeight }: CodeBlockProps) {
   const labels = useUiLabels();
   const [copied, copy] = useCopy();
   const dark = tone === "dark";
@@ -60,7 +64,7 @@ export function CodeBlock({ code, title, tone = "light", noCopy = false, wrap = 
         className={cn(
           "m-0 overflow-auto px-3.5 pb-3 font-mono text-[12.5px] leading-[1.7]",
           !title && noCopy && "pt-3",
-          wrap ? "break-words whitespace-pre-wrap" : "whitespace-pre",
+          noWrap ? "whitespace-pre" : "whitespace-pre-wrap [overflow-wrap:anywhere]",
         )}
         style={maxHeight ? { maxHeight } : undefined}
       >

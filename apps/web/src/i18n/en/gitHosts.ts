@@ -22,7 +22,9 @@ export default {
       "Git hosts this project's nodes may clone from internal addresses: a server on a private network or on one of the nodes. Saving a source as an admin adds its host when the panel sees it as internal.",
     host: "Host",
     allowedBy: "Allowed by",
-    recorded: "Recorded on upgrade",
+    // approved_by is null both for hosts the first start of 0.2 recorded and
+    // for hosts whose admin's account was deleted since (ON DELETE SET NULL).
+    recorded: "Recorded on upgrade or by a removed account",
     sources: "Sources",
     usedBy: { one: "{count} source", other: "{count} sources" },
     unused: "Not used",

@@ -59,16 +59,20 @@ export function MoveProjectDialog({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on purpose when the target changes
   useEffect(() => setConfirmed(false), [projectId]);
 
+  // TanStack Query runs the onSuccess of the latest render, so it reads the
+  // project the request went to from its variables, not from the picker
+  // (which also stays locked while the move runs).
   const move = useOpMutation(services.moveProject, {
-    onSuccess: (res) => {
+    onSuccess: (res, vars) => {
+      const project = nameOf(vars.projectId);
       onOpenChange(false);
       invalidate(services.get, services.list);
       toast.success(
         res.deploymentId
-          ? t("serviceCopy.move.moving", { name: service.name, project: to })
-          : t("serviceCopy.move.moved", { name: service.name, project: to }),
+          ? t("serviceCopy.move.moving", { name: service.name, project })
+          : t("serviceCopy.move.moved", { name: service.name, project }),
       );
-      void navigate({ to: "/p/$projectId/s/$serviceId", params: { projectId, serviceId: service.id } });
+      void navigate({ to: "/p/$projectId/s/$serviceId", params: { projectId: vars.projectId, serviceId: vars.serviceId } });
     },
   });
 
@@ -90,7 +94,13 @@ export function MoveProjectDialog({
             <DialogDescription>{t("serviceCopy.move.description")}</DialogDescription>
           </div>
           <Field label={t("serviceCopy.move.project")} htmlFor="move-project">
-            <ProjectPicker id="move-project" value={projectId} onChange={setProjectId} exclude={service.projectId} />
+            <ProjectPicker
+              id="move-project"
+              value={projectId}
+              onChange={setProjectId}
+              exclude={service.projectId}
+              disabled={move.isPending}
+            />
           </Field>
 
           {!projectId ? null : impact.isError ? (

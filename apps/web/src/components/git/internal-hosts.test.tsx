@@ -85,7 +85,9 @@ test("admins see the project's internal git hosts; members see nothing", () => {
   expect(out).toContain(html(t("gitHosts.list.title")));
   expect(out).toContain("git.example.com");
   expect(out).toContain("10.0.0.7:3000");
+  // approvedBy null: the first-start seed, or an admin whose account is gone since. The label claims neither alone.
   expect(out).toContain(html(t("gitHosts.list.recorded")));
+  expect(out).toContain("by a removed account");
   expect(out).toContain(html(t("gitHosts.list.usedBy", { count: 2 })));
   expect(out).toContain(html(t("gitHosts.add.submit")));
   expect(render("member", <InternalGitHosts projectId={projectId} projectName="shop" />)).toBe("");

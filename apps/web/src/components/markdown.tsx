@@ -4,10 +4,29 @@
 // and relative ones are dropped (its default urlTransform). Images become
 // links, so opening notes never loads anything from another host.
 
+import { CodeBlock } from "@seylo/ui/components/code-block";
 import { cn } from "@seylo/ui/lib/utils";
 import type { ComponentProps } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+type HastNode = { type: string; value?: string; tagName?: string; properties?: Record<string, unknown>; children?: HastNode[] };
+
+/** The text of a hast node and everything under it. */
+function textOf(node: HastNode | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(textOf).join("");
+}
+
+/** "yaml" for a fence opened with ```yaml (remark gives its code element class "language-yaml"). */
+function fenceLanguage(pre: HastNode | undefined): string | undefined {
+  const code = pre?.children?.find((child) => child.type === "element" && child.tagName === "code");
+  const classes = code?.properties?.className;
+  const list = Array.isArray(classes) ? classes : typeof classes === "string" ? classes.split(" ") : [];
+  const language = list.find((c): c is string => typeof c === "string" && c.startsWith("language-"));
+  return language?.slice("language-".length) || undefined;
+}
 
 const components: Components = {
   h1: ({ node: _, ...props }) => <h3 className="mt-5 mb-2 text-[17px] font-semibold text-foreground first:mt-0" {...props} />,
@@ -43,10 +62,13 @@ const components: Components = {
   code: ({ node: _, className, ...props }) => (
     <code className={cn("rounded-chip bg-muted px-1 py-px font-mono text-[12.5px] text-foreground", className)} {...props} />
   ),
-  pre: ({ node: _, ...props }) => (
-    <pre
-      className="my-2 overflow-x-auto rounded-control bg-terminal p-3 font-mono text-[12.5px] leading-relaxed text-terminal-foreground [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-inherit"
-      {...props}
+  // Fenced code: the kit's code block, so long lines wrap and it has a copy button.
+  pre: ({ node }) => (
+    <CodeBlock
+      className="my-2"
+      tone="dark"
+      title={fenceLanguage(node as HastNode | undefined)}
+      code={textOf(node as HastNode | undefined).replace(/\n$/, "")}
     />
   ),
   table: ({ node: _, ...props }) => (

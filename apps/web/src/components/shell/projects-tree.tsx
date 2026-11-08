@@ -86,7 +86,8 @@ export function ProjectsTree() {
                 over === project.id && dragging !== project.id && "shadow-[inset_0_2px_0_var(--primary)]",
               )}
             >
-              <div className="flex items-center rounded-control hover:bg-muted">
+              {/* The row is the indicator's box: it covers the chevron too. */}
+              <div className="relative isolate flex items-center rounded-control transition-interactive hover:bg-muted">
                 <button
                   type="button"
                   onClick={() => prefs.setCollapsed(project.id, open)}
@@ -102,9 +103,16 @@ export function ProjectsTree() {
                   activeOptions={{ exact: true, includeSearch: false }}
                   className="flex min-w-0 flex-1 items-center gap-[9px] py-[7px] pr-2.5 pl-1 text-[13.5px] font-medium text-foreground hover:text-foreground data-[status=active]:text-accent-foreground"
                 >
-                  <ProjectTile id={project.id} name={project.name} isProtected={project.protected} />
-                  <span className="truncate">{project.name}</span>
-                  <span className="ml-auto text-xs font-normal text-muted-foreground">{project.serviceCount}</span>
+                  {({ isActive }) => (
+                    <>
+                      {/* The same sliding background as the main navigation and the service rows. It
+                          follows the link's own active state, so it moves in the same commit as theirs. */}
+                      {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                      <ProjectTile id={project.id} name={project.name} isProtected={project.protected} />
+                      <span className="truncate">{project.name}</span>
+                      <span className="ml-auto text-xs font-normal text-muted-foreground">{project.serviceCount}</span>
+                    </>
+                  )}
                 </Link>
               </div>
               {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} />}

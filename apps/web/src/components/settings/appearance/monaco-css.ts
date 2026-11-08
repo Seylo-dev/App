@@ -1,11 +1,14 @@
-// Monaco with just what the custom CSS editor needs: the core editor, its
-// standard features, the CSS tokenizer and the editor worker. No CSS
-// language service, so no extra worker. Loaded on demand through
-// loadCssMonaco() so it lands in its own chunk (and shares Monaco's chunks
-// with the service editors).
+// Monaco with just what the custom CSS editor needs: the core editor, the
+// same contributions as the service editors (service/editor/monaco-features.ts),
+// the CSS tokenizer and the editor worker. No CSS language service, so no
+// extra worker. Loaded on demand through loadCssMonaco() so it lands in its
+// own chunk (and shares Monaco's chunks with the service editors).
 
 import * as monaco from "monaco-editor/editor/editor.api";
-import "monaco-editor/features/register.all";
+import "../../service/editor/monaco-features";
+// Color swatches and the color picker on hover, for colors in the CSS (Monaco's default color provider).
+// Only here, so the service editors' chunk does not carry it.
+import "monaco-editor/features/colorPicker/register";
 import "monaco-editor/languages/definitions/css/register";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 

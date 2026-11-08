@@ -296,7 +296,12 @@ function RepoRowsSkeleton({ bare = false }: { bare?: boolean }) {
   return bare ? rows : <div className="flex flex-col rounded-control bg-raised p-1">{rows}</div>;
 }
 
-function BranchSelect({
+/**
+ * The branches of the picked repository. When the list fails (token scope,
+ * rate limit, a repository that is gone) the error shows under the field:
+ * the saved or default branch alone in the list would hide it otherwise.
+ */
+export function BranchSelect({
   projectId,
   providerId,
   repo,
@@ -311,19 +316,29 @@ function BranchSelect({
 }) {
   const branches = useOp(gitProviders.branches, { projectId, providerId, repo }, { retry: retryOp });
   const list = branches.data?.branches ?? (value ? [value] : []);
+  const placeholder = branches.isPending
+    ? t("service.loading")
+    : branches.isError
+      ? t("serviceSource.provider.branchesFailed")
+      : list.length === 0
+        ? t("serviceSource.provider.noBranches")
+        : t("serviceSource.provider.pickBranch");
   return (
-    <Select value={value ?? undefined} onValueChange={onChange} disabled={branches.isPending && !value}>
-      <SelectTrigger aria-label={t("serviceSource.provider.branch")} className="font-mono">
-        <SelectValue placeholder={branches.isError ? t("service.notBuilt.title") : t("service.loading")} />
-      </SelectTrigger>
-      <SelectContent>
-        {list.map((b) => (
-          <SelectItem key={b} value={b} className="font-mono">
-            {b}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <>
+      <Select value={value ?? undefined} onValueChange={onChange} disabled={list.length === 0}>
+        <SelectTrigger aria-label={t("serviceSource.provider.branch")} className="font-mono">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {list.map((b) => (
+            <SelectItem key={b} value={b} className="font-mono">
+              {b}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {branches.isError && <OpErrorNote error={branches.error} compact />}
+    </>
   );
 }
 

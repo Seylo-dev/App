@@ -4,7 +4,7 @@
 // checked when a screen opens does not animate.
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { hostShellStatus, ids } from "./demo/fixtures";
+import { hostShellStatus, ids, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { stateFile } from "./helpers";
 
@@ -105,6 +105,28 @@ test.describe("loading placeholders", () => {
     await loaded(page);
     // Layout is exact here: the old rows were a quarter pixel short each.
     expectClose((await box(card)).height, before.height, "project card height", 0.2);
+  });
+
+  test("dashboard without nodes: the nodes card is its empty state from the start, so Projects stays put", async ({ page }) => {
+    // A first-run panel: no nodes yet, and the metrics answer comes late.
+    await installDemo(page, {
+      delay: (opId) => (opId === "metrics.nodes" ? 1500 : 0),
+      overrides: {
+        "metrics.nodes": () => ({ nodes: [] }),
+        "system.info": () => ({ ...systemInfo, nodes: { total: 0, online: 0 } }),
+      },
+    });
+    await page.goto("/");
+    const heading = page.getByRole("region", { name: "Projects" }).getByRole("heading", { name: "Projects" });
+    const nodesCard = page.getByRole("region", { name: "Node usage" });
+    // system.info is in: the panel knows it has no nodes.
+    await expect(page.getByText("0 nodes", { exact: false }).first()).toBeVisible();
+    await expect(heading).toBeVisible();
+    // Before: three chart placeholders until metrics.nodes answered, 59px shorter than the empty state after them.
+    await expect(nodesCard.getByText("No nodes yet")).toBeVisible({ timeout: 1000 });
+    const before = await box(heading);
+    await page.waitForTimeout(1800);
+    expectClose((await box(heading)).y, before.y, "Projects heading y");
   });
 
   test("node sheet: the cleanup form and the host shell take their placeholders' room", async ({ page }) => {

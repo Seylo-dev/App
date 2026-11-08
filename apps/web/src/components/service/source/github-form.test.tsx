@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { github } from "@seylo/ops";
+import { github, OpError } from "@seylo/ops";
 import type { OpClient } from "@seylo/ops/client";
 import { OpClientProvider, opQueryKey } from "@seylo/ops/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -7,7 +7,7 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { renderToStaticMarkup } from "react-dom/server";
 import { t } from "../../../i18n/t";
 import type { ServiceDetail } from "../use-service";
-import { GithubForm } from "./github-form";
+import { BranchSelect, GithubForm } from "./github-form";
 
 // Only what GithubForm reads.
 const service = {
@@ -52,4 +52,56 @@ test("someone who may see the App but has no installation still gets the install
   expect(html).toContain(t("serviceSource.github.noAppTitle"));
   expect(html).toContain("https://github.com/apps/acme-seylo/installations/new");
   expect(html).not.toContain(t("serviceSource.github.readOnly"));
+});
+
+const branchInput = { projectId: "prj1prj1prj1prj1", installationId: "ghi1ghi1ghi1ghi1", repo: "acme/shop" };
+
+/** The form's BranchSelect with github.branches already answered (or failed) in the cache. */
+function renderBranches(answer: { branches: string[]; defaultBranch: string } | OpError, value: string | null) {
+  // retryOnMount: false keeps a failed query failed on render instead of fetching again.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Number.POSITIVE_INFINITY } },
+  });
+  const key = opQueryKey(github.branches, branchInput);
+  if (answer instanceof OpError) {
+    queryClient
+      .getQueryCache()
+      .build(queryClient, { queryKey: key })
+      .setState({ status: "error", error: answer, fetchStatus: "idle", errorUpdateCount: 1, errorUpdatedAt: Date.now() });
+  } else {
+    queryClient.setQueryData(key, answer);
+  }
+  const client = { call: () => new Promise(() => {}) } as unknown as OpClient;
+  return renderToStaticMarkup(
+    <QueryClientProvider client={queryClient}>
+      <OpClientProvider client={client}>
+        <BranchSelect {...branchInput} value={value} onChange={() => {}} />
+      </OpClientProvider>
+    </QueryClientProvider>,
+  );
+}
+
+const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll("'", "&#x27;");
+const failed = new OpError("FORBIDDEN", "GitHub answered 404: the App installation has no access to acme/shop.");
+
+test("a failed GitHub branch list says so and shows GitHub's error, not 'Not available yet'", () => {
+  // An empty repository: nothing to fall back on.
+  const empty = renderBranches(failed, null);
+  expect(empty).toContain(escaped(t("serviceSource.github.branchesFailed")));
+  expect(empty).toContain(escaped(failed.message));
+  expect(empty).not.toContain(escaped(t("service.notBuilt.title")));
+  expect(empty).toContain('disabled=""');
+
+  // With the repository's default branch picked the list falls back to it (still pickable), and the error still shows.
+  const withDefault = renderBranches(failed, "main");
+  expect(withDefault).not.toContain('disabled=""');
+  expect(withDefault).toContain(escaped(failed.message));
+});
+
+test("a loaded GitHub branch list shows no error, and an empty one says there are no branches", () => {
+  const loaded = renderBranches({ branches: ["main", "dev"], defaultBranch: "main" }, null);
+  expect(loaded).toContain(escaped(t("serviceSource.github.pickBranch")));
+  expect(loaded).not.toContain('role="alert"');
+  expect(loaded).not.toContain(escaped(failed.message));
+  expect(renderBranches({ branches: [], defaultBranch: "main" }, null)).toContain(escaped(t("serviceSource.github.noBranches")));
 });

@@ -35,6 +35,8 @@ export function NodeUsage() {
   useLiveTopics((usage.data?.nodes ?? []).map((node): LiveTopic => `node:${node.nodeId}`));
   // The sidebar already has the node count: placeholders show as many node chips and values as will arrive.
   const nodeCount = useOp(system.info, {}).data?.nodes.total ?? 3;
+  // With no nodes the answer is known: the empty state right away, not chart placeholders of another height.
+  const noNodes = nodeCount === 0;
   const series = usage.data?.nodes ?? [];
   // Members without nodes.view see the dashboard without the fleet graphs.
   if (usage.error?.code === "FORBIDDEN") return null;
@@ -92,7 +94,7 @@ export function NodeUsage() {
       </CardHeader>
       {usage.isError && !usage.data ? (
         <QueryError error={usage.error} onRetry={() => void usage.refetch()} />
-      ) : usage.isPending ? (
+      ) : usage.isPending && !noNodes ? (
         <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 gap-[22px] lg:grid-cols-3">
           <MetricChartSkeleton metric="cpu" nodes={nodeCount} />
           <MetricChartSkeleton metric="memory" nodes={nodeCount} />

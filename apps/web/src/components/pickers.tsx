@@ -48,12 +48,15 @@ export function ProjectPicker({
   value,
   onChange,
   exclude,
+  disabled = false,
 }: {
   id: string;
   value: string;
   onChange: (projectId: string) => void;
   /** A project left out of the list (the one a service moves away from). */
   exclude?: string;
+  /** Locks the choice, for example while a request that used it runs. */
+  disabled?: boolean;
 }) {
   const list = useOp(projects.list, {});
   const options = list.data?.projects.filter((project) => !project.protected && project.id !== exclude) ?? [];
@@ -65,7 +68,7 @@ export function ProjectPicker({
 
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
   return (
-    <Select value={value} onValueChange={onChange} disabled={options.length === 0}>
+    <Select value={value} onValueChange={onChange} disabled={disabled || options.length === 0}>
       <SelectTrigger id={id}>
         <SelectValue placeholder={list.isPending ? t("common.loading") : t("pickers.noProjects")} />
       </SelectTrigger>
