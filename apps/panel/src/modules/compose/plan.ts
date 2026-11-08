@@ -104,6 +104,13 @@ function healthCheckOf(h: ComposeService["healthcheck"]): HealthCheck | null {
 }
 
 /**
+ * Agents before 0.2.0-rc.2 warn "build sections are not built" for every
+ * build: section. Whether a stack builds is the panel's call (below): it
+ * builds repository stacks and warns for pasted files, so that line goes.
+ */
+const legacyBuildWarning = /: build sections are not built for compose stacks; give the service an image$/;
+
+/**
  * Member plans from a normalized compose project. `composePath` is the
  * compose file's path in the repo ("" for pasted files), so build contexts
  * resolve relative to it.
@@ -115,7 +122,7 @@ export function planStack(
   agentWarnings: readonly string[] = [],
 ): StackPlan {
   const project = (projectJson ?? {}) as ComposeProject;
-  const warnings = [...agentWarnings];
+  const warnings = agentWarnings.filter((w) => !legacyBuildWarning.test(w));
   const entries = Object.entries(project.services ?? {}).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) warnings.push("The compose file has no services.");
   const composeDir = source.type === "inline" ? "" : posix.dirname(source.path || "docker-compose.yml");
