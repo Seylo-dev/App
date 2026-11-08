@@ -376,7 +376,23 @@ describe("the script", () => {
   test("the count it prints leaves out the dropped identity keys", () => {
     seed();
     const out = run("--new-panel-identity");
-    expect(out.stdout).toContain("New master.key written; 1 sealed values sealed again:\n  git_credentials.secret_sealed: 1\n");
+    expect(out.stdout).toContain("New master.key written; 1 sealed value sealed again:\n  git_credentials.secret_sealed: 1\n");
+  });
+
+  test("a fresh install whose only sealed values are the identity keys: no count and no colon left hanging", () => {
+    const secrets = createSecretBox(loadMasterKey(join(dir, "master.key"), true));
+    const dbs = open();
+    dbs.db.insert(users).values({ email: "owner@example.com", name: "Owner", role: "owner" }).run();
+    setSetting(dbs.db, "lbTlsCa", { certPem: "-", keySealed: secrets.seal("ca-key", "lb.key"), notAfter: 1 });
+    ensureEdgeTicketKey(dbs.db, secrets);
+    dbs.close();
+    const out = run("--new-panel-identity", "--from-cli");
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain(
+      "New master.key written; no other sealed values to seal again.\nThe panel makes a new edge ticket key and load balancer CA when it starts",
+    );
+    expect(out.stdout).not.toContain("sealed again:");
+    expect(out.stdout).not.toContain("0 sealed");
   });
 
   test("--keep-panel-identity says nodes keep working", () => {

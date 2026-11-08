@@ -103,8 +103,13 @@ try {
     console.log("Finished an earlier rotation that stopped before master.key was replaced.");
   } else {
     const total = Object.values(result.resealed).reduce((sum, n) => sum + n, 0);
-    console.log(`New master.key written; ${total} sealed values sealed again:`);
-    for (const [where, count] of Object.entries(result.resealed)) console.log(`  ${where}: ${count}`);
+    if (total === 0) {
+      // A fresh install with --new-panel-identity: the identity keys were its only sealed values.
+      console.log("New master.key written; no other sealed values to seal again.");
+    } else {
+      console.log(`New master.key written; ${total} sealed ${total === 1 ? "value" : "values"} sealed again:`);
+      for (const [where, count] of Object.entries(result.resealed)) console.log(`  ${where}: ${count}`);
+    }
     if (identity === "new") {
       console.log("The panel makes a new edge ticket key and load balancer CA when it starts; the panel id stays.");
       if (result.agentTlsPin) console.log(`The agents' TLS key was replaced too; its new pin is ${result.agentTlsPin}.`);
