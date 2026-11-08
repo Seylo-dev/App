@@ -5,13 +5,14 @@
 // agents that report nothing (before 0.2.1) count as able to build.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { OpError } from "@seylo/ops";
+import { builds, OpError } from "@seylo/ops";
 import { pickBuildNode } from "../src/modules/deployments/source";
 import { canBuildWarning } from "../src/modules/nodes/view";
 import { defaultSpec } from "../src/modules/services/spec";
 import { allCapabilities, type FakeAgent } from "./fake-agent";
-import { type TestPanel, testPanel } from "./helpers";
+import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 import { addJoinToken, joinAgent, listen } from "./hub-helpers";
+import { seedProject, seedService } from "./seed-helpers";
 
 let panel: TestPanel;
 let url: string;
@@ -97,4 +98,20 @@ test("with every builder lacking buildx the refusal names them, and installing i
   while (panel.deps.agents.state.get(only.nodeId)?.facts?.buildx?.installed !== true && Date.now() < deadline) await Bun.sleep(10);
   expect(pickBuildNode(panel.deps, spec(), [only.nodeId]).id).toBe(only.nodeId);
   expect(canBuildWarning(panel.deps.agents.state.get(only.nodeId)?.facts ?? null)).toBeNull();
+});
+
+test("the build settings refuse a build node that reports no buildx, and take one that has it", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const without = await builder("de-1", missing);
+  const withIt = await builder("de-2", installed);
+  const service = seedService(panel, { projectId: seedProject(panel).id, name: "web", nodeIds: [withIt.nodeId] });
+  const refused = await callOp(panel, builds.updateSettings, { serviceId: service.id, buildNodeId: without.nodeId }, { cookie });
+  expect(refused.status).toBe(400);
+  expect(refused.body.error).toMatchObject({
+    message: "de-1 has no docker buildx. Install docker-buildx-plugin on it.",
+    details: { field: "buildNodeId" },
+  });
+  const taken = await callOp(panel, builds.updateSettings, { serviceId: service.id, buildNodeId: withIt.nodeId }, { cookie });
+  expect(taken.status).toBe(200);
+  expect(taken.body.buildNodeId).toBe(withIt.nodeId);
 });

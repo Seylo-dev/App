@@ -108,7 +108,7 @@ export const updateSettings = defineOp({
   kind: "mutation",
   summary: "Change a service's build settings",
   description:
-    "Changes how a service is built. Omitted fields keep their value. Takes effect on the next deploy. buildNodeId must name a node with Can build on, or be null for automatic.",
+    "Changes how a service is built. Omitted fields keep their value. Takes effect on the next deploy. buildNodeId must name a node with Can build on whose agent does not report docker buildx missing, or be null for automatic.",
   input: Type.Object({
     serviceId: Id,
     builder: Type.Optional(Builder),

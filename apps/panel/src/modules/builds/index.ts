@@ -5,6 +5,7 @@ import { builds as buildOps, OpError } from "@seylo/ops";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { builds, deployments, nodes, projects, services } from "../../db/schema";
 import { implement } from "../../ops/implement";
+import { hasBuildx } from "../deployments/source";
 import { defineModule } from "../module";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService } from "../services/rows";
@@ -98,6 +99,10 @@ const updateSettings = implement(buildOps.updateSettings, (input, ctx) => {
     const node = ctx.db.select().from(nodes).where(eq(nodes.id, input.buildNodeId)).get();
     if (!node) throw new OpError("NOT_FOUND", "No node with this id.", { field: "buildNodeId" });
     if (!node.canBuild) throw new OpError("BAD_REQUEST", `${node.name} does not have Can build on.`, { field: "buildNodeId" });
+    // Every deploy would stop on it (pickBuildNode): say so now, not at the next deploy.
+    if (!hasBuildx(ctx, node.id)) {
+      throw new OpError("BAD_REQUEST", `${node.name} has no docker buildx. Install docker-buildx-plugin on it.`, { field: "buildNodeId" });
+    }
   }
   const { serviceId: _, ...changes } = input;
   const defined = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined));

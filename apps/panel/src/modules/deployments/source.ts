@@ -289,6 +289,6 @@ export function pickBuildNode(deps: Deps, spec: ServiceSpecJson, targetNodeIds: 
 }
 
 /** The agent's last word on docker buildx; unset (agents before 0.2.1) counts as installed. */
-function hasBuildx(deps: Deps, nodeId: string): boolean {
+export function hasBuildx(deps: Pick<Deps, "agents">, nodeId: string): boolean {
   return deps.agents.state.get(nodeId)?.facts?.buildx?.installed !== false;
 }
