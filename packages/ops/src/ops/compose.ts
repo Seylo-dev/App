@@ -31,11 +31,18 @@ const GitComposeSource = Type.Object({
 });
 
 /** Where the compose file comes from: pasted text, or a file in a repository. */
-export const ComposeSource = Type.Union([Type.Object({ type: Type.Literal("inline"), yaml: ComposeYaml }), GithubComposeSource, GitComposeSource]);
+export const ComposeSource = Type.Union([
+  Type.Object({ type: Type.Literal("inline"), yaml: ComposeYaml }),
+  GithubComposeSource,
+  GitComposeSource,
+]);
 
 /** A stored source as compose.get returns it: a pasted file may come back empty (fileHidden). */
 const StoredComposeSource = Type.Union([
-  Type.Object({ type: Type.Literal("inline"), yaml: Type.String({ maxLength: 512 * 1024, description: "The compose file, empty when hidden." }) }),
+  Type.Object({
+    type: Type.Literal("inline"),
+    yaml: Type.String({ maxLength: 512 * 1024, description: "The compose file, empty when hidden." }),
+  }),
   GithubComposeSource,
   GitComposeSource,
 ]);

@@ -306,7 +306,8 @@ export async function gitHostForMove(
   if (approved(db, input.toProjectId, host)) return fine;
   const target = await checkGitHost(db, input.source.url);
   if (target.ok && !approved(db, input.fromProjectId, host)) return fine;
-  if (!target.ok && target.reason === "metadata") return { problem: `${host} is ${blockedTarget(target)}; nodes never clone from it.`, record: null };
+  if (!target.ok && target.reason === "metadata")
+    return { problem: `${host} is ${blockedTarget(target)}; nodes never clone from it.`, record: null };
   if (input.caller.access.can("git.manage")) return { problem: null, record: { host } };
   const what = target.ok
     ? `Its git host ${host} is allowed as an internal host only in its current project`
@@ -320,7 +321,12 @@ export async function gitHostForMove(
 }
 
 /** Records a host gitHostForMove said the move records. */
-export function recordGitHostForMove(db: Pick<PanelDb, "insert">, projectId: string, record: { host: string } | null, userId: string | null): void {
+export function recordGitHostForMove(
+  db: Pick<PanelDb, "insert">,
+  projectId: string,
+  record: { host: string } | null,
+  userId: string | null,
+): void {
   if (record) db.insert(gitInternalHosts).values({ projectId, host: record.host, approvedBy: userId }).onConflictDoNothing().run();
 }
 

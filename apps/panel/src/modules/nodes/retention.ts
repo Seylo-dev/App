@@ -11,7 +11,6 @@
 import { and, desc, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { reportLaneSql } from "../../agent-hub/report-budget";
 import type { PanelDb } from "../../db/client";
-import { pruneFinishedJobs } from "../../jobs/queue";
 import {
   agentReports,
   alerts,
@@ -23,6 +22,7 @@ import {
   webhookBodies,
   webhookDeliveries,
 } from "../../db/schema";
+import { pruneFinishedJobs } from "../../jobs/queue";
 import { maxRememberedBodies, replayWindowMs } from "../webhooks/replay";
 
 const day = 24 * 3600 * 1000;

@@ -228,7 +228,12 @@ test("moving a service to another project carries its internal git host for an a
   const mover = await createUser(panel, "member");
   grant(panel, mover.user.id, "project", projectId, ["*"]);
   grant(panel, mover.user.id, "project", otherProjectId, ["services.create", "services.view"]);
-  const memberImpact = await callOp(panel, serviceOps.moveProjectImpact, { serviceId, projectId: otherProjectId }, { cookie: mover.cookie });
+  const memberImpact = await callOp(
+    panel,
+    serviceOps.moveProjectImpact,
+    { serviceId, projectId: otherProjectId },
+    { cookie: mover.cookie },
+  );
   expect(memberImpact.status).toBe(200);
   // Before: blockers [] and the move went through, then every build failed in blog.
   expect(memberImpact.body.blockers).toEqual([{ reason: "access", message: expect.stringContaining("gitea.lan") }]);
@@ -259,7 +264,14 @@ test("moving a service to another project carries its internal git host for an a
   ]);
   const service = loadService(panel.deps.db, serviceId);
   await expect(
-    resolveBuild(panel.deps, { service, spec: readSpec(service.spec), buildId: "b1", generation: 1, commitSha: "a".repeat(40), uploadId: null }),
+    resolveBuild(panel.deps, {
+      service,
+      spec: readSpec(service.spec),
+      buildId: "b1",
+      generation: 1,
+      commitSha: "a".repeat(40),
+      uploadId: null,
+    }),
   ).resolves.toMatchObject({ commit: { sha: "a".repeat(40) } });
 
   // A public host needs nothing; one allowed in shop for split-horizon DNS needs an admin too.
