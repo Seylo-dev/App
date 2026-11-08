@@ -10,7 +10,15 @@ import { requestOrigin } from "./request-origin";
 
 export function servedOverHttps(deps: Pick<Deps, "db" | "proxy">, request: Request, socketIp: string | null): boolean {
   if (requestOrigin(request, deps.proxy.trusts(socketIp)).startsWith("https://")) return true;
-  const domain = getSetting(deps.db, "panelDomain")?.trim().toLowerCase();
+  let domain: string | undefined;
+  try {
+    domain = getSetting(deps.db, "panelDomain")?.trim().toLowerCase();
+  } catch {
+    // An unreadable database must not fail every request here, before the
+    // route runs: /api/health has to answer 503 for it, and other routes
+    // fail on their own reads.
+    return false;
+  }
   return !!domain && request.headers.get("host")?.toLowerCase() === domain;
 }
 
