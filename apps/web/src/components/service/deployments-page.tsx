@@ -393,7 +393,8 @@ function BuildFacts({ service }: { service: ServiceDetail }) {
       text: t("serviceDeploys.facts.builder", { builder: t(`serviceSource.builders.${service.source.builder}.name`) }),
     });
   const onPush = deploysOnPush(src);
-  if (onPush !== null) facts.push({ icon: IconRefresh, text: onPush ? t("serviceDeploys.facts.pushOn") : t("serviceDeploys.facts.pushOff") });
+  if (onPush !== null)
+    facts.push({ icon: IconRefresh, text: onPush ? t("serviceDeploys.facts.pushOn") : t("serviceDeploys.facts.pushOff") });
   facts.push({
     icon: IconShieldCheck,
     text: service.deploy.mode === "rolling" ? t("serviceDeploys.facts.rolling") : t("serviceDeploys.facts.recreate"),

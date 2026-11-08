@@ -209,11 +209,15 @@ test("GitHub and git provider sources count toward the hosts they clone from", a
   const { db, secrets } = panel.deps;
   const gitlab = db
     .insert(gitProviders)
-    .values({ kind: "gitlab", name: "Corp GitLab", url: "https://GitLab.corp.example:8443", tokenSealed: secrets.seal("t", "git.provider") })
+    .values({
+      kind: "gitlab",
+      name: "Corp GitLab",
+      url: "https://GitLab.corp.example:8443",
+      tokenSealed: secrets.seal("t", "git.provider"),
+    })
     .returning()
     .get();
-  const source = (name: string, spec: unknown) =>
-    db.insert(services).values({ projectId, name, nameKey: name, kind: "app", spec }).run();
+  const source = (name: string, spec: unknown) => db.insert(services).values({ projectId, name, nameKey: name, kind: "app", spec }).run();
   source("from-github", { source: { type: "github", installationId: "i1", repo: "acme/shop", branch: "main", deployOnPush: true } });
   source("from-gitlab", {
     source: { type: "provider", providerId: gitlab.id, provider: "gitlab", repo: "acme/shop", branch: "main", deployOnPush: true },
@@ -227,7 +231,7 @@ test("GitHub and git provider sources count toward the hosts they clone from", a
 
   const list = await callOp(panel, gitOps.listInternalHosts, { projectId }, { cookie: owner });
   expect(list.status).toBe(200);
-  const usedBy = Object.fromEntries(list.body.items.map((h) => [h.host, h.usedBy]));
+  const usedBy = Object.fromEntries(list.body.items.map((h: { host: string; usedBy: number }) => [h.host, h.usedBy]));
   // Taking either off changes their builds (gitHostRecorded, providerGitVerdict), so the list must not call them unused.
   expect(usedBy).toEqual({ "github.com": 1, "gitlab.corp.example:8443": 2 });
 });

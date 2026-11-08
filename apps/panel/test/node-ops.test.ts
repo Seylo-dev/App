@@ -223,7 +223,11 @@ describe("nodes", () => {
 
   test("nodes.choices offers members who may create services the nodes, without addresses", async () => {
     const agent = await join();
-    panel.deps.db.update(nodes).set({ name: "edge", wildcardDomain: "apps.example.com", publicIpv4: "203.0.113.7" }).where(eq(nodes.id, agent.nodeId)).run();
+    panel.deps.db
+      .update(nodes)
+      .set({ name: "edge", wildcardDomain: "apps.example.com", publicIpv4: "203.0.113.7" })
+      .where(eq(nodes.id, agent.nodeId))
+      .run();
     const off = panel.deps.db
       .insert(nodes)
       .values({ name: "spare", publicKey: Buffer.alloc(32, 1), disabledAt: new Date() })
@@ -238,7 +242,7 @@ describe("nodes", () => {
     expect(offered.nodes).toEqual([
       { id: agent.nodeId, name: "edge", status: "online", wildcardDomain: "apps.example.com", arch: "amd64" },
     ]);
-    expect(offered.nodes.some((n) => n.id === off.id)).toBe(false);
+    expect(offered.nodes.some((n: { id: string }) => n.id === off.id)).toBe(false);
 
     // Viewers and accounts without grants cannot create anything, so they get nothing.
     const viewer = await createUser(panel, "member");
@@ -248,7 +252,7 @@ describe("nodes", () => {
     expect(await ok(callOp(panel, nodeOps.choices, {}, { cookie: stranger.cookie }))).toEqual({ nodes: [] });
 
     const all = await ok(callOp(panel, nodeOps.choices, {}, { cookie: owner.cookie }));
-    expect(all.nodes.map((n) => n.name)).toEqual(["edge"]);
+    expect(all.nodes.map((n: { name: string }) => n.name)).toEqual(["edge"]);
   });
 });
 
