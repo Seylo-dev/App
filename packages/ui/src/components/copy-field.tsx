@@ -67,7 +67,8 @@ export interface CopyFieldProps {
  * on the keyboard (install commands, connection URLs, API keys). The whole
  * field is the button, so one click copies; the text stays selectable.
  * Focus alone never copies: tabbing across a page must not put its secrets
- * on the clipboard.
+ * on the clipboard. Keyboard focus on the value rings the whole field, the
+ * same 2px ring the kit's :focus-visible draws around a button.
  */
 export function CopyField({ value, secret = false, masked, prefix, mono = true, tone = "card", className, ...rest }: CopyFieldProps) {
   const labels = useUiLabels();
@@ -81,6 +82,7 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
       data-slot="copy-field"
       className={cn(
         "group relative flex h-[38px] min-w-0 items-center gap-1 rounded-control pr-1 pl-3 text-[13px]",
+        "has-[[data-slot=copy-field-value]:focus-visible]:outline-2 has-[[data-slot=copy-field-value]:focus-visible]:outline-offset-2 has-[[data-slot=copy-field-value]:focus-visible]:outline-ring",
         dark ? "bg-terminal text-terminal-foreground" : "bg-field text-foreground shadow-[inset_0_0_0_1px_var(--input)]",
         className,
       )}
@@ -88,6 +90,7 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
       {prefix && <span className={cn("shrink-0 select-none font-mono", dark ? "text-terminal-prompt" : "text-ink-faint")}>{prefix}</span>}
       <button
         type="button"
+        data-slot="copy-field-value"
         aria-label={rest["aria-label"] ? `${labels.copy}: ${rest["aria-label"]}` : labels.copy}
         onClick={() => void copy(value)}
         className={cn(

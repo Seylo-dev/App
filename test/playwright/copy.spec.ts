@@ -2,7 +2,8 @@
 // clipboard that the viewer did not ask to copy: the setup-link command,
 // the pgvector SQL and a cron job's command (job list, run dialog, cron
 // overview) copy with one click; tabbing onto a copy field (a database URL
-// with its password) does not copy it, Enter does. Demo data.
+// with its password) does not copy it, Enter does, and the field shows a
+// focus ring while the keyboard is on it. Demo data.
 
 import { expect, type Page, test } from "@playwright/test";
 import { ids } from "./demo/fixtures";
@@ -38,6 +39,48 @@ test.describe("copy", () => {
     await page.keyboard.press("Enter");
     await expect(internal.getByText("Copied")).toBeVisible();
     expect(await clipboard(page)).toBe("clickhouse://ch_k3v9q2m8x1:Wd4nB8sKq1Pz7Hv2@events:9000/events");
+  });
+
+  test("keyboard focus on a copy field shows where focus is", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(`/p/${ids.acme}/s/${svc.clickhouse}/connection`);
+    const internal = page.getByRole("region", { name: "Internal connection" });
+    const url = internal.getByRole("button", { name: "Copy: Connection URL" });
+    const field = url.locator('xpath=ancestor::*[@data-slot="copy-field"][1]');
+    const eye = field.getByRole("button", { name: "Show" });
+    await expect(url).toBeVisible();
+    const outline = (target: typeof field) =>
+      target.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { style: s.outlineStyle, width: s.outlineWidth, color: s.outlineColor };
+      });
+    const ring = await page.evaluate(() => {
+      // --ring resolved the way the browser paints it (rgb), to compare with outlineColor.
+      const probe = document.createElement("span");
+      probe.style.color = "var(--ring)";
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+
+    expect(await outline(field)).toMatchObject({ style: "none" });
+    await internal.getByRole("button", { name: "Reset password" }).focus();
+    await page.keyboard.press("Tab");
+    await expect(url).toBeFocused();
+    // Before: the value button had outline-none and the field showed nothing.
+    expect(await outline(field)).toEqual({ style: "solid", width: "2px", color: ring });
+
+    // The eye button draws its own ring; the field does not ring with it.
+    await page.keyboard.press("Tab");
+    await expect(eye).toBeFocused();
+    expect(await outline(field)).toMatchObject({ style: "none" });
+    expect(await outline(eye)).toMatchObject({ style: "solid", width: "2px" });
+
+    // A mouse click copies without the keyboard ring.
+    await url.click();
+    await expect(url).toBeFocused();
+    expect(await outline(field)).toMatchObject({ style: "none" });
   });
 
   test("the expired setup link screen gives the command with a copy button", async ({ page }) => {
