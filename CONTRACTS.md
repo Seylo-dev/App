@@ -260,10 +260,18 @@ Summary; the full rules are in `proto/README.md` and the comments of
   the socket actually connects to (after DNS) and refuses loopback,
   private, link-local, CGNAT, unique-local, multicast, unspecified and
   reserved addresses, also as IPv4-mapped, IPv4-compatible, NAT64 or 6to4
-  forms. The node's own public addresses are not refused (a git server on
-  the node, reached by its public name, keeps working); refusing them
-  needs the panel to know every node address first (see Not built yet).
-  With this field set, internal addresses are allowed for the
+  forms (`netguard` rules; `go/internal/netguard/testdata/addresses.json` is
+  the table the panel's classifier is tested against too), and the node's
+  own interface addresses, public ones included (`net.InterfaceAddrs`,
+  cached 5 s; public addresses are refused when they cannot be read): a
+  connection to them stays on the node, past a firewall that hides a
+  service from the internet. A git server on the node, reached by its
+  public name, therefore needs this field like one on a private address;
+  the panel counts the nodes' addresses as internal, so an admin's save of
+  such a source sets it (Git addresses below). Agents report those
+  addresses as `NodeFacts.interface_addresses` (added in 0.2: the public
+  addresses on the node's interfaces, sorted, at most 64; empty from older
+  agents). With this field set, internal addresses are allowed for the
   source's own host and port only (not for a redirect or submodule to
   another host); cloud metadata addresses never. The panel sets it for a
   generic git source exactly when its host is in `git_internal_hosts` for
@@ -272,7 +280,9 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `gitProviders.manage`), or when the host is in `git_internal_hosts` for
   the project; for a GitHub App source only when `github.com` is in
   `git_internal_hosts` for the project. A refused connection fails the fetch with
-  "the node refused to connect to <host:port>: ...". ssh is used only with
+  "the node refused to connect to <host:port>: ..."; for the source's own
+  host the message names how an admin allows it (the project's Settings >
+  Internal git hosts, or `git.allowInternalHost`). ssh is used only with
   the source's SSH key (`protocol.ssh.allow=never` otherwise), and ssh://
   hosts must be plain names or IP addresses. Since the ssh tunnel always
   goes to the source's host, an ssh submodule on another host fails its
@@ -286,12 +296,19 @@ Summary; the full rules are in `proto/README.md` and the comments of
   operator set it), never a metadata one. The node cannot see where the
   proxy connects, so then the address check is on the target before the
   request goes out: an IP address exactly, a name by what it resolves to
-  on the node (all its addresses). A name the node cannot resolve goes on
-  to the proxy unchecked (nodes whose DNS knows no outside names rely on
-  the proxy to resolve), so then the proxy's own rules decide, as they do
-  for rebinding between the node's lookup and the proxy's. A
-  0.2 agent behind a panel that never sends the field clones from public
-  addresses only.
+  on the node (all its addresses). A name the node cannot resolve (not
+  found, a failing server, or no answer in 10 s) is refused before it goes
+  to the proxy, unless this field covers that host and port, or the node's
+  root set `git_proxy_resolves: true` in its config.yml (nodes whose DNS
+  knows no outside names and rely on the proxy to resolve; read at agent
+  start, the panel cannot set it): then it goes on to the proxy unchecked,
+  for any host (a redirect or submodule too), and the proxy's own rules
+  decide, as they do for rebinding between the node's lookup and the
+  proxy's. The refusal ("the node cannot resolve <name>, so it cannot check
+  where the agent's HTTP proxy would connect") names the key with the
+  node's config.yml path, and for the source's own host the admin's
+  allowance too. A 0.2 agent behind a panel that never sends the field
+  clones from public addresses only.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -1156,7 +1173,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
 - Uptime targets (`modules/uptime/targets.ts`): loopback, link-local, cloud
   metadata (169.254.169.254, 100.100.100.200, fd00:ec2::254,
   `metadata.google.internal`, `*.internal`), private and reserved ranges
-  (IPv4-mapped and NAT64 included) are refused on save (BAD_REQUEST `reason:
+  (`blockedReason`: the same ranges as the agent's `netguard`, in the same
+  order, IPv4-mapped, NAT64 and 6to4 forms judged by the IPv4 address they
+  carry, IPv4-compatible `::/96`, site-local `fec0::/10`, the documentation
+  ranges and `2001:db8::/32`, local-use NAT64 `64:ff9b:1::/48` and
+  `100::/64`; both suites test against
+  `go/internal/netguard/testdata/addresses.json`) are refused on save (BAD_REQUEST `reason:
   internalTarget`) and before every probe, unless every such address is a
   node's address as an admin set it (`nodes.public_address`; the addresses
   an agent reports, `public_ipv4`/`public_ipv6`, never count, since a
@@ -1345,7 +1367,16 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   source (service, compose stack, clone) must resolve to public addresses
   (`uptime/targets.ts` `checkTarget`, no "allow internal targets", and a
   node's own address on a private network is internal here, unlike for
-  uptime checks: `ownNodes: false`), checked
+  uptime checks: `ownNodes: false`). A host whose every address is one of
+  the panel's nodes' (any node's admin-set `public_address`, `public_ipv4`,
+  `public_ipv6` or `NodeFacts.interface_addresses`; or whose name is a
+  node's admin-set public host name) is internal too, public addresses
+  included (`nodesInternal`, reason `node`, "an address of one of this
+  panel's nodes"), since nodes refuse their own addresses for git unless
+  the host is allowed. What agents report counts here because it only ever
+  makes a host more internal. A name that also resolves to another public
+  address stays public (the node skips its own address and dials the
+  other). Checked
   on save and again right before a build or FetchGitFile goes to a node
   (DNS may answer differently by then). An internal host (private,
   loopback, link-local, reserved, or a name the panel cannot resolve) works
@@ -1354,8 +1385,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   project's members may then use it too. Cloud metadata addresses never.
   On the first start of 0.2 the hosts of git sources already stored are
   recorded once (`gitInternalHostsSeededV2`), so existing LAN git servers
-  keep building: only hosts the panel resolves to internal addresses then,
-  or internal IP addresses. A public host is not recorded (a member's own
+  and git servers on a node keep building: only hosts the panel resolves to
+  internal addresses or the nodes' own then, or internal IP addresses. A
+  panel whose V2 seed ran before nodes refused their own addresses
+  (0.2.0-rc.1) records the hosts of its sources on the nodes' addresses
+  once more (`gitInternalHostsSeededNodes`), nothing else, and logs them. A public host is not recorded (a member's own
   name stays public-only after a rebind), and neither is a name the panel
   cannot resolve (not found, timeout, failing server: whoever controls the
   name could point it inside later); each of those is logged once with
@@ -1375,7 +1409,22 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   internal; for a LAN git server whose name resolves publicly at the
   panel (split horizon), a `git.manage` caller records it with
   `git.allowInternalHost {projectId, url}` (any host of a git URL, never a
-  metadata address; the node's refusal message names the op). `git.branches` (checking access to a generic git URL) reads the
+  metadata address; the node's refusal message names the op).
+  `git.listInternalHosts {projectId}` lists a project's hosts (who allowed
+  each, `approvedBy` null for the seed's rows or a removed account, and
+  `usedBy`, its generic git and stack sources on the host) and
+  `git.removeInternalHost {projectId, host}` takes one off (NOT_FOUND when
+  it is not there); both `git.manage`. A refusal an admin can lift
+  (BAD_REQUEST `internalTarget` or `unresolvable` from saving a source or
+  `git.branches`, never a metadata address) carries `details.host`, the
+  host as it would be recorded. The web app shows "Allow this host for
+  <project>" under such a refusal on the git source and provider forms for
+  owners and admins (a confirm step, then `git.allowInternalHost`, then the
+  check or save again) and tells members only an owner or admin can allow
+  it; a failed deployment whose error is the node's or the panel's refusal
+  for the source's host offers admins the same; project Settings >
+  Internal git hosts lists them for admins with Remove and an "Allow a
+  host" field. `git.branches` (checking access to a generic git URL) reads the
   repository from the panel under the same rule: public addresses, a host
   in `git_internal_hosts` for the project, or any internal host for a
   `git.manage` caller; never metadata, and the uptime "allow internal
@@ -1551,7 +1600,6 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
-| Git and the node's own addresses: a node does not refuse git connections to its own public addresses, and a name the node cannot resolve goes to its HTTP proxy unchecked. Refusing both needs the panel to know every node address (admin-set public address plus the addresses agents report) so an admin's save of a git server on a node records the host, and a node-level opt-in for proxy-only DNS. The panel's address classifier (uptime/targets.ts) also lacks a few ranges netguard has (6to4, IPv4-compatible, fec0::/10, documentation ranges); the node refuses those anyway | Planned for 0.2.1 |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled by `bun scripts/rotate-master-key.ts --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key and LB CA, so every node is joined again with `seylo join --force`; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
