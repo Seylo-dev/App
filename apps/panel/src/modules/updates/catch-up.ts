@@ -22,7 +22,9 @@
 //
 // An agent step that timed out (runs.ts) waits the same way, with retryAt a
 // few minutes later and the job queued for then; its second try is a run
-// of trigger "auto", since the node did not go away.
+// of trigger "auto", since the node did not go away. A node that reached
+// that version meanwhile is "upToDate", and the update_failed alert of the
+// timeout is resolved (runs.ts resolveTimedOutAlerts).
 //
 // Panels before 0.2.0-rc.2 skipped offline nodes with another message and
 // no retry, and kept no manifest on the run. At start such a step waits like
@@ -38,7 +40,7 @@ import { defineJob } from "../../jobs/queue";
 import { enqueueNext } from "../nodes/recurring";
 import { type RunRelease, runRelease, storedRelease } from "./release-state";
 import { wasRolledBack } from "./rollbacks";
-import { activeRun, agentVersion, createRun } from "./runs";
+import { activeRun, agentVersion, createRun, resolveTimedOutAlerts } from "./runs";
 
 /** How long the job waits for another run to finish before looking again. */
 export const catchUpRetryMs = 30_000;
@@ -136,7 +138,7 @@ export function queueCatchUp(deps: Pick<Deps, "db" | "jobs">, nodeId: string, no
  * node cannot interleave, and the run check and the run's creation happen
  * together.
  */
-export function catchUp(deps: Pick<Deps, "db" | "agents" | "jobs" | "live">, nodeId: string, now = new Date()): CatchUpOutcome {
+export function catchUp(deps: Pick<Deps, "db" | "agents" | "jobs" | "live" | "alerts">, nodeId: string, now = new Date()): CatchUpOutcome {
   const db = deps.db;
   const waiting = waitingSteps(db, nodeId);
   const newest = waiting[0];
@@ -160,6 +162,8 @@ export function catchUp(deps: Pick<Deps, "db" | "agents" | "jobs" | "live">, nod
   const current = agentVersion(deps, node);
   if (parseVersion(current) && !isNewer(version, current)) {
     resolve("up_to_date");
+    // A step that timed out while the agent was still finishing got there after all.
+    resolveTimedOutAlerts(deps, nodeId, current);
     return "upToDate";
   }
   if (wasRolledBack(db, nodeId, version)) {

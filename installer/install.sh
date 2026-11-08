@@ -62,6 +62,8 @@ PORT=3000
 AGENT_TLS_PORT=
 INSECURE=
 NO_DOCKER=
+# --install-docker: also reinstall a Docker that is installed but does not start.
+INSTALL_DOCKER=
 ROOT=
 DRY_RUN=
 PURGE=
@@ -270,8 +272,10 @@ Flags:
   --no-docker-install  never install Docker; stop if it is missing. Without it the
                        installer installs Docker with the official script from
                        get.docker.com when it is missing, without asking
-  --install-docker     kept for older commands (Docker is installed when missing anyway)
-  --yes                kept for older commands (the installer asks nothing)
+  --install-docker     also reinstall Docker with that script when it is installed
+                       but does not start (without it the installer stops there,
+                       before it installs anything)
+  --yes                same as --install-docker (the installer asks nothing)
   --data-dir <dir>     data folder (default: $BRAND_DATA_DIR)
   --root <dir>         write files under <dir> instead of / and run no system commands (testing)
   --dry-run            print what would be done and change nothing
@@ -279,6 +283,10 @@ Flags:
 
 Output is colored on a terminal; NO_COLOR=1 turns the colors off. Logs and
 pipes get plain text.
+
+Exit status: 0 when installed, also for a join that cannot reach the panel yet
+(the agent keeps trying); $JOIN_REFUSED_EXIT for a join the panel refused (a used or expired
+token, a wrong --pin: make a new join command); 1 for any other error.
 
 Docs: $BRAND_DOCS_URL
 EOF
@@ -327,8 +335,9 @@ parse_args() {
 		--name) need_value "$@"; NODE_NAME=$2; shift ;;
 		--can-build) CAN_BUILD=true ;;
 		--no-can-build) CAN_BUILD=false ;;
-		# Docker is installed when it is missing; these stay for commands from before 0.2.1.
-		--install-docker | --yes | -y) ;;
+		# A missing Docker is installed anyway (since 0.2.1); these only allow
+		# reinstalling one that does not start. --yes did that before 0.2.1 too.
+		--install-docker | --yes | -y) INSTALL_DOCKER=1 ;;
 		--no-docker-install) NO_DOCKER=1 ;;
 		--data-dir) need_value "$@"; DATA_DIR=$2; shift ;;
 		--root) need_value "$@"; ROOT=${2%/}; shift ;;
@@ -571,18 +580,31 @@ ensure_docker() {
 		ensure_live_restore
 		return
 	fi
-	if command -v docker >/dev/null 2>&1 && [ -z "$ROOT" ] && [ -z "$DRY_RUN" ]; then
+	if command -v docker >/dev/null 2>&1; then
+		# Installed but not answering: start it, and stop when that does not
+		# help. get.docker.com over it only with --install-docker: it swaps the
+		# distribution's docker.io, containerd and runc for its own packages,
+		# and whatever stops this dockerd (a bad /etc/docker/daemon.json, a
+		# masked unit) stops the new one too.
 		run systemctl start docker || true
 		if docker_ok; then
 			check_docker
 			ensure_live_restore
 			return
 		fi
+		if [ -n "$DRY_RUN" ]; then
+			warn "Docker is installed but not running: the install starts it (systemctl start docker) and stops if it does not answer then"
+			return
+		fi
+		[ -n "$INSTALL_DOCKER" ] && [ -z "$NO_DOCKER" ] ||
+			die "Docker is installed but not running, and systemctl start docker did not start it. See why with systemctl status docker and journalctl -u docker, fix it and run this installer again. To reinstall Docker with the script from get.docker.com instead (it replaces the distribution's docker.io, containerd and runc packages), add --install-docker"
+		say "Docker is installed but does not start: reinstalling it with the official script from get.docker.com (--install-docker)"
+	else
+		[ -z "$NO_DOCKER" ] || die "Docker is not installed (--no-docker-install was given). Install it (https://docs.docker.com/engine/install/) and run this installer again"
+		# No question, with or without a terminal: a join piped into sh over ssh
+		# or from cloud-init has nobody to answer it.
+		say "Docker is missing: installing it with the official script from get.docker.com (--no-docker-install skips this)"
 	fi
-	[ -z "$NO_DOCKER" ] || die "Docker is not installed or not running (--no-docker-install was given). Install it (https://docs.docker.com/engine/install/) and run this installer again"
-	# No question, with or without a terminal: a join piped into sh over ssh
-	# or from cloud-init has nobody to answer it.
-	say "Docker is missing: installing it with the official script from get.docker.com (--no-docker-install skips this)"
 	tmp=$(mktemp)
 	if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ]; then
 		download https://get.docker.com "$tmp"
@@ -1193,9 +1215,14 @@ install_join() {
 # How long a join waits for the agent's first connection. Tests shorten it.
 JOIN_WAIT=${INSTALLER_TEST_JOIN_WAIT:-60}
 # Set when the join finished without the agent connected: rejected when the
-# panel refused the node, else waiting. JOIN_HINT says what to do next.
+# panel refused the node (main then exits with JOIN_REFUSED_EXIT), else
+# waiting. JOIN_HINT says what to do next.
 NOT_CONNECTED=
 JOIN_HINT=
+# A join the panel refused (a used or expired token, a wrong --pin, a removed
+# or disabled node) never connects: automation such as cloud-init or
+# Terraform sees it in the exit code. A panel that is only unreachable exits 0.
+JOIN_REFUSED_EXIT=3
 
 # panel_address prints the host:port the agent dials for PANEL_URL.
 panel_address() {
@@ -1215,8 +1242,11 @@ panel_address() {
 # wait_connected waits up to JOIN_WAIT seconds for the agent's first
 # connection to the panel (seylo status). When it does not connect, it warns
 # with the reason (the status error) and sets JOIN_HINT, what join_done says
-# to check. The join still exits 0: the agent keeps trying, and the token
-# stays valid until it expires.
+# to check. A panel it cannot reach yet leaves the exit code 0: the agent
+# keeps trying, and the token stays valid until it expires. A panel that
+# refused the node sets NOT_CONNECTED=rejected: that token or pin never
+# works. A panel that only needs a newer agent (AGENT_TOO_OLD) is waited for
+# like an unreachable one, since the agent updates itself.
 wait_connected() {
 	if [ -n "$DRY_RUN" ]; then
 		trace "$SLUG status (until the agent is connected, up to ${JOIN_WAIT}s)"
@@ -1231,6 +1261,7 @@ wait_connected() {
 			ok "Connected: the node shows up in the panel now."
 			return 0
 			;;
+		*AGENT_TOO_OLD*) ;;
 		*"(rejected"*) break ;;
 		esac
 		[ "$waited" -lt "$JOIN_WAIT" ] || break
@@ -1241,6 +1272,11 @@ wait_connected() {
 	reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
 	[ -n "$reason" ] || reason=$(printf '%s\n' "$status" | sed -n "s/^$SLUG: //p" | head -1)
 	case $status in
+	*AGENT_TOO_OLD*)
+		NOT_CONNECTED=waiting
+		warn "the panel needs a newer agent than this one${reason:+: $reason}"
+		JOIN_HINT="The agent updates itself to the panel's release and connects after that."
+		;;
 	*"(rejected"*)
 		NOT_CONNECTED=rejected
 		warn "the panel refused this node${reason:+: $reason}"
@@ -1261,12 +1297,15 @@ wait_connected() {
 # join_done: the block at the end of a join, connected or not.
 join_done() {
 	frame_open
-	if [ -n "$NOT_CONNECTED" ]; then
+	if [ "$NOT_CONNECTED" = rejected ]; then
+		frame_line title "Installed, but the panel refused this node."
+		frame_line text ""
+		frame_line text "$JOIN_HINT"
+	elif [ -n "$NOT_CONNECTED" ]; then
 		frame_line title "Installed, but not connected to the panel yet."
 		frame_line text ""
 		frame_line text "$JOIN_HINT"
-		[ "$NOT_CONNECTED" = rejected ] ||
-			frame_line note "The agent keeps trying in the background. The join token works until it expires, an hour after it was made; after that make a new join command in the panel's Add node dialog."
+		frame_line note "The agent keeps trying in the background. The join token works until it expires, an hour after it was made; after that make a new join command in the panel's Add node dialog."
 		frame_line text ""
 		frame_cmd "Check again with:" "$SLUG status"
 	else
@@ -1361,6 +1400,7 @@ main() {
 	join-new) join_done ;;
 	join-updated) join_updated ;;
 	esac
+	[ "$NOT_CONNECTED" != rejected ] || exit "$JOIN_REFUSED_EXIT"
 }
 
 main "$@"

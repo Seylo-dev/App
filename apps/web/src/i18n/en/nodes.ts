@@ -84,6 +84,8 @@ export default {
     createHint: "Single use, valid for one hour.",
     singleUse: "Single use · expires {expires}",
     installsDocker: "The command installs Docker when the server has none.",
+    installsDockerAsks:
+      "This pre-release panel's command runs the latest stable installer, which asks before it installs Docker and stops without a terminal. For a server without Docker, add --install-docker at the end.",
     buildImages: "Build images on this node",
     buildImagesHint:
       "Builds get the source code and build-time secrets of the services they build. Untick for servers you do not fully trust.",

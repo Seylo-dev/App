@@ -2189,7 +2189,14 @@ folder, warn when an account on the server has uid or gid 61000
 (`getent`); the agent warns on every node after that (see "Docker resources").
 Join: `install.sh join --panel
 <url> --token <t> [--version <v>] [--pin sha256:<hex>] [--can-build|--no-can-build]` runs
-`seylo join --no-start`, then starts `seylo.service`. An installer from a
+`seylo join --no-start`, then starts `seylo.service` and waits up to 60
+seconds for the agent's first connect (`seylo status`). A panel it cannot
+reach yet is reported with what to check and the exit status stays 0 (the
+agent keeps trying, the token stays valid for its hour); a panel that
+refused the node (a used or expired token, a wrong pin, a removed or
+disabled node: status `rejected`) ends the wait at once with exit status 3,
+since that join never connects; `AGENT_TOO_OLD` is waited for like an
+unreachable panel (the agent updates itself). An installer from a
 release defaults to that release (`--version` picks another and takes the
 agent from that release's signed manifest), which is how the panel's join
 command, piped from the install host, pins the agent to the panel's
@@ -2218,6 +2225,16 @@ check mark and the block box lines (ASCII ones on the Linux console,
 movement. A run that fails after the panel started (so before its closing
 block) prints the setup link on exit. `INSTALLER_TEST_COLOR=1` acts as a
 terminal (installer/test/run.sh).
+
+Docker install (since 0.2.1): a server without the `docker` command gets
+Docker from get.docker.com without a question, with or without a terminal
+(`--no-docker-install` stops instead). An installed Docker that does not
+answer is started (`systemctl start docker`); when it still does not
+answer, the installer stops before it changes anything and points to
+`systemctl status docker` and `journalctl -u docker`, unless
+`--install-docker` (or `--yes`, as before 0.2.1) asks for get.docker.com
+over it, which replaces distribution packages such as docker.io,
+containerd and runc. Join commands never carry `--install-docker`.
 
 Docker preflight: the installer refuses snap Docker (root dir under
 `/var/snap` or the binary under `/snap`), a Docker without a
@@ -2468,7 +2485,12 @@ A run is update_runs/update_steps advanced by the `updates.run` job: panel
 step (UpdatePanel on the panel node), then one agent step per older node
 (UpdateAgent with the verified bytes); a durable `UpdateResult` or the new
 version on reconnect finishes a step, 10 minutes without either fails it
-and the run. A run keeps the manifest it installs (`update_runs.manifest`,
+and the run with an `update_failed` alert (an agent step is tried once
+more 5 minutes later). That alert is resolved when the node gets there
+after all: a late successful `UpdateResult` for the step (it stays
+failed), the retry or a later run reaching that version, a successful
+agent `UpdateResult` for it or a newer one, or the catch-up finding the
+node up to date. A run keeps the manifest it installs (`update_runs.manifest`,
 `manifest_signature`; a run from before rc.2 gets the stored one while it
 is still that version), so a later check or a channel switch never changes
 what its steps send. `nodes.updateDocker` is a one-step run finished by
