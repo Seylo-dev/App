@@ -36,6 +36,13 @@ export class LogBuffer {
   private nextSeq = 0;
   private parsed = new Map<number, AnsiSegment[]>();
   private listeners = new Set<() => void>();
+  /**
+   * The last search: the seqs of its matches (from `start` on; earlier ones
+   * fell off the ring) and the seq it read up to. The viewer searches again
+   * on every frame while lines stream in, so a repeated query only reads the
+   * lines added since instead of the whole ring.
+   */
+  private found: { query: string; seqs: number[]; start: number; scanned: number } | null = null;
   private scheduled = false;
   private readonly schedule: Schedule;
   /** Bumps on every change; cheap to compare in a render. */
@@ -79,6 +86,7 @@ export class LogBuffer {
     this.head = 0;
     this.count = 0;
     this.parsed.clear();
+    this.found = null;
     this.notify();
   }
 
@@ -105,13 +113,51 @@ export class LogBuffer {
     return out;
   }
 
-  /** Indexes (0 = oldest) of the lines whose plain text contains query, case-insensitive. */
+  /**
+   * Indexes (0 = oldest) of the lines whose plain text contains query,
+   * case-insensitive. Incremental: the same query again reads only the lines
+   * added since the last call, and a longer one (typing on) only re-checks
+   * the previous matches; any other query reads every kept line once.
+   */
   search(query: string): number[] {
     if (!query) return [];
     const q = query.toLowerCase();
-    const out: number[] = [];
-    for (let i = 0; i < this.count; i++) if ((this.at(i) as LogLine).plain.toLowerCase().includes(q)) out.push(i);
+    const first = this.firstSeq;
+    const prev = this.found;
+    let seqs: number[];
+    let start = 0;
+    let from = first;
+    if (prev && prev.query === q) {
+      seqs = prev.seqs;
+      start = prev.start;
+      from = Math.max(prev.scanned, first);
+    } else if (prev && q.includes(prev.query)) {
+      // Every line that contains q contains the previous query too.
+      seqs = [];
+      for (let k = prev.start; k < prev.seqs.length; k++) {
+        const seq = prev.seqs[k] as number;
+        if (seq >= first && this.matches(seq, q)) seqs.push(seq);
+      }
+      from = Math.max(prev.scanned, first);
+    } else {
+      seqs = [];
+    }
+    while (start < seqs.length && (seqs[start] as number) < first) start++;
+    for (let seq = from; seq < this.nextSeq; seq++) if (this.matches(seq, q)) seqs.push(seq);
+    // Drop the matches that fell off the ring once they are most of the array.
+    if (start > 1024 && start * 2 > seqs.length) {
+      seqs = seqs.slice(start);
+      start = 0;
+    }
+    this.found = { query: q, seqs, start, scanned: this.nextSeq };
+    const out = new Array<number>(seqs.length - start);
+    for (let k = start; k < seqs.length; k++) out[k - start] = (seqs[k] as number) - first;
     return out;
+  }
+
+  private matches(seq: number, q: string): boolean {
+    const line = this.at(seq - this.firstSeq);
+    return !!line?.plain.toLowerCase().includes(q);
   }
 
   /** Calls fn at most once per frame after changes. Returns the unsubscribe function. */
