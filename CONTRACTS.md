@@ -829,7 +829,8 @@ local API, join and resume. The areas:
   contact is the first owner's email (`NodeSettings.acme_email`). A change of
   the image, the contact or any other part of the container's spec recreates
   the container, logged at INFO as `Traefik recreated` with the reason.
-  Creating the owner resends every node's settings, so the recreate for the
+  Creating the owner resends the settings of every connected node (others
+  get them with the full sync when they connect), so the recreate for the
   new contact happens during setup, before anything is routed. Next to the Wings fork the files go to its
   `<proxy.data_dir>/dynamic` instead. The edge listener binds
   `<seylo-edge gateway>:5756`; Traefik rewrites to its paths under
