@@ -72,6 +72,15 @@ export const GeneralSettings = Type.Object({
    * shells) are kept whatever this says.
    */
   auditRetentionDays: Type.Union([AuditRetentionDays, Type.Null()]),
+  /**
+   * Enabled nodes whose agent connects over https://<domain> (added in
+   * 0.2.1). Removing or changing the domain takes them offline: a node that
+   * joined over the domain until it is joined again (`join --force`), one
+   * that moved there from the agents' port until it comes back over that
+   * port (about 5 minutes). updateGeneral needs acknowledgeNodesOffline
+   * then.
+   */
+  domainNodes: Type.Array(Type.Object({ id: Id, name: Type.String() })),
 });
 
 export const general = defineOp({
@@ -91,13 +100,15 @@ export const updateGeneral = defineOp({
   kind: "mutation",
   summary: "Update general settings",
   description:
-    "Changes the panel name, the panel domain (null removes it and goes back to IP:port), the default node or how long the audit log keeps entries. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect.",
+    'Changes the panel name, the panel domain (null removes it and goes back to IP:port), the default node or how long the audit log keeps entries. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect. Removing or changing the domain while settings.general domainNodes lists nodes takes them offline: it is refused (CONFLICT, details.reason "nodesOnDomain", details.nodeIds) unless acknowledgeNodesOffline is true.',
   input: Type.Object({
     name: Type.Optional(PanelName),
     domain: Type.Optional(Type.Union([Hostname, Type.Null()])),
     defaultNodeId: Type.Optional(Type.Union([Id, Type.Null()])),
     uptimeAllowInternalTargets: Type.Optional(Type.Boolean()),
     auditRetentionDays: Type.Optional(Type.Union([AuditRetentionDays, Type.Null()])),
+    /** The person confirmed that the nodes connecting over the domain (domainNodes) go offline. Needed to remove or change the domain while there are any. */
+    acknowledgeNodesOffline: Type.Optional(Type.Boolean()),
   }),
   output: GeneralSettings,
   permission: permission.global("settings.manage"),
@@ -180,6 +191,13 @@ export const panelAccessBlockCodes = [
   "nodesOnAgentPort",
   /** The agents' port only: the panel has no agents' TLS port. */
   "noAgentPort",
+  /**
+   * The panel node's own agent dials an address closing would cut off, not
+   * 127.0.0.1 (it was joined again with an Add node command): plain http://
+   * blocks closing IP access, anything but https://<domain> also blocks the
+   * agents' port. Join it again on http://127.0.0.1:<panel port> (--force).
+   */
+  "panelNodeNotLoopback",
 ] as const;
 export type PanelAccessBlockCode = (typeof panelAccessBlockCodes)[number];
 export const PanelAccessBlockCode = Type.Union(panelAccessBlockCodes.map((code) => Type.Literal(code)));

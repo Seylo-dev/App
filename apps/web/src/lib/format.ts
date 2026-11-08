@@ -78,6 +78,14 @@ export function formatDuration(ms: number): string {
   return t("format.minutesSeconds", { minutes: Math.floor(total / 60), seconds: total % 60 });
 }
 
+/** ["b1"] -> "b1", ["b1", "b2"] -> "b1 and b2", ["b1", "b2", "b3"] -> "b1, b2 and b3". */
+export function formatNames(names: readonly string[]): string {
+  const last = names.at(-1) ?? "";
+  if (names.length <= 1) return last;
+  if (names.length === 2) return t("format.namesTwo", { first: names[0] ?? "", last });
+  return t("format.namesMany", { list: names.slice(0, -1).join(", "), last });
+}
+
 function scale(bytes: number): [number, (typeof units)[number], number] {
   let value = Math.max(0, bytes);
   let power = 0;

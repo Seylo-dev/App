@@ -9,13 +9,15 @@
 // minutes, over a private path that works right now, with the panel
 // node's agent online and able to bind 127.0.0.1, no update running, and
 // no enabled node that would be cut off (plain http:// nodes; for the
-// agents' port, nodes that do not dial the domain). "Keep it closed" also
+// agents' port, nodes that do not dial the domain; the panel node's own
+// agent when it dials anything but loopback). "Keep it closed" also
 // needs the tick that the recovery commands are saved. Turning things back
 // on needs settings.manage over HTTP and is always allowed.
 
+import { slug } from "@seylo/brand";
 import { OpError, settings } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { dialingNodes, dialsDomain, dialsPlainHttp } from "../../agent-hub/dialed";
+import { type DialingNode, dialingNodes, dialsDomain, dialsPlainHttp, nodeNames } from "../../agent-hub/dialed";
 import { requireFreshSignIn } from "../../auth/fresh";
 import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
@@ -29,7 +31,9 @@ import {
   applyPanelIpAccess,
   decidePanelIpAccess,
   ipAccessOnCommand,
+  panelNodeOffDomain,
   panelNodeOldDocker,
+  panelNodeOnIp,
   panelNodeState,
   panelPortOf,
   readIpAccessApplied,
@@ -40,14 +44,6 @@ import {
 import { listPrivatePaths, provingPrivatePath } from "./private-paths";
 
 type Block = settings.PanelAccessBlock;
-
-const names = (list: readonly { name: string }[]) =>
-  list.length <= 2
-    ? list.map((n) => n.name).join(" and ")
-    : `${list
-        .slice(0, -1)
-        .map((n) => n.name)
-        .join(", ")} and ${list.at(-1)?.name}`;
 
 /** Where the panel's server is, for the SSH tunnel and messages: never bracketed (ssh takes IPv6 as it is). */
 function panelServer(deps: Pick<Deps, "db">): string | null {
@@ -64,6 +60,15 @@ function panelServer(deps: Pick<Deps, "db">): string | null {
 function ipUrl(deps: Pick<Deps, "db" | "config">): string {
   const server = panelServer(deps);
   return `http://${server ? (nodeAddress({ publicAddress: server }) ?? server) : "<server-ip>"}:${panelPortOf(deps)}`;
+}
+
+/** The panel node's own agent dials `node.url`, which `what` could cut off: join it again on loopback, as the installer set it up. */
+function panelNodeBlock(ctx: OpContext, node: DialingNode, what: string): Block {
+  return {
+    code: "panelNodeNotLoopback",
+    message: `${node.name}, the panel's own node, connects over ${node.url} instead of 127.0.0.1, so it can lose the panel once ${what}. On the panel's server, join it again on 127.0.0.1 with a token from Nodes > Add node: sudo ${slug} join http://127.0.0.1:${panelPortOf(ctx)} --token '<token>' --force`,
+    nodeIds: [node.id],
+  };
 }
 
 /** The refusals that come from who is asking and how. */
@@ -116,6 +121,8 @@ export function closeBlocks(ctx: OpContext): Block[] {
     });
   }
   if (updateRunning(ctx)) out.push({ code: "updateRunning", message: "An update is running. Try again once it finished." });
+  const ownOnIp = panelNodeOnIp(ctx);
+  if (ownOnIp) out.push(panelNodeBlock(ctx, ownOnIp, "IP access closes"));
   const dialing = dialingNodes(ctx);
   const plain = dialing.filter((node) => dialsPlainHttp(node.url));
   if (plain.length > 0) {
@@ -124,7 +131,7 @@ export function closeBlocks(ctx: OpContext): Block[] {
       code: "plainHttpNodes",
       message: one
         ? `${one.name} connects over ${one.url} - run the https join command from Nodes > Add node on it, with --force.`
-        : `${names(plain)} connect over plain http:// - run the https join command from Nodes > Add node on each, with --force.`,
+        : `${nodeNames(plain)} connect over plain http:// - run the https join command from Nodes > Add node on each, with --force.`,
       nodeIds: plain.map((node) => node.id),
     });
   }
@@ -133,7 +140,7 @@ export function closeBlocks(ctx: OpContext): Block[] {
     const one = unseen.length === 1;
     out.push({
       code: "plainHttpNodes",
-      message: `${names(unseen)} ${one ? "has" : "have"} not connected since the panel was updated, so the panel cannot tell how ${one ? "it connects" : "they connect"}. Bring ${one ? "it" : "them"} online once, or disable ${one ? "it" : "them"} under Nodes.`,
+      message: `${nodeNames(unseen)} ${one ? "has" : "have"} not connected since the panel was updated, so the panel cannot tell how ${one ? "it connects" : "they connect"}. Bring ${one ? "it" : "them"} online once, or disable ${one ? "it" : "them"} under Nodes.`,
       nodeIds: unseen.map((node) => node.id),
     });
   }
@@ -162,6 +169,9 @@ export function agentPortBlocks(ctx: OpContext): Block[] {
       nodeIds: off.map((node) => node.id),
     });
   }
+  // A plain http:// address is in closeBlocks already.
+  const ownOff = panelNodeOffDomain(ctx);
+  if (ownOff && !panelNodeOnIp(ctx)) out.push(panelNodeBlock(ctx, ownOff, "the agents' port closes"));
   return out;
 }
 

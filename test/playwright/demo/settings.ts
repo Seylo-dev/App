@@ -32,6 +32,7 @@ export const fixtures: Record<string, unknown> = {
     publicUrl: "https://panel.acme.dev",
     uptimeAllowInternalTargets: false,
     auditRetentionDays: 365,
+    domainNodes: [],
   },
   // Check now on the Panel domain card: the demo domain is still active.
   "settings.checkDomain": () => ({ state: "active", message: "", checkedAt: new Date().toISOString(), proxied: false }),

@@ -1996,7 +1996,7 @@ check_31() {
 }
 
 p31_run() {
-  local ip_a l vm st out hfile pfile lfile jar cookie key tls_port missing waited by_itself=
+  local ip_a l vm st out hfile pfile lfile jar cookie key tls_port missing waited refusal by_itself=
   ip_a=$(node_ip a)
   [ -n "$(node_id b)" ] && [ -n "$(node_id c)" ] || { blocked "B and C are not joined (check 3)"; return 3; }
   [ -s "$E2E_STATE/owner" ] || { blocked "no owner credentials (check 2)"; return 3; }
@@ -2197,10 +2197,20 @@ p31_run() {
 
   # The domain goes away: with no route left, B and C find the panel again on
   # their standing fallback after about 5 minutes of failed connects (the
-  # restart drops their open connection through Traefik).
-  api settings.updateGeneral '{"domain":null}' >/dev/null || { bad "settings.updateGeneral {domain: null} failed"; return 1; }
+  # restart drops their open connection through Traefik). B and C dial the
+  # domain, so the panel refuses until the call says it knows they go offline.
+  if refusal=$(api settings.updateGeneral '{"domain":null}' 2>&1 >/dev/null); then
+    bad "settings.updateGeneral {domain: null} went through without acknowledgeNodesOffline while B and C dial the domain"
+  else
+    case "$refusal" in
+      *nodesOnDomain*) good "removing the domain without acknowledgeNodesOffline is refused ($(printf '%s' "$refusal" | grep -o '"message":"[^"]*' | head -c 160))" ;;
+      *) bad "removing the domain was refused for another reason: $(printf '%s' "$refusal" | head -c 300)" ;;
+    esac
+  fi
+  api settings.updateGeneral '{"domain":null,"acknowledgeNodesOffline":true}' >/dev/null ||
+    { bad "settings.updateGeneral {domain: null, acknowledgeNodesOffline: true} failed"; return 1; }
   rm -f "$E2E_STATE/p31-domain"
-  good "panel domain removed (settings.updateGeneral {domain: null})"
+  good "panel domain removed (settings.updateGeneral {domain: null, acknowledgeNodesOffline: true})"
   expect "IP:port pages are served again" test "$(curl -s -o /dev/null -m 5 -w '%{http_code}' -H 'accept: text/html' "$(panel_url)/")" = 200
   p31_restart b c
   waited=$SECONDS
@@ -2218,7 +2228,7 @@ p31_run() {
 p31_cleanup() {
   local l vm saved restart_a=
   if [ -n "$(state_get p31-domain)" ]; then
-    if api settings.updateGeneral '{"domain":null}' >/dev/null; then
+    if api settings.updateGeneral '{"domain":null,"acknowledgeNodesOffline":true}' >/dev/null; then
       ev "cleanup: panel domain removed"
     else
       bad "cleanup: settings.updateGeneral {domain: null} failed (REQUESTS 'P-e2e -> P-panel: removing the panel domain fails'); removing it in the database"

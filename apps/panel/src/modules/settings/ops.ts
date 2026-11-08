@@ -3,12 +3,15 @@
 // favicon on disk), appearance (theme preset, color mode, accent,
 // owner-only custom CSS) and the telemetry opt-in. A domain change also decides IP access again
 // (ip-access.ts): the old domain stops counting as a private path at once.
-// The panel access ops are in panel-access.ts.
+// Removing or changing a domain that nodes connect over needs
+// acknowledgeNodesOffline (assertNodesAcknowledged). The panel access ops
+// are in panel-access.ts.
 
 import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpError, settings } from "@seylo/ops";
+import { nodeNames, nodesDialingDomain } from "../../agent-hub/dialed";
 import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
 import { deleteSetting, getSetting, setSetting } from "../../settings";
@@ -27,16 +30,38 @@ import "../uptime/targets";
 /** Ops whose results change with the boot data; the web app refetches them after a save. */
 const bootOps = ["settings.boot", "settings.branding", "settings.appearance", "settings.general", "system.info"];
 
-function general(deps: Pick<Deps, "db" | "config">) {
+function general(deps: Pick<Deps, "db" | "config" | "agents">) {
+  const domain = getSetting(deps.db, "panelDomain") ?? null;
   return {
     name: readPanelName(deps.db),
-    domain: getSetting(deps.db, "panelDomain") ?? null,
+    domain,
     domainStatus: readDomainStatus(deps),
     defaultNodeId: getSetting(deps.db, "defaultNodeId") ?? null,
     publicUrl: panelPublicUrl(deps),
     uptimeAllowInternalTargets: getSetting(deps.db, "uptimeAllowInternalTargets") === true,
     auditRetentionDays: readAuditRetentionDays(deps.db),
+    domainNodes: nodesDialingDomain(deps, domain).map((node) => ({ id: node.id, name: node.name })),
   };
+}
+
+/**
+ * Removing or changing the domain drops its route at once. Nodes that dial
+ * https://<domain> lose the panel: one that joined over the domain has no
+ * other address and stays offline until it is joined again; one that moved
+ * there from the agents' port comes back over its standing fallback after
+ * about 5 minutes. The panel cannot tell them apart, so it asks first.
+ */
+function assertNodesAcknowledged(ctx: OpContext, input: { domain?: string | null; acknowledgeNodesOffline?: boolean }): void {
+  if (input.acknowledgeNodesOffline === true) return;
+  const current = getSetting(ctx.db, "panelDomain") ?? null;
+  const cutOff = nodesDialingDomain(ctx, current);
+  if (cutOff.length === 0) return;
+  const one = cutOff.length === 1;
+  throw new OpError(
+    "CONFLICT",
+    `${nodeNames(cutOff)} ${one ? "connects" : "connect"} over https://${current} and ${one ? "goes" : "go"} offline without it. A node that joined over the domain stays offline until it is joined again with a new command from Nodes > Add node (--force); one that moved there from the agents' port comes back over that port in about 5 minutes. Pass acknowledgeNodesOffline: true to ${input.domain ? "change" : "remove"} the domain anyway.`,
+    { field: "acknowledgeNodesOffline", reason: "nodesOnDomain", nodeIds: cutOff.map((node) => node.id).join(",") },
+  );
 }
 
 function branding(deps: Pick<Deps, "db">) {
@@ -76,6 +101,7 @@ export const updateGeneral = implement(settings.updateGeneral, (input, ctx) => {
       { field: "domain", reason: "stayClosed" },
     );
   }
+  if (domainChanges) assertNodesAcknowledged(ctx, input);
   if (input.auditRetentionDays !== undefined) {
     // A shorter retention deletes history: not something a model may do on its own.
     const fromModel = (ctx.transport ?? "http") !== "http" || (ctx.principal.type === "apiKey" && ctx.principal.keyKind === "mcp");

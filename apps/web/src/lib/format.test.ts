@@ -4,6 +4,7 @@ import {
   formatBytes,
   formatDuration,
   formatExpiresIn,
+  formatNames,
   formatPercent,
   formatRate,
   formatUsage,
@@ -48,5 +49,12 @@ describe("format", () => {
     expect(formatExpiresIn("2026-11-05T17:00:00Z", now)).toBe("in 5 hours");
     expect(formatDuration(41_000)).toBe("41s");
     expect(formatDuration(125_000)).toBe("2m 5s");
+  });
+
+  test("names, as the panel's messages list them", () => {
+    expect(formatNames([])).toBe("");
+    expect(formatNames(["b1"])).toBe("b1");
+    expect(formatNames(["b1", "b2"])).toBe("b1 and b2");
+    expect(formatNames(["b1", "b2", "b3"])).toBe("b1, b2 and b3");
   });
 });

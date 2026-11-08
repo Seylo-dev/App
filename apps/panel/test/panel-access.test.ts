@@ -281,6 +281,35 @@ test("the agents' port closes only once every other node dials the domain", asyn
   expect(view.body.agentPortBlocked.map((b: { code: string }) => b.code)).toContain("noAgentPort");
 });
 
+test("the panel node's own agent must dial loopback: a public address blocks, with the join command", async () => {
+  recordDialedUrl(panel.deps.db, panelNode, "http://203.0.113.10:3000");
+  const refused = await update({ serveOnIp: false });
+  expect(refused.status).toBe(409);
+  expect(refused.body.error.details).toMatchObject({ reason: "panelNodeNotLoopback", nodeIds: panelNode });
+  expect(refused.body.error.message).toBe(
+    "here, the panel's own node, connects over http://203.0.113.10:3000 instead of 127.0.0.1, so it can lose the panel once IP access closes. On the panel's server, join it again on 127.0.0.1 with a token from Nodes > Add node: sudo seylo join http://127.0.0.1:3000 --token '<token>' --force",
+  );
+  // Listed once for the agents' port too.
+  const view = await callOp(panel, settings.panelAccess, {}, { cookie: owner.cookie, headers: overDomain });
+  expect(view.body.agentPortBlocked.filter((b: { code: string }) => b.code === "panelNodeNotLoopback")).toHaveLength(1);
+
+  // Over the agents' TLS port: IP access may close, the agents' port may not.
+  recordDialedUrl(panel.deps.db, panelNode, "https://203.0.113.10:3443");
+  expect((await update({ serveOnIp: false })).status).toBe(200);
+  const port = await update({ agentPortOpen: false });
+  expect(port.status).toBe(409);
+  expect(port.body.error.details).toMatchObject({ reason: "panelNodeNotLoopback", nodeIds: panelNode });
+  expect(port.body.error.message).toContain("so it can lose the panel once the agents' port closes");
+  expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: true, agentPortClosed: false });
+
+  // Back on loopback (or on the domain), nothing blocks.
+  recordDialedUrl(panel.deps.db, panelNode, "https://panel.test");
+  expect((await callOp(panel, settings.panelAccess, {}, { cookie: owner.cookie, headers: overDomain })).body.agentPortBlocked).toEqual([]);
+  recordDialedUrl(panel.deps.db, panelNode, "http://127.0.0.1:3000");
+  expect((await update({ agentPortOpen: false })).status).toBe(200);
+  expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: true, agentPortClosed: true });
+});
+
 test("keep it closed needs the tick that the recovery commands are saved", async () => {
   const missing = await update({ onFailure: "stayClosed" });
   expect(missing.status).toBe(400);
@@ -405,4 +434,74 @@ test("removing the domain reopens at once; in keep-closed mode it is refused", a
   expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: false, reason: "the panel domain was removed", by: owner.user.email });
   // The switch stays off: it closes again by itself once a private path has worked for an hour.
   expect(readPanelAccessWanted(panel.deps).serveOnIp).toBe(false);
+});
+
+test("removing or changing the domain while nodes connect over it needs acknowledgeNodesOffline, and names them", async () => {
+  const b1 = addNode("b1");
+  const c1 = addNode("c1");
+  const d1 = addNode("d1");
+  // Joined over the domain (Add node prints it once a domain is set), online or not.
+  recordDialedUrl(panel.deps.db, b1, "https://panel.test");
+  const disconnect = onlineNode(c1, "https://panel.test");
+  // On the agents' port: not cut off by the domain.
+  recordDialedUrl(panel.deps.db, d1, "https://203.0.113.10:3443");
+  try {
+    const view = await callOp(panel, settings.general, {}, { cookie: owner.cookie });
+    expect(view.body.domainNodes).toEqual([
+      { id: b1, name: "b1" },
+      { id: c1, name: "c1" },
+    ]);
+
+    for (const domainInput of [null, "other.example.com"]) {
+      const refused = await callOp(
+        panel,
+        settings.updateGeneral,
+        { domain: domainInput, name: "Not saved" },
+        { cookie: owner.cookie, headers: overDomain },
+      );
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.details).toMatchObject({ reason: "nodesOnDomain", field: "acknowledgeNodesOffline" });
+      expect(refused.body.error.details.nodeIds.split(",").sort()).toEqual([b1, c1].sort());
+      expect(refused.body.error.message).toContain("b1 and c1 connect over https://panel.test and go offline without it.");
+      expect(refused.body.error.message).toContain(domainInput ? "to change the domain anyway" : "to remove the domain anyway");
+    }
+    // Nothing of the refused saves was written, and the route stays.
+    expect(getSetting(panel.deps.db, "panelName")).toBeUndefined();
+    expect(getSetting(panel.deps.db, "panelDomain")).toBe(domain);
+    // Saving the same domain again, or anything else, is not a change.
+    expect((await callOp(panel, settings.updateGeneral, { domain, name: "Acme" }, { cookie: owner.cookie })).status).toBe(200);
+
+    const removed = await callOp(
+      panel,
+      settings.updateGeneral,
+      { domain: null, acknowledgeNodesOffline: true },
+      { cookie: owner.cookie, headers: overDomain },
+    );
+    expect(removed.status).toBe(200);
+    expect(removed.body).toMatchObject({ domain: null, domainNodes: [] });
+    const row = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "settings.updateGeneral")).orderBy(desc(auditLog.id)).get();
+    expect(row).toMatchObject({ outcome: "ok", input: { domain: null, acknowledgeNodesOffline: true } });
+  } finally {
+    disconnect();
+  }
+});
+
+test("a disabled node on the domain does not count, and a node on the old domain does not hold up the next one", async () => {
+  const b1 = addNode("b1");
+  const c1 = addNode("c1");
+  recordDialedUrl(panel.deps.db, b1, "https://panel.test");
+  recordDialedUrl(panel.deps.db, c1, "https://panel.test");
+  panel.deps.db.update(nodes).set({ disabledAt: new Date() }).where(eq(nodes.id, b1)).run();
+  const view = await callOp(panel, settings.general, {}, { cookie: owner.cookie });
+  expect(view.body.domainNodes).toEqual([{ id: c1, name: "c1" }]);
+  const moved = await callOp(
+    panel,
+    settings.updateGeneral,
+    { domain: "new.example.com", acknowledgeNodesOffline: true },
+    { cookie: owner.cookie, headers: overDomain },
+  );
+  expect(moved.status).toBe(200);
+  // c1 still dials panel.test, which is no longer the domain: nothing to ask about new.example.com.
+  expect(moved.body.domainNodes).toEqual([]);
+  expect((await callOp(panel, settings.updateGeneral, { domain: null }, { cookie: owner.cookie, headers: overDomain })).status).toBe(200);
 });

@@ -142,6 +142,8 @@ export default {
         one: "The agents' port {port} stays open: {count} node connects over it",
         other: "The agents' port {port} stays open: {count} nodes connect over it",
       },
+      agentPortStaysOpen: "The agents' port {port} stays open",
+      agentPortStaysNoDomain: "The agents' port {port} stays open: without the domain, nodes connect over it",
       agentPortOff: "The agents' port is off",
       domain: "Remove the panel domain {domain}",
       domainHint: "Kept, it stays public through the panel server's proxy.",
