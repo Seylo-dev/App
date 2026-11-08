@@ -36,5 +36,6 @@ test("the command pipes the install host into sh with the join flags, never a re
 
 test("the command carries no Docker flag: the installer installs Docker when it is missing", () => {
   // Owner decision for 0.2.1: the installer itself installs a missing Docker, with or without a terminal.
-  for (const v of ["0.2.1", "dev"]) expect(joinCommand(v, "https://p", "t")).not.toContain("docker");
+  // Not on a pre-release either: --install-docker would let the installer reinstall a Docker that does not start.
+  for (const v of ["0.2.1", "0.2.1-rc.3", "dev"]) expect(joinCommand(v, "https://p", "t")).not.toContain("docker");
 });

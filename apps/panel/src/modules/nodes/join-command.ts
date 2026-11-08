@@ -40,9 +40,13 @@ export function installerSource(panelVersion: string): InstallerSource {
 /**
  * The one-line install command for a new node. The installer installs
  * Docker by itself when it is missing (since 0.2.1), so the command needs no
- * flag for it. Agents refuse a plain http:// panel on another host unless
- * told so, so an insecure target carries --insecure in plain sight (the join
- * card warns next to it).
+ * flag for it. It never carries --install-docker: that also lets the
+ * installer reinstall a Docker that is installed but does not start. On a
+ * 0.2.1 pre-release panel the command still runs the 0.2.0 installer, which
+ * asks first; Add node says so (apps/web lib/join-installer.ts). Agents
+ * refuse a plain http:// panel on another host unless told so, so an
+ * insecure target carries --insecure in plain sight (the join card warns
+ * next to it).
  */
 export function joinCommand(panelVersion: string, url: string, token: string, pin: string | null = null, insecure = false): string {
   const installer = installerSource(panelVersion);

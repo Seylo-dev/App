@@ -4,7 +4,7 @@
 // is only created when someone asks for one (it is a credential); the
 // token itself is never shown again after this card is gone.
 
-import { nodes } from "@seylo/ops";
+import { nodes, system } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
@@ -13,6 +13,7 @@ import { IconPlus } from "@tabler/icons-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../../i18n/t";
 import { formatExpiresIn } from "../../lib/format";
+import { joinInstallsDocker } from "../../lib/join-installer";
 import { isReauthCancelled } from "../../lib/reauth";
 import { QueryError } from "../query-error";
 
@@ -26,6 +27,8 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
   const create = useOpMutation(nodes.createJoinToken);
   const revoke = useOpMutation(nodes.revokeJoinToken);
   const open = useOp(nodes.listJoinTokens, {}, { retry: false });
+  // Which installer the command runs depends on the panel's version (lib/join-installer.ts).
+  const panelVersion = useOp(system.info, {}).data?.version;
   const [now, setNow] = useState(Date.now());
   // "Build images on this node": stored on the token, so the node that joins cannot change it.
   const [canBuild, setCanBuild] = useState(true);
@@ -126,7 +129,11 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
             </div>
           </>
         )}
-        <span className="text-xs text-muted-foreground">{t("nodes.addCard.installsDocker")}</span>
+        {panelVersion !== undefined && (
+          <span className="text-xs text-muted-foreground">
+            {joinInstallsDocker(panelVersion) ? t("nodes.addCard.installsDocker") : t("nodes.addCard.installsDockerAsks")}
+          </span>
+        )}
         {create.error && !isReauthCancelled(create.error) && <QueryError error={create.error} />}
         {otherOpen > 0 && <span className="text-xs text-muted-foreground">{t("nodes.addCard.otherOpen", { count: otherOpen })}</span>}
       </div>
