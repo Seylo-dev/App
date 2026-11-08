@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { githubOrg, githubRepo, installUrl } from "@seylo/brand";
 import { eq } from "drizzle-orm";
 import { issueRecoveryCodes } from "../src/auth/second-factor";
 import { loadConfig } from "../src/config";
@@ -170,8 +171,9 @@ test("--keep-panel-identity: the edge ticket key and LB CA are sealed again and 
 
 describe("the script", () => {
   const script = resolve(import.meta.dir, "../scripts/rotate-master-key.ts");
-  const run = (...args: string[]) => {
-    const out = Bun.spawnSync(["bun", script, ...args], { env: { ...process.env, SEYLO_DATA_DIR: dir } });
+  const run = (...args: string[]) => runWith({}, ...args);
+  const runWith = (env: Record<string, string>, ...args: string[]) => {
+    const out = Bun.spawnSync(["bun", script, ...args], { env: { ...process.env, SEYLO_DATA_DIR: dir, ...env } });
     return { code: out.exitCode, stdout: out.stdout.toString(), stderr: out.stderr.toString() };
   };
 
@@ -196,6 +198,16 @@ describe("the script", () => {
     expect(out.stdout).not.toContain("retired");
     expect(out.stdout).toContain("Nodes > Add node");
     expect(out.stdout).toContain("join '<url>' --token '<token>' [--pin '<pin>'] --force");
+  });
+
+  test("the printed join command installs the panel's own release", () => {
+    seed();
+    const out = runWith({ SEYLO_VERSION: "0.2.0-rc.2" }, "--new-panel-identity");
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain(
+      `curl -fsSL https://github.com/${githubOrg}/${githubRepo}/releases/download/v0.2.0-rc.2/install.sh | sudo sh -s -- join --panel '<url>' --token '<token>' [--pin '<pin>'] --force`,
+    );
+    expect(out.stdout).not.toContain(installUrl);
   });
 
   test("--keep-panel-identity says nodes keep working", () => {

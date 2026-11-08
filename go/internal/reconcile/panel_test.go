@@ -1,10 +1,14 @@
 package reconcile
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -28,9 +32,9 @@ func panelSpec(gen uint64, image string) *agentv1.ServiceSpec {
 func TestInstallerPanelIsAdoptedWithoutARoll(t *testing.T) {
 	h := newHarness(t)
 	// The installer's container: reserved ids, generation 1, protected, no
-	// spec hash (cli.panelRunArgs).
-	labels := docker.InstanceLabels{ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true}.Map()
-	installer := h.eng.AddContainer(docker.ContainerSpec{Name: docker.ContainerName(docker.PanelServiceID, 1, 0), Image: "seylo:1", Labels: labels}, true)
+	// spec hash, run as the panel user (cli.panelRunArgs).
+	labels := docker.InstanceLabels{ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true, User: docker.PanelUser}.Map()
+	installer := h.eng.AddContainer(docker.ContainerSpec{Name: docker.ContainerName(docker.PanelServiceID, 1, 0), Image: "seylo:1", User: docker.PanelUser, Labels: labels}, true)
 
 	h.apply(1, panelSpec(1, "seylo:1"))
 	if got := h.names(docker.PanelServiceID); len(got) != 1 {
@@ -60,6 +64,84 @@ func TestInstallerPanelIsAdoptedWithoutARoll(t *testing.T) {
 	}
 	if len(c.Spec.Publish) != 1 || c.Spec.Publish[0] != (docker.PortPublish{HostPort: 3100, ContainerPort: 3000}) {
 		t.Fatalf("publish = %v", c.Spec.Publish)
+	}
+	if c.Spec.User != docker.PanelUser || c.Spec.Labels[docker.LabelUser] != docker.PanelUser {
+		t.Fatalf("generation 2 runs as %q (label %q), want the panel user %s", c.Spec.User, c.Spec.Labels[docker.LabelUser], docker.PanelUser)
+	}
+}
+
+// A panel container from before the panel user (no seylo.user label: it
+// runs as the image's uid 1000) is replaced once at the same generation by
+// one that runs as the panel user, with the folder closed to everyone else.
+func TestLegacyPanelMovesToThePanelUser(t *testing.T) {
+	for name, labels := range map[string]docker.InstanceLabels{
+		// Started by an older installer, never updated.
+		"installer": {ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true},
+		// Swapped in by an older agent's update: it carries a spec hash.
+		"older agent": {ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true,
+			SpecHash: SpecHash(panelSpec(1, "seylo:1"))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			dir := filepath.Join(h.layout.Root(), "panel")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "master.key"), []byte("key\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			legacy := h.eng.AddContainer(docker.ContainerSpec{Name: docker.ContainerName(docker.PanelServiceID, 1, 0), Image: "seylo:1", User: "1000:1000", Labels: labels.Map()}, true)
+
+			h.apply(1, panelSpec(1, "seylo:1"))
+			h.waitFor("the panel running as the panel user", func() bool {
+				for _, c := range h.eng.Containers() {
+					if c.Running && c.Spec.User == docker.PanelUser && c.Spec.Labels[docker.LabelUser] == docker.PanelUser &&
+						c.Spec.Name == docker.ContainerName(docker.PanelServiceID, 1, 0) {
+						return true
+					}
+				}
+				return false
+			})
+			h.waitFor("the old container gone", func() bool { _, ok := h.eng.Get(legacy); return !ok })
+			for path, want := range map[string]os.FileMode{dir: 0o700, filepath.Join(dir, "master.key"): 0o600} {
+				if info, err := os.Stat(path); err != nil || info.Mode().Perm() != want {
+					t.Errorf("%s is %v (%v), want %v", path, info.Mode().Perm(), err, want)
+				}
+			}
+			// Settled: no second roll.
+			before := len(h.eng.Containers())
+			h.apply(2, panelSpec(1, "seylo:1"))
+			if got := h.names(docker.PanelServiceID); len(got) != 1 || before != 1 {
+				t.Fatalf("panel containers after a second pass = %v", got)
+			}
+		})
+	}
+}
+
+// When the panel cannot start as the panel user, the old container comes
+// back as it was (set aside under another name, not removed).
+func TestLegacyPanelComesBackWhenTheMoveFails(t *testing.T) {
+	h := newHarness(t)
+	name := docker.ContainerName(docker.PanelServiceID, 1, 0)
+	labels := docker.InstanceLabels{ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true}.Map()
+	legacy := h.eng.AddContainer(docker.ContainerSpec{Name: name, Image: "seylo:1", User: "1000:1000", Labels: labels}, true)
+	// Only the container under the canonical name fails its health check;
+	// the old one is renamed aside first.
+	h.prober.setBad(name, true)
+	spec := panelSpec(1, "seylo:1")
+	spec.Deploy.HealthTimeout = durationpb.New(200 * time.Millisecond)
+	h.apply(1, spec)
+	h.waitFor("the old panel running again", func() bool {
+		c, ok := h.eng.Get(legacy)
+		return ok && c.Running && c.Spec.Name == name+"-prev"
+	})
+	for _, c := range h.eng.Containers() {
+		if c.ID != legacy && c.Spec.Labels[docker.LabelService] == docker.PanelServiceID {
+			t.Fatalf("the failed panel container is left: %+v", c.Spec)
+		}
 	}
 }
 

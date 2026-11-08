@@ -38,6 +38,14 @@ if [ -z "$docker_min" ] || [ -z "$docker_rec" ]; then
   echo "render-installer: no minDockerMajor/recommendedDockerMajor constants in $checks" >&2
   exit 1
 fi
+# The panel container's user, which the installer checks no account has
+# (go/internal/docker/names.go PanelUID).
+names="$root/go/internal/docker/names.go"
+panel_uid=$(sed -n 's/^[[:space:]]*PanelUID[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$names" | head -1)
+if [ -z "$panel_uid" ]; then
+  echo "render-installer: no PanelUID constant in $names" >&2
+  exit 1
+fi
 
 brand=$(grep -v '^#' "$env_file")
 tmp="$(mktemp)"
@@ -49,6 +57,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     line="${line//@@VERSION@@/$version}"
     line="${line//@@MIN_DOCKER_MAJOR@@/$docker_min}"
     line="${line//@@RECOMMENDED_DOCKER_MAJOR@@/$docker_rec}"
+    line="${line//@@PANEL_UID@@/$panel_uid}"
     printf '%s\n' "${line//@@TEST_RELEASE_PUBLIC_KEY@@/$test_key}"
     ;;
   esac

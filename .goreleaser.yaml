@@ -98,6 +98,7 @@ dockers_v2:
       - apps/panel/drizzle
       - apps/web/dist
       - templates
+      - deploy/panel-entrypoint.sh
     build_args:
       VERSION: "{{ .Version }}"
       REVISION: "{{ .FullCommit }}"

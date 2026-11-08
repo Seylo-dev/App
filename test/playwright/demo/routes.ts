@@ -33,7 +33,10 @@ const worldHandlers: Record<string, Handler> = {
   "nodes.createJoinToken": () => ({
     tokenId: "token00000000001",
     token: "seylo_join_8Kq2fT9xLw4mZp",
-    command: "curl -fsSL install.seylo.dev | sh -s -- join seylo_join_8Kq2fT9xLw4mZp",
+    // The shape nodes/join-command.ts gives: the installer of the panel's own release.
+    command:
+      "curl -fsSL https://github.com/Seylo-dev/App/releases/download/v0.2.0/install.sh | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token 'seylo_join_8Kq2fT9xLw4mZp' --pin 'sha256:9f2c4e1b7a3d5f60c8e2b4a6d1f3e5c7a9b0d2f4e6c8a1b3d5f7e9c0a2b4d6f8'",
+    insecureTransport: false,
     expiresAt: new Date(Date.now() + 58 * 60_000).toISOString(),
   }),
   "metrics.nodes": (input) => world.metricsNodes(String(input.range ?? "1h")),

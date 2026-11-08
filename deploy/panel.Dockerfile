@@ -22,6 +22,9 @@ ARG ENV_PREFIX=SEYLO
 # <DATA_DIR>/panel, which the agent mounts from the host.
 ARG DATA_DIR=/var/lib/seylo
 ARG REVISION=unknown
+# The panel user (go/internal/docker PanelUID; a test checks they match):
+# no login user has it, so none can read master.key or panel.db.
+ARG PANEL_UID=61000
 
 LABEL org.opencontainers.image.title="panel" \
       org.opencontainers.image.version="${VERSION}" \
@@ -44,10 +47,17 @@ COPY apps/web/dist apps/web/dist
 # runtime next to the bundle (modules/templates/catalog.ts catalogDir()).
 COPY templates templates
 
-# The "bun" user of the base image (uid 1000) runs the panel; the data
-# folder is a bind mount owned by the same uid on the host.
-RUN mkdir -p "${DATA_DIR}/panel" && chown -R 1000:1000 "${DATA_DIR}"
-USER 1000:1000
+# The panel user runs the panel. The data folder is a bind mount the agent
+# gives to that user (mode 0700) and starts the container with --user
+# ${PANEL_UID}:${PANEL_UID}. There is no USER line: started as root (an
+# agent from before the panel user, or `docker run` by hand) the entrypoint
+# runs the panel as the folder's owner and never as root
+# (deploy/panel-entrypoint.sh). The base image's uid 1000 ("bun") is the
+# default login user on most cloud images and is not used.
+COPY deploy/panel-entrypoint.sh /usr/local/bin/panel-entrypoint
+RUN sed -i -e "s|@@PANEL_UID@@|${PANEL_UID}|g" -e "s|@@ENV_PREFIX@@|${ENV_PREFIX}|g" -e "s|@@DATA_DIR@@|${DATA_DIR}|g" \
+      /usr/local/bin/panel-entrypoint && chmod 0755 /usr/local/bin/panel-entrypoint && \
+    mkdir -p "${DATA_DIR}/panel" && chown -R "${PANEL_UID}:${PANEL_UID}" "${DATA_DIR}/panel" && chmod 0700 "${DATA_DIR}/panel"
 
 EXPOSE 3000
 VOLUME ["${DATA_DIR}/panel"]
@@ -56,4 +66,5 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
   CMD ["bun", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 
 STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/panel-entrypoint"]
 CMD ["bun", "apps/panel/dist/main.js"]

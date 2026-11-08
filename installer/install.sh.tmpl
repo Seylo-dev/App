@@ -25,6 +25,9 @@ TEST_RELEASE_PUBLIC_KEY='@@TEST_RELEASE_PUBLIC_KEY@@'
 # minDockerMajor and recommendedDockerMajor (go/internal/nodecheck).
 MIN_DOCKER_MAJOR=@@MIN_DOCKER_MAJOR@@
 RECOMMENDED_DOCKER_MAJOR=@@RECOMMENDED_DOCKER_MAJOR@@
+# The panel container's uid and gid (go/internal/docker PanelUID). It owns
+# the panel's folder, so no account on the server may have it.
+PANEL_UID=@@PANEL_UID@@
 
 SLUG=$BRAND_SLUG
 NAME=$BRAND_DISPLAY_NAME
@@ -107,9 +110,12 @@ Flags:
   --insecure           join a panel at a plain http:// URL on another server: the
                        agent's traffic (environment values, registry logins, shells)
                        is then unencrypted
-  --name <name>        node name (default: the hostname)
+  --name <name>        node name (default: the hostname; a re-join keeps the current one)
   --can-build          allow builds on this node (join; the panel node always can)
-  --force              join again although this node already belongs to a panel;
+  --no-can-build       stop builds on this node (join; a re-join without either flag
+                       keeps the current setting)
+  --force              join again although this node already belongs to a panel
+                       (the node keeps its other settings in config.yml);
                        install the panel although another program holds 80/443
   --install-docker     install Docker with the official script from get.docker.com if missing
   --no-docker-install  never install Docker; fail if it is missing
@@ -164,7 +170,8 @@ parse_args() {
 		--token) need_value "$@"; TOKEN=$2; shift ;;
 		--pin) need_value "$@"; PIN=$2; shift ;;
 		--name) need_value "$@"; NODE_NAME=$2; shift ;;
-		--can-build) CAN_BUILD=1 ;;
+		--can-build) CAN_BUILD=true ;;
+		--no-can-build) CAN_BUILD=false ;;
 		--install-docker) INSTALL_DOCKER=1 ;;
 		--no-docker-install) NO_DOCKER=1 ;;
 		--yes | -y) INSTALL_DOCKER=1 ;;
@@ -811,6 +818,7 @@ install_panel() {
 		image="$BRAND_IMAGE:$VERSION@<digest from the release manifest>"
 	fi
 	step "Starting the panel"
+	check_panel_uid
 	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || ! docker image inspect "$image" >/dev/null 2>&1; then
 		run docker pull "$image"
 	fi
@@ -820,6 +828,17 @@ install_panel() {
 		seylo panel bootstrap --image "$image" --port "$PORT" --agent-tls-port "$AGENT_TLS_PORT"
 	fi
 	run systemctl restart "$SLUG.service"
+}
+
+# check_panel_uid warns when an account on this server has the panel's
+# uid or gid: the panel's folder (master.key, panel.db) belongs to it, so
+# that account could read them.
+check_panel_uid() {
+	command -v getent >/dev/null 2>&1 || return 0
+	for db in passwd group; do
+		name=$(getent "$db" "$PANEL_UID" 2>/dev/null | cut -d: -f1)
+		[ -z "$name" ] || warn "the $db entry $name on this server has id $PANEL_UID, the panel's user: it can read the panel's master key and database in $DATA_DIR/panel. Give it another id, or treat it like root"
+	done
 }
 
 install_join() {
@@ -837,7 +856,7 @@ install_join() {
 	set -- join "$PANEL_URL" --token "$TOKEN" --no-start
 	[ -z "$PIN" ] || set -- "$@" --pin "$PIN"
 	[ -z "$NODE_NAME" ] || set -- "$@" --name "$NODE_NAME"
-	[ -z "$CAN_BUILD" ] || set -- "$@" --can-build
+	[ -z "$CAN_BUILD" ] || set -- "$@" "--can-build=$CAN_BUILD"
 	[ -z "$FORCE" ] || set -- "$@" --force
 	[ -z "$INSECURE" ] || set -- "$@" --insecure
 	if can_write; then

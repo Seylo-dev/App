@@ -223,6 +223,7 @@ run_installer() {
     FAKE_LIVE_RESTORE="${FAKE_LIVE_RESTORE:-}" FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT:-}" FAKE_SWARM="${FAKE_SWARM:-}" \
     FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" \
     FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" \
+    FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
   RC=$?
@@ -431,6 +432,52 @@ expect_ok "a join only warns about port 80" "warning: port 80 is used by nginx" 
 FAKE_SS_3443=node run_installer minisign "$INSTALLER" --version "$V"
 expect_fail "panel install stops when the agents' TLS port is taken" "port 3443 (where other nodes' agents reach the panel over TLS) is used by node"
 
+# ---- joins install the release of the installer they came from
+# The panel's join command pipes its own release's install.sh into sh
+# (apps/panel/src/modules/nodes/join-command.ts). That installer defaults
+# to its own version, so the node gets that release's agent even when
+# "latest" (what the install host serves) is another release.
+VN=0.1.5
+fresh_release
+make_release "$VN" "$REL/download/v$VN"
+rm -rf "$REL/latest/download" && mkdir -p "$REL/latest/download" && cp "$REL/download/v$VN"/* "$REL/latest/download/"
+RELEASE_INSTALLER=$T/install-v$V.sh
+INSTALLER_TEST_PUBLIC_KEY=$KEY "$root/scripts/render-installer.sh" "$V" "$RELEASE_INSTALLER" >/dev/null
+run_installer minisign "$RELEASE_INSTALLER" join --panel https://192.0.2.10:3443 --token t --pin "sha256:$(printf '%064d' 1)"
+expect_ok "a release's installer joins with that release's agent, not latest" "$SLUG $V (test) -> /usr/local/bin/$SLUG" "join https://192.0.2.10:3443 --token t --no-start --pin sha256:"
+curl_log | grep -q "/download/v$V/${SLUG}_linux_$ARCH\$" && ! curl_log | grep -q "/latest/" &&
+  pass "a release's installer downloads only from its own release" || flunk "a release's installer download paths" "$(curl_log)"
+# The latest installer with --version (install.sh.tmpl join mode) installs that version too.
+run_installer minisign "$INSTALLER" join --panel https://192.0.2.10:3443 --token t --version "v$V"
+expect_ok "join --version installs that release's agent" "$SLUG $V (test) -> /usr/local/bin/$SLUG" "Joining https://192.0.2.10:3443"
+curl_log | grep -q "/download/v$V/manifest.json\$" && ! curl_log | grep -q "/latest/" &&
+  pass "join --version reads that release's manifest" || flunk "join --version download paths" "$(curl_log)"
+run_installer minisign "$INSTALLER" join --panel https://192.0.2.10:3443 --token t
+expect_ok "join without --version from the latest installer follows latest" "$SLUG $VN (test) -> /usr/local/bin/$SLUG"
+fresh_release
+
+# ---- the panel's uid (go/internal/docker PanelUID) belongs to no account
+panel_uid=$(sed -n 's/^PANEL_UID=//p' "$INSTALLER")
+nodes_uid=$(sed -n 's/^[[:space:]]*PanelUID[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$root/go/internal/docker/names.go")
+[ -n "$panel_uid" ] && [ "$panel_uid" = "$nodes_uid" ] && pass "installer panel uid ($panel_uid) is docker.PanelUID ($nodes_uid)" ||
+  flunk "installer panel uid '$panel_uid' differs from docker.PanelUID '$nodes_uid'"
+with_getent=$T/with-getent
+mkdir -p "$with_getent"
+cat >"$with_getent/getent" <<'SHIM'
+#!/bin/sh
+# getent passwd|group <id>: FAKE_GETENT_<db> names the entry with that id.
+case $1 in
+passwd) [ -n "${FAKE_GETENT_passwd:-}" ] && echo "$FAKE_GETENT_passwd:x:$2:$2::/home/$FAKE_GETENT_passwd:/bin/bash" ;;
+group) [ -n "${FAKE_GETENT_group:-}" ] && echo "$FAKE_GETENT_group:x:$2:" ;;
+esac
+SHIM
+chmod +x "$with_getent/getent"
+EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "a panel install with the panel's uid free installs quietly" "panel bootstrap --image"
+has "the panel's user" && flunk "a free panel uid got a warning" "$OUT" || pass "a free panel uid gets no warning"
+FAKE_GETENT_passwd=olduser EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "an account with the panel's uid gets a warning" "the passwd entry olduser on this server has id $panel_uid, the panel's user"
+
 # ---- the agents' TLS port and plain-HTTP joins
 FAKE_UFW=1 run_installer minisign "$INSTALLER" --version "$V"
 expect_ok "a panel install publishes and opens the agents' TLS port" \
@@ -452,6 +499,18 @@ run_installer none "$PLACEHOLDER_INSTALLER" join --panel http://192.0.2.10:3000 
 expect_ok "--insecure reaches the agent's join" "join http://192.0.2.10:3000 --token t --no-start --insecure"
 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'http://[::1]:3000' --token t --binary "$T/local-binary"
 expect_ok "a loopback panel URL needs no --insecure" "Joining http://[::1]:3000"
+
+# ---- can_build on a join: given, refused, or left to what config.yml says
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary" --can-build
+expect_ok "--can-build reaches the agent's join" "join https://panel.example.com --token t --no-start --can-build=true"
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary" --no-can-build --force
+expect_ok "--no-can-build turns builds off on a re-join" "join https://panel.example.com --token t --no-start --can-build=false --force"
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary" --force
+if [ "$RC" -eq 0 ] && has "join https://panel.example.com --token t --no-start --force" && ! has "can-build"; then
+  pass "a re-join without either flag leaves can_build to config.yml"
+else
+  flunk "a re-join without either flag leaves can_build to config.yml" "$OUT"
+fi
 
 # ---- scripts/release-preflight.sh (what `make release` checks before it publishes)
 cat >"$shims/gh" <<'EOF'

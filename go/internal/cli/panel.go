@@ -95,8 +95,10 @@ func runningWord(running bool) string {
 const (
 	PanelProjectID = docker.PanelProjectID
 	PanelServiceID = docker.PanelServiceID
-	// panelUID owns the panel's data folder: the image runs as this user.
-	panelUID = 1000
+	// panelUID owns the panel's data folder (mode 0700); the panel
+	// container runs as this user (docker.PanelUser), which no login user has.
+	panelUID = docker.PanelUID
+	panelGID = docker.PanelGID
 	// panelContainerPort is where the panel listens inside its container.
 	panelContainerPort = 3000
 	// DefaultAgentTLSPort is the agents' TLS port (the installer's default too).
@@ -170,8 +172,11 @@ const (
 // agent TLS port the panel serves agents there (the same number inside and
 // on the host, as the panel service's spec keeps it).
 func panelRunArgs(dataDir, image string, port, agentTLSPort int) []string {
+	// The panel user, recorded like the agent's own panel containers do, so
+	// the agent adopts this container instead of replacing it.
 	labels := docker.InstanceLabels{
 		ServiceID: PanelServiceID, ProjectID: PanelProjectID, Kind: "app", Generation: 1, Protected: true,
+		User: docker.PanelUser,
 	}.Map()
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
@@ -180,6 +185,7 @@ func panelRunArgs(dataDir, image string, port, agentTLSPort int) []string {
 	sort.Strings(keys)
 	env := strings.ToUpper(brand.Slug) + "_"
 	args := []string{"run", "--detach", "--name", panelContainerName(),
+		"--user", docker.PanelUser,
 		"--restart", "no",
 		"--cgroup-parent", docker.CgroupParent,
 		"--network", docker.ProjectNetwork(PanelProjectID),
@@ -237,11 +243,15 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 	}
 
 	panelDir := filepath.Join(d.layout.Root(), "panel")
-	if err := os.MkdirAll(panelDir, 0o750); err != nil {
+	if err := os.MkdirAll(panelDir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chown(panelDir, panelUID, panelUID); err != nil && !errors.Is(err, os.ErrPermission) {
+	if err := os.Chown(panelDir, panelUID, panelGID); err != nil && !errors.Is(err, os.ErrPermission) {
 		return fmt.Errorf("giving %s to the panel user: %w", panelDir, err)
+	}
+	// Only root and the panel user: master.key and panel.db go here.
+	if err := os.Chmod(panelDir, 0o700); err != nil {
+		return err
 	}
 
 	network := docker.ProjectNetwork(PanelProjectID)
@@ -265,7 +275,7 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 		if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
 			return err
 		}
-		if err := os.Chown(path, panelUID, panelUID); err != nil && !errors.Is(err, os.ErrPermission) {
+		if err := os.Chown(path, panelUID, panelGID); err != nil && !errors.Is(err, os.ErrPermission) {
 			return err
 		}
 	}
@@ -285,7 +295,8 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 	}
 
 	host, _ := os.Hostname()
-	if err := agent.Join(d.layout, agent.JoinOptions{PanelURL: local, Token: joinToken, Name: host, CanBuild: true}); err != nil {
+	canBuild := true
+	if err := agent.Join(d.layout, agent.JoinOptions{PanelURL: local, Token: joinToken, Name: host, CanBuild: &canBuild}); err != nil {
 		return fmt.Errorf("joining the local panel: %w", err)
 	}
 	ip := outboundIP()
@@ -438,7 +449,7 @@ func panelSetupLink(ctx context.Context, d *deps) error {
 	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
 		return err
 	}
-	if err := os.Chown(path, panelUID, panelUID); err != nil && !errors.Is(err, os.ErrPermission) {
+	if err := os.Chown(path, panelUID, panelGID); err != nil && !errors.Is(err, os.ErrPermission) {
 		return err
 	}
 	if _, err := d.output(ctx, "docker", "restart", container); err != nil {

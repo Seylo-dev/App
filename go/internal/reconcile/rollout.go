@@ -94,9 +94,15 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	// first. Collisions must be removed; plain recreate keeps the stopped
 	// containers so a failed deploy can start them again.
 	var stoppedOld []docker.Container
+	w.panelDirWas = nil
 	if recreate && len(old) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_STOPPING_OLD, "recreate: stopping the running version first")
-		if collide {
+		if collide && canRename && docker.IsPanelService(spec.GetId(), spec.GetProtected()) {
+			// The panel at the same generation (the agent moving it to the
+			// panel user): keep the old container under another name, so a
+			// failed start brings it back.
+			stoppedOld = w.stopAside(ctx, renamer, old, grace)
+		} else if collide {
 			w.removeAll(ctx, old, grace)
 		} else {
 			for _, c := range old {
@@ -129,6 +135,11 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	w.rollMu.Unlock()
 	restore := func() {
 		w.removeAll(ctx, created, 0)
+		if w.panelDirWas != nil {
+			// The old panel runs as the folder's old owner.
+			w.panelDirWas.revert(w.r.o.Layout)
+			w.panelDirWas = nil
+		}
 		started := false
 		for _, c := range stoppedOld {
 			if err := w.r.o.Docker.StartContainer(ctx, c.ID); err != nil {
@@ -253,6 +264,34 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 
 // nextSuffix marks containers of a side-by-side deploy until they serve.
 const nextSuffix = "-next"
+
+// prevSuffix marks a panel container stopped and set aside during a
+// same-generation recreate, until the new one serves.
+const prevSuffix = "-prev"
+
+// stopAside stops the old containers and renames them out of the new
+// ones' way, for a restore. One that cannot be renamed is removed: its
+// name is needed.
+func (w *worker) stopAside(ctx context.Context, renamer docker.Renamer, old []docker.Container, grace time.Duration) []docker.Container {
+	var kept []docker.Container
+	for _, c := range old {
+		w.expected[c.ID] = true
+		delete(w.restartAt, c.ID)
+		if err := w.r.o.Docker.StopContainer(ctx, c.ID, grace); err != nil && !errors.Is(err, docker.ErrNotFound) {
+			w.log.Warn("stopping old container", "err", err)
+		}
+		name := strings.TrimPrefix(c.Name, "/")
+		if !strings.HasSuffix(name, prevSuffix) {
+			if err := renamer.RenameContainer(ctx, c.ID, name+prevSuffix); err != nil {
+				w.log.Warn("renaming the old container aside", "container", name, "err", err)
+				w.stopRemove(ctx, c.ID, 0)
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	return kept
+}
 
 // byAddress names live instances by their project network address, so a
 // route keeps reaching them while they are renamed.

@@ -51,6 +51,24 @@ const (
 	PanelServiceID = "panel00000000000"
 )
 
+// The panel container's user (uid and gid), part of the on-node contract
+// like the reserved ids. It owns <dataDir>/panel (mode 0700), where
+// master.key and panel.db live. useradd hands out 1000-60000 to people, so
+// no login user has it; systemd keeps 60578-61183 unused, so no system
+// service does either. Before 0.2.0-rc.2 the panel ran as the image's uid
+// 1000, which on most cloud images is the default login user (ubuntu,
+// debian, ec2-user): that user could read master.key without sudo. The
+// agent moves an existing folder to this user before it starts a panel
+// container (reconcile); deploy/panel.Dockerfile builds the same number in
+// (ARG PANEL_UID).
+const (
+	PanelUID = 61000
+	PanelGID = 61000
+)
+
+// PanelUser is the panel container's --user.
+var PanelUser = fmt.Sprintf("%d:%d", PanelUID, PanelGID)
+
 // IsPanelService reports whether a service is the protected panel itself.
 func IsPanelService(serviceID string, protected bool) bool {
 	return protected && serviceID == PanelServiceID
