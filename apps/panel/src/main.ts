@@ -18,9 +18,14 @@ const logger = createLogger(config.logLevel);
 mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
 const panelPath = join(config.dataDir, "panel.db");
 const freshInstall = !existsSync(panelPath);
-// A master-key rotation killed half way: finished here when panel.db is
-// already sealed with the new key; one that never committed stops the panel.
-if (finishInterruptedRotation(config.dataDir)) logger.warn("finished a master-key rotation that stopped before master.key was replaced");
+// A master-key rotation that did not finish (master.key.new left): finished
+// here when panel.db is already sealed with the new key, else the leftover
+// is removed and the panel keeps the old key.
+const leftover = finishInterruptedRotation(config.dataDir);
+if (leftover === "finished") logger.warn("finished a master-key rotation that stopped before master.key was replaced");
+if (leftover === "removed") {
+  logger.warn("removed master.key.new left by a master-key rotation that never committed; master.key is unchanged, run the rotation again");
+}
 const masterKey = loadMasterKey(join(config.dataDir, "master.key"), freshInstall);
 const databases = openDatabases({ panelPath, metricsPath: join(config.dataDir, "metrics.db"), migrationsDir: config.migrationsDir });
 

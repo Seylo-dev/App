@@ -25,6 +25,7 @@ import (
 	"github.com/seylo-dev/app/go/gen/brand"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/systemd"
+	"github.com/seylo-dev/app/go/internal/update"
 )
 
 // `seylo panel rotate-key` runs the master-key rotation of
@@ -47,6 +48,12 @@ const (
 	// there until the database commit (security/rotate-master-key.ts).
 	masterKeyFile = "master.key"
 	panelDBFile   = "panel.db"
+	// rotateMinVersion is the first panel image whose script takes
+	// --from-cli; an older one rejects it with its usage text.
+	rotateMinVersion = "0.2.0-rc.2"
+	// imageVersionLabel holds the release on the panel image
+	// (deploy/panel.Dockerfile, .goreleaser.yaml).
+	imageVersionLabel = "org.opencontainers.image.version"
 )
 
 var errRotateFlags = errors.New("choose what happens to the panel's identity with exactly one flag: " +
@@ -103,6 +110,9 @@ type panelContainers struct {
 	image string
 	// hostPort is the panel's port on this host (SEYLO_HOST_PORT).
 	hostPort int
+	// version is the image's release label ("" when it has none, "dev" for
+	// a local build).
+	version string
 }
 
 func rotatePanelKey(ctx context.Context, d *deps, opts rotateKeyOptions) (err error) {
@@ -124,6 +134,9 @@ func rotatePanelKey(ctx context.Context, d *deps, opts rotateKeyOptions) (err er
 	}
 	panel, err := findPanelContainers(ctx, d)
 	if err != nil {
+		return err
+	}
+	if err := rotateSupported(panel.version); err != nil {
 		return err
 	}
 	if err := clearRotateContainer(ctx, d); err != nil {
@@ -183,8 +196,9 @@ func rotatePanelKey(ctx context.Context, d *deps, opts rotateKeyOptions) (err er
 			msg = "master.key was replaced, but the script failed afterwards"
 		}
 		if exists(keyPath + ".new") {
-			msg = "master.key.new is left: the panel finishes the rotation when it starts if the database already uses the new key, " +
-				"and otherwise refuses to start until this command runs again"
+			msg = "master.key.new is left: when the panel starts it finishes the rotation if panel.db already uses the new key, " +
+				"and otherwise removes master.key.new and keeps the old key (`" + brand.Slug + " panel logs` says which); " +
+				"if the old key stays, run this command again"
 		}
 		return fmt.Errorf("the rotation failed (%s): %w", msg, runErr)
 	}
@@ -302,7 +316,26 @@ func findPanelContainers(ctx context.Context, d *deps) (panelContainers, error) 
 			}
 		}
 	}
+	labels, err := d.output(ctx, "docker", "image", "inspect", "--format", "{{json .Config.Labels}}", out.image)
+	if err != nil {
+		return panelContainers{}, fmt.Errorf("inspecting the panel's image %s: %w", out.image, err)
+	}
+	var imageLabels map[string]string
+	_ = json.Unmarshal([]byte(labels), &imageLabels)
+	out.version = strings.TrimSpace(imageLabels[imageVersionLabel])
 	return out, nil
+}
+
+// rotateSupported refuses a panel image released before rotate-key (the
+// installer's "Already installed" path and a rolled back panel update
+// leave a new binary next to an old panel), before anything is stopped.
+// A build without a release version ("dev", no label) is let through.
+func rotateSupported(version string) error {
+	if update.IsRelease(version) && update.Compare(version, rotateMinVersion) < 0 {
+		return fmt.Errorf("the panel runs %s, whose image has no rotate-key support (it needs %s or newer); "+
+			"update the panel first (Settings > Updates) and run the command again. Nothing was changed", version, rotateMinVersion)
+	}
+	return nil
 }
 
 // clearRotateContainer refuses while an earlier rotation still runs and
