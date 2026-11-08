@@ -98,13 +98,17 @@ esac
 [ -f "$src" ] || exit 22
 cp "$src" "$out"
 EOF
-cat >"$shims/docker" <<'EOF'
+# The docker CLI has a folder of its own: NO_DOCKER_CLI=1 leaves it out of
+# PATH (Docker is not installed).
+docker_cli=$T/docker-cli
+mkdir -p "$docker_cli"
+cat >"$docker_cli/docker" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$SHIM_LOG.docker"
 case $1 in
 info)
-  # FAKE_NO_DOCKER: the CLI is there but no daemon answers (Docker missing).
-  [ "$2" = --format ] || { [ -z "${FAKE_NO_DOCKER:-}" ] || exit 1; exit 0; }
+  # FAKE_DOCKER_DOWN: the CLI is there but no daemon answers (installed, not running).
+  [ "$2" = --format ] || { [ -z "${FAKE_DOCKER_DOWN:-}" ] || exit 1; exit 0; }
   case $3 in
   *LiveRestoreEnabled*) echo "${FAKE_LIVE_RESTORE:-false}" ;;
   *DockerRootDir*) echo "${FAKE_DOCKER_ROOT:-/var/lib/docker}" ;;
@@ -149,7 +153,7 @@ cat >"$shims/dockerd" <<'EOF'
 # dockerd --validate --config-file <file>
 [ -z "${FAKE_DOCKERD_INVALID:-}" ]
 EOF
-chmod +x "$shims"/*
+chmod +x "$shims"/* "$docker_cli/docker"
 
 # ---- a fake release
 # The fake's `status` prints FAKE_STATUS (default: connected) and exits
@@ -223,6 +227,7 @@ run_installer() {
   [ -z "${PRESEED:-}" ] || cp -R "$PRESEED/." "$R/"
   rm -f "$T"/log.*
   local path=$shims:$tools${EXTRA_PATH:+:$EXTRA_PATH}
+  [ -n "${NO_DOCKER_CLI:-}" ] || path=$path:$docker_cli
   case $verifier in
   minisign) path=$path:$with_minisign ;;
   openssl) path=$path:$with_openssl ;;
@@ -231,7 +236,7 @@ run_installer() {
   set +e
   OUT=$(env -i PATH="$path" HOME="$T" TMPDIR="$T" FAKE_RELEASE="$REL" SHIM_LOG="$T/log" \
     FAKE_LIVE_RESTORE="${FAKE_LIVE_RESTORE:-}" FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT:-}" FAKE_SWARM="${FAKE_SWARM:-}" \
-    FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" FAKE_NO_DOCKER="${FAKE_NO_DOCKER:-}" \
+    FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" FAKE_DOCKER_DOWN="${FAKE_DOCKER_DOWN:-}" \
     FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" FAKE_PANEL_VERSION="${FAKE_PANEL_VERSION:-}" \
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
@@ -641,10 +646,26 @@ started=$(date +%s)
 FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
 Error:   the panel refused the join: the token is unknown, used or expired" INSTALLER_TEST_JOIN_WAIT=30 \
   run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
-expect_ok "a refused join stops waiting and says to make a new join command" \
-  "warning: the panel refused this node: the panel refused the join: the token is unknown, used or expired" \
-  "Make a new join command in the panel's Add node dialog" "==> Installed, but not connected to the panel yet"
+# Before: exit 0, so cloud-init or Terraform reported a node that never connects as joined.
+expect_fail "a refused join stops waiting and says to make a new join command" \
+  "warning: the panel refused this node: the panel refused the join: the token is unknown, used or expired"
+has "Make a new join command in the panel's Add node dialog" && has "==> Installed, but the panel refused this node (see above)" &&
+  pass "a refused join says what to do and that the node is refused" || flunk "a refused join's last lines" "$OUT"
+[ "$RC" -eq 3 ] && pass "a refused join exits 3" || flunk "a refused join exits 3 (exit $RC)" "$OUT"
 [ $(($(date +%s) - started)) -lt 15 ] && pass "a refused join does not wait out the full time" || flunk "a refused join waited the full time"
+FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
+Error:   dial panel 192.0.2.10:3443: conn: panel certificate does not match the pinned key" INSTALLER_TEST_JOIN_WAIT=0 \
+  run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+[ "$RC" -eq 3 ] && has "warning: the panel refused this node" && pass "a join refused for another reason (a wrong pin) exits 3 too" ||
+  flunk "a join refused for another reason exits 3 (exit $RC)" "$OUT"
+# A panel that only needs a newer agent: the agent updates itself, so the join waits and exits 0.
+FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
+Error:   panel rejected the agent: HELLO_REJECT_REASON_AGENT_TOO_OLD: this panel needs agent 0.3.0 or newer (retrying at 17:04:05)" \
+  INSTALLER_TEST_JOIN_WAIT=2 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a panel that needs a newer agent is waited for like an unreachable one and exits 0" \
+  "warning: the panel needs a newer agent than this one: panel rejected the agent: HELLO_REJECT_REASON_AGENT_TOO_OLD" \
+  "The agent updates itself to the panel's release and connects after that." "==> Installed, but not connected to the panel yet (see above)"
+has "the panel refused this node" && flunk "AGENT_TOO_OLD is not reported as refused" "$OUT" || pass "AGENT_TOO_OLD is not reported as refused"
 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary" --dry-run
 expect_ok "a dry-run join only shows the wait" "+ $SLUG status (until the agent is connected, up to 60s)"
 
@@ -706,19 +727,46 @@ fi
 for mode in panel join; do
   args=(--version "$V")
   [ "$mode" = panel ] || args=(join --panel https://192.0.2.10:3443 --token t --pin "sha256:$(printf '%064d' 1)" --version "$V")
-  FAKE_NO_DOCKER=1 run_installer minisign "$INSTALLER" "${args[@]}"
+  NO_DOCKER_CLI=1 run_installer minisign "$INSTALLER" "${args[@]}"
   expect_ok "[$mode] Docker missing: installed from get.docker.com without asking" \
     "Docker is missing: installing it with the official script from get.docker.com" "+ sh " "+ systemctl enable --now docker"
-  FAKE_NO_DOCKER=1 run_installer minisign "$INSTALLER" "${args[@]}" --install-docker --yes
-  expect_ok "[$mode] --install-docker and --yes still work (no-ops now)" "Docker is missing: installing it"
-  FAKE_NO_DOCKER=1 run_installer minisign "$INSTALLER" "${args[@]}" --no-docker-install
+  NO_DOCKER_CLI=1 run_installer minisign "$INSTALLER" "${args[@]}" --install-docker --yes
+  expect_ok "[$mode] --install-docker and --yes still work (no-ops for a missing Docker)" "Docker is missing: installing it"
+  NO_DOCKER_CLI=1 run_installer minisign "$INSTALLER" "${args[@]}" --no-docker-install
   expect_fail "[$mode] --no-docker-install stops instead" "--no-docker-install was given"
+
+  # Installed but dockerd does not start (a bad daemon.json, a masked unit).
+  # Before: "Docker is missing" and get.docker.com over it without asking,
+  # which swaps docker.io, containerd and runc and still does not start.
+  FAKE_DOCKER_DOWN=1 run_installer minisign "$INSTALLER" "${args[@]}"
+  expect_fail "[$mode] an installed Docker that does not start stops the install" \
+    "Docker is installed but not running, and systemctl start docker did not start it. See why with systemctl status docker and journalctl -u docker"
+  if has "+ systemctl start docker" && ! has "+ sh " && ! has "Docker is missing" && [ ! -e "$R/usr/local/bin/$SLUG" ]; then
+    pass "[$mode] it tries systemctl start docker, then installs nothing (no get.docker.com, no agent)"
+  else
+    flunk "[$mode] an installed Docker that does not start is left alone" "$OUT"
+  fi
+  FAKE_DOCKER_DOWN=1 run_installer minisign "$INSTALLER" "${args[@]}" --install-docker
+  expect_ok "[$mode] --install-docker reinstalls a Docker that does not start" \
+    "Docker is installed but does not start: reinstalling it with the official script from get.docker.com" "+ sh " "+ systemctl enable --now docker"
+  FAKE_DOCKER_DOWN=1 run_installer minisign "$INSTALLER" "${args[@]}" --yes
+  expect_ok "[$mode] --yes reinstalls it too, as before 0.2.1" "reinstalling it with the official script" "+ sh "
+  FAKE_DOCKER_DOWN=1 run_installer minisign "$INSTALLER" "${args[@]}" --install-docker --no-docker-install
+  expect_fail "[$mode] --no-docker-install wins over --install-docker" "Docker is installed but not running"
 done
+FAKE_DOCKER_DOWN=1 run_installer minisign "$INSTALLER" --version "$V" --dry-run
+expect_ok "--dry-run with Docker installed but not running shows the start and goes on" \
+  "+ systemctl start docker" "warning: Docker is installed but not running: the install starts it" "panel bootstrap --image"
+has "+ sh " && flunk "--dry-run with Docker not running plans no get.docker.com" "$OUT" || pass "--dry-run with Docker not running plans no get.docker.com"
 run_installer minisign "$INSTALLER" --version "$V"
 has "installing it with the official script" && flunk "a running Docker is not installed again" "$OUT" || pass "a running Docker is not installed again"
 "$SH" "$INSTALLER" --help >"$T/help.txt" 2>&1 || true
 grep -q "installs Docker with the official script" "$T/help.txt" && grep -q -- "--no-docker-install" "$T/help.txt" &&
   pass "--help says Docker is installed when missing and how to opt out" || flunk "--help on installing Docker" "$(cat "$T/help.txt")"
+grep -q -- "--install-docker     also reinstall Docker" "$T/help.txt" &&
+  pass "--help says --install-docker reinstalls a Docker that does not start" || flunk "--help on --install-docker" "$(cat "$T/help.txt")"
+grep -q "3 for a join the panel refused" "$T/help.txt" &&
+  pass "--help gives the exit status of a refused join" || flunk "--help on the exit status" "$(cat "$T/help.txt")"
 
 if [ "$failures" -gt 0 ]; then
   echo "installer tests: $failures failed"

@@ -2178,7 +2178,14 @@ folder, warn when an account on the server has uid or gid 61000
 (`getent`); the agent warns on every node after that (see "Docker resources").
 Join: `install.sh join --panel
 <url> --token <t> [--version <v>] [--pin sha256:<hex>] [--can-build|--no-can-build]` runs
-`seylo join --no-start`, then starts `seylo.service`. An installer from a
+`seylo join --no-start`, then starts `seylo.service` and waits up to 60
+seconds for the agent's first connect (`seylo status`). A panel it cannot
+reach yet is reported with what to check and the exit status stays 0 (the
+agent keeps trying, the token stays valid for its hour); a panel that
+refused the node (a used or expired token, a wrong pin, a removed or
+disabled node: status `rejected`) ends the wait at once with exit status 3,
+since that join never connects; `AGENT_TOO_OLD` is waited for like an
+unreachable panel (the agent updates itself). An installer from a
 release defaults to that release (`--version` picks another and takes the
 agent from that release's signed manifest), which is how the panel's join
 command, piped from the install host, pins the agent to the panel's
@@ -2196,6 +2203,16 @@ another program holds 80 or 443 (named from `ss -ltnp`) unless `--force`,
 and when the panel port is taken; our own containers (a Traefik or panel
 left by an earlier install) and Wings' Traefik on a Wings server pass, and
 joins only warn.
+
+Docker install (since 0.2.1): a server without the `docker` command gets
+Docker from get.docker.com without a question, with or without a terminal
+(`--no-docker-install` stops instead). An installed Docker that does not
+answer is started (`systemctl start docker`); when it still does not
+answer, the installer stops before it changes anything and points to
+`systemctl status docker` and `journalctl -u docker`, unless
+`--install-docker` (or `--yes`, as before 0.2.1) asks for get.docker.com
+over it, which replaces distribution packages such as docker.io,
+containerd and runc. Join commands never carry `--install-docker`.
 
 Docker preflight: the installer refuses snap Docker (root dir under
 `/var/snap` or the binary under `/snap`), a Docker without a
