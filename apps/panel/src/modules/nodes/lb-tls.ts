@@ -3,8 +3,12 @@
 // certificate for one shared server name; the agent's Traefik then accepts
 // only peers that present a certificate of this CA, and a balancing node
 // checks the peer by that name. Certificates are made when a node connects
-// and renewed by the prune job when under 30 days are left; the desired
-// state only reads them (contributors must not write). Agents turn load
+// and renewed by the (hourly) prune job when under 20 days are left; the
+// desired state only reads them (contributors must not write). Nothing can
+// revoke a certificate a node holds, so they live 30 days: a removed node's
+// certificate stops opening the other nodes' LB entry point within that,
+// and a panel that is down keeps load balancing working for 20 days. One
+// issued for longer (365 days before 0.2.0-rc.2) is replaced at once. Agents turn load
 // balancing to a node off while it has no certificate, so a node that
 // cannot get one raises an alert, resolved once it has one
 // (issueNodeCertificate).
@@ -22,8 +26,8 @@ import { getSetting, setSetting } from "../../settings";
 
 export const lbServerName = `lb.${slug}.internal`;
 const day = 86_400_000;
-const nodeCertDays = 365;
-const renewBeforeDays = 30;
+const nodeCertDays = 30;
+const renewBeforeDays = 20;
 
 interface StoredCert {
   certPem: string;
@@ -67,7 +71,8 @@ function ensureCa(deps: Pick<Deps, "db" | "secrets">, now: number): StoredCert {
 export function ensureNodeCertificate(deps: Pick<Deps, "db" | "secrets">, nodeId: string, now = Date.now()): boolean {
   const all = getSetting(deps.db, "lbTlsNodes") ?? {};
   const current = all[nodeId];
-  if (current && current.notAfter - now > renewBeforeDays * day) return false;
+  const left = current ? current.notAfter - now : 0;
+  if (current && left > renewBeforeDays * day && left <= nodeCertDays * day) return false;
   const ca = ensureCa(deps, now);
   const caKey = deps.secrets.open(ca.keySealed, "lb.key");
   if (!caKey) throw new Error("the load balancer CA key cannot be opened with this master.key");

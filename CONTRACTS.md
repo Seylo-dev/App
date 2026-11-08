@@ -753,8 +753,14 @@ local API, join and resume. The areas:
   `insecureSkipVerify`; without a complete `lb_tls` no route file has a
   router on `seylo-lb`, so the entry point, published on every interface,
   answers 404 to everyone instead of taking any client; the panel issues
-  each node's certificate on connect and renews it hourly
-  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`), and a node it cannot
+  each node's certificate on connect, for 30 days (nothing revokes one a
+  node holds, so a removed node's certificate stops opening the other
+  nodes' LB entry points within that; one issued for longer is replaced),
+  and the hourly prune job renews it with under 20 days left
+  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`). Every node's
+  certificate names the one shared `server_name`, so a node can still pose
+  as another to a sibling it can intercept; `seylo panel rotate-key
+  --new-panel-identity` makes a new LB CA. A node it cannot
   issue one for, for example because the LB CA key does not open with this
   master.key, gets one `node_health_check_failed` alert naming the reason,
   resolved once it has a certificate), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
