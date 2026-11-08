@@ -1474,14 +1474,17 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   it is not there); both `git.manage`. A refusal an admin can lift
   (BAD_REQUEST `internalTarget` or `unresolvable` from saving a source or
   `git.branches`, never a metadata address) carries `details.host`, the
-  host as it would be recorded. The web app shows "Allow this host for
-  <project>" under such a refusal on the git source and provider forms for
-  owners and admins (a confirm step, then `git.allowInternalHost`, then the
-  check or save again) and tells members only an owner or admin can allow
-  it; a failed deployment whose error is the node's or the panel's refusal
-  for the source's host offers admins the same; project Settings >
-  Internal git hosts lists them for admins with Remove and an "Allow a
-  host" field. `git.branches` (checking access to a generic git URL) reads the
+  host as it would be recorded. Only callers without `git.manage` get one:
+  an admin's save records the host and an admin's `git.branches` reads it,
+  and `gitProviders.connectRepo` never judges the host (deploys do). Under
+  such a refusal on the git source form the web app tells members that
+  only an owner or admin can allow the host (`internalTarget`), or to check
+  the address and that an owner or admin can allow a name only their
+  network knows (`unresolvable`). A failed deployment whose error is the
+  node's or the panel's refusal for the source's host offers admins "Allow
+  this host for <project>" (a confirm step, then `git.allowInternalHost`);
+  project Settings > Internal git hosts lists them for admins with Remove
+  and an "Allow a host" field. `git.branches` (checking access to a generic git URL) reads the
   repository from the panel under the same rule: public addresses, a host
   in `git_internal_hosts` for the project, or any internal host for a
   `git.manage` caller; never metadata, and the uptime "allow internal

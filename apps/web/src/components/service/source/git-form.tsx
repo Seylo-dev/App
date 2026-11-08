@@ -89,12 +89,7 @@ export function GitForm({ service }: { service: ServiceDetail }) {
           ) : branches.isError ? (
             <div className="flex flex-col gap-2">
               <OpErrorNote error={branches.error} compact />
-              <InternalHostNote
-                error={branches.error}
-                projectId={service.projectId}
-                url={check.url}
-                onAllowed={() => void branches.refetch()}
-              />
+              <InternalHostNote error={branches.error} projectId={service.projectId} />
             </div>
           ) : (
             <span className="text-chip-green-fg">
@@ -156,7 +151,7 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         </Button>
         <MutationError error={save.error} />
       </div>
-      <InternalHostNote error={save.error} projectId={service.projectId} url={url.trim()} onAllowed={submit} />
+      <InternalHostNote error={save.error} projectId={service.projectId} />
     </form>
   );
 }

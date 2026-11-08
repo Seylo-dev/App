@@ -41,18 +41,33 @@ const refused = new OpError("BAD_REQUEST", "git.example.com is an address of one
   reason: "internalTarget",
   host: "git.example.com",
 });
-const note = (error: unknown) => <InternalHostNote error={error} projectId={projectId} url="https://git.example.com/me/app.git" />;
+const note = (error: unknown) => <InternalHostNote error={error} projectId={projectId} />;
 
-test("an admin refused for an internal git host is offered to allow it for the project", () => {
-  const out = render("admin", note(refused));
-  expect(out).toContain(html(t("gitHosts.note.allow", { project: "shop" })));
-  expect(out).toContain(html(t("gitHosts.note.admin", { host: "git.example.com" })));
+// The panel never refuses an owner or admin this way: their save records the
+// host and their "Check access" reads it (modules/git/targets.ts). So they get
+// no note, and no "Allow" step inside the source form.
+test("owners and admins get no note under a refusal (the panel never sends them one)", () => {
+  for (const role of ["owner", "admin"] as const) {
+    const out = render(role, note(refused));
+    expect(out).toBe("");
+  }
 });
 
 test("a member refused for an internal git host is told who can allow it", () => {
   const out = render("member", note(refused));
   expect(out).toContain(html(t("gitHosts.note.askAdmin", { host: "git.example.com", project: "shop" })));
   expect(out).not.toContain(html(t("gitHosts.note.allow", { project: "shop" })));
+});
+
+test("a member whose git host does not resolve is told to check the address, not that it is internal", () => {
+  const typo = new OpError("BAD_REQUEST", "The name gitlab.exampel-typo.invalid did not resolve.", {
+    field: "url",
+    reason: "unresolvable",
+    host: "gitlab.exampel-typo.invalid",
+  });
+  const out = render("member", note(typo));
+  expect(out).toContain(html(t("gitHosts.note.unresolvable", { host: "gitlab.exampel-typo.invalid", project: "shop" })));
+  expect(out).not.toContain("internal address");
 });
 
 test("no note for a metadata address or another error", () => {

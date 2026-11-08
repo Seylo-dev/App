@@ -1,14 +1,14 @@
 // Internal git hosts: hosts a project's nodes may clone from internal
 // addresses (a LAN Gitea, a git server on a node's own address). The panel
-// records one when an admin saves a source with it; a member's save or
-// "Check access" on one is refused (BAD_REQUEST internalTarget or
-// unresolvable, details.host). InternalHostNote shows under such a refusal:
-// an admin (git.manage: owners and admins) can allow the host for the
-// project right there, after a confirm step; a member sees who to ask.
-// DeployHostAction offers the same under a failed deployment the node
-// refused for its git host (a name internal only at the nodes, a node behind
-// an HTTP proxy), where an admin meets it. InternalGitHosts lists a
-// project's hosts for admins, who can allow one or take one off.
+// records one when an admin saves a source with it (an admin's "Check
+// access" reads it too), so only a member's save or "Check access" is
+// refused for where the host is (BAD_REQUEST internalTarget or
+// unresolvable, details.host). InternalHostNote shows under such a refusal
+// and says who can allow the host. DeployHostAction offers admins "Allow
+// this host" under a failed deployment the node refused for its git host (a
+// name internal only at the nodes, a node behind an HTTP proxy), the one
+// place an admin meets such a refusal. InternalGitHosts lists a project's
+// hosts for admins, who can allow one or take one off.
 
 import { auth, git, gitProviders, OpError, type OpOutput, projects } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -35,12 +35,12 @@ export function useCanManageGit(): boolean {
   return role === "owner" || role === "admin";
 }
 
-/** The host an admin can allow for the project, when this error is such a refusal (never a metadata address). */
-export function internalHostOf(error: unknown): string | null {
+/** A refusal for where a git host is (internal, or not resolvable at the panel) and its host; never a metadata address. */
+export function refusedGitHostOf(error: unknown): { host: string; reason: "internalTarget" | "unresolvable" } | null {
   if (!(error instanceof OpError) || error.code !== "BAD_REQUEST") return null;
   const reason = error.details?.reason;
   const host = error.details?.host;
-  return (reason === "internalTarget" || reason === "unresolvable") && host ? host : null;
+  return (reason === "internalTarget" || reason === "unresolvable") && host ? { host, reason } : null;
 }
 
 /** The confirm step of allowing a host; calls git.allowInternalHost. */
@@ -81,58 +81,24 @@ function AllowHostDialog({
 }
 
 /**
- * Under a save or "Check access" that was refused for an internal host:
- * "Allow this host for <project>" for admins, who to ask for everyone else.
- * Nothing for other errors.
+ * Under a member's save or "Check access" that was refused for where the git
+ * host is: who can allow it, or, for a name the panel cannot resolve, to check
+ * the address first. Nothing for other errors, and nothing for owners and
+ * admins, who are never refused this way.
  */
-export function InternalHostNote({
-  error,
-  projectId,
-  url,
-  onAllowed,
-}: {
-  error: unknown;
-  projectId: string;
-  /** The git URL the refusal was for (git.allowInternalHost records its host). */
-  url: string;
-  /** After the host was allowed: check or save again. */
-  onAllowed?: () => void;
-}) {
-  const host = internalHostOf(error);
+export function InternalHostNote({ error, projectId }: { error: unknown; projectId: string }) {
+  const refused = refusedGitHostOf(error);
   const admin = useCanManageGit();
-  const project = useOp(projects.get, { projectId }, { enabled: host !== null });
-  const [open, setOpen] = useState(false);
-  if (!host) return null;
+  const project = useOp(projects.get, { projectId }, { enabled: refused !== null && !admin });
+  if (!refused || admin) return null;
   const projectName = project.data?.name ?? t("gitHosts.thisProject");
-  if (!admin)
-    return (
-      <Callout tone="neutral" className="text-[12.5px]">
-        {t("gitHosts.note.askAdmin", { host, project: projectName })}
-      </Callout>
-    );
   return (
-    <>
-      <Callout
-        tone="warning"
-        className="text-[12.5px]"
-        action={
-          <Button size="sm" onClick={() => setOpen(true)}>
-            {t("gitHosts.note.allow", { project: projectName })}
-          </Button>
-        }
-      >
-        {t("gitHosts.note.admin", { host })}
-      </Callout>
-      <AllowHostDialog
-        open={open}
-        onOpenChange={setOpen}
-        projectId={projectId}
-        projectName={projectName}
-        url={url}
-        host={host}
-        onAllowed={onAllowed}
-      />
-    </>
+    <Callout tone="neutral" className="text-[12.5px]">
+      {t(refused.reason === "unresolvable" ? "gitHosts.note.unresolvable" : "gitHosts.note.askAdmin", {
+        host: refused.host,
+        project: projectName,
+      })}
+    </Callout>
   );
 }
 
