@@ -254,3 +254,23 @@ func (zeros) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
 }
+
+// ArchiveMode is the mode an extracted entry gets from its header (a
+// volume move or a backup restore). tar keeps the unix bits (0o4000
+// setuid, 0o2000 setgid, 0o1000 sticky), which are not where fs.FileMode
+// keeps them, so they are mapped one by one. Sticky stays (shared folders
+// such as /tmp keep users from deleting each other's files), and so does
+// setgid on folders (new files inherit the folder's group). setuid, and
+// setgid on files, are dropped like uploads drop them (fs.userMode): the
+// agent writes as root, so a kept bit would make a root-owned setuid
+// program in a volume, and volumes are not mounted nosuid.
+func ArchiveMode(hdr *tar.Header) fs.FileMode {
+	m := fs.FileMode(hdr.Mode).Perm()
+	if hdr.Mode&0o1000 != 0 {
+		m |= fs.ModeSticky
+	}
+	if hdr.Mode&0o2000 != 0 && hdr.Typeflag == tar.TypeDir {
+		m |= fs.ModeSetgid
+	}
+	return m
+}

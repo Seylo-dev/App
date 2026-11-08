@@ -28,6 +28,9 @@ type fakeRunner struct {
 	// change it. noJSON plays a buildx without `ls --format json`.
 	builders []string
 	noJSON   bool
+	// noBuildx plays a node without the buildx plugin: `buildx` fails and
+	// the legacy `docker build` refuses buildx's flags, like the real CLI.
+	noBuildx bool
 }
 
 func (f *fakeRunner) Run(ctx context.Context, c Cmd) error {
@@ -44,6 +47,12 @@ func (f *fakeRunner) Run(ctx context.Context, c Cmd) error {
 		return f.tool(c)
 	case c.Name != "docker":
 		return fmt.Errorf("unexpected command %s", c)
+	case f.noBuildx && strings.HasPrefix(args, "buildx"):
+		fmt.Fprintln(out, "docker: 'buildx' is not a docker command.")
+		return &ExitError{Cmd: "docker", Code: 1}
+	case strings.HasPrefix(args, "build "):
+		fmt.Fprintln(out, "unknown flag: --progress")
+		return &ExitError{Cmd: "docker", Code: 125}
 	case strings.HasPrefix(args, "buildx inspect"):
 		f.mu.Lock()
 		found := slices.Contains(f.builders, c.Args[2])
@@ -493,5 +502,37 @@ func TestScopeName(t *testing.T) {
 		if !strings.HasPrefix(got, "x") || len(got) != 17 || strings.Contains(got, "-") {
 			t.Errorf("scopeName(%q) = %q, want a hashed name", scope, got)
 		}
+	}
+}
+
+// Without the buildx plugin a build fails with a reason that says what to
+// install, instead of announcing a fallback to `docker build` that cannot
+// parse the flags builds pass. Installing the plugin is enough: the next
+// build checks again.
+func TestBuildWithoutBuildxSaysWhatToInstall(t *testing.T) {
+	fr := &fakeRunner{noBuildx: true}
+	rep := newReports()
+	svc := newTestService(t, fr, rep)
+	if _, err := svc.Start(inlineRequest("b1")); err != nil {
+		t.Fatal(err)
+	}
+	p := finalOf(t, rep)
+	if p.GetStage() != agentv1.BuildStage_BUILD_STAGE_FAILED || p.GetMessage() != ErrNoBuildx.Msg {
+		t.Fatalf("result = %v %q", p.GetStage(), p.GetMessage())
+	}
+	for _, c := range fr.commands() {
+		if strings.HasPrefix(c, "docker build ") {
+			t.Fatalf("ran the legacy builder: %q", c)
+		}
+	}
+
+	fr.mu.Lock()
+	fr.noBuildx = false
+	fr.mu.Unlock()
+	if _, err := svc.Start(inlineRequest("b2")); err != nil {
+		t.Fatal(err)
+	}
+	if p := finalOf(t, rep); p.GetStage() != agentv1.BuildStage_BUILD_STAGE_SUCCEEDED {
+		t.Fatalf("after installing buildx: %v %q", p.GetStage(), p.GetMessage())
 	}
 }

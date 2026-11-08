@@ -98,9 +98,11 @@ func TestBuildSpecArgsKeepValuesOutOfArgs(t *testing.T) {
 	if !slices.Equal(env, []string{"NODE_ENV=production"}) {
 		t.Errorf("env %v", env)
 	}
+	// The legacy `docker build` has none of these flags: there is no
+	// fallback to it.
 	plain, _ := buildSpec{Tag: "x:1", Dockerfile: "D", ContextDir: "c"}.args()
-	if plain[0] != "build" {
-		t.Errorf("without buildx: %v", plain)
+	if !slices.Equal(plain[:2], []string{"buildx", "build"}) {
+		t.Errorf("without a named builder: %v", plain)
 	}
 }
 

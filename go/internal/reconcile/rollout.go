@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -21,6 +22,9 @@ const DefaultHealthTimeout = 5 * time.Minute
 // failureLines is how many output lines of a never-healthy container go
 // into the deploy failure message.
 const failureLines = 20
+
+// restoreTimeout bounds the rollback of a failed or interrupted rollout.
+const restoreTimeout = 30 * time.Second
 
 // rollout deploys a new generation of spec next to old, switches traffic
 // once it is healthy and then removes old. If the new generation never
@@ -90,6 +94,23 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		return
 	}
 
+	// From here on containers stop and start: remember the rollout, so an
+	// agent that stops or crashes before the new generation is verified
+	// rolls it back on its next start instead of adopting it.
+	panelAside := collide && canRename && docker.IsPanelService(spec.GetId(), spec.GetProtected())
+	pending := &rolloutRecord{Generation: gen, Hash: hash}
+	for _, c := range old {
+		pending.Old = append(pending.Old, c.ID)
+		if recreate && (!collide || panelAside) {
+			pending.Stopped = append(pending.Stopped, c.ID)
+		}
+	}
+	w.rec.Rolling = pending
+	w.saveRecord()
+	w.r.unverified.Add(1)
+	verified := sync.OnceFunc(func() { w.r.unverified.Add(-1) })
+	defer verified()
+
 	// Recreate mode (or a name clash with the old containers): old goes
 	// first. Collisions must be removed; plain recreate keeps the stopped
 	// containers so a failed deploy can start them again.
@@ -97,7 +118,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	w.panelDirWas = nil
 	if recreate && len(old) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_STOPPING_OLD, "recreate: stopping the running version first")
-		if collide && canRename && docker.IsPanelService(spec.GetId(), spec.GetProtected()) {
+		if panelAside {
 			// The panel at the same generation (the agent moving it to the
 			// panel user): keep the old container under another name, so a
 			// failed start brings it back.
@@ -133,8 +154,18 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		w.rollIDs[c.ID] = true
 	}
 	w.rollMu.Unlock()
+	if w.panelDirWas != nil {
+		pending.PanelDir = &panelDirRecord{UID: w.panelDirWas.uid, GID: w.panelDirWas.gid}
+		w.saveRecord()
+	}
 	restore := func() {
-		w.removeAll(ctx, created, 0)
+		// The rollback runs even when the agent is stopping (ctx ended
+		// during the health check): left behind, the unverified containers
+		// would be adopted as serving on the next start. It is bounded so a
+		// wedged Docker cannot hold the shutdown.
+		rctx, rcancel := context.WithTimeout(context.WithoutCancel(ctx), restoreTimeout)
+		defer rcancel()
+		done := w.removeAll(rctx, created, 0)
 		if w.panelDirWas != nil {
 			// The old panel runs as the folder's old owner.
 			w.panelDirWas.revert(w.r.o.Layout)
@@ -142,14 +173,21 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		}
 		started := false
 		for _, c := range stoppedOld {
-			if err := w.r.o.Docker.StartContainer(ctx, c.ID); err != nil {
+			if err := w.r.o.Docker.StartContainer(rctx, c.ID); err != nil {
 				log.Error("starting the old version again", "container", c.Name, "err", err)
+				if !errors.Is(err, docker.ErrNotFound) {
+					done = false
+				}
 				continue
 			}
 			started = true
 		}
 		if started {
 			w.systemLine(gen, "rolled back: generation %d runs again", prevGen)
+		}
+		if done {
+			w.rec.Rolling = nil
+			w.saveRecord()
 		}
 	}
 	if err != nil {
@@ -240,9 +278,18 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 		}
 	}
 
+	// Verified: from here on the new generation is the one to keep, also
+	// after an agent restart.
+	w.rec.Rolling = nil
+	w.saveRecord()
+	verified()
+	oldGone := true
 	if len(old) > 0 || len(stoppedOld) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_STOPPING_OLD, "")
-		w.removeAll(ctx, append(old, stoppedOld...), grace)
+		oldGone = w.removeAll(ctx, append(old, stoppedOld...), grace)
+	}
+	if oldGone {
+		w.pruneFiles(hash, nil)
 	}
 	if sideBySide {
 		newLive = w.takeCanonicalNames(ctx, renamer, newLive, suffix)

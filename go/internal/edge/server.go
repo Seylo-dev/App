@@ -26,6 +26,16 @@ type Tool interface {
 	Upstream(ctx context.Context) (string, error)
 }
 
+// AuthorizedTool is a Tool whose upstream has a login of its own (a
+// database web UI on its project's network, where the project's other
+// containers reach it too). Authorization is the header value the edge
+// sets on every proxied request, replacing whatever the browser sent, so
+// the login never reaches the browser.
+type AuthorizedTool interface {
+	Tool
+	Authorization() string
+}
+
 // ToolFunc adapts a function to Tool.
 type ToolFunc func(ctx context.Context) (string, error)
 
@@ -287,12 +297,19 @@ func (s *HTTPServer) serveTool(w http.ResponseWriter, r *http.Request, subject s
 		s.page(w, http.StatusServiceUnavailable, "", toolDownText)
 		return
 	}
+	authorized, _ := tool.(AuthorizedTool)
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.Host = pr.In.Host
 			pr.Out.Header.Del(proxy.HeaderTool)
 			stripCookie(pr.Out, sessionCookie)
+			if authorized != nil {
+				pr.Out.Header.Del("Authorization")
+				if a := authorized.Authorization(); a != "" {
+					pr.Out.Header.Set("Authorization", a)
+				}
+			}
 			pr.SetXForwarded()
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {

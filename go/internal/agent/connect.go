@@ -272,6 +272,12 @@ func (c *connector) dial(ctx context.Context, target panelTarget) (*conn.WebSock
 	cancel()
 	if err != nil {
 		_ = t.Close("handshake failed")
+		var rejected *rpc.RejectedError
+		if errors.As(err, &rejected) {
+			if why := c.unprovenRejection(target, rejected); why != "" {
+				return nil, nil, &unprovenRejectionError{url: target.url, rejected: rejected, why: why}
+			}
+		}
 		return nil, nil, err
 	}
 	if err := c.checkPanelIdentity(target.url, res); err != nil {

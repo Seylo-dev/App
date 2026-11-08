@@ -16,9 +16,9 @@ import {
 import { eq } from "drizzle-orm";
 import { agentReports, crashReports, servicePlacements, services } from "../src/db/schema";
 import { flusherFor } from "../src/modules/nodes/index";
-import { type FakeAgent, FakeStatus } from "./fake-agent";
+import { allCapabilities, FakeAgent, FakeStatus } from "./fake-agent";
 import { type TestPanel, testPanel } from "./helpers";
-import { joinAgent, listen, seedProject, seedService } from "./hub-helpers";
+import { addJoinToken, joinAgent, listen, seedProject, seedService } from "./hub-helpers";
 
 let panel: TestPanel;
 let url: string;
@@ -296,6 +296,38 @@ describe("desired state sync", () => {
     const syncs = await again.waitFor("SyncDesired");
     expect(syncs[0].state.services.map((s: { name: string }) => s.name)).toEqual(["api"]);
     expect(again.appliedRevision).toBeGreaterThan(before);
+  });
+
+  test("a node joined from another panel keeps the data of the services that panel ran there", async () => {
+    // seylo join --force keeps the agent's desired state: the node reports the other panel's
+    // services. The hub keeps only services placed on the node (service-scope.ts), so the connect
+    // sync drops their containers (SyncDesired keeps data) and never purges them with their data.
+    const theirs = "othr000000000001";
+    const agent = new FakeAgent({ url, panelId: panel.deps.panelId, capabilities: allCapabilities, token: addJoinToken(panel) });
+    agent.appliedRevision = 57n;
+    agent.handle("GetStateSnapshot", () => ({
+      snapshot: { epoch: 1n, seq: 0n, appliedRevision: 57n, services: [{ serviceId: theirs, generation: 3n }] },
+    }));
+    agents.push(agent);
+    await agent.connect();
+    await agent.waitFor("SyncDesired");
+    await flusherFor(panel.deps)?.flush();
+    await Bun.sleep(50);
+    expect(agent.requests("SyncDesired").at(-1)).toMatchObject({ state: { services: [] } });
+    expect(agent.requests("RemoveService").filter((r) => (r as { deleteData: boolean }).deleteData)).toEqual([]);
+
+    // A service this panel ran there and deleted still goes with its data.
+    const project = seedProject(panel);
+    const web = seedService(panel, project.id, agent.nodeId, { name: "web" });
+    panel.deps.agents.desired.markDirty({ serviceId: web.id });
+    await panel.deps.agents.desired.settled();
+    await agent.waitFor("ApplyService");
+    panel.deps.db.delete(services).where(eq(services.id, web.id)).run();
+    panel.deps.agents.desired.markDirty({ serviceId: web.id });
+    await panel.deps.agents.desired.settled();
+    expect((await agent.waitFor("RemoveService")).map((r) => r as { serviceId: string; deleteData: boolean })).toEqual([
+      expect.objectContaining({ serviceId: web.id, deleteData: true }),
+    ]);
   });
 
   test("a deleted service is removed with its data", async () => {

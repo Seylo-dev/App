@@ -61,7 +61,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 17 checks (kernel, OS, memory, disk, inodes, Docker, cgroups, Docker live-restore, ports 80/443, proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 18 checks (kernel, OS, memory, disk, inodes, Docker, cgroups, Docker live-restore, Docker buildx on nodes with can_build (builds have no fallback without it; a build fails with what to install), ports 80/443, proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link|rotate-key`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -71,7 +71,7 @@ packages use. "Built" means implemented and tested.
 | `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
-| `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
+| `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS, certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages, tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM) |
@@ -85,9 +85,9 @@ packages use. "Built" means implemented and tested.
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
 | `backup` | Volume .tar.gz archives and dumps (pg_dump/pg_dumpall, mysqldump/mariadb-dump, mongodump, redis-cli/valkey-cli/keydb-cli --rdb; Dragonfly `SAVE RDB <run>` and ClickHouse `BACKUP ... TO File()` into the data volume, read and deleted by a helper that mounts the volumes) in helpers from the database's own image, streamed multipart to S3/R2/MinIO: with URLs the panel presigns for the run when the destination comes without keys (`SignedStore`, `signing_id`; the panel makes the multipart create/complete/abort steps and retention), else with the keys through minio-go and `keep_last` retention (older panels), restores (staging folder swap, pg_restore/psql/mysql/mongorestore, the RDB swap of the Redis-like engines, ClickHouse: rename the databases the zip holds to `<name>__seylo_pre_restore_<time>`, `RESTORE`, then drop the renamed copies; a failed `RESTORE` drops what it created and renames them back, names passed as `Identifier` query parameters), `SleepSuspend` with crash-safe markers (a volume restore stops every service that mounts the folder, compose members included; a stop-service volume backup stops every writer), BackupProgress. RDB restores move every append-only file aside as `<name>.before-restore-<time>` (the copies of earlier restores are deleted once a restore is in place, so a volume keeps one undo) and also write the RDB as `appendonly.aof` (an RDB preamble, without the 40-byte diskless EOF marker `redis-cli --rdb -` leaves): with `--appendonly yes` the server would start empty otherwise | Built (every engine, Postgres 18, pgvector 15 to 18, Valkey 8.1, 9.0 and 9.1, ClickHouse 26.3 and 26.8, Redis with append-only, and volumes round-tripped through MinIO in the VM; truncated and incomplete ClickHouse zips fail and leave the databases as they were) |
 | `tunnel` | Cloudflare tunnels (`CloudflareDocker`): cloudflared on the project network, quick trycloudflare.com tunnels (URL from the log, kept current) or token tunnels, supervised; `Relay` interface for the Tunnel RPC | Built (quick tunnel served a page end to end from the VM) |
-| `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services, orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun`; an expression it cannot read is one failed `CleanupRun` per changed schedule | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
+| `cleanup` | Prune managed resources only (`Local`, rules in `Plan`): stopped job/old-generation/orphan containers, images past the newest 3 per service, volumes and services/<id> data of removed services (never within 24 h of a volume import into the folder: `ImportVolume` keeps `services/<id>/.incoming`, a move or clone copies before the service is placed; the desired state is read again right before each folder or volume goes, and imports into a folder wait while it is removed), orphan project networks; dry run with sizes; build cache only through the builder's `CachePruner`. `LocalScheduler` runs `NodeSettings.cleanup` by itself: a cron expression in the node's time zone and a disk line fed by the disk checks, each run a durable `CleanupRun`; an expression it cannot read is one failed `CleanupRun` per changed schedule | Built (unlabeled look-alikes survive, verified in the VM; the disk trigger on a filled tmpfs in the VM) |
 | `hostshell` | Root login shells on the node itself for HostShell: a PTY from /dev/ptmx (`golang.org/x/sys/unix`), the agent user's login shell from /etc/passwd in a new session with a clean environment, `Manager` with the `Allowed` gate, at most 2, 15 minutes idle, `CloseAll` when the setting turns off, hang-up of the process group on close; Linux only | Built (PTY, cap, idle and close-all verified as root in the VM) |
-| `dbtools` | On-demand database web UIs (pgweb, phpMyAdmin, mongo-express, Redis Commander for every Redis-like engine, and ClickHouse's own Play page behind `nginx:1.30.6-alpine`, which sets the admin's Basic header on every request, replaces the Authorization and X-ClickHouse-* headers and refuses credential URL parameters (`user`, `password`, `quota_key`, or any percent-encoded parameter name) with 403) signed in from the spec, stopped when idle; `ClientCommand` for pre-logged-in shells (psql, mysql/mariadb, mongosh, redis-cli, valkey-cli, keydb-cli, clickhouse-client); `ExposedUsers` creates/rotates the exposed user (ClickHouse: `CREATE USER ... sha256_password` and `GRANT ALL` on the database) and makes it TLS-only (Postgres: certificate + ssl + hostssl block; MySQL: SET PERSIST certificate + REQUIRE SSL; MariaDB: REQUIRE SSL on its own certificate), with the edge's ACME certificate for `tls_hostname` or a kept self-signed one | Built (all UIs, Postgres 18 included; exposed users, TLS-only logins and rotation in Postgres/MySQL/MariaDB/Mongo/ClickHouse verified in the VM) |
+| `dbtools` | On-demand database web UIs (pgweb, phpMyAdmin, mongo-express, Redis Commander for every Redis-like engine, and ClickHouse's own Play page behind `nginx:1.30.6-alpine`, which sets the admin's Basic header on every request, replaces the Authorization and X-ClickHouse-* headers and refuses credential URL parameters (`user`, `password`, `quota_key`, or any percent-encoded parameter name) with 403) signed in from the spec, stopped when idle. The helpers run on the project's network next to its other containers, so none is open: each has a login of its own that only the edge holds and sets as Authorization on every request it proxies (`edge.AuthorizedTool`, replacing the browser's): pgweb `PGWEB_AUTH_USER`/`PASS`, mongo-express Basic auth, Redis Commander `HTTP_USER`/`HTTP_PASSWORD` with its token secret in `NODE_CONFIG` (the edge signs its HS256 session tokens), the ClickHouse proxy a Basic check before it adds the admin's, all random per agent run; phpMyAdmin runs with HTTP auth (`PMA_USER_CONFIG_BASE64`) and gets the admin's login from the edge. A container of the project that reaches a helper gets 401 (verified in the VM); `ClientCommand` for pre-logged-in shells (psql, mysql/mariadb, mongosh, redis-cli, valkey-cli, keydb-cli, clickhouse-client); `ExposedUsers` creates/rotates the exposed user (ClickHouse: `CREATE USER ... sha256_password` and `GRANT ALL` on the database) and makes it TLS-only (Postgres: certificate + ssl + hostssl block; MySQL: SET PERSIST certificate + REQUIRE SSL; MariaDB: REQUIRE SSL on its own certificate), with the edge's ACME certificate for `tls_hostname` or a kept self-signed one | Built (all UIs, Postgres 18 included; exposed users, TLS-only logins and rotation in Postgres/MySQL/MariaDB/Mongo/ClickHouse verified in the VM) |
 | `box` | Box idle sleep and wake through reconcile `SetSleeping`/`Resolve`, activity from edge requests and code-server's heartbeat file | Built (unit tested; not run against a real reconcile yet) |
 | `dbengine` | Per-engine facts backup, dbtools and portgate share: `Port` (ClickHouse: native 9000), `HTTPPort`, `RedisLike`, `RedisCLI`, `TLSAtGate`, `SeparateExposedUser`, and `Capability` (`database.engines.v2`) | Built |
 | `jobrun` | Docker access of the jobs packages (moby client): one-off runs with streamed stdin/stdout/stderr, helpers by spec hash, on-demand helpers with idle reaping, Exec, cleanup inventory that re-checks `seylo.managed` before every removal; every container removal takes the container's anonymous volumes with it (images with a VOLUME line, such as database images, would leave one per backup, restore or cron run that nothing else removes); `jobrun/itest` is the VM test setup | Built (verified in the VM) |
@@ -399,7 +399,19 @@ Summary; the full rules are in `proto/README.md` and the comments of
   in `go/internal/rpc/accept_test.go`, key from seed 0..31). The panel
   sends it on every HelloAccepted (`agent-hub/signature.ts` `signAccept`,
   the same vector in `apps/panel/test/fix-panel-accept-signature.test.ts`),
-  signed with the edge ticket key. It does not bind the TLS connection, so
+  signed with the edge ticket key. HelloRejected carries a
+  `panel_signature` too, over `<slug>-panel-reject-v1` 0x00 panel_id 0x00
+  nonce 0x00 client signature (empty without a ClientHello) 0x00 reason
+  (decimal) 0x00 min_agent_version (`rpc.PanelRejectSignedBytes`,
+  `signReject`, vectors in the same two tests; the message is not
+  signed). A rejection arrives before the identity checks, so the agent
+  takes it as the panel's answer (5 minutes, AGENT_TOO_OLD self-update)
+  only over a pinned connection, when it verifies with the recorded key,
+  or when there is nothing to check it against (no identity recorded yet;
+  a panel that never signed, unless a standing fallback is there to try).
+  Any other rejection (unsigned once `panel_proves` is set, or signed with
+  another key) counts as a failed connect: normal backoff, the standing
+  fallback, no self-update. It does not bind the TLS connection, so
   a relay of a whole session to the real panel is not detected; the pinned
   standing fallback is what keeps a node of a taken-over domain with its
   panel. The panel's identity never changes on an existing data dir:
@@ -698,8 +710,28 @@ local API, join and resume. The areas:
 - `services/<id>/runtime.json` is reconcile's memory across agent restarts
   (crash-policy halt, the crash streak and its latest crash, failed
   generation, sleeping, containers re-attached to another project's
-  network); it and file mounts are written with
+  network, a rollout in flight); it and file mounts are written with
   `state.WriteFileAtomic` (fsync of the file and the folder).
+- File mounts live in `services/<id>/files/<spec hash>/<sha(path)>-<name>`,
+  bound read-only: one folder per spec hash, so every container binds the
+  content it was created with (Docker resolves bind sources again on each
+  start; a deploy that changed a file and failed cannot hand it to the old
+  generation when that one starts again). Folders of hashes no container
+  of the service uses go once a generation serves and the older ones are
+  removed. Files directly in `files/` (agents before 0.2.0-rc.2) are left
+  alone: containers created then bind them; they go with the service.
+- A rollout is recorded (`rolling`: generation, hash, the containers it
+  found, the ones recreate mode stops) before it stops or creates
+  anything, and cleared once the new generation passed its health check
+  and route check, or once a failed rollout's rollback finished. The
+  rollback runs on a context of its own (30 s), so an agent that stops
+  during the health check (update, `seylo restart`, SIGTERM) still removes
+  the unverified containers and starts the stopped old ones before it
+  exits; the next start deploys again. A record still set when a pass
+  starts (a crash, or Docker refused the rollback) is finished first: the
+  containers the rollout created are removed and the old ones it stopped
+  start again, so an unverified generation is never adopted as serving,
+  never replaces the old one and is never reported SUCCEEDED.
 - A service moved to another project (`services.moveProject`) arrives as a
   spec whose `project_id` changed. When that is the only change
   (`SpecHash` with the old project equals the container's), reconcile
@@ -754,8 +786,14 @@ local API, join and resume. The areas:
   `insecureSkipVerify`; without a complete `lb_tls` no route file has a
   router on `seylo-lb`, so the entry point, published on every interface,
   answers 404 to everyone instead of taking any client; the panel issues
-  each node's certificate on connect and renews it hourly
-  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`), and a node it cannot
+  each node's certificate on connect, for 30 days (nothing revokes one a
+  node holds, so a removed node's certificate stops opening the other
+  nodes' LB entry points within that; one issued for longer is replaced),
+  and the hourly prune job renews it with under 20 days left
+  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`). Every node's
+  certificate names the one shared `server_name`, so a node can still pose
+  as another to a sibling it can intercept; `seylo panel rotate-key
+  --new-panel-identity` makes a new LB CA. A node it cannot
   issue one for, for example because the LB CA key does not open with this
   master.key, gets one `node_health_check_failed` alert naming the reason,
   resolved once it has a certificate), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
@@ -769,7 +807,11 @@ local API, join and resume. The areas:
   second Traefik of ours, `seylo-traefik-lb` (LB entry point only, file
   provider on `<datadir>/traefik/lb-dynamic`, where the router writes each
   service's LB routers in its own `seylo-<id>.yml`); reconcile attaches it
-  to project networks like the fork's Traefik. Tool session cookies are
+  to project networks like the fork's Traefik. The mode is picked at agent
+  start; a node that switches to the fork's proxy (it came after our own
+  Traefik) has its managed `seylo-traefik` removed before the LB Traefik
+  starts (it held 80, 443 and 5757 and served stale route files), and the
+  fork's Traefik is started when it is not running. Tool session cookies are
   signed with `<datadir>/network/edge-session.key` (kept across agent
   restarts) and name the ticket's subject and user (`edge/session.go`; the
   older subject-only format is refused, one more sign-in). The edge asks
@@ -1829,7 +1871,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Boxes and backup `stop_service` against the real runtime: sleep/wake ran with a fake `SetSleeping`/`Resolve` | Unit tests only |
 | Runtime gaps: resource changes roll a new container instead of `docker update`; the portgate's `Resolve` may still pick an unhealthy replica (routes skip it); a brand slug with a dash would nest `<slug>.slice` under the systemd cgroup driver (`seylo` has none). The systemd driver path ran in a VM with `native.cgroupdriver=systemd` (docker, reconcile, wings incl. games-first CPU through systemctl, proxy, agent, jobrun, metrics, nodecheck packages) | Behaviour as described |
 | Observe Docker access goes through `console/dockerapi`, not `d.Docker`: kept on purpose. It needs raw multiplexed log frames with `until` (partial lines, the restart cursor), separate stdout/stderr for non-TTY exec, exec inspect for the process sweep, destroy events and one-shot stats, none of which `docker.Engine` exposes; moving it would mean five new Engine methods and re-verifying logs capture, console, shell and metrics for no user-visible change. It only reads, attaches and execs | Two Docker clients in the agent (both scoped to our containers) |
-| Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent) | Logged errors / reopen links |
+| Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificates share one server name (a node can pose as another to a sibling whose traffic it intercepts) and cannot be revoked before they expire (30 days); a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
 | GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
@@ -1972,7 +2014,14 @@ SHA-256, runs `<new> version`, keeps the old binary in
 The new agent confirms after its first accepted handshake; otherwise the
 guard restores the old binary and restarts it. Either way exactly one
 durable `UpdateResult` (target AGENT) reaches the panel. Failures before
-the swap are reported at once and returned as the RPC error. The guard
+the swap are reported at once and returned as the RPC error. While a
+deploy on the node is between changing its containers and verifying the
+new generation (`reconcile.Runtime.Unverified`; an agent stop then rolls
+it back and it runs again after the start), the update answers once the
+download is checked and swaps, arms the guard and restarts only when no
+deploy is left unverified, at most 5 minutes later
+(`update.DefaultRolloutWait`); a failure from there on is only reported,
+as a durable `UpdateResult`. The guard
 also counts the rollback in `<dataDir>/update/agent-rollbacks.json`
 (by version, kept across restarts; `update/rollbacks.go`): automatic
 installs of that release (auto-update on connect, the AGENT_TOO_OLD
@@ -2453,7 +2502,19 @@ the clone or the source ends a copy that has not ended (`failed`, "The
 clone was deleted." or "The source service was deleted.", in the delete's
 transaction, `services/delete.ts`) and starts a source the copy stopped; a
 copy whose clone is gone never holds anything back, so rows older panels
-left `queued` release their source. `ServiceDetail.dataCopy` is the
+left `queued` release their source. A move to
+another node with volumes (`services/move.ts`) places the service on the
+new node, stopped, in the same step that stops it on the old one, and
+waits for that desired state before it copies, like a parked clone; a
+failed move removes that placement, and the new node drops the partial
+copy with it. While the move copies (`deployments.moveCopying`),
+`serviceSpecFor` sends the service stopped to both nodes whatever
+`services.stopped` says, and `services.start`, `boxes.open`,
+`services.setPlacements` and `services.setVolumes` refuse it (CONFLICT
+`reason: moving`, `copies.ts` `assertNoMoveCopy`); a clone with
+`data: copy` is refused for the whole move (`reason: moving`), since the
+move deletes the old node's data once the new node serves.
+`ServiceDetail.dataCopy` is the
 newest copy; the web shows it under the header.
 
 Moves to another project (`services.moveProjectImpact`,

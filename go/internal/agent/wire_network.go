@@ -436,6 +436,9 @@ func (p *networkParts) runTraefik(ctx context.Context, d *Deps) error {
 // runLBTraefik keeps the LB-only Traefik running next to the Wings fork
 // and on the project networks of routed services.
 func (p *networkParts) runLBTraefik(ctx context.Context, d *Deps) error {
+	if err := p.retireOwnTraefik(ctx); err != nil {
+		return fmt.Errorf("LB traefik: %w", err)
+	}
 	att := p.attacher(d, p.lbTraefik.Name)
 	att.OnAttached = nil // probes go through the fork's Traefik
 	for {
@@ -452,6 +455,42 @@ func (p *networkParts) runLBTraefik(ctx context.Context, d *Deps) error {
 		case <-time.After(30 * time.Second):
 		}
 	}
+}
+
+// retireOwnTraefik removes the agent's own Traefik in shared mode. A node
+// that ran us before the Wings fork's proxy came (Seylo first, or a Wings
+// upgraded to the fork later) still has it, restarted by Docker: it holds
+// 80 and 443 so the fork's Traefik cannot bind them, keeps serving route
+// files the agent no longer writes, and holds the LB port the LB-only
+// Traefik needs. Once it is gone the fork's Traefik is started when it is
+// not running (it could not bind while ours held the ports).
+func (p *networkParts) retireOwnTraefik(ctx context.Context) error {
+	if p.wings == nil || p.wings.Proxy == nil || p.wings.Proxy.Container == docker.TraefikContainer {
+		return nil
+	}
+	c, err := p.docker.InspectContainer(ctx, docker.TraefikContainer)
+	if errors.Is(err, proxy.ErrContainerNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if c.Labels[docker.LabelManaged] != "true" || c.Labels[docker.LabelRole] != "traefik" {
+		return nil // not ours
+	}
+	p.log.Warn("the Wings fork's Traefik serves this node: removing our own, which held ports 80, 443 and the LB port",
+		"container", docker.TraefikContainer, "wings_traefik", p.wings.Proxy.Container)
+	if err := p.docker.RemoveContainer(ctx, c.ID); err != nil {
+		return err
+	}
+	w, err := p.docker.InspectContainer(ctx, p.wings.Proxy.Container)
+	if err != nil || w.Running {
+		return nil
+	}
+	if err := p.docker.StartContainer(ctx, w.ID); err != nil {
+		p.log.Warn("starting the Wings fork's Traefik", "container", p.wings.Proxy.Container, "err", err)
+	}
+	return nil
 }
 
 // runWingsTraefik keeps the Wings fork's Traefik on our networks.

@@ -10,14 +10,23 @@
 //   0x00 nonce 0x00 client_signature 0x00 panel_url 0x00 panel_pin
 //
 // so a node knows it reached the panel it joined, not just a host with a
-// certificate for its address. The Go agent builds the same bytes from
-// brand.Slug (go/internal/rpc/handshake.go, accept_test.go has the vector).
+// certificate for its address. A HelloRejected carries panel_signature too,
+// over
+//
+//   "<slug>-panel-reject-v1" 0x00 panel_id 0x00 nonce 0x00 client_signature
+//   0x00 reason 0x00 min_agent_version
+//
+// (reason as a decimal number), so a host with a certificate for the
+// panel's domain cannot keep a node away from its panel or make it update
+// itself with a rejection. The Go agent builds the same bytes from
+// brand.Slug (go/internal/rpc/handshake.go, accept_test.go has the vectors).
 
 import { createPublicKey, type KeyObject, sign, verify } from "node:crypto";
 import { slug } from "@seylo/brand";
 
 export const helloContext = `${slug}-agent-hello-v1`;
 export const acceptContext = `${slug}-panel-accept-v1`;
+export const rejectContext = `${slug}-panel-reject-v1`;
 
 export function helloSignedBytes(panelId: string, nodeId: string, nonce: Uint8Array): Uint8Array {
   const text = new TextEncoder().encode(`${helloContext}\0${panelId}\0${nodeId}\0`);
@@ -50,20 +59,54 @@ export interface AcceptFields {
   panelPin: string;
 }
 
-/** What HelloAccepted.panel_signature signs. */
-export function acceptSignedBytes(f: AcceptFields): Uint8Array {
-  const enc = (text: string) => new TextEncoder().encode(text);
-  const parts = [enc(f.panelId), enc(f.nodeId), enc(f.sessionId), f.nonce, f.clientSignature, enc(f.panelUrl), enc(f.panelPin)];
-  const context = enc(acceptContext);
-  const out = new Uint8Array(context.length + parts.reduce((n, p) => n + 1 + p.length, 0));
-  out.set(context);
-  let at = context.length;
+const enc = (text: string) => new TextEncoder().encode(text);
+
+/** context, then every part after a 0x00. */
+function joinParts(context: string, parts: Uint8Array[]): Uint8Array {
+  const head = enc(context);
+  const out = new Uint8Array(head.length + parts.reduce((n, p) => n + 1 + p.length, 0));
+  out.set(head);
+  let at = head.length;
   for (const part of parts) {
     out[at] = 0;
     out.set(part, at + 1);
     at += 1 + part.length;
   }
   return out;
+}
+
+/** What HelloAccepted.panel_signature signs. */
+export function acceptSignedBytes(f: AcceptFields): Uint8Array {
+  return joinParts(acceptContext, [
+    enc(f.panelId),
+    enc(f.nodeId),
+    enc(f.sessionId),
+    f.nonce,
+    f.clientSignature,
+    enc(f.panelUrl),
+    enc(f.panelPin),
+  ]);
+}
+
+export interface RejectFields {
+  panelId: string;
+  /** The ServerHello nonce. */
+  nonce: Uint8Array;
+  /** The ClientHello's join or resume signature; empty when no hello arrived. */
+  clientSignature: Uint8Array;
+  /** The HelloRejectReason number. */
+  reason: number;
+  minAgentVersion: string;
+}
+
+/** What HelloRejected.panel_signature signs. */
+export function rejectSignedBytes(f: RejectFields): Uint8Array {
+  return joinParts(rejectContext, [enc(f.panelId), f.nonce, f.clientSignature, enc(String(f.reason)), enc(f.minAgentVersion)]);
+}
+
+/** HelloRejected.panel_signature with the panel's identity key. */
+export function signReject(privateKey: KeyObject, fields: RejectFields): Uint8Array {
+  return new Uint8Array(sign(null, rejectSignedBytes(fields), privateKey));
 }
 
 /** HelloAccepted.panel_signature with the panel's identity key. */

@@ -28,6 +28,7 @@ import { deployments, servicePlacements, services, volumes } from "../../db/sche
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
 import type { SecretBox } from "../../security/secret-box";
 import { openRegistryLogin } from "../registries";
+import { moveCopying } from "./copies";
 import { entryNodeOf } from "./rows";
 import { registryMatches } from "./source-guard";
 import { type RunSettings, readRunSettings, readSpec, restartDelaySeconds } from "./spec";
@@ -89,6 +90,10 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
         ),
       )
       .get() !== undefined && mounts.some((v) => v.kind === "volume");
+  // A move's volume copy: the old node's folder is being read and the new node's (move.ts places
+  // the service there, stopped, before it copies) is being filled, so it runs on neither until
+  // the copy is done, whatever `stopped` says meanwhile.
+  const copying = moveCopying(db, serviceId);
 
   // A move to another project waiting for its switch deployment (services/move-project.ts): the
   // node keeps the old project until that deployment ships (rollout points the service at it), so
@@ -113,7 +118,7 @@ export function serviceSpecFor(db: PanelDb, secrets: SecretBox, serviceId: strin
     name: svc.name,
     kind,
     generation: BigInt(Math.max(1, target.generation)),
-    stopped: svc.stopped || leaving,
+    stopped: svc.stopped || leaving || copying,
     protected: svc.protected,
     image: { reference: target.imageRef ?? "", digest: target.imageDigest ?? "", auth: registry ?? undefined },
     container: {

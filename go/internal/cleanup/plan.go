@@ -6,10 +6,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/jobrun"
+	"github.com/seylo-dev/app/go/internal/volumes"
 )
 
 // KeepImagesPerService is how many of a service's newest images survive
@@ -37,6 +39,8 @@ type Item struct {
 	Size int64
 	// Why it goes, for the report.
 	Reason string
+	// ServiceID is the service whose data a volume or data item holds.
+	ServiceID string
 }
 
 // Describe is the line shown in the panel.
@@ -60,6 +64,8 @@ type Snapshot struct {
 	Networks   []jobrun.Network
 	// ServiceDirs are the folders under <data dir>/services.
 	ServiceDirs []ServiceDir
+	// Now is when the snapshot was taken.
+	Now time.Time
 }
 
 // ServiceDir is one services/<id> folder.
@@ -67,6 +73,8 @@ type ServiceDir struct {
 	ServiceID string
 	Path      string
 	Size      int64
+	// Incoming is when a volume import last wrote into it (zero: none).
+	Incoming time.Time
 }
 
 // Plan decides what a prune removes. It is pure so the rules can be
@@ -82,7 +90,9 @@ type ServiceDir struct {
 //   - Images: per service, keep the ones any container uses, the one the
 //     desired spec names and the newest KeepImagesPerService; the rest go.
 //   - Volumes, data folders and project networks: only when no service
-//     here uses them any more.
+//     here uses them any more, and data never within
+//     volumes.IncomingGrace of a volume import into it (a move or clone
+//     copies the data before the panel places the service here).
 //
 // Anything that depends on knowing which services belong here is skipped
 // while the node has never received a desired state (revision 0), so a
@@ -142,18 +152,28 @@ func Plan(req *agentv1.PruneRequest, s Snapshot) (items []Item, notes []string) 
 	}
 
 	if req.GetOrphanedServiceData() && known {
+		incoming := map[string]bool{}
+		for _, d := range s.ServiceDirs {
+			if !d.Incoming.IsZero() && s.Now.Sub(d.Incoming) < volumes.IncomingGrace {
+				incoming[d.ServiceID] = true
+			}
+		}
 		for _, v := range s.Volumes {
 			svc := v.Labels[docker.LabelService]
-			if svc == "" || desired[svc] != nil || volumeOwners[svc] || withContainers[svc] || !docker.IsManaged(v.Labels) || protected(v.Labels) {
+			if svc == "" || desired[svc] != nil || volumeOwners[svc] || withContainers[svc] || incoming[svc] || !docker.IsManaged(v.Labels) || protected(v.Labels) {
 				continue
 			}
-			items = append(items, Item{Kind: KindVolume, ID: v.Name, Name: v.Name, Reason: "service removed from this node"})
+			items = append(items, Item{Kind: KindVolume, ID: v.Name, Name: v.Name, Reason: "service removed from this node", ServiceID: svc})
 		}
 		for _, d := range s.ServiceDirs {
 			if desired[d.ServiceID] != nil || volumeOwners[d.ServiceID] || withContainers[d.ServiceID] {
 				continue
 			}
-			items = append(items, Item{Kind: KindData, ID: d.Path, Name: d.ServiceID, Size: d.Size, Reason: "service removed from this node"})
+			if incoming[d.ServiceID] {
+				notes = append(notes, "kept data "+d.ServiceID+": "+volumes.ErrIncoming.Error()+" (a move or clone to this node)")
+				continue
+			}
+			items = append(items, Item{Kind: KindData, ID: d.Path, Name: d.ServiceID, Size: d.Size, Reason: "service removed from this node", ServiceID: d.ServiceID})
 		}
 	}
 	return items, notes

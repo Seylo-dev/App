@@ -228,6 +228,7 @@ func newHealthCommand(d *deps) *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var pin string
+			var canBuild func() bool
 			if cfg, err := agent.LoadConfig(d.layout.ConfigFile()); err == nil {
 				if panelURL == "" {
 					panelURL = cfg.PanelURL
@@ -235,9 +236,10 @@ func newHealthCommand(d *deps) *cobra.Command {
 				if panelURL == cfg.PanelURL {
 					pin = cfg.PanelPin
 				}
+				canBuild = func() bool { return cfg.CanBuild }
 			}
 			results := nodecheck.Run(cmd.Context(), nodecheck.Default(nodecheck.Env{
-				DataDir: d.layout.Root(), PanelURL: panelURL, PanelPin: pin, GOARCH: runtime.GOARCH, Run: d.run,
+				DataDir: d.layout.Root(), PanelURL: panelURL, PanelPin: pin, GOARCH: runtime.GOARCH, Run: d.run, CanBuild: canBuild,
 			}))
 			printChecks(d, results)
 			if nodecheck.Worst(results) == agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {

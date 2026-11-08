@@ -502,3 +502,42 @@ func TestPanelCheckWithPin(t *testing.T) {
 		t.Fatalf("wrong pin = %v", r)
 	}
 }
+
+func TestBuildxCheck(t *testing.T) {
+	run := func(installed bool) func(context.Context, io.Writer, string, ...string) error {
+		return func(_ context.Context, w io.Writer, name string, args ...string) error {
+			if name != "docker" || strings.Join(args, " ") != "buildx version" {
+				return errors.New("unexpected command")
+			}
+			if !installed {
+				return errors.New("exit status 1")
+			}
+			_, _ = io.WriteString(w, "github.com/docker/buildx v0.29.1 abc123\n")
+			return nil
+		}
+	}
+	yes, no := func() bool { return true }, func() bool { return false }
+	for _, tc := range []struct {
+		name      string
+		canBuild  func() bool
+		installed bool
+		want      agentv1.NodeCheckStatus
+	}{
+		{"not checked", nil, false, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_SKIPPED},
+		{"builds off", no, false, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_SKIPPED},
+		{"missing", yes, false, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL},
+		{"installed", yes, true, agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS},
+	} {
+		e := &Env{CanBuild: tc.canBuild, Run: run(tc.installed)}
+		r := e.buildx(context.Background())
+		if r.GetStatus() != tc.want {
+			t.Errorf("%s: %v %q", tc.name, r.GetStatus(), r.GetDetail())
+		}
+		if tc.want == agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL && !strings.Contains(r.GetFixHint(), "docker-buildx-plugin") {
+			t.Errorf("%s: hint %q", tc.name, r.GetFixHint())
+		}
+		if tc.installed && r.GetDetail() != "github.com/docker/buildx v0.29.1 abc123" {
+			t.Errorf("%s: detail %q", tc.name, r.GetDetail())
+		}
+	}
+}

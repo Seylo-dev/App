@@ -52,7 +52,7 @@ const pruneReports = defineJob<Record<string, never>>({
   type: "nodes.pruneReports",
   async run(_payload, ctx) {
     pruneTables(ctx.db);
-    // Renew LB certificates with under 30 days left; the node gets them with its settings.
+    // Renew LB certificates with under 20 days left; the node gets them with its settings.
     for (const node of ctx.db.select({ id: nodes.id }).from(nodes).all()) {
       if (issueNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
     }

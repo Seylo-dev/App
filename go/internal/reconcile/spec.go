@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -199,7 +201,7 @@ func prepareData(ctx context.Context, eng docker.Engine, layout datadir.Layout, 
 		mounts = append(mounts, docker.VolumeMount{Volume: name, Target: target, ReadOnly: v.GetReadOnly()})
 	}
 	if len(s.GetFiles()) > 0 {
-		dir, err := layout.ServiceFiles(s.GetId())
+		dir, err := filesDir(layout, s.GetId(), SpecHash(s))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -232,6 +234,55 @@ func prepareData(ctx context.Context, eng docker.Engine, layout datadir.Layout, 
 		binds = append(binds, panelBind(layout))
 	}
 	return binds, mounts, nil
+}
+
+// filesDir is where the file mounts of one spec live: a folder per spec
+// hash (the hash covers the files), so every container binds the content
+// it was created with. Docker resolves bind sources again on every start,
+// so one shared path would hand a new deploy's files (written before it is
+// health checked) to the old generation the next time it starts: after a
+// failed recreate-mode deploy, a crash restart or a reboot.
+func filesDir(layout datadir.Layout, serviceID, hash string) (string, error) {
+	dir, err := layout.ServiceFiles(serviceID)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, hash), nil
+}
+
+// pruneFiles removes the file mount folders of spec hashes not in keep.
+// Files directly in files/ stay: containers created by agents from before
+// the per-hash folders bind them, and they go with the service's folder.
+func pruneFiles(layout datadir.Layout, serviceID string, keep map[string]bool) error {
+	dir, err := layout.ServiceFiles(serviceID)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() || keep[e.Name()] || !isSpecHash(e.Name()) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// isSpecHash reports whether name looks like a SpecHash.
+func isSpecHash(name string) bool {
+	if len(name) != 16 {
+		return false
+	}
+	_, err := hex.DecodeString(name)
+	return err == nil
 }
 
 // writeFileAtomic replaces name with data through state.WriteFileAtomic

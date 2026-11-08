@@ -49,7 +49,7 @@ import { capFields, factsLimits, maxAgentVersionLength } from "./field-caps";
 import { decideHello } from "./handshake";
 import type { AgentHub, AgentTransport, ConnectedAgent } from "./hub";
 import { PanelServiceError } from "./panel-service-types";
-import { signAccept } from "./signature";
+import { signAccept, signReject } from "./signature";
 import type { OpenedStream } from "./streams";
 import { agentVersionAllowed } from "./version";
 import { FrameWriter } from "./writer";
@@ -113,6 +113,8 @@ export class AgentSession {
   readonly sessionId = newId();
   private state: "awaitingHello" | "ready" | "closed" = "awaitingHello";
   private nonce = crypto.getRandomValues(new Uint8Array(32));
+  /** The ClientHello's join or resume signature, once it arrived (HelloRejected.panel_signature covers it). */
+  private helloSignature: Uint8Array = new Uint8Array();
   private nodeIdValue = "";
   private facts: NodeFacts | null = null;
   /** Next panel-owned (even) stream id; ids are never reused on a connection. */
@@ -329,6 +331,7 @@ export class AgentSession {
       return;
     }
     const hello = handshake.step.value;
+    this.helloSignature = hello.credential.value?.signature ?? new Uint8Array();
     // Every string of the hello is stored or shown (nodes.agent_version, the
     // node's name, its facts) and none is signed: cut them all first, facts
     // included, so a new field cannot miss the cut.
@@ -598,7 +601,15 @@ export class AgentSession {
       { reason: HelloRejectReason[reason], nodeId: this.nodeIdValue || undefined, remoteIp: this.remoteIp },
       "agent rejected",
     );
-    this.sendHandshake({ case: "rejected", value: { reason, message, minAgentVersion } });
+    // Signed like HelloAccepted, so a host with a certificate for the panel's domain cannot send one (signature.ts).
+    const panelSignature = signReject(this.deps.edgeTicketKey.privateKey, {
+      panelId: this.deps.panelId,
+      nonce: this.nonce,
+      clientSignature: this.helloSignature,
+      reason,
+      minAgentVersion,
+    });
+    this.sendHandshake({ case: "rejected", value: { reason, message, minAgentVersion, panelSignature } });
     this.state = "closed";
     this.writer.close();
     this.socket.close(closeRejected, message.slice(0, 120));
