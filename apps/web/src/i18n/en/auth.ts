@@ -43,6 +43,7 @@ export default {
     tooManyAttempts: "Too many wrong codes. Sign in with your password again.",
     useRecovery: "Use a recovery code",
     useTotp: "Use the authenticator app",
+    noRecoveryCodes: "This account has no recovery codes left. Lost your authenticator app? Ask an owner or admin.",
     fewLeft: {
       one: "Only {count} recovery code left. Make new ones in your account settings.",
       other: "Only {count} recovery codes left. Make new ones in your account settings.",

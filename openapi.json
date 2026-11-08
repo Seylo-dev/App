@@ -5382,6 +5382,7 @@
                           "required": [
                             "ticket",
                             "methods",
+                            "hasRecoveryCodes",
                             "expiresAt"
                           ],
                           "properties": {
@@ -5402,6 +5403,9 @@
                                   }
                                 ]
                               }
+                            },
+                            "hasRecoveryCodes": {
+                              "type": "boolean"
                             },
                             "expiresAt": {
                               "format": "date-time",
@@ -5745,6 +5749,7 @@
                       "required": [
                         "ticket",
                         "methods",
+                        "hasRecoveryCodes",
                         "expiresAt"
                       ],
                       "properties": {
@@ -5765,6 +5770,9 @@
                               }
                             ]
                           }
+                        },
+                        "hasRecoveryCodes": {
+                          "type": "boolean"
                         },
                         "expiresAt": {
                           "format": "date-time",
@@ -5998,6 +6006,7 @@
                       "required": [
                         "ticket",
                         "methods",
+                        "hasRecoveryCodes",
                         "expiresAt"
                       ],
                       "properties": {
@@ -6018,6 +6027,9 @@
                               }
                             ]
                           }
+                        },
+                        "hasRecoveryCodes": {
+                          "type": "boolean"
                         },
                         "expiresAt": {
                           "format": "date-time",
@@ -39560,6 +39572,7 @@
                       "required": [
                         "ticket",
                         "methods",
+                        "hasRecoveryCodes",
                         "expiresAt"
                       ],
                       "properties": {
@@ -39580,6 +39593,9 @@
                               }
                             ]
                           }
+                        },
+                        "hasRecoveryCodes": {
+                          "type": "boolean"
                         },
                         "expiresAt": {
                           "format": "date-time",

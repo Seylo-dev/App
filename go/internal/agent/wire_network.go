@@ -420,6 +420,10 @@ func (p *networkParts) runTraefik(ctx context.Context, d *Deps) error {
 			return fmt.Errorf("traefik: %w", err)
 		}
 		p.traefikDown.ok(ctx, d.Reports, p.log)
+		if st.Recreated != "" {
+			// Routed sites drop for a second or two; say why.
+			p.log.Info("Traefik recreated", "reason", st.Recreated, "container", cfg.Name)
+		}
 		p.setGateway(st.Gateway)
 		if st.IP != "" {
 			p.router.SetProbe(net.JoinHostPort(st.IP, "80"), st.Gateway)
@@ -446,8 +450,12 @@ func (p *networkParts) runLBTraefik(ctx context.Context, d *Deps) error {
 	att.OnAttached = nil // probes go through the fork's Traefik
 	for {
 		t := &proxy.Traefik{Docker: p.docker, Config: p.lbTraefik}
-		if _, err := t.Ensure(ctx); err != nil {
+		st, err := t.Ensure(ctx)
+		if err != nil {
 			return fmt.Errorf("LB traefik: %w", err)
+		}
+		if st.Recreated != "" {
+			p.log.Info("LB Traefik recreated", "reason", st.Recreated, "container", p.lbTraefik.Name)
 		}
 		if err := att.Attach(ctx); err != nil {
 			p.log.Warn("attaching the LB Traefik to project networks", "err", err)
