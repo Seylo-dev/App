@@ -103,7 +103,8 @@ cat >"$shims/docker" <<'EOF'
 printf '%s\n' "$*" >>"$SHIM_LOG.docker"
 case $1 in
 info)
-  [ "$2" = --format ] || exit 0
+  # FAKE_NO_DOCKER: the CLI is there but no daemon answers (Docker missing).
+  [ "$2" = --format ] || { [ -z "${FAKE_NO_DOCKER:-}" ] || exit 1; exit 0; }
   case $3 in
   *LiveRestoreEnabled*) echo "${FAKE_LIVE_RESTORE:-false}" ;;
   *DockerRootDir*) echo "${FAKE_DOCKER_ROOT:-/var/lib/docker}" ;;
@@ -230,7 +231,7 @@ run_installer() {
   set +e
   OUT=$(env -i PATH="$path" HOME="$T" TMPDIR="$T" FAKE_RELEASE="$REL" SHIM_LOG="$T/log" \
     FAKE_LIVE_RESTORE="${FAKE_LIVE_RESTORE:-}" FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT:-}" FAKE_SWARM="${FAKE_SWARM:-}" \
-    FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" \
+    FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" FAKE_NO_DOCKER="${FAKE_NO_DOCKER:-}" \
     FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" FAKE_PANEL_VERSION="${FAKE_PANEL_VERSION:-}" \
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
@@ -693,18 +694,31 @@ expect_fail "release preflight --no-secret-key still refuses the committed e2e t
 preflight --no-secret-key FAKE_GH_PUSH=false
 expect_fail "release preflight --no-secret-key still refuses a GitHub repo the releaser cannot push to" "cannot push to it"
 
-# Prompting needs a terminal that really opens. With no controlling terminal
-# (cloud-init, CI, ssh without -t) /dev/tty still reads as mode 666, so the old
-# -r/-w test said yes and the open killed the script under dash. A directory is
-# the same kind of trap: readable and writable, but it cannot be opened for writing.
-can_prompt_with() { # device: runs the installer's own can_prompt against it
-  ( INSTALLER_TEST_TTY=$1 && eval "$(sed -n '/^TTY_DEVICE=/p;/^can_prompt() {/,/^}/p' "$INSTALLER")" && can_prompt )
-}
-mkdir -p "$T/not-a-terminal"
-if can_prompt_with "$T/not-a-terminal"; then flunk "no terminal is detected as no terminal" "can_prompt said yes for an unopenable device"; else pass "no terminal is detected as no terminal"; fi
-: >"$T/a-terminal"
-if can_prompt_with "$T/a-terminal"; then pass "an openable terminal can be asked on"; else flunk "an openable terminal can be asked on" "can_prompt said no for a writable device"; fi
-if grep -q -- '-r /dev/tty' "$INSTALLER"; then flunk "the installer no longer trusts -r/-w on /dev/tty" "found -r /dev/tty"; else pass "the installer no longer trusts -r/-w on /dev/tty"; fi
+# ---- Docker missing: installed without a question (owner decision for 0.2.1)
+# The installer asks nothing, with or without a terminal: a join piped into
+# sh over ssh, from cloud-init or in CI has nobody to answer, and it used to
+# stop halfway with "Docker is missing".
+if grep -qF -- '[y/N]' "$INSTALLER" || grep -q -- '/dev/tty' "$INSTALLER"; then
+  flunk "the installer asks no questions" "found [y/N] or /dev/tty in $INSTALLER"
+else
+  pass "the installer asks no questions"
+fi
+for mode in panel join; do
+  args=(--version "$V")
+  [ "$mode" = panel ] || args=(join --panel https://192.0.2.10:3443 --token t --pin "sha256:$(printf '%064d' 1)" --version "$V")
+  FAKE_NO_DOCKER=1 run_installer minisign "$INSTALLER" "${args[@]}"
+  expect_ok "[$mode] Docker missing: installed from get.docker.com without asking" \
+    "Docker is missing: installing it with the official script from get.docker.com" "+ sh " "+ systemctl enable --now docker"
+  FAKE_NO_DOCKER=1 run_installer minisign "$INSTALLER" "${args[@]}" --install-docker --yes
+  expect_ok "[$mode] --install-docker and --yes still work (no-ops now)" "Docker is missing: installing it"
+  FAKE_NO_DOCKER=1 run_installer minisign "$INSTALLER" "${args[@]}" --no-docker-install
+  expect_fail "[$mode] --no-docker-install stops instead" "--no-docker-install was given"
+done
+run_installer minisign "$INSTALLER" --version "$V"
+has "installing it with the official script" && flunk "a running Docker is not installed again" "$OUT" || pass "a running Docker is not installed again"
+"$SH" "$INSTALLER" --help >"$T/help.txt" 2>&1 || true
+grep -q "installs Docker with the official script" "$T/help.txt" && grep -q -- "--no-docker-install" "$T/help.txt" &&
+  pass "--help says Docker is installed when missing and how to opt out" || flunk "--help on installing Docker" "$(cat "$T/help.txt")"
 
 if [ "$failures" -gt 0 ]; then
   echo "installer tests: $failures failed"

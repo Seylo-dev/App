@@ -47,7 +47,7 @@ const worldHandlers: Record<string, Handler> = {
     token: "seylo_join_8Kq2fT9xLw4mZp",
     // The shape nodes/join-command.ts gives: the install host, pinned to the panel's release with --version.
     command:
-      "curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token 'seylo_join_8Kq2fT9xLw4mZp' --install-docker --version '0.2.0' --pin 'sha256:9f2c4e1b7a3d5f60c8e2b4a6d1f3e5c7a9b0d2f4e6c8a1b3d5f7e9c0a2b4d6f8'",
+      "curl -fsSL https://install.seylo.dev | sudo sh -s -- join --panel 'https://203.0.113.10:3443' --token 'seylo_join_8Kq2fT9xLw4mZp' --version '0.2.0' --pin 'sha256:9f2c4e1b7a3d5f60c8e2b4a6d1f3e5c7a9b0d2f4e6c8a1b3d5f7e9c0a2b4d6f8'",
     insecureTransport: false,
     expiresAt: new Date(Date.now() + 58 * 60_000).toISOString(),
     // Build images on this node: on unless the form unticked it (added in 0.2.1).

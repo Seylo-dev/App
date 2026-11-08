@@ -50,7 +50,6 @@ PORT=3000
 # The agents' TLS port on the panel node (empty: 3443, or 3444 when --port is 3443).
 AGENT_TLS_PORT=
 INSECURE=
-INSTALL_DOCKER=
 NO_DOCKER=
 ROOT=
 DRY_RUN=
@@ -73,16 +72,6 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 die() {
 	printf 'error: %s\n' "$*" >&2
 	exit 1
-}
-
-# The terminal questions go to. Tests point it elsewhere.
-TTY_DEVICE=${INSTALLER_TEST_TTY:-/dev/tty}
-
-# True when there is a terminal to ask on. /dev/tty is mode 666 even with no
-# controlling terminal behind it (cloud-init, CI, ssh without -t), so testing
-# -r/-w says yes and the open then fails; only opening it tells.
-can_prompt() {
-	( : <"$TTY_DEVICE" >"$TTY_DEVICE" ) 2>/dev/null
 }
 
 usage() {
@@ -126,9 +115,11 @@ Flags:
   --force              join again although this node already belongs to a panel
                        (the node keeps its other settings in config.yml);
                        install the panel although another program holds 80/443
-  --install-docker     install Docker with the official script from get.docker.com if missing
-  --no-docker-install  never install Docker; fail if it is missing
-  --yes                answer yes to questions (implies --install-docker)
+  --no-docker-install  never install Docker; stop if it is missing. Without it the
+                       installer installs Docker with the official script from
+                       get.docker.com when it is missing, without asking
+  --install-docker     kept for older commands (Docker is installed when missing anyway)
+  --yes                kept for older commands (the installer asks nothing)
   --data-dir <dir>     data folder (default: $BRAND_DATA_DIR)
   --root <dir>         write files under <dir> instead of / and run no system commands (testing)
   --dry-run            print what would be done and change nothing
@@ -181,9 +172,9 @@ parse_args() {
 		--name) need_value "$@"; NODE_NAME=$2; shift ;;
 		--can-build) CAN_BUILD=true ;;
 		--no-can-build) CAN_BUILD=false ;;
-		--install-docker) INSTALL_DOCKER=1 ;;
+		# Docker is installed when it is missing; these stay for commands from before 0.2.1.
+		--install-docker | --yes | -y) ;;
 		--no-docker-install) NO_DOCKER=1 ;;
-		--yes | -y) INSTALL_DOCKER=1 ;;
 		--data-dir) need_value "$@"; DATA_DIR=$2; shift ;;
 		--root) need_value "$@"; ROOT=${2%/}; shift ;;
 		--dry-run) DRY_RUN=1 ;;
@@ -301,7 +292,7 @@ preflight() {
 docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
 
 snap_docker() {
-	die "Docker from snap is not supported: its confinement refuses the bind mounts under $BRAND_DATA_DIR and it has no docker.service unit. Remove it (snap remove docker) and install Docker from https://docs.docker.com/engine/install/, or run this installer again with --install-docker after removing it"
+	die "Docker from snap is not supported: its confinement refuses the bind mounts under $BRAND_DATA_DIR and it has no docker.service unit. Remove it (snap remove docker) and run this installer again: it installs Docker from get.docker.com when it is missing"
 }
 
 # check_docker refuses a Docker the agent cannot run on: the snap package,
@@ -433,22 +424,18 @@ ensure_docker() {
 			return
 		fi
 	fi
-	[ -z "$NO_DOCKER" ] || die "Docker is not installed or not running (--no-docker-install was given)"
-	if [ -z "$INSTALL_DOCKER" ]; then
-		if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ] && can_prompt; then
-			printf 'Docker is missing. Install it with the official script from get.docker.com? [y/N] ' >"$TTY_DEVICE"
-			read -r answer <"$TTY_DEVICE" || answer=
-			case $answer in [yY]*) INSTALL_DOCKER=1 ;; esac
-		fi
-	fi
-	[ -n "$INSTALL_DOCKER" ] || [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] ||
-		die "Docker is missing. Install it (https://docs.docker.com/engine/install/) or re-run with --install-docker (sh -s -- --install-docker after the pipe)"
-	say "Installing Docker with get.docker.com"
+	[ -z "$NO_DOCKER" ] || die "Docker is not installed or not running (--no-docker-install was given). Install it (https://docs.docker.com/engine/install/) and run this installer again"
+	# No question, with or without a terminal: a join piped into sh over ssh
+	# or from cloud-init has nobody to answer it.
+	say "Docker is missing: installing it with the official script from get.docker.com (--no-docker-install skips this)"
 	tmp=$(mktemp)
 	if [ -z "$DRY_RUN" ] && [ -z "$ROOT" ]; then
 		download https://get.docker.com "$tmp"
 	fi
-	run sh "$tmp"
+	if ! run sh "$tmp"; then
+		rm -f "$tmp"
+		die "get.docker.com could not install Docker on $OS_NAME (it supports Ubuntu, Debian, Raspberry Pi OS, CentOS, Fedora and RHEL). Install Docker by hand (https://docs.docker.com/engine/install/) and run this installer again"
+	fi
 	rm -f "$tmp"
 	run systemctl enable --now docker
 	[ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || check_docker
