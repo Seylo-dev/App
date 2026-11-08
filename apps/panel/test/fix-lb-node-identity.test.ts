@@ -66,12 +66,23 @@ function lastSent(agent: FakeAgent): LoadBalancerTls | undefined {
 const issuerOf = (certPem: string) => certPem.split(/(?<=-----END CERTIFICATE-----\n)/)[1] ?? "";
 const stored = (nodeId: string) => getSetting(panel.deps.db, "lbTlsNodes")?.[nodeId];
 
+/** The confirmation lands when the agent's answer to its connect sync is handled, a moment after join returns. */
+async function confirmed(nodeId: string, timeoutMs = 5000): Promise<number> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const at = stored(nodeId)?.confirmedAt;
+    if (typeof at === "number") return at;
+    if (Date.now() > until) throw new Error(`node ${nodeId} never confirmed its LB certificate`);
+    await Bun.sleep(20);
+  }
+}
+
 test("every node lists the current nodes with their issuers, and goes by its own name once its agent answers it", async () => {
   const a = await join();
   const b = await join();
   const old = await join(allCapabilities); // an agent before 0.2
   // The connect sync confirmed each node's certificate.
-  for (const agent of [a, b, old]) expect(stored(agent.nodeId)?.confirmedAt).toBeNumber();
+  for (const agent of [a, b, old]) expect(await confirmed(agent.nodeId)).toBeNumber();
 
   const tls = lbTlsOf(a.nodeId);
   const peers = new Map(tls?.peers.map((p) => [p.nodeId, p]));
@@ -136,7 +147,7 @@ test("a renewal keeps the old certificate accepted until the node confirmed the 
   expect(lastSent(b)?.peers.find((p) => p.nodeId === a.nodeId)?.issuerPems).toContain(renewed?.issuerPem ?? "");
   expect(lastSent(a)?.certPem).toBe(mine?.certPem ?? "");
   // a took that state, which confirms its new certificate.
-  const confirmedAt = stored(a.nodeId)?.confirmedAt ?? 0;
+  const confirmedAt = await confirmed(a.nodeId);
   expect(confirmedAt).toBeGreaterThan(0);
   expect(peerA(confirmedAt + confirmGraceMs - 1000)?.issuerPems).toHaveLength(2);
   // After the grace the replaced certificate is no longer accepted, but a still presents it until it
