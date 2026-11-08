@@ -26,6 +26,7 @@ var owners = []owner{
 	{"build", provideBuild, wireBuild},
 	{"jobs", provideJobs, wireJobs},
 	{"node", provideNode, wireNode},
+	{"tailnet", provideTailnet, wireTailnet},
 }
 
 // Wire runs every owner's provide, then every owner's wire, and returns

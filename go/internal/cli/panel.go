@@ -63,6 +63,8 @@ func newPanelCommand(d *deps) *cobra.Command {
 		newPanelSetupLinkCommand(d),
 		newPanelBootstrapCommand(d),
 		newPanelRotateKeyCommand(d),
+		newPanelIPAccessCommand(d),
+		newPanelTailscaleCommand(d),
 	)
 	return panel
 }
