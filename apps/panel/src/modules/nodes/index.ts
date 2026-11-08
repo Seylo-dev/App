@@ -17,7 +17,7 @@ import { type DesiredFlusher, startDesiredFlusher } from "../../desired";
 import { defineJob } from "../../jobs/queue";
 import { edgeAccessAllowed } from "../databases/edge-ticket";
 import { defineModule } from "../module";
-import { manifestMinAgent } from "../updates/release-state";
+import { runningMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
 import { importInstallerJoinToken } from "./installer-join";
 import { issueNodeCertificate, lbTlsContributor } from "./lb-tls";
@@ -99,7 +99,8 @@ function start(deps: Deps) {
       },
     }),
   );
-  deps.agents.setAgentVersionPolicy(() => minimumAgentVersion(deps.config.version, manifestMinAgent(deps.db)));
+  // The floor is the running release's minAgent, never one of a release the panel has only checked.
+  deps.agents.setAgentVersionPolicy(() => minimumAgentVersion(deps.config.version, runningMinAgent(deps.db, deps.config.version)));
 
   // Keep the last facts for when the node is offline: written and published at most once per
   // factsWriteMs per node (a node may send facts events as fast as it likes), the newest at the end.

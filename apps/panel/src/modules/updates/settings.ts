@@ -27,6 +27,12 @@ declare module "../../settings" {
       /** The channel this release was found on; absent (checks before 0.2.0-rc.2) means stable. */
       channel?: "stable" | "prerelease";
     };
+    /**
+     * The minAgent of the release the panel runs, kept from the last
+     * verified check that found that version, so a check that later finds a
+     * newer release does not lose it (release-state.ts runningMinAgent).
+     */
+    runningRelease: { version: string; minAgent: string | null };
   }
 }
 

@@ -1972,7 +1972,10 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   at once; DATA is chunked to 32 KiB and round-robined per stream; a
   stream's half-close or final CLOSE never overtakes its queued DATA.
 - Handshake: agents older than `deps.agents.minimumAgentVersion()` (panel
-  version N-2 minor, raised by the release manifest's `minAgent`) get
+  version N-2 minor, raised by the `minAgent` of the release the panel runs:
+  the stored check's only when it found the running version, else the one
+  kept in `runningRelease`; a newer release the panel has only checked never
+  raises it, `updates/release-state.ts` `runningMinAgent`) get
   `HelloRejected { AGENT_TOO_OLD, min_agent_version }`; dev builds always
   connect. ServerHello advertises `panel.report.v1`, `panel.desired.v1` and
   `panel.registry-tunnel.v1` once the nodes module attached PanelService.

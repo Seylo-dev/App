@@ -510,9 +510,32 @@ describe("updates", () => {
     serveRelease(manifest);
     const good = await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
     expect(good).toMatchObject({ checkError: null, panel: { latestVersion: "0.9.0", currentVersion: "dev" } });
-    expect(panel.deps.agents.minimumAgentVersion()).toBe("0.7.0");
+    // A release the panel has only checked does not raise the floor: a dev panel has none.
+    expect(panel.deps.agents.minimumAgentVersion()).toBeNull();
     const auto = await ok(callOp(panel, updates.setAutoUpdate, { enabled: true }, { cookie: owner.cookie }));
     expect(auto.autoUpdate).toBe(true);
+  });
+
+  test("the agent floor is the running release's minAgent, never a newer checked one's", async () => {
+    const config = panel.deps.config as { version: string };
+    const running = config.version;
+    try {
+      config.version = "0.8.0";
+      // 0.9.0 needs agents of 0.8.5 or newer; this panel still runs 0.8.0 (N-2 floor 0.6.0).
+      serveRelease({ ...manifest, minAgent: "0.8.5" });
+      await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+      // Before: 0.8.5, so every older agent was refused and updated itself ahead of the panel.
+      expect(panel.deps.agents.minimumAgentVersion()).toBe("0.6.0");
+      // Once the panel runs 0.9.0, its manifest's floor applies.
+      config.version = "0.9.0";
+      expect(panel.deps.agents.minimumAgentVersion()).toBe("0.8.5");
+      // A later check that finds 0.10.0 (minAgent 0.9.5) keeps the running release's floor.
+      serveRelease({ ...manifest, version: "0.10.0", minAgent: "0.9.5" });
+      await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+      expect(panel.deps.agents.minimumAgentVersion()).toBe("0.8.5");
+    } finally {
+      config.version = running;
+    }
   });
 
   test("updating a node sends the verified manifest and finishes on the agent's result", async () => {
