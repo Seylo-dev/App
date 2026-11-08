@@ -116,24 +116,36 @@ function moduleRoutes(deps: Deps, panelModules: readonly PanelModule[]): AnyElys
 }
 
 function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, modules: AnyElysia) {
-  return new Elysia()
-    .onRequest(({ request, set, server }) => {
-      // A Response's own headers win, so pages with stricter rules keep them.
-      const https = servedOverHttps(deps, request, server?.requestIP(request)?.address ?? null);
-      Object.assign(set.headers, securityHeaders(https));
-    })
-    .use(health(deps))
-    .use(opRoutes(allOps, httpOpHandler(execute, deps)))
-    .use(modules)
-    .use(liveEndpoint(deps))
-    .use(agentRoutes(deps, edgeTicketKey))
-    .use(
-      webApp(deps.config.webDist, {
-        renderIndex: (html) => injectBoot(html, readBoot(deps.db)),
-        contentSecurityPolicy: appContentSecurityPolicy,
-        redirect: (request) => domainRedirect(deps, request),
-      }),
-    );
+  return (
+    new Elysia()
+      // An error no route turned into a response (a broken database, a bug)
+      // is a 500 with no detail, never Elysia's default of the message with
+      // status 200, which health checks and clients would read as success.
+      .onError({ as: "global" }, ({ code, error, set }) => {
+        if (code === "NOT_FOUND" || code === "VALIDATION" || code === "PARSE") return;
+        if (typeof (error as { status?: unknown })?.status === "number") return;
+        deps.logger.error({ err: error, code }, "request failed");
+        set.status = 500;
+        return Response.json({ error: { code: "INTERNAL", message: "Something went wrong on the panel. Try again." } }, { status: 500 });
+      })
+      .onRequest(({ request, set, server }) => {
+        // A Response's own headers win, so pages with stricter rules keep them.
+        const https = servedOverHttps(deps, request, server?.requestIP(request)?.address ?? null);
+        Object.assign(set.headers, securityHeaders(https));
+      })
+      .use(health(deps))
+      .use(opRoutes(allOps, httpOpHandler(execute, deps)))
+      .use(modules)
+      .use(liveEndpoint(deps))
+      .use(agentRoutes(deps, edgeTicketKey))
+      .use(
+        webApp(deps.config.webDist, {
+          renderIndex: (html) => injectBoot(html, readBoot(deps.db)),
+          contentSecurityPolicy: appContentSecurityPolicy,
+          redirect: (request) => domainRedirect(deps, request),
+        }),
+      )
+  );
 }
 
 /** Next to Wings, the panel sits behind the fork's Traefik: its name comes with the panel node's facts. */
