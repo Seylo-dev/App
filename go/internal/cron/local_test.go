@@ -342,12 +342,13 @@ func TestDisabledStoppedAndUnknownJobs(t *testing.T) {
 
 func TestUnreadableScheduleIsReportedOnce(t *testing.T) {
 	h := newHarness(t, say("ok\n", 0))
-	// Panels before 0.2 saved Sunday as 7, which this parser refuses.
-	sunday := appSpec(&agentv1.CronJob{Id: "j1", Schedule: "0 4 * * 7", Command: []string{"x"}})
+	// Day-of-week 8 does not exist (7, which panels before 0.2 saved for
+	// Sunday, is read as 0 now: TestDayOfWeekSevenIsSunday).
+	sunday := appSpec(&agentv1.CronJob{Id: "j1", Schedule: "0 4 * * 8", Command: []string{"x"}})
 	cronSvc := &agentv1.ServiceSpec{
 		Id: "c1", ProjectId: "p", Kind: agentv1.ServiceKind_SERVICE_KIND_CRON,
 		Image:    &agentv1.ImageRef{Reference: "alpine:3.22"},
-		KindSpec: &agentv1.ServiceSpec_Cron{Cron: &agentv1.CronSpec{Schedule: "0 4 * * 1-7"}},
+		KindSpec: &agentv1.ServiceSpec_Cron{Cron: &agentv1.CronSpec{Schedule: "0 4 * * 1-8"}},
 	}
 	_ = h.sched.Sync([]*agentv1.ServiceSpec{sunday, cronSvc})
 	got := map[string]*agentv1.CronRun{}
@@ -379,7 +380,7 @@ func TestUnreadableScheduleIsReportedOnce(t *testing.T) {
 	}
 
 	// Another unreadable schedule is a new report; a fixed one is scheduled.
-	sunday.CronJobs[0].Schedule = "0 5 * * 7"
+	sunday.CronJobs[0].Schedule = "0 5 * * 9"
 	_ = h.sched.Sync([]*agentv1.ServiceSpec{sunday, cronSvc})
 	if r2 := h.report(); r2.GetCronJobId() != "j1" || r2.GetRunId() == r.GetRunId() {
 		t.Fatalf("changed schedule report = %v", r2)

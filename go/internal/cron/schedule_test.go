@@ -61,3 +61,38 @@ func TestParseScheduleRejects(t *testing.T) {
 		}
 	}
 }
+
+// Standard cron and the panel read a day-of-week 7 as Sunday. The parser
+// only knows 0-6, so these used to be refused and the job never ran.
+func TestDayOfWeekSevenIsSunday(t *testing.T) {
+	// 2026-03-10 is a Tuesday.
+	base := time.Date(2026, 3, 10, 10, 7, 30, 0, time.UTC)
+	sunday := time.Date(2026, 3, 15, 4, 0, 0, 0, time.UTC)
+	tests := []struct {
+		expr string
+		want time.Time
+	}{
+		{"0 4 * * 7", sunday},
+		{"0 4 * * 0", sunday},
+		{"0 4 * * 6-7", time.Date(2026, 3, 14, 4, 0, 0, 0, time.UTC)},
+		{"0 4 * * 1-7", time.Date(2026, 3, 11, 4, 0, 0, 0, time.UTC)},
+		{"0 4 * * 3,7", time.Date(2026, 3, 11, 4, 0, 0, 0, time.UTC)},
+		{"0 4 * * 5-7/2", time.Date(2026, 3, 13, 4, 0, 0, 0, time.UTC)},
+		{"0 4 * * 7/1", sunday},
+	}
+	for _, tt := range tests {
+		s, err := ParseSchedule(tt.expr, "")
+		if err != nil {
+			t.Fatalf("%q: %v", tt.expr, err)
+		}
+		if got := s.Next(base); !got.Equal(tt.want) {
+			t.Errorf("%q: Next = %v, want %v", tt.expr, got, tt.want)
+		}
+	}
+	// Out of range stays an error.
+	for _, bad := range []string{"0 4 * * 8", "0 4 * * 6-8", "0 4 * * 7-1"} {
+		if _, err := ParseSchedule(bad, ""); !errors.Is(err, ErrBadSchedule) {
+			t.Errorf("%q: err = %v, want ErrBadSchedule", bad, err)
+		}
+	}
+}
