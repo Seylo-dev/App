@@ -12,6 +12,7 @@ import {
   env,
   projects,
   services as serviceOps,
+  webhooks,
 } from "@seylo/ops";
 import { DeployStage } from "@seylo/proto";
 import { and, eq, sql } from "drizzle-orm";
@@ -29,6 +30,7 @@ import {
   services,
   sourceUploads,
   volumes,
+  webhookDeliveries,
 } from "../src/db/schema";
 import { compileDesiredState } from "../src/desired";
 import { enginesCapability } from "../src/modules/databases/engines";
@@ -1172,5 +1174,70 @@ describe("data copy guards", () => {
       error: "The source service was deleted.",
     });
     expect((await callOp(panel, deploymentOps.deploy, { serviceId: second.body.service.id }, { cookie })).status).toBe(200);
+  });
+});
+
+describe("deploy trigger URLs while another deployment is queued", () => {
+  const callTrigger = async (url: string, commit: string) => {
+    const res = await panel.app.handle(new Request(`http://panel.test${url}?commit=${commit}`, { method: "POST" }));
+    return { status: res.status, body: (await res.json()) as { deploymentId: string; queued: boolean } };
+  };
+  const history = (id: string) =>
+    panel.deps.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.serviceId, id))
+      .orderBy(deployments.createdAt)
+      .all()
+      .map((d) => [d.trigger, d.status, d.commitSha]);
+
+  test("a node move copying volumes keeps its deployment; the call queues its own deploy behind it", async () => {
+    const id = await app(shop, "files", { volumes: [{ name: "data", mountPath: "/data" }] });
+    await deployLive(id);
+    expect((await callOp(panel, serviceOps.move, { serviceId: id, toNodeId: nodeB }, { cookie })).status).toBe(200);
+    const move = panel.deps.db.select().from(deployments).where(eq(deployments.trigger, "move")).get();
+    expect(move).toMatchObject({ status: "queued", moveCopying: true });
+    const { url } = (await callOp(panel, webhooks.rotateTrigger, { serviceId: id }, { cookie })).body;
+
+    const commit = "b".repeat(40);
+    const res = await callTrigger(url, commit);
+    expect(res.status).toBe(200);
+    expect(res.body.queued).toBe(true);
+    expect(res.body.deploymentId).not.toBe(move?.id);
+    expect(history(id)).toEqual([
+      ["manual", "live", null],
+      ["move", "queued", null],
+      ["webhook", "queued", commit],
+    ]);
+    const deliveries = () => panel.deps.db.select().from(webhookDeliveries).all();
+    expect(deliveries().map((d) => [d.outcome, d.deploymentId])).toEqual([["deployed", res.body.deploymentId]]);
+
+    // A second call joins that deploy, not the move: the newest commit wins.
+    const newer = "c".repeat(40);
+    const again = await callTrigger(url, newer);
+    expect(again.body).toEqual({ deploymentId: res.body.deploymentId, queued: false });
+    expect(history(id).at(-1)).toEqual(["webhook", "queued", newer]);
+    expect(deliveries().find((d) => d.outcome === "ignored")).toMatchObject({
+      deploymentId: res.body.deploymentId,
+      detail: "A deploy from this URL was already queued; it builds this commit now.",
+    });
+  });
+
+  test("a queued rollback or manual deploy is not taken over either", async () => {
+    const id = await app(shop, "files");
+    await deployLive(id);
+    for (const trigger of ["rollback", "manual"] as const) {
+      const waiting = panel.deps.db
+        .insert(deployments)
+        .values({ serviceId: id, trigger, status: "queued", generation: 90 + history(id).length, actor: "test" } as never)
+        .returning()
+        .get();
+      const { url } = (await callOp(panel, webhooks.rotateTrigger, { serviceId: id }, { cookie })).body;
+      const res = await callTrigger(url, "d".repeat(40));
+      expect(res.body.queued).toBe(true);
+      expect(panel.deps.db.select().from(deployments).where(eq(deployments.id, waiting.id)).get()?.commitSha).toBeNull();
+      // Out of the way for the next round.
+      panel.deps.db.update(deployments).set({ status: "cancelled" }).where(eq(deployments.serviceId, id)).run();
+    }
   });
 });

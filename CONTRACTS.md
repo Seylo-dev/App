@@ -1582,8 +1582,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   active (pointing at the IP:port address before a domain exists) and
   `syncWebhookConfig` moves it to the panel domain with the panel's secret
   when the domain changes. Deploy trigger URLs allow 10 calls then one per
-  6 s per trigger; a call while a deploy is queued joins it (a newer
-  `?commit=` replaces its commit).
+  6 s per trigger; a call while a deploy from a trigger URL (`trigger:
+  webhook`) has not started joins it (a newer `?commit=` replaces its
+  commit, and its log says so). Any other queued deployment (a node move
+  copying volumes, a project move's switch, a rollback, a manual or
+  template deploy) ships what it was made for, so the call queues its own
+  deploy behind it, like push deploys (`queuePushDeploy`).
 - Registry GC: every successful deploy enqueues `deployments.registryGc`; a daily
   `deployments.registryGcSweep` retries services whose old images are still in
   the registry.
