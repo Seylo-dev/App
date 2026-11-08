@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -554,6 +556,19 @@ func (w *worker) createInstances(ctx context.Context, spec *agentv1.ServiceSpec,
 		}
 		if was.changed {
 			w.panelDirWas = &was
+		}
+		// The folder belongs to the panel's uid: an account with that id
+		// (made after the install, or before an upgrade from uid 1000) can
+		// read master.key. The installer only checks new installs.
+		if holders := docker.PanelIDHolders(w.r.o.EtcDir); len(holders) > 0 {
+			verb := "has"
+			if len(holders) > 1 {
+				verb = "have"
+			}
+			msg := fmt.Sprintf("the %s on this server %s id %d, the panel's user: it can read the panel's master key and database in %s; give it another id, or treat it like root",
+				strings.Join(holders, " and the "), verb, docker.PanelUID, filepath.Join(w.r.o.Layout.Root(), "panel"))
+			w.log.Warn(msg)
+			w.systemLine(gen, "%s", msg)
 		}
 	}
 	var out []docker.Container

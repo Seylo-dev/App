@@ -61,7 +61,7 @@ packages use. "Built" means implemented and tested.
 | `docker` | Docker Engine access; names and `seylo.*` labels | Built: `Engine` over the moby client (`Moby`), `dockertest.Fake` for unit tests |
 | `systemd` | `systemctl`/`journalctl` for the agent unit (`Units`, `Journal`), the `seylo.service` and `seylo.slice` unit files (`InstallUnits`) | Built |
 | `version` | Build version (ldflags) | Built |
-| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 16 checks (kernel, OS, memory, disk, inodes, Docker, cgroups, Docker live-restore, ports 80/443, proxy, route files, DNS, firewall, clock, panel, Wings), read-only Docker socket client | Built (also run against the real test VM) |
+| `nodecheck` | Node "Health check" (formerly Doctor): `Check`, `Run`, `Default(Env)` with 17 checks (kernel, OS, memory, disk, inodes, Docker, cgroups, Docker live-restore, ports 80/443, proxy, route files, DNS, firewall, clock, panel, Wings, the panel's files), read-only Docker socket client | Built (also run against the real test VM) |
 | `cli` | Cobra command tree: node (`agent --join`, `join`, `status`, `health`, `troubleshoot`, `panel start|status|logs|setup-link`), laptop (`login`, `logout`, `deploy`, `logs <svc>`, `env`, `tunnel`), hidden `panel bootstrap`, `install-units`, `update-guard`. Builds for linux, darwin and windows (amd64/arm64, `cmd/seylo` `TestCrossBuild`): node commands are `//go:build !windows` (Windows gets stubs, so no agent package is compiled there) and answer "runs on a Linux server" off Linux | Built |
 | `agent` | Daemon composition root: `Run` (config.yml, agent key, join/resume, reconnect with backoff and jitter, moves to the panel's new address (`move.go`), heartbeat, outbox drain, machine facts, DISK_LOW alerts (`disk_alert.go`), local API), `Join`, `Wire`, `Deps`, `Components`, `Facts`, one `wire_<area>.go` per area | Built |
 | `localapi` | Agent unix-socket API (HTTP, 0600): `Serve`/`Handler`/`Backend` in the agent, `Client` for the node CLI | Built; panel start/logs answer NOT_IMPLEMENTED until `Deps.PanelControl` is set |
@@ -631,7 +631,13 @@ local API, join and resume. The areas:
   so the spec never sets a user. Before a panel container is created,
   `preparePanelDir` gives `<dataDir>/panel` and everything in it to that
   user through an `os.Root` (links are changed themselves, never
-  followed) and sets the folder to 0700 and `master.key` to 0600. A panel
+  followed) and sets the folder to 0700 and `master.key` to 0600. When
+  `/etc/passwd` or `/etc/group` has an entry with id 61000 (an account
+  made after the install, or there before an upgrade moved the folder
+  from uid 1000), each panel container start names it in the agent's log
+  and as a SYSTEM line in the panel's own log, and the node health check
+  `panel.files` warns (it also warns when the folder belongs to another
+  uid or is open to other users). A panel
   container without `seylo.user` (from an agent or installer before
   0.2.0-rc.2: the image's uid 1000, often the default login user) serves
   no spec and is replaced once at its generation; the old one is stopped
@@ -1785,7 +1791,9 @@ default 3000, `--user 61000:61000` with the `seylo.user` label), waits for
 `http://<ip>:<port>/setup?t=<setup token>` (`<ip>`: the IPv4 route's
 source, else the IPv6 route's in brackets, else a public interface
 address; `<server-ip>` with a hint only when there is none). A new panel
-install warns when an account on the server has uid or gid 61000 (`getent`).
+install, and a re-run of the panel installer on a node that has a panel
+folder, warn when an account on the server has uid or gid 61000
+(`getent`); the agent warns on every node after that (see "Docker resources").
 Join: `install.sh join --panel
 <url> --token <t> [--pin sha256:<hex>] [--can-build|--no-can-build]` runs
 `seylo join --no-start`, then starts `seylo.service`. An installer from a

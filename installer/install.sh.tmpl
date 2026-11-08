@@ -805,6 +805,9 @@ open_firewall() {
 install_panel() {
 	if joined; then
 		step "Already installed"
+		# An upgrade (the agent then moves the folder from uid 1000 to the
+		# panel's uid) or an account made since the install.
+		[ ! -d "$DATA/panel" ] || check_panel_uid
 		run systemctl restart "$SLUG.service"
 		say "The agent was updated and restarted. The panel keeps its data."
 		say "Status: $SLUG status    Panel: $SLUG panel status"

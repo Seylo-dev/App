@@ -233,6 +233,8 @@ type harness struct {
 	done    chan error
 	// drain is Options.ReattachDrain from the next start (default 1ms).
 	drain time.Duration
+	// etc is Options.EtcDir (an empty folder unless a test writes to it).
+	etc string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -258,6 +260,7 @@ func newHarnessWith(t *testing.T, setup func(*dockertest.Fake)) *harness {
 		desired: &memDesired{},
 		layout:  datadir.New(t.TempDir()),
 		logs:    &memLogs{},
+		etc:     t.TempDir(),
 	}
 	h.start()
 	t.Cleanup(h.stop)
@@ -292,6 +295,7 @@ func (h *harness) start() {
 		LogWait:       time.Millisecond,
 		ReattachDrain: drain,
 		Logs:          h.logs,
+		EtcDir:        h.etc,
 	})
 	if err != nil {
 		h.t.Fatal(err)

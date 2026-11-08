@@ -121,6 +121,45 @@ func TestLegacyPanelMovesToThePanelUser(t *testing.T) {
 	}
 }
 
+// An account that has the panel's uid (made after the install, or there
+// before an upgrade from uid 1000) can read master.key once the folder is
+// the panel user's: starting a panel container says so in the agent's log
+// and the panel's own log. The installer only checks new installs.
+func TestPanelIDHolderIsReported(t *testing.T) {
+	warned := func(h *harness) bool {
+		for _, line := range h.logs.text(docker.PanelServiceID) {
+			if strings.Contains(line, "has id 61000, the panel's user") {
+				return true
+			}
+		}
+		return false
+	}
+
+	free := newHarness(t)
+	free.apply(1, panelSpec(1, "seylo:1"))
+	free.deployResult(docker.PanelServiceID, 1)
+	if warned(free) {
+		t.Fatalf("a free panel id was reported: %v", free.logs.text(docker.PanelServiceID))
+	}
+
+	h := newHarness(t)
+	if err := os.WriteFile(filepath.Join(h.etc, "passwd"), []byte("root:x:0:0::/root:/bin/bash\nops:x:61000:61000::/home/ops:/bin/bash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.apply(1, panelSpec(1, "seylo:1"))
+	h.deployResult(docker.PanelServiceID, 1)
+	if !warned(h) {
+		t.Fatalf("panel log = %v, want the account with the panel's id named", h.logs.text(docker.PanelServiceID))
+	}
+	found := false
+	for _, line := range h.logs.text(docker.PanelServiceID) {
+		found = found || strings.Contains(line, "the user ops on this server has id 61000") && strings.Contains(line, filepath.Join(h.layout.Root(), "panel"))
+	}
+	if !found {
+		t.Fatalf("panel log = %v, want the account and the folder named", h.logs.text(docker.PanelServiceID))
+	}
+}
+
 // When the panel cannot start as the panel user, the old container comes
 // back as it was (set aside under another name, not removed).
 func TestLegacyPanelComesBackWhenTheMoveFails(t *testing.T) {

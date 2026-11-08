@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/docker"
 )
 
 const gib = 1 << 30
@@ -521,6 +523,52 @@ func (e *Env) wings(ctx context.Context) *agentv1.NodeCheckResult {
 		return warn(detail+"; this Wings version removes routes it does not own", "Update the Wings fork so it leaves "+brand.Slug+"-* route files alone.")
 	}
 	return pass("%s, sharing its Traefik", detail)
+}
+
+// panelFiles looks at <dataDir>/panel (master.key, panel.db) on the node
+// that runs the panel: it belongs to root or the panel user, is closed to
+// everyone else, and no account on the server has the panel's uid or gid
+// (one made after the install, or there before an upgrade moved the
+// folder from uid 1000: the installer checks new installs only).
+func (e *Env) panelFiles(context.Context) *agentv1.NodeCheckResult {
+	if e.DataDir == "" {
+		return skipped("no data dir")
+	}
+	dir := filepath.Join(e.DataDir, "panel")
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return pass("no panel on this node")
+	case errors.Is(err, fs.ErrPermission):
+		return skipped("run as root to check " + dir)
+	case err != nil:
+		return warn("could not read "+dir+": "+err.Error(), "")
+	}
+	var problems, hints []string
+	if holders := docker.PanelIDHolders(e.EtcDir); len(holders) > 0 {
+		problems = append(problems, fmt.Sprintf("the %s on this server %s id %d, the panel's user, so it can read the panel's master key and database",
+			strings.Join(holders, " and the "), plural(len(holders), "has", "have"), docker.PanelUID))
+		hints = append(hints, fmt.Sprintf("Give it another id (usermod -u, groupmod -g), or treat it like root: id %d is the panel's.", docker.PanelUID))
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Uid != 0 && int(st.Uid) != docker.PanelUID {
+		problems = append(problems, fmt.Sprintf("%s belongs to uid %d, not the panel's user %d", dir, st.Uid, docker.PanelUID))
+		hints = append(hints, "The agent gives the folder to the panel's user each time it starts the panel; the panel's log says why the last start did not.")
+	}
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		problems = append(problems, fmt.Sprintf("%s is open to other users (mode %04o)", dir, mode))
+		hints = append(hints, "Run chmod 700 "+dir+".")
+	}
+	if len(problems) > 0 {
+		return warn(strings.Join(problems, "; "), strings.Join(hints, " "))
+	}
+	return pass("only root and the panel's user (uid %d) can read %s", docker.PanelUID, dir)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func bytesText(n uint64) string {

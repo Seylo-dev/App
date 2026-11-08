@@ -477,6 +477,22 @@ expect_ok "a panel install with the panel's uid free installs quietly" "panel bo
 has "the panel's user" && flunk "a free panel uid got a warning" "$OUT" || pass "a free panel uid gets no warning"
 FAKE_GETENT_passwd=olduser EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
 expect_ok "an account with the panel's uid gets a warning" "the passwd entry olduser on this server has id $panel_uid, the panel's user"
+# A re-run on a panel that is already installed (an upgrade: the agent then
+# moves the folder from uid 1000 to the panel's uid) checks too, and a
+# joined node without a panel folder does not.
+seed=$T/seed-joined-panel
+mkdir -p "$seed/var/lib/$SLUG/panel"
+printf 'panel_url: http://127.0.0.1:3000\nnode_id: n1\n' >"$seed/var/lib/$SLUG/config.yml"
+FAKE_GETENT_group=oldgroup PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "re-running the panel installer warns about an account with the panel's id" "Already installed" \
+  "the group entry oldgroup on this server has id $panel_uid, the panel's user"
+PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "re-running the panel installer with the panel's id free" "Already installed"
+has "the panel's user" && flunk "a free panel uid got a warning on a re-run" "$OUT" || pass "a re-run with a free panel uid gets no warning"
+rm -rf "$seed/var/lib/$SLUG/panel"
+FAKE_GETENT_passwd=olduser PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "re-running the installer on a node without a panel" "Already installed"
+has "the panel's user" && flunk "a node without a panel got a panel uid warning" "$OUT" || pass "a node without a panel gets no panel uid warning"
 
 # ---- the agents' TLS port and plain-HTTP joins
 FAKE_UFW=1 run_installer minisign "$INSTALLER" --version "$V"
