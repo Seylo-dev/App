@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/seylo-dev/app/go/internal/datadir"
 )
 
 // IncomingMarker is the file an import keeps in the services/<id> folder
@@ -67,7 +69,8 @@ func beginImport(dir string) (func(), error) {
 }
 
 func touchIncoming(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// A services/<id>/ folder, and services/ itself, are root's only.
+	if err := os.MkdirAll(dir, datadir.PrivateDirMode); err != nil {
 		return err
 	}
 	name := filepath.Join(dir, IncomingMarker)
