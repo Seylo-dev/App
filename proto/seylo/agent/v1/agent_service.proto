@@ -15,6 +15,7 @@ import "seylo/agent/v1/metrics.proto";
 import "seylo/agent/v1/node_ops.proto";
 import "seylo/agent/v1/options.proto";
 import "seylo/agent/v1/state.proto";
+import "seylo/agent/v1/tailnet.proto";
 import "seylo/agent/v1/terminal.proto";
 import "seylo/agent/v1/transfer.proto";
 import "seylo/agent/v1/tunnel.proto";
@@ -194,5 +195,16 @@ service AgentService {
   // without restarting it. added in 0.2
   rpc RetryCertificate(RetryCertificateRequest) returns (RetryCertificateResponse) {
     option (capability) = "routing.certificate-retry.v1";
+  }
+
+  // The host's own tailscaled (tailnet.proto): an interactive sign-in link,
+  // and Tailscale DNS on or off. Only the panel node's agent is asked.
+  // The Serve entry itself follows NodeSettings.tailnet (capability
+  // "tailnet.serve.v1", advertised without methods). added in 0.2.1 (tailnet)
+  rpc TailscaleLogin(TailscaleLoginRequest) returns (TailscaleLoginResponse) {
+    option (capability) = "tailnet.login.v1";
+  }
+  rpc TailscaleSetDns(TailscaleSetDnsRequest) returns (TailscaleSetDnsResponse) {
+    option (capability) = "tailnet.login.v1";
   }
 }

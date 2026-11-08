@@ -5,6 +5,7 @@ package seylo.agent.v1;
 import "google/protobuf/duration.proto";
 import "seylo/agent/v1/routing.proto";
 import "seylo/agent/v1/service.proto";
+import "seylo/agent/v1/tailnet.proto";
 
 // DesiredState is everything the panel wants on one node. The agent stores
 // the last one on disk and keeps reconciling toward it while the panel is
@@ -37,8 +38,10 @@ message NodeSettings {
   // *.n1.example.com A record pointing at this node.
   string wildcard_domain = 4;
   LogRetention log_retention = 5;
-  // Builds this node runs at the same time when it can build. 0 means 1;
-  // more wait in the agent's queue.
+  // Builds this node runs at the same time; more wait in the agent's
+  // queue. 0 means the panel sends this node no builds (Can build is off).
+  // Since 0.2.1 the agent's buildx health check follows it: it runs when
+  // this is above 0 or config.yml sets can_build.
   uint32 max_parallel_builds = 6;
   // The panel's auto-update switch. When on, an agent older than the
   // panel updates itself to the panel's release after it connects.
@@ -54,6 +57,9 @@ message NodeSettings {
   // The agent refuses HostShell while this is false and closes open ones
   // when it turns false.
   bool host_shell = 10; // added in 0.2 (nodeops)
+  // Tailscale Serve for the panel. Only the panel node gets it; unset
+  // (older panels, other nodes) means the agent keeps no Serve entry.
+  TailnetServe tailnet = 11; // added in 0.2.1 (tailnet)
 }
 
 // CleanupSchedule is when and what the agent cleans up by itself. It only

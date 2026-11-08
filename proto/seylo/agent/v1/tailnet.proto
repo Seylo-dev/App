@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// The panel on the owner's tailnet. The agent of the panel node reads the
+// tailscaled already running on its host (the owner's own, signed in to the
+// owner's tailnet) over its LocalAPI socket, and keeps one Tailscale Serve
+// entry that sends https://<machine>.<tailnet>.ts.net to the panel's unix
+// socket. Seylo stores no Tailscale key: nothing in these messages is a
+// secret except TailscaleLoginResponse.auth_url. The agent never runs
+// `tailscale up`, `down` or `logout`, never changes routes, exit nodes or
+// the firewall, and never writes AllowFunnel. added in 0.2.1 (tailnet)
+
+// TailscaleInfo is what the agent sees of the host's tailscaled. Sent in
+// NodeFacts.tailscale, only when it changed.
+message TailscaleInfo {
+  // tailscaled's version, for example "1.104.5".
+  string version = 1;
+  // tailscaled's BackendState: "NoState", "NeedsLogin", "NeedsMachineAuth",
+  // "Stopped", "Starting" or "Running". Readers treat other values as not
+  // running.
+  string backend_state = 2;
+  // The name of the tailnet the machine is signed in to, for example
+  // "example.com" or "owner@example.com". Empty before sign-in.
+  string tailnet = 3;
+  // This machine's MagicDNS name without the trailing dot, for example
+  // "panel.tail1234.ts.net". Empty before sign-in.
+  string dns_name = 4;
+  // The machine's tailnet addresses (100.64.0.0/10 and fd7a:115c:a1e0::/48).
+  repeated string addresses = 5;
+  // MagicDNS is on for the tailnet. Serve needs it.
+  bool magic_dns = 6;
+  // The tailnet issues HTTPS certificates for this machine (tailscaled's
+  // CertDomains is not empty). Without it the panel is served over HTTP
+  // inside the tailnet.
+  bool https = 7;
+  // The server uses Tailscale DNS (prefs CorpDNS, `--accept-dns`).
+  bool accept_dns = 8;
+  // When the machine's key expires; unset when key expiry is disabled or
+  // unknown.
+  google.protobuf.Timestamp key_expiry = 9;
+  // The tailnet login of the machine's owner, for example
+  // "owner@example.com". Empty for a tagged machine.
+  string login_name = 10;
+  // The ACL tags of a tagged machine, for example "tag:server".
+  repeated string tags = 11;
+  // The machine sends its traffic through an exit node.
+  bool exit_node_in_use = 12;
+  // The machine advertises subnet routes or offers itself as an exit node.
+  bool advertises_routes = 13;
+  // config.yml sets no_tailnet: true (only root on the node can set it):
+  // the agent removed its Serve entry, adds none and refuses
+  // TailscaleLogin and TailscaleSetDns.
+  bool disabled_on_server = 14;
+  // The panel's Serve entry. Unset on nodes whose desired state has no
+  // protected panel service.
+  TailnetServeStatus serve = 15;
+}
+
+// TailnetServeStatus is the state of the one Serve entry the agent owns.
+message TailnetServeStatus {
+  TailnetServeState state = 1;
+  // Where the panel answers on the tailnet: "https://<dns name>", or
+  // "http://<dns name>" when the tailnet has no HTTPS certificates. Empty
+  // unless state is ACTIVE.
+  string url = 2;
+  // Why the state is CONFLICT, ERROR or UNSUPPORTED, in words for people.
+  // Empty otherwise.
+  string message = 3;
+  // The agent's last request to /api/health through the panel's socket
+  // (every 60 s) answered.
+  bool panel_answers = 4;
+  // When the agent last read the Serve config.
+  google.protobuf.Timestamp checked_at = 5;
+  // The exact Proxy target of the agent's handler, for example
+  // "unix:/var/lib/seylo/panel/tailnet.sock" (the agent's own data dir,
+  // never a path from the panel). Empty when the agent has no entry.
+  string proxy = 6;
+}
+
+// TailnetServeState is where the agent's Serve entry stands.
+enum TailnetServeState {
+  // Older agents and unknown values: treat like OFF.
+  TAILNET_SERVE_STATE_UNSPECIFIED = 0;
+  // Not wanted, or wanted while tailscaled is not running, too old or has
+  // MagicDNS off. The agent has no entry.
+  TAILNET_SERVE_STATE_OFF = 1;
+  // Wanted; the agent is writing the entry (or retrying after a 412).
+  TAILNET_SERVE_STATE_APPLYING = 2;
+  // The entry is in tailscaled's Serve config.
+  TAILNET_SERVE_STATE_ACTIVE = 3;
+  // Another handler uses the same host and port, or AllowFunnel is on for
+  // it. The agent leaves the owner's entries alone and adds nothing.
+  TAILNET_SERVE_STATE_CONFLICT = 4;
+  // Reading or writing the Serve config failed (message says why).
+  TAILNET_SERVE_STATE_ERROR = 5;
+  // This tailscaled cannot serve a unix socket (too old).
+  TAILNET_SERVE_STATE_UNSUPPORTED = 6;
+}
+
+// TailnetServe is what the panel wants on its own node's tailnet. Only the
+// panel node gets it (NodeSettings.tailnet).
+message TailnetServe {
+  // Serve the panel on this machine's tailnet name. The agent applies it
+  // only while tailscaled is Running, new enough and has MagicDNS on, the
+  // protected panel service is in this node's desired state and the
+  // panel's socket exists.
+  bool panel = 1;
+}
+
+// TailscaleLoginRequest asks tailscaled for an interactive sign-in link.
+// On a machine that was never signed in the agent first sets WantRunning
+// and turns Tailscale DNS off (CorpDNS false); with a login profile (an
+// expired key, a sign-out) it never touches prefs. It answers
+// FAILED_PRECONDITION while the machine is Running, UNAVAILABLE without a
+// tailscaled socket and PERMISSION_DENIED when config.yml sets
+// no_tailnet: true.
+message TailscaleLoginRequest {}
+
+message TailscaleLoginResponse {
+  // https://login.tailscale.com/a/... (or the control server's
+  // /register/<id>). A secret for about 10 minutes: whoever opens it puts
+  // this server on their tailnet. Never logged or stored.
+  string auth_url = 1;
+  TailscaleInfo info = 2;
+}
+
+// TailscaleSetDnsRequest changes only the server's CorpDNS pref (the
+// panel only ever sends false). Refused like TailscaleLoginRequest
+// without a socket or with no_tailnet.
+message TailscaleSetDnsRequest {
+  bool accept_dns = 1;
+}
+
+message TailscaleSetDnsResponse {
+  TailscaleInfo info = 1;
+}

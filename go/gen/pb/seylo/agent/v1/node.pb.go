@@ -52,7 +52,11 @@ type NodeFacts struct {
 	Capabilities []string `protobuf:"bytes,16,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	// Present when Pelican Wings runs on this node.
 	Wings *WingsInfo `protobuf:"bytes,17,opt,name=wings,proto3" json:"wings,omitempty"`
-	// The owner allowed builds on this node (node config "can_build").
+	// The node's config.yml "can_build" (`seylo join --can-build`). Reported
+	// only: since 0.2.1 the panel decides which nodes build (the join
+	// command's "Build images on this node" choice, later nodes.setCanBuild)
+	// and sends max_parallel_builds 0 to the others. A re-join never changes
+	// a known node's value. changed in 0.2.1 (build default)
 	CanBuild bool `protobuf:"varint,18,opt,name=can_build,json=canBuild,proto3" json:"can_build,omitempty"`
 	// The node's private IPv4: the local address it reaches the panel from,
 	// or its default-route address when the panel is on the same host. Empty
@@ -74,8 +78,18 @@ type NodeFacts struct {
 	// the upgrade seed), never to refuse a member: an agent can report any
 	// address. Empty from agents before this field. added in 0.2 (security)
 	InterfaceAddresses []string `protobuf:"bytes,21,rep,name=interface_addresses,json=interfaceAddresses,proto3" json:"interface_addresses,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// docker buildx on this node, checked at agent start and every 30
+	// minutes. Unset from older agents: the panel counts the node as able to
+	// build, as before. With installed false the panel picks no automatic
+	// builds for this node and refuses it as an explicit build node.
+	// added in 0.2.1 (build default)
+	Buildx *BuildxInfo `protobuf:"bytes,22,opt,name=buildx,proto3" json:"buildx,omitempty"`
+	// The tailscaled on this node's host, as the agent reads it over its
+	// LocalAPI socket. Unset when there is no tailscaled socket, and from
+	// agents before 0.2.1. added in 0.2.1 (tailnet)
+	Tailscale     *TailscaleInfo `protobuf:"bytes,23,opt,name=tailscale,proto3" json:"tailscale,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeFacts) Reset() {
@@ -255,6 +269,77 @@ func (x *NodeFacts) GetInterfaceAddresses() []string {
 	return nil
 }
 
+func (x *NodeFacts) GetBuildx() *BuildxInfo {
+	if x != nil {
+		return x.Buildx
+	}
+	return nil
+}
+
+func (x *NodeFacts) GetTailscale() *TailscaleInfo {
+	if x != nil {
+		return x.Tailscale
+	}
+	return nil
+}
+
+// BuildxInfo is the result of `docker buildx version` on the node.
+// added in 0.2.1 (build default)
+type BuildxInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The command ran and exited 0.
+	Installed bool `protobuf:"varint,1,opt,name=installed,proto3" json:"installed,omitempty"`
+	// What it printed as the version, for example "v0.29.1"; empty when it
+	// is not installed.
+	Version       string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuildxInfo) Reset() {
+	*x = BuildxInfo{}
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuildxInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildxInfo) ProtoMessage() {}
+
+func (x *BuildxInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildxInfo.ProtoReflect.Descriptor instead.
+func (*BuildxInfo) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *BuildxInfo) GetInstalled() bool {
+	if x != nil {
+		return x.Installed
+	}
+	return false
+}
+
+func (x *BuildxInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 // WingsInfo describes a Pelican Wings installation found next to the agent.
 type WingsInfo struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
@@ -275,7 +360,7 @@ type WingsInfo struct {
 
 func (x *WingsInfo) Reset() {
 	*x = WingsInfo{}
-	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -287,7 +372,7 @@ func (x *WingsInfo) String() string {
 func (*WingsInfo) ProtoMessage() {}
 
 func (x *WingsInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +385,7 @@ func (x *WingsInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WingsInfo.ProtoReflect.Descriptor instead.
 func (*WingsInfo) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{1}
+	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WingsInfo) GetVersion() string {
@@ -335,7 +420,7 @@ var File_seylo_agent_v1_node_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xff\x05\n" +
+	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cseylo/agent/v1/tailnet.proto\"\xf0\x06\n" +
 	"\tNodeFacts\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x16\n" +
@@ -360,7 +445,13 @@ const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\tcan_build\x18\x12 \x01(\bR\bcanBuild\x12!\n" +
 	"\fprivate_ipv4\x18\x13 \x01(\tR\vprivateIpv4\x12\x1b\n" +
 	"\ttime_zone\x18\x14 \x01(\tR\btimeZone\x12/\n" +
-	"\x13interface_addresses\x18\x15 \x03(\tR\x12interfaceAddresses\"\xb8\x01\n" +
+	"\x13interface_addresses\x18\x15 \x03(\tR\x12interfaceAddresses\x122\n" +
+	"\x06buildx\x18\x16 \x01(\v2\x1a.seylo.agent.v1.BuildxInfoR\x06buildx\x12;\n" +
+	"\ttailscale\x18\x17 \x01(\v2\x1d.seylo.agent.v1.TailscaleInfoR\ttailscale\"D\n" +
+	"\n" +
+	"BuildxInfo\x12\x1c\n" +
+	"\tinstalled\x18\x01 \x01(\bR\tinstalled\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\xb8\x01\n" +
 	"\tWingsInfo\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12.\n" +
 	"\x13traefik_dynamic_dir\x18\x02 \x01(\tR\x11traefikDynamicDir\x128\n" +
@@ -380,20 +471,24 @@ func file_seylo_agent_v1_node_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_node_proto_rawDescData
 }
 
-var file_seylo_agent_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_seylo_agent_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_seylo_agent_v1_node_proto_goTypes = []any{
 	(*NodeFacts)(nil),             // 0: seylo.agent.v1.NodeFacts
-	(*WingsInfo)(nil),             // 1: seylo.agent.v1.WingsInfo
-	(*timestamppb.Timestamp)(nil), // 2: google.protobuf.Timestamp
+	(*BuildxInfo)(nil),            // 1: seylo.agent.v1.BuildxInfo
+	(*WingsInfo)(nil),             // 2: seylo.agent.v1.WingsInfo
+	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(*TailscaleInfo)(nil),         // 4: seylo.agent.v1.TailscaleInfo
 }
 var file_seylo_agent_v1_node_proto_depIdxs = []int32{
-	2, // 0: seylo.agent.v1.NodeFacts.boot_time:type_name -> google.protobuf.Timestamp
-	1, // 1: seylo.agent.v1.NodeFacts.wings:type_name -> seylo.agent.v1.WingsInfo
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 0: seylo.agent.v1.NodeFacts.boot_time:type_name -> google.protobuf.Timestamp
+	2, // 1: seylo.agent.v1.NodeFacts.wings:type_name -> seylo.agent.v1.WingsInfo
+	1, // 2: seylo.agent.v1.NodeFacts.buildx:type_name -> seylo.agent.v1.BuildxInfo
+	4, // 3: seylo.agent.v1.NodeFacts.tailscale:type_name -> seylo.agent.v1.TailscaleInfo
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_node_proto_init() }
@@ -401,13 +496,14 @@ func file_seylo_agent_v1_node_proto_init() {
 	if File_seylo_agent_v1_node_proto != nil {
 		return
 	}
+	file_seylo_agent_v1_tailnet_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_node_proto_rawDesc), len(file_seylo_agent_v1_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

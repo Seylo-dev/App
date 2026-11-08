@@ -23,6 +23,7 @@ export * from "./seylo/agent/v1/panel_service_pb";
 export * from "./seylo/agent/v1/routing_pb";
 export * from "./seylo/agent/v1/service_pb";
 export * from "./seylo/agent/v1/state_pb";
+export * from "./seylo/agent/v1/tailnet_pb";
 export * from "./seylo/agent/v1/terminal_pb";
 export * from "./seylo/agent/v1/transfer_pb";
 export * from "./seylo/agent/v1/tunnel_pb";

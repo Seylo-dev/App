@@ -16,6 +16,7 @@ generated from it with `make gen` and committed.
 | `access.proto` | Timed exposes and Cloudflare tunnels |
 | `database.proto` | Database engines, tools and TLS exposure |
 | `desired.proto` | `DesiredState` and the requests that change it |
+| `tailnet.proto` | The host's own tailscaled: `TailscaleInfo`, the panel's Serve entry, sign-in and DNS (added in 0.2.1) |
 | `state.proto` | Actual state: snapshot, deltas (epoch/seq), service status |
 | `events.proto` | Events: crash reports, deploy/build progress, cron runs, backups, alerts |
 | `build.proto`, `compose.proto`, `cron.proto`, `exec.proto`, `fs.proto`, `logs.proto`, `metrics.proto`, `terminal.proto`, `transfer.proto`, `tunnel.proto`, `backup.proto`, `node_ops.proto` | Request/response messages per domain |

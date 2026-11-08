@@ -1036,7 +1036,10 @@ type PortSpec struct {
 	ContainerPort uint32                 `protobuf:"varint,1,opt,name=container_port,json=containerPort,proto3" json:"container_port,omitempty"`
 	Protocol      PortProtocol           `protobuf:"varint,2,opt,name=protocol,proto3,enum=seylo.agent.v1.PortProtocol" json:"protocol,omitempty"`
 	// Optional direct IP:port access through the agent's portgate (never a
-	// Docker published port, which would bypass the firewall).
+	// Docker published port, which would bypass the firewall). The protected
+	// panel service is the one exception: Docker publishes its FORWARD ports,
+	// so the panel answers while the agent restarts (see
+	// PublicPort.bind_address).
 	Public        *PublicPort `protobuf:"bytes,3,opt,name=public,proto3" json:"public,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1107,7 +1110,16 @@ type PublicPort struct {
 	// When set the agent closes the port at this time, even while the panel
 	// is unreachable. Used after a domain goes live: the port redirects for a
 	// grace period, then closes.
-	CloseAt       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=close_at,json=closeAt,proto3" json:"close_at,omitempty"`
+	CloseAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=close_at,json=closeAt,proto3" json:"close_at,omitempty"`
+	// Host address Docker publishes the port on. Empty means every address
+	// (as before); "127.0.0.1" means only the server itself answers, which is
+	// how the panel closes IP access while its domain or tailnet keeps
+	// working. Honored only for the protected panel service's Docker
+	// publish: the agent refuses a value that is not a loopback address, and
+	// any value on another service. The portgate ignores it. Empty encodes
+	// as absent, so specs without it hash as before.
+	// added in 0.2.1 (panel-access)
+	BindAddress   string `protobuf:"bytes,6,opt,name=bind_address,json=bindAddress,proto3" json:"bind_address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1175,6 +1187,13 @@ func (x *PublicPort) GetCloseAt() *timestamppb.Timestamp {
 		return x.CloseAt
 	}
 	return nil
+}
+
+func (x *PublicPort) GetBindAddress() string {
+	if x != nil {
+		return x.BindAddress
+	}
+	return ""
 }
 
 type HealthCheck struct {
@@ -2138,14 +2157,15 @@ const file_seylo_agent_v1_service_proto_rawDesc = "" +
 	"\bPortSpec\x12%\n" +
 	"\x0econtainer_port\x18\x01 \x01(\rR\rcontainerPort\x128\n" +
 	"\bprotocol\x18\x02 \x01(\x0e2\x1c.seylo.agent.v1.PortProtocolR\bprotocol\x122\n" +
-	"\x06public\x18\x03 \x01(\v2\x1a.seylo.agent.v1.PublicPortR\x06public\"\xe9\x01\n" +
+	"\x06public\x18\x03 \x01(\v2\x1a.seylo.agent.v1.PublicPortR\x06public\"\x8c\x02\n" +
 	"\n" +
 	"PublicPort\x12\x1b\n" +
 	"\thost_port\x18\x01 \x01(\rR\bhostPort\x122\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x1e.seylo.agent.v1.PublicPortModeR\x04mode\x12!\n" +
 	"\fredirect_url\x18\x03 \x01(\tR\vredirectUrl\x120\n" +
 	"\x14allowed_source_cidrs\x18\x04 \x03(\tR\x12allowedSourceCidrs\x125\n" +
-	"\bclose_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acloseAt\"\x86\x03\n" +
+	"\bclose_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acloseAt\x12!\n" +
+	"\fbind_address\x18\x06 \x01(\tR\vbindAddress\"\x86\x03\n" +
 	"\vHealthCheck\x12,\n" +
 	"\x03tcp\x18\x01 \x01(\v2\x18.seylo.agent.v1.TcpProbeH\x00R\x03tcp\x12/\n" +
 	"\x04http\x18\x02 \x01(\v2\x19.seylo.agent.v1.HttpProbeH\x00R\x04http\x128\n" +

@@ -155,8 +155,10 @@ type NodeSettings struct {
 	// *.n1.example.com A record pointing at this node.
 	WildcardDomain string        `protobuf:"bytes,4,opt,name=wildcard_domain,json=wildcardDomain,proto3" json:"wildcard_domain,omitempty"`
 	LogRetention   *LogRetention `protobuf:"bytes,5,opt,name=log_retention,json=logRetention,proto3" json:"log_retention,omitempty"`
-	// Builds this node runs at the same time when it can build. 0 means 1;
-	// more wait in the agent's queue.
+	// Builds this node runs at the same time; more wait in the agent's
+	// queue. 0 means the panel sends this node no builds (Can build is off).
+	// Since 0.2.1 the agent's buildx health check follows it: it runs when
+	// this is above 0 or config.yml sets can_build.
 	MaxParallelBuilds uint32 `protobuf:"varint,6,opt,name=max_parallel_builds,json=maxParallelBuilds,proto3" json:"max_parallel_builds,omitempty"`
 	// The panel's auto-update switch. When on, an agent older than the
 	// panel updates itself to the panel's release after it connects.
@@ -171,7 +173,10 @@ type NodeSettings struct {
 	// The owner allowed root shells on this host from the panel (HostShell).
 	// The agent refuses HostShell while this is false and closes open ones
 	// when it turns false.
-	HostShell     bool `protobuf:"varint,10,opt,name=host_shell,json=hostShell,proto3" json:"host_shell,omitempty"` // added in 0.2 (nodeops)
+	HostShell bool `protobuf:"varint,10,opt,name=host_shell,json=hostShell,proto3" json:"host_shell,omitempty"` // added in 0.2 (nodeops)
+	// Tailscale Serve for the panel. Only the panel node gets it; unset
+	// (older panels, other nodes) means the agent keeps no Serve entry.
+	Tailnet       *TailnetServe `protobuf:"bytes,11,opt,name=tailnet,proto3" json:"tailnet,omitempty"` // added in 0.2.1 (tailnet)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -274,6 +279,13 @@ func (x *NodeSettings) GetHostShell() bool {
 		return x.HostShell
 	}
 	return false
+}
+
+func (x *NodeSettings) GetTailnet() *TailnetServe {
+	if x != nil {
+		return x.Tailnet
+	}
+	return nil
 }
 
 // CleanupSchedule is when and what the agent cleans up by itself. It only
@@ -1096,7 +1108,7 @@ var File_seylo_agent_v1_desired_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_desired_proto_rawDesc = "" +
 	"\n" +
-	"\x1cseylo/agent/v1/desired.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cseylo/agent/v1/routing.proto\x1a\x1cseylo/agent/v1/service.proto\"\xd9\x01\n" +
+	"\x1cseylo/agent/v1/desired.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cseylo/agent/v1/routing.proto\x1a\x1cseylo/agent/v1/service.proto\x1a\x1cseylo/agent/v1/tailnet.proto\"\xd9\x01\n" +
 	"\fDesiredState\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x04R\brevision\x127\n" +
 	"\bservices\x18\x02 \x03(\v2\x1b.seylo.agent.v1.ServiceSpecR\bservices\x12:\n" +
@@ -1104,7 +1116,7 @@ const file_seylo_agent_v1_desired_proto_rawDesc = "" +
 	"\bsettings\x18\x04 \x01(\v2\x1c.seylo.agent.v1.NodeSettingsR\bsettings\"/\n" +
 	"\x0eProjectNetwork\x12\x1d\n" +
 	"\n" +
-	"project_id\x18\x01 \x01(\tR\tprojectId\"\xe3\x03\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\"\x9b\x04\n" +
 	"\fNodeSettings\x12=\n" +
 	"\vmaintenance\x18\x01 \x01(\v2\x1b.seylo.agent.v1.MaintenanceR\vmaintenance\x12&\n" +
 	"\x0fgames_first_cpu\x18\x02 \x01(\bR\rgamesFirstCpu\x12\x1d\n" +
@@ -1119,7 +1131,8 @@ const file_seylo_agent_v1_desired_proto_rawDesc = "" +
 	"\acleanup\x18\t \x01(\v2\x1f.seylo.agent.v1.CleanupScheduleR\acleanup\x12\x1d\n" +
 	"\n" +
 	"host_shell\x18\n" +
-	" \x01(\bR\thostShell\"\xf1\x01\n" +
+	" \x01(\bR\thostShell\x126\n" +
+	"\atailnet\x18\v \x01(\v2\x1c.seylo.agent.v1.TailnetServeR\atailnet\"\xf1\x01\n" +
 	"\x0fCleanupSchedule\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cron\x18\x02 \x01(\tR\x04cron\x12!\n" +
@@ -1212,7 +1225,8 @@ var file_seylo_agent_v1_desired_proto_goTypes = []any{
 	(*RestartServiceResponse)(nil), // 15: seylo.agent.v1.RestartServiceResponse
 	(*ServiceSpec)(nil),            // 16: seylo.agent.v1.ServiceSpec
 	(*Maintenance)(nil),            // 17: seylo.agent.v1.Maintenance
-	(*durationpb.Duration)(nil),    // 18: google.protobuf.Duration
+	(*TailnetServe)(nil),           // 18: seylo.agent.v1.TailnetServe
+	(*durationpb.Duration)(nil),    // 19: google.protobuf.Duration
 }
 var file_seylo_agent_v1_desired_proto_depIdxs = []int32{
 	16, // 0: seylo.agent.v1.DesiredState.services:type_name -> seylo.agent.v1.ServiceSpec
@@ -1222,16 +1236,17 @@ var file_seylo_agent_v1_desired_proto_depIdxs = []int32{
 	6,  // 4: seylo.agent.v1.NodeSettings.log_retention:type_name -> seylo.agent.v1.LogRetention
 	4,  // 5: seylo.agent.v1.NodeSettings.lb_tls:type_name -> seylo.agent.v1.LoadBalancerTls
 	3,  // 6: seylo.agent.v1.NodeSettings.cleanup:type_name -> seylo.agent.v1.CleanupSchedule
-	5,  // 7: seylo.agent.v1.LoadBalancerTls.peers:type_name -> seylo.agent.v1.LoadBalancerPeer
-	18, // 8: seylo.agent.v1.LogRetention.max_age:type_name -> google.protobuf.Duration
-	0,  // 9: seylo.agent.v1.SyncDesiredRequest.state:type_name -> seylo.agent.v1.DesiredState
-	9,  // 10: seylo.agent.v1.SyncDesiredResponse.refused:type_name -> seylo.agent.v1.RefusedService
-	16, // 11: seylo.agent.v1.ApplyServiceRequest.service:type_name -> seylo.agent.v1.ServiceSpec
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	18, // 7: seylo.agent.v1.NodeSettings.tailnet:type_name -> seylo.agent.v1.TailnetServe
+	5,  // 8: seylo.agent.v1.LoadBalancerTls.peers:type_name -> seylo.agent.v1.LoadBalancerPeer
+	19, // 9: seylo.agent.v1.LogRetention.max_age:type_name -> google.protobuf.Duration
+	0,  // 10: seylo.agent.v1.SyncDesiredRequest.state:type_name -> seylo.agent.v1.DesiredState
+	9,  // 11: seylo.agent.v1.SyncDesiredResponse.refused:type_name -> seylo.agent.v1.RefusedService
+	16, // 12: seylo.agent.v1.ApplyServiceRequest.service:type_name -> seylo.agent.v1.ServiceSpec
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_desired_proto_init() }
@@ -1241,6 +1256,7 @@ func file_seylo_agent_v1_desired_proto_init() {
 	}
 	file_seylo_agent_v1_routing_proto_init()
 	file_seylo_agent_v1_service_proto_init()
+	file_seylo_agent_v1_tailnet_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

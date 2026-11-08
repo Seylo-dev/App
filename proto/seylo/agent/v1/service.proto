@@ -149,7 +149,10 @@ message PortSpec {
   uint32 container_port = 1;
   PortProtocol protocol = 2;
   // Optional direct IP:port access through the agent's portgate (never a
-  // Docker published port, which would bypass the firewall).
+  // Docker published port, which would bypass the firewall). The protected
+  // panel service is the one exception: Docker publishes its FORWARD ports,
+  // so the panel answers while the agent restarts (see
+  // PublicPort.bind_address).
   PublicPort public = 3;
 }
 
@@ -173,6 +176,15 @@ message PublicPort {
   // is unreachable. Used after a domain goes live: the port redirects for a
   // grace period, then closes.
   google.protobuf.Timestamp close_at = 5;
+  // Host address Docker publishes the port on. Empty means every address
+  // (as before); "127.0.0.1" means only the server itself answers, which is
+  // how the panel closes IP access while its domain or tailnet keeps
+  // working. Honored only for the protected panel service's Docker
+  // publish: the agent refuses a value that is not a loopback address, and
+  // any value on another service. The portgate ignores it. Empty encodes
+  // as absent, so specs without it hash as before.
+  // added in 0.2.1 (panel-access)
+  string bind_address = 6;
 }
 
 enum PublicPortMode {

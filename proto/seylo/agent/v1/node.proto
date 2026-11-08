@@ -3,6 +3,7 @@ syntax = "proto3";
 package seylo.agent.v1;
 
 import "google/protobuf/timestamp.proto";
+import "seylo/agent/v1/tailnet.proto";
 
 // NodeFacts describes a node. The agent sends it in ClientHello and
 // whenever it changes (GetNodeFacts returns the current value).
@@ -33,7 +34,11 @@ message NodeFacts {
   repeated string capabilities = 16;
   // Present when Pelican Wings runs on this node.
   WingsInfo wings = 17;
-  // The owner allowed builds on this node (node config "can_build").
+  // The node's config.yml "can_build" (`seylo join --can-build`). Reported
+  // only: since 0.2.1 the panel decides which nodes build (the join
+  // command's "Build images on this node" choice, later nodes.setCanBuild)
+  // and sends max_parallel_builds 0 to the others. A re-join never changes
+  // a known node's value. changed in 0.2.1 (build default)
   bool can_build = 18;
   // The node's private IPv4: the local address it reaches the panel from,
   // or its default-route address when the panel is on the same host. Empty
@@ -55,6 +60,26 @@ message NodeFacts {
   // the upgrade seed), never to refuse a member: an agent can report any
   // address. Empty from agents before this field. added in 0.2 (security)
   repeated string interface_addresses = 21;
+  // docker buildx on this node, checked at agent start and every 30
+  // minutes. Unset from older agents: the panel counts the node as able to
+  // build, as before. With installed false the panel picks no automatic
+  // builds for this node and refuses it as an explicit build node.
+  // added in 0.2.1 (build default)
+  BuildxInfo buildx = 22;
+  // The tailscaled on this node's host, as the agent reads it over its
+  // LocalAPI socket. Unset when there is no tailscaled socket, and from
+  // agents before 0.2.1. added in 0.2.1 (tailnet)
+  TailscaleInfo tailscale = 23;
+}
+
+// BuildxInfo is the result of `docker buildx version` on the node.
+// added in 0.2.1 (build default)
+message BuildxInfo {
+  // The command ran and exited 0.
+  bool installed = 1;
+  // What it printed as the version, for example "v0.29.1"; empty when it
+  // is not installed.
+  string version = 2;
 }
 
 // WingsInfo describes a Pelican Wings installation found next to the agent.
