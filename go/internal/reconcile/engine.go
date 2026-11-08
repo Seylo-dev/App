@@ -199,6 +199,10 @@ type Runtime struct {
 	// reattached mirrors the workers' records for readers outside them
 	// (Resolve, syncNetworks): container id -> reattachment.
 	reattached sync.Map
+	// published holds the Docker bindings of panel containers without a
+	// spec hash (the installer's): container id -> []docker.PortPublish.
+	// Bindings never change, so each container is inspected once.
+	published sync.Map
 	// webUI reads a database web UI's state (SetWebUIStatus).
 	webUI atomic.Pointer[func(serviceID string) *agentv1.ToolStatus]
 	// unverified counts rollouts between their first container change and
@@ -345,7 +349,31 @@ func validateSpec(s *agentv1.ServiceSpec) error {
 			return fmt.Errorf("%w: volume: %w", ErrInvalidSpec, err)
 		}
 	}
+	if err := checkBindAddresses(s); err != nil {
+		return err
+	}
 	return checkRelayImage(s)
+}
+
+// checkBindAddresses refuses a PublicPort.bind_address anywhere but on the
+// protected panel service, where Docker publishes the ports, and any value
+// there that is not a loopback address: the field can only narrow who
+// reaches the panel, never move it to another address of the host.
+func checkBindAddresses(s *agentv1.ServiceSpec) error {
+	panel := docker.IsPanelService(s.GetId(), s.GetProtected())
+	for _, p := range s.GetPorts() {
+		pub := p.GetPublic()
+		if pub.GetBindAddress() == "" {
+			continue
+		}
+		if !panel {
+			return fmt.Errorf("%w: port %d: a bind address is only for the panel service", ErrInvalidSpec, p.GetContainerPort())
+		}
+		if _, err := bindAddress(pub); err != nil {
+			return fmt.Errorf("%w: port %d: %w", ErrInvalidSpec, p.GetContainerPort(), err)
+		}
+	}
+	return nil
 }
 
 // checkRelayImage refuses an image from the panel registry relay that is

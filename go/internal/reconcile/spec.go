@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -138,24 +140,92 @@ func volumeOwner(s *agentv1.ServiceSpec, v *agentv1.VolumeMount) string {
 // instanceHash is the spec hash an instance runs. The installer's first
 // panel container carries no hash label: a protected instance without one
 // at the desired generation counts as running the desired spec, so the
-// agent adopts it as is instead of rolling the panel. Any later spec change comes with a new generation and rolls it.
+// agent adopts it as is instead of rolling the panel. Any later spec
+// change comes with a new generation and rolls it.
+//
+// For the panel that adoption also needs Docker to publish exactly what
+// the spec asks for, host address included (published reports the
+// container's bindings; ok false means they could not be read, which
+// keeps the container as before). Otherwise a panel the owner closed to
+// 127.0.0.1 would stay open on every address after its container was
+// made again by the installer, while the panel thinks it is closed.
 //
 // A panel container that does not run as docker.PanelUser (no LabelUser:
 // started by an agent or installer from before 0.2.0-rc.2, as the image's
 // uid 1000) serves no spec, so it is replaced once by one that does, after
 // preparePanelDir moved the folder to that user.
-func instanceHash(labels map[string]string, spec *agentv1.ServiceSpec, hash string) string {
-	if docker.IsPanelService(spec.GetId(), spec.GetProtected()) && labels[docker.LabelUser] != docker.PanelUser {
+func instanceHash(labels map[string]string, spec *agentv1.ServiceSpec, hash string, published func() (ports []docker.PortPublish, ok bool)) string {
+	panel := docker.IsPanelService(spec.GetId(), spec.GetProtected())
+	if panel && labels[docker.LabelUser] != docker.PanelUser {
 		return ""
 	}
 	if h := labels[docker.LabelSpecHash]; h != "" {
 		return h
 	}
-	if spec.GetProtected() && labels[docker.LabelProtected] == "true" &&
-		labels[docker.LabelGeneration] == strconv.FormatUint(spec.GetGeneration(), 10) {
-		return hash
+	if !spec.GetProtected() || labels[docker.LabelProtected] != "true" ||
+		labels[docker.LabelGeneration] != strconv.FormatUint(spec.GetGeneration(), 10) {
+		return ""
 	}
-	return ""
+	if panel && published != nil {
+		if ports, ok := published(); ok && !samePublish(ports, panelPublish(spec)) {
+			return ""
+		}
+	}
+	return hash
+}
+
+// samePublish compares Docker bindings by who can connect: an unspecified
+// host address (0.0.0.0, ::) counts like the zero value, every address, so
+// a daemon that reports `--publish 3000:3000` as 0.0.0.0 and :: still
+// matches a spec without a bind address.
+func samePublish(actual, want []docker.PortPublish) bool {
+	norm := func(list []docker.PortPublish) []docker.PortPublish {
+		out := make([]docker.PortPublish, 0, len(list))
+		for _, p := range list {
+			if p.HostIP.IsUnspecified() {
+				p.HostIP = netip.Addr{}
+			}
+			out = append(out, p)
+		}
+		docker.SortPublish(out)
+		return slices.Compact(out)
+	}
+	return slices.Equal(norm(actual), norm(want))
+}
+
+// needsPublishCheck reports whether instanceHash reads a container's
+// bindings: the panel's containers without a spec hash label.
+func needsPublishCheck(labels map[string]string, spec *agentv1.ServiceSpec) bool {
+	return docker.IsPanelService(spec.GetId(), spec.GetProtected()) && labels[docker.LabelSpecHash] == ""
+}
+
+// notePublished reads the bindings of the containers in list that
+// instanceHash checks (needsPublishCheck) into r.published, before a pass
+// sorts its containers. A read that fails is tried again on the next pass;
+// until then the container is kept as it is.
+func (r *Runtime) notePublished(ctx context.Context, spec *agentv1.ServiceSpec, list []docker.Container) {
+	for _, c := range list {
+		if !needsPublishCheck(c.Labels, spec) {
+			continue
+		}
+		if _, ok := r.published.Load(c.ID); ok {
+			continue
+		}
+		d, err := r.o.Docker.InspectContainer(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+		r.published.Store(c.ID, d.Publish)
+	}
+}
+
+// publishedOf returns the bindings notePublished read for a container.
+func (r *Runtime) publishedOf(id string) ([]docker.PortPublish, bool) {
+	v, ok := r.published.Load(id)
+	if !ok {
+		return nil, false
+	}
+	return v.([]docker.PortPublish), true
 }
 
 // panelBind mounts the panel's data folder at the same path the installer
@@ -165,8 +235,19 @@ func panelBind(layout datadir.Layout) string {
 	return filepath.Join(layout.Root(), "panel") + ":" + brand.DataDir + "/panel"
 }
 
+// PanelPublishBindCapability is advertised by agents that publish the
+// panel's ports on PublicPort.bind_address. The panel closes IP access
+// only on a panel node that advertises it; an older agent ignores the
+// field and keeps the port open on every address.
+const PanelPublishBindCapability = "panel.publish-bind.v1"
+
 // panelPublish is the panel's FORWARD public ports, published by Docker
 // like the installer does, so the panel answers while the agent restarts.
+// Each is bound to its bind_address (validateSpec allows only a loopback
+// address there), or to every address when that is empty. A value
+// validateSpec would refuse never gets here; if one did, it would count as
+// every address (0.2.0's behavior), never as some other address. Sorted
+// like docker.SortPublish.
 func panelPublish(s *agentv1.ServiceSpec) []docker.PortPublish {
 	var out []docker.PortPublish
 	for _, p := range s.GetPorts() {
@@ -175,9 +256,27 @@ func panelPublish(s *agentv1.ServiceSpec) []docker.PortPublish {
 			pub.GetMode() == agentv1.PublicPortMode_PUBLIC_PORT_MODE_REDIRECT {
 			continue
 		}
-		out = append(out, docker.PortPublish{HostPort: pub.GetHostPort(), ContainerPort: p.GetContainerPort()})
+		ip, _ := bindAddress(pub)
+		out = append(out, docker.PortPublish{HostIP: ip, HostPort: pub.GetHostPort(), ContainerPort: p.GetContainerPort()})
 	}
+	docker.SortPublish(out)
 	return out
+}
+
+// bindAddress parses a public port's bind_address. Empty is the zero
+// address (every address); anything else must be a loopback IP literal
+// without a zone ("127.0.0.1", "::1"). A name such as "localhost" is not
+// accepted: Docker binds addresses, and the panel's docs say 127.0.0.1.
+func bindAddress(pub *agentv1.PublicPort) (netip.Addr, error) {
+	raw := pub.GetBindAddress()
+	if raw == "" {
+		return netip.Addr{}, nil
+	}
+	ip, err := netip.ParseAddr(raw)
+	if err != nil || ip.Zone() != "" || ip.Is4In6() || !ip.IsLoopback() {
+		return netip.Addr{}, fmt.Errorf("bind address %q is not a loopback address (127.0.0.1)", raw)
+	}
+	return ip, nil
 }
 
 // prepareData creates the service's volumes (folders and Docker volumes)

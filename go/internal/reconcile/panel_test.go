@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,9 +33,9 @@ func panelSpec(gen uint64, image string) *agentv1.ServiceSpec {
 func TestInstallerPanelIsAdoptedWithoutARoll(t *testing.T) {
 	h := newHarness(t)
 	// The installer's container: reserved ids, generation 1, protected, no
-	// spec hash, run as the panel user (cli.panelRunArgs).
-	labels := docker.InstanceLabels{ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true, User: docker.PanelUser}.Map()
-	installer := h.eng.AddContainer(docker.ContainerSpec{Name: docker.ContainerName(docker.PanelServiceID, 1, 0), Image: "seylo:1", User: docker.PanelUser, Labels: labels}, true)
+	// spec hash, run as the panel user, the panel port published on every
+	// address (cli.panelRunArgs).
+	installer := addInstallerPanel(h, docker.PortPublish{HostPort: 3100, ContainerPort: 3000})
 
 	h.apply(1, panelSpec(1, "seylo:1"))
 	if got := h.names(docker.PanelServiceID); len(got) != 1 {
@@ -67,6 +68,115 @@ func TestInstallerPanelIsAdoptedWithoutARoll(t *testing.T) {
 	}
 	if c.Spec.User != docker.PanelUser || c.Spec.Labels[docker.LabelUser] != docker.PanelUser {
 		t.Fatalf("generation 2 runs as %q (label %q), want the panel user %s", c.Spec.User, c.Spec.Labels[docker.LabelUser], docker.PanelUser)
+	}
+}
+
+// addInstallerPanel adds a running container like the one cli.panelRunArgs
+// starts: reserved ids, generation 1, protected, the panel user, no spec
+// hash, and Docker publishing the given ports.
+func addInstallerPanel(h *harness, publish ...docker.PortPublish) string {
+	labels := docker.InstanceLabels{ServiceID: docker.PanelServiceID, ProjectID: docker.PanelProjectID, Kind: "app", Generation: 1, Protected: true, User: docker.PanelUser}.Map()
+	return h.eng.AddContainer(docker.ContainerSpec{Name: docker.ContainerName(docker.PanelServiceID, 1, 0), Image: "seylo:1", User: docker.PanelUser, Labels: labels, Publish: publish}, true)
+}
+
+// closedPanelSpec is panelSpec with its port published on 127.0.0.1 only.
+func closedPanelSpec(gen uint64, image string) *agentv1.ServiceSpec {
+	s := panelSpec(gen, image)
+	s.Ports[0].Public.BindAddress = "127.0.0.1"
+	return s
+}
+
+var loopback = netip.MustParseAddr("127.0.0.1")
+
+// The installer's container is adopted only while Docker publishes what
+// the spec asks for. One whose bindings differ (open while the panel wants
+// it on 127.0.0.1, another host port) is rolled at the same generation, so
+// the port is never left open while the panel counts it as closed.
+func TestInstallerPanelWithOtherBindingsIsRolled(t *testing.T) {
+	for name, tc := range map[string]struct {
+		spec *agentv1.ServiceSpec
+		want docker.PortPublish
+	}{
+		"closed":         {closedPanelSpec(1, "seylo:1"), docker.PortPublish{HostIP: loopback, HostPort: 3100, ContainerPort: 3000}},
+		"other hostPort": {func() *agentv1.ServiceSpec { s := panelSpec(1, "seylo:1"); s.Ports[0].Public.HostPort = 3200; return s }(), docker.PortPublish{HostPort: 3200, ContainerPort: 3000}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			installer := addInstallerPanel(h, docker.PortPublish{HostPort: 3100, ContainerPort: 3000})
+			h.apply(1, tc.spec)
+			h.deployResult(docker.PanelServiceID, 1)
+			h.waitFor("the installer's container gone", func() bool { _, ok := h.eng.Get(installer); return !ok })
+			c, ok := h.eng.Get(docker.ContainerName(docker.PanelServiceID, 1, 0))
+			if !ok || !c.Running || c.ID == installer {
+				t.Fatalf("no new generation 1 container running: %+v", c)
+			}
+			if !slices.Equal(c.Spec.Publish, []docker.PortPublish{tc.want}) {
+				t.Fatalf("publish = %v, want %v", c.Spec.Publish, tc.want)
+			}
+			// Settled: the new container carries a spec hash, so no second roll.
+			id := c.ID
+			h.apply(2, tc.spec)
+			if c, ok := h.eng.Get(docker.ContainerName(docker.PanelServiceID, 1, 0)); !ok || c.ID != id {
+				t.Fatalf("the panel rolled again: %v", h.names(docker.PanelServiceID))
+			}
+		})
+	}
+}
+
+// A change of bind_address rolls the panel (RECREATE), at the same
+// generation and on a bump, and the new container's Docker bindings follow
+// it: 127.0.0.1 only, then every address again.
+func TestPanelBindAddressChangeRolls(t *testing.T) {
+	h := newHarness(t)
+	h.apply(1, panelSpec(1, "seylo:1"))
+	h.deployResult(docker.PanelServiceID, 1)
+	open, _ := h.eng.Get(docker.ContainerName(docker.PanelServiceID, 1, 0))
+	if !slices.Equal(open.Spec.Publish, []docker.PortPublish{{HostPort: 3100, ContainerPort: 3000}}) {
+		t.Fatalf("open publish = %v", open.Spec.Publish)
+	}
+
+	// Same generation, port closed to the server itself.
+	h.apply(2, closedPanelSpec(1, "seylo:1"))
+	h.waitFor("the closed panel at generation 1", func() bool {
+		c, ok := h.eng.Get(docker.ContainerName(docker.PanelServiceID, 1, 0))
+		return ok && c.Running && c.ID != open.ID && slices.Equal(c.Spec.Publish, []docker.PortPublish{{HostIP: loopback, HostPort: 3100, ContainerPort: 3000}})
+	})
+	h.waitFor("the open container gone", func() bool { _, ok := h.eng.Get(open.ID); return !ok })
+	if got := h.names(docker.PanelServiceID); len(got) != 1 {
+		t.Fatalf("panel containers = %v", got)
+	}
+
+	// A new generation opens it again.
+	h.apply(3, panelSpec(2, "seylo:1"))
+	h.deployResult(docker.PanelServiceID, 2)
+	c, ok := h.eng.Get(docker.ContainerName(docker.PanelServiceID, 2, 0))
+	if !ok || !c.Running || !slices.Equal(c.Spec.Publish, []docker.PortPublish{{HostPort: 3100, ContainerPort: 3000}}) {
+		t.Fatalf("generation 2 = %+v", c.Spec.Publish)
+	}
+	if got := h.names(docker.PanelServiceID); len(got) != 1 {
+		t.Fatalf("panel containers = %v", got)
+	}
+}
+
+// A closed panel that never turns healthy is rolled back: the open
+// container runs again, so a failed close leaves IP access open.
+func TestFailedCloseKeepsThePanelOpen(t *testing.T) {
+	h := newHarness(t)
+	h.apply(1, panelSpec(1, "seylo:1"))
+	h.deployResult(docker.PanelServiceID, 1)
+	open, _ := h.eng.Get(docker.ContainerName(docker.PanelServiceID, 1, 0))
+	h.prober.setBad(docker.ContainerName(docker.PanelServiceID, 2, 0), true)
+	closed := closedPanelSpec(2, "seylo:1")
+	closed.Deploy.HealthTimeout = durationpb.New(200 * time.Millisecond)
+	h.apply(2, closed)
+	if p := h.deployResult(docker.PanelServiceID, 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
+		t.Fatalf("closing deploy = %v, want failed", p)
+	}
+	h.waitFor("the open panel running again", func() bool { c, ok := h.eng.Get(open.ID); return ok && c.Running })
+	for _, c := range h.eng.Containers() {
+		if c.Spec.Labels[docker.LabelService] == docker.PanelServiceID && c.ID != open.ID {
+			t.Fatalf("the failed closed container is left: %+v", c.Spec)
+		}
 	}
 }
 

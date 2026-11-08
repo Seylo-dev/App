@@ -347,7 +347,30 @@ func (m *Moby) InspectContainer(ctx context.Context, id string) (ContainerDetail
 			}
 		}
 	}
+	if c.HostConfig != nil {
+		d.Publish = publishedPorts(c.HostConfig.PortBindings)
+	}
 	return d, nil
+}
+
+// publishedPorts turns a container's TCP port bindings into PortPublish
+// entries (sorted). A binding without a usable host port is skipped.
+func publishedPorts(bindings network.PortMap) []PortPublish {
+	var out []PortPublish
+	for port, list := range bindings {
+		if port.Proto() != network.TCP {
+			continue
+		}
+		for _, b := range list {
+			hostPort, err := strconv.ParseUint(b.HostPort, 10, 16)
+			if err != nil || hostPort == 0 {
+				continue
+			}
+			out = append(out, PortPublish{HostIP: b.HostIP, HostPort: uint32(hostPort), ContainerPort: uint32(port.Num())})
+		}
+	}
+	SortPublish(out)
+	return out
 }
 
 // parseDockerTime treats Docker's zero time ("0001-01-01T00:00:00Z") as zero.
@@ -429,11 +452,12 @@ func (m *Moby) CreateContainer(ctx context.Context, spec ContainerSpec) (string,
 		host.PortBindings = network.PortMap{}
 		for _, p := range spec.Publish {
 			port, ok := network.PortFrom(uint16(p.ContainerPort), network.TCP)
-			if !ok || p.HostPort == 0 || p.HostPort > 65535 {
-				return "", fmt.Errorf("creating container %s: bad published port %d:%d", spec.Name, p.HostPort, p.ContainerPort)
+			if !ok || p.HostPort == 0 || p.HostPort > 65535 || p.HostIP.Zone() != "" {
+				return "", fmt.Errorf("creating container %s: bad published port %s:%d", spec.Name, p.Host(), p.ContainerPort)
 			}
 			cfg.ExposedPorts[port] = struct{}{}
-			host.PortBindings[port] = []network.PortBinding{{HostPort: strconv.Itoa(int(p.HostPort))}}
+			// A zero HostIP goes out as "": every address, as before.
+			host.PortBindings[port] = append(host.PortBindings[port], network.PortBinding{HostIP: p.HostIP, HostPort: strconv.Itoa(int(p.HostPort))})
 		}
 	}
 	var netCfg *network.NetworkingConfig

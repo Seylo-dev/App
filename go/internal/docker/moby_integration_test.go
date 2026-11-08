@@ -7,8 +7,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -218,6 +221,78 @@ func TestMobyListsOnlyManaged(t *testing.T) {
 	}
 	if _, err := m.CreateContainer(ctx, ContainerSpec{Name: prefix + "-ours", Image: testImage}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate name = %v", err)
+	}
+}
+
+// A port published on 127.0.0.1 answers on loopback only and inspects with
+// its host address; a zero HostIP is every address, as before 0.2.1. The
+// bindings are read back the same whether the container runs or not.
+func TestMobyPublishHostIP(t *testing.T) {
+	m, prefix := itEngine(t)
+	ctx := context.Background()
+	free := func() uint32 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer l.Close()
+		return uint32(l.Addr().(*net.TCPAddr).Port)
+	}
+	closed, open := free(), free()
+	publish := []PortPublish{
+		{HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: closed, ContainerPort: 3000},
+		{HostPort: open, ContainerPort: 3443},
+	}
+	id, err := m.CreateContainer(ctx, ContainerSpec{
+		Name: prefix + "-pub", Image: testImage, Labels: map[string]string{"seylo.it": prefix},
+		Command: []string{"sh", "-c", "httpd -p 3000 -h / && exec httpd -f -p 3443 -h /"},
+		Publish: publish,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err := m.InspectContainer(ctx, id); err != nil || !slices.Equal(d.Publish, publish) {
+		t.Fatalf("created: publish = %v, %v; want %v", d.Publish, err, publish)
+	}
+	if err := m.StartContainer(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := m.InspectContainer(ctx, id); err != nil || !slices.Equal(d.Publish, publish) {
+		t.Fatalf("running: publish = %v, %v; want %v", d.Publish, err, publish)
+	}
+	dial := func(host string, port uint32) error {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			c, err := net.DialTimeout("tcp", net.JoinHostPort(host, itoa(int(port))), 2*time.Second)
+			if err == nil {
+				return c.Close()
+			}
+			if time.Now().After(deadline) {
+				return err
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	if err := dial("127.0.0.1", closed); err != nil {
+		t.Fatalf("loopback-only port from loopback: %v", err)
+	}
+	if err := dial("127.0.0.1", open); err != nil {
+		t.Fatalf("open port from loopback: %v", err)
+	}
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		n, ok := a.(*net.IPNet)
+		if !ok || n.IP.To4() == nil || n.IP.IsLoopback() || n.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		if err := dial(n.IP.String(), open); err != nil {
+			t.Fatalf("open port from %s: %v", n.IP, err)
+		}
+		if c, err := net.DialTimeout("tcp", net.JoinHostPort(n.IP.String(), itoa(int(closed))), 2*time.Second); err == nil {
+			c.Close()
+			t.Fatalf("the loopback-only port answered on %s", n.IP)
+		}
+		break
 	}
 }
 

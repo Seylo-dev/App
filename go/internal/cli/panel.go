@@ -48,15 +48,14 @@ func newPanelCommand(d *deps) *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "status",
-			Short: "Show the panel service's state, version and URL",
+			Short: "Show the panel service's state, version, URL and where its ports answer",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				s, err := localapi.NewClient(d.layout).PanelStatus(cmd.Context())
 				if err != nil {
 					return err
 				}
-				_, err = fmt.Fprintf(d.out, "Panel %s (%s), version %s, %s\n", s.Phase, runningWord(s.Running), s.Version, s.URL)
-				return err
+				return printPanelStatus(d.out, s)
 			},
 		},
 		newPanelLogsCommand(d),
@@ -274,11 +273,8 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 		return err
 	}
 	for name, token := range map[string]string{setupTokenFile: setupToken, joinTokenFile: joinToken} {
-		path := filepath.Join(panelDir, name)
-		if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-			return err
-		}
-		if err := os.Chown(path, panelUID, panelGID); err != nil && !errors.Is(err, os.ErrPermission) {
+		// The folder may be left from an earlier panel: never follow what it holds.
+		if err := writePanelFile(panelDir, name, []byte(token+"\n")); err != nil {
 			return err
 		}
 	}
@@ -428,31 +424,15 @@ func newPanelSetupLinkCommand(d *deps) *cobra.Command {
 // panelSetupLink rewrites <data>/panel/setup-token and restarts the panel
 // container (apps/panel/src/auth/setup-token.ts reads the file on start).
 func panelSetupLink(ctx context.Context, d *deps) error {
-	list, err := d.output(ctx, "docker", "ps", "--filter", "label="+docker.LabelProtected+"=true",
-		"--format", "{{.Names}}\t{{.Image}}\t{{.Label \""+docker.LabelService+"\"}}")
+	container, err := runningPanelContainer(ctx, d)
 	if err != nil {
-		return fmt.Errorf("listing containers: %w", err)
-	}
-	container := ""
-	for _, line := range strings.Split(list, "\n") {
-		f := strings.Split(line, "\t")
-		if len(f) == 3 && (f[2] == PanelServiceID || strings.HasPrefix(f[1], brand.Image)) {
-			container = f[0]
-			break
-		}
-	}
-	if container == "" {
-		return errors.New("no running panel container on this node; start it with `" + brand.Slug + " panel start`")
+		return err
 	}
 	token, err := newToken("setup")
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(d.layout.Root(), "panel", setupTokenFile)
-	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
-		return err
-	}
-	if err := os.Chown(path, panelUID, panelGID); err != nil && !errors.Is(err, os.ErrPermission) {
+	if err := writePanelFile(filepath.Join(d.layout.Root(), "panel"), setupTokenFile, []byte(token+"\n")); err != nil {
 		return err
 	}
 	if _, err := d.output(ctx, "docker", "restart", container); err != nil {

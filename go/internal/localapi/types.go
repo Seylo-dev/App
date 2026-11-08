@@ -70,7 +70,35 @@ type PanelStatus struct {
 	Version string `json:"version"`
 	URL     string `json:"url"`
 	Phase   string `json:"phase"`
+	// IPAccess is the panel's own port and AgentPort the agents' TLS
+	// port, as Docker publishes them for the running panel container
+	// (added in 0.2.1: an older agent leaves both empty).
+	IPAccess  PortAccess `json:"ipAccess"`
+	AgentPort PortAccess `json:"agentPort"`
 }
+
+// PortAccess is how one of the panel's ports is published on the host.
+type PortAccess struct {
+	// State is PortOpen, PortClosed, PortOff or PortUnknown.
+	State string `json:"state,omitempty"`
+	// Bindings are the host sides, for example "127.0.0.1:3000", or
+	// "0.0.0.0:3443" for every address.
+	Bindings []string `json:"bindings,omitempty"`
+}
+
+// PortAccess states.
+const (
+	// PortOpen: published on an address other machines can reach (every
+	// address, as before 0.2.1).
+	PortOpen = "open"
+	// PortClosed: published on 127.0.0.1 (or ::1) only, so only the
+	// server itself and an SSH tunnel reach it.
+	PortClosed = "closed"
+	// PortOff: not published at all (no agents' TLS port).
+	PortOff = "off"
+	// PortUnknown: no running panel container to read it from.
+	PortUnknown = "unknown"
+)
 
 // LogsOptions controls PanelLogs.
 type LogsOptions struct {

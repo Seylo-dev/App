@@ -29,7 +29,9 @@ func TestWireRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	caps := d.Facts.Get().GetCapabilities()
-	for _, c := range []string{"state.sync.v1", "volume.transfer.v1"} {
+	// panel.publish-bind.v1: the panel closes IP access only on a panel
+	// node that advertises it (apps/panel/src/modules/settings).
+	for _, c := range []string{"state.sync.v1", "volume.transfer.v1", "panel.publish-bind.v1"} {
 		if !slices.Contains(caps, c) {
 			t.Fatalf("capability %s not advertised: %v", c, caps)
 		}

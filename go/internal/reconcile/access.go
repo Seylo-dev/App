@@ -457,7 +457,7 @@ func (r *Runtime) Resolve(ctx context.Context, serviceID string, containerPort u
 			continue
 		}
 		a := net.JoinHostPort(d.Networks[network], strconv.Itoa(int(containerPort)))
-		served := instanceHash(c.Labels, spec, hash)
+		served := instanceHash(c.Labels, spec, hash, func() ([]docker.PortPublish, bool) { return d.Publish, true })
 		if v, ok := r.reattached.Load(c.ID); ok {
 			served = v.(reattachment).Hash
 		}

@@ -77,6 +77,9 @@ func wireRuntime(reg *Registry, d *Deps) error {
 		return err
 	}
 	d.Reconcile = rt
+	// Reconcile publishes the panel's ports on PublicPort.bind_address, so
+	// the panel may close IP access on this node.
+	reg.Advertise(reconcile.PanelPublishBindCapability)
 	d.Components.Add("reconcile", rt.Run)
 	d.Components.Add("docker-facts", func(ctx context.Context) error { return dockerFacts(ctx, d) })
 

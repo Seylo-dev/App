@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/rpc"
 	"github.com/seylo-dev/app/go/internal/state"
@@ -181,14 +184,99 @@ func (b *localBackend) PanelStatus(ctx context.Context) (localapi.PanelStatus, e
 		if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
 			ver = ref[i+1:]
 		}
-		return localapi.PanelStatus{
+		out := localapi.PanelStatus{
 			Running: phase == agentv1.ServicePhase_SERVICE_PHASE_RUNNING,
 			Version: ver,
 			URL:     cfg.PanelURL,
 			Phase:   phaseName(phase),
-		}, nil
+		}
+		out.IPAccess, out.AgentPort = b.panelPorts(ctx, spec)
+		return out, nil
 	}
 	return localapi.PanelStatus{Phase: "not on this node", URL: cfg.PanelURL}, nil
+}
+
+// panelPorts reports how Docker actually publishes the panel's own port
+// and the agents' TLS port: the bindings of the running panel container,
+// not what the desired state asks for, so a close that failed and rolled
+// back shows as open.
+func (b *localBackend) panelPorts(ctx context.Context, spec *agentv1.ServiceSpec) (panel, agents localapi.PortAccess) {
+	panelPort, agentPort := panelContainerPorts(spec)
+	agents = localapi.PortAccess{State: localapi.PortUnknown}
+	if agentPort == 0 {
+		agents = localapi.PortAccess{State: localapi.PortOff}
+	}
+	publish, ok := b.runningPanelPublish(ctx, spec.GetId())
+	if !ok {
+		return localapi.PortAccess{State: localapi.PortUnknown}, agents
+	}
+	panel = portAccess(publish, panelPort)
+	if agentPort != 0 {
+		agents = portAccess(publish, agentPort)
+	}
+	return panel, agents
+}
+
+// panelContainerPorts reads the panel's ports inside its container from
+// the env panelContributor sets: <SLUG>_PORT (3000 when unset) and
+// <SLUG>_AGENT_TLS_PORT (0: the agents' TLS port is off).
+func panelContainerPorts(spec *agentv1.ServiceSpec) (panel, agents uint32) {
+	prefix := strings.ToUpper(brand.Slug) + "_"
+	panel = 3000
+	for _, e := range spec.GetEnv() {
+		v, err := strconv.ParseUint(e.GetValue(), 10, 16)
+		if err != nil || v == 0 {
+			continue
+		}
+		switch e.GetName() {
+		case prefix + "PORT":
+			panel = uint32(v)
+		case prefix + "AGENT_TLS_PORT":
+			agents = uint32(v)
+		}
+	}
+	return panel, agents
+}
+
+// runningPanelPublish returns the Docker bindings of a running panel
+// container; false when none runs or Docker does not answer in time.
+func (b *localBackend) runningPanelPublish(ctx context.Context, serviceID string) ([]docker.PortPublish, bool) {
+	if b.deps.Docker == nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	list, err := b.deps.Docker.ListContainers(ctx, map[string]string{docker.LabelService: serviceID})
+	if err != nil {
+		return nil, false
+	}
+	for _, c := range list {
+		if !docker.IsServiceInstance(c.Labels) || c.State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
+			continue
+		}
+		if d, err := b.deps.Docker.InspectContainer(ctx, c.ID); err == nil && d.Running {
+			return d.Publish, true
+		}
+	}
+	return nil, false
+}
+
+// portAccess describes the bindings of one container port: open when any
+// is on an address other than loopback (the zero address is every one).
+func portAccess(publish []docker.PortPublish, containerPort uint32) localapi.PortAccess {
+	out := localapi.PortAccess{State: localapi.PortOff}
+	for _, p := range publish {
+		if p.ContainerPort != containerPort {
+			continue
+		}
+		out.Bindings = append(out.Bindings, p.Host())
+		if !p.HostIP.IsLoopback() {
+			out.State = localapi.PortOpen
+		} else if out.State == localapi.PortOff {
+			out.State = localapi.PortClosed
+		}
+	}
+	return out
 }
 
 func (b *localBackend) StartPanel(ctx context.Context) error {

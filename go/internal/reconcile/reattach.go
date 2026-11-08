@@ -34,7 +34,7 @@ func (w *worker) hashOf(id string, labels map[string]string, spec *agentv1.Servi
 	if e, ok := w.rec.Reattached[id]; ok {
 		return e.Hash
 	}
-	return instanceHash(labels, spec, hash)
+	return instanceHash(labels, spec, hash, func() ([]docker.PortPublish, bool) { return w.r.publishedOf(id) })
 }
 
 // projectOf is the project whose network a container is on: a

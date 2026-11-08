@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -223,7 +225,54 @@ func (e *Env) dockerEngine(ctx context.Context) *agentv1.NodeCheckResult {
 	if err != nil {
 		return fail("Docker is not reachable: "+err.Error(), "Start it with `systemctl start docker` and check `journalctl -u docker`.")
 	}
-	return dockerResult(info)
+	res := dockerResult(info)
+	major, _, ok := parseDockerVersion(info.ServerVersion)
+	if !ok || major >= loopbackSafeDockerMajor || res.GetStatus() == agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
+		return res
+	}
+	bound := e.panelLoopbackPorts(ctx)
+	if len(bound) == 0 {
+		return res
+	}
+	hint := fmt.Sprintf("Update Docker to %d or newer from the node page (Update Docker) or with your package manager: "+
+		"older versions may let other machines on the same local network reach ports published on 127.0.0.1.", loopbackSafeDockerMajor)
+	if major >= recommendedDockerMajor && res.GetFixHint() != "" {
+		hint += " " + res.GetFixHint() // the storage driver's
+	}
+	return warn(res.GetDetail()+"; the panel is published on "+strings.Join(bound, ", ")+" only", hint)
+}
+
+// loopbackSafeDockerMajor is the Docker release from which ports published
+// on 127.0.0.1 are kept from other machines on the same local network.
+// Before it, a neighbour that routes 127.0.0.1 to this server may reach
+// them (Docker's DNAT rules with route_localnet); not yet reproduced on our
+// VMs, so it only warns, and only while the panel's port is loopback-only
+// ("Serve on IP address" off).
+const loopbackSafeDockerMajor = 28
+
+// panelLoopbackPorts lists the panel container's ports that Docker
+// publishes on a loopback address ("127.0.0.1:3000"), from the running
+// container's actual bindings.
+func (e *Env) panelLoopbackPorts(ctx context.Context) []string {
+	list, err := e.Docker.Containers(ctx, map[string][]string{"label": {docker.LabelService + "=" + docker.PanelServiceID}})
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, c := range list {
+		if c.State != "running" || !docker.IsPanelService(c.Labels[docker.LabelService], c.Labels[docker.LabelProtected] == "true") {
+			continue
+		}
+		for _, p := range c.Ports {
+			ip, err := netip.ParseAddr(p.IP)
+			if err != nil || !ip.IsLoopback() || p.PublicPort == 0 || p.Type != "tcp" {
+				continue
+			}
+			out = append(out, net.JoinHostPort(ip.String(), strconv.Itoa(int(p.PublicPort))))
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 func dockerResult(info *DockerInfo) *agentv1.NodeCheckResult {
