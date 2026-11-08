@@ -1,8 +1,9 @@
 // panel.db does not grow without bound: crash reports, webhook deliveries,
-// notification deliveries, resolved alerts and old deploy logs are pruned.
+// notification deliveries, resolved alerts, finished jobs and old deploy
+// logs are pruned.
 
 import { expect, test } from "bun:test";
-import { crashReports, webhookDeliveries } from "../src/db/schema";
+import { crashReports, jobs, webhookDeliveries } from "../src/db/schema";
 import { pruneTables, retention } from "../src/modules/nodes/retention";
 import { testPanel } from "./helpers";
 import { seedNode, seedProject, seedService } from "./seed-helpers";
@@ -60,5 +61,32 @@ test("crash reports keep the newest per service and nothing older than a month; 
       .all()
       .map((d) => d.deliveryId),
   ).toEqual(["b"]);
+  panel.close();
+});
+
+test("the hourly sweep deletes finished jobs older than a week, not only the next start", () => {
+  const panel = testPanel({ modules: [] });
+  const now = Date.now();
+  const at = (days: number) => new Date(now - days * 24 * 3600 * 1000);
+  const job = (type: string, status: "queued" | "running" | "succeeded" | "failed" | "cancelled", finishedDaysAgo: number | null) =>
+    panel.deps.db
+      .insert(jobs)
+      .values({ type, payload: {}, status, runAt: at(30), finishedAt: finishedDaysAgo === null ? null : at(finishedDaysAgo) })
+      .run();
+  job("old-ok", "succeeded", 8);
+  job("old-failed", "failed", 8);
+  job("old-cancelled", "cancelled", 30);
+  job("recent", "succeeded", 1);
+  job("waiting", "queued", null);
+  job("busy", "running", null);
+
+  pruneTables(panel.deps.db, now);
+  const left = panel.deps.db
+    .select({ type: jobs.type })
+    .from(jobs)
+    .all()
+    .map((j) => j.type)
+    .sort();
+  expect(left).toEqual(["busy", "recent", "waiting"]);
   panel.close();
 });

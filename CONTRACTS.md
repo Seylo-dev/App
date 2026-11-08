@@ -1117,7 +1117,10 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   fields (or `@daily` and friends) in UTC. Each due schedule enqueues one job
   with dedupe key `schedule:<key>`, so a slow run is never doubled; calling
   `ensure` again with the same timing keeps `nextRunAt`. `remove(key)`,
-  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`.
+  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`. Every run leaves a
+  finished `jobs` row; rows finished more than 7 days ago are deleted at
+  start and by the hourly retention sweep (`pruneFinishedJobs`, called from
+  `nodes/retention.ts` `pruneTables`).
 - Alerts: `deps.alerts.raise({ event, key, title, message?, serviceId?,
   projectId?, nodeId?, link?, severity? })` (`modules/alerts/sink.ts`). One
   row per `key` ("<incident kind>:<subject>:<start>"); mutes and the

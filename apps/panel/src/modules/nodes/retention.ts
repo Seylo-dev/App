@@ -4,13 +4,14 @@
 // update: durable agent events and crash reports (also capped per node, so
 // one node cannot fill the disk; agent-hub/report-budget.ts bounds a day of
 // them as they arrive), webhook deliveries,
-// notification deliveries, resolved alerts and the build and deploy output
-// of old deployments. Deployments themselves stay (they are the history and
+// notification deliveries, resolved alerts, finished jobs (every schedule
+// run leaves one) and the build and deploy output of old deployments. Deployments themselves stay (they are the history and
 // the rollback targets); only their log lines go.
 
 import { and, desc, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { reportLaneSql } from "../../agent-hub/report-budget";
 import type { PanelDb } from "../../db/client";
+import { pruneFinishedJobs } from "../../jobs/queue";
 import {
   agentReports,
   alerts,
@@ -109,6 +110,7 @@ export function pruneTables(db: PanelDb, now = Date.now()): void {
   db.delete(alerts)
     .where(and(isNotNull(alerts.resolvedAt), lt(alerts.resolvedAt, before(retention.resolvedAlertsMs))))
     .run();
+  pruneFinishedJobs(db, now);
 
   // Log lines of old deployments, except each service's newest ones and the one it runs.
   const keep = db

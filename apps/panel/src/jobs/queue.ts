@@ -66,7 +66,19 @@ export interface JobRunner extends JobQueue {
   stop(): Promise<void>;
 }
 
-const finishedRetentionMs = 7 * 24 * 60 * 60 * 1000;
+/** Finished jobs (every schedule run leaves one) are kept a week. */
+export const finishedJobsRetentionMs = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Deletes finished jobs older than the retention. Runs at start and with the
+ * hourly retention sweep (nodes/retention.ts pruneTables): the 15 s
+ * deployments tick alone leaves 5,760 rows a day.
+ */
+export function pruneFinishedJobs(db: PanelDb, now = Date.now()): void {
+  db.delete(jobs)
+    .where(and(inArray(jobs.status, ["succeeded", "failed", "cancelled"]), lt(jobs.finishedAt, new Date(now - finishedJobsRetentionMs))))
+    .run();
+}
 
 /** 10s, 20s, 40s ... capped at 10 minutes. */
 export function retryDelayMs(attempt: number): number {
@@ -200,11 +212,7 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
     start(deps, intervalMs = 1000) {
       // Jobs left "running" by a crash or restart never finished: run them again.
       db.update(jobs).set({ status: "queued", lockedAt: null }).where(eq(jobs.status, "running")).run();
-      db.delete(jobs)
-        .where(
-          and(inArray(jobs.status, ["succeeded", "failed", "cancelled"]), lt(jobs.finishedAt, new Date(Date.now() - finishedRetentionMs))),
-        )
-        .run();
+      pruneFinishedJobs(db);
       timer = setInterval(() => void tick(deps, new Date()), intervalMs);
     },
     async stop() {
