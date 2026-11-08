@@ -11,13 +11,17 @@
 //                a node offline when the step comes up, or that drops while
 //                UpdateAgent is in flight, is skipped with retry "waiting" and
 //                gets the update in a run of its own when it reconnects
-//                (catch-up.ts)
+//                (catch-up.ts); a busy node (ABORTED: another update holds its
+//                lock) gets UpdateAgent again with a backoff until the step's
+//                deadline
 //   docker step  single-step runs from nodes.updateDocker, finished by UpdateResult
 //
 // A run keeps the verified manifest it installs (update_runs.manifest), so a
 // check that finds a newer release, or a switch of the release channel,
 // never changes what a run in progress sends. A failed step fails the run
-// and skips the rest.
+// and skips the rest. A step that times out raises an update_failed alert;
+// a timed-out agent step is tried once more on its own (retry "waiting"
+// until retryAt, catch-up.ts).
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
@@ -50,6 +54,19 @@ import "./settings";
 /** A step not finished in this long fails the run. */
 export const stepTimeoutMs = 10 * 60_000;
 const pollMs = 5_000;
+/** The error of a step that timed out. */
+export const stepTimeoutError = "The update did not finish in time.";
+/** A timed-out agent step is tried again this long after (once: a retry that times out too is left to Update now). */
+export const timeoutRetryMs = 5 * 60_000;
+/**
+ * UpdateAgent's deadline. Since 0.2.1 the agent waits up to a minute for a
+ * panel swap that holds its update lock (it leaves 30 seconds of the
+ * deadline to the download), then downloads and checks the new binary.
+ */
+export const updateAgentTimeoutMs = 2 * 60_000;
+/** A busy node gets UpdateAgent again after this, then twice as long each time up to busyRetryMaxMs, within the step's deadline. */
+export const busyRetryMs = 5_000;
+const busyRetryMaxMs = 60_000;
 /**
  * How long a Docker update (nodes.updateDocker) may go without its
  * UpdateResult. The agent reports only once the package manager is done and
@@ -385,11 +402,19 @@ function agentWait(deps: Pick<Deps, "jobs">, step: StepRow, backoff: string, ret
   return { retry: "waiting", retryAt };
 }
 
+type RunCtx = Pick<Deps, "db" | "agents" | "config" | "logger" | "live" | "jobs" | "alerts">;
+
+/**
+ * Agent steps whose UpdateAgent the node answered busy (ABORTED: another
+ * update holds its lock, such as the panel swap that just brought this
+ * panel up, or its own update on connect), by step id: when the panel
+ * sends it again and how many times it was busy. Kept in memory; after a
+ * panel restart such a step finishes by version or times out.
+ */
+const busySteps = new Map<string, { tries: number; at: number }>();
+
 /** Advances a run by one step. Returns the delay before the job should look again, or null when the run is over. */
-export async function advanceRun(
-  ctx: Pick<Deps, "db" | "agents" | "config" | "logger" | "live" | "jobs">,
-  runId: string,
-): Promise<number | null> {
+export async function advanceRun(ctx: RunCtx, runId: string): Promise<number | null> {
   const db = ctx.db;
   const run = db.select().from(updateRuns).where(eq(updateRuns.id, runId)).get();
   if (run?.status !== "running") return null;
@@ -416,6 +441,17 @@ export async function advanceRun(
         : null;
     if (!error) return dockerPollMs;
     finishStep(db, step.id, "failed", error);
+    if (error === dockerNoResultError && step.nodeId) {
+      const name = db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, step.nodeId)).get()?.name ?? "a node";
+      // Resolved if the result still comes (applyUpdateResult).
+      ctx.alerts.raise({
+        event: "update_failed",
+        key: `update-failed:${step.id}`,
+        title: `Docker update on ${name} did not report back`,
+        message: dockerNoResultError,
+        nodeId: step.nodeId,
+      });
+    }
     publish();
     return 0;
   }
@@ -428,14 +464,34 @@ export async function advanceRun(
         ctx.agents.isOnline(step.nodeId) &&
         ctx.agents.state.get(step.nodeId)?.facts?.agentVersion === step.toVersion);
     if (doneByVersion) {
+      busySteps.delete(step.id);
       finishStep(db, step.id, "succeeded");
       publish();
       return 0;
     }
     if (step.startedAt && Date.now() - step.startedAt.getTime() > stepTimeoutMs) {
-      finishStep(db, step.id, "failed", "The update did not finish in time.");
+      busySteps.delete(step.id);
+      timedOut(ctx, run, step);
       publish();
       return 0;
+    }
+    // A busy node gets UpdateAgent again when its backoff is over, if it is
+    // connected: one that dropped may be restarting into the new version.
+    const busy = busySteps.get(step.id);
+    if (busy && step.target === "agent" && step.nodeId) {
+      const wait = busy.at - Date.now();
+      if (wait > 0) return Math.min(wait, pollMs);
+      const release = runRelease(db, run);
+      if (release && ctx.agents.isOnline(step.nodeId)) {
+        try {
+          return await sendUpdateAgent(ctx, run, step, release, busy.tries);
+        } catch (error) {
+          busySteps.delete(step.id);
+          finishStep(db, step.id, "failed", error instanceof OpError ? error.message : "The update could not start.");
+          publish();
+          return 0;
+        }
+      }
     }
     return pollMs;
   }
@@ -498,49 +554,155 @@ export async function advanceRun(
       }
       start();
       publish();
-      try {
-        await ctx.agents.call(step.nodeId, "updateAgent", {
-          manifest: release.manifest,
-          manifestSignature: release.signature,
-          targetVersion: release.version,
-          updateId: step.id,
-          // Not a person's choice: the agent waits as its own automatic updates do.
-          automatic: run.trigger !== "manual",
-        });
-      } catch (error) {
-        const details = error instanceof OpError ? error.details : undefined;
-        // The node dropped while the call was in flight: like a node offline
-        // when its step came up, it gets the update when it reconnects.
-        if (details?.reason === "offline" && !ctx.agents.isOnline(step.nodeId)) {
-          finishStep(db, step.id, "skipped", offlineSkipMessage, { retry: "waiting" });
-          publish();
-          return 0;
-        }
-        // An automatic update of a release the agent rolled back, or that
-        // failed there within the hour, waits (UpdateAgentRequest.automatic).
-        if (details?.agentStatus === "FAILED_PRECONDITION" && details.backoff) {
-          const retry = run.trigger === "reconnect" ? agentWait(ctx, step, details.backoff, details.retryAfter) : {};
-          // Go error text starts in lower case; the history shows it as a sentence.
-          const message = (error as OpError).message;
-          finishStep(db, step.id, "skipped", message.charAt(0).toUpperCase() + message.slice(1), retry);
-          publish();
-          return 0;
-        }
-        // Busy (ABORTED: its own update on connect is running) or already
-        // at that version (ALREADY_EXISTS): the step finishes by version.
-        const status = details?.agentStatus;
-        if (status !== "ABORTED" && status !== "ALREADY_EXISTS") throw error;
-      }
-      return pollMs;
+      return await sendUpdateAgent(ctx, run, { ...step, status: "running" }, release, 0);
     }
     finishStep(db, step.id, "skipped");
     return 0;
   } catch (error) {
+    busySteps.delete(step.id);
     const message = error instanceof OpError ? error.message : "The update could not start.";
     finishStep(db, step.id, "failed", message);
     publish();
     return 0;
   }
+}
+
+/**
+ * Sends UpdateAgent for a running agent step (`busyTries`: how many times
+ * the node was busy before) and records the answer. Returns the delay
+ * before the run looks again. Errors it does not handle are thrown; the
+ * caller fails the step with them.
+ */
+async function sendUpdateAgent(ctx: RunCtx, run: RunRow, step: StepRow, release: RunRelease, busyTries: number): Promise<number> {
+  const db = ctx.db;
+  const nodeId = step.nodeId as string;
+  const publish = () => ctx.live.publish("panel", { type: "invalidate", ops: ["updates.status", "updates.history", "nodes.list"] });
+  try {
+    await ctx.agents.call(
+      nodeId,
+      "updateAgent",
+      {
+        manifest: release.manifest,
+        manifestSignature: release.signature,
+        targetVersion: release.version,
+        updateId: step.id,
+        // Not a person's choice: the agent waits as its own automatic updates do.
+        automatic: run.trigger !== "manual",
+      },
+      { timeoutMs: updateAgentTimeoutMs },
+    );
+    // Accepted: the new version on reconnect or the UpdateResult finishes the step.
+    busySteps.delete(step.id);
+    return pollMs;
+  } catch (error) {
+    const details = error instanceof OpError ? error.details : undefined;
+    if (details?.reason === "offline" && !ctx.agents.isOnline(nodeId)) {
+      // Sent again after a busy answer: the node may be restarting into the
+      // new version (its own update held the lock). It finishes by version,
+      // or gets UpdateAgent again once it is back on the old one.
+      if (busyTries > 0) return pollMs;
+      // The node dropped while the call was in flight: like a node offline
+      // when its step came up, it gets the update when it reconnects.
+      finishStep(db, step.id, "skipped", offlineSkipMessage, { retry: "waiting" });
+      publish();
+      return 0;
+    }
+    // An automatic update of a release the agent rolled back, or that
+    // failed there within the hour, waits (UpdateAgentRequest.automatic).
+    if (details?.agentStatus === "FAILED_PRECONDITION" && details.backoff) {
+      busySteps.delete(step.id);
+      const retry = run.trigger === "reconnect" ? agentWait(ctx, step, details.backoff, details.retryAfter) : {};
+      // Go error text starts in lower case; the history shows it as a sentence.
+      const message = (error as OpError).message;
+      finishStep(db, step.id, "skipped", message.charAt(0).toUpperCase() + message.slice(1), retry);
+      publish();
+      return 0;
+    }
+    if (details?.agentStatus === "ABORTED") {
+      // Busy. Before 0.2.1 the panel only waited for the version, which
+      // never came when the lock was the panel swap's (the agent waits for
+      // that one itself since 0.2.1): send it again.
+      const delay = Math.min(busyRetryMs * 2 ** busyTries, busyRetryMaxMs);
+      busySteps.set(step.id, { tries: busyTries + 1, at: Date.now() + delay });
+      ctx.logger.info(
+        { runId: run.id, stepId: step.id, nodeId, busy: (error as OpError).message, attempt: busyTries + 1, retryInMs: delay },
+        "node busy with another update; sending UpdateAgent again",
+      );
+      return Math.min(delay, pollMs);
+    }
+    if (details?.agentStatus === "ALREADY_EXISTS") {
+      // The agent runs that version or a newer one (its facts may be older).
+      busySteps.delete(step.id);
+      finishStep(db, step.id, "succeeded");
+      publish();
+      return 0;
+    }
+    busySteps.delete(step.id);
+    throw error;
+  }
+}
+
+/**
+ * Fails a step that did not finish within stepTimeoutMs and raises the
+ * update_failed alert a failed UpdateResult raises (same key, so a late
+ * result does not alert twice). An agent step is tried once more after
+ * timeoutRetryMs (retry "waiting"; the catch-up makes a run of its own),
+ * unless its run is already that second try.
+ */
+function timedOut(ctx: RunCtx, run: RunRow, step: StepRow): void {
+  const db = ctx.db;
+  const node =
+    step.target === "panel"
+      ? db.select({ id: nodes.id, name: nodes.name }).from(nodes).where(eq(nodes.isPanelNode, true)).get()
+      : step.nodeId
+        ? db.select({ id: nodes.id, name: nodes.name }).from(nodes).where(eq(nodes.id, step.nodeId)).get()
+        : undefined;
+  if (step.target !== "panel" && !node) {
+    // The node was removed meanwhile: nothing to alert about or try again.
+    finishStep(db, step.id, "failed", stepTimeoutError);
+    return;
+  }
+  let extra: Partial<StepRow> = {};
+  let next: string;
+  if (step.target === "agent" && node) {
+    const secondTry =
+      db
+        .select({ id: updateSteps.id })
+        .from(updateSteps)
+        .where(and(eq(updateSteps.retryRunId, run.id), eq(updateSteps.status, "failed")))
+        .get() !== undefined;
+    if (secondTry) {
+      next = "It was the second try. Update now in Settings > Updates tries again.";
+    } else {
+      const retryAt = new Date(Date.now() + timeoutRetryMs);
+      ctx.jobs.enqueue(
+        "updates.catchUp",
+        { nodeId: node.id },
+        { runAt: retryAt, dedupeKey: `updates.catchUp:${node.id}:timeout:${step.id}` },
+      );
+      extra = { retry: "waiting", retryAt };
+      next = `The panel tries again in ${timeoutRetryMs / 60_000} minutes; Update now in Settings > Updates tries now.`;
+    }
+  } else {
+    next = "Update the panel again in Settings > Updates.";
+  }
+  finishStep(db, step.id, "failed", stepTimeoutError, extra);
+  const minutes = stepTimeoutMs / 60_000;
+  const what =
+    step.target === "panel"
+      ? `The panel did not come back on ${step.toVersion} within ${minutes} minutes, and its node reported no result.`
+      : `The node's agent did not reconnect on ${step.toVersion} within ${minutes} minutes and reported no result.`;
+  ctx.alerts.raise({
+    event: "update_failed",
+    key: `update-failed:${step.id}`,
+    title:
+      step.target === "panel"
+        ? `Update of the panel to ${step.toVersion} did not finish`
+        : `Update to ${step.toVersion} did not finish on ${node?.name ?? "a node"}`,
+    message: `${what} ${next}`,
+    nodeId: node?.id ?? null,
+    link: "/settings/updates",
+  });
 }
 
 /** Runs being advanced right now; jobs for the same run never overlap. */
@@ -584,7 +746,7 @@ export const checkJob = defineJob<Record<string, never>>({
  * that node is the one the step runs on (a node step on its own node, the
  * panel step on the panel's node); another node cannot finish it.
  */
-export function applyUpdateResult(deps: Pick<Deps, "db" | "jobs" | "live">, nodeId: string, result: UpdateResult): void {
+export function applyUpdateResult(deps: Pick<Deps, "db" | "jobs" | "live" | "alerts">, nodeId: string, result: UpdateResult): void {
   // Also results no step names (the agent updating itself on connect).
   noteUpdateResult(deps.db, nodeId, result, panelNodeId(deps.db));
   const step = deps.db.select().from(updateSteps).where(eq(updateSteps.id, result.updateId)).get();
@@ -599,6 +761,8 @@ export function applyUpdateResult(deps: Pick<Deps, "db" | "jobs" | "live">, node
     toVersion: result.toVersion || step.toVersion,
     finishedAt: result.finishedAt ? timestampDate(result.finishedAt) : new Date(),
   });
+  // The "did not report back" alert of a Docker step whose result came late after all.
+  if (lateDocker && result.success) deps.alerts.resolve(`update-failed:${step.id}`);
   const others = deps.db
     .select({ id: updateSteps.id })
     .from(updateSteps)

@@ -23,13 +23,18 @@ test("builds without a release install the latest stable release", () => {
 
 test("the command pipes the install host into sh with the join flags, never a release asset", () => {
   expect(joinCommand("0.2.0-rc.2", "https://203.0.113.9:3443", "tok", "sha256:ab")).toBe(
-    `curl -fsSL ${host} | sudo sh -s -- join --panel 'https://203.0.113.9:3443' --token 'tok' --version '0.2.0-rc.2' --pin 'sha256:ab'`,
+    `curl -fsSL ${host} | sudo sh -s -- join --panel 'https://203.0.113.9:3443' --token 'tok' --install-docker --version '0.2.0-rc.2' --pin 'sha256:ab'`,
   );
   expect(joinCommand("dev", "http://203.0.113.9:3000", "tok", null, true)).toBe(
-    `curl -fsSL ${host} | sudo sh -s -- join --panel 'http://203.0.113.9:3000' --token 'tok' --insecure`,
+    `curl -fsSL ${host} | sudo sh -s -- join --panel 'http://203.0.113.9:3000' --token 'tok' --install-docker --insecure`,
   );
   for (const v of ["0.2.0-rc.2", "0.2.0", "dev"]) {
     expect(joinCommand(v, "https://p", "t")).not.toContain("github.com");
     expect(joinCommand(v, "https://p", "t")).not.toContain(`${githubOrg}/${githubRepo}`);
   }
+});
+
+test("a fresh server without Docker does not stop halfway: the command installs Docker when it is missing", () => {
+  // Over ssh without a terminal the installer cannot ask, and without the flag it stopped with "Docker is missing".
+  for (const v of ["0.2.1", "dev"]) expect(joinCommand(v, "https://p", "t")).toContain(" --install-docker");
 });

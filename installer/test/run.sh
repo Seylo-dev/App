@@ -56,7 +56,7 @@ OPENSSL3=$(find_openssl3 || true)
 
 tools=$T/tools
 mkdir -p "$tools"
-for t in awk base64 cat chmod cmp cp cut dd grep head id mkdir mktemp mv od rm sed sh sort tail tr uname wc \
+for t in awk base64 cat chmod cmp cp cut dd grep head id mkdir mktemp mv od rm sed sh sleep sort tail tr uname wc \
   sha256sum shasum perl dash bash env; do
   p=$(command -v "$t" 2>/dev/null || true)
   [ -n "$p" ] && ln -sf "$p" "$tools/$t"
@@ -151,6 +151,8 @@ EOF
 chmod +x "$shims"/*
 
 # ---- a fake release
+# The fake's `status` prints FAKE_STATUS (default: connected) and exits
+# FAKE_STATUS_EXIT, so a join's wait for the first connect ends at once.
 fake_binary() {
   cat >"$1" <<EOF
 #!/bin/sh
@@ -158,6 +160,7 @@ fake_binary() {
 case " \$* " in
 *" version "*) echo "$SLUG ${2:-$V} (test)" ;;
 *" install-units "*) echo "units written" ;;
+*" status "*) printf '%s\n' "\${FAKE_STATUS:-Panel:   https://panel.test (connected, version test)}"; exit "\${FAKE_STATUS_EXIT:-0}" ;;
 *) echo "fake $SLUG: \$*" ;;
 esac
 EOF
@@ -231,6 +234,7 @@ run_installer() {
     FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" FAKE_PANEL_VERSION="${FAKE_PANEL_VERSION:-}" \
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
+    FAKE_STATUS="${FAKE_STATUS:-}" FAKE_STATUS_EXIT="${FAKE_STATUS_EXIT:-}" INSTALLER_TEST_JOIN_WAIT="${INSTALLER_TEST_JOIN_WAIT:-}" \
     "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
   RC=$?
   set -e
@@ -607,6 +611,41 @@ if [ "$RC" -eq 0 ] && has "join https://panel.example.com --token t --no-start -
 else
   flunk "a re-join without either flag leaves can_build to config.yml" "$OUT"
 fi
+
+# ---- a join waits for the agent's first connect (seylo status)
+# Before: it printed "joins the panel; the node shows up there in a few
+# seconds" and exit 0 also when the node could not reach the panel at all.
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a join that connects says so" "Waiting for the agent to connect to the panel" "Connected: the node shows up in the panel now." "==> Done"
+unreachable="Node:    n1 (n1)
+Agent:   $V
+Panel:   https://192.0.2.10:3443 (waiting)
+Error:   dial panel 192.0.2.10:3443: connect: no route to host (retrying at 17:04:05)"
+FAKE_STATUS=$unreachable INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a join whose agent cannot reach the panel exits 0 but says it is not connected, why, and what to check" \
+  "warning: the agent has not connected to the panel at https://192.0.2.10:3443 after 0 seconds" \
+  "Last error: dial panel 192.0.2.10:3443: connect: no route to host (retrying at 17:04:05)" \
+  "Check that this server can reach 192.0.2.10:3443: the panel's server must accept connections on port 3443" \
+  "firewall or cloud security group" "The join token works until it expires, an hour after it was made" \
+  "Check again with: $SLUG status" "==> Installed, but not connected to the panel yet (see above)"
+has "==> Done" && flunk "a join that did not connect does not say Done" "$OUT" || pass "a join that did not connect does not say Done"
+has "Connected:" && flunk "a join that did not connect does not say Connected" "$OUT" || pass "a join that did not connect does not say Connected"
+FAKE_STATUS="$SLUG: no agent socket at $BRAND_DATA_DIR/agent.sock: is the agent running? Try \`$SLUG start\`" FAKE_STATUS_EXIT=1 \
+  INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
+expect_ok "an agent that is not up yet is reported with what seylo status said, the domain on 443" \
+  "Last error: no agent socket at $BRAND_DATA_DIR/agent.sock: is the agent running?" "Check that this server can reach panel.example.com:443"
+FAKE_STATUS=$unreachable INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'https://[2001:db8::7]' --token t --binary "$T/local-binary"
+expect_ok "an IPv6 panel without a port is reached on 443" "Check that this server can reach [2001:db8::7]:443"
+started=$(date +%s)
+FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
+Error:   the panel refused the join: the token is unknown, used or expired" INSTALLER_TEST_JOIN_WAIT=30 \
+  run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a refused join stops waiting and says to make a new join command" \
+  "warning: the panel refused this node: the panel refused the join: the token is unknown, used or expired" \
+  "Make a new join command in the panel's Add node dialog" "==> Installed, but not connected to the panel yet"
+[ $(($(date +%s) - started)) -lt 15 ] && pass "a refused join does not wait out the full time" || flunk "a refused join waited the full time"
+run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary" --dry-run
+expect_ok "a dry-run join only shows the wait" "+ $SLUG status (until the agent is connected, up to 60s)"
 
 # ---- scripts/release-preflight.sh (what `make release` checks before it publishes)
 cat >"$shims/gh" <<'EOF'

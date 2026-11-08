@@ -14,8 +14,19 @@
 // shares one Resolve (Docker lookups) per container port for ResolveTTL
 // instead of resolving per connection.
 //
+// Deploys move a service to new containers under its open connections. A
+// new connection waits for the service (ConnectTimeout) instead of being
+// closed at the first miss: a failed lookup or an address that refuses is
+// tried again after a short pause (lookups stay shared, once per moment),
+// and an address from an earlier lookup gets a second before it is looked
+// up again, since a removed container's address may not answer at all.
+// Reconcile calls Switched when a deploy moves the route (and when the old
+// generation is gone), which drops the service's lookups, failed ones too.
+//
 // Interfaces used by other packages:
 //
 //   - Gate: the agent syncs it from the desired state (SyncAll), and
 //     ServiceStatus.open_ports comes from Ports.
+//   - Manager.Switched: reconcile finds it on its Gate with a type
+//     assertion.
 package portgate

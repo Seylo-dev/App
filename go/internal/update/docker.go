@@ -98,9 +98,9 @@ type dockerPlan struct {
 // Update reports the installed and the available version and, unless
 // dryRun, upgrades in the background and reports a durable UpdateResult.
 func (d *DockerUpdater) Update(ctx context.Context, req *agentv1.UpdateDockerRequest) (*agentv1.UpdateDockerResponse, error) {
-	release, ok := d.lock.TryAcquire("Docker update")
+	release, ok := d.lock.TryAcquire(holdDockerUpdate)
 	if !ok {
-		return nil, fmt.Errorf("%w (%s)", ErrBusy, d.lock.Holder())
+		return nil, busy(d.lock.Holder())
 	}
 	plan, err := d.plan(ctx)
 	if err != nil {

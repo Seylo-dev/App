@@ -979,8 +979,71 @@ install_join() {
 		say "+ $SLUG join $PANEL_URL --token <token> --no-start"
 	fi
 	run systemctl restart "$SLUG.service"
-	say "The agent is starting and joins the panel; the node shows up there in a few seconds."
-	say "Check it here with: $SLUG status"
+	wait_connected
+}
+
+# How long a join waits for the agent's first connection. Tests shorten it.
+JOIN_WAIT=${INSTALLER_TEST_JOIN_WAIT:-60}
+# Set when the join finished without the agent connected (main says so last).
+NOT_CONNECTED=
+
+# panel_address prints the host:port the agent dials for PANEL_URL.
+panel_address() {
+	a=${PANEL_URL#*://}
+	a=${a%%/*}
+	p=443
+	case $PANEL_URL in http://* | ws://*) p=80 ;; esac
+	case $a in
+	\[*\]:[0-9]*) ;;
+	\[*) a=$a:$p ;;
+	*:*) ;;
+	*) a=$a:$p ;;
+	esac
+	printf '%s\n' "$a"
+}
+
+# wait_connected waits up to JOIN_WAIT seconds for the agent's first
+# connection to the panel (seylo status). When it does not connect, it says
+# why (the status error) and what to check, and the join still exits 0: the
+# agent keeps trying, and the token stays valid until it expires.
+wait_connected() {
+	if [ -n "$DRY_RUN" ]; then
+		say "+ $SLUG status (until the agent is connected, up to ${JOIN_WAIT}s)"
+		return 0
+	fi
+	step "Waiting for the agent to connect to the panel"
+	waited=0
+	while :; do
+		status=$(seylo status 2>&1) || true
+		case $status in
+		*"(connected"*)
+			say "Connected: the node shows up in the panel now."
+			return 0
+			;;
+		*"(rejected"*) break ;;
+		esac
+		[ "$waited" -lt "$JOIN_WAIT" ] || break
+		sleep 2
+		waited=$((waited + 2))
+	done
+	NOT_CONNECTED=1
+	# The status error, else what seylo status itself said (the agent's socket is not up yet).
+	reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
+	[ -n "$reason" ] || reason=$(printf '%s\n' "$status" | sed -n "s/^$SLUG: //p" | head -1)
+	case $status in
+	*"(rejected"*)
+		warn "the panel refused this node${reason:+: $reason}"
+		say "Make a new join command in the panel's Add node dialog and run it here."
+		;;
+	*)
+		warn "the agent has not connected to the panel at $PANEL_URL after $JOIN_WAIT seconds"
+		[ -z "$reason" ] || say "Last error: $reason"
+		addr=$(panel_address)
+		say "Check that this server can reach $addr: the panel's server must accept connections on port ${addr##*:} (3443 is the agents' port of a panel without a domain), and no firewall or cloud security group on the way may block it."
+		say "The agent keeps trying in the background. The join token works until it expires, an hour after it was made; after that make a new join command in the panel's Add node dialog."
+		;;
+	esac
+	say "Check again with: $SLUG status"
 }
 
 uninstall() {
@@ -1044,7 +1107,11 @@ main() {
 	panel) install_panel ;;
 	join) install_join ;;
 	esac
-	step "Done"
+	if [ -n "$NOT_CONNECTED" ]; then
+		step "Installed, but not connected to the panel yet (see above)"
+	else
+		step "Done"
+	fi
 	say "Docs: $BRAND_DOCS_URL"
 }
 

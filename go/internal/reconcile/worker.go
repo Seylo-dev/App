@@ -67,6 +67,10 @@ type worker struct {
 	rollHash   string
 	rollIDs    map[string]bool
 	rollCancel context.CancelCauseFunc
+	// rollSwitched: the route points at the rollout's new containers.
+	// Until then Resolve (the portgate's IP:port relay) keeps to the
+	// generation that still serves.
+	rollSwitched bool
 	// waitLogged: the "kept until the panel sends a desired state" line
 	// was logged.
 	waitLogged bool

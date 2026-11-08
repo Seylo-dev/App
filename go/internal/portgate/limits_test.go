@@ -66,6 +66,10 @@ func TestStaleResolveIsRefreshed(t *testing.T) {
 	m := newManager(t, "", func(c *Config) {
 		c.Resolve = func(context.Context, string, uint32) (string, error) { return current.Load().(string), nil }
 		c.ResolveTTL = time.Minute
+		// The first client is closed before its own 2-second deadline. The
+		// refused address counts as a failed lookup for resolveErrorTTL, so
+		// the second client may wait up to that long for the next lookup.
+		c.ConnectTimeout = 1500 * time.Millisecond
 	})
 	ports, err := m.Sync(context.Background(), "svc1", []Listener{{ID: "public-80", ContainerPort: 80}})
 	if err != nil {

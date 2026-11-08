@@ -27,6 +27,8 @@ type fakePanel struct {
 	stops          int
 	// blockHealth makes WaitHealthy wait for its context to end.
 	blockHealth bool
+	// healthGate, when set, holds WaitHealthy until it is closed.
+	healthGate chan struct{}
 }
 
 func (p *fakePanel) log(s string) {
@@ -73,11 +75,18 @@ func (p *fakePanel) Start(_ context.Context, _ string, img *agentv1.ImageRef) er
 
 func (p *fakePanel) WaitHealthy(ctx context.Context, _ string, _ time.Duration) error {
 	p.mu.Lock()
-	block := p.blockHealth
+	block, gate := p.blockHealth, p.healthGate
 	p.mu.Unlock()
 	if block {
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -94,6 +103,13 @@ func (p *fakePanel) Steps() string {
 }
 
 func panelFixture(t *testing.T, healthy map[string]bool) (*PanelSwapper, *fakePanel, *reports, string) {
+	t.Helper()
+	return panelFixtureLocked(t, healthy, &Lock{})
+}
+
+// panelFixtureLocked is panelFixture with the node's update lock shared
+// with other updaters.
+func panelFixtureLocked(t *testing.T, healthy map[string]bool, lock *Lock) (*PanelSwapper, *fakePanel, *reports, string) {
 	t.Helper()
 	dataDir := t.TempDir()
 	panelDir := filepath.Join(dataDir, "panel")
@@ -112,7 +128,7 @@ func panelFixture(t *testing.T, healthy map[string]bool) (*PanelSwapper, *fakePa
 		Runtime:      rt,
 		Report:       rep.add,
 		PanelVersion: func() string { return "1.1.0" },
-	}, &Lock{})
+	}, lock)
 	return s, rt, rep, dataDir
 }
 

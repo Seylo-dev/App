@@ -38,11 +38,14 @@ export function installerSource(panelVersion: string): InstallerSource {
 }
 
 /**
- * The one-line install command for a new node. Agents refuse a plain
- * http:// panel on another host unless told so, so an insecure target
- * carries --insecure in plain sight (the join card warns next to it).
+ * The one-line install command for a new node. It carries --install-docker:
+ * piped into sh over ssh without a terminal (or from cloud-init) the
+ * installer cannot ask, and a fresh server without Docker would stop
+ * halfway; a server that has Docker keeps it. Agents refuse a plain http://
+ * panel on another host unless told so, so an insecure target carries
+ * --insecure in plain sight (the join card warns next to it).
  */
 export function joinCommand(panelVersion: string, url: string, token: string, pin: string | null = null, insecure = false): string {
   const installer = installerSource(panelVersion);
-  return `curl -fsSL ${installer.url} | sudo sh -s -- join --panel '${url}' --token '${token}'${installer.version ? ` --version '${installer.version}'` : ""}${pin ? ` --pin '${pin}'` : ""}${insecure ? " --insecure" : ""}`;
+  return `curl -fsSL ${installer.url} | sudo sh -s -- join --panel '${url}' --token '${token}' --install-docker${installer.version ? ` --version '${installer.version}'` : ""}${pin ? ` --pin '${pin}'` : ""}${insecure ? " --insecure" : ""}`;
 }

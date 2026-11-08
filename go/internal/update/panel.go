@@ -153,9 +153,9 @@ func (s *PanelSwapper) Swap(ctx context.Context, req *agentv1.UpdatePanelRequest
 	if req.GetTargetVersion() != "" && !IsRelease(req.GetTargetVersion()) {
 		return fmt.Errorf("%w: %q is not a release version", ErrRejected, req.GetTargetVersion())
 	}
-	release, ok := s.lock.TryAcquire("panel update")
+	release, ok := s.lock.TryAcquire(holdPanelUpdate)
 	if !ok {
-		return fmt.Errorf("%w (%s)", ErrBusy, s.lock.Holder())
+		return busy(s.lock.Holder())
 	}
 	old, err := s.opts.Runtime.CurrentImage(ctx, req.GetServiceId())
 	if err != nil {
@@ -367,7 +367,7 @@ func (s *PanelSwapper) Resume(ctx context.Context) error {
 		}
 		return fmt.Errorf("reading the panel update journal: %w", err)
 	}
-	release, ok := s.lock.TryAcquire("panel update recovery")
+	release, ok := s.lock.TryAcquire(holdPanelRecovery)
 	if !ok {
 		return ErrBusy
 	}
