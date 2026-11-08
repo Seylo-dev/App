@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
@@ -40,10 +42,12 @@ func provideBuild(d *Deps) error {
 
 // wireBuild registers Build, CancelBuild, UploadBuildContext
 // (build.run.v1), Tunnel (tunnel.tcp.v1) and ParseCompose
-// (compose.parse.v1), and runs the build maintenance loop, the
-// 127.0.0.1:5755 registry relay and the registry garbage collector.
+// (compose.parse.v1), and runs the build maintenance loop, the buildx
+// facts, the 127.0.0.1:5755 registry relay and the registry garbage
+// collector.
 func wireBuild(reg *Registry, d *Deps) error {
 	log := d.Logger.With("component", "build")
+	wireBuildxFacts(d, dockerBuildxVersion(filepath.Join(d.Layout.BuildsDir(), "docker")))
 
 	var teed sync.Map // build id -> struct{}: output already copied to the log store
 	rpc.HandleStream(reg, "Build", func(ctx context.Context, req *agentv1.BuildRequest, s *rpc.TypedStream[*agentv1.BuildRequest, *agentv1.BuildResponse]) error {
@@ -113,6 +117,26 @@ func wireBuild(reg *Registry, d *Deps) error {
 	d.Components.Add("registry-gc", server.RunGC)
 	log.Debug("build, registry and compose wired")
 	return nil
+}
+
+// wireBuildxFacts adds the buildx-facts loop (NodeFacts.buildx, see
+// buildx_facts.go). It checks again right away when the panel turns builds
+// on, so the owner who just ticked Can build sees the real answer.
+func wireBuildxFacts(d *Deps, version buildxVersionFunc) *buildxFacts {
+	bx := newBuildxFacts(d, version)
+	d.Components.Add("buildx-facts", bx.run)
+	if d.Feed != nil {
+		// The loop checks at start anyway: only a later switch to on asks again.
+		var on atomic.Bool
+		on.Store(d.Feed.Settings().GetMaxParallelBuilds() > 0)
+		d.Feed.Subscribe(func(ds *agentv1.DesiredState) {
+			now := ds.GetSettings().GetMaxParallelBuilds() > 0
+			if was := on.Swap(now); now && !was {
+				bx.Recheck()
+			}
+		})
+	}
+	return bx
 }
 
 // gitFileStatus maps FetchGitFile errors to statuses; the messages carry

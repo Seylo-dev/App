@@ -112,6 +112,54 @@ func TestHealthAlertsOnTransitions(t *testing.T) {
 	}
 }
 
+// TestBuildxCheckFollowsThePanel: since 0.2.1 the panel decides which nodes
+// build, so the buildx health check runs when the panel sends builds
+// (max_parallel_builds > 0) although config.yml leaves can_build unset,
+// and is skipped only when both are off.
+func TestBuildxCheckFollowsThePanel(t *testing.T) {
+	buildx := func(d *Deps) *agentv1.NodeCheckResult {
+		t.Helper()
+		for _, c := range nodeChecks(d) {
+			if c.ID() == "docker.buildx" {
+				return c.Run(context.Background())
+			}
+		}
+		t.Fatal("no docker.buildx check")
+		return nil
+	}
+	skipped := agentv1.NodeCheckStatus_NODE_CHECK_STATUS_SKIPPED
+	for _, tc := range []struct {
+		name        string
+		configBuild bool
+		parallel    uint32
+		wantSkipped bool
+	}{
+		{"panel sends builds, config unset", false, 2, false},
+		{"config can_build, panel sends none", true, 0, false},
+		{"both off", false, 0, true},
+	} {
+		d, _ := newTestDeps(t)
+		d.Config.CanBuild = tc.configBuild
+		d.Feed.Publish(&agentv1.DesiredState{Revision: 1, Settings: &agentv1.NodeSettings{MaxParallelBuilds: tc.parallel}})
+		// The check itself runs the real `docker buildx version`: installed
+		// or not, it must not be skipped while builds are on.
+		r := buildx(d)
+		if got := r.GetStatus() == skipped; got != tc.wantSkipped {
+			t.Errorf("%s: status %v %q", tc.name, r.GetStatus(), r.GetDetail())
+		}
+		if tc.wantSkipped && r.GetDetail() != "builds are off on this node" {
+			t.Errorf("%s: detail %q", tc.name, r.GetDetail())
+		}
+	}
+
+	// Without a feed (no desired state yet) config.yml alone decides.
+	d, _ := newTestDeps(t)
+	d.Feed = nil
+	if r := buildx(d); r.GetStatus() != skipped {
+		t.Errorf("no feed, can_build unset: %v", r.GetStatus())
+	}
+}
+
 type fakeJournal struct{ entries []systemd.JournalEntry }
 
 func (f fakeJournal) Journal(context.Context, string, systemd.JournalOptions) ([]systemd.JournalEntry, error) {

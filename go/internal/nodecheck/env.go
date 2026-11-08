@@ -43,7 +43,8 @@ type Env struct {
 	// the agent on purpose, so a host firewall applies and each one needs
 	// an allow rule. Nil: not checked (the CLI runs without the agent).
 	GatePorts func() []uint32
-	// CanBuild reports config.yml's can_build: builds need the docker
+	// CanBuild reports whether this node builds (agent.BuildsOn: the panel
+	// sends builds or config.yml's can_build): builds need the docker
 	// buildx plugin. Nil: not checked.
 	CanBuild func() bool
 	Now      func() time.Time

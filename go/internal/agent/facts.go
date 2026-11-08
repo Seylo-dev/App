@@ -12,7 +12,7 @@ import (
 
 // Facts holds the node's NodeFacts. Components contribute their fields
 // with Update (runtime: the Docker and cgroup versions, network: Wings,
-// build: can_build, ...); the agent fills the machine fields and the capabilities,
+// build: buildx, ...); the agent fills the machine fields, can_build and the capabilities,
 // which come from the registry and must not be set by anyone else.
 type Facts struct {
 	mu    sync.Mutex
