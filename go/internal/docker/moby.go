@@ -71,6 +71,10 @@ func mapErr(err error) error {
 		return fmt.Errorf("%w: %w", ErrConflict, err)
 	case client.IsErrConnectionFailed(err):
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case strings.Contains(err.Error(), "is marked for removal"):
+		// A 500 with no type: "Container <id> is marked for removal and
+		// cannot be connected or disconnected to the network".
+		return fmt.Errorf("%w: %w", ErrRemoving, err)
 	}
 	return err
 }

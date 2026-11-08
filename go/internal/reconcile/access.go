@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -169,7 +170,7 @@ type TunnelURLs interface {
 // attachProxy connects Traefik to a project network so it can reach the
 // project's routed containers by name.
 func (r *Runtime) attachProxy(ctx context.Context, projectID string) {
-	var names []string
+	names := []string{docker.TraefikContainer}
 	if pc, ok := r.o.Router.(ProxyContainers); ok {
 		n, err := pc.ProxyContainers(ctx)
 		if err != nil {
@@ -177,15 +178,46 @@ func (r *Runtime) attachProxy(ctx context.Context, projectID string) {
 			return
 		}
 		names = n
-	} else if _, err := r.o.Docker.InspectContainer(ctx, docker.TraefikContainer); err == nil {
-		names = []string{docker.TraefikContainer}
 	}
 	net := docker.ProjectNetwork(projectID)
 	for _, n := range names {
-		if err := r.o.Docker.ConnectNetwork(ctx, net, n, nil); err != nil {
-			r.log.Warn("connecting the proxy to a project network", "container", n, "network", net, "err", err)
-		}
+		r.connectProxy(ctx, net, n)
 	}
+}
+
+// connectProxy connects the proxy container name to net unless it is
+// there already. A proxy that is missing, stopped or being removed is left
+// alone: it is being recreated (a Traefik config change replaces the
+// container), and the loop that keeps it running attaches every routed
+// project network once it starts. Connecting by name in that window hits
+// the old container while Docker removes it.
+func (r *Runtime) connectProxy(ctx context.Context, net, name string) {
+	d, err := r.o.Docker.InspectContainer(ctx, name)
+	if errors.Is(err, docker.ErrNotFound) {
+		return
+	}
+	if err != nil {
+		r.log.Warn("inspecting the proxy container", "container", name, "err", err)
+		return
+	}
+	if _, ok := d.Networks[net]; ok || !d.Running {
+		return
+	}
+	err = r.o.Docker.ConnectNetwork(ctx, net, name, nil)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, docker.ErrRemoving) || (errors.Is(err, docker.ErrNotFound) && r.proxyGone(ctx, name)) {
+		r.log.Debug("the proxy container is being replaced; its new container gets the network", "container", name, "network", net, "err", err)
+		return
+	}
+	r.log.Warn("connecting the proxy to a project network", "container", name, "network", net, "err", err)
+}
+
+// proxyGone reports whether the proxy container no longer exists.
+func (r *Runtime) proxyGone(ctx context.Context, name string) bool {
+	_, err := r.o.Docker.InspectContainer(ctx, name)
+	return errors.Is(err, docker.ErrNotFound)
 }
 
 // syncNetworks removes project networks no desired service uses any more.
