@@ -5,6 +5,8 @@
 // the agent's Exec, password on stdin), and the web UI and shell client
 // names.
 
+import type { services as serviceOps } from "@seylo/ops";
+import type { Static } from "@sinclair/typebox";
 import type { DatabaseEngine } from "../../db/schema";
 
 export interface EngineVersion {
@@ -396,8 +398,28 @@ export function containerCommand(engine: DatabaseEngine): string[] {
   }
 }
 
-/** Health check command run inside the container. None needs the current password. */
-export function healthCommand(engine: DatabaseEngine): string[] {
+/**
+ * The command that 0.2.0-rc.2 and older panels gave Mongo databases as their
+ * health check. mongosh is a Node.js program: every probe (every 10 s) cost
+ * about 0.2 s of CPU and a 265 MB process inside the database's container,
+ * enough to push a memory-limited database into the OOM killer. Migration
+ * 0003 turns it into healthProbe("mongo") on existing databases.
+ */
+export const legacyMongoHealthCommand = ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"];
+
+type HealthProbe = Static<typeof serviceOps.HealthCheck>["probe"];
+
+/** The health check probe of a new database. None needs the current password. */
+export function healthProbe(engine: DatabaseEngine): HealthProbe {
+  // The agent connects to the container's address. mongod's first start
+  // creates the user on 127.0.0.1 only, so the port answers there once the
+  // real server is up.
+  if (engine === "mongo") return { type: "tcp", port: engines.mongo.port };
+  return { type: "command", command: healthCommand(engine) };
+}
+
+/** Health check command run inside the container (every engine but Mongo, see healthProbe). */
+export function healthCommand(engine: Exclude<DatabaseEngine, "mongo">): string[] {
   switch (engine) {
     case "postgres":
       return ["sh", "-c", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1'];
@@ -406,8 +428,6 @@ export function healthCommand(engine: DatabaseEngine): string[] {
       return ["sh", "-c", 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent'];
     case "mariadb":
       return ["healthcheck.sh", "--connect", "--innodb_initialized"];
-    case "mongo":
-      return ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"];
     case "redis":
     case "valkey":
     case "keydb":

@@ -14,6 +14,7 @@ import {
   generatePassword,
   generateUserName,
   healthCommand,
+  healthProbe,
   httpUrl,
 } from "../src/modules/databases/engines";
 import { resolveServiceEnv } from "../src/modules/env/desired";
@@ -386,6 +387,7 @@ describe("more engines", () => {
     expect(containerCommand("dragonfly").join(" ")).not.toContain("requirepass");
     expect(containerCommand("clickhouse")).toEqual([]);
     expect(healthCommand("keydb").join(" ")).toContain("keydb-cli ping");
+    expect(healthProbe("mongo")).toEqual({ type: "tcp", port: 27017 });
     expect(healthCommand("clickhouse").join(" ")).toContain(":8123/ping");
     expect(generateUserName("ch")).toMatch(/^ch_[a-z0-9]{10}$/);
   });

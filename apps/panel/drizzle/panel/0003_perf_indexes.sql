@@ -46,3 +46,16 @@ CREATE TRIGGER `crash_reports_totals_update` AFTER UPDATE OF `node_id`, `last_li
 		SELECT new.`node_id`, 'crash', 1, length(new.`last_lines`) + length(new.`container_id`) WHERE new.`node_id` IS NOT NULL
 		ON CONFLICT (`node_id`, `kind`) DO UPDATE SET `row_count` = `row_count` + 1, `byte_count` = `byte_count` + excluded.`byte_count`;
 END;
+--> statement-breakpoint
+-- Mongo databases created with the mongosh health check (a Node.js process every 10 s inside the
+-- database's container) get the TCP check new ones get (databases/engines.ts healthProbe), in the
+-- service and in its deployments' run settings. Changed checks are left alone.
+UPDATE `services` SET `spec` = json_set(`spec`, '$.healthCheck.probe',
+		json_object('type', 'tcp', 'port', coalesce(json_extract(`spec`, '$.ports[0].containerPort'), 27017)))
+	WHERE `kind` = 'mongo' AND json_extract(`spec`, '$.healthCheck.probe.type') = 'command'
+		AND json_extract(`spec`, '$.healthCheck.probe.command') = json_array('mongosh', '--quiet', '--eval', 'db.adminCommand(''ping'')');--> statement-breakpoint
+UPDATE `deployments` SET `run_settings` = json_set(`run_settings`, '$.healthCheck.probe',
+		json_object('type', 'tcp', 'port', coalesce(json_extract(`run_settings`, '$.ports[0].containerPort'), 27017)))
+	WHERE `service_id` IN (SELECT `id` FROM `services` WHERE `kind` = 'mongo')
+		AND json_extract(`run_settings`, '$.healthCheck.probe.type') = 'command'
+		AND json_extract(`run_settings`, '$.healthCheck.probe.command') = json_array('mongosh', '--quiet', '--eval', 'db.adminCommand(''ping'')');

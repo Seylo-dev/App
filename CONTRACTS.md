@@ -2438,7 +2438,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   user (`ch_` + 10 characters) from `CLICKHOUSE_USER`/`_PASSWORD`/`_DB`
   with `CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1` (so it can create the
   exposed user), and its health check reads `/ping` on the container's own
-  address (the first start serves 127.0.0.1 only). ClickHouse adds
+  address (the first start serves 127.0.0.1 only). Mongo's health check is
+  TCP on its port (`healthProbe`), not mongosh: that is a Node.js program
+  (about 0.2 s of CPU and a 265 MB process inside the container on every
+  probe, measured with `mongo:8.0`); migration 0003 moves databases still on
+  the mongosh default, in the service and its deployments' run settings,
+  and leaves changed checks alone. ClickHouse adds
   `INTERNAL_HTTP_URL` (`http://user:password@<name>:8123/<db>`, a
   credential) and `INTERNAL_HTTP_PORT` to the references; exposed URLs
   carry `secure=true` (and `skip_verify=true` with a self-signed
