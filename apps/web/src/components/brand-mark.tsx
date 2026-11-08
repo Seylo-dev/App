@@ -13,14 +13,10 @@ export function BrandMark({ size = 28 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden="true" className="shrink-0">
       <rect width="28" height="28" rx="7" className="fill-primary" />
-      <path
-        d="M18.5 9.2c-1.4-1.3-3.4-1.8-5.2-1.3-2.4.6-3.2 3.1-1.2 4.4.9.6 2.2.9 3.4 1.3 2.6.8 3 3.6.7 4.9-1.9 1.1-4.5.7-6.1-.8"
-        className="stroke-primary-foreground"
-        strokeWidth="2.1"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {/* Three layers, the middle one sliding in: a new release joining a live stack. */}
+      <rect x="5.5" y="6.25" width="13.5" height="4" rx="1.5" className="fill-primary-foreground" />
+      <rect x="9" y="12" width="13.5" height="4" rx="1.5" className="fill-primary-foreground" />
+      <rect x="5.5" y="17.75" width="13.5" height="4" rx="1.5" className="fill-primary-foreground" />
     </svg>
   );
 }
