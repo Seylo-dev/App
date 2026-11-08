@@ -21,6 +21,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/nodecheck"
 	"github.com/seylo-dev/app/go/internal/systemd"
 	"github.com/seylo-dev/app/go/internal/version"
+	"github.com/seylo-dev/app/go/internal/wings"
 )
 
 // MaxReportBytes keeps reports under the site's 512 KiB upload limit.
@@ -99,7 +100,8 @@ func (o *Options) defaults() {
 		o.Now = time.Now
 	}
 	if o.Checks == nil {
-		o.Checks = nodecheck.Default(nodecheck.Env{DataDir: o.DataDir, PanelURL: o.PanelURL, PanelPin: o.PanelPin, GOARCH: runtime.GOARCH, Docker: o.Docker, Run: o.Run})
+		o.Checks = nodecheck.Default(nodecheck.Env{DataDir: o.DataDir, PanelURL: o.PanelURL, PanelPin: o.PanelPin, GOARCH: runtime.GOARCH, Docker: o.Docker, Run: o.Run,
+			Wings: wings.NewDetector().Detect})
 	}
 }
 

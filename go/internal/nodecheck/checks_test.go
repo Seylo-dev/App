@@ -190,6 +190,37 @@ func TestPortsHeldByOurProxy(t *testing.T) {
 	}
 }
 
+// TestPortsHeldByWingsForkProxy: the Wings fork's Traefik is a container
+// named by its config (nexthost-proxy by default) publishing 80 and 443;
+// when routes go to it, it holding the ports is the setup working, while
+// another container with that name and no shared proxy is a problem.
+func TestPortsHeldByWingsForkProxy(t *testing.T) {
+	files := healthyFiles()
+	files["proc/net/tcp6"] = procNetTCP
+	files["proc/99/comm"] = "docker-proxy\n"
+	proc, sys, etc := machine(t, files)
+	_ = os.MkdirAll(filepath.Join(proc, "99", "fd"), 0o755)
+	_ = os.Symlink("socket:[23456]", filepath.Join(proc, "99", "fd", "3"))
+	env := Env{ProcDir: proc, SysDir: sys, EtcDir: etc, Docker: fakeDocker{publishers: []DockerContainer{{Names: []string{"/nexthost-proxy"}}}},
+		Wings: func(context.Context) (*agentv1.WingsInfo, error) {
+			return &agentv1.WingsInfo{Version: "1.11", TraefikDynamicDir: "/var/lib/pelican/proxy/dynamic", ProxyContainer: "nexthost-proxy"}, nil
+		}}
+	env.defaults()
+	r := env.ports(context.Background())
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || !strings.Contains(r.GetDetail(), "nexthost-proxy") {
+		t.Fatalf("ports = %v", r)
+	}
+	// Wings without the fork's proxy: nothing here routes our domains.
+	env.Wings = func(context.Context) (*agentv1.WingsInfo, error) { return &agentv1.WingsInfo{Version: "1.11"}, nil }
+	if r := env.ports(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
+		t.Fatalf("ports without the fork's proxy = %v", r)
+	}
+	env.Wings = nil
+	if r := env.ports(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
+		t.Fatalf("ports without Wings detection = %v", r)
+	}
+}
+
 func TestDiskThresholds(t *testing.T) {
 	cases := []struct {
 		total, free uint64
@@ -259,6 +290,16 @@ func TestProxyChecks(t *testing.T) {
 	}
 	if r := env.proxyRunning(context.Background()); !strings.Contains(r.GetDetail(), "Wings") {
 		t.Fatalf("wings = %v", r)
+	}
+}
+
+// TestLiveRestoreWithoutWingsDetection: `seylo health` before 0.2.0-rc.2
+// had no Wings detection, and the check crashed calling it.
+func TestLiveRestoreWithoutWingsDetection(t *testing.T) {
+	env := Env{Docker: fakeDocker{info: &DockerInfo{ServerVersion: "28.0.1"}}}
+	r := Run(context.Background(), []Check{check{"docker.live-restore", "Docker live-restore", env.liveRestore}})[0]
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || strings.Contains(r.GetDetail(), "crashed") {
+		t.Fatalf("live-restore without Wings detection = %v", r)
 	}
 }
 

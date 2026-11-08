@@ -204,7 +204,7 @@ func (e *Env) liveRestore(ctx context.Context) *agentv1.NodeCheckResult {
 		return pass("%s", "on: containers keep running while Docker restarts")
 	}
 	detail := "off: every service and the panel stop while Docker restarts (Docker updates, unattended upgrades)"
-	if wi, err := e.Wings(ctx); err == nil && wi != nil {
+	if wi := e.wingsInfo(ctx); wi != nil {
 		detail += "; with it on, Wings' game servers keep running too"
 	}
 	return warn(detail, `Add "live-restore": true to /etc/docker/daemon.json and run `+"`systemctl reload docker`"+` (restarts nothing).`)
@@ -232,11 +232,24 @@ func (e *Env) cgroups(ctx context.Context) *agentv1.NodeCheckResult {
 	return pass("cgroup v2, Docker cgroup driver %s", driver)
 }
 
-// proxyNames are processes and containers allowed to hold 80 and 443:
-// our Traefik, or the Wings fork's.
+// isProxy: processes and containers allowed to hold 80 and 443 by name:
+// our Traefik, or a Traefik next to us.
 func isProxy(name string) bool {
 	name = strings.ToLower(name)
 	return strings.Contains(name, "traefik") || strings.HasPrefix(name, brand.Slug+"-")
+}
+
+// wingsInfo is what Wings detection found, nil when Wings is not here or
+// detection is not wired (the CLI without Wings, tests).
+func (e *Env) wingsInfo(ctx context.Context) *agentv1.WingsInfo {
+	if e.Wings == nil {
+		return nil
+	}
+	info, err := e.Wings(ctx)
+	if err != nil {
+		return nil
+	}
+	return info
 }
 
 func (e *Env) ports(ctx context.Context) *agentv1.NodeCheckResult {
@@ -262,6 +275,13 @@ func (e *Env) ports(ctx context.Context) *agentv1.NodeCheckResult {
 			}
 		}
 	}
+	// The Wings fork's Traefik is a container named by its config
+	// (proxy.container_name, nexthost-proxy by default); routes go to it
+	// when it is shared, so it holding 80 and 443 is the setup working.
+	wingsProxy := ""
+	if len(held) > 0 {
+		wingsProxy = e.wingsInfo(ctx).GetProxyContainer()
+	}
 	var notes, problems []string
 	for _, port := range []uint16{80, 443} {
 		owner, used := held[port]
@@ -272,7 +292,9 @@ func (e *Env) ports(ctx context.Context) *agentv1.NodeCheckResult {
 			notes = append(notes, fmt.Sprintf("%d held by %s", port, owner))
 		case strings.HasPrefix(owner, "docker-proxy"):
 			name := e.publisher(ctx, port)
-			if isProxy(name) {
+			if wingsProxy != "" && name == wingsProxy {
+				notes = append(notes, fmt.Sprintf("%d published by container %s (the Wings fork's Traefik)", port, name))
+			} else if isProxy(name) {
 				notes = append(notes, fmt.Sprintf("%d published by container %s", port, name))
 			} else {
 				problems = append(problems, fmt.Sprintf("%d is published by container %s", port, name))
