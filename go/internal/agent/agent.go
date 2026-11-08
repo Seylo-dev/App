@@ -62,8 +62,8 @@ var ErrAlreadyJoined = errors.New("agent: this node already joined a panel")
 // connect; Run does, and records the node id once the panel accepted it.
 //
 // A node that joins again (--force) keeps what its owner set in
-// config.yml: no_host_shell, node_name, can_build, the acme_ca settings
-// and every key this agent does not know. Join replaces only how the node
+// config.yml: no_host_shell, no_tailnet, tailscale_socket, node_name,
+// can_build, the acme_ca settings and every key this agent does not know. Join replaces only how the node
 // reaches the panel (panel_url, panel_pin, trust_on_first_use,
 // insecure_transport, fallback), the identity the token gives it (node_id,
 // join_token) and the identity of the panel it belonged to (panel_id,

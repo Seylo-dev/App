@@ -48,7 +48,7 @@ func newPanelCommand(d *deps) *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "status",
-			Short: "Show the panel service's state, version, URL and where its ports answer",
+			Short: "Show the panel service's state, version, URL, where its ports answer and its tailnet address",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				s, err := localapi.NewClient(d.layout).PanelStatus(cmd.Context())

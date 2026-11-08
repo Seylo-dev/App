@@ -191,6 +191,7 @@ func (b *localBackend) PanelStatus(ctx context.Context) (localapi.PanelStatus, e
 			Phase:   phaseName(phase),
 		}
 		out.IPAccess, out.AgentPort = b.panelPorts(ctx, spec)
+		out.Tailnet = panelTailnet(b.deps.Facts.Get().GetTailscale())
 		return out, nil
 	}
 	return localapi.PanelStatus{Phase: "not on this node", URL: cfg.PanelURL}, nil
@@ -215,6 +216,47 @@ func (b *localBackend) panelPorts(ctx context.Context, spec *agentv1.ServiceSpec
 		agents = portAccess(publish, agentPort)
 	}
 	return panel, agents
+}
+
+// panelTailnet turns the tailnet area's last report (NodeFacts.tailscale)
+// into the Tailnet line of `seylo panel status`; nil without tailscaled.
+func panelTailnet(info *agentv1.TailscaleInfo) *localapi.TailnetAccess {
+	if info == nil {
+		return nil
+	}
+	if info.GetDisabledOnServer() {
+		return &localapi.TailnetAccess{State: localapi.TailnetDisabled, Message: "no_tailnet is set in config.yml"}
+	}
+	serve := info.GetServe()
+	out := &localapi.TailnetAccess{State: "off", URL: serve.GetUrl(), Message: serve.GetMessage()}
+	if s := serve.GetState(); s != agentv1.TailnetServeState_TAILNET_SERVE_STATE_UNSPECIFIED {
+		out.State = strings.ToLower(strings.TrimPrefix(s.String(), "TAILNET_SERVE_STATE_"))
+	}
+	if out.State != "active" {
+		out.URL = ""
+	}
+	if out.Message == "" {
+		out.Message = tailscaleNotRunning(info.GetBackendState())
+	}
+	return out
+}
+
+// tailscaleNotRunning says why tailscaled cannot serve, in words; empty
+// while it runs.
+func tailscaleNotRunning(state string) string {
+	switch state {
+	case "Running":
+		return ""
+	case "NeedsLogin":
+		return "Tailscale needs a sign-in"
+	case "NeedsMachineAuth":
+		return "Tailscale waits for approval in the admin console"
+	case "Stopped":
+		return "Tailscale is stopped"
+	case "":
+		return "Tailscale is not running"
+	}
+	return "Tailscale is " + state
 }
 
 // panelContainerPorts reads the panel's ports inside its container from

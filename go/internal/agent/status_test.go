@@ -125,3 +125,39 @@ func TestPortAccess(t *testing.T) {
 		}
 	}
 }
+
+// `seylo panel status` also says where the panel's Tailscale Serve entry
+// stands, from the tailnet area's last report; nothing without tailscaled.
+func TestPanelStatusReportsTheTailnet(t *testing.T) {
+	b, eng := panelStatusBackend(t)
+	addPanelContainer(eng, true, docker.PortPublish{HostPort: 8080, ContainerPort: 3000})
+	report := func(info *agentv1.TailscaleInfo) *localapi.TailnetAccess {
+		t.Helper()
+		b.deps.Facts.Update(func(f *agentv1.NodeFacts) { f.Tailscale = info })
+		s, err := b.PanelStatus(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Tailnet
+	}
+	if got := report(nil); got != nil {
+		t.Fatalf("without tailscaled = %+v", got)
+	}
+	active := &agentv1.TailscaleInfo{BackendState: "Running", Serve: &agentv1.TailnetServeStatus{
+		State: agentv1.TailnetServeState_TAILNET_SERVE_STATE_ACTIVE, Url: "https://panel.tail1234.ts.net"}}
+	if got := report(active); *got != (localapi.TailnetAccess{State: "active", URL: "https://panel.tail1234.ts.net"}) {
+		t.Fatalf("active = %+v", got)
+	}
+	conflict := &agentv1.TailscaleInfo{BackendState: "Running", Serve: &agentv1.TailnetServeStatus{
+		State: agentv1.TailnetServeState_TAILNET_SERVE_STATE_CONFLICT, Message: "port 443 has another handler", Url: "https://stale"}}
+	if got := report(conflict); *got != (localapi.TailnetAccess{State: "conflict", Message: "port 443 has another handler"}) {
+		t.Fatalf("conflict = %+v", got)
+	}
+	// No Serve status yet (no desired state) and signed out: off, with why.
+	if got := report(&agentv1.TailscaleInfo{BackendState: "NeedsLogin"}); *got != (localapi.TailnetAccess{State: "off", Message: "Tailscale needs a sign-in"}) {
+		t.Fatalf("signed out = %+v", got)
+	}
+	if got := report(&agentv1.TailscaleInfo{BackendState: "Running", DisabledOnServer: true, Serve: active.Serve}); got.State != localapi.TailnetDisabled || got.URL != "" {
+		t.Fatalf("no_tailnet = %+v", got)
+	}
+}

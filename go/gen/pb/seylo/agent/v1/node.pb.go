@@ -78,11 +78,12 @@ type NodeFacts struct {
 	// the upgrade seed), never to refuse a member: an agent can report any
 	// address. Empty from agents before this field. added in 0.2 (security)
 	InterfaceAddresses []string `protobuf:"bytes,21,rep,name=interface_addresses,json=interfaceAddresses,proto3" json:"interface_addresses,omitempty"`
-	// docker buildx on this node, checked at agent start and every 30
-	// minutes. Unset from older agents: the panel counts the node as able to
-	// build, as before. With installed false the panel picks no automatic
-	// builds for this node and refuses it as an explicit build node.
-	// added in 0.2.1 (build default)
+	// docker buildx on this node, checked at agent start, every 30 minutes,
+	// every minute while the panel sends builds and it is missing, and at
+	// once when the panel turns builds on. Unset from older agents: the
+	// panel counts the node as able to build, as before. With installed
+	// false the panel picks no automatic builds for this node and refuses it
+	// as an explicit build node. added in 0.2.1 (build default)
 	Buildx *BuildxInfo `protobuf:"bytes,22,opt,name=buildx,proto3" json:"buildx,omitempty"`
 	// The tailscaled on this node's host, as the agent reads it over its
 	// LocalAPI socket. Unset when there is no tailscaled socket, and from

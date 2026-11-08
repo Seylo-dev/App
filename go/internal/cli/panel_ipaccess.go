@@ -149,17 +149,36 @@ func writePanelFile(dir, name string, data []byte) error {
 
 // printPanelStatus prints `seylo panel status`: the service line, then how
 // Docker publishes the panel port and the agents' port, for example
-// "IP access: closed (127.0.0.1:3000); agents' port: open (0.0.0.0:3443)".
-// An agent from before 0.2.1 reports no bindings, and the line is left out.
+// "IP access: closed (127.0.0.1:3000); agents' port: open (0.0.0.0:3443)",
+// then the panel's Tailscale Serve entry when the server runs tailscaled,
+// for example "Tailnet: active (https://panel.tail1234.ts.net)". An agent
+// from before 0.2.1 reports neither, and those lines are left out.
 func printPanelStatus(w io.Writer, s localapi.PanelStatus) error {
 	if _, err := fmt.Fprintf(w, "Panel %s (%s), version %s, %s\n", s.Phase, runningWord(s.Running), s.Version, s.URL); err != nil {
 		return err
 	}
-	if s.IPAccess.State == "" {
+	if s.IPAccess.State != "" {
+		if _, err := fmt.Fprintf(w, "IP access: %s; agents' port: %s\n", portAccessText(s.IPAccess), portAccessText(s.AgentPort)); err != nil {
+			return err
+		}
+	}
+	if s.Tailnet == nil {
 		return nil
 	}
-	_, err := fmt.Fprintf(w, "IP access: %s; agents' port: %s\n", portAccessText(s.IPAccess), portAccessText(s.AgentPort))
+	_, err := fmt.Fprintf(w, "Tailnet: %s\n", tailnetAccessText(*s.Tailnet))
 	return err
+}
+
+func tailnetAccessText(t localapi.TailnetAccess) string {
+	switch {
+	case t.State == localapi.TailnetDisabled:
+		return "off on this server (" + t.Message + "; " + brand.Slug + " panel tailscale on undoes it)"
+	case t.URL != "":
+		return t.State + " (" + t.URL + ")"
+	case t.Message != "":
+		return t.State + " (" + t.Message + ")"
+	}
+	return t.State
 }
 
 func portAccessText(p localapi.PortAccess) string {

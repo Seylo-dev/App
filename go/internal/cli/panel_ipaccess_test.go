@@ -200,6 +200,26 @@ func TestPrintPanelStatus(t *testing.T) {
 		t.Fatalf("stopped = %q", b.String())
 	}
 
+	// With tailscaled on the server, a third line says where the panel's
+	// Serve entry stands.
+	for _, tc := range []struct {
+		tailnet localapi.TailnetAccess
+		want    string
+	}{
+		{localapi.TailnetAccess{State: "active", URL: "https://panel.tail1234.ts.net"}, "Tailnet: active (https://panel.tail1234.ts.net)\n"},
+		{localapi.TailnetAccess{State: "off", Message: "Tailscale needs a sign-in"}, "Tailnet: off (Tailscale needs a sign-in)\n"},
+		{localapi.TailnetAccess{State: "off"}, "Tailnet: off\n"},
+		{localapi.TailnetAccess{State: localapi.TailnetDisabled, Message: "no_tailnet is set in config.yml"},
+			"Tailnet: off on this server (no_tailnet is set in config.yml; seylo panel tailscale on undoes it)\n"},
+	} {
+		b.Reset()
+		_ = printPanelStatus(&b, localapi.PanelStatus{Phase: "running", Running: true, Version: "0.2.1", URL: "u",
+			IPAccess: localapi.PortAccess{State: localapi.PortOpen}, AgentPort: localapi.PortAccess{State: localapi.PortOff}, Tailnet: &tc.tailnet})
+		if !strings.HasSuffix(b.String(), "agents' port: off\n"+tc.want) {
+			t.Fatalf("tailnet %+v = %q", tc.tailnet, b.String())
+		}
+	}
+
 	// An agent from before 0.2.1 reports no bindings: one line, as before.
 	b.Reset()
 	_ = printPanelStatus(&b, localapi.PanelStatus{Phase: "running", Running: true, Version: "0.2.0", URL: "u"})

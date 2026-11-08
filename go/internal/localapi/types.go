@@ -75,7 +75,27 @@ type PanelStatus struct {
 	// (added in 0.2.1: an older agent leaves both empty).
 	IPAccess  PortAccess `json:"ipAccess"`
 	AgentPort PortAccess `json:"agentPort"`
+	// Tailnet is the panel's Tailscale Serve entry on this server (added
+	// in 0.2.1): nil when the agent sees no tailscaled, or is older.
+	Tailnet *TailnetAccess `json:"tailnet,omitempty"`
 }
+
+// TailnetAccess is where the panel's Tailscale Serve entry stands, as the
+// agent last read it from the host's tailscaled.
+type TailnetAccess struct {
+	// State is "off", "applying", "active", "conflict", "error" or
+	// "unsupported" (TailnetServeState), or TailnetDisabled.
+	State string `json:"state"`
+	// URL is where the panel answers on the tailnet, set while active.
+	URL string `json:"url,omitempty"`
+	// Message says why for conflict, error and unsupported, and what
+	// tailscaled is doing when it is not running.
+	Message string `json:"message,omitempty"`
+}
+
+// TailnetDisabled: config.yml sets no_tailnet: true (`seylo panel
+// tailscale off`), so the agent keeps no Serve entry.
+const TailnetDisabled = "disabled"
 
 // PortAccess is how one of the panel's ports is published on the host.
 type PortAccess struct {

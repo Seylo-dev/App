@@ -170,11 +170,12 @@ export type NodeFacts = Message<"seylo.agent.v1.NodeFacts"> & {
   interfaceAddresses: string[];
 
   /**
-   * docker buildx on this node, checked at agent start and every 30
-   * minutes. Unset from older agents: the panel counts the node as able to
-   * build, as before. With installed false the panel picks no automatic
-   * builds for this node and refuses it as an explicit build node.
-   * added in 0.2.1 (build default)
+   * docker buildx on this node, checked at agent start, every 30 minutes,
+   * every minute while the panel sends builds and it is missing, and at
+   * once when the panel turns builds on. Unset from older agents: the
+   * panel counts the node as able to build, as before. With installed
+   * false the panel picks no automatic builds for this node and refuses it
+   * as an explicit build node. added in 0.2.1 (build default)
    *
    * @generated from field: seylo.agent.v1.BuildxInfo buildx = 22;
    */
