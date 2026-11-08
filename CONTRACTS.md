@@ -610,7 +610,8 @@ local API, join and resume. The areas:
   contracts: changing one orphans existing resources.
 - Service instances (reconcile's) carry `seylo.service` and no
   `seylo.role`, plus `seylo.spec-hash` (`reconcile.SpecHash`: a matching
-  hash is adopted as is). Containers any other component runs (cron runs,
+  hash is adopted as is) and, on panel containers only, `seylo.user`.
+  Containers any other component runs (cron runs,
   DB web UIs, cloudflared, Traefik, builds, registry) use
   `docker.RoleLabels(role, serviceID)`; reconcile never touches them.
 - Isolation: service containers join only their `seylo-p-<project>`.
@@ -624,7 +625,18 @@ local API, join and resume. The areas:
   panel answers while the agent restarts; the hash includes the ports),
   and adopts a protected instance without a `seylo.spec-hash` label at the
   desired generation as is (the installer's container). Send it with
-  `deploy.mode = RECREATE`.
+  `deploy.mode = RECREATE`. It runs as the panel user
+  (`docker.PanelUser`, uid and gid 61000, which no login user has;
+  `--user` and the label `seylo.user=61000:61000`) whatever the spec says,
+  so the spec never sets a user. Before a panel container is created,
+  `preparePanelDir` gives `<dataDir>/panel` and everything in it to that
+  user through an `os.Root` (links are changed themselves, never
+  followed) and sets the folder to 0700 and `master.key` to 0600. A panel
+  container without `seylo.user` (from an agent or installer before
+  0.2.0-rc.2: the image's uid 1000, often the default login user) serves
+  no spec and is replaced once at its generation; the old one is stopped
+  and renamed `<name>-prev` rather than removed, and when the new one
+  fails it starts again with the folder given back to its old owner.
 - Unhealthy running instances leave the route while another replica of
   the serving generation is healthy; a lone unhealthy replica stays
   routed (the service is DEGRADED). Reconcile writes SYSTEM lines into
@@ -1669,8 +1681,12 @@ built by the Release workflow: `make release-draft`, then
 - `openapi.json`: the op API description (`scripts/gen-openapi.ts`); the
   docs sync their API reference from `releases/latest/download/openapi.json`.
 - `<image>:<version>` and `:latest`: the multi-arch panel image
-  (`deploy/panel.Dockerfile`, non-root uid 1000, data in
-  `<dataDir>/panel`, health check on `/api/health`).
+  (`deploy/panel.Dockerfile`, data in `<dataDir>/panel`, health check on
+  `/api/health`). It has no `USER`: agents run it with `--user
+  61000:61000` (`ARG PANEL_UID`, the same as `docker.PanelUID`), and
+  started as root (an older agent, `docker run` by hand) its entrypoint
+  (`deploy/panel-entrypoint.sh`) runs the command as the data folder's
+  owner, never as root, giving a root-owned folder to uid 61000 first.
 - `manifest.json` + `manifest.json.minisig` (minisign, prehashed): the
   update manifest. Fields: `schema` (1; absent means 1), `version` (no
   `v`), `releasedAt`, `changelogUrl`, `minAgent`, `minUpgradeFrom`,
@@ -1759,16 +1775,22 @@ runtime FAILED_PRECONDITION, anything else UNAVAILABLE with the message.
 
 Installer contract ("panel + node here"): `seylo panel bootstrap` writes
 `<dataDir>/panel/setup-token` and `<dataDir>/panel/join-token` (one line
-each, 0600, uid 1000), creates the `seylo-p-panelproject0000` network and
+each, 0600, owned by the panel user 61000:61000, the folder 0700), creates
+the `seylo-p-panelproject0000` network and
 runs the first panel container as service `panel00000000000` in project
 `panelproject0000` (generation 1, protected, published on the chosen port,
-default 3000), waits for `/api/health`, writes config.yml with
+default 3000, `--user 61000:61000` with the `seylo.user` label), waits for
+`/api/health`, writes config.yml with
 `panel_url: http://127.0.0.1:<port>` and the join token, then prints
 `http://<ip>:<port>/setup?t=<setup token>` (`<ip>`: the IPv4 route's
 source, else the IPv6 route's in brackets, else a public interface
-address; `<server-ip>` with a hint only when there is none). Join: `install.sh join --panel
-<url> --token <t> [--pin sha256:<hex>]` runs `seylo join --no-start`, then
-starts `seylo.service`. Re-runs update the binary and units and keep the
+address; `<server-ip>` with a hint only when there is none). A new panel
+install warns when an account on the server has uid or gid 61000 (`getent`).
+Join: `install.sh join --panel
+<url> --token <t> [--pin sha256:<hex>] [--can-build|--no-can-build]` runs
+`seylo join --no-start`, then starts `seylo.service`. An installer from a
+release defaults to that release (`--version` picks another), which is how
+the panel's join command pins the agent to the panel's version. Re-runs update the binary and units and keep the
 node; `uninstall [--purge]` removes the agent (and with `--purge` every
 `seylo.managed` container, network, volume and the data dir).
 Port check (before anything changes): a new panel install stops when

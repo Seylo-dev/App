@@ -31,6 +31,10 @@ const (
 	LabelSpecHash = LabelPrefix + "spec-hash"
 	// LabelVolume names the service volume a Docker volume backs.
 	LabelVolume = LabelPrefix + "volume"
+	// LabelUser is the uid:gid a panel container runs as (PanelUser). A
+	// panel container without it runs as the image's user (uid 1000 before
+	// 0.2.0-rc.2) and is replaced once by one that runs as PanelUser.
+	LabelUser = LabelPrefix + "user"
 
 	// LabelTraefikEnable is set to "false" on every container we create so
 	// a Traefik with the Docker provider (Wings) ignores it.
@@ -47,6 +51,9 @@ type InstanceLabels struct {
 	Protected  bool
 	// SpecHash is reconcile.SpecHash of the spec the container runs.
 	SpecHash string
+	// User is the --user the container runs with, recorded for the panel
+	// (LabelUser); empty for every other service.
+	User string
 }
 
 // Map returns the Docker label map for the instance, including the
@@ -66,6 +73,9 @@ func (l InstanceLabels) Map() map[string]string {
 	}
 	if l.SpecHash != "" {
 		m[LabelSpecHash] = l.SpecHash
+	}
+	if l.User != "" {
+		m[LabelUser] = l.User
 	}
 	return m
 }

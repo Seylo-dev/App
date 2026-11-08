@@ -53,8 +53,9 @@ test-go: ## Go tests with the race detector
 test-ts: ## bun test in every workspace
 	bun run test
 
-test-installer: ## install.sh in --root mode against a fake signed release (skips without minisign)
+test-installer: ## install.sh in --root mode against a fake signed release (skips without minisign), and the panel image entrypoint
 	installer/test/run.sh
+	deploy/test/panel-entrypoint.sh
 
 test-release: ## scripts/release-sign.sh and release-publish.sh against fake releases and ghcr.io (skip without minisign or jq)
 	installer/test/release-sign.sh

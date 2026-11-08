@@ -200,6 +200,14 @@ write_key_dropin() {
 
 panel_container() { on "$E2E_A" "docker ps -aq --filter label=$SLUG.service=panel00000000000 | head -1"; }
 
+# panel_user_of <vm>: the panel container's --user, then owner:group:mode of
+# the panel folder and of master.key (go/internal/docker PanelUser).
+panel_user_of() {
+  on "$1" "c=\$(docker ps -q --filter label=$SLUG.service=panel00000000000 | head -1); printf '%s %s %s' \"\$(docker inspect -f '{{.Config.User}}' \$c)\" \"\$(stat -c '%u:%g:%a' $BRAND_DATA_DIR/panel)\" \"\$(stat -c '%u:%g:%a' $BRAND_DATA_DIR/panel/master.key)\""
+}
+# panel_user_ok <vm>: the panel runs as uid 61000, which no login user has, and only it and root read its folder.
+panel_user_ok() { test "$(panel_user_of "$1")" = "61000:61000 61000:61000:700 61000:61000:600"; }
+
 # panel_sql <sql>: read-only query on the panel's SQLite inside its container (JSON rows).
 panel_sql() {
   local c
@@ -356,6 +364,7 @@ check_01() {
   ev "panel container $cid1: $(printf '%s' "$labels" | jq -c "with_entries(select(.key|startswith(\"$SLUG.\")))")"
   expect "panel container is in project panelproject0000" test "$(printf '%s' "$labels" | jq -r ".[\"$SLUG.project\"]")" = panelproject0000
   expect "panel container is protected" test "$(printf '%s' "$labels" | jq -r ".[\"$SLUG.protected\"]")" = true
+  expect "the panel runs as the panel user with its folder closed to login users ($(panel_user_of "$E2E_A"))" panel_user_ok "$E2E_A"
   started1=$(on "$E2E_A" "docker inspect -f '{{.State.StartedAt}}' $cid1")
   # Give reconcile time to adopt (or wrongly roll) the container.
   sleep 25
@@ -3048,6 +3057,9 @@ upgrade_body() {
   after=$(api projects.list | jq -c '[.projects[].name] | sort')
   expect "the projects are the same ($after)" test "$after" = "$before"
   expect "the API key made on $E2E_BASE still works" sh -c "curl -fsS -m 5 -H 'authorization: Bearer $key' '$up/api/v1/auth.whoami' >/dev/null"
+  # The $E2E_BASE panel ran as uid 1000; the updated agent gives its folder to the panel user and replaces it once.
+  wait_for 120 "the panel on C as the panel user" panel_user_ok "$E2E_C" || true
+  expect "the upgraded panel runs as the panel user, its folder and master.key moved to it ($(panel_user_of "$E2E_C"))" panel_user_ok "$E2E_C"
   expect "web still answers on $addr with its env" sh -c "curl -fsS -m 5 http://$addr/ | grep -q upgrade-web"
   expect "the Postgres row from $E2E_BASE is there" test "$(pg_exec c "$pg" "select v from upgrade_rows")" = "from-$E2E_BASE"
   ev "cron job after the upgrade: $(api cron.list "{\"serviceId\":\"$worker\"}" | jq -c '.jobs[0] | {schedule, nextRunAt}')"

@@ -54,6 +54,11 @@ type worker struct {
 	// takes them off every project network but their own (healNetworks).
 	netsUnsure map[string]bool
 
+	// panelDirWas is who owned the panel's folder before this rollout gave
+	// it to the panel user (preparePanelDir), so a failed first start puts
+	// it back for the panel container that ran before. Panel only.
+	panelDirWas *panelDirOwner
+
 	rollMu     sync.Mutex
 	rolling    bool
 	rollGen    uint64
@@ -540,6 +545,16 @@ func (w *worker) createInstances(ctx context.Context, spec *agentv1.ServiceSpec,
 	binds, mounts, err := prepareData(ctx, w.r.o.Docker, w.r.o.Layout, spec, w.r.o.Scope)
 	if err != nil {
 		return nil, err
+	}
+	if docker.IsPanelService(spec.GetId(), spec.GetProtected()) {
+		// No older panel runs by now (the panel deploys in RECREATE mode).
+		was, err := preparePanelDir(w.r.o.Layout)
+		if err != nil {
+			return nil, err
+		}
+		if was.changed {
+			w.panelDirWas = &was
+		}
 	}
 	var out []docker.Container
 	for _, rep := range reps {

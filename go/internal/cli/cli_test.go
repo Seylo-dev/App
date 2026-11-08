@@ -288,11 +288,16 @@ func TestPanelBootstrap(t *testing.T) {
 		"--label seylo.service=panel00000000000", "--label traefik.enable=false", "--env SEYLO_PORT=3000",
 		// Other nodes' agents reach the panel over TLS with a pinned key on the same port inside and outside.
 		"--publish 3443:3443", "--env SEYLO_AGENT_TLS_PORT=3443",
+		// The panel user, which no login user has, recorded so the agent adopts the container.
+		"--user 61000:61000", "--label seylo.user=61000:61000",
 		"ghcr.io/seylo-dev/seylo:0.1.0@sha256:abc",
 	} {
 		if !strings.Contains(runCmd, want) {
 			t.Errorf("docker run misses %q:\n%s", want, runCmd)
 		}
+	}
+	if info, err := os.Stat(filepath.Join(h.dataDir, "panel")); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("the panel folder is %v (%v), want 0700: only root and the panel user", info.Mode(), err)
 	}
 	cfg, err := agent.LoadConfig(filepath.Join(h.dataDir, "config.yml"))
 	if err != nil || cfg.PanelURL != "http://127.0.0.1:3000" || !strings.HasPrefix(cfg.JoinToken, "seylo_join_") || strings.Contains(runCmd, "seylo_join_") {

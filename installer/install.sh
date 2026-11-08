@@ -36,6 +36,9 @@ TEST_RELEASE_PUBLIC_KEY=''
 # minDockerMajor and recommendedDockerMajor (go/internal/nodecheck).
 MIN_DOCKER_MAJOR=23
 RECOMMENDED_DOCKER_MAJOR=25
+# The panel container's uid and gid (go/internal/docker PanelUID). It owns
+# the panel's folder, so no account on the server may have it.
+PANEL_UID=61000
 
 SLUG=$BRAND_SLUG
 NAME=$BRAND_DISPLAY_NAME
@@ -826,6 +829,7 @@ install_panel() {
 		image="$BRAND_IMAGE:$VERSION@<digest from the release manifest>"
 	fi
 	step "Starting the panel"
+	check_panel_uid
 	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ] || ! docker image inspect "$image" >/dev/null 2>&1; then
 		run docker pull "$image"
 	fi
@@ -835,6 +839,17 @@ install_panel() {
 		seylo panel bootstrap --image "$image" --port "$PORT" --agent-tls-port "$AGENT_TLS_PORT"
 	fi
 	run systemctl restart "$SLUG.service"
+}
+
+# check_panel_uid warns when an account on this server has the panel's
+# uid or gid: the panel's folder (master.key, panel.db) belongs to it, so
+# that account could read them.
+check_panel_uid() {
+	command -v getent >/dev/null 2>&1 || return 0
+	for db in passwd group; do
+		name=$(getent "$db" "$PANEL_UID" 2>/dev/null | cut -d: -f1)
+		[ -z "$name" ] || warn "the $db entry $name on this server has id $PANEL_UID, the panel's user: it can read the panel's master key and database in $DATA_DIR/panel. Give it another id, or treat it like root"
+	done
 }
 
 install_join() {

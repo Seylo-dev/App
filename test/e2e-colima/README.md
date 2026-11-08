@@ -109,8 +109,13 @@ refreshed version instead of N.
   Sunday, which 0.1 panels accepted), then publishes this build and runs the normal update
   (`updates.updatePanel`, panel then node). C pulls the pinned panel images of A's registry through
   two small Python TCP relays (`e2e-regfwd` units: A's address -> A's 127.0.0.1:15000, C's
-  127.0.0.1:15000 -> A), since Docker only pulls plain HTTP from 127.0.0.0/8. Afterwards it puts the
+  127.0.0.1:15000 -> A), since Docker only pulls plain HTTP from 127.0.0.0/8. The 0.1.1 panel runs as
+  uid 1000; after the update the panel must run as the panel user (61000) with its folder 0700 and
+  `master.key` 0600 (check 3 asks the same of a fresh install). Afterwards it puts the
   published release back, uninstalls C and joins it to A again.
+- Kept VMs installed before the panel user existed: the first agent of this build replaces the panel
+  container once (same generation) to move it to the panel user, so check 3's "no roll after the
+  join" can see a new container id on that one rerun.
 - Run nothing that edits `checks.sh` or `lib.sh` while a run is going: bash reads the script as it goes.
 - The scripts only take VM profiles named `seylo-e2e-*` (they create and delete them), so they never
   touch a VM you use for something else, such as the dev VM `seylo-a`.

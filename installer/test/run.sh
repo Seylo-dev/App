@@ -223,6 +223,7 @@ run_installer() {
     FAKE_LIVE_RESTORE="${FAKE_LIVE_RESTORE:-}" FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT:-}" FAKE_SWARM="${FAKE_SWARM:-}" \
     FAKE_DOCKER_VERSION="${FAKE_DOCKER_VERSION:-}" FAKE_NO_DOCKER_UNIT="${FAKE_NO_DOCKER_UNIT:-}" \
     FAKE_DOCKERD_INVALID="${FAKE_DOCKERD_INVALID:-}" FAKE_OUR_PROXY="${FAKE_OUR_PROXY:-}" \
+    FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
   RC=$?
@@ -454,6 +455,28 @@ curl_log | grep -q "/download/v$V/manifest.json\$" && ! curl_log | grep -q "/lat
 run_installer minisign "$INSTALLER" join --panel https://192.0.2.10:3443 --token t
 expect_ok "join without --version from the latest installer follows latest" "$SLUG $VN (test) -> /usr/local/bin/$SLUG"
 fresh_release
+
+# ---- the panel's uid (go/internal/docker PanelUID) belongs to no account
+panel_uid=$(sed -n 's/^PANEL_UID=//p' "$INSTALLER")
+nodes_uid=$(sed -n 's/^[[:space:]]*PanelUID[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$root/go/internal/docker/names.go")
+[ -n "$panel_uid" ] && [ "$panel_uid" = "$nodes_uid" ] && pass "installer panel uid ($panel_uid) is docker.PanelUID ($nodes_uid)" ||
+  flunk "installer panel uid '$panel_uid' differs from docker.PanelUID '$nodes_uid'"
+with_getent=$T/with-getent
+mkdir -p "$with_getent"
+cat >"$with_getent/getent" <<'SHIM'
+#!/bin/sh
+# getent passwd|group <id>: FAKE_GETENT_<db> names the entry with that id.
+case $1 in
+passwd) [ -n "${FAKE_GETENT_passwd:-}" ] && echo "$FAKE_GETENT_passwd:x:$2:$2::/home/$FAKE_GETENT_passwd:/bin/bash" ;;
+group) [ -n "${FAKE_GETENT_group:-}" ] && echo "$FAKE_GETENT_group:x:$2:" ;;
+esac
+SHIM
+chmod +x "$with_getent/getent"
+EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "a panel install with the panel's uid free installs quietly" "panel bootstrap --image"
+has "the panel's user" && flunk "a free panel uid got a warning" "$OUT" || pass "a free panel uid gets no warning"
+FAKE_GETENT_passwd=olduser EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "an account with the panel's uid gets a warning" "the passwd entry olduser on this server has id $panel_uid, the panel's user"
 
 # ---- the agents' TLS port and plain-HTTP joins
 FAKE_UFW=1 run_installer minisign "$INSTALLER" --version "$V"

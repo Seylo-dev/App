@@ -130,7 +130,15 @@ func volumeOwner(s *agentv1.ServiceSpec, v *agentv1.VolumeMount) string {
 // panel container carries no hash label: a protected instance without one
 // at the desired generation counts as running the desired spec, so the
 // agent adopts it as is instead of rolling the panel. Any later spec change comes with a new generation and rolls it.
+//
+// A panel container that does not run as docker.PanelUser (no LabelUser:
+// started by an agent or installer from before 0.2.0-rc.2, as the image's
+// uid 1000) serves no spec, so it is replaced once by one that does, after
+// preparePanelDir moved the folder to that user.
 func instanceHash(labels map[string]string, spec *agentv1.ServiceSpec, hash string) string {
+	if docker.IsPanelService(spec.GetId(), spec.GetProtected()) && labels[docker.LabelUser] != docker.PanelUser {
+		return ""
+	}
 	if h := labels[docker.LabelSpecHash]; h != "" {
 		return h
 	}
@@ -215,8 +223,10 @@ func prepareData(ctx context.Context, eng docker.Engine, layout datadir.Layout, 
 		}
 	}
 	if docker.IsPanelService(s.GetId(), s.GetProtected()) {
+		// Its owner and modes are set by preparePanelDir, right before a
+		// panel container is created (the old one may still run now).
 		dir := filepath.Join(layout.Root(), "panel")
-		if err := os.MkdirAll(dir, 0o750); err != nil {
+		if err := os.MkdirAll(dir, panelDirMode); err != nil {
 			return nil, nil, fmt.Errorf("creating the panel folder: %w", err)
 		}
 		binds = append(binds, panelBind(layout))
@@ -248,8 +258,13 @@ func containerSpec(s *agentv1.ServiceSpec, image string, gen uint64, replica uin
 	aliases := append([]string{s.GetName()}, s.GetNetworkAliases()...)
 	r := s.GetResources()
 	var publish []docker.PortPublish
+	user, labelUser := c.GetUser(), ""
 	if docker.IsPanelService(s.GetId(), s.GetProtected()) {
 		publish = panelPublish(s)
+		// The agent decides the panel's user, not the spec: a panel that
+		// set it would make an agent from before the panel user start it
+		// as that user on a folder still owned by uid 1000.
+		user, labelUser = docker.PanelUser, docker.PanelUser
 	}
 	return docker.ContainerSpec{
 		Publish:    publish,
@@ -258,7 +273,7 @@ func containerSpec(s *agentv1.ServiceSpec, image string, gen uint64, replica uin
 		Command:    c.GetCommand(),
 		Entrypoint: c.GetEntrypoint(),
 		WorkingDir: c.GetWorkingDir(),
-		User:       c.GetUser(),
+		User:       user,
 		Env:        env,
 		Labels: docker.InstanceLabels{
 			ServiceID:  s.GetId(),
@@ -268,6 +283,7 @@ func containerSpec(s *agentv1.ServiceSpec, image string, gen uint64, replica uin
 			Replica:    replica,
 			Protected:  s.GetProtected(),
 			SpecHash:   hash,
+			User:       labelUser,
 		}.Map(),
 		Binds:             binds,
 		Mounts:            mounts,

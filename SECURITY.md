@@ -64,8 +64,14 @@ What Seylo protects, and what it does not:
 
 ## Where secrets live
 
-On the panel's server, in `/var/lib/seylo/panel/` (owned by the panel's user;
-the key and token files are mode 0600):
+On the panel's server, in `/var/lib/seylo/panel/` (mode 0700, owned by the
+panel's user, uid and gid 61000, which no login user has; the key and token
+files are mode 0600). Only root and the panel container can read it. Before
+0.2.0-rc.2 the panel ran as uid 1000, which on most cloud images is the
+default login user (`ubuntu`, `debian`, `ec2-user`), and that user could
+read `master.key` without sudo; the agent gives the folder to the panel's
+user the first time it starts the panel after its update. The installer
+warns when an account already has uid or gid 61000.
 
 - `master.key`: seals every stored secret (env values and secrets, registry,
   Git and GitHub credentials, backup destinations, notification channels,

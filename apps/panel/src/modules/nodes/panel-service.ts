@@ -17,6 +17,12 @@
 // panelContributor keeps the service's spec as the installer made it (env,
 // the published port, the "panel" alias, recreate deploys, no volumes: the
 // agent binds the data dir itself) and routes the panel domain to it.
+//
+// The spec never names the panel's user: the agent runs the panel as its
+// panel user (go/internal/docker PanelUser, uid 61000) after giving the data
+// dir to it. A user in the spec would make an agent from before 0.2.0-rc.2,
+// which does not move the folder, start the panel as that user on a folder
+// uid 1000 still owns.
 
 import { create } from "@bufbuild/protobuf";
 import {
