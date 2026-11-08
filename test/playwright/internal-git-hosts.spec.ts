@@ -136,7 +136,7 @@ test.describe("internal git hosts", () => {
     await page.goto(`/p/${ids.acme}?tab=settings`);
     const section = page.getByRole("region", { name: "Internal git hosts" }).or(page.locator("section", { hasText: "Internal git hosts" }));
     await expect(section.getByText("git.example.com")).toBeVisible();
-    await expect(section.getByText("Recorded on upgrade")).toBeVisible();
+    await expect(section.getByText("Recorded on upgrade or by a removed account")).toBeVisible();
     await expect(section.getByText("2 sources")).toBeVisible();
 
     await section.getByLabel("Allow a host").fill("https://gitea.corp.example/team/app.git");
