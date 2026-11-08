@@ -27,6 +27,17 @@ var fakeLBTLS = &agentv1.LoadBalancerTls{
 	KeyPem: "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n", ServerName: "lb.seylo.internal",
 }
 
+// fakePeersLBTLS is fakeLBTLS from a panel that lists its nodes.
+var fakePeersLBTLS = &agentv1.LoadBalancerTls{
+	CaPem: fakeLBTLS.GetCaPem(), CertPem: fakeLBTLS.GetCertPem(), KeyPem: fakeLBTLS.GetKeyPem(), ServerName: fakeLBTLS.GetServerName(),
+	NodeServerName: "n1.lb.seylo.internal",
+	Peers: []*agentv1.LoadBalancerPeer{
+		{NodeId: "n1", ServerName: "n1.lb.seylo.internal"},
+		{NodeId: "n2", ServerName: "n2.lb.seylo.internal"},
+		{NodeId: "n3", ServerName: "lb.seylo.internal"},
+	},
+}
+
 func route(id string, hosts ...string) *agentv1.Route {
 	return &agentv1.Route{Id: id, Hosts: hosts, TargetPort: 3000, Https: agentv1.HttpsMode_HTTPS_MODE_ACME, RedirectToHttps: true}
 }
@@ -110,6 +121,23 @@ func TestBuildGolden(t *testing.T) {
 			}(),
 			Upstreams:    ups("http://seylo-svc7-4:3000"),
 			Settings:     &agentv1.NodeSettings{LbTls: fakeLBTLS},
+			Edge:         testEdge,
+			LBEntryPoint: true,
+		}},
+		{"load-balancer-peers", BuildInput{
+			// n2 answers its own name, n3 (older agent) the shared one, n4
+			// holds no certificate the panel lists; route r2 goes to another port.
+			Service: func() *agentv1.ServiceSpec {
+				s := app("svc10", route("r1", "peers.example.com"), &agentv1.Route{Id: "r2", Hosts: []string{"admin.peers.example.com"}, TargetPort: 9000, Https: agentv1.HttpsMode_HTTPS_MODE_OFF})
+				s.LoadBalancer = &agentv1.LoadBalancer{StickySessions: true, RemoteUpstreams: []*agentv1.RemoteUpstream{
+					{NodeId: "n2", Url: "https://198.51.100.2:5757"},
+					{NodeId: "n3", Url: "https://198.51.100.3:5757"},
+					{NodeId: "n4", Url: "https://198.51.100.4:5757"},
+				}}
+				return s
+			}(),
+			Upstreams:    ups("http://seylo-svc10-4:3000", "http://seylo-svc10-4-1:3000"),
+			Settings:     &agentv1.NodeSettings{LbTls: fakePeersLBTLS},
 			Edge:         testEdge,
 			LBEntryPoint: true,
 		}},
@@ -278,5 +306,103 @@ func TestBuildRejectsUnsafeInput(t *testing.T) {
 		if _, err := Build(in); !errors.Is(err, ErrInvalidRoute) {
 			t.Errorf("case %d: err = %v, want ErrInvalidRoute", i, err)
 		}
+	}
+}
+
+// Each copy on another node is a Traefik service of its own, so its
+// serversTransport verifies that node's own name: a sibling's certificate
+// (valid for the shared name too) does not pass for it.
+func TestBuildRemoteCopiesVerifyTheirOwnNode(t *testing.T) {
+	spec := app("svc7", route("r1", "lb.example.com"))
+	spec.LoadBalancer = &agentv1.LoadBalancer{RemoteUpstreams: []*agentv1.RemoteUpstream{
+		{NodeId: "n2", Url: "https://198.51.100.2:5757"},
+		{NodeId: "n3", Url: "https://198.51.100.3:5757"},
+		{NodeId: "n4", Url: "https://198.51.100.4:5757"},
+	}}
+	decode := func(in BuildInput) dynamicConfig {
+		t.Helper()
+		built, err := Build(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg dynamicConfig
+		if err := yaml.Unmarshal(built.Data, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	in := BuildInput{Service: spec, Upstreams: ups("http://seylo-svc7-4:3000"), Settings: &agentv1.NodeSettings{LbTls: fakePeersLBTLS}, Edge: testEdge, LBEntryPoint: true}
+	cfg := decode(in)
+	main := cfg.HTTP.Services["seylo-svc7"]
+	if main == nil || main.Weighted == nil {
+		t.Fatalf("main service is not weighted over the copies: %+v", main)
+	}
+	var children []string
+	for _, c := range main.Weighted.Services {
+		children = append(children, c.Name)
+	}
+	if want := []string{"seylo-svc7-local", "seylo-svc7-node-n2", "seylo-svc7-node-n3"}; !slices.Equal(children, want) {
+		t.Fatalf("children %v, want %v (n4 has no certificate the panel lists)", children, want)
+	}
+	for node, name := range map[string]string{"n2": "n2.lb.seylo.internal", "n3": "lb.seylo.internal"} {
+		svc := cfg.HTTP.Services["seylo-svc7-node-"+node]
+		st := cfg.HTTP.ServersTransports["seylo-svc7-node-"+node]
+		if svc == nil || svc.LoadBalancer.ServersTransport != "seylo-svc7-node-"+node || st == nil {
+			t.Fatalf("%s: service %+v, transport %+v", node, svc, st)
+		}
+		if st.ServerName != name || st.InsecureSkipVerify || len(st.RootCAs) != 1 || len(st.Certificates) != 1 {
+			t.Errorf("%s: transport %+v, want server name %s, the CA and this node's certificate", node, st, name)
+		}
+	}
+	if _, ok := cfg.HTTP.Services["seylo-svc7-node-n4"]; ok {
+		t.Error("a node the panel lists no certificate for is dialed")
+	}
+
+	// Only unlisted nodes and no replica here: the status page, not a dead pool.
+	in.Upstreams = nil
+	in.Service.LoadBalancer.RemoteUpstreams = in.Service.LoadBalancer.RemoteUpstreams[2:]
+	cfg = decode(in)
+	if r := cfg.HTTP.Routers["seylo-svc7-r-r1"]; r == nil || r.Service != "seylo-svc7-edge" {
+		t.Fatalf("no reachable copy should serve the status page: %+v", r)
+	}
+
+	// From an older panel (no peers) every node goes by the shared name.
+	in.Settings = &agentv1.NodeSettings{LbTls: fakeLBTLS}
+	cfg = decode(in)
+	if st := cfg.HTTP.ServersTransports["seylo-svc7-node-n4"]; st == nil || st.ServerName != "lb.seylo.internal" {
+		t.Fatalf("older panel: %+v", st)
+	}
+	// Without lb_tls: encrypted only, as before.
+	in.Settings = nil
+	cfg = decode(in)
+	if st := cfg.HTTP.ServersTransports["seylo-svc7-node-n4"]; st == nil || !st.InsecureSkipVerify {
+		t.Fatalf("no lb_tls: %+v", st)
+	}
+}
+
+// Node ids go into Traefik names as they are when they are plain ids, and
+// hashed otherwise; two copies on one node keep apart.
+func TestBuildRemoteCopyNames(t *testing.T) {
+	spec := app("svc7", route("r1", "lb.example.com"))
+	spec.LoadBalancer = &agentv1.LoadBalancer{RemoteUpstreams: []*agentv1.RemoteUpstream{
+		{NodeId: "Node_2", Url: "https://198.51.100.2:5757"},
+		{NodeId: "n3", Url: "https://198.51.100.3:5757"},
+		{NodeId: "n3", Url: "https://198.51.100.33:5757"},
+	}}
+	built, err := Build(BuildInput{Service: spec, Upstreams: ups("http://seylo-svc7-4:3000"), Edge: testEdge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg dynamicConfig
+	if err := yaml.Unmarshal(built.Data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range cfg.HTTP.Services["seylo-svc7"].Weighted.Services {
+		names = append(names, c.Name)
+	}
+	if len(names) != 4 || names[1] != "seylo-svc7-node-"+nodeKey("Node_2") || !strings.HasPrefix(names[1], "seylo-svc7-node-x") ||
+		names[2] != "seylo-svc7-node-n3" || names[3] != "seylo-svc7-node-n3-2" {
+		t.Fatalf("names %v", names)
 	}
 }

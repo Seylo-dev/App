@@ -125,7 +125,21 @@ type headers struct {
 
 type service struct {
 	LoadBalancer *loadBalancer `yaml:"loadBalancer,omitempty"`
+	Weighted     *weighted     `yaml:"weighted,omitempty"`
 	Failover     *failover     `yaml:"failover,omitempty"`
+}
+
+// weighted spreads requests over other services by weight (Traefik's
+// weighted round robin); its sticky cookie picks the service, so a child
+// with sticky servers needs a cookie of another name.
+type weighted struct {
+	Services []weightedService `yaml:"services"`
+	Sticky   *sticky           `yaml:"sticky,omitempty"`
+}
+
+type weightedService struct {
+	Name   string `yaml:"name"`
+	Weight int    `yaml:"weight"`
 }
 
 // failover sends a request to Fallback when Service answers one of

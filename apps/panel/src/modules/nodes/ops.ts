@@ -18,7 +18,7 @@ import { metricsFor } from "../metrics/ingest";
 import { blockedReason } from "../uptime/targets";
 import { joinCommand } from "./join-command";
 import { agentJoinTarget } from "./join-target";
-import { forgetNodeCertificate } from "./lb-tls";
+import { forgetNodeCertificate, refreshLbPeers } from "./lb-tls";
 import { nodeLive } from "./live";
 import { factsOf, toNode, toNodeDetail } from "./view";
 
@@ -193,6 +193,8 @@ const remove = implement(nodeOps.remove, (input, ctx) => {
   ctx.agents.forgetNode(row.id, "node removed from the panel");
   metricsFor(ctx).forgetNode(row.id);
   forgetNodeCertificate(ctx, row.id);
+  // The other nodes stop accepting its LB certificate.
+  refreshLbPeers(ctx);
   publishNode(ctx, row.id);
   return {};
 });

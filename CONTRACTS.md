@@ -791,19 +791,34 @@ local API, join and resume. The areas:
   `<datadir>/traefik/acme`; entry points `web` :80, `websecure` :443,
   `seylo-lb` :5757 (TLS, other nodes' load-balanced traffic, local replicas
   only; with `NodeSettings.lb_tls` mutual TLS: LB routers use the TLS options
-  `seylo-lb` from `seylo-lb.tls.yml` (client certificate from the panel's LB
-  CA required, anchor router for the `server_name` SNI), and balancing nodes
-  verify peers by `server_name` and present their own certificate instead of
-  `insecureSkipVerify`; without a complete `lb_tls` no route file has a
-  router on `seylo-lb`, so the entry point, published on every interface,
-  answers 404 to everyone instead of taking any client; the panel issues
-  each node's certificate on connect, for 30 days (nothing revokes one a
-  node holds, so a removed node's certificate stops opening the other
-  nodes' LB entry points within that; one issued for longer is replaced),
-  and the hourly prune job renews it with under 20 days left
-  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`). Every node's
-  certificate names the one shared `server_name`, so a node can still pose
-  as another to a sibling it can intercept; `seylo panel rotate-key
+  `seylo-lb` from `seylo-lb.tls.yml` (anchor router for the shared
+  `server_name` and the node's own `node_server_name` SNIs; client CAs: with
+  `lb_tls.peers` the one-off issuers of the listed nodes' certificates, so
+  only a certificate the panel issued to a current node opens it; from older
+  panels, or while a listed peer is `legacy`, any certificate of the LB CA),
+  and a balancing node gives each copy on another node a Traefik service and
+  serversTransport of its own (`seylo-<id>-node-<node id>`, under a
+  `weighted` main service: one share per local replica, one per node; the
+  sticky cookie `seylo_<id>` picks the node's copy and `seylo_<id>_r` the
+  local replica) that verifies the peer against the LB CA by the name
+  `peers` lists for it and presents this node's certificate and, while it
+  lives, the previous one (Go's TLS client sends the one whose issuer the
+  peer asks for); copies on nodes `peers` does not list are not dialed;
+  without a complete `lb_tls` no route file has a router on `seylo-lb`, so
+  the entry point, published on every interface, answers 404 to everyone
+  instead of taking any client. The panel issues each node's certificate
+  on connect, for 30 days, signed by a one-off issuer (a CA with path length
+  0 the LB CA signs; its key is thrown away) and valid for `lb.seylo.internal`
+  and `<node id>.lb.seylo.internal`; the hourly prune job renews it for
+  connected nodes with under 20 days left, and one from before 0.2 (no
+  issuer of its own) or issued for longer is replaced at once
+  (`modules/nodes/lb-tls.ts` `issueNodeCertificate`). Every node's settings
+  list every node with a live certificate (`peers`); removing a node, a
+  renewal, a confirmation and a certificate's expiry resend the connected
+  nodes' settings (`refreshLbPeers`). A renewed node's previous certificate
+  stays accepted until the node accepted a full SyncDesired carrying the new
+  one (`agents.desired.onSynced`) plus 2 minutes, and it presents the
+  previous one until it expires. `seylo panel rotate-key
   --new-panel-identity` makes a new LB CA. A node it cannot
   issue one for, for example because the LB CA key does not open with this
   master.key, gets one `node_health_check_failed` alert naming the reason,
@@ -1900,7 +1915,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Boxes and backup `stop_service` against the real runtime: sleep/wake ran with a fake `SetSleeping`/`Resolve` | Unit tests only |
 | Runtime gaps: resource changes roll a new container instead of `docker update`; the portgate's `Resolve` may still pick an unhealthy replica (routes skip it); a brand slug with a dash would nest `<slug>.slice` under the systemd cgroup driver (`seylo` has none). The systemd driver path ran in a VM with `native.cgroupdriver=systemd` (docker, reconcile, wings incl. games-first CPU through systemctl, proxy, agent, jobrun, metrics, nodecheck packages) | Behaviour as described |
 | Observe Docker access goes through `console/dockerapi`, not `d.Docker`: kept on purpose. It needs raw multiplexed log frames with `until` (partial lines, the restart cursor), separate stdout/stderr for non-TTY exec, exec inspect for the process sweep, destroy events and one-shot stats, none of which `docker.Engine` exposes; moving it would mean five new Engine methods and re-verifying logs capture, console, shell and metrics for no user-visible change. It only reads, attaches and execs | Two Docker clients in the agent (both scoped to our containers) |
-| Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificates share one server name (a node can pose as another to a sibling whose traffic it intercepts) and cannot be revoked before they expire (30 days); a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
+| Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificate revocation holds only on agents with `lb.tls.peers.v1`, only once they got their settings (a node cut off from the panel keeps its last list), and only for new connections (Traefik keeps a TLS connection it already accepted across reloads); while the panel lists a `legacy` peer (a node holding a certificate from before 0.2 that has not connected since, at most 30 days) every certificate of the LB CA is accepted; an older agent is reached by the shared name, which any node's certificate carries; a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
 | GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
@@ -1917,7 +1932,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled on the panel's node by `sudo seylo panel rotate-key --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key, LB CA and agents' TLS key, so every node is joined again with the printed `seylo join --force` command and its new pin; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
-| LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates | During an update run only |
+| LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates. Agents from before `lb.tls.peers` keep working with upgraded ones: every certificate carries the shared name and chains to the LB CA through its issuer, upgraded nodes reach them by the shared name and accept their certificate when the panel lists them | During an update run only |
 
 ### Verification
 
@@ -2001,6 +2016,7 @@ the node is offline (`modules/databases/capability.ts`).
 |---|---|
 | `database.engines.v2` | Valkey, KeyDB, Dragonfly and ClickHouse (`DatabaseEngine` 6-9): shells, web UIs, backups and TLS on the exposed port. The panel creates, moves or clones such a database only onto a node that advertised it, refuses exposure elsewhere, and the desired state never sends their exposure to an agent without it (an older one would relay the port without TLS) |
 | `backup.signed.v1` | Backup destinations without keys (`BackupDestination.signing_id`): the agent asks `PanelService.SignBackupRequests` for each S3 step (`backup.SignedStore`). The panel sends backups and restores only to agents that advertised it |
+| `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
 
 ## Releases and updates
 

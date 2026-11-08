@@ -10,6 +10,7 @@
 // await settled() only when the op must report what the agent accepted.
 // Offline nodes are not a failure: they get a full SyncDesired on connect.
 
+import type { DesiredState } from "@seylo/proto";
 import type { DesiredContributor } from "./contributors";
 
 export type DesiredTarget = { serviceId: string } | { projectId: string } | { nodeId: string } | { all: true };
@@ -56,6 +57,15 @@ export interface DesiredStateSync {
   onRefused(listener: (nodeId: string, refusal: RefusedSpec) => void): () => void;
   /** For the flusher: tells the onRefused listeners. Never throws. */
   reportRefused(nodeId: string, refusal: RefusedSpec): void;
+
+  /**
+   * Called after a node accepted a full SyncDesired, with the state it
+   * accepted (it now holds that state's node settings). Returns an
+   * unsubscribe function.
+   */
+  onSynced(listener: (nodeId: string, state: DesiredState) => void): () => void;
+  /** For the flusher: tells the onSynced listeners. Never throws. */
+  reportSynced(nodeId: string, state: DesiredState): void;
 }
 
 export function createDesiredStateSync(): DesiredStateSync {
@@ -67,6 +77,7 @@ export function createDesiredStateSync(): DesiredStateSync {
   let inFlight = false;
   let contributors: DesiredContributor[] = [];
   const refusedListeners = new Set<(nodeId: string, refusal: RefusedSpec) => void>();
+  const syncedListeners = new Set<(nodeId: string, state: DesiredState) => void>();
 
   return {
     contribute(contributor) {
@@ -118,6 +129,19 @@ export function createDesiredStateSync(): DesiredStateSync {
           listener(nodeId, refusal);
         } catch {
           // A listener's failure must not stop the flusher; listeners log their own errors.
+        }
+      }
+    },
+    onSynced(listener) {
+      syncedListeners.add(listener);
+      return () => syncedListeners.delete(listener);
+    },
+    reportSynced(nodeId, state) {
+      for (const listener of syncedListeners) {
+        try {
+          listener(nodeId, state);
+        } catch {
+          // As reportRefused.
         }
       }
     },

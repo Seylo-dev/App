@@ -88,8 +88,46 @@ message LoadBalancerTls {
   string cert_pem = 2;
   string key_pem = 3;
   // The DNS name every node's LB certificate carries; balancing nodes send it
-  // as SNI and verify it, for example "lb.seylo.internal".
+  // as SNI and verify it, for example "lb.seylo.internal". Agents that know
+  // peers use it only for peers listed with it.
   string server_name = 4;
+  // This node's own name, for example "<node id>.lb.seylo.internal". The
+  // certificate carries it next to server_name and the LB entry point
+  // answers it as SNI. Empty from older panels. added in 0.2 (lb-cert)
+  string node_server_name = 5;
+  // The certificate this node had before cert_pem (with its issuer) and its
+  // key, until it expires. As a client the node presents whichever of the
+  // two the peer asks for (the issuers in the peer's certificate request),
+  // so a peer that has not heard of the new one yet still takes it. Empty
+  // when there is none. added in 0.2 (lb-cert)
+  string previous_cert_pem = 6;
+  string previous_key_pem = 7;
+  // Every node the panel holds a current LB certificate for, this one
+  // included. With peers the LB entry point accepts only a client
+  // certificate one of them was issued (a removed node's, or one replaced
+  // and given up, is refused), and a balancing node verifies each peer by
+  // the server_name listed for it and skips copies on nodes not listed.
+  // Empty (older panels): any certificate of ca_pem, verified by
+  // server_name. added in 0.2 (lb-cert)
+  repeated LoadBalancerPeer peers = 8;
+}
+
+// LoadBalancerPeer is one node in LoadBalancerTls.peers. added in 0.2 (lb-cert)
+message LoadBalancerPeer {
+  string node_id = 1;
+  // The name to send as SNI and verify when balancing to this node: its own
+  // name once its agent answers it, else the shared server_name.
+  string server_name = 2;
+  // PEM of the one-off CA certificates (each signed by ca_pem, one per node
+  // certificate) that issued the certificates this node may present: the
+  // current one, and the one before while the node has not confirmed the
+  // new one.
+  repeated string issuer_pems = 3;
+  // The node may still present a certificate issued straight by ca_pem (by a
+  // panel before 0.2, which did not give certificates an issuer of their
+  // own). While any peer has it, the LB entry point accepts every
+  // certificate of ca_pem, as before.
+  bool legacy = 4;
 }
 
 // LogRetention bounds the per-service log store (logs/<service id>/). The

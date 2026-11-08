@@ -21,7 +21,7 @@ import { defineModule } from "../module";
 import { runningMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
 import { importInstallerJoinToken } from "./installer-join";
-import { issueNodeCertificate, lbTlsContributor } from "./lb-tls";
+import { confirmGraceMs, confirmNodeCertificate, issueNodeCertificate, lbTlsContributor, refreshLbPeers, rememberLbPeers } from "./lb-tls";
 import { nodeHandlers, publishNode } from "./ops";
 import { ensurePanelService, panelContributor, panelServiceId } from "./panel-service";
 import { pruneTables } from "./retention";
@@ -52,10 +52,13 @@ const pruneReports = defineJob<Record<string, never>>({
   type: "nodes.pruneReports",
   async run(_payload, ctx) {
     pruneTables(ctx.db);
-    // Renew LB certificates with under 20 days left; the node gets them with its settings.
+    // Renew the LB certificates of connected nodes with under 20 days left (one that is away
+    // gets its own on connect); the node gets it with its settings, the others its issuer.
     for (const node of ctx.db.select({ id: nodes.id }).from(nodes).all()) {
-      if (issueNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
+      if (ctx.agents.isOnline(node.id) && issueNodeCertificate(ctx, node.id)) ctx.agents.desired.markDirty({ nodeId: node.id });
     }
+    // Also certificates that expired and confirmations whose grace ended change the peers.
+    refreshLbPeers(ctx);
   },
 });
 
@@ -73,7 +76,22 @@ function start(deps: Deps) {
   };
   ensure();
   deps.agents.desired.contribute(panelContributor);
-  deps.agents.desired.contribute(lbTlsContributor);
+  deps.agents.desired.contribute(lbTlsContributor(deps.agents));
+  rememberLbPeers(deps);
+  // A node that took a state with its new LB certificate holds it: once the grace is over the
+  // others stop accepting the one before (and reach it by its own name).
+  deps.agents.desired.onSynced((nodeId, state) => {
+    const certPem = state.settings?.lbTls?.certPem;
+    if (!certPem || !confirmNodeCertificate(deps, nodeId, certPem)) return;
+    const timer = setTimeout(() => {
+      try {
+        refreshLbPeers(deps);
+      } catch (error) {
+        nodesLogger.warn({ err: error, nodeId }, "resending the nodes' load balancer peers failed");
+      }
+    }, confirmGraceMs + 1000);
+    timer.unref?.();
+  });
   // A node may report only on the services it runs (agent-hub/service-scope.ts).
   deps.agents.setServiceScope((nodeId) => servicesOnNode(deps.db, nodeId));
   const logger = deps.logger.child({ component: "desired" });
@@ -153,8 +171,12 @@ function start(deps: Deps) {
   };
 
   deps.agents.onConnection((nodeId, online) => {
-    // Its LB identity exists before the connect sync compiles the node's settings.
-    if (online) issueNodeCertificate({ ...deps, logger: nodesLogger }, nodeId);
+    // Its LB identity exists before the connect sync compiles the node's settings; the other
+    // nodes hear of a new certificate, or of an agent that now answers its own LB name.
+    if (online) {
+      issueNodeCertificate({ ...deps, logger: nodesLogger }, nodeId);
+      refreshLbPeers(deps, { except: nodeId });
+    }
     if (!online) {
       if (factsWriter.waiting.has(nodeId)) factsWriter.flush(nodeId);
       deps.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, nodeId)).run();

@@ -21,6 +21,10 @@
 // wedged node does not slow every pass. Passes run one at a time; within a
 // pass, nodes are sent to in parallel.
 //
+// A node that accepted a full SyncDesired is reported through
+// agents.desired.reportSynced with the state it took (the LB certificate
+// module learns from it that the node holds its new certificate).
+//
 // Revisions: when an agent answers with a higher accepted revision than the
 // one sent (the panel's database was restored to an older copy), the node's
 // counter jumps past it and the node gets a full sync, instead of every
@@ -224,6 +228,7 @@ export function startDesiredFlusher(
       return;
     }
     sent.set(nodeId, new Map(state.services.map((s) => [s.id, s.projectId])));
+    agents.desired.reportSynced(nodeId, state);
     // SyncDesired drops services but keeps their data; deleted and moved-away services lose it too.
     const purge = [...before].filter((id) => !kept.has(id) && deleteDataOf(nodeId, id)).sort();
     if (purge.length === 0) return;

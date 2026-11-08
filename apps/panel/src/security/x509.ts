@@ -96,6 +96,8 @@ export interface CertificateRequest {
   hosts?: readonly string[];
   /** A certificate authority (signs other certificates) or an end entity. */
   ca?: boolean;
+  /** For a CA: how many CAs may follow it in a chain (0: it signs end entities only). Unlimited when left out. */
+  pathLen?: number;
   /** Extended key usages of an end entity; serverAuth when left out. */
   usages?: readonly ("serverAuth" | "clientAuth")[];
   notBefore?: Date;
@@ -108,7 +110,8 @@ export function issueCertificate(request: CertificateRequest): Uint8Array {
   serial[0] = (serial[0] ?? 0) & 0x7f;
   const extensions: Uint8Array[] = [];
   if (request.ca) {
-    extensions.push(extension(oids.basicConstraints, true, seq(bool(true))));
+    const pathLen = request.pathLen === undefined ? [] : [integer(Uint8Array.of(request.pathLen))];
+    extensions.push(extension(oids.basicConstraints, true, seq(bool(true), ...pathLen)));
     // keyCertSign (bit 5) and cRLSign (bit 6): 0b0000_0110, one unused bit.
     extensions.push(extension(oids.keyUsage, true, bitString(Uint8Array.of(0x06), 1)));
   } else {
