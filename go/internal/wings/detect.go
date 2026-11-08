@@ -95,6 +95,20 @@ type wingsConfig struct {
 	} `yaml:"proxy"`
 }
 
+// defaultClient asks the local Wings API. One request every few minutes
+// needs no pooled connection: Wings' server has no idle timeout, so a
+// kept-alive socket (and its transport's goroutines) would stay open on
+// both ends, and a new transport per call leaked one per Detect.
+var defaultClient = &http.Client{
+	Timeout: 3 * time.Second,
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+		// The certificate names the node's domain, not the loopback
+		// address this request uses.
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // loopback only
+	},
+}
+
 // FileDetector reads Wings' files (and asks its local API for the version
 // and features).
 type FileDetector struct {
@@ -201,9 +215,7 @@ func (d *FileDetector) system(ctx context.Context, inst *Installation) (*systemI
 	}
 	client := d.HTTP
 	if client == nil {
-		// The certificate names the node's domain, not the loopback
-		// address this request uses.
-		client = &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // loopback only
+		client = defaultClient
 	}
 	url := fmt.Sprintf("%s://%s/api/system", scheme, net.JoinHostPort(host, strconv.Itoa(inst.api.Port)))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
