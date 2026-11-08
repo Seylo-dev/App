@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/desired.proto.
  */
 export const file_seylo_agent_v1_desired: GenFile = /*@__PURE__*/
-  fileDesc("ChxzZXlsby9hZ2VudC92MS9kZXNpcmVkLnByb3RvEg5zZXlsby5hZ2VudC52MSKxAQoMRGVzaXJlZFN0YXRlEhAKCHJldmlzaW9uGAEgASgEEi0KCHNlcnZpY2VzGAIgAygLMhsuc2V5bG8uYWdlbnQudjEuU2VydmljZVNwZWMSMAoIbmV0d29ya3MYAyADKAsyHi5zZXlsby5hZ2VudC52MS5Qcm9qZWN0TmV0d29yaxIuCghzZXR0aW5ncxgEIAEoCzIcLnNleWxvLmFnZW50LnYxLk5vZGVTZXR0aW5ncyIkCg5Qcm9qZWN0TmV0d29yaxISCgpwcm9qZWN0X2lkGAEgASgJIuQCCgxOb2RlU2V0dGluZ3MSMAoLbWFpbnRlbmFuY2UYASABKAsyGy5zZXlsby5hZ2VudC52MS5NYWludGVuYW5jZRIXCg9nYW1lc19maXJzdF9jcHUYAiABKAgSEgoKYWNtZV9lbWFpbBgDIAEoCRIXCg93aWxkY2FyZF9kb21haW4YBCABKAkSMwoNbG9nX3JldGVudGlvbhgFIAEoCzIcLnNleWxvLmFnZW50LnYxLkxvZ1JldGVudGlvbhIbChNtYXhfcGFyYWxsZWxfYnVpbGRzGAYgASgNEhMKC2F1dG9fdXBkYXRlGAcgASgIEi8KBmxiX3RscxgIIAEoCzIfLnNleWxvLmFnZW50LnYxLkxvYWRCYWxhbmNlclRscxIwCgdjbGVhbnVwGAkgASgLMh8uc2V5bG8uYWdlbnQudjEuQ2xlYW51cFNjaGVkdWxlEhIKCmhvc3Rfc2hlbGwYCiABKAginwEKD0NsZWFudXBTY2hlZHVsZRIPCgdlbmFibGVkGAEgASgIEgwKBGNyb24YAiABKAkSFAoMZGlza19wZXJjZW50GAMgASgNEg4KBmltYWdlcxgEIAEoCBITCgtidWlsZF9jYWNoZRgFIAEoCBIaChJzdG9wcGVkX2NvbnRhaW5lcnMYBiABKAgSFgoOdW51c2VkX3ZvbHVtZXMYByABKAgiWQoPTG9hZEJhbGFuY2VyVGxzEg4KBmNhX3BlbRgBIAEoCRIQCghjZXJ0X3BlbRgCIAEoCRIPCgdrZXlfcGVtGAMgASgJEhMKC3NlcnZlcl9uYW1lGAQgASgJIlkKDExvZ1JldGVudGlvbhIdChVtYXhfYnl0ZXNfcGVyX3NlcnZpY2UYASABKAQSKgoHbWF4X2FnZRgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiJBChJTeW5jRGVzaXJlZFJlcXVlc3QSKwoFc3RhdGUYASABKAsyHC5zZXlsby5hZ2VudC52MS5EZXNpcmVkU3RhdGUiYQoTU3luY0Rlc2lyZWRSZXNwb25zZRIZChFhY2NlcHRlZF9yZXZpc2lvbhgBIAEoBBIvCgdyZWZ1c2VkGAIgAygLMh4uc2V5bG8uYWdlbnQudjEuUmVmdXNlZFNlcnZpY2UiSQoOUmVmdXNlZFNlcnZpY2USEgoKc2VydmljZV9pZBgBIAEoCRISCgpnZW5lcmF0aW9uGAIgASgEEg8KB21lc3NhZ2UYAyABKAkiVQoTQXBwbHlTZXJ2aWNlUmVxdWVzdBIQCghyZXZpc2lvbhgBIAEoBBIsCgdzZXJ2aWNlGAIgASgLMhsuc2V5bG8uYWdlbnQudjEuU2VydmljZVNwZWMiMQoUQXBwbHlTZXJ2aWNlUmVzcG9uc2USGQoRYWNjZXB0ZWRfcmV2aXNpb24YASABKAQiUQoUUmVtb3ZlU2VydmljZVJlcXVlc3QSEAoIcmV2aXNpb24YASABKAQSEgoKc2VydmljZV9pZBgCIAEoCRITCgtkZWxldGVfZGF0YRgDIAEoCCIyChVSZW1vdmVTZXJ2aWNlUmVzcG9uc2USGQoRYWNjZXB0ZWRfcmV2aXNpb24YASABKAQiKwoVUmVzdGFydFNlcnZpY2VSZXF1ZXN0EhIKCnNlcnZpY2VfaWQYASABKAkiGAoWUmVzdGFydFNlcnZpY2VSZXNwb25zZUK3AQoSY29tLnNleWxvLmFnZW50LnYxQgxEZXNpcmVkUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_duration, file_seylo_agent_v1_routing, file_seylo_agent_v1_service]);
+  fileDesc("ChxzZXlsby9hZ2VudC92MS9kZXNpcmVkLnByb3RvEg5zZXlsby5hZ2VudC52MSKxAQoMRGVzaXJlZFN0YXRlEhAKCHJldmlzaW9uGAEgASgEEi0KCHNlcnZpY2VzGAIgAygLMhsuc2V5bG8uYWdlbnQudjEuU2VydmljZVNwZWMSMAoIbmV0d29ya3MYAyADKAsyHi5zZXlsby5hZ2VudC52MS5Qcm9qZWN0TmV0d29yaxIuCghzZXR0aW5ncxgEIAEoCzIcLnNleWxvLmFnZW50LnYxLk5vZGVTZXR0aW5ncyIkCg5Qcm9qZWN0TmV0d29yaxISCgpwcm9qZWN0X2lkGAEgASgJIuQCCgxOb2RlU2V0dGluZ3MSMAoLbWFpbnRlbmFuY2UYASABKAsyGy5zZXlsby5hZ2VudC52MS5NYWludGVuYW5jZRIXCg9nYW1lc19maXJzdF9jcHUYAiABKAgSEgoKYWNtZV9lbWFpbBgDIAEoCRIXCg93aWxkY2FyZF9kb21haW4YBCABKAkSMwoNbG9nX3JldGVudGlvbhgFIAEoCzIcLnNleWxvLmFnZW50LnYxLkxvZ1JldGVudGlvbhIbChNtYXhfcGFyYWxsZWxfYnVpbGRzGAYgASgNEhMKC2F1dG9fdXBkYXRlGAcgASgIEi8KBmxiX3RscxgIIAEoCzIfLnNleWxvLmFnZW50LnYxLkxvYWRCYWxhbmNlclRscxIwCgdjbGVhbnVwGAkgASgLMh8uc2V5bG8uYWdlbnQudjEuQ2xlYW51cFNjaGVkdWxlEhIKCmhvc3Rfc2hlbGwYCiABKAginwEKD0NsZWFudXBTY2hlZHVsZRIPCgdlbmFibGVkGAEgASgIEgwKBGNyb24YAiABKAkSFAoMZGlza19wZXJjZW50GAMgASgNEg4KBmltYWdlcxgEIAEoCBITCgtidWlsZF9jYWNoZRgFIAEoCBIaChJzdG9wcGVkX2NvbnRhaW5lcnMYBiABKAgSFgoOdW51c2VkX3ZvbHVtZXMYByABKAgi2QEKD0xvYWRCYWxhbmNlclRscxIOCgZjYV9wZW0YASABKAkSEAoIY2VydF9wZW0YAiABKAkSDwoHa2V5X3BlbRgDIAEoCRITCgtzZXJ2ZXJfbmFtZRgEIAEoCRIYChBub2RlX3NlcnZlcl9uYW1lGAUgASgJEhkKEXByZXZpb3VzX2NlcnRfcGVtGAYgASgJEhgKEHByZXZpb3VzX2tleV9wZW0YByABKAkSLwoFcGVlcnMYCCADKAsyIC5zZXlsby5hZ2VudC52MS5Mb2FkQmFsYW5jZXJQZWVyIl0KEExvYWRCYWxhbmNlclBlZXISDwoHbm9kZV9pZBgBIAEoCRITCgtzZXJ2ZXJfbmFtZRgCIAEoCRITCgtpc3N1ZXJfcGVtcxgDIAMoCRIOCgZsZWdhY3kYBCABKAgiWQoMTG9nUmV0ZW50aW9uEh0KFW1heF9ieXRlc19wZXJfc2VydmljZRgBIAEoBBIqCgdtYXhfYWdlGAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIkEKElN5bmNEZXNpcmVkUmVxdWVzdBIrCgVzdGF0ZRgBIAEoCzIcLnNleWxvLmFnZW50LnYxLkRlc2lyZWRTdGF0ZSJhChNTeW5jRGVzaXJlZFJlc3BvbnNlEhkKEWFjY2VwdGVkX3JldmlzaW9uGAEgASgEEi8KB3JlZnVzZWQYAiADKAsyHi5zZXlsby5hZ2VudC52MS5SZWZ1c2VkU2VydmljZSJJCg5SZWZ1c2VkU2VydmljZRISCgpzZXJ2aWNlX2lkGAEgASgJEhIKCmdlbmVyYXRpb24YAiABKAQSDwoHbWVzc2FnZRgDIAEoCSJVChNBcHBseVNlcnZpY2VSZXF1ZXN0EhAKCHJldmlzaW9uGAEgASgEEiwKB3NlcnZpY2UYAiABKAsyGy5zZXlsby5hZ2VudC52MS5TZXJ2aWNlU3BlYyIxChRBcHBseVNlcnZpY2VSZXNwb25zZRIZChFhY2NlcHRlZF9yZXZpc2lvbhgBIAEoBCJRChRSZW1vdmVTZXJ2aWNlUmVxdWVzdBIQCghyZXZpc2lvbhgBIAEoBBISCgpzZXJ2aWNlX2lkGAIgASgJEhMKC2RlbGV0ZV9kYXRhGAMgASgIIjIKFVJlbW92ZVNlcnZpY2VSZXNwb25zZRIZChFhY2NlcHRlZF9yZXZpc2lvbhgBIAEoBCIrChVSZXN0YXJ0U2VydmljZVJlcXVlc3QSEgoKc2VydmljZV9pZBgBIAEoCSIYChZSZXN0YXJ0U2VydmljZVJlc3BvbnNlQrcBChJjb20uc2V5bG8uYWdlbnQudjFCDERlc2lyZWRQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_google_protobuf_duration, file_seylo_agent_v1_routing, file_seylo_agent_v1_service]);
 
 /**
  * DesiredState is everything the panel wants on one node. The agent stores
@@ -265,11 +265,50 @@ export type LoadBalancerTls = Message<"seylo.agent.v1.LoadBalancerTls"> & {
 
   /**
    * The DNS name every node's LB certificate carries; balancing nodes send it
-   * as SNI and verify it, for example "lb.seylo.internal".
+   * as SNI and verify it, for example "lb.seylo.internal". Agents that know
+   * peers use it only for peers listed with it.
    *
    * @generated from field: string server_name = 4;
    */
   serverName: string;
+
+  /**
+   * This node's own name, for example "<node id>.lb.seylo.internal". The
+   * certificate carries it next to server_name and the LB entry point
+   * answers it as SNI. Empty from older panels. added in 0.2 (lb-cert)
+   *
+   * @generated from field: string node_server_name = 5;
+   */
+  nodeServerName: string;
+
+  /**
+   * The certificate this node had before cert_pem (with its issuer) and its
+   * key, until it expires. As a client the node presents whichever of the
+   * two the peer asks for (the issuers in the peer's certificate request),
+   * so a peer that has not heard of the new one yet still takes it. Empty
+   * when there is none. added in 0.2 (lb-cert)
+   *
+   * @generated from field: string previous_cert_pem = 6;
+   */
+  previousCertPem: string;
+
+  /**
+   * @generated from field: string previous_key_pem = 7;
+   */
+  previousKeyPem: string;
+
+  /**
+   * Every node the panel holds a current LB certificate for, this one
+   * included. With peers the LB entry point accepts only a client
+   * certificate one of them was issued (a removed node's, or one replaced
+   * and given up, is refused), and a balancing node verifies each peer by
+   * the server_name listed for it and skips copies on nodes not listed.
+   * Empty (older panels): any certificate of ca_pem, verified by
+   * server_name. added in 0.2 (lb-cert)
+   *
+   * @generated from field: repeated seylo.agent.v1.LoadBalancerPeer peers = 8;
+   */
+  peers: LoadBalancerPeer[];
 };
 
 /**
@@ -278,6 +317,53 @@ export type LoadBalancerTls = Message<"seylo.agent.v1.LoadBalancerTls"> & {
  */
 export const LoadBalancerTlsSchema: GenMessage<LoadBalancerTls> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_desired, 4);
+
+/**
+ * LoadBalancerPeer is one node in LoadBalancerTls.peers. added in 0.2 (lb-cert)
+ *
+ * @generated from message seylo.agent.v1.LoadBalancerPeer
+ */
+export type LoadBalancerPeer = Message<"seylo.agent.v1.LoadBalancerPeer"> & {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId: string;
+
+  /**
+   * The name to send as SNI and verify when balancing to this node: its own
+   * name once its agent answers it, else the shared server_name.
+   *
+   * @generated from field: string server_name = 2;
+   */
+  serverName: string;
+
+  /**
+   * PEM of the one-off CA certificates (each signed by ca_pem, one per node
+   * certificate) that issued the certificates this node may present: the
+   * current one, and the one before while the node has not confirmed the
+   * new one.
+   *
+   * @generated from field: repeated string issuer_pems = 3;
+   */
+  issuerPems: string[];
+
+  /**
+   * The node may still present a certificate issued straight by ca_pem (by a
+   * panel before 0.2, which did not give certificates an issuer of their
+   * own). While any peer has it, the LB entry point accepts every
+   * certificate of ca_pem, as before.
+   *
+   * @generated from field: bool legacy = 4;
+   */
+  legacy: boolean;
+};
+
+/**
+ * Describes the message seylo.agent.v1.LoadBalancerPeer.
+ * Use `create(LoadBalancerPeerSchema)` to create a new message.
+ */
+export const LoadBalancerPeerSchema: GenMessage<LoadBalancerPeer> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_desired, 5);
 
 /**
  * LogRetention bounds the per-service log store (logs/<service id>/). The
@@ -306,7 +392,7 @@ export type LogRetention = Message<"seylo.agent.v1.LogRetention"> & {
  * Use `create(LogRetentionSchema)` to create a new message.
  */
 export const LogRetentionSchema: GenMessage<LogRetention> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 5);
+  messageDesc(file_seylo_agent_v1_desired, 6);
 
 /**
  * SyncDesiredRequest replaces the whole desired state. The panel sends it
@@ -326,7 +412,7 @@ export type SyncDesiredRequest = Message<"seylo.agent.v1.SyncDesiredRequest"> & 
  * Use `create(SyncDesiredRequestSchema)` to create a new message.
  */
 export const SyncDesiredRequestSchema: GenMessage<SyncDesiredRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 6);
+  messageDesc(file_seylo_agent_v1_desired, 7);
 
 /**
  * @generated from message seylo.agent.v1.SyncDesiredResponse
@@ -356,7 +442,7 @@ export type SyncDesiredResponse = Message<"seylo.agent.v1.SyncDesiredResponse"> 
  * Use `create(SyncDesiredResponseSchema)` to create a new message.
  */
 export const SyncDesiredResponseSchema: GenMessage<SyncDesiredResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 7);
+  messageDesc(file_seylo_agent_v1_desired, 8);
 
 /**
  * RefusedService is one spec of a SyncDesired the agent refused.
@@ -389,7 +475,7 @@ export type RefusedService = Message<"seylo.agent.v1.RefusedService"> & {
  * Use `create(RefusedServiceSchema)` to create a new message.
  */
 export const RefusedServiceSchema: GenMessage<RefusedService> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 8);
+  messageDesc(file_seylo_agent_v1_desired, 9);
 
 /**
  * ApplyServiceRequest creates or updates one service. Deploys, rollbacks
@@ -416,7 +502,7 @@ export type ApplyServiceRequest = Message<"seylo.agent.v1.ApplyServiceRequest"> 
  * Use `create(ApplyServiceRequestSchema)` to create a new message.
  */
 export const ApplyServiceRequestSchema: GenMessage<ApplyServiceRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 9);
+  messageDesc(file_seylo_agent_v1_desired, 10);
 
 /**
  * @generated from message seylo.agent.v1.ApplyServiceResponse
@@ -433,7 +519,7 @@ export type ApplyServiceResponse = Message<"seylo.agent.v1.ApplyServiceResponse"
  * Use `create(ApplyServiceResponseSchema)` to create a new message.
  */
 export const ApplyServiceResponseSchema: GenMessage<ApplyServiceResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 10);
+  messageDesc(file_seylo_agent_v1_desired, 11);
 
 /**
  * @generated from message seylo.agent.v1.RemoveServiceRequest
@@ -463,7 +549,7 @@ export type RemoveServiceRequest = Message<"seylo.agent.v1.RemoveServiceRequest"
  * Use `create(RemoveServiceRequestSchema)` to create a new message.
  */
 export const RemoveServiceRequestSchema: GenMessage<RemoveServiceRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 11);
+  messageDesc(file_seylo_agent_v1_desired, 12);
 
 /**
  * @generated from message seylo.agent.v1.RemoveServiceResponse
@@ -480,7 +566,7 @@ export type RemoveServiceResponse = Message<"seylo.agent.v1.RemoveServiceRespons
  * Use `create(RemoveServiceResponseSchema)` to create a new message.
  */
 export const RemoveServiceResponseSchema: GenMessage<RemoveServiceResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 12);
+  messageDesc(file_seylo_agent_v1_desired, 13);
 
 /**
  * RestartServiceRequest restarts running instances without changing the
@@ -500,7 +586,7 @@ export type RestartServiceRequest = Message<"seylo.agent.v1.RestartServiceReques
  * Use `create(RestartServiceRequestSchema)` to create a new message.
  */
 export const RestartServiceRequestSchema: GenMessage<RestartServiceRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 13);
+  messageDesc(file_seylo_agent_v1_desired, 14);
 
 /**
  * @generated from message seylo.agent.v1.RestartServiceResponse
@@ -513,5 +599,5 @@ export type RestartServiceResponse = Message<"seylo.agent.v1.RestartServiceRespo
  * Use `create(RestartServiceResponseSchema)` to create a new message.
  */
 export const RestartServiceResponseSchema: GenMessage<RestartServiceResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_desired, 14);
+  messageDesc(file_seylo_agent_v1_desired, 15);
 

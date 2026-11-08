@@ -391,8 +391,28 @@ type LoadBalancerTls struct {
 	CertPem string `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
 	KeyPem  string `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`
 	// The DNS name every node's LB certificate carries; balancing nodes send it
-	// as SNI and verify it, for example "lb.seylo.internal".
-	ServerName    string `protobuf:"bytes,4,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	// as SNI and verify it, for example "lb.seylo.internal". Agents that know
+	// peers use it only for peers listed with it.
+	ServerName string `protobuf:"bytes,4,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	// This node's own name, for example "<node id>.lb.seylo.internal". The
+	// certificate carries it next to server_name and the LB entry point
+	// answers it as SNI. Empty from older panels. added in 0.2 (lb-cert)
+	NodeServerName string `protobuf:"bytes,5,opt,name=node_server_name,json=nodeServerName,proto3" json:"node_server_name,omitempty"`
+	// The certificate this node had before cert_pem (with its issuer) and its
+	// key, until it expires. As a client the node presents whichever of the
+	// two the peer asks for (the issuers in the peer's certificate request),
+	// so a peer that has not heard of the new one yet still takes it. Empty
+	// when there is none. added in 0.2 (lb-cert)
+	PreviousCertPem string `protobuf:"bytes,6,opt,name=previous_cert_pem,json=previousCertPem,proto3" json:"previous_cert_pem,omitempty"`
+	PreviousKeyPem  string `protobuf:"bytes,7,opt,name=previous_key_pem,json=previousKeyPem,proto3" json:"previous_key_pem,omitempty"`
+	// Every node the panel holds a current LB certificate for, this one
+	// included. With peers the LB entry point accepts only a client
+	// certificate one of them was issued (a removed node's, or one replaced
+	// and given up, is refused), and a balancing node verifies each peer by
+	// the server_name listed for it and skips copies on nodes not listed.
+	// Empty (older panels): any certificate of ca_pem, verified by
+	// server_name. added in 0.2 (lb-cert)
+	Peers         []*LoadBalancerPeer `protobuf:"bytes,8,rep,name=peers,proto3" json:"peers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -455,6 +475,113 @@ func (x *LoadBalancerTls) GetServerName() string {
 	return ""
 }
 
+func (x *LoadBalancerTls) GetNodeServerName() string {
+	if x != nil {
+		return x.NodeServerName
+	}
+	return ""
+}
+
+func (x *LoadBalancerTls) GetPreviousCertPem() string {
+	if x != nil {
+		return x.PreviousCertPem
+	}
+	return ""
+}
+
+func (x *LoadBalancerTls) GetPreviousKeyPem() string {
+	if x != nil {
+		return x.PreviousKeyPem
+	}
+	return ""
+}
+
+func (x *LoadBalancerTls) GetPeers() []*LoadBalancerPeer {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
+}
+
+// LoadBalancerPeer is one node in LoadBalancerTls.peers. added in 0.2 (lb-cert)
+type LoadBalancerPeer struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// The name to send as SNI and verify when balancing to this node: its own
+	// name once its agent answers it, else the shared server_name.
+	ServerName string `protobuf:"bytes,2,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	// PEM of the one-off CA certificates (each signed by ca_pem, one per node
+	// certificate) that issued the certificates this node may present: the
+	// current one, and the one before while the node has not confirmed the
+	// new one.
+	IssuerPems []string `protobuf:"bytes,3,rep,name=issuer_pems,json=issuerPems,proto3" json:"issuer_pems,omitempty"`
+	// The node may still present a certificate issued straight by ca_pem (by a
+	// panel before 0.2, which did not give certificates an issuer of their
+	// own). While any peer has it, the LB entry point accepts every
+	// certificate of ca_pem, as before.
+	Legacy        bool `protobuf:"varint,4,opt,name=legacy,proto3" json:"legacy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoadBalancerPeer) Reset() {
+	*x = LoadBalancerPeer{}
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoadBalancerPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoadBalancerPeer) ProtoMessage() {}
+
+func (x *LoadBalancerPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoadBalancerPeer.ProtoReflect.Descriptor instead.
+func (*LoadBalancerPeer) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *LoadBalancerPeer) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *LoadBalancerPeer) GetServerName() string {
+	if x != nil {
+		return x.ServerName
+	}
+	return ""
+}
+
+func (x *LoadBalancerPeer) GetIssuerPems() []string {
+	if x != nil {
+		return x.IssuerPems
+	}
+	return nil
+}
+
+func (x *LoadBalancerPeer) GetLegacy() bool {
+	if x != nil {
+		return x.Legacy
+	}
+	return false
+}
+
 // LogRetention bounds the per-service log store (logs/<service id>/). The
 // oldest segments go first when either limit is reached.
 type LogRetention struct {
@@ -469,7 +596,7 @@ type LogRetention struct {
 
 func (x *LogRetention) Reset() {
 	*x = LogRetention{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -481,7 +608,7 @@ func (x *LogRetention) String() string {
 func (*LogRetention) ProtoMessage() {}
 
 func (x *LogRetention) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[5]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -494,7 +621,7 @@ func (x *LogRetention) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRetention.ProtoReflect.Descriptor instead.
 func (*LogRetention) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{5}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LogRetention) GetMaxBytesPerService() uint64 {
@@ -522,7 +649,7 @@ type SyncDesiredRequest struct {
 
 func (x *SyncDesiredRequest) Reset() {
 	*x = SyncDesiredRequest{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -534,7 +661,7 @@ func (x *SyncDesiredRequest) String() string {
 func (*SyncDesiredRequest) ProtoMessage() {}
 
 func (x *SyncDesiredRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[6]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -547,7 +674,7 @@ func (x *SyncDesiredRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncDesiredRequest.ProtoReflect.Descriptor instead.
 func (*SyncDesiredRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{6}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SyncDesiredRequest) GetState() *DesiredState {
@@ -573,7 +700,7 @@ type SyncDesiredResponse struct {
 
 func (x *SyncDesiredResponse) Reset() {
 	*x = SyncDesiredResponse{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -585,7 +712,7 @@ func (x *SyncDesiredResponse) String() string {
 func (*SyncDesiredResponse) ProtoMessage() {}
 
 func (x *SyncDesiredResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[7]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -598,7 +725,7 @@ func (x *SyncDesiredResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncDesiredResponse.ProtoReflect.Descriptor instead.
 func (*SyncDesiredResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{7}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SyncDesiredResponse) GetAcceptedRevision() uint64 {
@@ -629,7 +756,7 @@ type RefusedService struct {
 
 func (x *RefusedService) Reset() {
 	*x = RefusedService{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[8]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -641,7 +768,7 @@ func (x *RefusedService) String() string {
 func (*RefusedService) ProtoMessage() {}
 
 func (x *RefusedService) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[8]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -654,7 +781,7 @@ func (x *RefusedService) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefusedService.ProtoReflect.Descriptor instead.
 func (*RefusedService) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{8}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RefusedService) GetServiceId() string {
@@ -691,7 +818,7 @@ type ApplyServiceRequest struct {
 
 func (x *ApplyServiceRequest) Reset() {
 	*x = ApplyServiceRequest{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[9]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +830,7 @@ func (x *ApplyServiceRequest) String() string {
 func (*ApplyServiceRequest) ProtoMessage() {}
 
 func (x *ApplyServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[9]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +843,7 @@ func (x *ApplyServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyServiceRequest.ProtoReflect.Descriptor instead.
 func (*ApplyServiceRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{9}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ApplyServiceRequest) GetRevision() uint64 {
@@ -742,7 +869,7 @@ type ApplyServiceResponse struct {
 
 func (x *ApplyServiceResponse) Reset() {
 	*x = ApplyServiceResponse{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[10]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -754,7 +881,7 @@ func (x *ApplyServiceResponse) String() string {
 func (*ApplyServiceResponse) ProtoMessage() {}
 
 func (x *ApplyServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[10]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -767,7 +894,7 @@ func (x *ApplyServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyServiceResponse.ProtoReflect.Descriptor instead.
 func (*ApplyServiceResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{10}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ApplyServiceResponse) GetAcceptedRevision() uint64 {
@@ -790,7 +917,7 @@ type RemoveServiceRequest struct {
 
 func (x *RemoveServiceRequest) Reset() {
 	*x = RemoveServiceRequest{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[11]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -802,7 +929,7 @@ func (x *RemoveServiceRequest) String() string {
 func (*RemoveServiceRequest) ProtoMessage() {}
 
 func (x *RemoveServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[11]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -815,7 +942,7 @@ func (x *RemoveServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveServiceRequest.ProtoReflect.Descriptor instead.
 func (*RemoveServiceRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{11}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RemoveServiceRequest) GetRevision() uint64 {
@@ -848,7 +975,7 @@ type RemoveServiceResponse struct {
 
 func (x *RemoveServiceResponse) Reset() {
 	*x = RemoveServiceResponse{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[12]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -860,7 +987,7 @@ func (x *RemoveServiceResponse) String() string {
 func (*RemoveServiceResponse) ProtoMessage() {}
 
 func (x *RemoveServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[12]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -873,7 +1000,7 @@ func (x *RemoveServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveServiceResponse.ProtoReflect.Descriptor instead.
 func (*RemoveServiceResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{12}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RemoveServiceResponse) GetAcceptedRevision() uint64 {
@@ -894,7 +1021,7 @@ type RestartServiceRequest struct {
 
 func (x *RestartServiceRequest) Reset() {
 	*x = RestartServiceRequest{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[13]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -906,7 +1033,7 @@ func (x *RestartServiceRequest) String() string {
 func (*RestartServiceRequest) ProtoMessage() {}
 
 func (x *RestartServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[13]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -919,7 +1046,7 @@ func (x *RestartServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartServiceRequest.ProtoReflect.Descriptor instead.
 func (*RestartServiceRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{13}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RestartServiceRequest) GetServiceId() string {
@@ -937,7 +1064,7 @@ type RestartServiceResponse struct {
 
 func (x *RestartServiceResponse) Reset() {
 	*x = RestartServiceResponse{}
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[14]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1076,7 @@ func (x *RestartServiceResponse) String() string {
 func (*RestartServiceResponse) ProtoMessage() {}
 
 func (x *RestartServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_desired_proto_msgTypes[14]
+	mi := &file_seylo_agent_v1_desired_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1089,7 @@ func (x *RestartServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartServiceResponse.ProtoReflect.Descriptor instead.
 func (*RestartServiceResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{14}
+	return file_seylo_agent_v1_desired_proto_rawDescGZIP(), []int{15}
 }
 
 var File_seylo_agent_v1_desired_proto protoreflect.FileDescriptor
@@ -1001,13 +1128,24 @@ const file_seylo_agent_v1_desired_proto_rawDesc = "" +
 	"\vbuild_cache\x18\x05 \x01(\bR\n" +
 	"buildCache\x12-\n" +
 	"\x12stopped_containers\x18\x06 \x01(\bR\x11stoppedContainers\x12%\n" +
-	"\x0eunused_volumes\x18\a \x01(\bR\runusedVolumes\"}\n" +
+	"\x0eunused_volumes\x18\a \x01(\bR\runusedVolumes\"\xb5\x02\n" +
 	"\x0fLoadBalancerTls\x12\x15\n" +
 	"\x06ca_pem\x18\x01 \x01(\tR\x05caPem\x12\x19\n" +
 	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1f\n" +
 	"\vserver_name\x18\x04 \x01(\tR\n" +
-	"serverName\"u\n" +
+	"serverName\x12(\n" +
+	"\x10node_server_name\x18\x05 \x01(\tR\x0enodeServerName\x12*\n" +
+	"\x11previous_cert_pem\x18\x06 \x01(\tR\x0fpreviousCertPem\x12(\n" +
+	"\x10previous_key_pem\x18\a \x01(\tR\x0epreviousKeyPem\x126\n" +
+	"\x05peers\x18\b \x03(\v2 .seylo.agent.v1.LoadBalancerPeerR\x05peers\"\x85\x01\n" +
+	"\x10LoadBalancerPeer\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1f\n" +
+	"\vserver_name\x18\x02 \x01(\tR\n" +
+	"serverName\x12\x1f\n" +
+	"\vissuer_pems\x18\x03 \x03(\tR\n" +
+	"issuerPems\x12\x16\n" +
+	"\x06legacy\x18\x04 \x01(\bR\x06legacy\"u\n" +
 	"\fLogRetention\x121\n" +
 	"\x15max_bytes_per_service\x18\x01 \x01(\x04R\x12maxBytesPerService\x122\n" +
 	"\amax_age\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x06maxAge\"H\n" +
@@ -1054,44 +1192,46 @@ func file_seylo_agent_v1_desired_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_desired_proto_rawDescData
 }
 
-var file_seylo_agent_v1_desired_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_seylo_agent_v1_desired_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_seylo_agent_v1_desired_proto_goTypes = []any{
 	(*DesiredState)(nil),           // 0: seylo.agent.v1.DesiredState
 	(*ProjectNetwork)(nil),         // 1: seylo.agent.v1.ProjectNetwork
 	(*NodeSettings)(nil),           // 2: seylo.agent.v1.NodeSettings
 	(*CleanupSchedule)(nil),        // 3: seylo.agent.v1.CleanupSchedule
 	(*LoadBalancerTls)(nil),        // 4: seylo.agent.v1.LoadBalancerTls
-	(*LogRetention)(nil),           // 5: seylo.agent.v1.LogRetention
-	(*SyncDesiredRequest)(nil),     // 6: seylo.agent.v1.SyncDesiredRequest
-	(*SyncDesiredResponse)(nil),    // 7: seylo.agent.v1.SyncDesiredResponse
-	(*RefusedService)(nil),         // 8: seylo.agent.v1.RefusedService
-	(*ApplyServiceRequest)(nil),    // 9: seylo.agent.v1.ApplyServiceRequest
-	(*ApplyServiceResponse)(nil),   // 10: seylo.agent.v1.ApplyServiceResponse
-	(*RemoveServiceRequest)(nil),   // 11: seylo.agent.v1.RemoveServiceRequest
-	(*RemoveServiceResponse)(nil),  // 12: seylo.agent.v1.RemoveServiceResponse
-	(*RestartServiceRequest)(nil),  // 13: seylo.agent.v1.RestartServiceRequest
-	(*RestartServiceResponse)(nil), // 14: seylo.agent.v1.RestartServiceResponse
-	(*ServiceSpec)(nil),            // 15: seylo.agent.v1.ServiceSpec
-	(*Maintenance)(nil),            // 16: seylo.agent.v1.Maintenance
-	(*durationpb.Duration)(nil),    // 17: google.protobuf.Duration
+	(*LoadBalancerPeer)(nil),       // 5: seylo.agent.v1.LoadBalancerPeer
+	(*LogRetention)(nil),           // 6: seylo.agent.v1.LogRetention
+	(*SyncDesiredRequest)(nil),     // 7: seylo.agent.v1.SyncDesiredRequest
+	(*SyncDesiredResponse)(nil),    // 8: seylo.agent.v1.SyncDesiredResponse
+	(*RefusedService)(nil),         // 9: seylo.agent.v1.RefusedService
+	(*ApplyServiceRequest)(nil),    // 10: seylo.agent.v1.ApplyServiceRequest
+	(*ApplyServiceResponse)(nil),   // 11: seylo.agent.v1.ApplyServiceResponse
+	(*RemoveServiceRequest)(nil),   // 12: seylo.agent.v1.RemoveServiceRequest
+	(*RemoveServiceResponse)(nil),  // 13: seylo.agent.v1.RemoveServiceResponse
+	(*RestartServiceRequest)(nil),  // 14: seylo.agent.v1.RestartServiceRequest
+	(*RestartServiceResponse)(nil), // 15: seylo.agent.v1.RestartServiceResponse
+	(*ServiceSpec)(nil),            // 16: seylo.agent.v1.ServiceSpec
+	(*Maintenance)(nil),            // 17: seylo.agent.v1.Maintenance
+	(*durationpb.Duration)(nil),    // 18: google.protobuf.Duration
 }
 var file_seylo_agent_v1_desired_proto_depIdxs = []int32{
-	15, // 0: seylo.agent.v1.DesiredState.services:type_name -> seylo.agent.v1.ServiceSpec
+	16, // 0: seylo.agent.v1.DesiredState.services:type_name -> seylo.agent.v1.ServiceSpec
 	1,  // 1: seylo.agent.v1.DesiredState.networks:type_name -> seylo.agent.v1.ProjectNetwork
 	2,  // 2: seylo.agent.v1.DesiredState.settings:type_name -> seylo.agent.v1.NodeSettings
-	16, // 3: seylo.agent.v1.NodeSettings.maintenance:type_name -> seylo.agent.v1.Maintenance
-	5,  // 4: seylo.agent.v1.NodeSettings.log_retention:type_name -> seylo.agent.v1.LogRetention
+	17, // 3: seylo.agent.v1.NodeSettings.maintenance:type_name -> seylo.agent.v1.Maintenance
+	6,  // 4: seylo.agent.v1.NodeSettings.log_retention:type_name -> seylo.agent.v1.LogRetention
 	4,  // 5: seylo.agent.v1.NodeSettings.lb_tls:type_name -> seylo.agent.v1.LoadBalancerTls
 	3,  // 6: seylo.agent.v1.NodeSettings.cleanup:type_name -> seylo.agent.v1.CleanupSchedule
-	17, // 7: seylo.agent.v1.LogRetention.max_age:type_name -> google.protobuf.Duration
-	0,  // 8: seylo.agent.v1.SyncDesiredRequest.state:type_name -> seylo.agent.v1.DesiredState
-	8,  // 9: seylo.agent.v1.SyncDesiredResponse.refused:type_name -> seylo.agent.v1.RefusedService
-	15, // 10: seylo.agent.v1.ApplyServiceRequest.service:type_name -> seylo.agent.v1.ServiceSpec
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	5,  // 7: seylo.agent.v1.LoadBalancerTls.peers:type_name -> seylo.agent.v1.LoadBalancerPeer
+	18, // 8: seylo.agent.v1.LogRetention.max_age:type_name -> google.protobuf.Duration
+	0,  // 9: seylo.agent.v1.SyncDesiredRequest.state:type_name -> seylo.agent.v1.DesiredState
+	9,  // 10: seylo.agent.v1.SyncDesiredResponse.refused:type_name -> seylo.agent.v1.RefusedService
+	16, // 11: seylo.agent.v1.ApplyServiceRequest.service:type_name -> seylo.agent.v1.ServiceSpec
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_desired_proto_init() }
@@ -1107,7 +1247,7 @@ func file_seylo_agent_v1_desired_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_desired_proto_rawDesc), len(file_seylo_agent_v1_desired_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
