@@ -3,7 +3,6 @@
 
 import { isIP } from "node:net";
 import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { installUrl } from "@seylo/brand";
 import { nodes as nodeOps, OpError } from "@seylo/ops";
 import { NodeCheckStatus } from "@seylo/proto";
 import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm";
@@ -17,6 +16,7 @@ import { getSetting } from "../../settings";
 import { privateIpv4Of, urlHost } from "../domains/lookup";
 import { metricsFor } from "../metrics/ingest";
 import { blockedReason } from "../uptime/targets";
+import { joinCommand } from "./join-command";
 import { forgetNodeCertificate } from "./lb-tls";
 import { nodeLive } from "./live";
 import { factsOf, toNode, toNodeDetail } from "./view";
@@ -100,16 +100,6 @@ function nonLoopbackOrigin(origin: string | null | undefined): string | null {
 }
 
 /**
- * The one-line install command for a new node (installer/install.sh.tmpl
- * "join"). Agents refuse a plain http:// panel on another host unless told
- * so, so an insecure target carries --insecure in plain sight (the join card
- * warns next to it).
- */
-export function joinCommand(url: string, token: string, pin: string | null = null, insecure = false): string {
-  return `curl -fsSL https://${installUrl} | sudo sh -s -- join --panel '${url}' --token '${token}'${pin ? ` --pin '${pin}'` : ""}${insecure ? " --insecure" : ""}`;
-}
-
-/**
  * Where a new node's agent dials and how it trusts the panel: the domain
  * over HTTPS with its public certificate; else the agents' TLS port with
  * the panel's pinned key; else plain HTTP, which the join card warns about
@@ -150,7 +140,8 @@ const createJoinToken = implement(nodeOps.createJoinToken, (_input, ctx) => {
   return {
     tokenId: row.id,
     token,
-    command: joinCommand(target.url, token, target.pin, target.insecureTransport),
+    // The installer of this panel's own release, so the node gets the agent of this version.
+    command: joinCommand(ctx.config.version, target.url, token, target.pin, target.insecureTransport),
     expiresAt: expiresAt.toISOString(),
     insecureTransport: target.insecureTransport,
   };

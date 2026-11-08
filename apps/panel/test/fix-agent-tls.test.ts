@@ -6,6 +6,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { githubOrg, githubRepo, installUrl } from "@seylo/brand";
 import { nodes as nodeOps } from "@seylo/ops";
 import { agentConnectPath, agentSubprotocol } from "../src/agent-hub/endpoint";
 import { nodes } from "../src/db/schema";
@@ -60,6 +61,21 @@ test("join commands use the TLS port with --pin; plain HTTP is flagged", async (
   expect(pinned.body.command).toContain("--panel 'https://203.0.113.9:3443'");
   expect(pinned.body.command).toContain(`--pin '${tls.pin}'`);
   expect(pinned.body.command).not.toContain("--insecure");
+});
+
+test("join commands install the running panel's own release", async () => {
+  const panel = testPanel();
+  cleanup.push(() => panel.close());
+  panel.deps.config.version = "0.2.0-rc.2";
+  panelNode(panel, "203.0.113.9");
+  const owner = await createUser(panel, "owner");
+  const res = await callOp(panel, nodeOps.createJoinToken, {}, { cookie: owner.cookie });
+  expect(res.status).toBe(200);
+  // That release's installer defaults to its own version, so the node gets the agent of this panel,
+  // not the one of the latest stable release the install host serves.
+  const installer = `https://github.com/${githubOrg}/${githubRepo}/releases/download/v0.2.0-rc.2/install.sh`;
+  expect(res.body.command).toStartWith(`curl -fsSL ${installer} | sudo sh -s -- join --panel '`);
+  expect(res.body.command).not.toContain(installUrl);
 });
 
 test("the agent endpoint answers on the TLS listener", async () => {

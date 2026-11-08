@@ -431,6 +431,30 @@ expect_ok "a join only warns about port 80" "warning: port 80 is used by nginx" 
 FAKE_SS_3443=node run_installer minisign "$INSTALLER" --version "$V"
 expect_fail "panel install stops when the agents' TLS port is taken" "port 3443 (where other nodes' agents reach the panel over TLS) is used by node"
 
+# ---- joins install the release of the installer they came from
+# The panel's join command pipes its own release's install.sh into sh
+# (apps/panel/src/modules/nodes/join-command.ts). That installer defaults
+# to its own version, so the node gets that release's agent even when
+# "latest" (what the install host serves) is another release.
+VN=0.1.5
+fresh_release
+make_release "$VN" "$REL/download/v$VN"
+rm -rf "$REL/latest/download" && mkdir -p "$REL/latest/download" && cp "$REL/download/v$VN"/* "$REL/latest/download/"
+RELEASE_INSTALLER=$T/install-v$V.sh
+INSTALLER_TEST_PUBLIC_KEY=$KEY "$root/scripts/render-installer.sh" "$V" "$RELEASE_INSTALLER" >/dev/null
+run_installer minisign "$RELEASE_INSTALLER" join --panel https://192.0.2.10:3443 --token t --pin "sha256:$(printf '%064d' 1)"
+expect_ok "a release's installer joins with that release's agent, not latest" "$SLUG $V (test) -> /usr/local/bin/$SLUG" "join https://192.0.2.10:3443 --token t --no-start --pin sha256:"
+curl_log | grep -q "/download/v$V/${SLUG}_linux_$ARCH\$" && ! curl_log | grep -q "/latest/" &&
+  pass "a release's installer downloads only from its own release" || flunk "a release's installer download paths" "$(curl_log)"
+# The latest installer with --version (install.sh.tmpl join mode) installs that version too.
+run_installer minisign "$INSTALLER" join --panel https://192.0.2.10:3443 --token t --version "v$V"
+expect_ok "join --version installs that release's agent" "$SLUG $V (test) -> /usr/local/bin/$SLUG" "Joining https://192.0.2.10:3443"
+curl_log | grep -q "/download/v$V/manifest.json\$" && ! curl_log | grep -q "/latest/" &&
+  pass "join --version reads that release's manifest" || flunk "join --version download paths" "$(curl_log)"
+run_installer minisign "$INSTALLER" join --panel https://192.0.2.10:3443 --token t
+expect_ok "join without --version from the latest installer follows latest" "$SLUG $VN (test) -> /usr/local/bin/$SLUG"
+fresh_release
+
 # ---- the agents' TLS port and plain-HTTP joins
 FAKE_UFW=1 run_installer minisign "$INSTALLER" --version "$V"
 expect_ok "a panel install publishes and opens the agents' TLS port" \

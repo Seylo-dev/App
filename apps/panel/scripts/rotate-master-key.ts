@@ -9,8 +9,9 @@
 // See src/security/rotate-master-key.ts for what each one does.
 
 import { resolve } from "node:path";
-import { installUrl, slug } from "@seylo/brand";
+import { slug } from "@seylo/brand";
 import { loadConfig } from "../src/config";
+import { joinCommand } from "../src/modules/nodes/join-command";
 import { type PanelIdentity, type RejoinNode, rotateMasterKey } from "../src/security/rotate-master-key";
 
 const choice = `Choose what happens to the panel's identity with exactly one flag:
@@ -40,8 +41,12 @@ function identityFromArgs(args: string[]): PanelIdentity | null {
   return fresh ? "new" : "keep";
 }
 
-/** The re-join procedure of the Nodes screen's Add node dialog (nodes/ops.ts joinCommand), for nodes that already joined. */
-function rejoinSteps(nodes: RejoinNode[]): string[] {
+/**
+ * The re-join procedure of the Nodes screen's Add node dialog
+ * (nodes/join-command.ts joinCommand, the installer of this panel's own
+ * release), for nodes that already joined.
+ */
+function rejoinSteps(nodes: RejoinNode[], panelVersion: string): string[] {
   const lines = [
     "",
     "Every node now refuses the panel until it is joined again. Its services keep running meanwhile, and a",
@@ -50,7 +55,7 @@ function rejoinSteps(nodes: RejoinNode[]): string[] {
     "  2. Open Nodes > Add node. The dialog shows a join command with a new token (one node per token,",
     "     valid for one hour).",
     "  3. On that node, run that command with --force added at the end:",
-    `       curl -fsSL https://${installUrl} | sudo sh -s -- join --panel '<url>' --token '<token>' [--pin '<pin>'] --force`,
+    `       ${joinCommand(panelVersion, "<url>", "<token>")} [--pin '<pin>'] --force`,
     "     or, with the panel URL, token and pin from the same dialog, the node CLI directly:",
     `       sudo ${slug} join '<url>' --token '<token>' [--pin '<pin>'] --force`,
     `  4. \`${slug} status\` on the node shows it connected, and the Nodes screen shows it online.`,
@@ -89,7 +94,7 @@ try {
     console.log("Recovery codes were deleted; these people make new ones in Settings > Security:");
     for (const email of result.recoveryCodesCleared) console.log(`  ${email}`);
   }
-  if (identity === "new") for (const line of rejoinSteps(result.rejoin)) console.log(line);
+  if (identity === "new") for (const line of rejoinSteps(result.rejoin, config.version)) console.log(line);
   console.log("");
   console.log("Start the panel now. Delete old copies of the data dir: they still open with the old key.");
 } catch (error) {
