@@ -1,7 +1,7 @@
 // Package metrics samples node and container usage every 10 seconds, keeps
-// the last hour in memory for GetMetrics, streams live samples for
-// WatchMetrics and pushes each sample to the panel as a best-effort event
-// (the panel rolls them up into metrics.db).
+// the latest sample for GetMetrics, streams live samples for WatchMetrics
+// and pushes each sample to the panel as a best-effort event (the panel
+// keeps the live window and rolls them up into metrics.db).
 //
 // Node usage comes from /proc and /sys (CPU, memory, swap, load, physical
 // network interfaces, every real filesystem). Container usage comes from

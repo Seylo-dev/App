@@ -441,14 +441,14 @@ func TestITStatsSample(t *testing.T) {
 	}
 	cancel()
 
-	// The periodic collector keeps history and publishes events.
+	// The periodic collector publishes events and keeps the latest one.
 	c := metrics.NewDockerCollector(e.dk, e.d.Layout.Root(), time.Second)
 	rctx, rcancel := context.WithTimeout(context.Background(), 3500*time.Millisecond)
 	defer rcancel()
 	published := 0
 	_ = c.Run(rctx, func(*agentv1.MetricsReport) { published++ })
 	hist := c.History(time.Time{}, []string{e.svc})
-	if published < 2 || len(hist) != published || len(hist[0].GetServices()) != 1 {
+	if published < 2 || len(hist) != 1 || len(hist[0].GetServices()) != 1 {
 		t.Fatalf("published %d, history %d", published, len(hist))
 	}
 	node := hist[len(hist)-1].GetNode()

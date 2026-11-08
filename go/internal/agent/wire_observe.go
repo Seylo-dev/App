@@ -138,8 +138,9 @@ func registerLogs(reg *Registry, d *Deps) {
 }
 
 func registerMetrics(reg *Registry, d *Deps) {
+	// The agent keeps only its latest sample; the panel has the history.
 	rpc.HandleUnary(reg, "GetMetrics", func(_ context.Context, req *agentv1.GetMetricsRequest) (*agentv1.GetMetricsResponse, error) {
-		since := time.Now().Add(-metrics.HistoryWindow)
+		var since time.Time
 		if req.GetSince() != nil {
 			since = req.GetSince().AsTime()
 		}
