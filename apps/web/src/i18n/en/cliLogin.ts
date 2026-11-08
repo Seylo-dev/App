@@ -37,7 +37,7 @@ export default {
   },
   expiry: "Key expires after",
   days: { one: "{count} day", other: "{count} days" },
-  keyNote: 'The key is named "CLI on {client}". It shows in Settings > API keys, where you can revoke it at any time.',
+  keyNote: 'The key is named "CLI on {client}". It shows in Settings > API keys and MCP, where you can revoke it at any time.',
   chooseFirst: "Choose what the key can do and which projects it reaches.",
   approve: "Approve",
   approving: "Approving",

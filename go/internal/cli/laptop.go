@@ -27,7 +27,7 @@ func newLoginCommand(d *deps) *cobra.Command {
 		Long: "Signs in to a panel and saves an API key in ~/.config/" + brand.Slug + "/config.json.\n" +
 			"By default it opens the panel's approval page in your browser: check the code, pick\n" +
 			"what the key may do and approve. With --token or --token-stdin it saves an API key\n" +
-			"you created under Settings > API keys instead.",
+			"you created under Settings > API keys and MCP instead.",
 		GroupID: groupLaptop,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
