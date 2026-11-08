@@ -1069,7 +1069,9 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   a person approved (the approvals module checks that the approval matches the op and input).
 - Second factor: sign-in ops return a `LoginResult`; with 2FA there is no
   session yet, only a 5-minute ticket (`auth_challenges`) that
-  `auth.verifySecondFactor` exchanges for one. Passkey sign-in (user
+  `auth.verifySecondFactor` exchanges for one. The challenge says whether
+  the account has an unused recovery code (`hasRecoveryCodes`), so the
+  sign-in screen offers one only then. Passkey sign-in (user
   verification required) skips it. Five wrong passwords or codes in a row
   from one client address lock that email (account or not, so the answer
   never tells which emails exist) or account for that address for 30 s,

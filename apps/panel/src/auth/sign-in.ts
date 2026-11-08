@@ -10,7 +10,7 @@ import type { OpContext } from "../ops/implement";
 import { createChallenge } from "./challenges";
 import { clearFailures, emailKey, rememberSignedInAddress, userKey } from "./lockout";
 import type { PrincipalUser } from "./principal";
-import { confirmedTotp } from "./second-factor";
+import { confirmedTotp, recoveryCodesLeft } from "./second-factor";
 import { createSession, sessionLifetimeMs } from "./sessions";
 
 export const secondFactorTtlMs = 5 * 60 * 1000;
@@ -24,7 +24,7 @@ export function toViewer(user: PrincipalUser) {
 export interface LoginResult {
   status: "signedIn" | "secondFactor";
   viewer: ReturnType<typeof toViewer>;
-  challenge?: { ticket: string; methods: ("totp" | "recovery")[]; expiresAt: string };
+  challenge?: { ticket: string; methods: ("totp" | "recovery")[]; hasRecoveryCodes: boolean; expiresAt: string };
 }
 
 /**
@@ -39,7 +39,14 @@ export function finishSignIn(ctx: OpContext, user: UserRow, options: { skipSecon
     return {
       status: "secondFactor",
       viewer: toViewer(user),
-      challenge: { ticket, methods: ["totp", "recovery"], expiresAt: expiresAt.toISOString() },
+      challenge: {
+        ticket,
+        methods: ["totp", "recovery"],
+        // The password (or GitHub, or the invite) is right by now, so the
+        // screen may know whether to offer a recovery code at all.
+        hasRecoveryCodes: recoveryCodesLeft(ctx.db, user.id) > 0,
+        expiresAt: expiresAt.toISOString(),
+      },
     };
   }
   startSession(ctx, user.id);

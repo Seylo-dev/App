@@ -76,6 +76,12 @@ export const LoginResult = Type.Object({
       /** Short-lived (5 minutes), single use; send it back with the code. */
       ticket: Type.String(),
       methods: Type.Array(SecondFactorMethod),
+      /**
+       * Whether the account has an unused recovery code. False means only
+       * the authenticator app can finish this sign-in: the codes were used
+       * up, or `panel rotate-key` deleted them.
+       */
+      hasRecoveryCodes: Type.Boolean(),
       expiresAt: Timestamp,
     }),
   ),

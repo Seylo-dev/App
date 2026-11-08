@@ -278,6 +278,8 @@ test.describe("signed in", () => {
       other.getByRole("heading", { level: 1, name: "Two-factor authentication" }),
     );
     await other.screenshot({ path: `${shots}/login-2fa.png`, fullPage: true });
+    // The owner just got 10 recovery codes, so the screen offers one.
+    await expect(other.getByRole("button", { name: "Use a recovery code" })).toBeVisible();
     await other.getByLabel("Code").fill(totp(secret));
     await submitPastRateLimit(other, other.getByRole("button", { name: "Verify" }), other.getByRole("heading", { level: 1, name: "Dashboard" }));
     // Turn it off again (with the next code) so the specs after this one start from a plain account.

@@ -54,6 +54,7 @@ test("2FA: enroll, confirm, then sign-in asks for a code and a used code fails",
   expect(first.body.status).toBe("secondFactor");
   expect(first.cookie).toBeUndefined();
   expect(first.body.challenge.methods).toEqual(["totp", "recovery"]);
+  expect(first.body.challenge.hasRecoveryCodes).toBe(true);
 
   const ticket = first.body.challenge.ticket;
   const bad = await call(panel, auth.verifySecondFactor, { ticket, method: "totp", code: "123456" });
@@ -97,6 +98,27 @@ test("2FA: recovery codes work once, and disabling needs a code", async () => {
   await ok(panel, auth.totpDisable, { code: secondCode }, { cookie: current });
   expect(panel.deps.db.select().from(totpSecrets).where(eq(totpSecrets.userId, user.id)).get()).toBeUndefined();
   expect((await signIn(user.email, password)).body.status).toBe("signedIn");
+});
+
+test("2FA: the challenge says when no recovery code is left", async () => {
+  const { user, password, cookie } = await createUser(panel, "member");
+  const { secret, recoveryCodes } = await enableTotp(cookie);
+  for (const [i, recovery] of recoveryCodes.entries()) {
+    const { challenge } = (await signIn(user.email, password)).body;
+    expect(challenge.hasRecoveryCodes).toBe(true);
+    const used = await ok(panel, auth.verifySecondFactor, { ticket: challenge.ticket, method: "recovery", code: recovery });
+    expect(used.body.recoveryCodesLeft).toBe(recoveryCodes.length - 1 - i);
+  }
+
+  // All used up: the screen should not offer one. The authenticator still works.
+  const { challenge } = (await signIn(user.email, password)).body;
+  expect(challenge.hasRecoveryCodes).toBe(false);
+  expect(
+    (await call(panel, auth.verifySecondFactor, { ticket: challenge.ticket, method: "recovery", code: recoveryCodes[0] })).status,
+  ).toBe(401);
+  // The next step: the current one was used to turn 2FA on.
+  const viaApp = await ok(panel, auth.verifySecondFactor, { ticket: challenge.ticket, method: "totp", code: code(secret, 1) });
+  expect(viaApp.body.viewer.id).toBe(user.id);
 });
 
 test("five wrong codes end the challenge; failures lock the account", async () => {
