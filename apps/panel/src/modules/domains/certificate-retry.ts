@@ -6,11 +6,11 @@
 // validation against 5 per host name per hour, so retries are allowed
 // once a minute per domain and refused while DNS points elsewhere.
 
-import { domains as domainOps, OpError } from "@seylo/ops";
+import { domains as domainOps, OpError, type OpOutput } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains } from "../../db/schema";
-import { implement } from "../../ops/implement";
+import { implement, type OpContext } from "../../ops/implement";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, type PlacedNode, serviceNodes } from "./lookup";
 import { requireDomain } from "./ops";
@@ -66,14 +66,29 @@ export const retryCertificate = implement(domainOps.retryCertificate, async (inp
     });
   }
   const retries = retriesOf(ctx.db);
-  const wait = waitSeconds(retries, row.id, Date.now());
+  const now = Date.now();
+  const wait = waitSeconds(retries, row.id, now);
   if (wait > 0) {
     throw new OpError("RATE_LIMITED", `The certificate of ${row.host} was regenerated a moment ago. Try again in ${wait} seconds.`, {
       reason: "certificateRetry",
       retryAfter: String(wait),
     });
   }
+  // Taken before the DNS check and the agent calls, so requests sent together
+  // (a double submit, a script, an MCP client) cannot all pass the check
+  // while the first one waits; given back when the retry fails (DNS, offline,
+  // every node refused), so the minute starts only with a retry that happened.
+  retries.set(row.id, now);
+  try {
+    return await retryOnNodes(ctx, row);
+  } catch (error) {
+    if (retries.get(row.id) === now) retries.delete(row.id);
+    throw error;
+  }
+});
 
+/** The DNS check and the agent calls of one retry; throws when no agent was asked or every one refused. */
+async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): Promise<OpOutput<typeof domainOps.retryCertificate>> {
   const nodes = serviceNodes(ctx.db, row.serviceId);
   if (nodes.length === 0) throw new OpError("CONFLICT", "The service is not on a node yet. Deploy it first.", { reason: "notPlaced" });
   const dns = await checkHost(row.host, nodes, dnsLookups());
@@ -109,8 +124,7 @@ export const retryCertificate = implement(domainOps.retryCertificate, async (inp
   const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
   if (failed && !results.some((r) => r.status === "fulfilled")) throw failed.reason;
 
-  retries.set(row.id, Date.now());
   const updated = ctx.db.update(domains).set({ certStatus: "pending" }).where(eq(domains.id, row.id)).returning().get();
   invalidateService(ctx, row.serviceId, [domainOps.list.id]);
   return toDomain(updated);
-});
+}

@@ -133,6 +133,33 @@ describe("domains.retryCertificate", () => {
     expect(auditRows().map((r) => r.errorCode)).toEqual([null, "RATE_LIMITED", null]);
   });
 
+  test("requests sent together: one retry, the others wait for the minute", async () => {
+    const { agent, ref } = await failedDomain();
+    // Hold the DNS answers until every request is in flight, so all of them pass the minute check first.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let asked = 0;
+    setDnsLookups({
+      resolve4: async (name) => {
+        asked++;
+        await gate;
+        return name === "shop.example.com" ? ["203.0.113.10"] : [];
+      },
+      resolve6: async () => [],
+      resolveCname: async () => [],
+      resolveNs: async (name) => (name === "example.com" ? ["ns1.registrar.net"] : []),
+    });
+    const calls = [1, 2, 3].map(() => callOp(panel, domainOps.retryCertificate, ref, { cookie: owner.cookie }));
+    for (let i = 0; i < 50 && asked === 0; i++) await Bun.sleep(5);
+    await Bun.sleep(20);
+    release();
+    const statuses = (await Promise.all(calls)).map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 429, 429]);
+    expect(agent.calls.filter((c) => c.method === "retryCertificate")).toHaveLength(1);
+  });
+
   test("refuses while DNS does not point at the node", async () => {
     const { agent, ref, service } = await failedDomain();
     dnsPointsAt("198.51.100.99");

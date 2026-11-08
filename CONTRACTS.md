@@ -2373,7 +2373,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   destructive, so models need no approval), audited, refusals included. Only `https: acme` domains whose certificate is
   pending or failed (CONFLICT `reason` `notAcme`, `certificateValid`). Once
   a minute per domain, in memory (RATE_LIMITED `reason: certificateRetry`
-  with `retryAfter`; a refused try does not start the minute). DNS is
+  with `retryAfter`; a refused try does not start the minute). The minute
+  is taken before the DNS lookup and the agent calls and given back when
+  the try fails, so requests sent together make one retry. DNS is
   looked up now (and stored): `missing` or `wrongTarget` is refused
   (CONFLICT `reason: dnsNotPointing`, the DNS check's message plus why),
   since Let's Encrypt validates through that record and counts every
