@@ -156,6 +156,13 @@ export default {
       superseded: "A later update run included it.",
       upToDate: "It came back already running {version} or newer.",
     },
+    retryFailed: {
+      waiting: "The panel tries {version} again after {when}.",
+      retried: "The panel tried again ({when}); the run above this one shows how it went.",
+      held: "It had rolled {version} back, so it was not tried again. Update now installs it.",
+      superseded: "A later update run included it.",
+      upToDate: "It reached {version} or newer after all.",
+    },
     runStatus: { running: "Running", succeeded: "Done", failed: "Failed", cancelled: "Cancelled" },
   },
 

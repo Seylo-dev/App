@@ -164,9 +164,14 @@ function StatusSections({ data }: { data: Status }) {
           {data.lastCheckedAt
             ? t("settings.updates.lastChecked", { when: formatRelative(data.lastCheckedAt) })
             : t("settings.updates.neverChecked")}
-          {data.channel === "stable" && !offered && isPrerelease(data.panel.currentVersion) && (
-            <> {t("settings.updates.keepsPrerelease", { version: data.panel.currentVersion })}</>
-          )}
+          {/* Only a check knows that no newer stable release is out: before the first one nothing is offered either. */}
+          {data.channel === "stable" &&
+            data.lastCheckedAt &&
+            data.panel.latestVersion &&
+            !offered &&
+            isPrerelease(data.panel.currentVersion) && (
+              <> {t("settings.updates.keepsPrerelease", { version: data.panel.currentVersion })}</>
+            )}
         </p>
         {data.checkError && (
           <Alert tone="warning" title={t("settings.updates.checkFailed")}>
@@ -264,10 +269,17 @@ const stepTone = (step: Step) =>
         ? "green"
         : "gray";
 
-/** What a step's chip says on hover: its outcome, the error, and what became of an offline node. */
+/** What a step's chip says on hover: its outcome, the error, and what became of an offline node or a step that timed out. */
 function stepDetail(step: Step): string {
   const lines = [t(`settings.updates.stepStatus.${step.status}`)];
-  if (step.retry === "waiting" && step.retryAt) {
+  if (step.status === "failed") {
+    // A step that did not finish in time is tried once more (runs.ts timedOut).
+    if (step.error) lines.push(step.error);
+    if (step.retry) {
+      const when = step.retryAt ? formatDateTime(step.retryAt) : "";
+      lines.push(t(`settings.updates.retryFailed.${step.retry}`, { version: step.toVersion, when }));
+    }
+  } else if (step.retry === "waiting" && step.retryAt) {
     // A catch-up the agent asked to wait (its error says why): the panel tries again then.
     if (step.error) lines.push(step.error);
     lines.push(t("settings.updates.retry.waitingUntil", { version: step.toVersion, when: formatDateTime(step.retryAt) }));

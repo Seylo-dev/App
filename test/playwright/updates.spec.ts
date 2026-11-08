@@ -203,4 +203,48 @@ test.describe("updates", () => {
     await channel.getByRole("radio", { name: "Pre-release" }).click({ force: true });
     expect(sent["updates.setChannel"]).toBeUndefined();
   });
+
+  test("a pre-release panel before its first check does not say it stays on the pre-release", async ({ page }) => {
+    // Right after an RC install: nothing checked, nothing offered. Before, the
+    // page said it stays on the RC "until a newer stable release is out",
+    // although one was out and the first check offered it.
+    await installDemo(page, {
+      overrides: {
+        "updates.status": () => ({
+          ...updateStatus,
+          activeRun: null,
+          lastCheckedAt: null,
+          panel: { ...updateStatus.panel, currentVersion: "0.9.5-rc.1", latestVersion: null, offeredVersion: null },
+        }),
+        "updates.history": () => history,
+      },
+    });
+    await page.goto("/settings/updates");
+    await expect(page.getByText("Not checked yet.")).toBeVisible();
+    await expect(page.getByText(/stays on it until a newer stable release is out/)).toHaveCount(0);
+  });
+
+  test("a step that did not finish in time says when the panel tries again", async ({ page }) => {
+    const failedRun = {
+      ...history.runs[1],
+      id: "run000000000004",
+      trigger: "manual",
+      status: "failed",
+      error: "The update did not finish in time.",
+      steps: [step({ id: "t1", nodeName: "fr-par-1", status: "failed", error: "The update did not finish in time.", retry: "waiting", retryAt: soon })],
+    };
+    await installDemo(page, {
+      overrides: {
+        "updates.status": () => ({ ...updateStatus, activeRun: null }),
+        "updates.history": () => ({ ...history, runs: [failedRun, ...history.runs] }),
+      },
+    });
+    await page.goto("/settings/updates");
+    const table = page.getByRole("table", { name: "History" });
+    const chip = table.getByLabel(/^fr-par-1: Failed\./);
+    await chip.focus();
+    await expect(page.getByRole("tooltip", { name: /The update did not finish in time\. The panel tries 0\.9\.4 again after/ })).toBeVisible();
+    // Not the offline node's wording.
+    await expect(page.getByRole("tooltip", { name: /The node was offline/ })).toHaveCount(0);
+  });
 });
