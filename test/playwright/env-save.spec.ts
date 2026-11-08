@@ -35,6 +35,8 @@ test.describe("environment saves", () => {
     // The end of the text. The browser says it is Windows (Desktop Chrome), so Monaco's keys are Control ones.
     await page.keyboard.press("Control+End");
     await page.keyboard.type("THIRD=3");
+    // The editor's state has caught up with the keys (the status bar shows the cursor after them).
+    await expect(page.getByText(/Ln 11, Col 8/)).toBeVisible();
 
     // Save with the editor's shortcut, so the cursor stays in the editor, and keep typing.
     await page.keyboard.press("Control+s");

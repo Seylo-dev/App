@@ -24,6 +24,18 @@ const worldHandlers: Record<string, Handler> = {
   "auth.whoami": () => ({ viewer: world.viewer, via: "session" }),
   "system.info": () => world.systemInfo,
   "nodes.list": () => ({ nodes: world.nodes }),
+  // The create forms' node field: what nodes.choices answers for the same nodes.
+  "nodes.choices": () => ({
+    nodes: world.nodes
+      .filter((node) => node.status !== "disabled")
+      .map((node) => ({
+        id: node.id,
+        name: node.name,
+        status: node.status,
+        wildcardDomain: node.wildcardDomain ?? null,
+        arch: node.facts?.arch ?? null,
+      })),
+  }),
   "nodes.get": (input) => world.nodeDetail(String(input.nodeId ?? "")),
   "nodes.healthReport": () => world.healthReport,
   "cleanup.getSchedule": (input) => world.cleanupSchedule(String(input.nodeId ?? "")),
