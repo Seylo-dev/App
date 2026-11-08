@@ -115,3 +115,22 @@ test("the build settings refuse a build node that reports no buildx, and take on
   expect(taken.status).toBe(200);
   expect(taken.body.buildNodeId).toBe(withIt.nodeId);
 });
+
+test("the build settings list says which nodes have no buildx, by the rule the picks use", async () => {
+  const { cookie } = await createUser(panel, "owner");
+  const without = await builder("de-1", missing);
+  const withIt = await builder("de-2", installed);
+  const old = await builder("de-3");
+  const service = seedService(panel, { projectId: seedProject(panel).id, name: "web", nodeIds: [without.nodeId] });
+  const res = await callOp(panel, builds.getSettings, { serviceId: service.id }, { cookie });
+  expect(res.status).toBe(200);
+  const byName = Object.fromEntries(
+    res.body.nodes.map((n: { name: string; canBuild: boolean; online: boolean; hasBuildx: boolean }) => [n.name, n]),
+  );
+  expect(byName["de-1"]).toMatchObject({ id: without.nodeId, canBuild: true, online: true, hasBuildx: false });
+  expect(byName["de-2"]).toMatchObject({ id: withIt.nodeId, hasBuildx: true });
+  // An agent before 0.2.1 reports nothing about buildx: usable, as in pickBuildNode.
+  expect(byName["de-3"]).toMatchObject({ id: old.nodeId, hasBuildx: true });
+  // The service runs on de-1, and the automatic pick goes elsewhere: the list shows why.
+  expect(pickBuildNode(panel.deps, spec(), [without.nodeId]).id).not.toBe(without.nodeId);
+});

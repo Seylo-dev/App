@@ -82,6 +82,9 @@ export default {
     recreate: "Stops the old version first",
     buildsOn: "Builds on: {node}",
     buildsOnInstead: "Builds on: {node} ({target} can't build)",
+    buildsOnOffline: "Builds on: {node} ({target} is offline)",
+    buildsOnNoBuildx: "Builds on: {node} ({target} has no docker buildx)",
+    chosenNoBuildx: "Build node {node} has no docker buildx",
     noBuilder: "No node can build right now",
   },
   modal: {

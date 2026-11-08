@@ -10594,6 +10594,7 @@
                           "name",
                           "canBuild",
                           "online",
+                          "hasBuildx",
                           "queued"
                         ],
                         "properties": {
@@ -10609,6 +10610,9 @@
                             "type": "boolean"
                           },
                           "online": {
+                            "type": "boolean"
+                          },
+                          "hasBuildx": {
                             "type": "boolean"
                           },
                           "queued": {

@@ -1,7 +1,7 @@
 // How the source is built: Railpack (default), Nixpacks (maintenance mode
 // upstream) or a Dockerfile; paths, command overrides and the build node.
-// Nodes without "Can build" stay in the list, disabled, so the reason a
-// node is not offered is visible.
+// Nodes that can't build (Can build off, offline, no docker buildx) stay in
+// the list, disabled, so the reason a node is not offered is visible.
 
 import { builds, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -14,6 +14,7 @@ import { FieldSkeleton, LoadingRegion, Skeleton } from "@seylo/ui/components/ske
 import { toast } from "@seylo/ui/components/toast";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
+import { cantBuildNote } from "../build-node";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
@@ -149,18 +150,15 @@ function BuildForm({ service, data, dockerfileOnly }: { service: ServiceDetail; 
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={auto}>{t("service.automatic")}</SelectItem>
-              {data.nodes.map((n) => (
-                <SelectItem key={n.id} value={n.id} disabled={!n.canBuild || !n.online}>
-                  {n.name}
-                  {!n.canBuild
-                    ? ` · ${t("serviceSource.build.cantBuild")}`
-                    : !n.online
-                      ? ` · ${t("serviceSource.build.offline")}`
-                      : n.queued > 0
-                        ? ` · ${t("serviceSource.build.queued", { count: n.queued })}`
-                        : ""}
-                </SelectItem>
-              ))}
+              {data.nodes.map((n) => {
+                const note = cantBuildNote(n);
+                return (
+                  <SelectItem key={n.id} value={n.id} disabled={note !== null}>
+                    {n.name}
+                    {note ? ` · ${note}` : n.queued > 0 ? ` · ${t("serviceSource.build.queued", { count: n.queued })}` : ""}
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         </Field>

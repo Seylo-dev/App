@@ -79,12 +79,13 @@ function buildNodes(ctx: Parameters<typeof queue.run>[1]) {
     .all()) {
     if (b.nodeId) busy.set(b.nodeId, (busy.get(b.nodeId) ?? 0) + 1);
   }
+  // hasBuildx: the same rule pickBuildNode and updateSettings use, so the picker shows what they refuse.
   return ctx.db
     .select({ id: nodes.id, name: nodes.name, canBuild: nodes.canBuild })
     .from(nodes)
     .orderBy(asc(nodes.name))
     .all()
-    .map((n) => ({ ...n, online: ctx.agents.isOnline(n.id), queued: busy.get(n.id) ?? 0 }));
+    .map((n) => ({ ...n, online: ctx.agents.isOnline(n.id), hasBuildx: hasBuildx(ctx, n.id), queued: busy.get(n.id) ?? 0 }));
 }
 
 const getSettings = implement(buildOps.getSettings, (input, ctx) => {

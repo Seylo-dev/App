@@ -2,7 +2,7 @@
 // shipped, the history with step chips, rollback and redeploy, the running
 // deploy's log on the side, and full logs in a modal.
 
-import { builds, deployments, type OpOutput, services } from "@seylo/ops";
+import { builds, deployments, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
@@ -31,6 +31,7 @@ import { errorMessage } from "../../lib/api";
 import { useLiveUp } from "../../lib/live";
 import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
+import { buildNodeText } from "./build-node";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
 import { type Deployment, StepChips } from "./deploy-steps";
@@ -412,16 +413,4 @@ function BuildFacts({ service }: { service: ServiceDetail }) {
       ))}
     </div>
   );
-}
-
-function buildNodeText(data: OpOutput<typeof builds.getSettings> | undefined, service: ServiceDetail): string | null {
-  if (!data || service.source.type === "image" || service.source.type === "none") return null;
-  const chosen = data.settings.buildNodeId ? data.nodes.find((n) => n.id === data.settings.buildNodeId) : null;
-  const target = service.placements[0];
-  const targetNode = target ? data.nodes.find((n) => n.id === target.nodeId) : undefined;
-  const builder = chosen ?? (targetNode?.canBuild ? targetNode : data.nodes.find((n) => n.canBuild && n.online));
-  if (!builder) return t("serviceDeploys.facts.noBuilder");
-  if (targetNode && !targetNode.canBuild && builder.id !== targetNode.id)
-    return t("serviceDeploys.facts.buildsOnInstead", { node: builder.name, target: targetNode.name });
-  return t("serviceDeploys.facts.buildsOn", { node: builder.name });
 }
