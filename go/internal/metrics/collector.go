@@ -17,8 +17,10 @@ type Collector interface {
 	// Run samples on a fixed interval until ctx ends, calling publish with
 	// every sample (the agent sends it to the panel).
 	Run(ctx context.Context, publish func(*agentv1.MetricsReport)) error
-	// History returns retained samples since t, filtered to serviceIDs
-	// (node usage only when empty).
+	// History returns the retained samples newer than since (all when
+	// zero), filtered to serviceIDs (node usage only when empty). Only the
+	// latest periodic sample is retained: the panel keeps its own live
+	// window and rollups, and nothing reads a longer history from a node.
 	History(since time.Time, serviceIDs []string) []*agentv1.MetricsReport
 	// Watch streams fresh samples at interval until ctx ends.
 	Watch(ctx context.Context, interval time.Duration, serviceIDs []string, fn func(*agentv1.MetricsReport) error) error
@@ -27,24 +29,23 @@ type Collector interface {
 // Defaults.
 const (
 	DefaultInterval = 10 * time.Second
-	// HistoryWindow is what the agent keeps for GetMetrics; longer ranges
-	// come from the panel's rollups.
-	HistoryWindow = time.Hour
 	// MinWatchInterval and DefaultWatchInterval bound WatchMetrics.
 	MinWatchInterval     = time.Second
 	DefaultWatchInterval = 2 * time.Second
 )
 
 // DockerCollector is the Collector of a node: /proc for the node, Docker
-// stats for containers. The periodic samples live in memory for an hour.
+// stats for containers. Only the latest periodic sample stays in memory
+// (an hour of full reports was about 11 MiB per 200 services, kept for an
+// RPC nothing calls).
 type DockerCollector struct {
 	src      Source
 	newHost  func() *Host
 	interval time.Duration
 	now      func() time.Time
 
-	mu      sync.Mutex
-	history []*agentv1.MetricsReport // oldest first
+	mu     sync.Mutex
+	latest *agentv1.MetricsReport
 }
 
 var _ Collector = (*DockerCollector)(nil)
@@ -108,29 +109,18 @@ func (c *DockerCollector) Run(ctx context.Context, publish func(*agentv1.Metrics
 func (c *DockerCollector) record(r *agentv1.MetricsReport) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.history = append(c.history, r)
-	cutoff := r.GetTime().AsTime().Add(-HistoryWindow)
-	drop := 0
-	for drop < len(c.history) && c.history[drop].GetTime().AsTime().Before(cutoff) {
-		drop++
-	}
-	if drop > 0 {
-		c.history = slices.Clone(c.history[drop:])
-	}
+	c.latest = r
 }
 
-// History implements Collector.
+// History implements Collector: the latest sample, when newer than since.
 func (c *DockerCollector) History(since time.Time, serviceIDs []string) []*agentv1.MetricsReport {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []*agentv1.MetricsReport
-	for _, r := range c.history {
-		if !since.IsZero() && !r.GetTime().AsTime().After(since) {
-			continue
-		}
-		out = append(out, filterReport(r, serviceIDs))
+	r := c.latest
+	if r == nil || !since.IsZero() && !r.GetTime().AsTime().After(since) {
+		return nil
 	}
-	return out
+	return []*agentv1.MetricsReport{filterReport(r, serviceIDs)}
 }
 
 // filterReport copies r keeping only the listed services (none when the

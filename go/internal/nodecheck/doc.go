@@ -7,9 +7,10 @@
 //	system.memory     total and available memory
 //	disk.space        free space on the data dir's file system
 //	disk.inodes       free inodes there
+//	disk.permissions  services/ and services/<id>/ open to root only (0700)
 //	docker.engine     Docker reachable, version, storage driver
 //	docker.cgroup     cgroup v2, cpu/memory/pids controllers, Docker's driver
-//	network.ports     80 and 443 free or held by our (or Wings') Traefik
+//	network.ports     80 and 443 free or held by our Traefik or the Wings fork's proxy
 //	proxy.running     the seylo-traefik container runs (or Wings' is shared)
 //	proxy.routes      every seylo-*.yml route file parses
 //	network.dns       public registries and the panel host resolve

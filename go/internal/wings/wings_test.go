@@ -95,6 +95,54 @@ func TestDetectForkWithForeignRoutes(t *testing.T) {
 	}
 }
 
+// TestDetectLeavesNoConnectionOpen: the fork's API server has no idle
+// timeout, so a kept-alive connection stays open on both ends. The agent
+// detects Wings every 10 minutes and several times per health check run;
+// each Detect used to leave its connection (and its transport's
+// goroutines) behind.
+func TestDetectLeavesNoConnectionOpen(t *testing.T) {
+	var mu sync.Mutex
+	open := map[net.Conn]bool{}
+	api := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"1.12.0-nh.5","features":["foreign-routes"]}`))
+	}))
+	api.Config.ConnState = func(c net.Conn, s http.ConnState) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch s {
+		case http.StateNew:
+			open[c] = true
+		case http.StateClosed, http.StateHijacked:
+			delete(open, c)
+		}
+	}
+	api.Start()
+	defer api.Close()
+	_, port, _ := net.SplitHostPort(api.Listener.Addr().String())
+	root := t.TempDir()
+	write(t, root, "etc/pelican/config.yml", "token: abc\napi:\n  host: 127.0.0.1\n  port: "+port+"\n")
+	d := &FileDetector{Root: root}
+	for range 5 {
+		if info, err := d.Detect(context.Background()); err != nil || info.GetVersion() != "1.12.0-nh.5" {
+			t.Fatalf("detect: %v %v", info, err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(open)
+		mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d connections to the Wings API are still open after 5 Detect calls", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestSliceCPUCgroupfs(t *testing.T) {
 	root := t.TempDir()
 	c := &SliceCPU{CgroupRoot: root, Slice: "seylo.slice"}

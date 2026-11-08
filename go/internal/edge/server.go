@@ -204,9 +204,14 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// page writes a maintenance, status or edge page. Custom HTML is served
+// as is, so the CSP (no scripts, no frames) and nosniff are what keep it a
+// static page on the app's origin.
 func (s *HTTPServer) page(w http.ResponseWriter, status int, custom string, text pageText) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", proxy.PageContentSecurityPolicy)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	if custom != "" {
 		_, _ = w.Write([]byte(custom))

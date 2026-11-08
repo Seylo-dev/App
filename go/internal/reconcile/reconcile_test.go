@@ -400,6 +400,52 @@ func TestAdoptionAfterAgentRestart(t *testing.T) {
 	}
 }
 
+// TestServiceFoldersArePrivate: file mounts are secrets and volumes hold
+// the apps' data, under a data dir every local account may traverse
+// (0711). services/ and services/<id>/ (and files/) are root's only, also
+// when an older agent made them 0755; file mounts keep their own modes,
+// which is what a container user reads them by.
+func TestServiceFoldersArePrivate(t *testing.T) {
+	h := newHarness(t)
+	dir, _ := h.layout.ServiceDir("svc")
+	services := filepath.Dir(dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(services, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s1 := appSpec("svc", 1, "app:v1")
+	s1.Volumes = []*agentv1.VolumeMount{{Name: "data", ContainerPath: "/data"}}
+	s1.Files = []*agentv1.FileMount{
+		{ContainerPath: "/etc/app/config.yml", Content: []byte("a: 1")},
+		{ContainerPath: "/etc/app/secret.key", Content: []byte("k"), Mode: 0o600},
+	}
+	h.apply(1, s1)
+	h.deployResult("svc", 1)
+	files, _ := h.layout.ServiceFiles("svc")
+	vol, _ := h.layout.ServiceVolume("svc", "data")
+	want := map[string]os.FileMode{
+		services: 0o700,
+		dir:      0o700,
+		files:    0o700,
+		vol:      0o755,
+		filepath.Join(files, fileName("/etc/app/config.yml")): 0o644,
+		filepath.Join(files, fileName("/etc/app/secret.key")): 0o600,
+		filepath.Join(dir, "runtime.json"):                    0o600,
+	}
+	for p, mode := range want {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Errorf("%s: %v", p, err)
+			continue
+		}
+		if st.Mode().Perm() != mode {
+			t.Errorf("%s is %v, want %v", p, st.Mode().Perm(), mode)
+		}
+	}
+}
+
 func TestRemoveLeavesForeignAlone(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

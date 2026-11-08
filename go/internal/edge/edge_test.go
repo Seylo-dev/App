@@ -79,6 +79,16 @@ func TestPages(t *testing.T) {
 	get := func(path string) (int, string) {
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		// Custom HTML runs on the app's own domains: never scripts.
+		if rec.Code == 503 && strings.Contains(rec.Body.String(), "<") {
+			if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "script-src") ||
+				!strings.Contains(csp, "frame-ancestors 'none'") {
+				t.Errorf("%s: CSP %q", path, csp)
+			}
+			if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Errorf("%s: no nosniff", path)
+			}
+		}
 		return rec.Code, rec.Body.String()
 	}
 	if code, body := get(proxy.MaintenancePath + "/a"); code != 503 || body != "<p>custom a</p>" {

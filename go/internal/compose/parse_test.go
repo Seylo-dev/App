@@ -136,3 +136,16 @@ func TestParseRejectsBadInput(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildSectionsAreThePanelsCall: the panel builds build: sections of
+// repository stacks (and warns itself for pasted files), so the agent's
+// warnings must not tell people to replace build: with image:.
+func TestBuildSectionsAreThePanelsCall(t *testing.T) {
+	resp, err := Parse(context.Background(), &agentv1.ParseComposeRequest{ComposeYaml: "services:\n  web:\n    build: .\n  api:\n    build: ./api\n    image: shop/api:1\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetWarnings()) != 0 {
+		t.Fatalf("warnings = %q", resp.GetWarnings())
+	}
+}

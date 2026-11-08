@@ -77,6 +77,22 @@ describe("compose plan", () => {
     );
     expect(plan.members[0]?.build).toEqual({ contextPath: "deploy/api", dockerfilePath: "Dockerfile.prod", target: "" });
   });
+
+  test("build: sections are the panel's call, not an older agent's warning", () => {
+    const legacy = "api: build sections are not built for compose stacks; give the service an image";
+    const project = { services: { api: { build: { context: "." } } } };
+    const repo = planStack(
+      "app",
+      project,
+      { type: "github", installationId: "a".repeat(16), repo: "acme/shop", branch: "main", path: "compose.yml", deployOnPush: true },
+      [legacy, "api: port 80 is published on the host as 8080"],
+    );
+    expect(repo.members[0]?.build).not.toBeNull();
+    expect(repo.warnings).toEqual(["api: port 80 is published on the host as 8080"]);
+    const pasted = planStack("app", project, { type: "inline", yaml: "" }, [legacy]);
+    expect(pasted.warnings).toContain("api: build: needs a repository; pasted files must use image:.");
+    expect(pasted.warnings).not.toContain(legacy);
+  });
 });
 
 describe("compose stacks", () => {

@@ -429,8 +429,9 @@ func (x *ServiceUsage) GetInstances() uint32 {
 	return 0
 }
 
-// GetMetricsRequest reads the agent's short high resolution history (the
-// last hour). Longer ranges come from the panel's rollups.
+// GetMetricsRequest reads the agent's latest sample (agents before
+// 0.2.0-rc.2 kept the last hour). History comes from the panel's live
+// window and rollups.
 type GetMetricsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Empty means node usage only.

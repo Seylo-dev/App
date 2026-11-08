@@ -1,6 +1,7 @@
 // The maintenance and down page: a service's own HTML, else the global
 // page, else the built-in one with the message filled in. The node's edge
-// serves the result as is, with a CSP that blocks scripts.
+// serves the result as is, with a CSP that blocks scripts and frames
+// (go/internal/proxy PageContentSecurityPolicy, set in edge/server.go).
 
 import { displayName } from "@seylo/brand";
 import { eq } from "drizzle-orm";

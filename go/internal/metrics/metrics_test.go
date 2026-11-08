@@ -198,8 +198,14 @@ func TestSamplerSumsReplicas(t *testing.T) {
 	}
 }
 
-func TestHistoryWindowAndFilter(t *testing.T) {
+// TestKeepsOnlyTheLatestSample: an hour of full reports (node plus every
+// service, every 10s) was about 11 MiB per 200 services on every node,
+// for GetMetrics, which nothing calls; the panel keeps its own window.
+func TestKeepsOnlyTheLatestSample(t *testing.T) {
 	c := NewDockerCollector(&fakeSource{}, "", 0)
+	if got := c.History(time.Time{}, nil); len(got) != 0 {
+		t.Fatalf("before any sample = %v", got)
+	}
 	base := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	for i := range 400 { // 400 x 10s = 66 minutes
 		c.record(&agentv1.MetricsReport{
@@ -209,8 +215,8 @@ func TestHistoryWindowAndFilter(t *testing.T) {
 		})
 	}
 	all := c.History(time.Time{}, nil)
-	if len(all) != 361 {
-		t.Fatalf("kept %d samples, want an hour (361)", len(all))
+	if len(all) != 1 || all[0].GetNode().GetCpuPercent() != 399 {
+		t.Fatalf("kept %d samples, want the latest only", len(all))
 	}
 	if len(all[0].GetServices()) != 0 {
 		t.Fatal("node-only history carries services")
@@ -218,5 +224,8 @@ func TestHistoryWindowAndFilter(t *testing.T) {
 	recent := c.History(base.Add(3980*time.Second), []string{"b"})
 	if len(recent) != 1 || len(recent[0].GetServices()) != 1 || recent[0].GetServices()[0].GetServiceId() != "b" {
 		t.Fatalf("recent = %v", recent)
+	}
+	if got := c.History(base.Add(3990*time.Second), nil); len(got) != 0 {
+		t.Fatalf("since the latest sample = %v", got)
 	}
 }

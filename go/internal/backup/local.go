@@ -241,19 +241,38 @@ func (l *Local) planBackup(req *agentv1.RunBackupRequest) (*backupPlan, error) {
 	return p, nil
 }
 
-// volumeDir is the folder of a volume the service mounts.
-func (l *Local) volumeDir(spec *agentv1.ServiceSpec, name string) (string, error) {
+// volumeOwner is the service whose folder holds a volume the service
+// mounts.
+func volumeOwner(spec *agentv1.ServiceSpec, name string) (string, error) {
 	for _, v := range spec.GetVolumes() {
 		if v.GetName() != name {
 			continue
 		}
-		owner := v.GetOwnerServiceId()
-		if owner == "" {
-			owner = spec.GetId()
+		if owner := v.GetOwnerServiceId(); owner != "" {
+			return owner, nil
 		}
-		return l.opts.Layout.ServiceVolume(owner, name)
+		return spec.GetId(), nil
 	}
 	return "", fmt.Errorf("%w: service %s has no volume %q", ErrBadRequest, spec.GetId(), name)
+}
+
+// volumeDir is the folder of a volume the service mounts.
+func (l *Local) volumeDir(spec *agentv1.ServiceSpec, name string) (string, error) {
+	owner, err := volumeOwner(spec, name)
+	if err != nil {
+		return "", err
+	}
+	return l.opts.Layout.ServiceVolume(owner, name)
+}
+
+// makeVolumeDir is volumeDir, created (with the service folder private to
+// root, datadir.MakeServiceVolume) when it is not there yet.
+func (l *Local) makeVolumeDir(spec *agentv1.ServiceSpec, name string) (string, error) {
+	owner, err := volumeOwner(spec, name)
+	if err != nil {
+		return "", err
+	}
+	return l.opts.Layout.MakeServiceVolume(owner, name)
 }
 
 // backup produces the archive or dump and streams it to the store.
@@ -291,7 +310,7 @@ func (l *Local) backup(ctx context.Context, p *backupPlan, res *agentv1.BackupRe
 			if _, err := os.Stat(p.vol); errors.Is(err, os.ErrNotExist) {
 				// A volume nothing wrote to yet is an empty archive, not an
 				// error.
-				if err := os.MkdirAll(p.vol, 0o755); err != nil {
+				if _, err := l.makeVolumeDir(p.spec, p.volName); err != nil {
 					return err
 				}
 			}
@@ -471,12 +490,17 @@ func (l *Local) Restore(ctx context.Context, req *agentv1.RestoreBackupRequest) 
 		if ext != extVolume {
 			return nil, fmt.Errorf("%w: %s is not a volume archive", ErrBadRequest, key)
 		}
-		dir, err := l.volumeDir(spec, w.Volume)
-		if err != nil {
+		if _, err := l.volumeDir(spec, w.Volume); err != nil {
 			return nil, err
 		}
 		if l.opts.Suspend == nil {
 			return nil, ErrSuspendUnavailable
+		}
+		// Made first, so the staging folder next to it is inside a service
+		// folder only root may enter.
+		dir, err := l.makeVolumeDir(spec, w.Volume)
+		if err != nil {
+			return nil, err
 		}
 		return l.restoreVolume(ctx, store, key, l.mounters(spec, w.Volume, false), dir)
 	case *agentv1.BackupSubject_Database:
@@ -645,7 +669,7 @@ func (l *Local) restoreRedis(ctx context.Context, store Store, key string, spec 
 		return nil, err
 	}
 	defer closeFn()
-	if err := os.MkdirAll(data, 0o755); err != nil {
+	if _, err := l.makeVolumeDir(spec, volume); err != nil {
 		return nil, err
 	}
 	suffix := newSuffix(l.opts.Now())

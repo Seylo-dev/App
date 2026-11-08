@@ -9,7 +9,7 @@
 //	state/desired.pb               last accepted desired state (0600)
 //	state/outbox/                  durable reports waiting for the panel
 //	panel/panel.db                 panel SQLite (only on the panel node)
-//	services/<id>/volumes/<name>   service volumes
+//	services/<id>/volumes/<name>   service volumes (services/ and services/<id>/ are 0700)
 //	services/<id>/files            file mounts
 //	builds/                        build workspaces and uploaded contexts
 //	tools/                         pinned helper binaries (Railpack, Nixpacks)

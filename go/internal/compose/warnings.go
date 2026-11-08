@@ -106,9 +106,9 @@ func serviceWarnings(s types.ServiceConfig, w func(string, ...any)) {
 	if len(s.Sysctls) > 0 {
 		w("sysctls are ignored")
 	}
-	if s.Build != nil {
-		w("build sections are not built for compose stacks; give the service an image")
-	} else if s.Image == "" {
+	// build: is the panel's call: it builds repository stacks and warns
+	// itself when a pasted file has a build section (compose/plan.ts).
+	if s.Build == nil && s.Image == "" {
 		w("has no image")
 	}
 	if s.Build != nil && s.PullPolicy == types.PullPolicyBuild {

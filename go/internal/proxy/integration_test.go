@@ -131,9 +131,11 @@ func (e *itEnv) edgeHandler(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == ProbePath:
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(r.URL.Path, StatusPath+"/"):
+		w.Header().Set("Content-Security-Policy", PageContentSecurityPolicy)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = io.WriteString(w, "status page for "+strings.TrimPrefix(r.URL.Path, StatusPath+"/"))
 	case strings.HasPrefix(r.URL.Path, MaintenancePath+"/"):
+		w.Header().Set("Content-Security-Policy", PageContentSecurityPolicy)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = io.WriteString(w, "maintenance for "+strings.TrimPrefix(r.URL.Path, MaintenancePath+"/"))
 	default:
@@ -274,10 +276,30 @@ func TestIntegrationTwoDomainsPagesAndMiddlewares(t *testing.T) {
 		t.Fatalf("probe without secret: %d", code)
 	}
 
-	// Stopped: the status page through the edge.
+	// Stopped: the status page through the edge, with the edge's CSP (a
+	// custom page must not run scripts on the app's domain).
 	e.apply(app("sb", plainRoute("r1", "b.it.test")))
-	if code, body, _ := e.get("b.it.test", "/"); code != 503 || body != "status page for sb" {
-		t.Fatalf("status page: %d %q", code, body)
+	if code, body, h := e.get("b.it.test", "/"); code != 503 || body != "status page for sb" || h.Get("Content-Security-Policy") != PageContentSecurityPolicy {
+		t.Fatalf("status page: %d %q %v", code, body, h)
+	}
+	// The replica went away (502 from Traefik): the errors middleware
+	// serves the status page, and the edge's headers come with it.
+	gone := e.whoami("g1")
+	e.apply(app("sg", plainRoute("r1", "g.it.test")), gone)
+	e.stop("g1")
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		_, body, h := e.get("g.it.test", "/")
+		if body == "status page for sg" {
+			if h.Get("Content-Security-Policy") != PageContentSecurityPolicy {
+				t.Fatalf("status page for a 502 without the CSP: %v", h)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no status page for a 502: %q", body)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	// Global maintenance; a protected service keeps serving.
 	prot := app("sp", plainRoute("r1", "panel.it.test"))
@@ -287,8 +309,8 @@ func TestIntegrationTwoDomainsPagesAndMiddlewares(t *testing.T) {
 	if err := e.router.Verify(e.ctx, "sa"); err != nil {
 		t.Fatal(err)
 	}
-	if code, body, _ := e.get("a.it.test", "/"); code != 503 || body != "maintenance for sa" {
-		t.Fatalf("maintenance: %d %q", code, body)
+	if code, body, h := e.get("a.it.test", "/"); code != 503 || body != "maintenance for sa" || h.Get("Content-Security-Policy") != PageContentSecurityPolicy {
+		t.Fatalf("maintenance: %d %q %v", code, body, h)
 	}
 	if code, body, _ := e.get("panel.it.test", "/"); code != 200 || !strings.Contains(body, "Name: a1") {
 		t.Fatalf("protected during maintenance: %d %q", code, body)

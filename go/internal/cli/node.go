@@ -20,6 +20,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/systemd"
 	"github.com/seylo-dev/app/go/internal/troubleshoot"
 	"github.com/seylo-dev/app/go/internal/update"
+	"github.com/seylo-dev/app/go/internal/wings"
 )
 
 func newAgentCommand(d *deps) *cobra.Command {
@@ -240,6 +241,9 @@ func newHealthCommand(d *deps) *cobra.Command {
 			}
 			results := nodecheck.Run(cmd.Context(), nodecheck.Default(nodecheck.Env{
 				DataDir: d.layout.Root(), PanelURL: panelURL, PanelPin: pin, GOARCH: runtime.GOARCH, Run: d.run, CanBuild: canBuild,
+				// Wings detection, so a node next to the Wings fork passes the
+				// ports and proxy checks like in the agent's own run.
+				Wings: wings.NewDetector().Detect,
 			}))
 			printChecks(d, results)
 			if nodecheck.Worst(results) == agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {

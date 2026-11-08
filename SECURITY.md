@@ -113,6 +113,14 @@ On every node, in `/var/lib/seylo/` (owned by root; `agent.key` and
   the node joined).
 - `state/desired.pb`: what the node runs, with the env values and secrets of
   the services placed on it, and only those.
+- `services/<id>/files/` and `services/<id>/volumes/`: the services' file
+  mounts (which hold secrets) and volume data. `services/` and every
+  `services/<id>/` are mode 0700, so only root reaches them (Docker mounts
+  them into containers as root). Before 0.2.0-rc.2 these folders were 0755
+  under the data dir's 0711, so a local account that learned a service id
+  could read file mounts (0644 unless the service sets a mode) and volume
+  data; the agent sets 0700 when it starts, and the node's health check
+  warns when a service folder is open to other accounts.
 
 The release signing key (minisign) is kept offline by the maintainers, and
 in GitHub only as secrets of the `release` environment of

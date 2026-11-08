@@ -74,10 +74,6 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 			return 0, ErrRunning
 		}
 	}
-	dir, err := t.Layout.ServiceVolume(owner, volume)
-	if err != nil {
-		return 0, err
-	}
 	// Until the panel places the service here, nothing in the desired
 	// state names this folder: the marker keeps cleanup's hands off it.
 	serviceDir, err := t.Layout.ServiceDir(owner)
@@ -89,8 +85,10 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 		return 0, fmt.Errorf("marking the service folder: %w", err)
 	}
 	defer end()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, fmt.Errorf("creating volume folder: %w", err)
+	// Inside services/<owner>/, which only root may enter.
+	dir, err := t.Layout.MakeServiceVolume(owner, volume)
+	if err != nil {
+		return 0, err
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {

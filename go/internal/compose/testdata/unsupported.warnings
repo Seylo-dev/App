@@ -1,4 +1,3 @@
-app: build sections are not built for compose stacks; give the service an image
 app: port 80 is published on the host as 8080; instead add a domain for container port 80, or open it on IP:port from the service's networking
 app: UDP port 53 is not supported
 app: bind mount ./data:/data is not supported; use a named volume (files outside the stack are not on the node)

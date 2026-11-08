@@ -160,6 +160,11 @@ func newDaemon(ctx context.Context, layout datadir.Layout, logger *slog.Logger) 
 			return nil, fmt.Errorf("creating %s: %w", dir, err)
 		}
 	}
+	// services/ and services/<id>/ hold file mounts and volume data; agents
+	// before 0.2.0-rc.2 made them 0755 under the 0711 data dir.
+	if err := layout.SecureServiceDirs(); err != nil {
+		logger.Warn("closing the service folders to other accounts", "err", err)
+	}
 	key, err := loadOrCreateKey(layout.AgentKey())
 	if err != nil {
 		return nil, err

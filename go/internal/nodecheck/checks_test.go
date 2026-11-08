@@ -107,6 +107,9 @@ func TestHealthyMachine(t *testing.T) {
 		t.Errorf("clock detail = %q", results["time.sync"].GetDetail())
 	}
 	// Disk results depend on the test machine; they must at least run.
+	if r := results["disk.permissions"]; r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
+		t.Errorf("disk.permissions = %v", r)
+	}
 	if results["disk.space"].GetDetail() == "" || results["disk.inodes"].GetDetail() == "" {
 		t.Errorf("disk results = %v %v", results["disk.space"], results["disk.inodes"])
 	}
@@ -334,6 +337,77 @@ func TestPortsHeldByOurProxy(t *testing.T) {
 	}
 }
 
+// TestPortsHeldByWingsForkProxy: the Wings fork's Traefik is a container
+// named by its config (nexthost-proxy by default) publishing 80 and 443;
+// when routes go to it, it holding the ports is the setup working, while
+// another container with that name and no shared proxy is a problem.
+func TestPortsHeldByWingsForkProxy(t *testing.T) {
+	files := healthyFiles()
+	files["proc/net/tcp6"] = procNetTCP
+	files["proc/99/comm"] = "docker-proxy\n"
+	proc, sys, etc := machine(t, files)
+	_ = os.MkdirAll(filepath.Join(proc, "99", "fd"), 0o755)
+	_ = os.Symlink("socket:[23456]", filepath.Join(proc, "99", "fd", "3"))
+	env := Env{ProcDir: proc, SysDir: sys, EtcDir: etc, Docker: fakeDocker{publishers: []DockerContainer{{Names: []string{"/nexthost-proxy"}}}},
+		Wings: func(context.Context) (*agentv1.WingsInfo, error) {
+			return &agentv1.WingsInfo{Version: "1.11", TraefikDynamicDir: "/var/lib/pelican/proxy/dynamic", ProxyContainer: "nexthost-proxy"}, nil
+		}}
+	env.defaults()
+	r := env.ports(context.Background())
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || !strings.Contains(r.GetDetail(), "nexthost-proxy") {
+		t.Fatalf("ports = %v", r)
+	}
+	// Wings without the fork's proxy: nothing here routes our domains.
+	env.Wings = func(context.Context) (*agentv1.WingsInfo, error) { return &agentv1.WingsInfo{Version: "1.11"}, nil }
+	if r := env.ports(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
+		t.Fatalf("ports without the fork's proxy = %v", r)
+	}
+	env.Wings = nil
+	if r := env.ports(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
+		t.Fatalf("ports without Wings detection = %v", r)
+	}
+}
+
+// TestServiceFolders: services/ and services/<id>/ must be open to root
+// only; file mounts and volume data are under them and the data dir is
+// 0711.
+func TestServiceFolders(t *testing.T) {
+	data := t.TempDir()
+	env := Env{DataDir: data}
+	if r := env.serviceFolders(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS {
+		t.Fatalf("no services = %v", r)
+	}
+	services := filepath.Join(data, "services")
+	for _, dir := range []string{services, filepath.Join(services, "web"), filepath.Join(services, "db")} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := env.serviceFolders(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS || !strings.Contains(r.GetDetail(), "2 service folders") {
+		t.Fatalf("private = %v", r)
+	}
+	for _, dir := range []string{services, filepath.Join(services, "web")} {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := env.serviceFolders(context.Background())
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || !strings.Contains(r.GetDetail(), "0755") ||
+		!strings.Contains(r.GetDetail(), "1 of 2 service folders") || !strings.Contains(r.GetFixHint(), "chmod 700") {
+		t.Fatalf("open = %v", r)
+	}
+	// Execute-only still lets an account that knows an id walk in.
+	if err := os.Chmod(services, 0o711); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(services, "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if r := env.serviceFolders(context.Background()); r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN {
+		t.Fatalf("traversable = %v", r)
+	}
+}
+
 func TestDiskThresholds(t *testing.T) {
 	cases := []struct {
 		total, free uint64
@@ -348,6 +422,10 @@ func TestDiskThresholds(t *testing.T) {
 		if got := diskResult("/", c.total, c.free).GetStatus(); got != c.want {
 			t.Errorf("disk %d/%d = %v, want %v", c.free, c.total, got, c.want)
 		}
+	}
+	// The hint names the screens as the web app does.
+	if h := diskResult("/", 20*gib, gib).GetFixHint(); !strings.Contains(h, "Settings > Docker cleanup") || !strings.Contains(h, "node's Cleanup view") {
+		t.Errorf("disk hint = %q", h)
 	}
 	if inodeResult("/", 0, 0).GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS ||
 		inodeResult("/", 1000, 50).GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN ||
@@ -399,6 +477,16 @@ func TestProxyChecks(t *testing.T) {
 	}
 	if r := env.proxyRunning(context.Background()); !strings.Contains(r.GetDetail(), "Wings") {
 		t.Fatalf("wings = %v", r)
+	}
+}
+
+// TestLiveRestoreWithoutWingsDetection: `seylo health` before 0.2.0-rc.2
+// had no Wings detection, and the check crashed calling it.
+func TestLiveRestoreWithoutWingsDetection(t *testing.T) {
+	env := Env{Docker: fakeDocker{info: &DockerInfo{ServerVersion: "28.0.1"}}}
+	r := Run(context.Background(), []Check{check{"docker.live-restore", "Docker live-restore", env.liveRestore}})[0]
+	if r.GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN || strings.Contains(r.GetDetail(), "crashed") {
+		t.Fatalf("live-restore without Wings detection = %v", r)
 	}
 }
 

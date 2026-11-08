@@ -508,3 +508,48 @@ func TestITVolumeMove(t *testing.T) {
 		t.Fatalf("moved file = %q", b)
 	}
 }
+
+// TestITPrivateServiceFoldersStillMount: services/ and services/<id>/ are
+// 0700 root, and a container running as another user still gets its file
+// mount and its volume: dockerd sets up the mounts as root, and the
+// process reads and writes them by their own modes.
+func TestITPrivateServiceFoldersStillMount(t *testing.T) {
+	e := newIT(t)
+	id := e.id("priv")
+	vol, err := e.layout.MakeServiceVolume(id, "data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(vol, 1234, 1234); err != nil {
+		t.Fatal(err)
+	}
+	s := &agentv1.ServiceSpec{
+		Id: id, ProjectId: e.prefix + "p", Name: "priv", Generation: 1,
+		Kind:  agentv1.ServiceKind_SERVICE_KIND_APP,
+		Image: &agentv1.ImageRef{Reference: itImage},
+		Container: &agentv1.ContainerConfig{
+			User:    "1234:1234",
+			Command: []string{"sh", "-c", "cat /etc/app/config.yml > /data/out && exec sleep 600"},
+		},
+		Volumes: []*agentv1.VolumeMount{{Name: "data", ContainerPath: "/data"}},
+		Files:   []*agentv1.FileMount{{ContainerPath: "/etc/app/config.yml", Content: []byte("a: 1")}},
+	}
+	e.apply(1, s)
+	e.result(id, 1)
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if b, _ := os.ReadFile(vol + "/out"); string(b) == "a: 1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the container (uid 1234) did not copy its file mount into its volume")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	dir, _ := e.layout.ServiceDir(id)
+	for _, p := range []string{e.layout.ServicesDir(), dir} {
+		if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o700 {
+			t.Fatalf("%s = %v %v", p, st, err)
+		}
+	}
+}
