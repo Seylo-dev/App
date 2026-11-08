@@ -145,7 +145,9 @@ The generated indexes let features land without touching a shared list:
 Migrations: `apps/panel/drizzle/panel` starts with `0000_init.sql`, frozen
 since the first release (0.1.0): installs out there have it applied, so it
 never changes again. Every schema change after it is a new, add-only
-migration (`0001_features` for 0.2), which the panel applies at start, also
+migration (`0001_features` for 0.2, shipped in 0.2.0-rc.1, so frozen too;
+`0002_updates` for rc.2: update runs keep their manifest, update steps
+their reconnect retry), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -886,6 +888,10 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   own cap, a setting it has not synced) raises none and is audited as
   closed with `refused by the node: <message>`. Turning them on raises a
   `security_change` alert too.
+- Release channel: `updates.setChannel` takes `updates.manage` but only the
+  owner's calls (session or key) change it (FORBIDDEN otherwise, audited
+  either way); it is `mcp: false`. `updates.status.canChangeChannel` says
+  whether the caller may.
 - Model callers (transport `mcp` or `ai`, or any `mcp` token on any
   transport) only reach ops with `mcp: true`; everything else is FORBIDDEN.
 - Approval: a destructive op from a model fails with `APPROVAL_REQUIRED`
@@ -1513,7 +1519,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   version ("0.1.1"); `parseVersion` also accepts the older
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by
   version when the node already runs it, is busy updating itself (ABORTED) or
-  answers ALREADY_EXISTS.
+  answers ALREADY_EXISTS, and is skipped with the agent's message when an
+  automatic update waits (FAILED_PRECONDITION with details `backoff`).
 
 ### Not built yet
 
@@ -1679,7 +1686,13 @@ also counts the rollback in `<dataDir>/update/agent-rollbacks.json`
 installs of that release (auto-update on connect, the AGENT_TOO_OLD
 self-update) wait an hour after its first rollback and a day after each
 later one, and the restored agent raises an `UPDATE_FAILED` node alert
-saying until when. `UpdateAgent` from the panel does not wait. A
+saying until when. `UpdateAgent` from the panel does not wait, unless the
+panel sets `automatic` (its automatic run, and a node catching up after it
+was offline during a run): then the agent waits the same way, and also an
+hour after an automatic update of the release failed before the swap, and
+answers FAILED_PRECONDITION with details `backoff` (`rolledBack` or
+`failed`) and `retryAfter` (RFC 3339), installing and reporting nothing
+(`update.WaitError`). Agents before 0.2.0-rc.2 ignore the field. A
 confirmed update, or an agent already at or past the release, drops its
 record and resolves the alert once none is left. The panel keeps its own
 record from the rolled-back `UpdateResult`s (setting `updateRollbacks`,
@@ -1729,7 +1742,9 @@ and/or `--define __TEST_RELEASE_PUBLIC_KEY__='"<RW... key>"'` compiles in a
 release mirror and a throwaway minisign key (`modules/updates/manifest.ts`
 `testReleaseOverrides`). They are build-time constants on purpose: no
 environment variable can point a shipped panel at another release source or
-key. Such a panel logs a "TEST BUILD" warning on start.
+key. Such a panel logs a "TEST BUILD" warning on start. The pre-release
+channel lists `<that URL without /latest>?per_page=100`, which the e2e
+mirror does not serve (the e2e runs on the stable channel).
 
 Docker update (`UpdateDocker`): reports `from`/`to` from apt or dnf/yum at
 once, plus `warning` when Docker's live-restore is off (every service and
@@ -1954,21 +1969,50 @@ Host shells (`modules/hostShell`) use their own socket,
 terminal relay (`startTerminal` in mode `host`); their tickets live in
 their own store and the session closes after 15 minutes idle.
 
-Updates: `updates.*` read `manifest.json` + `manifest.json.minisig` from
-the latest GitHub release, verified with
-`brand.minisignPublicKey`. A run is update_runs/update_steps advanced by
-the `updates.run` job: panel step (UpdatePanel on the panel node), then one
-agent step per older node (UpdateAgent with the verified bytes); a durable
-`UpdateResult` or the new version on reconnect finishes a step, 10 minutes
-without either fails it and the run. `nodes.updateDocker` is a one-step run
-finished by its `UpdateResult`. The release check runs every 6 hours
-(schedule `updates.check`) and starts a run when auto-update is on. That
-automatic run leaves out a node whose update to the release was rolled
-back (any rolled-back agent `UpdateResult`, also from the agent's own
-update on connect) and does not start when the panel's own update to it
-was; a newer release, or a run a person starts (Update now, update
-everything), installs it again and clears the record, and a successful
-update forgets it.
+Updates: `updates.*` read `manifest.json` + `manifest.json.minisig` of
+the newest release on the release channel, verified with
+`brand.minisignPublicKey`. The channel (setting `updateChannel`,
+`updates.setChannel`, owner only, audited, checks at once) is `stable`
+(default: GitHub's `releases/latest`, never a pre-release) or `prerelease`
+(the releases list: the highest semver of the non-draft releases whose tag
+is a version, pre-releases included, so 0.2.0-rc.1 < 0.2.0-rc.2 < 0.2.0;
+its manifest must name that version). The stored check (setting
+`updateCheck`) records its channel; one from the other channel offers
+nothing, and a failed check keeps the last good release of the same
+channel only. Nothing offers a downgrade: `updateAvailable` and the run's
+steps need a newer version, and `updates.updateNode` answers CONFLICT for a
+node that already runs the release or a newer one (back on stable, an RC
+stays until a newer stable release). `updates.status` has `channel`,
+`canChangeChannel`, `panel.offeredVersion` and `panel.latestIsPrerelease`.
+A run is update_runs/update_steps advanced by the `updates.run` job: panel
+step (UpdatePanel on the panel node), then one agent step per older node
+(UpdateAgent with the verified bytes); a durable `UpdateResult` or the new
+version on reconnect finishes a step, 10 minutes without either fails it
+and the run. A run keeps the manifest it installs (`update_runs.manifest`,
+`manifest_signature`; a run from before rc.2 gets the stored one while it
+is still that version), so a later check or a channel switch never changes
+what its steps send. `nodes.updateDocker` is a one-step run finished by
+its `UpdateResult`. The release check runs every 6 hours (schedule
+`updates.check`) and starts a run when auto-update is on. That automatic
+run leaves out a node whose update to the release was rolled back (any
+rolled-back agent `UpdateResult`, also from the agent's own update on
+connect) and does not start when the panel's own update to it was; a newer
+release, or a run a person starts (Update now, update everything),
+installs it again and clears the record, and a successful update forgets
+it. UpdateAgent carries `automatic` for every run a person did not start.
+
+A node offline when its step comes up is skipped with `retry: waiting`
+(`modules/updates/catch-up.ts`). Every connect queues `updates.catchUp` for
+the node; for its newest waiting step it records `upToDate` (the node runs
+that version or newer), `held` (the node rolled that version back: not
+retried automatically, Update now installs it) or starts a run of trigger
+`reconnect` with one agent step to that run's version and manifest
+(`retried`, `retryRunId`), waiting 30 seconds at a time while another run
+is active. A later run with a step for the node marks older waiting steps
+`superseded`. The agent's own waits end the catch-up step as skipped with
+its message (FAILED_PRECONDITION `backoff`), not as a failure. The steps'
+`retry`, `retryRunId` and `retryAt` and the run's trigger show in the
+history.
 
 Metrics: each `metrics` event feeds `modules/metrics/ingest.ts`: a 5-minute
 in-memory window (range `live`) and `metrics.db` buckets 1m (26 h), 5m

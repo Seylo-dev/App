@@ -1,5 +1,7 @@
 // Settings > Updates: the one auto-update switch for the panel and every
-// node, the versions running now, a manual "update now", and past runs.
+// node, the release channel (owner only), the versions running now and the
+// one on offer, a manual "update now", and past runs with what became of
+// nodes that were offline during one.
 
 import { type OpOutput, updates } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -11,7 +13,9 @@ import { DataTable, type DataTableColumn } from "@seylo/ui/components/data-table
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Progress } from "@seylo/ui/components/progress";
 import { SectionCard } from "@seylo/ui/components/section-card";
+import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Switch } from "@seylo/ui/components/switch";
+import { Tip } from "@seylo/ui/components/tooltip";
 import { IconHistory, IconRefresh } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -27,6 +31,10 @@ export const Route = createFileRoute("/_app/settings/updates")({
 
 type Status = OpOutput<typeof updates.status>;
 type Run = OpOutput<typeof updates.history>["runs"][number];
+type Step = Run["steps"][number];
+type Channel = Status["channel"];
+
+const channels: Channel[] = ["stable", "prerelease"];
 
 function UpdatesPage() {
   const status = useOp(updates.status, {}, { refetchInterval: (q) => (q.state.data?.activeRun ? 3000 : false) });
@@ -42,7 +50,13 @@ const refreshes = [updates.status, updates.history];
 
 function StatusSections({ data }: { data: Status }) {
   const [confirmPanel, setConfirmPanel] = useState(false);
+  const [confirmPrerelease, setConfirmPrerelease] = useState(false);
   const setAuto = useSettingsMutation(updates.setAutoUpdate, { invalidates: refreshes });
+  const setChannel = useSettingsMutation(updates.setChannel, {
+    invalidates: refreshes,
+    success: (out) => t(`settings.updates.channelSaved.${out.channel}`),
+  });
+  const offered = data.panel.offeredVersion;
   const check = useSettingsMutation(updates.check, {
     invalidates: refreshes,
     success: (out) =>
@@ -67,6 +81,37 @@ function StatusSections({ data }: { data: Status }) {
             />
           }
         />
+        <SettingRow
+          title={t("settings.updates.channelTitle")}
+          description={
+            data.canChangeChannel
+              ? t(`settings.updates.channelDescription.${data.channel}`)
+              : `${t(`settings.updates.channelDescription.${data.channel}`)} ${t("settings.updates.channelOwnerOnly")}`
+          }
+          control={
+            <Segmented
+              aria-label={t("settings.updates.channelTitle")}
+              value={data.channel}
+              onValueChange={(next) => {
+                const channel = next as Channel;
+                if (channel === data.channel) return;
+                if (channel === "prerelease") setConfirmPrerelease(true);
+                else setChannel.mutate({ channel });
+              }}
+            >
+              {channels.map((channel) => (
+                <SegmentedItem
+                  key={channel}
+                  value={channel}
+                  className="px-3 duration-200 disabled:cursor-default"
+                  disabled={!data.canChangeChannel || setChannel.isPending}
+                >
+                  {t(`settings.updates.channels.${channel}`)}
+                </SegmentedItem>
+              ))}
+            </Segmented>
+          }
+        />
       </SectionCard>
 
       {run && (
@@ -86,9 +131,9 @@ function StatusSections({ data }: { data: Status }) {
               <IconRefresh size={15} stroke={1.8} />
               {check.isPending ? t("settings.updates.checking") : t("settings.updates.check")}
             </Button>
-            {data.panel.updateAvailable && (
+            {offered && (
               <Button size="sm" variant="primary" disabled={!!run || updatePanel.isPending} onClick={() => setConfirmPanel(true)}>
-                {t("settings.updates.updateTo", { version: data.panel.latestVersion ?? "" })}
+                {t("settings.updates.updateTo", { version: offered })}
               </Button>
             )}
           </>
@@ -100,11 +145,12 @@ function StatusSections({ data }: { data: Status }) {
             <span className="font-mono">{data.panel.currentVersion}</span>
           </span>
           <span>
-            <span className="text-muted-foreground">{t("settings.updates.latest")} </span>
+            <span className="text-muted-foreground">{t(`settings.updates.newest.${data.channel}`)} </span>
             <span className="font-mono">{data.panel.latestVersion ?? "-"}</span>
           </span>
-          {data.panel.updateAvailable ? (
-            <Chip tone="blue">{t("settings.updates.available")}</Chip>
+          {data.panel.latestIsPrerelease && <Chip tone="amber">{t("settings.updates.prereleaseChip")}</Chip>}
+          {offered ? (
+            <Chip tone="blue">{t("settings.updates.offered", { version: offered })}</Chip>
           ) : (
             data.panel.latestVersion && <Chip tone="green">{t("settings.updates.upToDate")}</Chip>
           )}
@@ -118,6 +164,9 @@ function StatusSections({ data }: { data: Status }) {
           {data.lastCheckedAt
             ? t("settings.updates.lastChecked", { when: formatRelative(data.lastCheckedAt) })
             : t("settings.updates.neverChecked")}
+          {data.channel === "stable" && !offered && isPrerelease(data.panel.currentVersion) && (
+            <> {t("settings.updates.keepsPrerelease", { version: data.panel.currentVersion })}</>
+          )}
         </p>
         {data.checkError && (
           <Alert tone="warning" title={t("settings.updates.checkFailed")}>
@@ -184,13 +233,47 @@ function StatusSections({ data }: { data: Status }) {
       <ConfirmDialog
         open={confirmPanel}
         onOpenChange={setConfirmPanel}
-        title={t("settings.updates.confirmTitle", { version: data.panel.latestVersion ?? "" })}
+        title={t("settings.updates.confirmTitle", { version: offered ?? "" })}
         description={t("settings.updates.confirmDescription")}
         confirmLabel={t("settings.updates.updateNow")}
         onConfirm={() => updatePanel.mutateAsync({ panelOnly: false }).then(() => undefined)}
       />
+      <ConfirmDialog
+        open={confirmPrerelease}
+        onOpenChange={setConfirmPrerelease}
+        title={t("settings.updates.prereleaseConfirmTitle")}
+        description={t("settings.updates.prereleaseConfirmDescription")}
+        confirmLabel={t("settings.updates.prereleaseConfirm")}
+        onConfirm={() => setChannel.mutateAsync({ channel: "prerelease" }).then(() => undefined)}
+      />
     </>
   );
+}
+
+/** A version with a pre-release part, such as 0.2.0-rc.2. */
+function isPrerelease(version: string): boolean {
+  return /^v?\d+\.\d+\.\d+-/.test(version);
+}
+
+const stepTone = (step: Step) =>
+  step.retry === "waiting"
+    ? "amber"
+    : step.status === "failed" || step.status === "rolledBack"
+      ? "red"
+      : step.status === "succeeded"
+        ? "green"
+        : "gray";
+
+/** What a step's chip says on hover: its outcome, the error, and what became of an offline node. */
+function stepDetail(step: Step): string {
+  const lines = [t(`settings.updates.stepStatus.${step.status}`)];
+  if (step.retry) {
+    const when = step.retryAt ? formatDateTime(step.retryAt) : "";
+    lines.push(t("settings.updates.wasOffline"), t(`settings.updates.retry.${step.retry}`, { version: step.toVersion, when }));
+  } else if (step.error) {
+    lines.push(step.error);
+  }
+  return lines.join(" ");
 }
 
 const runTones = { running: "blue", succeeded: "green", failed: "red", cancelled: "gray" } as const;
@@ -221,12 +304,11 @@ function History() {
       cell: (run) => (
         <span className="flex flex-wrap gap-1">
           {run.steps.map((step) => (
-            <Chip
-              key={step.id}
-              tone={step.status === "failed" || step.status === "rolledBack" ? "red" : step.status === "succeeded" ? "green" : "gray"}
-            >
-              {step.target === "panel" ? t("settings.updates.panel") : (step.nodeName ?? step.target)}
-            </Chip>
+            <Tip key={step.id} content={stepDetail(step)}>
+              <Chip tone={stepTone(step)} tabIndex={0} aria-label={`${step.nodeName ?? t("settings.updates.panel")}: ${stepDetail(step)}`}>
+                {step.target === "panel" ? t("settings.updates.panel") : (step.nodeName ?? step.target)}
+              </Chip>
+            </Tip>
           ))}
         </span>
       ),

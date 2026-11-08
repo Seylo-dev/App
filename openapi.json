@@ -66169,6 +66169,8 @@
                   "type": "object",
                   "required": [
                     "autoUpdate",
+                    "channel",
+                    "canChangeChannel",
                     "panel",
                     "lastCheckedAt",
                     "checkError",
@@ -66179,12 +66181,29 @@
                     "autoUpdate": {
                       "type": "boolean"
                     },
+                    "channel": {
+                      "anyOf": [
+                        {
+                          "const": "stable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "prerelease",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "canChangeChannel": {
+                      "type": "boolean"
+                    },
                     "panel": {
                       "type": "object",
                       "required": [
                         "currentVersion",
                         "latestVersion",
                         "updateAvailable",
+                        "offeredVersion",
+                        "latestIsPrerelease",
                         "changelogUrl"
                       ],
                       "properties": {
@@ -66202,6 +66221,19 @@
                           ]
                         },
                         "updateAvailable": {
+                          "type": "boolean"
+                        },
+                        "offeredVersion": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "latestIsPrerelease": {
                           "type": "boolean"
                         },
                         "changelogUrl": {
@@ -66311,6 +66343,10 @@
                                 {
                                   "const": "manual",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "reconnect",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -66394,7 +66430,10 @@
                                   "status",
                                   "error",
                                   "startedAt",
-                                  "finishedAt"
+                                  "finishedAt",
+                                  "retry",
+                                  "retryRunId",
+                                  "retryAt"
                                 ],
                                 "properties": {
                                   "id": {
@@ -66516,6 +66555,60 @@
                                         "type": "null"
                                       }
                                     ]
+                                  },
+                                  "retry": {
+                                    "anyOf": [
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "const": "waiting",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "retried",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "held",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "superseded",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "upToDate",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryRunId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryAt": {
+                                    "anyOf": [
+                                      {
+                                        "format": "date-time",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
                                   }
                                 }
                               }
@@ -66627,6 +66720,10 @@
                               {
                                 "const": "manual",
                                 "type": "string"
+                              },
+                              {
+                                "const": "reconnect",
+                                "type": "string"
                               }
                             ]
                           },
@@ -66710,7 +66807,10 @@
                                 "status",
                                 "error",
                                 "startedAt",
-                                "finishedAt"
+                                "finishedAt",
+                                "retry",
+                                "retryRunId",
+                                "retryAt"
                               ],
                               "properties": {
                                 "id": {
@@ -66832,6 +66932,60 @@
                                       "type": "null"
                                     }
                                   ]
+                                },
+                                "retry": {
+                                  "anyOf": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "const": "waiting",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "const": "retried",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "const": "held",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "const": "superseded",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "const": "upToDate",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "retryRunId": {
+                                  "anyOf": [
+                                    {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "retryAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 }
                               }
                             }
@@ -66900,6 +67054,8 @@
                   "type": "object",
                   "required": [
                     "autoUpdate",
+                    "channel",
+                    "canChangeChannel",
                     "panel",
                     "lastCheckedAt",
                     "checkError",
@@ -66910,12 +67066,29 @@
                     "autoUpdate": {
                       "type": "boolean"
                     },
+                    "channel": {
+                      "anyOf": [
+                        {
+                          "const": "stable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "prerelease",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "canChangeChannel": {
+                      "type": "boolean"
+                    },
                     "panel": {
                       "type": "object",
                       "required": [
                         "currentVersion",
                         "latestVersion",
                         "updateAvailable",
+                        "offeredVersion",
+                        "latestIsPrerelease",
                         "changelogUrl"
                       ],
                       "properties": {
@@ -66933,6 +67106,19 @@
                           ]
                         },
                         "updateAvailable": {
+                          "type": "boolean"
+                        },
+                        "offeredVersion": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "latestIsPrerelease": {
                           "type": "boolean"
                         },
                         "changelogUrl": {
@@ -67042,6 +67228,10 @@
                                 {
                                   "const": "manual",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "reconnect",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -67125,7 +67315,10 @@
                                   "status",
                                   "error",
                                   "startedAt",
-                                  "finishedAt"
+                                  "finishedAt",
+                                  "retry",
+                                  "retryRunId",
+                                  "retryAt"
                                 ],
                                 "properties": {
                                   "id": {
@@ -67238,6 +67431,60 @@
                                     ]
                                   },
                                   "finishedAt": {
+                                    "anyOf": [
+                                      {
+                                        "format": "date-time",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retry": {
+                                    "anyOf": [
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "const": "waiting",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "retried",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "held",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "superseded",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "upToDate",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryRunId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryAt": {
                                     "anyOf": [
                                       {
                                         "format": "date-time",
@@ -67272,11 +67519,11 @@
         "x-mcp": true
       }
     },
-    "/api/v1/updates.status": {
-      "get": {
-        "operationId": "updates.status",
-        "summary": "Get update status",
-        "description": "Returns the panel's and every node's version, the newest release, whether auto-update is on, and the update run in progress.",
+    "/api/v1/updates.setChannel": {
+      "post": {
+        "operationId": "updates.setChannel",
+        "summary": "Choose the release channel",
+        "description": "Picks which releases updates offer: \"stable\" (the latest release) or \"prerelease\" (the highest version of all releases, release candidates included), then checks for updates on that channel. Only the owner may change it (FORBIDDEN otherwise). Never offers a downgrade: back on stable, the panel keeps the version it runs until a newer stable release is out.",
         "tags": [
           "updates"
         ],
@@ -67289,7 +67536,33 @@
             "apiKey": []
           }
         ],
-        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "channel"
+                ],
+                "properties": {
+                  "channel": {
+                    "anyOf": [
+                      {
+                        "const": "stable",
+                        "type": "string"
+                      },
+                      {
+                        "const": "prerelease",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Success.",
@@ -67299,6 +67572,8 @@
                   "type": "object",
                   "required": [
                     "autoUpdate",
+                    "channel",
+                    "canChangeChannel",
                     "panel",
                     "lastCheckedAt",
                     "checkError",
@@ -67309,12 +67584,29 @@
                     "autoUpdate": {
                       "type": "boolean"
                     },
+                    "channel": {
+                      "anyOf": [
+                        {
+                          "const": "stable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "prerelease",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "canChangeChannel": {
+                      "type": "boolean"
+                    },
                     "panel": {
                       "type": "object",
                       "required": [
                         "currentVersion",
                         "latestVersion",
                         "updateAvailable",
+                        "offeredVersion",
+                        "latestIsPrerelease",
                         "changelogUrl"
                       ],
                       "properties": {
@@ -67332,6 +67624,19 @@
                           ]
                         },
                         "updateAvailable": {
+                          "type": "boolean"
+                        },
+                        "offeredVersion": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "latestIsPrerelease": {
                           "type": "boolean"
                         },
                         "changelogUrl": {
@@ -67441,6 +67746,10 @@
                                 {
                                   "const": "manual",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "reconnect",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -67524,7 +67833,10 @@
                                   "status",
                                   "error",
                                   "startedAt",
-                                  "finishedAt"
+                                  "finishedAt",
+                                  "retry",
+                                  "retryRunId",
+                                  "retryAt"
                                 ],
                                 "properties": {
                                   "id": {
@@ -67637,6 +67949,552 @@
                                     ]
                                   },
                                   "finishedAt": {
+                                    "anyOf": [
+                                      {
+                                        "format": "date-time",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retry": {
+                                    "anyOf": [
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "const": "waiting",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "retried",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "held",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "superseded",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "upToDate",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryRunId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryAt": {
+                                    "anyOf": [
+                                      {
+                                        "format": "date-time",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "updates.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/updates.status": {
+      "get": {
+        "operationId": "updates.status",
+        "summary": "Get update status",
+        "description": "Returns the panel's and every node's version, the newest release, whether auto-update is on, and the update run in progress.",
+        "tags": [
+          "updates"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "autoUpdate",
+                    "channel",
+                    "canChangeChannel",
+                    "panel",
+                    "lastCheckedAt",
+                    "checkError",
+                    "nodes",
+                    "activeRun"
+                  ],
+                  "properties": {
+                    "autoUpdate": {
+                      "type": "boolean"
+                    },
+                    "channel": {
+                      "anyOf": [
+                        {
+                          "const": "stable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "prerelease",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "canChangeChannel": {
+                      "type": "boolean"
+                    },
+                    "panel": {
+                      "type": "object",
+                      "required": [
+                        "currentVersion",
+                        "latestVersion",
+                        "updateAvailable",
+                        "offeredVersion",
+                        "latestIsPrerelease",
+                        "changelogUrl"
+                      ],
+                      "properties": {
+                        "currentVersion": {
+                          "type": "string"
+                        },
+                        "latestVersion": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "type": "boolean"
+                        },
+                        "offeredVersion": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "latestIsPrerelease": {
+                          "type": "boolean"
+                        },
+                        "changelogUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "lastCheckedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "checkError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "nodeId",
+                          "name",
+                          "online",
+                          "version",
+                          "updateAvailable"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "online": {
+                            "type": "boolean"
+                          },
+                          "version": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "updateAvailable": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "activeRun": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "targetVersion",
+                            "trigger",
+                            "status",
+                            "startedBy",
+                            "error",
+                            "createdAt",
+                            "finishedAt",
+                            "doneSteps",
+                            "totalSteps",
+                            "steps"
+                          ],
+                          "properties": {
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "targetVersion": {
+                              "type": "string"
+                            },
+                            "trigger": {
+                              "anyOf": [
+                                {
+                                  "const": "auto",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "manual",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "reconnect",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "status": {
+                              "anyOf": [
+                                {
+                                  "const": "running",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "succeeded",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "failed",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "cancelled",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "startedBy": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "createdAt": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "doneSteps": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalSteps": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "steps": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "id",
+                                  "position",
+                                  "target",
+                                  "nodeId",
+                                  "nodeName",
+                                  "fromVersion",
+                                  "toVersion",
+                                  "status",
+                                  "error",
+                                  "startedAt",
+                                  "finishedAt",
+                                  "retry",
+                                  "retryRunId",
+                                  "retryAt"
+                                ],
+                                "properties": {
+                                  "id": {
+                                    "pattern": "^[a-z0-9]{16}$",
+                                    "description": "Panel-issued id.",
+                                    "type": "string"
+                                  },
+                                  "position": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "target": {
+                                    "anyOf": [
+                                      {
+                                        "const": "panel",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "agent",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "docker",
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "nodeId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "nodeName": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "fromVersion": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "toVersion": {
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "anyOf": [
+                                      {
+                                        "const": "pending",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "running",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "succeeded",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "failed",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "rolledBack",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "skipped",
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "error": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "startedAt": {
+                                    "anyOf": [
+                                      {
+                                        "format": "date-time",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "finishedAt": {
+                                    "anyOf": [
+                                      {
+                                        "format": "date-time",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retry": {
+                                    "anyOf": [
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "const": "waiting",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "retried",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "held",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "superseded",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "upToDate",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryRunId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "retryAt": {
                                     "anyOf": [
                                       {
                                         "format": "date-time",
@@ -67675,7 +68533,7 @@
       "post": {
         "operationId": "updates.updateNode",
         "summary": "Update one node",
-        "description": "Updates one node's agent to the panel's version. The agent swaps its binary, reconnects, and rolls back by itself if the new one fails.",
+        "description": "Updates one node's agent to the newest release on the release channel. The agent swaps its binary, reconnects, and rolls back by itself if the new one fails. Fails with CONFLICT when the node already runs that release or a newer one.",
         "tags": [
           "updates"
         ],
@@ -67746,6 +68604,10 @@
                         {
                           "const": "manual",
                           "type": "string"
+                        },
+                        {
+                          "const": "reconnect",
+                          "type": "string"
                         }
                       ]
                     },
@@ -67829,7 +68691,10 @@
                           "status",
                           "error",
                           "startedAt",
-                          "finishedAt"
+                          "finishedAt",
+                          "retry",
+                          "retryRunId",
+                          "retryAt"
                         ],
                         "properties": {
                           "id": {
@@ -67951,6 +68816,60 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "retry": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "const": "waiting",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "retried",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "held",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "superseded",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "upToDate",
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "retryRunId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "retryAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         }
                       }
@@ -67973,7 +68892,7 @@
       "post": {
         "operationId": "updates.updatePanel",
         "summary": "Update the panel",
-        "description": "Starts an update run to the newest release: the panel first (a few seconds of an updating page, apps keep running), then, unless panelOnly is set, every node one at a time. Fails with CONFLICT while another run is active.",
+        "description": "Starts an update run to the newest release on the release channel: the panel first (a few seconds of an updating page, apps keep running), then, unless panelOnly is set, every node one at a time. A node that is offline is skipped and gets the update when it reconnects. Fails with CONFLICT while another run is active.",
         "tags": [
           "updates"
         ],
@@ -68040,6 +68959,10 @@
                         {
                           "const": "manual",
                           "type": "string"
+                        },
+                        {
+                          "const": "reconnect",
+                          "type": "string"
                         }
                       ]
                     },
@@ -68123,7 +69046,10 @@
                           "status",
                           "error",
                           "startedAt",
-                          "finishedAt"
+                          "finishedAt",
+                          "retry",
+                          "retryRunId",
+                          "retryAt"
                         ],
                         "properties": {
                           "id": {
@@ -68236,6 +69162,60 @@
                             ]
                           },
                           "finishedAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "retry": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "const": "waiting",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "retried",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "held",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "superseded",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "upToDate",
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "retryRunId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "retryAt": {
                             "anyOf": [
                               {
                                 "format": "date-time",

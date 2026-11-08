@@ -109,25 +109,40 @@ export const joinTokens = sqliteTable(
 
 export type UpdateRunStatus = "running" | "succeeded" | "failed" | "cancelled";
 
+export type UpdateRunTrigger = "auto" | "manual" | "reconnect";
+
 /** One fleet update to a release: the panel first, then every node in turn. */
 export const updateRuns = sqliteTable(
   "update_runs",
   {
     id: id(),
     targetVersion: text("target_version").notNull(),
-    /** "auto" when the auto-update switch started it. */
-    trigger: text("trigger").$type<"auto" | "manual">().notNull(),
+    /**
+     * "auto" when the auto-update switch started it, "reconnect" for a node
+     * that was offline during a run and got the update when it came back.
+     */
+    trigger: text("trigger").$type<UpdateRunTrigger>().notNull(),
     status: text("status").$type<UpdateRunStatus>().notNull().default("running"),
     startedBy: text("started_by").references(() => users.id, { onDelete: "set null" }),
     error: text("error"),
     createdAt: createdAt(),
     finishedAt: timestamp("finished_at"),
+    /**
+     * The verified release manifest and its minisign signature (base64) this
+     * run installs, so its steps (and a node catching up on reconnect) send
+     * this release even after a newer check. Null for Docker runs and for
+     * runs made before 0.2.0-rc.2. Added in 0002.
+     */
+    manifest: text("manifest"),
+    manifestSignature: text("manifest_signature"),
   },
   (t) => [index("update_runs_created_idx").on(t.createdAt)],
 );
 
 export type UpdateStepTarget = "panel" | "agent" | "docker";
 export type UpdateStepStatus = "pending" | "running" | "succeeded" | "failed" | "rolled_back" | "skipped";
+/** What became of an agent step skipped because its node was offline (modules/updates/catch-up.ts). */
+export type UpdateStepRetry = "waiting" | "retried" | "held" | "superseded" | "up_to_date";
 
 /**
  * One step of an update run. The id is sent to the agent as `update_id`
@@ -151,8 +166,14 @@ export const updateSteps = sqliteTable(
     error: text("error"),
     startedAt: timestamp("started_at"),
     finishedAt: timestamp("finished_at"),
+    /** Set on an agent step skipped because the node was offline; see UpdateStepRetry. Added in 0002. */
+    retry: text("retry").$type<UpdateStepRetry>(),
+    /** The run that updated the node when it reconnected (an update_runs id; runs are never deleted). */
+    retryRunId: text("retry_run_id"),
+    /** When retry last changed from "waiting". */
+    retryAt: timestamp("retry_at"),
   },
-  (t) => [index("update_steps_run_idx").on(t.runId, t.position)],
+  (t) => [index("update_steps_run_idx").on(t.runId, t.position), index("update_steps_node_retry_idx").on(t.nodeId, t.retry)],
 );
 
 export type CleanupRunTrigger = "schedule" | "disk" | "manual";

@@ -1,5 +1,7 @@
 // Fleet updates: one switch updates the panel first, then every node one at
-// a time. A node that was offline updates itself before it reconnects.
+// a time. A node that was offline during a run gets the update when it
+// reconnects (a run of its own, trigger "reconnect"). The release channel
+// picks which releases are offered: stable ones only, or pre-releases too.
 // Docker updates (nodes.updateDocker) are single-step runs in the same
 // history.
 
@@ -25,6 +27,22 @@ export const UpdateStepStatus = Type.Union([
   Type.Literal("skipped"),
 ]);
 
+/**
+ * What became of an agent step skipped because its node was offline:
+ * "waiting" until the node reconnects; "retried" in the run retryRunId when
+ * it did; "held" when it came back but had rolled this version back (not
+ * retried automatically; Update now installs it); "superseded" when a later
+ * run included the node; "upToDate" when it came back already running the
+ * version or a newer one.
+ */
+export const UpdateStepRetry = Type.Union([
+  Type.Literal("waiting"),
+  Type.Literal("retried"),
+  Type.Literal("held"),
+  Type.Literal("superseded"),
+  Type.Literal("upToDate"),
+]);
+
 export const UpdateStep = Type.Object({
   id: Id,
   /** Order inside the run; the panel step is 0. */
@@ -38,12 +56,21 @@ export const UpdateStep = Type.Object({
   error: Nullable(Type.String()),
   startedAt: Nullable(Timestamp),
   finishedAt: Nullable(Timestamp),
+  /** Set on an agent step skipped because the node was offline; null otherwise. */
+  retry: Nullable(UpdateStepRetry),
+  /** The run that updated the node when it reconnected (retry "retried"). */
+  retryRunId: Nullable(Id),
+  /** When retry last changed from "waiting". */
+  retryAt: Nullable(Timestamp),
 });
+
+export const ReleaseChannel = Type.Union([Type.Literal("stable"), Type.Literal("prerelease")]);
 
 export const UpdateRun = Type.Object({
   id: Id,
   targetVersion: Type.String(),
-  trigger: Type.Union([Type.Literal("auto"), Type.Literal("manual")]),
+  /** "reconnect": a node that was offline during a run, updated when it came back. */
+  trigger: Type.Union([Type.Literal("auto"), Type.Literal("manual"), Type.Literal("reconnect")]),
   status: UpdateRunStatus,
   startedBy: Nullable(Id),
   error: Nullable(Type.String()),
@@ -58,11 +85,23 @@ export const UpdateRun = Type.Object({
 export const UpdateStatus = Type.Object({
   /** The auto-update switch: panel and all nodes. */
   autoUpdate: Type.Boolean(),
+  /**
+   * Which releases the check looks at: "stable" (the latest release) or
+   * "prerelease" (the highest version of all releases, release candidates
+   * included). Never a downgrade either way.
+   */
+  channel: ReleaseChannel,
+  /** Only the owner changes the channel. */
+  canChangeChannel: Type.Boolean(),
   panel: Type.Object({
     currentVersion: Type.String(),
-    /** Newest release from the signed release manifest; null before the first check. */
+    /** Newest release on the channel, from its signed release manifest; null before the first check. */
     latestVersion: Nullable(Type.String()),
     updateAvailable: Type.Boolean(),
+    /** The release an update installs now: latestVersion when it is newer than the panel, else null. */
+    offeredVersion: Nullable(Type.String()),
+    /** latestVersion is a pre-release (a version with a "-" part, such as 0.2.0-rc.2). */
+    latestIsPrerelease: Type.Boolean(),
     changelogUrl: Nullable(Type.String()),
   }),
   lastCheckedAt: Nullable(Timestamp),
@@ -119,12 +158,25 @@ export const setAutoUpdate = defineOp({
   audit: true,
 });
 
+export const setChannel = defineOp({
+  id: "updates.setChannel",
+  kind: "mutation",
+  summary: "Choose the release channel",
+  description:
+    'Picks which releases updates offer: "stable" (the latest release) or "prerelease" (the highest version of all releases, release candidates included), then checks for updates on that channel. Only the owner may change it (FORBIDDEN otherwise). Never offers a downgrade: back on stable, the panel keeps the version it runs until a newer stable release is out.',
+  input: Type.Object({ channel: ReleaseChannel }),
+  output: UpdateStatus,
+  permission: permission.global("updates.manage"),
+  mcp: false,
+  audit: true,
+});
+
 export const updatePanel = defineOp({
   id: "updates.updatePanel",
   kind: "mutation",
   summary: "Update the panel",
   description:
-    "Starts an update run to the newest release: the panel first (a few seconds of an updating page, apps keep running), then, unless panelOnly is set, every node one at a time. Fails with CONFLICT while another run is active.",
+    "Starts an update run to the newest release on the release channel: the panel first (a few seconds of an updating page, apps keep running), then, unless panelOnly is set, every node one at a time. A node that is offline is skipped and gets the update when it reconnects. Fails with CONFLICT while another run is active.",
   input: Type.Object({ panelOnly: Type.Optional(Type.Boolean({ default: false })) }),
   output: UpdateRun,
   permission: permission.global("updates.manage"),
@@ -137,7 +189,7 @@ export const updateNode = defineOp({
   kind: "mutation",
   summary: "Update one node",
   description:
-    "Updates one node's agent to the panel's version. The agent swaps its binary, reconnects, and rolls back by itself if the new one fails.",
+    "Updates one node's agent to the newest release on the release channel. The agent swaps its binary, reconnects, and rolls back by itself if the new one fails. Fails with CONFLICT when the node already runs that release or a newer one.",
   input: Type.Object({ nodeId: Id }),
   output: UpdateRun,
   permission: permission.global("updates.manage"),
