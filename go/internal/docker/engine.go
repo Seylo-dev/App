@@ -1,9 +1,14 @@
 package docker
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
+	"net"
+	"net/netip"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -178,10 +183,32 @@ type ContainerSpec struct {
 	// devices): containers never get extra privileges through this API.
 }
 
-// PortPublish is one Docker-published TCP port on all host addresses.
+// PortPublish is one Docker-published TCP port.
 type PortPublish struct {
+	// HostIP is the host address Docker binds. The zero value means every
+	// address (IPv4 and IPv6), like `--publish <host>:<container>`;
+	// 127.0.0.1 means only the server itself can connect.
+	HostIP        netip.Addr
 	HostPort      uint32
 	ContainerPort uint32
+}
+
+// Host is the host side as address:port, "0.0.0.0:3000" for every
+// address.
+func (p PortPublish) Host() string {
+	ip := "0.0.0.0"
+	if p.HostIP.IsValid() {
+		ip = p.HostIP.String()
+	}
+	return net.JoinHostPort(ip, strconv.FormatUint(uint64(p.HostPort), 10))
+}
+
+// SortPublish orders ports by container port, host port, then host
+// address, so two lists compare with slices.Equal.
+func SortPublish(list []PortPublish) {
+	slices.SortFunc(list, func(a, b PortPublish) int {
+		return cmp.Or(cmp.Compare(a.ContainerPort, b.ContainerPort), cmp.Compare(a.HostPort, b.HostPort), a.HostIP.Compare(b.HostIP))
+	})
 }
 
 // VolumeMount mounts a named volume.
@@ -223,6 +250,10 @@ type ContainerDetails struct {
 	Tty          bool
 	// Networks maps network name to the container's IPv4 address there.
 	Networks map[string]string
+	// Publish is what the container was created to publish on the host
+	// (its TCP port bindings), whatever its state. Sorted by container
+	// port, host port, then host address.
+	Publish []PortPublish
 }
 
 // Image is one local image.

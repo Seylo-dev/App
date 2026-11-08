@@ -332,6 +332,7 @@ func (w *worker) pass(ctx context.Context) (gone bool) {
 		return false
 	}
 	w.healNetworks(ctx, list)
+	w.r.notePublished(ctx, spec, list)
 
 	var target, others []docker.Container
 	for _, c := range list {

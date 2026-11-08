@@ -249,11 +249,13 @@ func (f *Fake) InspectContainer(ctx context.Context, id string) (docker.Containe
 	if c == nil {
 		return docker.ContainerDetails{}, fmt.Errorf("%w: container %s", docker.ErrNotFound, id)
 	}
+	publish := slices.Clone(c.Spec.Publish)
+	docker.SortPublish(publish)
 	return docker.ContainerDetails{
 		ID: c.ID, Name: c.Spec.Name, Image: c.Spec.Image, ImageID: "sha256:" + c.Spec.Image,
 		Labels: maps.Clone(c.Spec.Labels), State: c.state(), Running: c.Running,
 		ExitCode: c.ExitCode, OOMKilled: c.OOM, StartedAt: c.Started, FinishedAt: c.Finished,
-		RestartCount: c.Restarts, Tty: c.Spec.Tty, Networks: maps.Clone(c.Networks),
+		RestartCount: c.Restarts, Tty: c.Spec.Tty, Networks: maps.Clone(c.Networks), Publish: publish,
 	}, nil
 }
 

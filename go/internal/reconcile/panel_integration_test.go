@@ -4,9 +4,13 @@ package reconcile
 
 import (
 	"context"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -228,4 +232,153 @@ func countFailed(e *itEnv, id string, gen uint64) int {
 		}
 	}
 	return n
+}
+
+// TestITPanelBindAddressChangeRolls: real Docker. Closing the panel's port
+// (bind_address 127.0.0.1) recreates the panel with the port published on
+// 127.0.0.1 only, at the same generation and on a new one, and an empty
+// bind_address publishes it on every address again. The server itself
+// always reaches it; another address of the host only while it is open.
+// Needs the reserved panel id (only the panel is published by Docker), so
+// it skips when a panel container already runs here.
+func TestITPanelBindAddressChangeRolls(t *testing.T) {
+	e := newIT(t)
+	ctx := context.Background()
+	id := docker.PanelServiceID
+	for _, gen := range []uint64{1, 2, 3} {
+		for _, n := range []string{docker.ContainerName(id, gen, 0), docker.ContainerName(id, gen, 0) + prevSuffix} {
+			if _, err := e.eng.InspectContainer(ctx, n); err == nil {
+				t.Skipf("a panel container %s already exists on this Docker", n)
+			}
+		}
+	}
+	project := e.prefix + "pp"
+	network := docker.ProjectNetwork(project)
+	if out, err := exec.Command("docker", "network", "create", "--label", docker.LabelManaged+"=true",
+		"--label", docker.LabelProject+"="+project, "--label", "seylo.it="+e.prefix, network).CombinedOutput(); err != nil {
+		t.Fatalf("network: %v %s", err, out)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := uint32(ln.Addr().(*net.TCPAddr).Port)
+	ln.Close()
+	other := hostAddress()
+
+	open := &agentv1.ServiceSpec{
+		Id: id, ProjectId: project, Name: "panel", Kind: agentv1.ServiceKind_SERVICE_KIND_APP,
+		Generation: 1, Protected: true,
+		Image:     &agentv1.ImageRef{Reference: itImage},
+		Container: &agentv1.ContainerConfig{Command: []string{"httpd", "-f", "-p", "3000", "-h", "/"}, StopGracePeriod: durationpb.New(time.Second)},
+		Ports: []*agentv1.PortSpec{{ContainerPort: 3000, Protocol: agentv1.PortProtocol_PORT_PROTOCOL_TCP,
+			Public: &agentv1.PublicPort{HostPort: port, Mode: agentv1.PublicPortMode_PUBLIC_PORT_MODE_FORWARD}}},
+		NetworkAliases: []string{"panel"},
+		CrashPolicy:    &agentv1.CrashPolicy{Restart: true},
+		Deploy:         &agentv1.DeployStrategy{Mode: agentv1.DeployMode_DEPLOY_MODE_RECREATE, HealthTimeout: durationpb.New(30 * time.Second)},
+	}
+	everyAddress := []docker.PortPublish{{HostPort: port, ContainerPort: 3000}}
+	loopbackOnly := []docker.PortPublish{{HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: port, ContainerPort: 3000}}
+	// waitBindings waits for the one running panel container of gen, other
+	// than not, whose Docker bindings are want, and returns its id.
+	waitBindings := func(gen uint64, want []docker.PortPublish, not string) string {
+		t.Helper()
+		name := docker.ContainerName(id, gen, 0)
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			if list := e.containers(id); len(list) == 1 && list[0].Name == name && list[0].ID != not {
+				if d, err := e.eng.InspectContainer(ctx, list[0].ID); err == nil && d.Running && slices.Equal(d.Publish, want) {
+					return d.ID
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no running %s published as %v: %+v", name, want, e.containers(id))
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	reach := func(host string, want bool) {
+		t.Helper()
+		addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err == nil {
+				c.Close()
+			}
+			if (err == nil) == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("connect %s = %v, want reachable %v", addr, err, want)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	e.apply(1, open)
+	if p := e.result(id, 1); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 1: %v", p)
+	}
+	first := waitBindings(1, everyAddress, "")
+	reach("127.0.0.1", true)
+	if other != "" {
+		reach(other, true)
+	}
+
+	// Closed at the same generation: recreated, loopback only.
+	closed := cloneOf(open)
+	closed.Ports[0].Public.BindAddress = "127.0.0.1"
+	e.apply(2, closed)
+	waitBindings(1, loopbackOnly, first)
+	e.settle()
+	if out := dockerOut(t, "inspect", "--format", "{{json .HostConfig.PortBindings}}", docker.ContainerName(id, 1, 0)); !strings.Contains(out, `"HostIp":"127.0.0.1"`) {
+		t.Fatalf("docker bindings = %s", out)
+	}
+	reach("127.0.0.1", true)
+	if other != "" {
+		reach(other, false)
+	}
+
+	// Opened again with a new generation (how the panel sends it).
+	reopened := cloneOf(open)
+	reopened.Generation = 2
+	e.apply(3, reopened)
+	if p := e.result(id, 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 2: %v", p)
+	}
+	waitBindings(2, everyAddress, "")
+	e.settle()
+	reach("127.0.0.1", true)
+	if other != "" {
+		reach(other, true)
+	}
+
+	// And closed again on a bump.
+	closed3 := cloneOf(closed)
+	closed3.Generation = 3
+	e.apply(4, closed3)
+	if p := e.result(id, 3); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 3: %v", p)
+	}
+	waitBindings(3, loopbackOnly, "")
+	reach("127.0.0.1", true)
+	if other != "" {
+		reach(other, false)
+	}
+}
+
+// hostAddress is an IPv4 address of this machine other than loopback, or
+// "" when it has none (then the checks from another address are skipped).
+func hostAddress() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() && !n.IP.IsLinkLocalUnicast() {
+			return n.IP.String()
+		}
+	}
+	return ""
 }
