@@ -300,30 +300,39 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 	}
 	ip := outboundIP()
 	fmt.Fprintf(d.out, "\nThe panel is running. Open this link within an hour to create the owner account:\n\n  %s/setup?t=%s\n\n", panelBase(ip, opts.Port), setupToken)
-	fmt.Fprint(d.out, plainHTTPWarning(panelBase(ip, opts.Port)))
 	if ip == "" {
 		fmt.Fprintf(d.out, "Replace %s with this server's public address (an IPv6 address goes in brackets, like [2001:db8::1]).\n", serverIPPlaceholder)
 	} else {
 		fmt.Fprintf(d.out, "If %s is not this server's public address, use the public one with the same path.\n", ip)
 	}
+	fmt.Fprint(d.out, plainHTTPTip(panelBase(ip, opts.Port), dimOn(d.out)))
 	return nil
 }
 
-// plainHTTPWarning goes under a plain-HTTP setup link: until the panel has a
-// domain, the setup token, the owner's password and the session cross the
-// network unencrypted. Empty for an https:// link.
-func plainHTTPWarning(base string) string {
+// plainHTTPTip is the last line under a plain-HTTP setup link: one calm line
+// on how the panel gets HTTPS, dim on a terminal like the installer's notes.
+// Empty for an https:// link.
+func plainHTTPTip(base string, dim bool) string {
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme != "http" {
 		return ""
 	}
-	port := u.Port()
-	if port == "" {
-		port = "80"
+	const tip = "Tip: the panel uses plain HTTP until it has a domain. Add one in the setup wizard to switch to HTTPS."
+	if dim {
+		return "\033[2m" + tip + "\033[0m\n"
 	}
-	return fmt.Sprintf("This link is plain HTTP: the setup token, your password and your session cross the network unencrypted.\n"+
-		"Open it only from a network you trust, or through an SSH tunnel (ssh -L %s:localhost:%s <user>@<server>,\n"+
-		"then the same path on http://localhost:%s). Set a panel domain in the setup wizard to switch to HTTPS.\n\n", port, port, port)
+	return tip + "\n"
+}
+
+// dimOn reports whether w takes dim text: a terminal, TERM not "dumb" and
+// NO_COLOR unset or empty (https://no-color.org), the installer's rule.
+func dimOn(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && isTerminal(f) && colorEnv(os.Getenv)
+}
+
+func colorEnv(getenv func(string) string) bool {
+	return getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
 }
 
 // serverIPPlaceholder stands in a printed link when no address is known.
@@ -452,10 +461,13 @@ func panelSetupLink(ctx context.Context, d *deps) error {
 			base = strings.TrimSuffix(u.String(), "/")
 		}
 	}
-	_, err = fmt.Fprintf(d.out, "Open this link within an hour to create the owner account:\n\n  %s/setup?t=%s\n\n%s"+
-		"If an owner already exists, the panel ignores it: sign in instead.\n", base, token, plainHTTPWarning(base))
+	_, err = fmt.Fprintf(d.out, "Open this link within an hour to create the owner account:\n\n  %s/setup?t=%s\n\n"+
+		"If an owner already exists, the panel ignores it: sign in instead.\n", base, token)
 	if err == nil && strings.Contains(base, serverIPPlaceholder) {
 		_, err = fmt.Fprintf(d.out, "Replace %s with this server's public address (an IPv6 address goes in brackets).\n", serverIPPlaceholder)
+	}
+	if err == nil {
+		_, err = fmt.Fprint(d.out, plainHTTPTip(base, dimOn(d.out)))
 	}
 	return err
 }

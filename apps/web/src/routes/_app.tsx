@@ -6,8 +6,8 @@
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { createFileRoute, Outlet, redirect, useChildMatches, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { PlainHttpWarning } from "../components/auth/plain-http-warning";
 import { ErrorPage, NotFound } from "../components/not-found";
+import { PlainHttpNotice } from "../components/shell/plain-http-notice";
 import { ShellProvider } from "../components/shell/shell-context";
 import { Sidebar } from "../components/shell/sidebar";
 import { live, useLiveTopic } from "../lib/live";
@@ -43,7 +43,7 @@ function AppLayout() {
       <div className="flex min-h-dvh flex-col md:flex-row">
         <Sidebar />
         <main className="box-border flex min-w-0 flex-1 flex-col px-4 pt-[26px] pb-10 md:px-[30px]">
-          <PlainHttpWarning className="mb-5" />
+          <PlainHttpNotice className="mb-5" />
           <EnterOnChange motionKey={page} className="flex min-w-0 flex-1 flex-col gap-5">
             <Outlet />
           </EnterOnChange>

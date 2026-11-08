@@ -20,6 +20,7 @@ import nodes from "./nodes";
 import palette from "./palette";
 import pickers from "./pickers";
 import placeholder from "./placeholder";
+import plainHttp from "./plainHttp";
 import project from "./project";
 import roles from "./roles";
 import service from "./service";
@@ -57,4 +58,4 @@ import sidebar from "./sidebar";
 import templates from "./templates";
 
 /** The English catalog: one section per file in this folder, keyed by file name. */
-export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, gitHosts, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCopy, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsSecurity, settingsTailscale, setup, sidebar, templates } as const;
+export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, gitHosts, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, plainHttp, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCopy, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsSecurity, settingsTailscale, setup, sidebar, templates } as const;

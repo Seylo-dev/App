@@ -120,6 +120,9 @@ const slug = /^BRAND_SLUG='([^']+)'$/m.exec(readFileSync(new URL("../../installe
  */
 export const sessionKey = { storage: `${slug}.sessionKey`, header: `x-${slug}-session-key` };
 
+/** Where the app shell remembers a dismissed plain-HTTP notice (apps/web/src/lib/plain-http.ts). */
+export const plainHttpNoticeStorage = `${slug}.plainHttpNoticeDismissed`;
+
 /** Something that posts like page.request: api(page) or a bare request context. */
 interface Poster {
   post(path: string, options: { data: unknown }): Promise<APIResponse>;
