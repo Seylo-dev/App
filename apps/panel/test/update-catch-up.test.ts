@@ -6,11 +6,11 @@
 // with UpdateAgent marked automatic so the agent's own waits apply. The
 // outcome is on the skipped step (retry) and in the run made for it.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { type OpOutput, updates } from "@seylo/ops";
 import { ReportEventRequestSchema, ReportEventResponseSchema, StatusCode, UpdateTarget } from "@seylo/proto";
-import { eq } from "drizzle-orm";
-import { nodes, updateRuns, updateSteps } from "../src/db/schema";
+import { and, eq } from "drizzle-orm";
+import { jobs, nodes, updateRuns, updateSteps } from "../src/db/schema";
 import { releaseSource } from "../src/modules/updates/manifest";
 import { wasRolledBack } from "../src/modules/updates/rollbacks";
 import { checkJob } from "../src/modules/updates/runs";
@@ -206,7 +206,7 @@ test("a node that rolled the version back is held, not retried; one already ther
   expect((await back.waitFor("UpdateAgent"))[0]).toMatchObject({ targetVersion: "0.9.0", automatic: false });
 });
 
-test("the agent's own wait ends the catch-up step as skipped with its message; the run does not fail", async () => {
+test("an agent that rolled the release back ends the catch-up step as skipped and held; the run does not fail", async () => {
   serveReleases([{ tag: "v0.9.0" }]);
   const node = await join("0.8.0");
   await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
@@ -218,9 +218,76 @@ test("the agent's own wait ends the catch-up step as skipped with its message; t
   });
   await drain();
   expect((await back.waitFor("UpdateAgent"))[0]?.automatic).toBe(true);
-  const retry = stepsOf(node.nodeId)[1];
+  const [original, retry] = stepsOf(node.nodeId);
+  expect(original?.step).toMatchObject({ retry: "retried", retryRunId: retry?.run.id });
   expect(retry?.run).toMatchObject({ trigger: "reconnect", status: "succeeded" });
-  expect(retry?.step).toMatchObject({ status: "skipped", error: message });
+  // Not retried automatically, like the panel's own rollback record; Update now installs it.
+  expect(retry?.step).toMatchObject({ status: "skipped", error: message, retry: "held" });
+  await goOffline(back);
+  const again = await reconnect(node, "0.8.0");
+  await drain();
+  expect(again.requests("UpdateAgent")).toHaveLength(0);
+  expect(stepsOf(node.nodeId)).toHaveLength(2);
+});
+
+test("an agent whose automatic update failed within the hour gets the catch-up again when its wait is over", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await join("0.8.0");
+  await ok(callOp(panel, updates.check, {}, { cookie: owner.cookie }));
+  await runWhileOffline(node);
+  const back = await reconnect(node, "0.8.0");
+  const until = new Date(Date.now() + 40 * 60_000);
+  const message = "updating to 0.9.0 failed less than an hour ago; automatic updates to it wait until then.";
+  const shown = "Updating to 0.9.0 failed less than an hour ago; automatic updates to it wait until then.";
+  back.handle("UpdateAgent", () => {
+    throw new FakeStatus(StatusCode.FAILED_PRECONDITION, message, { backoff: "failed", retryAfter: until.toISOString() });
+  });
+  await drain();
+  expect(back.requests("UpdateAgent")).toHaveLength(1);
+  const first = stepsOf(node.nodeId)[1];
+  expect(first?.run).toMatchObject({ trigger: "reconnect", status: "succeeded" });
+  // Before: the catch-up ended here for good. Now the step waits for the end of the agent's wait.
+  expect(first?.step).toMatchObject({ status: "skipped", error: shown, retry: "waiting" });
+  const retryAt = first?.step.retryAt?.getTime() ?? 0;
+  expect(retryAt).toBe(until.getTime() + 30_000);
+  const queued = panel.deps.db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.type, "updates.catchUp"), eq(jobs.status, "queued")))
+    .all();
+  expect(queued.map((j) => j.runAt.getTime())).toEqual([retryAt]);
+
+  // Reconnecting during the wait sends nothing and queues nothing more.
+  const catchUpJobs = () => panel.deps.db.select().from(jobs).where(eq(jobs.type, "updates.catchUp")).all().length;
+  const jobsBefore = catchUpJobs();
+  await goOffline(back);
+  const during = await reconnect(node, "0.8.0");
+  await drain();
+  expect(during.requests("UpdateAgent")).toHaveLength(0);
+  expect(catchUpJobs()).toBe(jobsBefore);
+
+  // The wait is over: the job queued for then sends the update again, in a run of its own.
+  try {
+    setSystemTime(new Date(retryAt + 1000));
+    await drain();
+    expect((await during.waitFor("UpdateAgent"))[0]).toMatchObject({ targetVersion: "0.9.0", automatic: true });
+  } finally {
+    setSystemTime();
+  }
+  const steps = stepsOf(node.nodeId);
+  expect(steps).toHaveLength(3);
+  expect(steps[1]?.step).toMatchObject({ retry: "retried", retryRunId: steps[2]?.run.id });
+  expect(steps[2]?.run).toMatchObject({ trigger: "reconnect", status: "running" });
+});
+
+test("a connect with nothing to catch up writes no job", async () => {
+  serveReleases([{ tag: "v0.9.0" }]);
+  const node = await join("0.8.0");
+  await goOffline(node);
+  await reconnect(node, "0.8.0");
+  await drain();
+  // Before: one succeeded "updates.catchUp" job per connect, kept 7 days.
+  expect(panel.deps.db.select().from(jobs).where(eq(jobs.type, "updates.catchUp")).all()).toHaveLength(0);
 });
 
 test("while another run is active the catch-up waits for it", async () => {

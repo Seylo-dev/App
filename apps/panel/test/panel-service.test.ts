@@ -163,3 +163,48 @@ test("after a panel update the new image is recorded at the next generation, onc
   const spec = compile(panel.deps.db.select().from(nodes).get()?.id ?? "");
   expect(spec).toMatchObject({ generation: 2n, image: { reference: "ghcr.io/seylo-dev/seylo:0.2.0", digest: newDigest } });
 });
+
+test("the image comes from the run's own manifest: a check or channel switch during the panel step changes nothing", () => {
+  const nodeId = addPanelNode();
+  ensurePanelService(panel.deps);
+  // The owner, on the pre-release channel, started the update to 0.2.0-rc.2:
+  // the run keeps its manifest, its panel step is running.
+  const rc = { version: "0.2.0-rc.2", panel: { image: "ghcr.io/seylo-dev/seylo:0.2.0-rc.2", digest: newDigest } };
+  const run = panel.deps.db
+    .insert(updateRuns)
+    .values({
+      targetVersion: "0.2.0-rc.2",
+      trigger: "manual",
+      manifest: Buffer.from(JSON.stringify(rc)).toString("base64"),
+      manifestSignature: "c2ln",
+    })
+    .returning()
+    .get();
+  panel.deps.db
+    .insert(updateSteps)
+    .values({ runId: run.id, position: 0, target: "panel", fromVersion: "0.1.0", toVersion: "0.2.0-rc.2", status: "running" })
+    .run();
+  // While the image pulled the channel went back to stable (updates.setChannel
+  // checks at once), or "Check now" ran: the stored check names 0.1.0 again.
+  const stable = { version: "0.1.0", panel: { image: "ghcr.io/seylo-dev/seylo:0.1.0", digest } };
+  setSetting(panel.deps.db, "updateCheck", {
+    checkedAt: new Date().toISOString(),
+    latestVersion: "0.1.0",
+    changelogUrl: null,
+    error: null,
+    channel: "stable",
+    manifestBase64: Buffer.from(JSON.stringify(stable)).toString("base64"),
+    signatureBase64: "c2ln",
+  });
+
+  // The swapped-in rc.2 panel boots.
+  panel.deps.config.version = "0.2.0-rc.2";
+  panel.deps.config.image = null;
+  expect(ensurePanelService(panel.deps)).toBe("updated");
+  const rows = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, panelServiceId)).all();
+  expect(rows.map((r) => [r.generation, r.status, r.imageDigest])).toEqual([
+    [1, "superseded", digest],
+    [2, "live", newDigest],
+  ]);
+  expect(compile(nodeId)).toMatchObject({ generation: 2n, image: { reference: "ghcr.io/seylo-dev/seylo:0.2.0-rc.2", digest: newDigest } });
+});

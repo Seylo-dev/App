@@ -267,7 +267,11 @@ const stepTone = (step: Step) =>
 /** What a step's chip says on hover: its outcome, the error, and what became of an offline node. */
 function stepDetail(step: Step): string {
   const lines = [t(`settings.updates.stepStatus.${step.status}`)];
-  if (step.retry) {
+  if (step.retry === "waiting" && step.retryAt) {
+    // A catch-up the agent asked to wait (its error says why): the panel tries again then.
+    if (step.error) lines.push(step.error);
+    lines.push(t("settings.updates.retry.waitingUntil", { version: step.toVersion, when: formatDateTime(step.retryAt) }));
+  } else if (step.retry) {
     const when = step.retryAt ? formatDateTime(step.retryAt) : "";
     lines.push(t("settings.updates.wasOffline"), t(`settings.updates.retry.${step.retry}`, { version: step.toVersion, when }));
   } else if (step.error) {

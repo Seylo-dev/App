@@ -126,11 +126,6 @@ interface GithubRelease {
 
 const apiHeaders = () => ({ accept: "application/vnd.github+json", "user-agent": `${slug}-panel` });
 
-/** Fetches the latest release's manifest and checks its signature. Throws ReleaseError with a message safe to show. */
-export async function fetchLatestRelease(): Promise<FetchedRelease> {
-  return fetchRelease("stable");
-}
-
 /**
  * Fetches the newest release on `channel` and checks its manifest's
  * signature: "stable" reads releases/latest, "prerelease" lists the

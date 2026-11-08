@@ -29,11 +29,12 @@ export const UpdateStepStatus = Type.Union([
 
 /**
  * What became of an agent step skipped because its node was offline:
- * "waiting" until the node reconnects; "retried" in the run retryRunId when
- * it did; "held" when it came back but had rolled this version back (not
- * retried automatically; Update now installs it); "superseded" when a later
- * run included the node; "upToDate" when it came back already running the
- * version or a newer one.
+ * "waiting" until the node reconnects (or, with retryAt, until the agent's
+ * own wait is over); "retried" when it reconnected and got the run
+ * retryRunId, whose step says how that went; "held" when it came back but
+ * had rolled this version back (not retried automatically; Update now
+ * installs it); "superseded" when a later run included the node; "upToDate"
+ * when it came back already running the version or a newer one.
  */
 export const UpdateStepRetry = Type.Union([
   Type.Literal("waiting"),
@@ -58,9 +59,13 @@ export const UpdateStep = Type.Object({
   finishedAt: Nullable(Timestamp),
   /** Set on an agent step skipped because the node was offline; null otherwise. */
   retry: Nullable(UpdateStepRetry),
-  /** The run that updated the node when it reconnected (retry "retried"). */
+  /** The run made for the node when it reconnected (retry "retried"). */
   retryRunId: Nullable(Id),
-  /** When retry last changed from "waiting". */
+  /**
+   * When retry last changed from "waiting". On a waiting step: when the
+   * panel tries again because the agent asked to wait (null: when the node
+   * reconnects).
+   */
   retryAt: Nullable(Timestamp),
 });
 
