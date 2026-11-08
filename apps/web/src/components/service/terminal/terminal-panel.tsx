@@ -23,6 +23,8 @@ export function TerminalPanel({
   keyboard = false,
   fileName,
   minHeight = 520,
+  prefill,
+  onPrefilled,
 }: {
   label: string;
   /** Console | Shell links, or a title. */
@@ -36,6 +38,9 @@ export function TerminalPanel({
   keyboard?: boolean;
   fileName: string;
   minHeight?: number;
+  /** Typed once the shell says it is ready, without Enter: the person reads it and runs it (node-shell.tsx). */
+  prefill?: string;
+  onPrefilled?: () => void;
 }) {
   const session = useTerminalSession(source, describe);
   const view = useRef<XtermHandle | null>(null);
@@ -43,7 +48,17 @@ export function TerminalPanel({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [line, setLine] = useState("");
-  const { connect } = session;
+  const { connect, input } = session;
+
+  const prefilled = useRef(false);
+  const shellReady = session.state.status === "ready" && session.state.info !== null;
+  useEffect(() => {
+    if (!prefill || prefilled.current || !shellReady) return;
+    prefilled.current = true;
+    // Never an Enter: line breaks would run what comes before them.
+    input(prefill.replace(/[\r\n]/g, ""));
+    onPrefilled?.();
+  }, [prefill, shellReady, input, onPrefilled]);
 
   // Connect once the terminal exists (its size goes into the ticket request).
   const [mounted, setMounted] = useState(false);

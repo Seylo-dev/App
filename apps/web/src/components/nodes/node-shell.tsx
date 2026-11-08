@@ -3,17 +3,24 @@
 // allows it for the node (a recent sign-in, asked for by the re-auth
 // dialog); then owners and admins open one, each after a recent sign-in,
 // at most two at a time, closed after 15 minutes without input or output.
+//
+// ?prefill=<name> (added in 0.2.1, Settings > Tailscale's Install button)
+// opens the shell and types one command from a fixed list once the shell is
+// ready, never with Enter: the person reads it and runs it. Unknown names
+// are dropped by the route's validateSearch.
 
-import { hostShell } from "@seylo/ops";
+import { hostShell, tailscale } from "@seylo/ops";
 import { useOp, useOpClient, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
+import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconLock, IconTerminal2, IconX } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { formatAgo } from "../../lib/format";
@@ -22,8 +29,30 @@ import type { NodeDetail } from "../../lib/types";
 import { QueryError } from "../query-error";
 import { TerminalPanel } from "../service/terminal/terminal-panel";
 
+/** The commands ?prefill= may type, by name. Nothing else is ever typed for the person. */
+export const shellPrefills = {
+  "tailscale-install": tailscale.tailscaleInstallCommand,
+} as const;
+export type ShellPrefill = keyof typeof shellPrefills;
+
+export function isShellPrefill(value: unknown): value is ShellPrefill {
+  return typeof value === "string" && Object.hasOwn(shellPrefills, value);
+}
+
+/** The prefill of the nodes route, and a way to drop it from the URL once it is typed. */
+function usePrefill(): { command: string | null; done: () => void } {
+  const search = useSearch({ strict: false }) as { prefill?: unknown };
+  const navigate = useNavigate();
+  const name = isShellPrefill(search.prefill) ? search.prefill : null;
+  const done = useCallback(() => {
+    void navigate({ to: "/nodes", search: (prev) => ({ ...prev, prefill: undefined }), replace: true });
+  }, [navigate]);
+  return { command: name ? shellPrefills[name] : null, done };
+}
+
 export function NodeShell({ node }: { node: NodeDetail }) {
   const status = useOp(hostShell.status, { nodeId: node.id });
+  const prefill = usePrefill();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const setEnabled = useOpMutation(hostShell.setEnabled, {
@@ -34,10 +63,35 @@ export function NodeShell({ node }: { node: NodeDetail }) {
     },
   });
 
+  // The command from the URL, typed into the first shell opened here and only that one.
+  const [command, setCommand] = useState<string | null>(null);
+  const [typed, setTyped] = useState(false);
+  useEffect(() => {
+    if (prefill.command) setCommand(prefill.command);
+  }, [prefill.command]);
+  const { done } = prefill;
+  const onPrefilled = useCallback(() => {
+    setTyped(true);
+    done();
+  }, [done]);
+  // A command to type opens the shell by itself once it can be opened.
+  const canOpenNow = status.data?.enabled === true && status.data.available && status.data.canOpen;
+  useEffect(() => {
+    if (command && !typed && canOpenNow) setOpen(true);
+  }, [command, typed, canOpenNow]);
+
   if (status.isError) return <QueryError error={status.error} onRetry={() => void status.refetch()} />;
   if (status.isPending) return <ShellSkeleton />;
   const s = status.data;
   const minutes = Math.round(s.idleTimeoutSeconds / 60);
+  const prefillNote = command && (
+    <Alert tone="info" title={t("nodeShell.prefillTitle")}>
+      <span className="flex flex-col items-start gap-1.5">
+        {typed ? t("nodeShell.prefillTyped") : s.enabled && s.available ? t("nodeShell.prefillHint") : t("nodeShell.prefillOff")}
+        <CopyCode code={command} aria-label={t("nodeShell.prefillCommand")} />
+      </span>
+    </Alert>
+  );
 
   if (!s.enabled) {
     return (
@@ -47,6 +101,7 @@ export function NodeShell({ node }: { node: NodeDetail }) {
           <h3 className="m-0 text-sm font-semibold">{t("nodeShell.offTitle")}</h3>
         </div>
         <p className="m-0 text-[12.5px] leading-relaxed text-muted-foreground">{t("nodeShell.offHint", { minutes })}</p>
+        {prefillNote}
         {s.canEnable ? (
           <Button size="sm" variant="primary" disabled={setEnabled.isPending} onClick={() => setConfirm(true)}>
             {t("nodeShell.enable")}
@@ -106,10 +161,17 @@ export function NodeShell({ node }: { node: NodeDetail }) {
           <Alert tone="danger">{errorMessage(setEnabled.error, t("common.unknownError"))}</Alert>
         )}
       </section>
+      {prefillNote}
       {!s.available ? (
         <Alert tone="neutral">{t("nodeShell.unavailable")}</Alert>
       ) : open ? (
-        <HostTerminal node={node} minutes={minutes} onClose={() => setOpen(false)} />
+        <HostTerminal
+          node={node}
+          minutes={minutes}
+          onClose={() => setOpen(false)}
+          prefill={typed ? undefined : (command ?? undefined)}
+          onPrefilled={onPrefilled}
+        />
       ) : (
         s.canOpen && (
           <Button variant="primary" className="self-start" onClick={() => setOpen(true)}>
@@ -122,7 +184,19 @@ export function NodeShell({ node }: { node: NodeDetail }) {
   );
 }
 
-function HostTerminal({ node, minutes, onClose }: { node: NodeDetail; minutes: number; onClose: () => void }) {
+function HostTerminal({
+  node,
+  minutes,
+  onClose,
+  prefill,
+  onPrefilled,
+}: {
+  node: NodeDetail;
+  minutes: number;
+  onClose: () => void;
+  prefill?: string;
+  onPrefilled?: () => void;
+}) {
   const client = useOpClient();
   const source = useMemo(
     () => ({ open: (size: { columns: number; rows: number }) => client.call(hostShell.open, { nodeId: node.id, ...size }) }),
@@ -157,6 +231,8 @@ function HostTerminal({ node, minutes, onClose }: { node: NodeDetail; minutes: n
       keyboard
       fileName={`${node.name}-host-shell.log`}
       minHeight={440}
+      prefill={prefill}
+      onPrefilled={onPrefilled}
     />
   );
 }

@@ -1,6 +1,14 @@
 // Composes the panel from its parts. main.ts calls it with real files;
 // tests call it with in-memory databases. Nothing here reads the
 // environment or the clock directly.
+//
+// Three apps share one set of deps: `app` (the panel port), `agentApp` (the
+// agents' TLS port) and `tailnetApp` (the unix socket Tailscale Serve
+// proxies to, http/tailnet-host.ts). The tailnet app gets a copy of the
+// deps that trusts forwarded headers from every peer and says it is the
+// tailnet listener; it has no agent endpoint and no domain redirect. Module
+// state is keyed by deps.db and deps.agents, which the copy shares, so a
+// second module.http(deps) splits nothing.
 
 import { allOps } from "@seylo/ops";
 import { opRoutes } from "@seylo/ops/elysia";
@@ -19,6 +27,7 @@ import { securityHeaders, servedOverHttps } from "./http/https";
 import { httpOpHandler } from "./http/ops-http";
 import { createProxyTrust, type ProxyTrust } from "./http/proxy-trust";
 import { webApp } from "./http/static";
+import { tailnetHostGuard } from "./http/tailnet-host";
 import { createJobRunner, type JobRunner } from "./jobs/queue";
 import { liveEndpoint } from "./live/endpoint";
 import { createLiveHub } from "./live/hub";
@@ -28,6 +37,7 @@ import { modules } from "./modules/index.gen";
 import type { PanelModule } from "./modules/module";
 import { createNotifier } from "./modules/notifications/email";
 import { appContentSecurityPolicy, injectBoot, readBoot } from "./modules/settings/boot";
+import { tailnetIdentity } from "./modules/tailscale/facts";
 import { collectHandlers } from "./ops/handlers";
 import { createOpExecutor, type ExecuteOp } from "./ops/pipeline";
 import { createRateLimiter, type RateLimiter } from "./ops/rate-limit";
@@ -53,6 +63,8 @@ export interface Panel {
   app: ReturnType<typeof buildApp>;
   /** Only the agent endpoint, for the agents' TLS listener (main.ts listens on it with the certificate). */
   agentApp: AnyElysia;
+  /** The panel for Tailscale Serve on the unix socket (main.ts listens on it): host pinned, forwarded headers trusted. */
+  tailnetApp: AnyElysia;
   deps: Deps;
   runner: JobRunner;
   execute: ExecuteOp;
@@ -103,8 +115,18 @@ export function createPanel(options: PanelOptions): Panel {
   const app = buildApp(deps, execute, edgeKey, moduleRoutes(deps, panelModules));
   // Agents' node health check reads /api/health at the URL they joined (the pinned TLS port).
   const agentApp = new Elysia({ name: "agent-tls" }).use(health(deps)).use(agentRoutes(deps, edgeKey));
-  return { app, agentApp, deps, runner, execute };
+  const tailnetDeps: Deps = { ...deps, proxy: trustEveryPeer, listener: "tailnet" };
+  const tailnetApp = buildApp(tailnetDeps, execute, edgeKey, moduleRoutes(tailnetDeps, panelModules), { tailnet: true });
+  return { app, agentApp, tailnetApp, deps, runner, execute };
 }
+
+/** Only tailscaled (root) and the panel reach the socket, and Serve sets the forwarded headers itself. */
+const trustEveryPeer: ProxyTrust = {
+  trusts: () => true,
+  refresh: async () => {},
+  start() {},
+  stop() {},
+};
 
 /** The extra HTTP endpoints of every module (PanelModule.http), as one plugin. */
 function moduleRoutes(deps: Deps, panelModules: readonly PanelModule[]): AnyElysia {
@@ -115,7 +137,9 @@ function moduleRoutes(deps: Deps, panelModules: readonly PanelModule[]): AnyElys
   return routes;
 }
 
-function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, modules: AnyElysia) {
+function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, modules: AnyElysia, options: { tailnet?: boolean } = {}) {
+  // On the tailnet socket the host is pinned before anything else, and Host is set to it for the rest.
+  const pinHost = options.tailnet ? tailnetHostGuard(() => tailnetIdentity(deps)) : null;
   return (
     new Elysia()
       // An error no route turned into a response (a broken database, a bug)
@@ -128,6 +152,7 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
         set.status = 500;
         return Response.json({ error: { code: "INTERNAL", message: "Something went wrong on the panel. Try again." } }, { status: 500 });
       })
+      .onRequest(({ request }) => pinHost?.({ request }))
       .onRequest(({ request, set, server }) => {
         // A Response's own headers win, so pages with stricter rules keep them.
         const https = servedOverHttps(deps, request, server?.requestIP(request)?.address ?? null);
@@ -137,12 +162,14 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
       .use(opRoutes(allOps, httpOpHandler(execute, deps)))
       .use(modules)
       .use(liveEndpoint(deps))
-      .use(agentRoutes(deps, edgeTicketKey))
+      // Agents connect on the panel port and the TLS port, never through Serve.
+      .use((options.tailnet ? new Elysia({ name: "no-agents" }) : agentRoutes(deps, edgeTicketKey)) as AnyElysia)
       .use(
         webApp(deps.config.webDist, {
           renderIndex: (html) => injectBoot(html, readBoot(deps.db)),
           contentSecurityPolicy: appContentSecurityPolicy,
-          redirect: (request) => domainRedirect(deps, request),
+          // Visitors on the tailnet name stay on it.
+          redirect: options.tailnet ? undefined : (request) => domainRedirect(deps, request),
         }),
       )
   );

@@ -1,6 +1,7 @@
 // The private-path registry and the panel domain path (added in 0.2.1), and
-// the WP0 stubs built on them: tailscale.get reports Tailscale as not
-// detected. IP access itself is in ip-access.test.ts and panel-access.test.ts.
+// what builds on them: tailscale.get reports Tailscale as not detected before
+// the panel node reported it. IP access itself is in ip-access.test.ts and
+// panel-access.test.ts, the Tailscale ops in tailscale-ops.test.ts.
 
 import { afterEach, expect, test } from "bun:test";
 import { tailscale } from "@seylo/ops";
@@ -92,13 +93,6 @@ test("IP access is open by default, and stays open without a panel node", () => 
 test("tailscale.get says not detected while nothing reads Tailscale", async () => {
   panel = testPanel();
   const { cookie } = await createUser(panel, "owner");
-  for (const [op, input] of [
-    [tailscale.setServe, { serve: true }],
-    [tailscale.signIn, {}],
-    [tailscale.setDns, { acceptDns: false }],
-  ] as const) {
-    expect((await callOp(panel, op, input as never, { cookie })).status).toBe(501);
-  }
   const status = await callOp(panel, tailscale.get, {}, { cookie });
   expect(status.status).toBe(200);
   expect(status.body).toMatchObject({

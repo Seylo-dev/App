@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./config";
 import { openDatabases } from "./db/client";
+import { listenOnTailnetSocket, tailnetSocketName } from "./http/tailnet-host";
 import { panelWebsocket } from "./http/ws-guard";
 import { createLogger } from "./logger";
 import { createPanel } from "./panel";
@@ -46,6 +47,9 @@ if (agentTls) {
   });
   logger.info({ port: agentTls.port, pin: agentTls.pin }, "agent TLS listener ready");
 }
+// Tailscale Serve's target (http/tailnet-host.ts). Always listening, so
+// turning Serve on or off never restarts the panel.
+const tailnetListening = listenOnTailnetSocket(panel.tailnetApp, join(config.dataDir, tailnetSocketName), logger);
 logger.info({ host: config.host, port: config.port, version: config.version, dataDir: config.dataDir }, "panel listening");
 
 let stopping = false;
@@ -57,6 +61,8 @@ async function shutdown(signal: string) {
   // the process exits and agents reconnect to the next one.
   await panel.app.stop(true);
   if (agentTls) await panel.agentApp.stop(true);
+  // Bun removes the socket file when the server stops.
+  if (tailnetListening) await panel.tailnetApp.stop(true);
   await panel.runner.stop();
   panel.deps.proxy.stop();
   databases.close();
