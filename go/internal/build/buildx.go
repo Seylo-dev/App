@@ -138,9 +138,14 @@ type buildxEnv struct {
 	used    map[string]time.Time
 }
 
+// ErrNoBuildx is the build failure on a node without docker buildx. Every
+// build needs it: the build worker that caps CPU and memory is a buildx
+// builder, and the flags builds pass (--load, --secret, --provenance) do
+// not exist in the legacy `docker build`.
+var ErrNoBuildx = &InvalidError{Msg: "docker buildx is not installed on this node, and builds need it. Install the docker-buildx-plugin package (Docker from get.docker.com has it) and build again."}
+
 // builder returns the builder name to build with for scope, creating it
-// on first use, or "" when buildx is missing (plain `docker build`,
-// uncapped).
+// on first use. Without buildx it fails with ErrNoBuildx.
 func (b *buildxEnv) builder(ctx context.Context, log io.Writer, scope string) (string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -148,8 +153,10 @@ func (b *buildxEnv) builder(ctx context.Context, log io.Writer, scope string) (s
 		return "", err
 	}
 	if !b.ok {
-		fmt.Fprintln(log, "docker buildx is not installed - building with docker build, without the CPU and memory cap")
-		return "", nil
+		// Checked again on the next build, so installing the plugin is
+		// enough.
+		b.checked = false
+		return "", ErrNoBuildx
 	}
 	name := b.size.BuilderName(scope)
 	b.used[name] = time.Now()
@@ -354,10 +361,9 @@ type Secret struct{ ID, File string }
 // args returns the docker arguments. Build arg values the CLI must read
 // from its environment (never shown in the process list) are in env.
 func (s buildSpec) args() (args, env []string) {
+	args = []string{"buildx", "build"}
 	if s.Builder != "" {
-		args = []string{"buildx", "build", "--builder", s.Builder}
-	} else {
-		args = []string{"build"}
+		args = append(args, "--builder", s.Builder)
 	}
 	args = append(args, "--progress", "plain", "--load", "--provenance=false", "--sbom=false", "-t", s.Tag, "-f", s.Dockerfile)
 	if s.Target != "" {

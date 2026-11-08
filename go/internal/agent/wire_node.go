@@ -378,7 +378,8 @@ func (p *panelControl) Logs(ctx context.Context, opts localapi.LogsOptions, w io
 // nodeChecks builds the health checks with this node's settings.
 func nodeChecks(d *Deps) []nodecheck.Check {
 	panelURL, panelPin := panelAddress(d)
-	env := nodecheck.Env{DataDir: d.Layout.Root(), PanelURL: panelURL, PanelPin: panelPin, GOARCH: runtime.GOARCH}
+	env := nodecheck.Env{DataDir: d.Layout.Root(), PanelURL: panelURL, PanelPin: panelPin, GOARCH: runtime.GOARCH,
+		CanBuild: func() bool { return d.Config.CanBuild }}
 	if d.Wings != nil {
 		env.Wings = d.Wings.Detect
 	}

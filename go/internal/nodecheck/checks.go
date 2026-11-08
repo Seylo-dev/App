@@ -210,6 +210,24 @@ func (e *Env) liveRestore(ctx context.Context) *agentv1.NodeCheckResult {
 	return warn(detail, `Add "live-restore": true to /etc/docker/daemon.json and run `+"`systemctl reload docker`"+` (restarts nothing).`)
 }
 
+// buildx checks for the buildx plugin on a node that builds: every build
+// runs on a buildx builder, and there is no fallback without it.
+func (e *Env) buildx(ctx context.Context) *agentv1.NodeCheckResult {
+	if e.CanBuild == nil {
+		return skipped("not checked here")
+	}
+	if !e.CanBuild() {
+		return skipped("builds are off on this node")
+	}
+	out, err := e.output(ctx, "docker", "buildx", "version")
+	if err != nil {
+		return fail("docker buildx is not installed: every build on this node fails",
+			"Install the docker-buildx-plugin package (Docker from get.docker.com has it), then run the checks again.")
+	}
+	version, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	return pass("%s", version)
+}
+
 func (e *Env) cgroups(ctx context.Context) *agentv1.NodeCheckResult {
 	controllers, err := e.read(filepath.Join(e.SysDir, "fs/cgroup/cgroup.controllers"))
 	if err != nil {

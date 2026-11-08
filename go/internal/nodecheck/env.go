@@ -43,7 +43,10 @@ type Env struct {
 	// the agent on purpose, so a host firewall applies and each one needs
 	// an allow rule. Nil: not checked (the CLI runs without the agent).
 	GatePorts func() []uint32
-	Now       func() time.Time
+	// CanBuild reports config.yml's can_build: builds need the docker
+	// buildx plugin. Nil: not checked.
+	CanBuild func() bool
+	Now      func() time.Time
 }
 
 func (e *Env) defaults() {
@@ -98,6 +101,7 @@ func Default(env Env) []Check {
 		check{"docker.engine", "Docker Engine", e.dockerEngine},
 		check{"docker.cgroup", "Control groups", e.cgroups},
 		check{"docker.live-restore", "Docker live-restore", e.liveRestore},
+		check{"docker.buildx", "Docker buildx", e.buildx},
 		check{"network.ports", "Ports 80 and 443", e.ports},
 		check{"proxy.running", "Proxy", e.proxyRunning},
 		check{"proxy.routes", "Route files", e.routeFiles},
