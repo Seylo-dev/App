@@ -19,7 +19,7 @@ import { describePrincipal, type Principal, type PrincipalUser } from "../auth/p
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
 import { anonymousErrorRows, firstOverCapThisHour, takeAnonymousErrorRow, targetLabel, targetProject, writeAudit } from "./audit";
-import type { HttpEffects, OpContext, OpHandler } from "./implement";
+import { type HttpEffects, maxViaLoginLength, type OpContext, type OpHandler, type OpVia } from "./implement";
 import type { RateLimiter } from "./rate-limit";
 import { checkOutput, parseInput } from "./validate";
 
@@ -35,6 +35,14 @@ export interface OpCall {
   http: HttpEffects | null;
   /** "https://panel.example.com" as the caller reached the panel, for links in outputs; null when unknown. */
   origin?: string | null;
+  /**
+   * The listener the request came in on when it is not the main one: only
+   * the HTTP adapter of the tailnet listener sets "tailnet". Never from
+   * request input. added in 0.2.1
+   */
+  via?: OpVia | null;
+  /** Serve's Tailscale-User-Login for the caller, set with via; cut to maxViaLoginLength. Audit only. */
+  viaLogin?: string | null;
   /**
    * Set only by the approvals module when it replays a call a person
    * approved; never taken from request input. Destructive ops from models
@@ -64,7 +72,15 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
     let label: string | null = null;
     let projectId: string | null = null;
     const actor: { user?: PrincipalUser; details?: Record<string, unknown> } = {};
-    const audited = () => (actor.details && input && typeof input === "object" ? { ...(input as object), ...actor.details } : input);
+    const via = viaOf(call);
+    // The listener goes into every audit row of a tailnet call, refused ones
+    // included, and wins over input or handler details of the same name.
+    const audited = () => {
+      const extra = via ? { ...actor.details, ...via } : actor.details;
+      if (!extra) return input;
+      if (input === undefined) return via ? extra : input;
+      return input && typeof input === "object" ? { ...(input as object), ...extra } : input;
+    };
 
     try {
       const handler = handlers.get(op.id);
@@ -94,7 +110,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
         throw new OpError("RATE_LIMITED", `Too many requests. Try again in ${waitSeconds} seconds.`, { retryAfter: String(waitSeconds) });
       }
 
-      const ctx = buildContext(deps, call, principal, access, actor);
+      const ctx = buildContext(deps, call, principal, access, actor, via);
       // parseInput validated `input` against this op's schema; the handler
       // map erases each handler's input type, hence the cast.
       const checked = checkOutput(op.output, await handler.run(input as never, ctx));
@@ -119,12 +135,20 @@ function fromModel(call: OpCall, principal: Principal): boolean {
   return call.transport !== "http" || (principal.type === "apiKey" && principal.keyKind === "mcp");
 }
 
+/** via and viaLogin of a call, checked: only HTTP calls come in on a listener, and the login is cut. */
+function viaOf(call: OpCall): { via: OpVia; viaLogin: string | null } | null {
+  if (call.transport !== "http" || call.via !== "tailnet") return null;
+  const login = call.viaLogin?.trim();
+  return { via: "tailnet", viaLogin: login ? login.slice(0, maxViaLoginLength) : null };
+}
+
 function buildContext(
   deps: Deps,
   call: OpCall,
   principal: Principal,
   access: Access,
   actor: { user?: PrincipalUser; details?: Record<string, unknown> },
+  via: { via: OpVia; viaLogin: string | null } | null,
 ): OpContext {
   return {
     ...deps,
@@ -135,6 +159,8 @@ function buildContext(
     userAgent: call.userAgent,
     origin: call.origin ?? null,
     transport: call.transport,
+    via: via?.via ?? null,
+    viaLogin: via?.viaLogin ?? null,
     auditDetails: (details) => {
       actor.details = { ...actor.details, ...details };
     },

@@ -19,6 +19,12 @@ export interface HttpEffects {
   clearSession(): void;
 }
 
+/** The listener a call came in on, when it is not the main one. added in 0.2.1 */
+export type OpVia = "tailnet";
+
+/** Longest viaLogin kept: tailnet logins are email-like. */
+export const maxViaLoginLength = 256;
+
 export interface OpContext extends Deps {
   principal: Principal;
   access: Access;
@@ -34,6 +40,19 @@ export interface OpContext extends Deps {
    * contexts built by hand (jobs, tests) default to "http".
    */
   transport?: "http" | "mcp" | "ai";
+  /**
+   * "tailnet" when the call came in on the panel's tailnet listener
+   * (Tailscale Serve to the unix socket); null or absent otherwise. A
+   * private path's proof for settings.updatePanelAccess. added in 0.2.1
+   */
+  via?: OpVia | null;
+  /**
+   * The tailnet login Serve named for the caller (its Tailscale-User-Login
+   * header), at most 256 characters; null when Serve sent none (a tagged
+   * device, HTTP mode). Recorded in audit rows only: it never signs anyone
+   * in and grants nothing. added in 0.2.1
+   */
+  viaLogin?: string | null;
   /**
    * For public sign-in ops: record this person as the actor of the audit
    * entry (the caller was anonymous until now, or tried their password).
