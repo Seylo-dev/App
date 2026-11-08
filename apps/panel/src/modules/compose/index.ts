@@ -11,13 +11,23 @@ import { implement, type OpContext } from "../../ops/implement";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { setStackRefresher } from "../github/push";
 import { defineModule } from "../module";
+import { assertCreateRights } from "../services/create-rights";
 import { deleteServiceTree } from "../services/delete";
 import { displaySource } from "../services/git-url";
 import { insertService } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
 import { loadService, projectServiceRows, type ServiceRow, toDetail, toSummaries } from "../services/rows";
 import { assertSourceAllowed } from "../services/source-guard";
-import { applyPlan, diffMembers, fetchComposeFile, loadStackSource, planFromSource, saveStackSource, stackEnv } from "./apply";
+import {
+  applyPlan,
+  diffMembers,
+  fetchComposeFile,
+  loadStackSource,
+  memberEnvChanges,
+  planFromSource,
+  saveStackSource,
+  stackEnv,
+} from "./apply";
 import { assertPlanReferences, assertPushReferences } from "./references";
 
 function stackNode(ctx: Pick<OpContext, "db">, stack: ServiceRow): string {
@@ -56,6 +66,12 @@ const create = implement(composeOps.create, async (input, ctx) => {
   const { conflicts } = diffMembers(ctx, null, plan, input.projectId, input.source);
   if (conflicts.length > 0)
     throw new OpError("CONFLICT", `Services named ${conflicts.join(", ")} already exist in this project.`, { field: "name" });
+  // Members' environment: blocks become their .env, and deployNow is their first deploy (services/create-rights.ts).
+  assertCreateRights(
+    ctx,
+    { type: "project", id: input.projectId },
+    { env: plan.members.some((m) => Object.keys(m.env).length > 0), deploy: input.deployNow ?? true },
+  );
   const userId = userOf(ctx.principal)?.id ?? null;
   const { id } = ctx.db.transaction((tx) =>
     insertService(tx, { projectId: input.projectId, name: input.name, kind: "compose", nodeId: input.nodeId, createdBy: userId }),
@@ -103,6 +119,17 @@ const update = implement(composeOps.update, async (input, ctx) => {
     return { members, warnings: [...plan.warnings, ...conflicts.map((n) => `A service named ${n} already exists in this project.`)] };
   }
   if (plan.members.length === 0) throw new OpError("BAD_REQUEST", "The compose file has no services.", { field: "source" });
+  // Applying writes the members' env where it changed and deploys changed members: env.edit and services.deploy
+  // on the stack, as env.set and a deploy would need (services/create-rights.ts).
+  const { members: diff } = diffMembers(ctx, stack, plan, stack.projectId, input.source);
+  assertCreateRights(
+    ctx,
+    { type: "service", id: stack.id },
+    {
+      env: memberEnvChanges(ctx, stack, plan),
+      deploy: diff.some((m) => m.action === "create" || m.action === "update"),
+    },
+  );
   saveStackSource(ctx, stack.id, input.source);
   const members = await applyPlan(ctx, {
     stack: loadService(ctx.db, stack.id),

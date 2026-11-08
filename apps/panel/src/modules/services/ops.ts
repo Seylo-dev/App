@@ -14,6 +14,7 @@ import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
 import { assertNoActiveCopy } from "./copies";
+import { assertCreateRights } from "./create-rights";
 import { assertNameFree, assertNode, insertService, writeSpec } from "./insert";
 import { entryNodeOf, loadService, nameKey, projectServiceRows, type ServiceRow, toDetail, toSummaries, volumesOf } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
@@ -87,6 +88,8 @@ const create = implement(serviceOps.create, async (input, ctx) => {
         field: "source",
       },
     );
+  // Deploying it now is a first deploy: services.deploy, like services.start of a never-deployed service.
+  assertCreateRights(ctx, { type: "project", id: input.projectId }, { deploy: input.deployNow === true });
   if (input.source) assertSourceAllowed(ctx, input.projectId, input.source);
   await assertGitSourceTarget(ctx.db, input.projectId, input.source, gitCaller(ctx));
   const spec: Partial<ServiceSpecJson> = {

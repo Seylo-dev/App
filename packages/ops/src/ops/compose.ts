@@ -101,7 +101,7 @@ export const create = defineOp({
   kind: "mutation",
   summary: "Create a compose stack",
   description:
-    "Creates a compose stack and one member service per compose service on one node (members share volumes, so they stay on the same node). Deploys every member when deployNow is true.",
+    "Creates a compose stack and one member service per compose service on one node (members share volumes, so they stay on the same node). Deploys every member when deployNow is true. Beyond services.create, members' environment: blocks need env.edit and deploying needs services.deploy in the project.",
   input: Type.Object({
     projectId: Id,
     name: ServiceName,
@@ -144,7 +144,7 @@ export const update = defineOp({
   kind: "destructive",
   summary: "Change a compose stack's file",
   description:
-    "Replaces a stack's compose file. With dryRun the result is the member diff (create, update, delete) and nothing changes; without it members are created, updated or deleted to match, and changed members are deployed.",
+    "Replaces a stack's compose file. With dryRun the result is the member diff (create, update, delete) and nothing changes; without it members are created, updated or deleted to match, and changed members are deployed (env.edit on the stack when a member's env changes, services.deploy when a member is created or changed).",
   input: Type.Object({
     serviceId: Id,
     source: ComposeSource,

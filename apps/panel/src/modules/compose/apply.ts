@@ -170,6 +170,16 @@ function memberVolumes(deps: Pick<Deps, "db">, serviceId: string) {
 }
 
 /** What applying the plan would do to the stack's members. */
+/** True when applying the plan writes some member's .env: a new member with an environment, or a changed one. */
+export function memberEnvChanges(deps: Pick<Deps, "db" | "secrets">, stack: ServiceRow, plan: StackPlan): boolean {
+  const byCompose = new Map(members(deps, stack.id).map((m) => [readSpec(m.spec).member?.composeService ?? m.name, m]));
+  return plan.members.some((p) => {
+    const current = byCompose.get(p.composeService);
+    const next = envText(p.env);
+    return current ? readServiceEnv(deps.db, deps.secrets, current.id).text !== next : next.trim() !== "";
+  });
+}
+
 export function diffMembers(
   deps: Pick<Deps, "db" | "secrets">,
   stack: ServiceRow | null,

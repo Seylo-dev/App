@@ -27,6 +27,7 @@ import { invalidateService } from "../domains/lookup";
 import { assertHostUnclaimed } from "../domains/ownership";
 import { issuerName } from "../domains/rows";
 import { readServiceEnv } from "../env/store";
+import { assertCreateRights } from "../services/create-rights";
 import { insertService } from "../services/insert";
 import { defaultContainer } from "../services/spec";
 import terminalsModule from "../terminals";
@@ -177,6 +178,8 @@ export const create = implement(dbOps.create, (input, ctx) => {
     );
   }
   const password = input.password ?? generatePassword();
+  // A database starts right away: that first deploy is services.deploy. Its env is the panel's own (credentials).
+  assertCreateRights(ctx, { type: "project", id: input.projectId }, { deploy: true });
   const user = userOf(ctx.principal);
   const serviceId = ctx.db.transaction((tx) => {
     const row = insertService(tx, {

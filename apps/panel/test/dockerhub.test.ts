@@ -242,7 +242,8 @@ describe("dockerHub.create", () => {
       { cookie },
     );
     expect(ok.status).toBe(200);
-    grant(panel, user.id, "project", projectId, ["services.create"]);
+    // env.edit lets them write a new service's env; the references are checked on top.
+    grant(panel, user.id, "project", projectId, ["services.create", "env.edit"]);
     const refused = await callOp(
       panel,
       dockerHub.create,

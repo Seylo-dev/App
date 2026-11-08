@@ -14,6 +14,7 @@ import { edgeToolLink } from "../databases/edge-ticket";
 import { queueDeploy } from "../deployments/queue";
 import { getService, invalidateService, serviceNodes } from "../domains/lookup";
 import { assertNoActiveCopy } from "../services/copies";
+import { assertCreateRights } from "../services/create-rights";
 import { insertService } from "../services/insert";
 import { publishService } from "../services/ops";
 import { defaultContainer } from "../services/spec";
@@ -64,6 +65,8 @@ function toBox(ctx: OpContext, serviceId: string): Box {
 }
 
 export const create = implement(boxOps.create, (input, ctx) => {
+  // A Box starts right away: that first deploy is services.deploy.
+  assertCreateRights(ctx, { type: "project", id: input.projectId }, { deploy: true });
   const user = userOf(ctx.principal);
   const serviceId = ctx.db.transaction((tx) => {
     const row = insertService(tx, {

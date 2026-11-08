@@ -848,6 +848,19 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
 - Action lists (grants and keys) hold `*` (everything), `<area>.*` (every
   action of one area, for example `services.*`) or exact actions; match
   them with `actionAllowed(list, action)` from `@seylo/ops`.
+- `services.create` makes a service; what the new service gets beyond that
+  is its own permission in the project, whichever op makes it
+  (`services/create-rights.ts` `assertCreateRights`, FORBIDDEN with
+  `details.action`): an env the caller wrote or picked needs `env.edit`
+  (dockerHub.create `env`, a template's app env, compose members'
+  `environment:`), file mounts `files.write` (templates), and running it
+  `services.deploy` (services.create and dockerHub/templates/compose.create
+  with `deployNow`, databases.create and boxes.create, which always start,
+  and a template with a database). compose.update needs `env.edit` on the
+  stack when it changes a member's env and `services.deploy` when it
+  creates or changes a member. services.clone and services.start of a
+  never-deployed service follow the same rule, so `services.create` alone
+  makes services that someone who may deploy starts.
 - Grants (`grants` table): one row per member per project or service, with
   a list of actions (`*` = all grantable ones). A project grant covers the
   project's services, so it takes project and service actions; a service

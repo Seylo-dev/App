@@ -14,6 +14,7 @@ import { addAuto } from "../domains/ops";
 import { checkEnvReferences } from "../env/ops";
 import { writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
+import { assertCreateRights } from "../services/create-rights";
 import { deleteServiceTree } from "../services/delete";
 import { insertService } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
@@ -93,6 +94,12 @@ export async function createFromDockerHub(ctx: OpContext, input: CreateInput) {
   if (!isRepository(input.repository)) throw new OpError("BAD_REQUEST", "Name a Docker Hub repository.", { field: "repository" });
   const source = { type: "image" as const, image: hubOps.imageRef(input.repository, input.tag), registryId: input.registryId ?? null };
   assertSourceAllowed(ctx, input.projectId, source);
+  // Its env and its first deploy are env.edit and services.deploy, whichever op makes the service.
+  assertCreateRights(
+    ctx,
+    { type: "project", id: input.projectId },
+    { env: (input.env ?? "").trim() !== "", deploy: input.deployNow ?? true },
+  );
   const volumes = plannedVolumes(input);
   const env = envText(ctx, input);
   const isPublic = input.public ?? true;
