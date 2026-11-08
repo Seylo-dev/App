@@ -115,7 +115,15 @@ test("Lock: every row says to a screen reader whether it is done, not yet, or a 
       status({
         backendState: "Stopped",
         viaTailnet: false,
-        serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: false, state: "active", url: tailnetUrl, message: "", panelAnswers: false },
+        serve: {
+          wanted: true,
+          tailnet: "acme.dev",
+          onOtherTailnet: false,
+          state: "active",
+          url: tailnetUrl,
+          message: "",
+          panelAnswers: false,
+        },
       }),
       access(),
     ),
@@ -126,7 +134,14 @@ test("Lock: every row says to a screen reader whether it is done, not yet, or a 
   expect(notYet).not.toContain("Tailscale runs on the server");
   expect(notYet).not.toContain(`Serve answers on ${tailnetUrl}`);
 
-  const noUrl = text(await lock(status({ serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: false, state: "off", url: null, message: "", panelAnswers: false } }), access()));
+  const noUrl = text(
+    await lock(
+      status({
+        serve: { wanted: true, tailnet: "acme.dev", onOtherTailnet: false, state: "off", url: null, message: "", panelAnswers: false },
+      }),
+      access(),
+    ),
+  );
   expect(noUrl).toContain("Not yet: Serve does not answer yet");
 });
 
