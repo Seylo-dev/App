@@ -31,3 +31,19 @@ test("images become links instead of loading", () => {
   expect(html).toContain('href="https://example.com/a.png"');
   expect(html).toContain("diagram");
 });
+
+test("fenced code wraps and has a copy button", () => {
+  const html = renderToStaticMarkup(
+    <Markdown>
+      {"Run:\n\n```bash\ncurl -fsSL https://example.com/a/very/long/path/install.sh | sudo sh -s -- join --token abc\n```"}
+    </Markdown>,
+  );
+  expect(html).toContain('data-slot="code-block"');
+  expect(html).toContain("whitespace-pre-wrap");
+  expect(html).not.toContain("overflow-x-auto rounded-control bg-terminal");
+  // The copy button, and the fence's language as the title.
+  expect(html).toContain("tabler-icon-copy");
+  expect(html).toContain(">bash<");
+  // The code itself, without the fence's closing newline.
+  expect(html).toContain("join --token abc</code>");
+});

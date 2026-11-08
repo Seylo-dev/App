@@ -86,7 +86,7 @@ function KeyForm({ kind, onDone }: { kind: Kind; onDone: () => void }) {
             <CopyField value={created.token} secret aria-label={t("settingsKeys.create.token")} />
           </Field>
           {kind === "api" ? (
-            <CodeBlock title={t("settingsKeys.create.tryIt")} code={example} tone="dark" wrap />
+            <CodeBlock title={t("settingsKeys.create.tryIt")} code={example} tone="dark" />
           ) : (
             <p className="m-0 text-[13px] text-muted-foreground">{t("settingsKeys.create.mcpNext")}</p>
           )}

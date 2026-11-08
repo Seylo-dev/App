@@ -14,7 +14,7 @@ export function PlainHttpWarning({ className }: { className?: string }) {
     <Alert tone="warning" title={t("auth.plainHttp.title")} className={cn("w-full", className)} data-testid="plain-http-warning">
       <div className="flex flex-col gap-2">
         <span>{t("auth.plainHttp.body", { host: page.host })}</span>
-        <CodeBlock code={`ssh -L ${page.port}:localhost:${page.port} ${page.host}`} tone="dark" wrap />
+        <CodeBlock code={`ssh -L ${page.port}:localhost:${page.port} ${page.host}`} tone="dark" />
         <span>{t("auth.plainHttp.thenOpen", { url: `http://localhost:${page.port}` })}</span>
       </div>
     </Alert>
