@@ -825,7 +825,12 @@ local API, join and resume. The areas:
   resolved once it has a certificate), resolver `le` (HTTP-01; `SEYLO_ACME_CA=staging|<url>` overrides the
   directory; for a test CA, config.yml `acme_ca_certificates` (a PEM file,
   mounted as `LEGO_CA_CERTIFICATES`) and `acme_ca_server_name`, or the
-  `SEYLO_ACME_CA_CERTIFICATES` / `SEYLO_ACME_CA_SERVER_NAME` env). Next to the Wings fork the files go to its
+  `SEYLO_ACME_CA_CERTIFICATES` / `SEYLO_ACME_CA_SERVER_NAME` env). The ACME
+  contact is the first owner's email (`NodeSettings.acme_email`). A change of
+  the image, the contact or any other part of the container's spec recreates
+  the container, logged at INFO as `Traefik recreated` with the reason.
+  Creating the owner resends every node's settings, so the recreate for the
+  new contact happens during setup, before anything is routed. Next to the Wings fork the files go to its
   `<proxy.data_dir>/dynamic` instead. The edge listener binds
   `<seylo-edge gateway>:5756`; Traefik rewrites to its paths under
   `/_seylo/` (`/page/maintenance/<id>`, `/page/status/<id>`, `/ticket`,

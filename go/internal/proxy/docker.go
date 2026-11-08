@@ -53,6 +53,10 @@ type ContainerInfo struct {
 	Labels  map[string]string
 	// IPs by network name (IPv4).
 	IPs map[string]string
+	// Image and Cmd the container was created with, so a recreate can say
+	// what changed. Empty when Docker did not report them.
+	Image string
+	Cmd   []string
 }
 
 // NetworkInfo describes a bridge network.
@@ -127,6 +131,8 @@ func (d *MobyDocker) InspectContainer(ctx context.Context, name string) (Contain
 	}
 	if c.Config != nil {
 		info.Labels = c.Config.Labels
+		info.Image = c.Config.Image
+		info.Cmd = c.Config.Cmd
 	}
 	if c.NetworkSettings != nil {
 		for name, ep := range c.NetworkSettings.Networks {

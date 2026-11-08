@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	"github.com/seylo-dev/app/go/internal/docker"
@@ -192,6 +193,10 @@ type TraefikState struct {
 	// host's address there, where the edge listener binds).
 	IP      string
 	Gateway string
+	// Recreated says why Ensure replaced a container that no longer
+	// matched the config, for example "ACME contact email changed". Empty
+	// when it kept the container or created a missing one.
+	Recreated string
 }
 
 // Ensure creates the edge network and the Traefik container when missing,
@@ -213,6 +218,7 @@ func (t *Traefik) Ensure(ctx context.Context) (TraefikState, error) {
 	if err != nil && !errors.Is(err, ErrContainerNotFound) {
 		return TraefikState{}, err
 	}
+	recreated := ""
 	if found && existing.Labels[specLabel] != spec.Labels[specLabel] {
 		if existing.Labels[docker.LabelManaged] != "true" {
 			return TraefikState{}, fmt.Errorf("a container named %s exists and is not managed by %s", c.Name, brand.DisplayName)
@@ -221,6 +227,7 @@ func (t *Traefik) Ensure(ctx context.Context) (TraefikState, error) {
 			return TraefikState{}, err
 		}
 		found = false
+		recreated = recreateReason(existing, spec)
 	}
 	if !found {
 		if err := t.Docker.EnsureImage(ctx, spec.Image); err != nil {
@@ -241,5 +248,34 @@ func (t *Traefik) Ensure(ctx context.Context) (TraefikState, error) {
 	if err != nil {
 		return TraefikState{}, err
 	}
-	return TraefikState{ContainerID: info.ID, IP: info.IPs[c.Network], Gateway: netInfo.Gateway}, nil
+	return TraefikState{ContainerID: info.ID, IP: info.IPs[c.Network], Gateway: netInfo.Gateway, Recreated: recreated}, nil
+}
+
+// recreateReason says what differs between a container and the spec that
+// replaces it: the image, the ACME contact email, or else the
+// configuration in general (ports, mounts, other flags, the CA file).
+func recreateReason(existing ContainerInfo, spec ContainerSpec) string {
+	var changed []string
+	if existing.Image != "" && existing.Image != spec.Image {
+		changed = append(changed, "image changed")
+	}
+	if existing.Cmd != nil && acmeEmailArg(existing.Cmd) != acmeEmailArg(spec.Cmd) {
+		changed = append(changed, "ACME contact email changed")
+	}
+	if len(changed) == 0 {
+		return "configuration changed"
+	}
+	return strings.Join(changed, ", ")
+}
+
+// acmeEmailArg is the ACME contact email in Traefik's arguments, "" when
+// there is none.
+func acmeEmailArg(args []string) string {
+	prefix := "--certificatesresolvers." + CertResolver + ".acme.email="
+	for _, arg := range args {
+		if email, ok := strings.CutPrefix(arg, prefix); ok {
+			return email
+		}
+	}
+	return ""
 }

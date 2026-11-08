@@ -63,6 +63,7 @@ test("status reports the link, and createOwner burns it and signs in", async () 
   const short = await call(panel, setup.createOwner, { token, email: "o@example.com", password: "short" });
   expect(short.status).toBe(400);
 
+  panel.deps.agents.desired.takeDirty();
   const created = await ok(panel, setup.createOwner, {
     token,
     email: "Owner@Example.com",
@@ -70,6 +71,8 @@ test("status reports the link, and createOwner burns it and signs in", async () 
     password: "a long enough password",
   });
   expect(created.body.viewer).toMatchObject({ email: "owner@example.com", role: "owner", name: "Owner" });
+  // The owner's email is the nodes' ACME contact: it goes out now, not with the next full sync.
+  expect(panel.deps.agents.desired.takeDirty()).toEqual([{ all: true }]);
   const cookie = cookieFrom(created.headers) as string;
   expect((await ok(panel, auth.whoami, {}, { cookie })).body.viewer.role).toBe("owner");
   expect(existsSync(setupTokenPath(dataDir))).toBe(false);

@@ -25,6 +25,8 @@ type proxyContainer struct {
 	id      string
 	labels  map[string]string
 	running bool
+	image   string
+	cmd     []string
 }
 
 func newProxyDocker() *proxyDocker { return &proxyDocker{containers: map[string]*proxyContainer{}} }
@@ -61,13 +63,13 @@ func (f *proxyDocker) InspectContainer(_ context.Context, name string) (proxy.Co
 	if !ok {
 		return proxy.ContainerInfo{}, proxy.ErrContainerNotFound
 	}
-	return proxy.ContainerInfo{ID: c.id, Running: c.running, Labels: maps.Clone(c.labels), IPs: map[string]string{}}, nil
+	return proxy.ContainerInfo{ID: c.id, Running: c.running, Labels: maps.Clone(c.labels), IPs: map[string]string{}, Image: c.image, Cmd: slices.Clone(c.cmd)}, nil
 }
 
 func (f *proxyDocker) CreateContainer(_ context.Context, spec proxy.ContainerSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.containers[spec.Name] = &proxyContainer{id: "id-" + spec.Name, labels: maps.Clone(spec.Labels)}
+	f.containers[spec.Name] = &proxyContainer{id: "id-" + spec.Name, labels: maps.Clone(spec.Labels), image: spec.Image, cmd: slices.Clone(spec.Cmd)}
 	return "id-" + spec.Name, nil
 }
 

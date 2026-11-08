@@ -40,6 +40,11 @@ function insertOwner(ctx: OpContext, token: string, values: { email: string; nam
   removeSetupTokenFile(ctx.config.dataDir);
   // Where the owner reached the panel is how people reach the panel node (1:1 NAT clouds hide it).
   rememberSetupHost(ctx.db, ctx.origin);
+  // The owner's email is every node's ACME contact, and Traefik is
+  // recreated when it changes. Send it now, while nothing is routed yet,
+  // rather than with whatever full sync comes next (setting the panel
+  // domain, for one, would recreate Traefik just as its certificate is asked for).
+  ctx.agents.desired.markDirty({ all: true });
   return owner;
 }
 
