@@ -756,7 +756,11 @@ local API, join and resume. The areas:
   second Traefik of ours, `seylo-traefik-lb` (LB entry point only, file
   provider on `<datadir>/traefik/lb-dynamic`, where the router writes each
   service's LB routers in its own `seylo-<id>.yml`); reconcile attaches it
-  to project networks like the fork's Traefik. Tool session cookies are
+  to project networks like the fork's Traefik. The mode is picked at agent
+  start; a node that switches to the fork's proxy (it came after our own
+  Traefik) has its managed `seylo-traefik` removed before the LB Traefik
+  starts (it held 80, 443 and 5757 and served stale route files), and the
+  fork's Traefik is started when it is not running. Tool session cookies are
   signed with `<datadir>/network/edge-session.key` (kept across agent
   restarts) and name the ticket's subject and user (`edge/session.go`; the
   older subject-only format is refused, one more sign-in). The edge asks
