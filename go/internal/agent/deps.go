@@ -47,6 +47,9 @@ type Config struct {
 	// NoHostShell is config.yml's no_host_shell: HostShell is refused
 	// whatever the panel says.
 	NoHostShell bool
+	// GitProxyResolves is config.yml's git_proxy_resolves: git hosts the
+	// node cannot resolve go on to the agent's HTTP proxy.
+	GitProxyResolves bool
 }
 
 // Deps is everything the wiring functions share. The agent fills the

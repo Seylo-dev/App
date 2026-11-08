@@ -66,6 +66,9 @@ type Options struct {
 	Sizing *Sizing
 	// Tools installs builder binaries; default one under ToolsDir.
 	Tools *Tools
+	// Git is what the node's config.yml says about git fetches
+	// (git_proxy_resolves).
+	Git GitNodeConfig
 }
 
 // Service is the node's Builder: a queue of detached build jobs.
@@ -382,7 +385,7 @@ func builderName(req *agentv1.BuildRequest) string {
 func (s *Service) fetch(ctx context.Context, j *Job, req *agentv1.BuildRequest, src, work string) error {
 	switch source := req.GetSource().GetSource().(type) {
 	case *agentv1.BuildSource_Git:
-		info, err := fetchGit(ctx, s.opts.Runner, j, source.Git, src, work, req.GetGitSubmodules())
+		info, err := fetchGitOn(ctx, s.opts.Git, s.opts.Runner, j, source.Git, src, work, req.GetGitSubmodules())
 		if err != nil {
 			return err
 		}

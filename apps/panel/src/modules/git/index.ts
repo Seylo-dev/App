@@ -12,8 +12,8 @@ import { defineModule } from "../module";
 import { assertSourceAllowed } from "../services/source-guard";
 import { blockedMessage, blockedTarget } from "../uptime/targets";
 import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
-import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys } from "./remote";
-import { allowInternalGitHost, gitReadTarget, seedInternalGitHosts } from "./targets";
+import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, urlHost } from "./remote";
+import { allowInternalGitHost, gitReadTarget, listInternalGitHosts, removeInternalGitHost, seedInternalGitHosts } from "./targets";
 
 // People who may set a source somewhere see names and hosts for the source
 // picker (an account with no such grant gets an empty list); the account
@@ -149,7 +149,12 @@ const branches = implement(gitOps.branches, async (input, ctx) => {
       check.reason === "unresolvable"
         ? blockedMessage(check)
         : `The git host is ${blockedTarget(check)}.${check.reason === "metadata" ? "" : " Only an admin can use an internal git host; once an admin saves a source with it in this project (or allows it with git.allowInternalHost), its members can use it too."}`,
-      { field: "url", reason: check.reason === "unresolvable" ? "unresolvable" : "internalTarget" },
+      {
+        field: "url",
+        reason: check.reason === "unresolvable" ? "unresolvable" : "internalTarget",
+        // What an admin can allow for the project; never a metadata address.
+        ...(check.reason === "metadata" ? {} : { host: urlHost(input.url).toLowerCase() }),
+      },
     );
   }
   const refs = await listRemoteRefs(input.url, auth, { address: target.address, byName: target.byName });
@@ -162,9 +167,27 @@ const allowInternalHost = implement(gitOps.allowInternalHost, (input, ctx) =>
   allowInternalGitHost(ctx.db, { projectId: input.projectId, url: input.url, userId: userOf(ctx.principal)?.id ?? null }),
 );
 
+const listInternalHosts = implement(gitOps.listInternalHosts, (input, ctx) => listInternalGitHosts(ctx.db, input.projectId));
+
+const removeInternalHost = implement(gitOps.removeInternalHost, (input, ctx) => {
+  removeInternalGitHost(ctx.db, input);
+  return {};
+});
+
 export default defineModule({
   name: "git",
-  ops: [listCredentials, createCredential, generateSshKey, updateCredential, deleteCredential, scan, branches, allowInternalHost],
+  ops: [
+    listCredentials,
+    createCredential,
+    generateSshKey,
+    updateCredential,
+    deleteCredential,
+    scan,
+    branches,
+    allowInternalHost,
+    listInternalHosts,
+    removeInternalHost,
+  ],
   start(deps) {
     // Lookups run in the background; builds and source checks wait for them (git/targets.ts).
     void seedInternalGitHosts(deps.db, deps.logger);

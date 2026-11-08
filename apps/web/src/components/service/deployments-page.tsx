@@ -29,6 +29,7 @@ import { type ReactNode, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { useLiveUp } from "../../lib/live";
+import { DeployHostAction } from "../git/internal-hosts";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
 import { type Deployment, StepChips } from "./deploy-steps";
@@ -249,6 +250,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
           </span>
         </div>
         {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
+        {failed && <DeployHostAction service={service} error={d.error} />}
         {running ? <StepChips steps={d.steps} /> : <DeploymentChips d={d} now={now} />}
       </div>
       <div className="ml-auto flex shrink-0 gap-1.5">

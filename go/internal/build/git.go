@@ -55,10 +55,16 @@ type git struct {
 // would let a host skip it.
 var proxyEnv = []string{"HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=", "http_proxy=", "https_proxy=", "all_proxy=", "no_proxy="}
 
-// newGit prepares credentials in work (a private folder of the build) and
-// starts the fetch's proxy. The caller closes it.
+// newGit is newGitOn for a node with config.yml's defaults.
 func newGit(r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git, error) {
-	policy, err := gitPolicyFor(src)
+	return newGitOn(GitNodeConfig{}, r, log, src, work)
+}
+
+// newGitOn prepares credentials in work (a private folder of the build)
+// and starts the fetch's proxy with the node's git settings. The caller
+// closes it.
+func newGitOn(node GitNodeConfig, r Runner, log io.Writer, src *agentv1.GitSource, work string) (*git, error) {
+	policy, err := gitPolicyFor(src, node)
 	if err != nil {
 		return nil, err
 	}
@@ -228,11 +234,16 @@ func (g *git) do(ctx context.Context, dir string, args ...string) error {
 	return g.run.Run(ctx, g.cmd(dir, args...))
 }
 
-// fetchGit checks out src into dir: the exact commit when given, else
+// fetchGit is fetchGitOn for a node with config.yml's defaults.
+func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSource, dir, work string, submodules bool) (*agentv1.BuildSourceInfo, error) {
+	return fetchGitOn(ctx, GitNodeConfig{}, r, log, src, dir, work, submodules)
+}
+
+// fetchGitOn checks out src into dir: the exact commit when given, else
 // the tip of ref (or the default branch). Shallow wherever the server
 // allows it.
-func fetchGit(ctx context.Context, r Runner, log io.Writer, src *agentv1.GitSource, dir, work string, submodules bool) (*agentv1.BuildSourceInfo, error) {
-	g, err := newGit(r, log, src, work)
+func fetchGitOn(ctx context.Context, node GitNodeConfig, r Runner, log io.Writer, src *agentv1.GitSource, dir, work string, submodules bool) (*agentv1.BuildSourceInfo, error) {
+	g, err := newGitOn(node, r, log, src, work)
 	if err != nil {
 		return nil, fmt.Errorf("preparing git credentials: %w", err)
 	}

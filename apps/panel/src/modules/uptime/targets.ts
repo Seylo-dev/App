@@ -24,7 +24,7 @@ declare module "../../settings" {
   }
 }
 
-export type BlockReason = "loopback" | "linkLocal" | "metadata" | "private" | "reserved" | "unresolvable";
+export type BlockReason = "loopback" | "linkLocal" | "metadata" | "private" | "reserved" | "unresolvable" | "node";
 
 /**
  * ok carries the vetted address to connect to. `byName` (address null) only
@@ -55,19 +55,31 @@ export function setTargetResolver(next: Resolver | null): void {
 
 const v4 = (a: number, b: number, c: number, d: number) => ((a << 24) >>> 0) + (b << 16) + (c << 8) + d;
 
+// The same ranges as the agent's go/internal/netguard (rules), in the same
+// order; go/internal/netguard/testdata/addresses.json is a table both test
+// suites read, so the two lists cannot drift.
+
 /** [network, prefix length, reason]; checked in order, so the metadata host wins over link-local. */
 const v4Ranges: [number, number, BlockReason][] = [
   [v4(169, 254, 169, 254), 32, "metadata"],
   [v4(100, 100, 100, 200), 32, "metadata"],
-  [v4(127, 0, 0, 0), 8, "loopback"],
-  [v4(169, 254, 0, 0), 16, "linkLocal"],
   [v4(0, 0, 0, 0), 8, "reserved"],
   [v4(10, 0, 0, 0), 8, "private"],
+  // Carrier-grade NAT.
   [v4(100, 64, 0, 0), 10, "private"],
+  [v4(127, 0, 0, 0), 8, "loopback"],
+  [v4(169, 254, 0, 0), 16, "linkLocal"],
   [v4(172, 16, 0, 0), 12, "private"],
   [v4(192, 0, 0, 0), 24, "reserved"],
+  // Documentation (TEST-NET-1).
+  [v4(192, 0, 2, 0), 24, "reserved"],
   [v4(192, 168, 0, 0), 16, "private"],
+  // Benchmarking.
   [v4(198, 18, 0, 0), 15, "reserved"],
+  // Documentation (TEST-NET-2, TEST-NET-3).
+  [v4(198, 51, 100, 0), 24, "reserved"],
+  [v4(203, 0, 113, 0), 24, "reserved"],
+  // Multicast.
   [v4(224, 0, 0, 0), 4, "reserved"],
   [v4(240, 0, 0, 0), 4, "reserved"],
 ];
@@ -111,11 +123,40 @@ function parseV6(address: string): bigint | null {
   return out;
 }
 
-const inV6 = (value: bigint, network: string, bits: number) => {
-  const net = parseV6(network) as bigint;
+/** [network, prefix length, reason], checked in order after unmapping (blockedReason). */
+const v6Ranges: [bigint, number, BlockReason][] = (
+  [
+    ["fd00:ec2::254", 128, "metadata"],
+    ["::", 128, "reserved"],
+    ["::1", 128, "loopback"],
+    // IPv4-compatible (deprecated): never a real internet host.
+    ["::", 96, "reserved"],
+    // Local-use NAT64 (RFC 8215): the IPv4 address it carries is a local one.
+    ["64:ff9b:1::", 48, "reserved"],
+    // Discard-only.
+    ["100::", 64, "reserved"],
+    // Documentation.
+    ["2001:db8::", 32, "reserved"],
+    // Unique-local.
+    ["fc00::", 7, "private"],
+    ["fe80::", 10, "linkLocal"],
+    // Site-local (deprecated).
+    ["fec0::", 10, "private"],
+    // Multicast.
+    ["ff00::", 8, "reserved"],
+  ] as const
+).map(([network, bits, reason]) => [parseV6(network) as bigint, bits, reason]);
+
+const inV6 = (value: bigint, network: bigint, bits: number) => {
   const shift = BigInt(128 - bits);
-  return value >> shift === net >> shift;
+  return value >> shift === network >> shift;
 };
+
+const mapped = parseV6("::ffff:0:0") as bigint;
+const nat64 = parseV6("64:ff9b::") as bigint;
+const sixToFour = parseV6("2002::") as bigint;
+
+const dottedV4 = (n: number) => `${n >>> 24}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`;
 
 /** Why this address is not a public internet address, or null when it is one. */
 export function blockedReason(address: string): BlockReason | null {
@@ -127,22 +168,16 @@ export function blockedReason(address: string): BlockReason | null {
       const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
       if ((n & mask) >>> 0 === network) return reason;
     }
-    return n === 0xffffffff ? "reserved" : null;
+    return null;
   }
   if (kind === 6) {
     const n = parseV6(address);
     if (n === null) return "reserved";
-    // IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) carry an IPv4 address.
-    if (inV6(n, "::ffff:0:0", 96) || inV6(n, "64:ff9b::", 96)) {
-      const embedded = Number(n & 0xffffffffn);
-      return blockedReason(`${embedded >>> 24}.${(embedded >>> 16) & 255}.${(embedded >>> 8) & 255}.${embedded & 255}`);
-    }
-    if (n === 0n) return "reserved";
-    if (n === 1n) return "loopback";
-    if (n === (parseV6("fd00:ec2::254") as bigint)) return "metadata";
-    if (inV6(n, "fe80::", 10)) return "linkLocal";
-    if (inV6(n, "fc00::", 7)) return "private";
-    if (inV6(n, "ff00::", 8)) return "reserved";
+    // IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) carry an IPv4 address in their
+    // last 32 bits, 6to4 (2002:aabb:ccdd::) right after the prefix: judged by that address.
+    if (inV6(n, mapped, 96) || inV6(n, nat64, 96)) return blockedReason(dottedV4(Number(n & 0xffffffffn)));
+    if (inV6(n, sixToFour, 16)) return blockedReason(dottedV4(Number((n >> 80n) & 0xffffffffn)));
+    for (const [network, bits, reason] of v6Ranges) if (inV6(n, network, bits)) return reason;
     return null;
   }
   return "reserved";
@@ -174,17 +209,78 @@ function ownTarget(deps: Pick<Deps, "db">, addresses: readonly string[]): boolea
   return internal.every((a) => set.includes(a));
 }
 
+/** One spelling per IP address ("4:<n>" or "6:<n>", IPv4-mapped as IPv4), or null for anything else. */
+function ipKey(address: string): string | null {
+  const text = address
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/%.*$/, "");
+  const kind = isIP(text);
+  if (kind === 4) {
+    const n = parseV4(text);
+    return n === null ? null : `4:${n}`;
+  }
+  if (kind !== 6) return null;
+  const n = parseV6(text);
+  if (n === null) return null;
+  return inV6(n, mapped, 96) ? `4:${Number(n & 0xffffffffn)}` : `6:${n}`;
+}
+
+/**
+ * Every address of this panel's nodes: the admin-set public address and
+ * what agents report (public_ipv4/public_ipv6, NodeFacts.interface_addresses:
+ * the public addresses on their interfaces, which their git fetches refuse
+ * unless allowed), plus admin-set public host names. Only ever used to
+ * count a target as more internal (git sources), never to open one up, so
+ * what an agent reports may count here.
+ */
+function nodeAddresses(deps: Pick<Deps, "db">): { ips: Set<string>; names: Set<string> } {
+  const ips = new Set<string>();
+  const names = new Set<string>();
+  const rows = deps.db
+    .select({ publicAddress: nodes.publicAddress, ipv4: nodes.publicIpv4, ipv6: nodes.publicIpv6, facts: nodes.facts })
+    .from(nodes)
+    .all();
+  for (const row of rows) {
+    const facts = (row.facts ?? {}) as { interfaceAddresses?: unknown; publicIpv4?: unknown; publicIpv6?: unknown };
+    const reported = Array.isArray(facts.interfaceAddresses) ? facts.interfaceAddresses.slice(0, 256) : [];
+    for (const address of [row.publicAddress, row.ipv4, row.ipv6, facts.publicIpv4, facts.publicIpv6, ...reported]) {
+      if (typeof address !== "string" || address === "") continue;
+      const key = ipKey(address);
+      if (key) ips.add(key);
+      else if (address === row.publicAddress) names.add(address.toLowerCase().replace(/\.$/, ""));
+    }
+  }
+  return { ips, names };
+}
+
+/**
+ * True when the target is one of this panel's nodes: its name is a node's
+ * admin-set public host name, or every address it resolves to is a node's
+ * address (nodeAddresses).
+ */
+function nodeTarget(deps: Pick<Deps, "db">, host: string, addresses: readonly string[]): boolean {
+  const known = nodeAddresses(deps);
+  if (known.names.has(host.replace(/\.$/, ""))) return true;
+  return addresses.length > 0 && addresses.every((a) => known.ips.has(ipKey(a) ?? ""));
+}
+
 /**
  * Decides whether an uptime check may request this URL. Hostnames are
  * resolved; every address must be public (or the panel's own).
  * `ownNodes: false` drops the "panel's own" exception: a node's address on
  * a private network then counts like any other internal address (git
  * sources, where such a host needs an admin's approval per project).
+ * `nodesInternal` refuses a target on one of this panel's nodes too, public
+ * addresses included (reason "node"): the node connects to itself there,
+ * past a firewall that hides a service from the internet (git sources,
+ * whose nodes refuse their own addresses unless allowed).
  */
 export async function checkTarget(
   deps: Pick<Deps, "db">,
   url: string,
-  options: { allowInternal?: boolean; ownNodes?: boolean } = {},
+  options: { allowInternal?: boolean; ownNodes?: boolean; nodesInternal?: boolean } = {},
 ): Promise<TargetCheck> {
   if (options.allowInternal ?? getSetting(deps.db, "uptimeAllowInternalTargets") === true) return { ok: true, address: null, byName: true };
   let host: string;
@@ -215,7 +311,10 @@ export async function checkTarget(
   }
   const blocked = addresses.map((address) => ({ address, reason: blockedReason(address) })).filter((a) => a.reason !== null);
   const pin = addresses[0] as string;
-  if (blocked.length === 0) return { ok: true, address: pin, byName: false };
+  if (blocked.length === 0) {
+    if (options.nodesInternal && nodeTarget(deps, host, addresses)) return { ok: false, reason: "node", address: pin };
+    return { ok: true, address: pin, byName: false };
+  }
   // The metadata service is never one of ours, even on a node's own address.
   const first = blocked.find((b) => b.reason === "metadata") ?? (blocked[0] as { address: string; reason: BlockReason });
   if (first.reason !== "metadata" && options.ownNodes !== false && ownTarget(deps, addresses))
@@ -230,6 +329,7 @@ const reasonText: Record<BlockReason, string> = {
   private: "a private network address",
   reserved: "a reserved address",
   unresolvable: "a name that does not resolve",
+  node: "an address of one of this panel's nodes",
 };
 
 /** What a refused target is, for messages: "a private network address (10.0.0.7)". */

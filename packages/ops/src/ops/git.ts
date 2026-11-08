@@ -158,11 +158,53 @@ export const allowInternalHost = defineOp({
   kind: "mutation",
   summary: "Allow an internal git host in a project",
   description:
-    "Lets the project's nodes clone from internal addresses (private, loopback, link-local and the like) of the host of this git URL, whatever the panel's own DNS answers for it: for a git server whose name is public at the panel and internal at the nodes (split-horizon DNS). Saving a source as an admin does this by itself only when the panel sees the host as internal. Also for a LAN-only name the panel cannot resolve (the first-start seed of 0.2 does not record those), and for a node behind an HTTP proxy that cannot resolve the git host itself. The project's members may then use the host in their sources and git.branches. Nodes still clone only that host and port from an internal address, never a redirect or submodule to another one, and never a cloud metadata address (BAD_REQUEST internalTarget).",
+    "Lets the project's nodes clone from internal addresses (private, loopback, link-local, the node's own and the like) of the host of this git URL, whatever the panel's own DNS answers for it: for a git server whose name is public at the panel and internal at the nodes (split-horizon DNS). Saving a source as an admin does this by itself only when the panel sees the host as internal (a host on one of the nodes' own addresses counts). Also for a LAN-only name the panel cannot resolve (the first-start seed of 0.2 does not record those), and for a node behind an HTTP proxy that cannot resolve the git host itself (or that node's root sets git_proxy_resolves in its config.yml). git.listInternalHosts lists them, git.removeInternalHost takes one off. The project's members may then use the host in their sources and git.branches. Nodes still clone only that host and port from an internal address, never a redirect or submodule to another one, and never a cloud metadata address (BAD_REQUEST internalTarget).",
   input: Type.Object({ projectId: Id, url: GitUrl }),
   output: Type.Object({
     host: Type.String({ description: 'The host as recorded for the project, for example "gitea.lan" or "10.0.0.7:3000".' }),
   }),
+  permission: permission.global("git.manage"),
+  mcp: true,
+  audit: true,
+});
+
+export const InternalGitHost = Type.String({
+  minLength: 1,
+  maxLength: 260,
+  pattern: "^[A-Za-z0-9.:\\[\\]-]+$",
+  description: 'A host as recorded for a project, for example "gitea.lan", "10.0.0.7:3000" or "[fd00::7]:3000".',
+});
+
+export const listInternalHosts = defineOp({
+  id: "git.listInternalHosts",
+  kind: "query",
+  summary: "List a project's internal git hosts",
+  description:
+    "Lists the git hosts a project's nodes may clone from internal addresses (private, loopback, link-local, a node's own and the like): recorded when an admin saved a source with an internal host there, by git.allowInternalHost, or by the first start of 0.2 for sources saved before. approvedBy is null for hosts the first start recorded (or whose admin account is gone); usedBy counts the project's generic git and compose stack sources on the host.",
+  input: Type.Object({ projectId: Id }),
+  output: Type.Object({
+    items: Type.Array(
+      Type.Object({
+        host: InternalGitHost,
+        approvedBy: Type.Union([Type.Object({ id: Id, name: Type.String() }), Type.Null()]),
+        createdAt: Timestamp,
+        usedBy: Type.Integer({ minimum: 0 }),
+      }),
+    ),
+  }),
+  permission: permission.global("git.manage"),
+  mcp: true,
+  audit: false,
+});
+
+export const removeInternalHost = defineOp({
+  id: "git.removeInternalHost",
+  kind: "mutation",
+  summary: "Stop allowing an internal git host in a project",
+  description:
+    "Takes a host off a project's internal git hosts: its nodes then clone it from public addresses only (not their own), so builds of the project's sources on a host the panel sees as internal fail until an admin saves one or allows it again (git.allowInternalHost). NOT_FOUND when the host is not allowed in the project.",
+  input: Type.Object({ projectId: Id, host: InternalGitHost }),
+  output: Empty,
   permission: permission.global("git.manage"),
   mcp: true,
   audit: true,

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/netguard"
 	"github.com/seylo-dev/app/go/internal/version"
 )
 
@@ -73,6 +74,33 @@ func timeZoneName(tz string, tzSet bool, localtime, timezoneFile string) string 
 func refreshVolatileFacts(f *agentv1.NodeFacts, dataDir string) {
 	f.DiskTotalBytes, f.DiskFreeBytes = diskUsage(dataDir)
 	f.PublicIpv4, f.PublicIpv6 = publicAddresses()
+	f.InterfaceAddresses = interfaceAddresses()
+}
+
+// maxInterfaceAddresses caps NodeFacts.interface_addresses.
+const maxInterfaceAddresses = 64
+
+// ownPublicAddresses lists the node's public interface addresses. Tests
+// replace it.
+var ownPublicAddresses = netguard.OwnPublicAddresses
+
+// interfaceAddresses is NodeFacts.interface_addresses: every public address
+// on the node's interfaces, the ones its git fetches refuse unless allowed,
+// so the panel can count git hosts on them as internal. Nil when they
+// cannot be read.
+func interfaceAddresses() []string {
+	addrs, err := ownPublicAddresses()
+	if err != nil {
+		return nil
+	}
+	if len(addrs) > maxInterfaceAddresses {
+		addrs = addrs[:maxInterfaceAddresses]
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		out = append(out, a.String())
+	}
+	return out
 }
 
 // PublicAddresses is publicAddresses for the node CLI (setup links).

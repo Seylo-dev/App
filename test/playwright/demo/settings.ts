@@ -3,7 +3,7 @@
 // acme-shop and personal). Shaped like the op contracts and loosely typed:
 // Playwright transpiles this file without type checks.
 
-import { ids as world } from "./fixtures";
+import { viewer, ids as world } from "./fixtures";
 
 type Input = Record<string, any>;
 const now = Date.now();
@@ -17,6 +17,13 @@ const nodes = [
 ];
 
 export const fixtures: Record<string, unknown> = {
+  // Project settings > Internal git hosts.
+  "git.listInternalHosts": {
+    items: [
+      { host: "gitea.lan:3000", approvedBy: { id: viewer.id, name: "You" }, createdAt: new Date(now - 86_400_000).toISOString(), usedBy: 2 },
+      { host: "10.0.0.7", approvedBy: null, createdAt: new Date(now - 7 * 86_400_000).toISOString(), usedBy: 1 },
+    ],
+  },
   "settings.general": {
     name: "Acme Cloud",
     domain: "panel.acme.dev",

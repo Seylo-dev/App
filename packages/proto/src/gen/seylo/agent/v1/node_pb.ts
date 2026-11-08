@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/node.proto.
  */
 export const file_seylo_agent_v1_node: GenFile = /*@__PURE__*/
-  fileDesc("ChlzZXlsby9hZ2VudC92MS9ub2RlLnByb3RvEg5zZXlsby5hZ2VudC52MSLhAwoJTm9kZUZhY3RzEhAKCGhvc3RuYW1lGAEgASgJEgoKAm9zGAIgASgJEg4KBmtlcm5lbBgDIAEoCRIMCgRhcmNoGAQgASgJEhEKCWNwdV9jb3JlcxgFIAEoDRIaChJtZW1vcnlfdG90YWxfYnl0ZXMYBiABKAQSGAoQZGlza190b3RhbF9ieXRlcxgHIAEoBBIXCg9kaXNrX2ZyZWVfYnl0ZXMYCCABKAQSFgoOZG9ja2VyX3ZlcnNpb24YCSABKAkSGgoSZG9ja2VyX2FwaV92ZXJzaW9uGAogASgJEhYKDmNncm91cF92ZXJzaW9uGAsgASgNEhMKC3B1YmxpY19pcHY0GAwgASgJEhMKC3B1YmxpY19pcHY2GA0gASgJEi0KCWJvb3RfdGltZRgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNYWdlbnRfdmVyc2lvbhgPIAEoCRIUCgxjYXBhYmlsaXRpZXMYECADKAkSKAoFd2luZ3MYESABKAsyGS5zZXlsby5hZ2VudC52MS5XaW5nc0luZm8SEQoJY2FuX2J1aWxkGBIgASgIEhQKDHByaXZhdGVfaXB2NBgTIAEoCRIRCgl0aW1lX3pvbmUYFCABKAkidAoJV2luZ3NJbmZvEg8KB3ZlcnNpb24YASABKAkSGwoTdHJhZWZpa19keW5hbWljX2RpchgCIAEoCRIgChhmb3JlaWduX3JvdXRlc19zdXBwb3J0ZWQYAyABKAgSFwoPcHJveHlfY29udGFpbmVyGAQgASgJQrQBChJjb20uc2V5bG8uYWdlbnQudjFCCU5vZGVQcm90b1ABWjlnaXRodWIuY29tL3NleWxvLWRldi9hcHAvZ28vZ2VuL3BiL3NleWxvL2FnZW50L3YxO2FnZW50djGiAgNTQViqAg5TZXlsby5BZ2VudC5WMcoCDlNleWxvXEFnZW50XFYx4gIaU2V5bG9cQWdlbnRcVjFcR1BCTWV0YWRhdGHqAhBTZXlsbzo6QWdlbnQ6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChlzZXlsby9hZ2VudC92MS9ub2RlLnByb3RvEg5zZXlsby5hZ2VudC52MSL+AwoJTm9kZUZhY3RzEhAKCGhvc3RuYW1lGAEgASgJEgoKAm9zGAIgASgJEg4KBmtlcm5lbBgDIAEoCRIMCgRhcmNoGAQgASgJEhEKCWNwdV9jb3JlcxgFIAEoDRIaChJtZW1vcnlfdG90YWxfYnl0ZXMYBiABKAQSGAoQZGlza190b3RhbF9ieXRlcxgHIAEoBBIXCg9kaXNrX2ZyZWVfYnl0ZXMYCCABKAQSFgoOZG9ja2VyX3ZlcnNpb24YCSABKAkSGgoSZG9ja2VyX2FwaV92ZXJzaW9uGAogASgJEhYKDmNncm91cF92ZXJzaW9uGAsgASgNEhMKC3B1YmxpY19pcHY0GAwgASgJEhMKC3B1YmxpY19pcHY2GA0gASgJEi0KCWJvb3RfdGltZRgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNYWdlbnRfdmVyc2lvbhgPIAEoCRIUCgxjYXBhYmlsaXRpZXMYECADKAkSKAoFd2luZ3MYESABKAsyGS5zZXlsby5hZ2VudC52MS5XaW5nc0luZm8SEQoJY2FuX2J1aWxkGBIgASgIEhQKDHByaXZhdGVfaXB2NBgTIAEoCRIRCgl0aW1lX3pvbmUYFCABKAkSGwoTaW50ZXJmYWNlX2FkZHJlc3NlcxgVIAMoCSJ0CglXaW5nc0luZm8SDwoHdmVyc2lvbhgBIAEoCRIbChN0cmFlZmlrX2R5bmFtaWNfZGlyGAIgASgJEiAKGGZvcmVpZ25fcm91dGVzX3N1cHBvcnRlZBgDIAEoCBIXCg9wcm94eV9jb250YWluZXIYBCABKAlCtAEKEmNvbS5zZXlsby5hZ2VudC52MUIJTm9kZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * NodeFacts describes a node. The agent sends it in ClientHello and
@@ -147,6 +147,19 @@ export type NodeFacts = Message<"seylo.agent.v1.NodeFacts"> & {
    * @generated from field: string time_zone = 20;
    */
   timeZone: string;
+
+  /**
+   * The public addresses on the node's own interfaces (what netguard
+   * counts as public; internal ones are left out), sorted, at most 64. The
+   * agent refuses git connections to them like internal addresses unless
+   * the panel allows internal addresses for the source's host
+   * (GitSource.allow_internal_host), and the panel counts a git host whose
+   * every address is a node's address as internal. Empty from agents
+   * before this field. added in 0.2 (security)
+   *
+   * @generated from field: repeated string interface_addresses = 21;
+   */
+  interfaceAddresses: string[];
 };
 
 /**

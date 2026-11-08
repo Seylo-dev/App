@@ -80,6 +80,14 @@ type FileConfig struct {
 	// (HostShell), whatever the panel's node setting says. Only someone
 	// with root on the node can set it.
 	NoHostShell bool `yaml:"no_host_shell,omitempty"`
+	// GitProxyResolves says the node's HTTP proxy (the agent's
+	// HTTPS_PROXY/HTTP_PROXY) resolves names the node's own DNS does not
+	// know: a git host the node cannot resolve then goes on to the proxy
+	// unchecked, and the proxy's own rules decide where it connects.
+	// Without it such a host is refused unless the panel allowed internal
+	// addresses for it (GitSource.allow_internal_host). Only someone with
+	// root on the node can set it.
+	GitProxyResolves bool `yaml:"git_proxy_resolves,omitempty"`
 }
 
 // PanelAddress is one way to reach the panel, as config.yml stores it.

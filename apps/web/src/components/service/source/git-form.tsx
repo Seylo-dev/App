@@ -12,6 +12,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
+import { InternalHostNote } from "../../git/internal-hosts";
 import { Field, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
@@ -45,12 +46,15 @@ export function GitForm({ service }: { service: ServiceDetail }) {
   const validUrl = urlPattern.test(url.trim());
   const hasCredentials = !validUrl && anyGitUrl.test(url.trim());
 
+  const submit = () =>
+    save.mutate({ serviceId: service.id, source: { type: "git", url: url.trim(), branch: branch.trim(), credentialId, deployOnPush } });
+
   return (
     <form
       className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault();
-        save.mutate({ serviceId: service.id, source: { type: "git", url: url.trim(), branch: branch.trim(), credentialId, deployOnPush } });
+        submit();
       }}
     >
       <Field
@@ -83,7 +87,15 @@ export function GitForm({ service }: { service: ServiceDetail }) {
           {branches.isPending ? (
             <span className="text-muted-foreground">{t("serviceSource.git.checking")}</span>
           ) : branches.isError ? (
-            <OpErrorNote error={branches.error} compact />
+            <div className="flex flex-col gap-2">
+              <OpErrorNote error={branches.error} compact />
+              <InternalHostNote
+                error={branches.error}
+                projectId={service.projectId}
+                url={check.url}
+                onAllowed={() => void branches.refetch()}
+              />
+            </div>
           ) : (
             <span className="text-chip-green-fg">
               {t("serviceSource.git.reachable", { count: branches.data.branches.length, branch: branches.data.defaultBranch ?? "-" })}
@@ -144,6 +156,7 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         </Button>
         <MutationError error={save.error} />
       </div>
+      <InternalHostNote error={save.error} projectId={service.projectId} url={url.trim()} onAllowed={submit} />
     </form>
   );
 }

@@ -1,5 +1,6 @@
-// Project settings: name and description, and deleting an empty project.
-// The protected Panel project can be described but not renamed or deleted.
+// Project settings: name and description, the internal git hosts its nodes
+// may clone from (admins only), and deleting an empty project. The
+// protected Panel project can be described but not renamed or deleted.
 
 import { projects } from "@seylo/ops";
 import { useOpMutation } from "@seylo/ops/react";
@@ -13,6 +14,7 @@ import { type FormEvent, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { Project } from "../../lib/types";
+import { InternalGitHosts } from "../git/internal-hosts";
 
 export function ProjectSettings({ project }: { project: Project }) {
   const navigate = useNavigate();
@@ -60,6 +62,8 @@ export function ProjectSettings({ project }: { project: Project }) {
           </div>
         </form>
       </SectionCard>
+
+      <InternalGitHosts projectId={project.id} projectName={project.name} />
 
       {!project.protected && (
         <SectionCard danger title={t("project.dangerZone")} description={t("project.deleteHint")}>

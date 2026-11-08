@@ -63,9 +63,17 @@ type NodeFacts struct {
 	// IANA name of the node's own time zone (/etc/localtime, else TZ), for
 	// example "Europe/Berlin"; "UTC" when the machine names none. Scheduled
 	// cleanup runs in it. added in 0.2 (nodeops)
-	TimeZone      string `protobuf:"bytes,20,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TimeZone string `protobuf:"bytes,20,opt,name=time_zone,json=timeZone,proto3" json:"time_zone,omitempty"`
+	// The public addresses on the node's own interfaces (what netguard
+	// counts as public; internal ones are left out), sorted, at most 64. The
+	// agent refuses git connections to them like internal addresses unless
+	// the panel allows internal addresses for the source's host
+	// (GitSource.allow_internal_host), and the panel counts a git host whose
+	// every address is a node's address as internal. Empty from agents
+	// before this field. added in 0.2 (security)
+	InterfaceAddresses []string `protobuf:"bytes,21,rep,name=interface_addresses,json=interfaceAddresses,proto3" json:"interface_addresses,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *NodeFacts) Reset() {
@@ -238,6 +246,13 @@ func (x *NodeFacts) GetTimeZone() string {
 	return ""
 }
 
+func (x *NodeFacts) GetInterfaceAddresses() []string {
+	if x != nil {
+		return x.InterfaceAddresses
+	}
+	return nil
+}
+
 // WingsInfo describes a Pelican Wings installation found next to the agent.
 type WingsInfo struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
@@ -318,7 +333,7 @@ var File_seylo_agent_v1_node_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x05\n" +
+	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xff\x05\n" +
 	"\tNodeFacts\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x16\n" +
@@ -342,7 +357,8 @@ const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\x05wings\x18\x11 \x01(\v2\x19.seylo.agent.v1.WingsInfoR\x05wings\x12\x1b\n" +
 	"\tcan_build\x18\x12 \x01(\bR\bcanBuild\x12!\n" +
 	"\fprivate_ipv4\x18\x13 \x01(\tR\vprivateIpv4\x12\x1b\n" +
-	"\ttime_zone\x18\x14 \x01(\tR\btimeZone\"\xb8\x01\n" +
+	"\ttime_zone\x18\x14 \x01(\tR\btimeZone\x12/\n" +
+	"\x13interface_addresses\x18\x15 \x03(\tR\x12interfaceAddresses\"\xb8\x01\n" +
 	"\tWingsInfo\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12.\n" +
 	"\x13traefik_dynamic_dir\x18\x02 \x01(\tR\x11traefikDynamicDir\x128\n" +
