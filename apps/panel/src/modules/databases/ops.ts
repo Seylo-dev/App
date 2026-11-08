@@ -43,7 +43,7 @@ import {
   engineVersions,
   generatePassword,
   generateUserName,
-  healthCommand,
+  healthProbe,
 } from "./engines";
 import {
   adminPasswordSecret,
@@ -194,7 +194,7 @@ export const create = implement(dbOps.create, (input, ctx) => {
         container: { ...defaultContainer, command: containerCommand(input.engine), entrypoint: [], stopGraceSeconds: 30 },
         ports: [{ containerPort: engine.port, protocol: "tcp" }],
         healthCheck: {
-          probe: { type: "command", command: healthCommand(input.engine) },
+          probe: healthProbe(input.engine),
           intervalSeconds: 10,
           timeoutSeconds: 5,
           startPeriodSeconds: 60,

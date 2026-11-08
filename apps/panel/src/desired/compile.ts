@@ -38,7 +38,7 @@ import { nodeAddress, privateIpv4Of } from "../modules/domains/lookup";
 import { serviceSpecFor, servicesOnNode } from "../modules/services";
 import type { SecretBox } from "../security/secret-box";
 import { getSetting } from "../settings";
-import type { DesiredContributor } from "./contributors";
+import { type CompileMemo, compileMemo, type DesiredContributor } from "./contributors";
 
 export interface CompileOptions {
   /** Revision to stamp on the result (nodes.desired_revision after the bump). */
@@ -59,8 +59,9 @@ export function compileDesiredState(db: PanelDb, nodeId: string, options: Compil
   if (!node) throw new Error(`node ${nodeId} does not exist`);
 
   const specs: ServiceSpec[] = [];
+  const memo = compileMemo();
   for (const serviceId of placedServiceIds(db, nodeId)) {
-    const spec = compileServiceSpec(db, nodeId, serviceId, options);
+    const spec = compileServiceSpec(db, nodeId, serviceId, options, memo);
     if (spec) specs.push(spec);
   }
   const projectIds = [...new Set(specs.map((s) => s.projectId))].sort();
@@ -90,8 +91,17 @@ export function compileNodeSettings(db: PanelDb, node: typeof nodes.$inferSelect
   return out;
 }
 
-/** One service's spec for one node, or null when nothing of it runs there. */
-export function compileServiceSpec(db: PanelDb, nodeId: string, serviceId: string, options: CompileOptions): ServiceSpec | null {
+/**
+ * One service's spec for one node, or null when nothing of it runs there.
+ * Specs compiled together from one moment of the database share `memo`.
+ */
+export function compileServiceSpec(
+  db: PanelDb,
+  nodeId: string,
+  serviceId: string,
+  options: CompileOptions,
+  memo: CompileMemo = compileMemo(),
+): ServiceSpec | null {
   const spec = serviceSpecFor(db, options.secrets, serviceId, nodeId);
   if (!spec) return null;
   const service = db.select().from(services).where(eq(services.id, serviceId)).get();
@@ -99,7 +109,7 @@ export function compileServiceSpec(db: PanelDb, nodeId: string, serviceId: strin
   addCronJobs(db, spec);
   fillRemoteUpstreams(db, spec);
   for (const contributor of options.contributors ?? []) {
-    contributor.service?.({ db, secrets: options.secrets, nodeId, service, spec });
+    contributor.service?.({ db, secrets: options.secrets, nodeId, service, spec, memo });
   }
   return spec;
 }

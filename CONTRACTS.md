@@ -206,7 +206,12 @@ Summary; the full rules are in `proto/README.md` and the comments of
   snapshots and metrics about other services are dropped, and an update
   result finishes only a step of that node. Best-effort events reuse the
   node's scope for a second (a service missing from it is looked up again
-  after 100 ms); durable reports and snapshots use a fresh one. A metrics
+  after 100 ms); durable reports and snapshots use a fresh one. The scope
+  and the registry tunnel's (`registryScope`) read deployments and builds
+  in flight through partial indexes (`deployments_in_flight_idx`,
+  `builds_in_flight_idx`, migration 0003), since deployments are never
+  deleted; their conditions are the literal `deploymentInFlight` /
+  `buildInFlight` (a bound `inArray` list never matches a partial index). A metrics
   event keeps one entry per service, and a live series at most 600 points.
   Every string of the ClientHello, its NodeFacts included, and
   `nodeFacts` events are capped (strings 256 chars, 256 capabilities of
@@ -238,9 +243,13 @@ Summary; the full rules are in `proto/README.md` and the comments of
   (newest 200 crashes per service always kept), and per node at most the
   newest agent reports of each report lane up to its budget (75,000 and
   32 MiB; 10,000 and 8 MiB for backup, cleanup and update results) and
-  32 MiB of crash reports, webhook deliveries 30 days
-  (rejected ones 1 day), notification deliveries 30 days, resolved alerts
-  180 days, deploy log lines of failed/cancelled/superseded deployments
+  32 MiB of crash reports (`report_totals`, rows and bytes per node and
+  kind kept by triggers since migration 0003, says which node is over a
+  cap; only those nodes' rows are read), webhook deliveries 30 days
+  (rejected ones 1 day), notification deliveries 30 days, alerts 180 days
+  after they were resolved, or after they were raised when nothing resolved
+  them (deploy, build, backup, cleanup and update results are events, not
+  incidents), deploy log lines of failed/cancelled/superseded deployments
   after 30 days (newest 20 per service and the live one keep theirs); a
   service keeps its two newest source uploads.
 - Proto changes are add-only within v1 (`proto/README.md`).
@@ -1202,16 +1211,19 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   fields (or `@daily` and friends) in UTC. Each due schedule enqueues one job
   with dedupe key `schedule:<key>`, so a slow run is never doubled; calling
   `ensure` again with the same timing keeps `nextRunAt`. `remove(key)`,
-  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`. Every run leaves a
-  finished `jobs` row; rows finished more than 7 days ago are deleted at
-  start and by the hourly retention sweep (`pruneFinishedJobs`, called from
-  `nodes/retention.ts` `pruneTables`).
+  `removePrefix(prefix)`, `keys(prefix)`, `get(key)`. Every run is a job
+  row; jobs that finished more than 7 days ago are deleted at start, then
+  once an hour by the runner's tick and by the hourly retention sweep
+  (`jobs/queue.ts` `pruneFinishedJobs`, also called from
+  `nodes/retention.ts` `pruneTables`), so a panel that runs for months
+  holds about a week of them.
 - Alerts: `deps.alerts.raise({ event, key, title, message?, serviceId?,
   projectId?, nodeId?, link?, severity? })` (`modules/alerts/sink.ts`). One
   row per `key` ("<incident kind>:<subject>:<start>"); mutes and the
   notification rules decide who is told; delivery is a retried job per
   channel. `deps.alerts.resolve(keyPrefix, recovered?)` closes the incident
-  and can record the good news (feed only). Agent events (deploy/build
+  and can record the good news (feed only); it and `isOpen(keyPrefix)`
+  match keys as a range on the unique `event_key` index. Agent events (deploy/build
   results, health, backups, node alerts, updates, crashes via
   `agents.onCrash`, node offline after a 60 s grace) become alerts in
   `modules/alerts/events.ts`.
@@ -2245,9 +2257,14 @@ The compiler (`desired/compile.ts`) starts from the services module's
 contributors. A module that owns rows agents need registers one in its
 `start()`: `deps.agents.desired.contribute({ name, service(ctx), node(ctx) })`
 (`desired/contributors.ts`); `ctx.spec` / `ctx.settings` are changed in
-place, in registration order. The networking contributor
+place, in registration order. `ctx.memo` lives for one compile (a full
+state, or the specs one ApplyService pass compiles together before its
+first send) and holds what many services share. The networking contributor
 (`modules/domains/contributor.ts`) sets env, routing, dev access, public
-ports, database/Box specs and the global maintenance page.
+ports, database/Box specs and the global maintenance page; services
+without a sealed deployment env (databases, Boxes, parked clones) resolve
+theirs from one env graph per project per compile (`ctx.memo`), not one
+per service.
 
 Live topics the nodes module publishes (`modules/nodes/live.ts`): `panel` invalidates
 `nodes.list`, `system.info`, `updates.status` on node changes; `node:<id>`
@@ -2352,7 +2369,12 @@ history.
 Metrics: each `metrics` event feeds `modules/metrics/ingest.ts`: a 5-minute
 in-memory window (range `live`) and `metrics.db` buckets 1m (26 h), 5m
 (8 days) and 1h (35 days); `30d` groups hourly buckets by 6 hours. Network
-rates come from the cumulative counters of consecutive samples.
+rates come from the cumulative counters of consecutive samples. Each sample
+is one metrics.db transaction; closing a minute writes the 1m row and
+updates the 5m and 1h rows from running sums (a bucket's 1m rows are read
+only when it starts, after a restart, or when a minute comes again), and
+the hourly prune deletes through `(resolution, bucket_start)` indexes
+(metrics migration 0001).
 
 ## Placeholders
 
@@ -2602,7 +2624,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   destructive, so models need no approval), audited, refusals included. Only `https: acme` domains whose certificate is
   pending or failed (CONFLICT `reason` `notAcme`, `certificateValid`). Once
   a minute per domain, in memory (RATE_LIMITED `reason: certificateRetry`
-  with `retryAfter`; a refused try does not start the minute). DNS is
+  with `retryAfter`; a refused try does not start the minute). The minute
+  is taken before the DNS lookup and the agent calls and given back when
+  the try fails, so requests sent together make one retry. DNS is
   looked up now (and stored): `missing` or `wrongTarget` is refused
   (CONFLICT `reason: dnsNotPointing`, the DNS check's message plus why),
   since Let's Encrypt validates through that record and counts every
@@ -2670,7 +2694,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   user (`ch_` + 10 characters) from `CLICKHOUSE_USER`/`_PASSWORD`/`_DB`
   with `CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1` (so it can create the
   exposed user), and its health check reads `/ping` on the container's own
-  address (the first start serves 127.0.0.1 only). ClickHouse adds
+  address (the first start serves 127.0.0.1 only). Mongo's health check is
+  TCP on its port (`healthProbe`), not mongosh: that is a Node.js program
+  (about 0.2 s of CPU and a 265 MB process inside the container on every
+  probe, measured with `mongo:8.0`); migration 0003 moves databases still on
+  the mongosh default, in the service and its deployments' run settings,
+  and leaves changed checks alone. ClickHouse adds
   `INTERNAL_HTTP_URL` (`http://user:password@<name>:8123/<db>`, a
   credential) and `INTERNAL_HTTP_PORT` to the references; exposed URLs
   carry `secure=true` (and `skip_verify=true` with a self-signed

@@ -3,10 +3,11 @@
 // change being ignored, and one spec the agent refuses does not hold up the
 // rest of the node.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { StatusCode } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { nodes } from "../src/db/schema";
+import { nodes, services } from "../src/db/schema";
+import * as envGraph from "../src/modules/env/graph";
 import { flusherFor } from "../src/modules/nodes/index";
 import { type FakeAgent, FakeStatus } from "./fake-agent";
 import { type TestPanel, testPanel } from "./helpers";
@@ -71,4 +72,28 @@ test("a spec the agent refuses does not stop the node's other services", async (
   panel.deps.agents.desired.markDirty({ nodeId: agent.nodeId });
   await panel.deps.agents.desired.settled();
   expect(agent.desired.has(good.id)).toBe(true);
+});
+
+test("ApplyService passes compile their specs together: one env graph per project, not one per service", async () => {
+  const agent = await joinAgent(panel, url);
+  agents.push(agent);
+  agent.handle("ApplyService", (request: any) => {
+    agent.desired.set(request.service.id, request.service);
+    return { acceptedRevision: request.revision };
+  });
+  const project = seedProject(panel);
+  // Parked clones (stopped, never deployed) have no sealed env and resolve theirs from the graph.
+  const clones = [1, 2, 3, 4, 5, 6].map((i) => seedService(panel, project.id, agent.nodeId, { name: `clone-${i}`, image: null }));
+  for (const clone of clones) panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, clone.id)).run();
+  await panel.deps.agents.desired.settled();
+
+  const graphs = spyOn(envGraph, "buildEnvGraph");
+  try {
+    panel.deps.agents.desired.markDirty({ projectId: project.id });
+    await panel.deps.agents.desired.settled();
+    for (const clone of clones) expect((agent.desired.get(clone.id) as { stopped?: boolean } | undefined)?.stopped).toBe(true);
+    expect(graphs.mock.calls.filter((call) => call[1] === project.id)).toHaveLength(1);
+  } finally {
+    graphs.mockRestore();
+  }
 });

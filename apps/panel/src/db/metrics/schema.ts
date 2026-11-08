@@ -28,7 +28,11 @@ export const nodeMetrics = sqliteTable(
     diskUsedBytes: integer("disk_used_bytes").notNull(),
     diskTotalBytes: integer("disk_total_bytes").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.nodeId, t.resolution, t.bucketStart] })],
+  (t) => [
+    primaryKey({ columns: [t.nodeId, t.resolution, t.bucketStart] }),
+    // The hourly prune deletes by resolution and age, across nodes.
+    index("node_metrics_bucket_idx").on(t.resolution, t.bucketStart),
+  ],
 );
 
 export const serviceMetrics = sqliteTable(
@@ -38,7 +42,11 @@ export const serviceMetrics = sqliteTable(
     nodeId: text("node_id").notNull(),
     ...bucket,
   },
-  (t) => [primaryKey({ columns: [t.serviceId, t.nodeId, t.resolution, t.bucketStart] })],
+  (t) => [
+    primaryKey({ columns: [t.serviceId, t.nodeId, t.resolution, t.bucketStart] }),
+    // The hourly prune deletes by resolution and age, across services.
+    index("service_metrics_bucket_idx").on(t.resolution, t.bucketStart),
+  ],
 );
 
 export const uptimeSamples = sqliteTable(

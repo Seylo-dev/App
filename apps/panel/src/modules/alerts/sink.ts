@@ -11,7 +11,7 @@
 // without the start.
 
 import type { alerts as alertOps } from "@seylo/ops";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, gte, isNull, lt, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { alertMutes, alerts, notificationChannels, services } from "../../db/schema";
 import type { JobQueue } from "../../jobs/queue";
@@ -86,8 +86,31 @@ export const defaultSeverity: Record<AlertEventName, AlertSeverity> = {
 
 const feedOnly = new Set<string>(["node_online", "uptime_up", "health_recovered", "domain_live"]);
 
-function keyStartsWith(prefix: string) {
-  return sql`substr(${alerts.eventKey}, 1, ${prefix.length}) = ${prefix}`;
+/**
+ * The first string after every string that starts with `prefix` (its last
+ * code point plus one), or null when there is none. Text compares by its
+ * UTF-8 bytes, which sort like code points.
+ */
+export function prefixEnd(prefix: string): string | null {
+  const points = [...prefix];
+  while (points.length > 0) {
+    const last = points.pop()?.codePointAt(0) ?? 0;
+    if (last >= 0x10ffff) continue;
+    // Surrogates are not characters; nothing sorts between U+D7FF and U+E000.
+    const next = last + 1 >= 0xd800 && last + 1 <= 0xdfff ? 0xe000 : last + 1;
+    return points.join("") + String.fromCodePoint(next);
+  }
+  return null;
+}
+
+/**
+ * Keys that start with `prefix`, as a range on alerts_event_key_unique (a
+ * substr() comparison cannot use the index and reads the whole table on
+ * every crash report and health change).
+ */
+export function keyStartsWith(prefix: string) {
+  const end = prefixEnd(prefix);
+  return end === null ? gte(alerts.eventKey, prefix) : and(gte(alerts.eventKey, prefix), lt(alerts.eventKey, end));
 }
 
 export function createAlertSink(parts: { db: PanelDb; jobs: JobQueue; live: LiveHub; logger: Logger }): AlertSink {

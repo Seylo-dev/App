@@ -1,0 +1,290 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "9dbf1192-2ef5-4c2c-b1fc-f466a2be22bb",
+  "prevId": "3c2ddb19-188c-438c-a2da-60d7903fb711",
+  "tables": {
+    "node_metrics": {
+      "name": "node_metrics",
+      "columns": {
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bucket_start": {
+          "name": "bucket_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cpu_percent": {
+          "name": "cpu_percent",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cpu_percent_max": {
+          "name": "cpu_percent_max",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory_bytes": {
+          "name": "memory_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory_bytes_max": {
+          "name": "memory_bytes_max",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "network_rx_bytes_per_sec": {
+          "name": "network_rx_bytes_per_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "network_tx_bytes_per_sec": {
+          "name": "network_tx_bytes_per_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory_total_bytes": {
+          "name": "memory_total_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "disk_used_bytes": {
+          "name": "disk_used_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "disk_total_bytes": {
+          "name": "disk_total_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "node_metrics_bucket_idx": {
+          "name": "node_metrics_bucket_idx",
+          "columns": [
+            "resolution",
+            "bucket_start"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "node_metrics_node_id_resolution_bucket_start_pk": {
+          "columns": [
+            "node_id",
+            "resolution",
+            "bucket_start"
+          ],
+          "name": "node_metrics_node_id_resolution_bucket_start_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "service_metrics": {
+      "name": "service_metrics",
+      "columns": {
+        "service_id": {
+          "name": "service_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bucket_start": {
+          "name": "bucket_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cpu_percent": {
+          "name": "cpu_percent",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cpu_percent_max": {
+          "name": "cpu_percent_max",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory_bytes": {
+          "name": "memory_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory_bytes_max": {
+          "name": "memory_bytes_max",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "network_rx_bytes_per_sec": {
+          "name": "network_rx_bytes_per_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "network_tx_bytes_per_sec": {
+          "name": "network_tx_bytes_per_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "service_metrics_bucket_idx": {
+          "name": "service_metrics_bucket_idx",
+          "columns": [
+            "resolution",
+            "bucket_start"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "service_metrics_service_id_node_id_resolution_bucket_start_pk": {
+          "columns": [
+            "service_id",
+            "node_id",
+            "resolution",
+            "bucket_start"
+          ],
+          "name": "service_metrics_service_id_node_id_resolution_bucket_start_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "uptime_samples": {
+      "name": "uptime_samples",
+      "columns": {
+        "check_id": {
+          "name": "check_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ok": {
+          "name": "ok",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status_code": {
+          "name": "status_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "latency_ms": {
+          "name": "latency_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uptime_samples_at_idx": {
+          "name": "uptime_samples_at_idx",
+          "columns": [
+            "at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "uptime_samples_check_id_at_pk": {
+          "columns": [
+            "check_id",
+            "at"
+          ],
+          "name": "uptime_samples_check_id_at_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

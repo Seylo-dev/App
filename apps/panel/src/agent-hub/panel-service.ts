@@ -43,12 +43,14 @@ import {
   type SignedStorageRequest,
   StatusCode,
 } from "@seylo/proto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { PanelDb } from "../db/client";
 import {
   agentReports,
+  buildInFlight,
   builds,
   crashReports,
+  deploymentInFlight,
   deployments,
   nodes,
   type CrashAction as StoredCrashAction,
@@ -356,18 +358,13 @@ export function registryScope(db: PanelDb, nodeId: string): { nodeId: string; pu
   const targeted = db
     .select({ id: deployments.serviceId })
     .from(deployments)
-    .where(
-      and(
-        inArray(deployments.status, ["queued", "building", "deploying"]),
-        sql`exists (select 1 from json_each(${deployments.targetNodeIds}) where value = ${nodeId})`,
-      ),
-    )
+    .where(and(deploymentInFlight, sql`exists (select 1 from json_each(${deployments.targetNodeIds}) where value = ${nodeId})`))
     .all();
   const building = db
     .select({ id: deployments.serviceId })
     .from(builds)
     .innerJoin(deployments, eq(builds.deploymentId, deployments.id))
-    .where(and(eq(builds.nodeId, nodeId), inArray(builds.status, ["queued", "running"])))
+    .where(and(eq(builds.nodeId, nodeId), buildInFlight))
     .all();
   const push = [...new Set(building.map((r) => r.id))].sort();
   const pull = [...new Set([...placed, ...targeted].map((r) => r.id))].sort();

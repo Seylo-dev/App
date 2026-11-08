@@ -3,11 +3,12 @@
 // services module and env/routing from the networking contributor; these tests
 // cover what the compiler adds and that the pieces come together.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { CronConcurrency, ServiceKind } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { cronJobs, deployments, domains, nodes, projectEnv, serviceEnv, servicePlacements, services } from "../src/db/schema";
 import { compileDesiredState, compileServiceSpec, type DesiredContributor } from "../src/desired";
+import * as envGraph from "../src/modules/env/graph";
 import { type TestPanel, testPanel } from "./helpers";
 import { seedProject, seedService } from "./hub-helpers";
 
@@ -123,6 +124,43 @@ describe("compileDesiredState", () => {
     const env = Object.fromEntries(spec?.env.map((e) => [e.name, e.value]) ?? []);
     expect(env).toMatchObject({ API: "http://api:8080", REGION: "eu", PLAIN: "1" });
     expect(spec?.routing?.routes.map((r) => r.hosts)).toEqual([["shop.example.com"]]);
+  });
+
+  test("services without a sealed env share one env graph per project per compile", () => {
+    const { db, secrets } = panel.deps;
+    const ref = (target: string, variable: string) => `$${"{{"}${target}.${variable}}}`;
+    const shop = seedProject(panel);
+    const blog = seedProject(panel);
+    seedService(panel, shop.id, nodeA, { name: "api", spec: { ports: [{ containerPort: 8080, protocol: "tcp" }] } });
+    // Parked clones: stopped and never deployed, so no target deployment and no sealed env.
+    const parked = (projectId: string, name: string) => {
+      const svc = seedService(panel, projectId, nodeA, { name, image: null });
+      db.update(services).set({ stopped: true }).where(eq(services.id, svc.id)).run();
+      db.insert(serviceEnv)
+        .values({ serviceId: svc.id, contentSealed: secrets.seal(`API=${ref("api", "INTERNAL_URL")}\nNAME=${name}\n`, "service.env") })
+        .run();
+      return svc.id;
+    };
+    const clones = [1, 2, 3, 4, 5].map((i) => parked(shop.id, `clone-${i}`));
+    parked(blog.id, "blog-1");
+    parked(blog.id, "blog-2");
+
+    const graphs = spyOn(envGraph, "buildEnvGraph");
+    try {
+      const state = compileDesiredState(db, nodeA, options());
+      expect(state.services).toHaveLength(8);
+      expect(graphs.mock.calls.map((call) => call[1]).sort()).toEqual([shop.id, blog.id].sort());
+      const env = (id: string) => Object.fromEntries(state.services.find((s) => s.id === id)?.env.map((e) => [e.name, e.value]) ?? []);
+      expect(env(clones[0] ?? "")).toMatchObject({ API: "http://api:8080", NAME: "clone-1" });
+      expect(env(clones[4] ?? "")).toMatchObject({ API: "http://api:8080", NAME: "clone-5" });
+
+      // A spec compiled on its own (ApplyService) builds its own graph.
+      graphs.mockClear();
+      compileServiceSpec(db, nodeA, clones[1] ?? "", options());
+      expect(graphs).toHaveBeenCalledTimes(1);
+    } finally {
+      graphs.mockRestore();
+    }
   });
 
   test("never-deployed services and compose stacks are left out; the target deployment decides the image", () => {

@@ -3,6 +3,7 @@ import { deployments as deploymentOps, projects, services as serviceOps } from "
 import { DeployStage, ServiceKind } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { alerts, deployments, nodes, services } from "../src/db/schema";
+import { compileMemo } from "../src/desired/contributors";
 import { registryGcSweepJob, registryGcSweepJobType, servicesWithPrunableImages } from "../src/modules/deployments/registry-gc";
 import { networkingContributor } from "../src/modules/domains/contributor";
 import { writeServiceEnv } from "../src/modules/env/store";
@@ -197,7 +198,14 @@ describe("deploys", () => {
       const svc = panel.deps.db.select().from(services).where(eq(services.id, id)).get();
       const spec = serviceSpecFor(panel.deps.db, panel.deps.secrets, id, nodeA);
       if (!svc || !spec) throw new Error("no spec");
-      networkingContributor.service?.({ db: panel.deps.db, secrets: panel.deps.secrets, nodeId: nodeA, service: svc, spec });
+      networkingContributor.service?.({
+        db: panel.deps.db,
+        secrets: panel.deps.secrets,
+        nodeId: nodeA,
+        service: svc,
+        spec,
+        memo: compileMemo(),
+      });
       return Object.fromEntries(spec.env.map((v) => [v.name, v.value]));
     };
     writeServiceEnv(panel.deps.db, panel.deps.secrets, id, "NAME=v1\n", null);

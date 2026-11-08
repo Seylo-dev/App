@@ -1,0 +1,2 @@
+CREATE INDEX `node_metrics_bucket_idx` ON `node_metrics` (`resolution`,`bucket_start`);--> statement-breakpoint
+CREATE INDEX `service_metrics_bucket_idx` ON `service_metrics` (`resolution`,`bucket_start`);

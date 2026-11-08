@@ -66,17 +66,26 @@ export interface JobRunner extends JobQueue {
   stop(): Promise<void>;
 }
 
-/** Finished jobs (every schedule run leaves one) are kept a week. */
-export const finishedJobsRetentionMs = 7 * 24 * 60 * 60 * 1000;
+/** Finished jobs (succeeded, failed, cancelled) are kept this long. */
+export const finishedRetentionMs = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How often the runner deletes them. Schedules alone write a row per run
+ * (deployments.tick every 15 s, the minute sweeps, every uptime check), so
+ * a panel that is not restarted for months must not wait for its next start.
+ */
+export const finishedPruneEveryMs = 60 * 60 * 1000;
 
 /**
- * Deletes finished jobs older than the retention. Runs at start and with the
- * hourly retention sweep (nodes/retention.ts pruneTables): the 15 s
- * deployments tick alone leaves 5,760 rows a day.
+ * Deletes jobs that finished more than finishedRetentionMs ago. The runner
+ * calls it at start and once an hour on its tick, and the hourly retention
+ * sweep (nodes/retention.ts pruneTables) too. run_at is never after
+ * finished_at (a job runs once it is due), so the run_at bound keeps the
+ * delete on jobs_due_idx instead of reading every finished row.
  */
 export function pruneFinishedJobs(db: PanelDb, now = Date.now()): void {
+  const cutoff = new Date(now - finishedRetentionMs);
   db.delete(jobs)
-    .where(and(inArray(jobs.status, ["succeeded", "failed", "cancelled"]), lt(jobs.finishedAt, new Date(now - finishedJobsRetentionMs))))
+    .where(and(inArray(jobs.status, ["succeeded", "failed", "cancelled"]), lt(jobs.runAt, cutoff), lt(jobs.finishedAt, cutoff)))
     .run();
 }
 
@@ -91,6 +100,12 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
   const running: Record<JobLane, number> = { default: 0, slow: 0 };
   const limits: Record<JobLane, number> = { default: concurrency, slow: slowLaneSize };
   let timer: ReturnType<typeof setInterval> | undefined;
+  let lastPruneAt = Number.NEGATIVE_INFINITY;
+
+  const pruneFinished = (now: Date) => {
+    lastPruneAt = now.getTime();
+    pruneFinishedJobs(db, now.getTime());
+  };
 
   const laneOf = (type: string): JobLane => handlers.get(type)?.lane ?? "default";
   const slowTypes = () => [...handlers.values()].filter((h) => h.lane === "slow").map((h) => h.type);
@@ -157,6 +172,13 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
 
   const tick = (deps: Deps, now: Date): Promise<void>[] => {
     const started: Promise<void>[] = [];
+    if (now.getTime() - lastPruneAt >= finishedPruneEveryMs) {
+      try {
+        pruneFinished(now);
+      } catch (error) {
+        logger.error({ err: error }, "deleting finished jobs failed");
+      }
+    }
     try {
       schedules.runDue(now);
     } catch (error) {
@@ -212,7 +234,7 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
     start(deps, intervalMs = 1000) {
       // Jobs left "running" by a crash or restart never finished: run them again.
       db.update(jobs).set({ status: "queued", lockedAt: null }).where(eq(jobs.status, "running")).run();
-      pruneFinishedJobs(db);
+      pruneFinished(new Date());
       timer = setInterval(() => void tick(deps, new Date()), intervalMs);
     },
     async stop() {

@@ -19,7 +19,7 @@
 // lanes together still bound what one node adds per day.
 //
 // modules/nodes/retention.ts trims what each node has stored to the same
-// caps every hour.
+// caps every hour, reading only the nodes report_totals shows over a cap.
 
 import { and, eq, gte, inArray, notInArray, type SQL, sql } from "drizzle-orm";
 import type { PanelDb } from "../db/client";
