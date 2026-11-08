@@ -6,6 +6,8 @@ node_modules/
 /bin/
 /build/
 apps/*/dist/
+# The web app's source maps, kept out of dist (apps/web/vite.config.ts)
+apps/web/sourcemaps/
 packages/*/dist/
 
 # TypeScript incremental build info goes stale and breaks builds
