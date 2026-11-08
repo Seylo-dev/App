@@ -77,10 +77,16 @@ const create = implement(composeOps.create, async (input, ctx) => {
 const get = implement(composeOps.get, (input, ctx) => {
   const stack = requireStack(ctx, input.serviceId);
   const rows = projectServiceRows(ctx.db, stack.projectId).filter((r) => r.parentId === stack.id);
+  const source = displaySource(loadStackSource(ctx, stack));
+  // A pasted file carries every member's environment: values, which env.get
+  // hands out only with env.view; services.view alone does not read them.
+  const envVisible = [stack.id, ...rows.map((r) => r.id)].every((id) => ctx.access.can("env.view", { type: "service", id }));
+  const fileHidden = source.type === "inline" && source.yaml !== "" && !envVisible;
   return {
     stack: toDetail(ctx.db, ctx.agents, stack),
-    source: displaySource(loadStackSource(ctx, stack)),
+    source: fileHidden ? { type: "inline" as const, yaml: "" } : source,
     members: toSummaries(ctx.db, ctx.agents, rows),
+    fileHidden,
   };
 });
 

@@ -13198,7 +13198,7 @@
       "get": {
         "operationId": "compose.get",
         "summary": "Get a compose stack's file",
-        "description": "Returns where a stack's compose file comes from (with the pasted file) and the member services it created.",
+        "description": "Returns where a stack's compose file comes from (with the pasted file) and the member services it created. A pasted file holds the members' environment values, so it comes back empty with fileHidden true unless the caller holds env.view on the stack and every member.",
         "tags": [
           "compose"
         ],
@@ -13233,7 +13233,8 @@
                   "required": [
                     "stack",
                     "source",
-                    "members"
+                    "members",
+                    "fileHidden"
                   ],
                   "properties": {
                     "stack": {
@@ -14561,9 +14562,8 @@
                               "type": "string"
                             },
                             "yaml": {
-                              "minLength": 1,
                               "maxLength": 524288,
-                              "description": "The compose file (docker-compose.yml).",
+                              "description": "The compose file, empty when hidden.",
                               "type": "string"
                             }
                           }
@@ -15039,6 +15039,9 @@
                           }
                         }
                       }
+                    },
+                    "fileHidden": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -16489,7 +16492,7 @@
           }
         },
         "x-op-kind": "query",
-        "x-permission": "service:services.logs",
+        "x-permission": "service:logs.view",
         "x-mcp": true
       }
     },

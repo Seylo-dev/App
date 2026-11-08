@@ -1534,8 +1534,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   agent cannot read anyway is not skipped silently: the agent reports one
   failed `CronRun` per job and schedule (`unreadable-<hash>`, exit code -1,
   the parser's reason as its line; the same id after an agent restart, so
-  the panel stores it once), and `cron_failed` shows that line. Alert
-  sizes use the web app's units (binary steps, "3 GB").
+  the panel stores it once), and `cron_failed` shows that line. Cron reads
+  are `services.view` (`cron.list`, `cron.runs`), except a run's output
+  (`cron.run`), which is a log and needs `logs.view` like `logs.search`; a
+  grant or key that still lists the old one-op action `services.logs`
+  keeps an inert entry. Alert sizes use the web app's units (binary steps,
+  "3 GB").
 - Bodies read before authentication are capped while streaming: op JSON
   bodies at 1 MiB (`defaultOpBodyBytes`), or the op's own `maxBodyBytes` (at
   most 4 MiB, `maxOpBodyBytes`; `files.write` 4 MiB, `compose.preview`,

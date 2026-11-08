@@ -175,7 +175,7 @@ export const run = defineOp({
     /** True when older lines were cut; only the tail is kept. */
     truncated: Type.Boolean(),
   }),
-  permission: permission.service("services.logs", byService),
+  permission: permission.service("logs.view", byService),
   mcp: true,
   audit: false,
 });

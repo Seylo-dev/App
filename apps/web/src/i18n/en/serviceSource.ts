@@ -183,5 +183,7 @@ export default {
     volumes: { one: "{count} volume", other: "{count} volumes" },
     dependsOn: "after {names}",
     action: { create: "New", update: "Changed", delete: "Deleted", unchanged: "Same" },
+    hidden:
+      "The pasted file holds the members' environment values, so it is shown only to people with the Env view permission on the stack and all of its members.",
   },
 } as const;

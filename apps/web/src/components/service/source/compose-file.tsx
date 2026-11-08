@@ -35,6 +35,12 @@ export function ComposeFilePage({ service }: { service: ServiceDetail }) {
       </LoadingRegion>
     );
   if (stack.isError) return <OpErrorNote error={stack.error} />;
+  if (stack.data.fileHidden)
+    return (
+      <SectionCard title={t("serviceSource.compose.title")} description={t("serviceSource.compose.description")}>
+        <Callout tone="info">{t("serviceSource.compose.hidden")}</Callout>
+      </SectionCard>
+    );
   return <ComposeEditor service={service} initial={stack.data.source} />;
 }
 

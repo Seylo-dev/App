@@ -13,25 +13,31 @@ import { GitBranch, ServiceDetail, ServiceName, ServiceSummary } from "./service
 
 const ComposeYaml = Type.String({ minLength: 1, maxLength: 512 * 1024, description: "The compose file (docker-compose.yml)." });
 
+const GithubComposeSource = Type.Object({
+  type: Type.Literal("github"),
+  installationId: Id,
+  repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
+  branch: GitBranch,
+  path: RepoPath,
+  deployOnPush: Type.Boolean(),
+});
+const GitComposeSource = Type.Object({
+  type: Type.Literal("git"),
+  url: GitUrl,
+  branch: GitBranch,
+  path: RepoPath,
+  credentialId: Type.Union([Id, Type.Null()]),
+  deployOnPush: Type.Boolean(),
+});
+
 /** Where the compose file comes from: pasted text, or a file in a repository. */
-export const ComposeSource = Type.Union([
-  Type.Object({ type: Type.Literal("inline"), yaml: ComposeYaml }),
-  Type.Object({
-    type: Type.Literal("github"),
-    installationId: Id,
-    repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
-    branch: GitBranch,
-    path: RepoPath,
-    deployOnPush: Type.Boolean(),
-  }),
-  Type.Object({
-    type: Type.Literal("git"),
-    url: GitUrl,
-    branch: GitBranch,
-    path: RepoPath,
-    credentialId: Type.Union([Id, Type.Null()]),
-    deployOnPush: Type.Boolean(),
-  }),
+export const ComposeSource = Type.Union([Type.Object({ type: Type.Literal("inline"), yaml: ComposeYaml }), GithubComposeSource, GitComposeSource]);
+
+/** A stored source as compose.get returns it: a pasted file may come back empty (fileHidden). */
+const StoredComposeSource = Type.Union([
+  Type.Object({ type: Type.Literal("inline"), yaml: Type.String({ maxLength: 512 * 1024, description: "The compose file, empty when hidden." }) }),
+  GithubComposeSource,
+  GitComposeSource,
 ]);
 
 /** What one compose service becomes, shown before anything is created. */
@@ -109,9 +115,16 @@ export const get = defineOp({
   id: "compose.get",
   kind: "query",
   summary: "Get a compose stack's file",
-  description: "Returns where a stack's compose file comes from (with the pasted file) and the member services it created.",
+  description:
+    "Returns where a stack's compose file comes from (with the pasted file) and the member services it created. A pasted file holds the members' environment values, so it comes back empty with fileHidden true unless the caller holds env.view on the stack and every member.",
   input: Type.Object({ serviceId: Id }),
-  output: Type.Object({ stack: ServiceDetail, source: ComposeSource, members: Type.Array(ServiceSummary) }),
+  output: Type.Object({
+    stack: ServiceDetail,
+    source: StoredComposeSource,
+    members: Type.Array(ServiceSummary),
+    /** True when a pasted file was left out (yaml empty) because the caller lacks env.view on the stack or a member. */
+    fileHidden: Type.Boolean(),
+  }),
   permission: permission.service("services.view", serviceScope),
   sensitive: { output: ["source.yaml"] },
   mcp: true,
