@@ -8,24 +8,39 @@
 //                or a durable UpdateResult arrives
 //   agent step   UpdateAgent with the verified manifest; done when the node
 //                reconnects with the target version or an UpdateResult arrives;
-//                an offline node is skipped (it updates itself on start)
+//                an offline node is skipped with retry "waiting" and gets the
+//                update in a run of its own when it reconnects (catch-up.ts)
 //   docker step  single-step runs from nodes.updateDocker, finished by UpdateResult
 //
-// A failed step fails the run and skips the rest.
+// A run keeps the verified manifest it installs (update_runs.manifest), so a
+// check that finds a newer release, or a switch of the release channel,
+// never changes what a run in progress sends. A failed step fails the run
+// and skips the rest.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { OpError } from "@seylo/ops";
 import type { UpdateResult } from "@seylo/proto";
 import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
-import { isNewer } from "../../agent-hub/version";
+import { isNewer, parseVersion } from "../../agent-hub/version";
+import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
-import { nodes, servicePlacements, services, type UpdateStepStatus, updateRuns, updateSteps } from "../../db/schema";
+import {
+  nodes,
+  servicePlacements,
+  services,
+  type UpdateRunTrigger,
+  type UpdateStepRetry,
+  type UpdateStepStatus,
+  updateRuns,
+  updateSteps,
+} from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob, type JobContext } from "../../jobs/queue";
 import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { enqueueNext } from "../nodes/recurring";
-import { fetchLatestRelease, ReleaseError } from "./manifest";
+import { fetchRelease, ReleaseError } from "./manifest";
+import { releaseChannel, storedCheck } from "./release-state";
 import { forgetRollback, noteUpdateResult, panelKey, panelNodeId, wasRolledBack } from "./rollbacks";
 import "./settings";
 
@@ -34,11 +49,15 @@ export const stepTimeoutMs = 10 * 60_000;
 const pollMs = 5_000;
 export const checkIntervalSeconds = 6 * 3600;
 
-type RunRow = typeof updateRuns.$inferSelect;
+export type RunRow = typeof updateRuns.$inferSelect;
 type StepRow = typeof updateSteps.$inferSelect;
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 const stepStatus = (s: UpdateStepStatus) => (s === "rolled_back" ? "rolledBack" : s);
+const stepRetry = (r: UpdateStepRetry | null) => (r === "up_to_date" ? "upToDate" : r);
+
+/** The message of an agent step skipped because its node was offline. */
+export const offlineSkipMessage = "The node is offline; it gets the update when it reconnects.";
 
 export function toRun(db: PanelDb, run: RunRow) {
   const steps = db
@@ -72,6 +91,9 @@ export function toRun(db: PanelDb, run: RunRow) {
       error: step.error,
       startedAt: iso(step.startedAt),
       finishedAt: iso(step.finishedAt),
+      retry: stepRetry(step.retry) as never,
+      retryRunId: step.retryRunId,
+      retryAt: iso(step.retryAt),
     })),
   };
 }
@@ -80,21 +102,31 @@ export function activeRun(db: PanelDb): RunRow | undefined {
   return db.select().from(updateRuns).where(eq(updateRuns.status, "running")).orderBy(desc(updateRuns.createdAt)).get();
 }
 
-function agentVersion(deps: Pick<Deps, "agents">, row: typeof nodes.$inferSelect): string | null {
+export function agentVersion(deps: Pick<Deps, "agents">, row: typeof nodes.$inferSelect): string | null {
   return deps.agents.state.get(row.id)?.facts?.agentVersion || row.agentVersion;
 }
 
-/** The update status op output. */
-export function updateStatus(deps: Pick<Deps, "db" | "agents" | "config">) {
-  const check = getSetting(deps.db, "updateCheck");
+/** Only the owner changes the release channel. */
+export function isOwner(principal: Principal | undefined): boolean {
+  return principal !== undefined && principal.type !== "anonymous" && principal.user.role === "owner";
+}
+
+/** The update status op output. `principal` is the caller, for canChangeChannel. */
+export function updateStatus(deps: Pick<Deps, "db" | "agents" | "config"> & { principal?: Principal }) {
+  const check = storedCheck(deps.db);
   const latest = check?.latestVersion ?? null;
   const run = activeRun(deps.db);
+  const updateAvailable = isNewer(latest, deps.config.version);
   return {
     autoUpdate: getSetting(deps.db, "autoUpdate") ?? false,
+    channel: releaseChannel(deps.db),
+    canChangeChannel: isOwner(deps.principal),
     panel: {
       currentVersion: deps.config.version,
       latestVersion: latest,
-      updateAvailable: isNewer(latest, deps.config.version),
+      updateAvailable,
+      offeredVersion: updateAvailable ? latest : null,
+      latestIsPrerelease: (parseVersion(latest)?.pre ?? "") !== "",
       changelogUrl: check?.changelogUrl ?? null,
     },
     lastCheckedAt: check?.checkedAt ?? null,
@@ -118,11 +150,16 @@ export function updateStatus(deps: Pick<Deps, "db" | "agents" | "config">) {
   };
 }
 
-/** Fetches and verifies the latest manifest and stores the result (also failures, for the UI). */
+/**
+ * Fetches and verifies the newest manifest on the release channel and
+ * stores the result (also failures, for the UI). A failed check keeps the
+ * last good release of the same channel.
+ */
 export async function checkNow(deps: Pick<Deps, "db" | "logger">): Promise<void> {
-  const previous = getSetting(deps.db, "updateCheck");
+  const channel = releaseChannel(deps.db);
+  const previous = storedCheck(deps.db);
   try {
-    const release = await fetchLatestRelease();
+    const release = await fetchRelease(channel);
     setSetting(deps.db, "updateCheck", {
       checkedAt: new Date().toISOString(),
       latestVersion: release.manifest.version,
@@ -131,6 +168,7 @@ export async function checkNow(deps: Pick<Deps, "db" | "logger">): Promise<void>
       minAgent: release.manifest.minAgent,
       manifestBase64: Buffer.from(release.bytes).toString("base64"),
       signatureBase64: Buffer.from(release.signature).toString("base64"),
+      channel,
     });
   } catch (error) {
     const message = error instanceof ReleaseError ? error.message : "Checking for updates failed.";
@@ -140,31 +178,107 @@ export async function checkNow(deps: Pick<Deps, "db" | "logger">): Promise<void>
       ...(previous ?? { latestVersion: null, changelogUrl: null }),
       checkedAt: new Date().toISOString(),
       error: message,
+      channel,
     });
   }
 }
 
-function storedRelease(db: PanelDb) {
-  const check = getSetting(db, "updateCheck");
-  if (!check?.latestVersion || !check.manifestBase64 || !check.signatureBase64) {
-    throw new OpError("CONFLICT", "No verified release is known yet. Check for updates first.");
-  }
-  const bytes = Buffer.from(check.manifestBase64, "base64");
+/** A verified release as a run installs it. */
+export interface RunRelease {
+  version: string;
+  manifest: Uint8Array;
+  signature: Uint8Array;
+  manifestBase64: string;
+  signatureBase64: string;
+  panelImage: string;
+  panelDigest: string;
+}
+
+function decodeRelease(version: string, manifestBase64: string, signatureBase64: string): RunRelease {
+  const bytes = Buffer.from(manifestBase64, "base64");
   const manifest = JSON.parse(bytes.toString()) as { panel?: { image?: string; digest?: string } };
   return {
-    version: check.latestVersion,
+    version,
     manifest: new Uint8Array(bytes),
-    signature: new Uint8Array(Buffer.from(check.signatureBase64, "base64")),
+    signature: new Uint8Array(Buffer.from(signatureBase64, "base64")),
+    manifestBase64,
+    signatureBase64,
     panelImage: manifest.panel?.image ?? "",
     panelDigest: manifest.panel?.digest ?? "",
   };
 }
 
+function storedRelease(db: PanelDb): RunRelease {
+  const check = storedCheck(db);
+  if (!check?.latestVersion || !check.manifestBase64 || !check.signatureBase64) {
+    throw new OpError("CONFLICT", "No verified release is known yet. Check for updates first.");
+  }
+  return decodeRelease(check.latestVersion, check.manifestBase64, check.signatureBase64);
+}
+
+/**
+ * The release a run installs: its own copy of the manifest, else (runs made
+ * before 0.2.0-rc.2) the stored release while it is still that version.
+ * Null when neither is there.
+ */
+export function runRelease(db: PanelDb, run: RunRow): RunRelease | null {
+  if (run.manifest && run.manifestSignature) return decodeRelease(run.targetVersion, run.manifest, run.manifestSignature);
+  try {
+    const stored = storedRelease(db);
+    return stored.version === run.targetVersion ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Inserts a run with its steps and queues the job that advances it. A new
+ * agent step for a node supersedes its older steps still waiting for it to
+ * reconnect.
+ */
+export function createRun(
+  deps: Pick<Deps, "db" | "jobs">,
+  run: { release: RunRelease; trigger: UpdateRunTrigger; startedBy: string | null },
+  steps: Omit<typeof updateSteps.$inferInsert, "runId" | "position">[],
+  beforeInsert?: (tx: Parameters<Parameters<PanelDb["transaction"]>[0]>[0], runId: string) => void,
+): RunRow {
+  const created = deps.db.transaction((tx) => {
+    const row = tx
+      .insert(updateRuns)
+      .values({
+        targetVersion: run.release.version,
+        trigger: run.trigger,
+        startedBy: run.startedBy,
+        manifest: run.release.manifestBase64,
+        manifestSignature: run.release.signatureBase64,
+      })
+      .returning()
+      .get();
+    beforeInsert?.(tx, row.id);
+    const now = new Date();
+    for (const [position, step] of steps.entries()) {
+      if (step.target === "agent" && step.nodeId) {
+        tx.update(updateSteps)
+          .set({ retry: "superseded", retryAt: now })
+          .where(and(eq(updateSteps.nodeId, step.nodeId), eq(updateSteps.retry, "waiting")))
+          .run();
+      }
+      tx.insert(updateSteps)
+        .values({ ...step, position, runId: row.id })
+        .run();
+    }
+    return row;
+  });
+  deps.jobs.enqueue("updates.run", { runId: created.id }, { dedupeKey: `updates.run:${created.id}` });
+  return created;
+}
+
 /**
  * Creates a run to the latest verified release: the panel step when the
  * panel is older, then one agent step per node whose agent is older (or
- * just `onlyNodeId`). Fails with CONFLICT while another run is active or
- * when there is nothing to update.
+ * just `onlyNodeId`, when it is older or its version is unknown). Fails
+ * with CONFLICT while another run is active or when there is nothing to
+ * update.
  *
  * An automatic run leaves out a node whose update to this release was
  * rolled back, and does not start at all when the panel's own update to it
@@ -179,7 +293,7 @@ export function startRun(
   const release = storedRelease(deps.db);
   if (activeRun(deps.db)) throw new OpError("CONFLICT", "Another update is running. Wait for it to finish.");
   const auto = options.trigger === "auto";
-  const steps: Omit<typeof updateSteps.$inferInsert, "runId">[] = [];
+  const steps: Omit<typeof updateSteps.$inferInsert, "runId" | "position">[] = [];
   if (!options.onlyNodeId && isNewer(release.version, deps.config.version)) {
     if (auto && wasRolledBack(deps.db, panelKey, release.version)) {
       // Nodes go after the panel; they wait with it.
@@ -188,7 +302,7 @@ export function startRun(
         `The panel's update to ${release.version} was rolled back. Update it by hand or wait for a newer release.`,
       );
     }
-    steps.push({ position: 0, target: "panel", fromVersion: deps.config.version, toVersion: release.version });
+    steps.push({ target: "panel", fromVersion: deps.config.version, toVersion: release.version });
   }
   if (!options.panelOnly) {
     const rows = deps.db.select().from(nodes).orderBy(desc(nodes.isPanelNode), asc(nodes.name)).all();
@@ -197,8 +311,13 @@ export function startRun(
       if (row.disabledAt) continue;
       const version = agentVersion(deps, row);
       if (!options.onlyNodeId && !isNewer(release.version, version)) continue;
+      // Never a downgrade, also on request: back on the stable channel a node
+      // may run a newer pre-release than the release offered.
+      if (options.onlyNodeId && parseVersion(version) && !isNewer(release.version, version)) {
+        throw new OpError("CONFLICT", `${row.name} already runs ${version}, which is not older than ${release.version}.`);
+      }
       if (auto && wasRolledBack(deps.db, row.id, release.version)) continue;
-      steps.push({ position: steps.length, target: "agent", nodeId: row.id, fromVersion: version, toVersion: release.version });
+      steps.push({ target: "agent", nodeId: row.id, fromVersion: version, toVersion: release.version });
     }
     if (options.onlyNodeId && steps.length === 0) throw new OpError("NOT_FOUND", "No node with this id.");
   }
@@ -207,21 +326,7 @@ export function startRun(
     // A person asked for this release here: it may be retried automatically again.
     for (const step of steps) forgetRollback(deps.db, step.target === "panel" ? panelKey : (step.nodeId as string), release.version);
   }
-  const run = deps.db.transaction((tx) => {
-    const created = tx
-      .insert(updateRuns)
-      .values({ targetVersion: release.version, trigger: options.trigger, startedBy: options.startedBy })
-      .returning()
-      .get();
-    for (const [position, step] of steps.entries()) {
-      tx.insert(updateSteps)
-        .values({ ...step, position, runId: created.id })
-        .run();
-    }
-    return created;
-  });
-  deps.jobs.enqueue("updates.run", { runId: run.id }, { dedupeKey: `updates.run:${run.id}` });
-  return run;
+  return createRun(deps, { release, trigger: options.trigger, startedBy: options.startedBy }, steps);
 }
 
 function finishStep(db: PanelDb, stepId: string, status: UpdateStepStatus, error: string | null = null, extra: Partial<StepRow> = {}) {
@@ -301,7 +406,20 @@ export async function advanceRun(ctx: Pick<Deps, "db" | "agents" | "config" | "l
 
   // Start the pending step.
   const start = () => db.update(updateSteps).set({ status: "running", startedAt: new Date() }).where(eq(updateSteps.id, step.id)).run();
-  const release = storedRelease(db);
+  const release = runRelease(db, run);
+  if (!release) {
+    finishStep(db, step.id, "failed", "The release this run installs is no longer known. Check for updates and start the update again.");
+    publish();
+    return 0;
+  }
+  // A run from before 0.2.0-rc.2 (resumed after the panel's own update) keeps
+  // its release from now on, for the nodes it skips (catch-up.ts).
+  if (!run.manifest) {
+    db.update(updateRuns)
+      .set({ manifest: release.manifestBase64, manifestSignature: release.signatureBase64 })
+      .where(eq(updateRuns.id, run.id))
+      .run();
+  }
   try {
     if (step.target === "panel") {
       const panelNode = db.select({ id: nodes.id }).from(nodes).where(eq(nodes.isPanelNode, true)).get();
@@ -323,13 +441,14 @@ export async function advanceRun(ctx: Pick<Deps, "db" | "agents" | "config" | "l
     }
     if (step.target === "agent" && step.nodeId) {
       if (!ctx.agents.supports(step.nodeId, "updateAgent")) {
+        // An offline node gets the update when it reconnects (catch-up.ts).
+        const online = ctx.agents.isOnline(step.nodeId);
         finishStep(
           db,
           step.id,
           "skipped",
-          ctx.agents.isOnline(step.nodeId)
-            ? "The agent cannot update itself remotely."
-            : "The node is offline; it updates itself when it starts.",
+          online ? "The agent cannot update itself remotely." : offlineSkipMessage,
+          online ? {} : { retry: "waiting" },
         );
         publish();
         return 0;
@@ -349,11 +468,21 @@ export async function advanceRun(ctx: Pick<Deps, "db" | "agents" | "config" | "l
           manifestSignature: release.signature,
           targetVersion: release.version,
           updateId: step.id,
+          // Not a person's choice: the agent waits as its own automatic updates do.
+          automatic: run.trigger !== "manual",
         });
       } catch (error) {
+        const details = error instanceof OpError ? error.details : undefined;
+        // An automatic update of a release the agent rolled back, or that
+        // failed there within the hour, waits (UpdateAgentRequest.automatic).
+        if (details?.agentStatus === "FAILED_PRECONDITION" && details.backoff) {
+          finishStep(db, step.id, "skipped", (error as OpError).message);
+          publish();
+          return 0;
+        }
         // Busy (ABORTED: its own update on connect is running) or already
         // at that version (ALREADY_EXISTS): the step finishes by version.
-        const status = error instanceof OpError ? error.details?.agentStatus : undefined;
+        const status = details?.agentStatus;
         if (status !== "ABORTED" && status !== "ALREADY_EXISTS") throw error;
       }
       return pollMs;

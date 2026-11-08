@@ -302,7 +302,16 @@ type UpdateAgentRequest struct {
 	ManifestSignature []byte                 `protobuf:"bytes,2,opt,name=manifest_signature,json=manifestSignature,proto3" json:"manifest_signature,omitempty"`
 	TargetVersion     string                 `protobuf:"bytes,3,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
 	// Panel id of this update; echoed in the UpdateResult event.
-	UpdateId      string `protobuf:"bytes,4,opt,name=update_id,json=updateId,proto3" json:"update_id,omitempty"`
+	UpdateId string `protobuf:"bytes,4,opt,name=update_id,json=updateId,proto3" json:"update_id,omitempty"`
+	// The panel sends this update on its own (an automatic run, or a node that
+	// was offline during a run catching up when it reconnects), not because a
+	// person asked. The agent then waits like its own automatic updates do: a
+	// release the update guard rolled back waits an hour after the first
+	// rollback and a day after each later one, and one that failed before the
+	// swap waits an hour. While it waits it answers FAILED_PRECONDITION with
+	// details "backoff" ("rolledBack" or "failed") and "retryAfter" (RFC 3339).
+	// Agents before 0.2.0-rc.2 ignore it and install.
+	Automatic     bool `protobuf:"varint,5,opt,name=automatic,proto3" json:"automatic,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -363,6 +372,13 @@ func (x *UpdateAgentRequest) GetUpdateId() string {
 		return x.UpdateId
 	}
 	return ""
+}
+
+func (x *UpdateAgentRequest) GetAutomatic() bool {
+	if x != nil {
+		return x.Automatic
+	}
+	return false
 }
 
 type UpdateAgentResponse struct {
@@ -1154,12 +1170,13 @@ const file_seylo_agent_v1_node_ops_proto_rawDesc = "" +
 	"\adry_run\x18\x05 \x01(\bR\x06dryRun\"R\n" +
 	"\rPruneResponse\x12'\n" +
 	"\x0freclaimed_bytes\x18\x01 \x01(\x04R\x0ereclaimedBytes\x12\x18\n" +
-	"\aremoved\x18\x02 \x03(\tR\aremoved\"\xa3\x01\n" +
+	"\aremoved\x18\x02 \x03(\tR\aremoved\"\xc1\x01\n" +
 	"\x12UpdateAgentRequest\x12\x1a\n" +
 	"\bmanifest\x18\x01 \x01(\fR\bmanifest\x12-\n" +
 	"\x12manifest_signature\x18\x02 \x01(\fR\x11manifestSignature\x12%\n" +
 	"\x0etarget_version\x18\x03 \x01(\tR\rtargetVersion\x12\x1b\n" +
-	"\tupdate_id\x18\x04 \x01(\tR\bupdateId\"\x15\n" +
+	"\tupdate_id\x18\x04 \x01(\tR\bupdateId\x12\x1c\n" +
+	"\tautomatic\x18\x05 \x01(\bR\tautomatic\"\x15\n" +
 	"\x13UpdateAgentResponse\"\xe9\x01\n" +
 	"\x12UpdatePanelRequest\x12\x1b\n" +
 	"\tupdate_id\x18\x01 \x01(\tR\bupdateId\x12\x1d\n" +

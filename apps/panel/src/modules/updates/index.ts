@@ -1,19 +1,23 @@
 // Fleet updates: one switch updates the panel first, then nodes one by one
-// (runs.ts), from a signed release manifest (manifest.ts). Contracts:
-// packages/ops/src/ops/updates.ts.
+// (runs.ts), from a signed release manifest (manifest.ts) on the release
+// channel the owner picked. Nodes that were offline during a run catch up
+// when they reconnect (catch-up.ts). Contracts: packages/ops/src/ops/updates.ts.
 
-import { updates } from "@seylo/ops";
+import { OpError, updates } from "@seylo/ops";
 import { userOf } from "../../auth/principal";
 import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
 import { setSetting } from "../../settings";
 import { defineModule } from "../module";
+import { catchUpJob, queueCatchUp } from "./catch-up";
 import { testReleaseOverrides } from "./manifest";
+import { releaseChannel } from "./release-state";
 import {
   applyUpdateResult,
   checkIntervalSeconds,
   checkJob,
   checkNow,
+  isOwner,
   history as runHistory,
   runJob,
   startRun,
@@ -41,6 +45,17 @@ const setAutoUpdate = implement(updates.setAutoUpdate, (input, ctx) => {
   return updateStatus(ctx);
 });
 
+const setChannel = implement(updates.setChannel, async (input, ctx) => {
+  if (!isOwner(ctx.principal)) throw new OpError("FORBIDDEN", "Only the owner can change the release channel.");
+  if (releaseChannel(ctx.db) !== input.channel) {
+    setSetting(ctx.db, "updateChannel", input.channel);
+    // Offer the channel's release right away; until a check on it succeeds nothing is offered.
+    await checkNow(ctx);
+    publish(ctx);
+  }
+  return updateStatus(ctx);
+});
+
 const updatePanel = implement(updates.updatePanel, (input, ctx) => {
   const run = startRun(ctx, { trigger: "manual", startedBy: userOf(ctx.principal)?.id ?? null, panelOnly: input.panelOnly ?? false });
   publish(ctx);
@@ -63,13 +78,17 @@ function start(deps: Deps) {
   deps.agents.onEvent("updateResult", (nodeId, result, _event, meta) => {
     if (meta.durable) applyUpdateResult(deps, nodeId, result);
   });
+  // A node that was offline during a run gets its update when it is back.
+  deps.agents.onConnection((nodeId, online) => {
+    if (online) queueCatchUp(deps, nodeId);
+  });
   // Every few hours; "Check now" (updates.check) does it on demand.
   deps.schedules.ensure({ key: "updates.check", jobType: "updates.check", intervalSeconds: checkIntervalSeconds, jitterSeconds: 600 });
 }
 
 export default defineModule({
   name: "updates",
-  ops: [status, check, setAutoUpdate, updatePanel, updateNode, history],
-  jobs: [runJob, checkJob],
+  ops: [status, check, setAutoUpdate, setChannel, updatePanel, updateNode, history],
+  jobs: [runJob, checkJob, catchUpJob],
   start,
 });

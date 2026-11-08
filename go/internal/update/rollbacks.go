@@ -19,8 +19,11 @@ import (
 // agentRollbacks, which survives restarts, and automatic installs of that
 // release wait: an hour after the first rollback, a day after each later
 // one. An update the panel asks for (UpdateAgent) is a person's choice and
-// does not wait. A confirmed update, or an agent that already runs the
-// release, forgets it.
+// does not wait, unless the panel marks it automatic (its automatic run, or
+// a node catching up on reconnect): that one waits the same way, and also
+// an hour after an automatic update of the release failed before the swap
+// (agent.go automaticWait). A confirmed update, or an agent that already
+// runs the release, forgets it.
 
 // agentRollbacks holds the rollback history by canonical version.
 const agentRollbacks = "agent-rollbacks.json"

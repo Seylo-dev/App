@@ -378,7 +378,16 @@ export const alerts = {
 
 export const updateStatus = {
   autoUpdate: true,
-  panel: { currentVersion: "0.9.4", latestVersion: "0.9.4", updateAvailable: false, changelogUrl: "https://seylo.dev/changelog" },
+  channel: "stable",
+  canChangeChannel: true,
+  panel: {
+    currentVersion: "0.9.4",
+    latestVersion: "0.9.4",
+    updateAvailable: false,
+    offeredVersion: null,
+    latestIsPrerelease: false,
+    changelogUrl: "https://seylo.dev/changelog",
+  },
   lastCheckedAt: iso(hour),
   checkError: null,
   nodes: nodes.map((node) => ({ nodeId: node.id, name: node.name, online: true, version: node.agentVersion, updateAvailable: node.updateAvailable })),

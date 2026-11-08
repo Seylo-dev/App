@@ -41,9 +41,9 @@ export const fixtures: Record<string, unknown> = {
         doneSteps: 3,
         totalSteps: 3,
         steps: [
-          { id: "s1", position: 0, target: "panel", nodeId: null, nodeName: null, fromVersion: "0.9.2", toVersion: "0.9.3", status: "succeeded", error: null, startedAt: null, finishedAt: null },
-          { id: "s2", position: 1, target: "agent", nodeId: "a", nodeName: "de-fsn-1", fromVersion: "0.9.2", toVersion: "0.9.3", status: "succeeded", error: null, startedAt: null, finishedAt: null },
-          { id: "s3", position: 2, target: "agent", nodeId: "b", nodeName: "us-ash-1", fromVersion: "0.9.2", toVersion: "0.9.3", status: "rolledBack", error: "health check failed", startedAt: null, finishedAt: null },
+          { id: "s1", position: 0, target: "panel", nodeId: null, nodeName: null, fromVersion: "0.9.2", toVersion: "0.9.3", status: "succeeded", error: null, startedAt: null, finishedAt: null, retry: null, retryRunId: null, retryAt: null },
+          { id: "s2", position: 1, target: "agent", nodeId: "a", nodeName: "de-fsn-1", fromVersion: "0.9.2", toVersion: "0.9.3", status: "succeeded", error: null, startedAt: null, finishedAt: null, retry: null, retryRunId: null, retryAt: null },
+          { id: "s3", position: 2, target: "agent", nodeId: "b", nodeName: "us-ash-1", fromVersion: "0.9.2", toVersion: "0.9.3", status: "rolledBack", error: "health check failed", startedAt: null, finishedAt: null, retry: null, retryRunId: null, retryAt: null },
         ],
       },
     ],

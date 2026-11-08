@@ -32,13 +32,14 @@ import { agentConnectPath, agentSubprotocol } from "../src/agent-hub/endpoint";
 import { helloSignedBytes } from "../src/agent-hub/signature";
 
 type AnyMethod = (typeof AgentService.methods)[number];
-type Status = { code: StatusCode; message?: string };
+type Status = { code: StatusCode; message?: string; details?: Record<string, string> };
 
-/** Throw from a handler to answer with this status. */
+/** Throw from a handler to answer with this status (and its machine-readable details). */
 export class FakeStatus extends Error {
   constructor(
     readonly code: StatusCode,
     message = "",
+    readonly details: Record<string, string> = {},
   ) {
     super(message);
   }
@@ -371,7 +372,7 @@ export class FakeAgent {
     const method = this.method(call.method);
     const reply = (status: Status, response?: Uint8Array) => {
       const result = create(ResultSchema, {
-        status: { code: status.code, message: status.message ?? "", details: {} },
+        status: { code: status.code, message: status.message ?? "", details: status.details ?? {} },
         response: response ?? new Uint8Array(),
       });
       this.send({ kind: FrameKind.RESULT, stream, payload: toBinary(ResultSchema, result) });
@@ -387,7 +388,7 @@ export class FakeAgent {
       const response = await handler(request, call.metadata);
       reply({ code: StatusCode.OK }, toBinary(method.output, create(method.output, (response ?? {}) as never)));
     } catch (error) {
-      if (error instanceof FakeStatus) reply({ code: error.code, message: error.message });
+      if (error instanceof FakeStatus) reply({ code: error.code, message: error.message, details: error.details });
       else reply({ code: StatusCode.INTERNAL, message: String(error) });
     }
   }

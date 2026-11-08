@@ -233,8 +233,9 @@ Each release:
    to the Sign job as an artifact (kept 14 days). One release runs at a
    time, and a running release is never cancelled by another tag. Re-running
    the job replaces the draft an earlier run made. A `vX.Y.Z-<pre>` tag
-   (`v0.1.0-rc.1`) makes a pre-release that installs and updates do not
-   follow; to promote it, tag the same commit `vX.Y.Z`.
+   (`v0.1.0-rc.1`) makes a pre-release that installs and the stable update
+   channel do not follow (panels on the Pre-release channel, Settings >
+   Updates, offer it); to promote it, tag the same commit `vX.Y.Z`.
 3. The Sign job waits for a reviewer: open the run, Review deployments,
    tick `release` and approve. It then checks the files (every file
    `checksums.txt` lists matches it; `manifest.json` is for this version and
@@ -265,8 +266,9 @@ Each release:
    Right before publishing, Publish reads the release again and stops if
    its files or flags changed, or another release with the tag appeared,
    while it checked. A stable version becomes the latest release, which
-   installs and updates follow, unless a newer version already is; a
-   pre-release never does. The run summary lists every check. When one
+   installs and the stable update channel follow, unless a newer version
+   already is; a pre-release never does (the Pre-release channel takes the
+   highest version of all releases). The run summary lists every check. When one
    fails, the draft stays a draft and the summary says what to do (for two
    drafts with one tag: delete the stale one, then re-run Publish). Running
    Publish again on a release that is already published checks it and
@@ -284,8 +286,9 @@ To keep a release from going out on its own:
   Reject). The draft stays unsigned and Publish never runs; delete the
   draft and the tag as below, or re-run the Sign job later to sign it.
 - Or push the tag as a pre-release (`v0.1.0-rc.1`). Publish still
-  publishes it, as a pre-release that installs and updates do not follow;
-  tag the same commit `vX.Y.Z` when it is ready.
+  publishes it, as a pre-release that installs and the stable update
+  channel do not follow (panels on the Pre-release channel offer it); tag
+  the same commit `vX.Y.Z` when it is ready.
 
 If the Sign job stops at "Release secrets are set", the `release`
 environment has no key yet: add its secrets (step 3 above), then re-run the
