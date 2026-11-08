@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,14 @@ func TestITPanelAdoptAndSwap(t *testing.T) {
 	if len(list) != 1 || list[0].Name != docker.ContainerName(id, 2, 0) || list[0].State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
 		t.Fatalf("after the swap: %+v", list)
 	}
+	// Pinned by digest, still named by its tag: docker ps shows the
+	// version, not a bare image id.
+	if d, err := e.eng.InspectContainer(ctx, list[0].ID); err != nil || d.Image != "docker.io/library/busybox:1.37@"+digest {
+		t.Fatalf("swapped panel image = %q, %v", d.Image, err)
+	}
+	if out, err := exec.Command("docker", "ps", "--filter", "id="+list[0].ID, "--format", "{{.Image}}").Output(); err != nil || strings.TrimSpace(string(out)) != itImage {
+		t.Fatalf("docker ps shows the swapped panel's image as %q (%v), want %s", out, err, itImage)
+	}
 
 	// A broken image (no httpd in alpine) never becomes healthy: the old
 	// image comes back as the next generation and the database is restored.
@@ -130,7 +139,7 @@ func TestITPanelAdoptAndSwap(t *testing.T) {
 	e.settle()
 	waitPhase(t, e, id, 4, agentv1.ServicePhase_SERVICE_PHASE_RUNNING)
 	d, err := e.eng.InspectContainer(ctx, docker.ContainerName(id, 4, 0))
-	if err != nil || !d.Running || d.Image != "docker.io/library/busybox@"+digest {
+	if err != nil || !d.Running || d.Image != "docker.io/library/busybox:1.37@"+digest {
 		t.Fatalf("restored panel: %+v %v", d, err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(e.layout.Root(), "panel", "panel.db")); string(b) != "v2 rows" {

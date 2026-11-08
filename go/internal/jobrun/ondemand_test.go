@@ -123,12 +123,12 @@ func TestOnDemandAdoptsRunningHelpers(t *testing.T) {
 
 func TestImageRefAndTail(t *testing.T) {
 	cases := map[[2]string]string{
-		{"nginx:1.27", "sha256:a"}:                  "nginx@sha256:a",
-		{"127.0.0.1:5755/svc:3", "sha256:b"}:        "127.0.0.1:5755/svc@sha256:b",
+		{"nginx:1.27", "sha256:a"}:                  "nginx:1.27@sha256:a",
+		{"127.0.0.1:5755/svc:3", "sha256:b"}:        "127.0.0.1:5755/svc:3@sha256:b",
 		{"127.0.0.1:5755/svc", "sha256:b"}:          "127.0.0.1:5755/svc@sha256:b",
 		{"ghcr.io/a/b:1", ""}:                       "ghcr.io/a/b:1",
 		{"ghcr.io/a/b@sha256:c", "sha256:c"}:        "ghcr.io/a/b@sha256:c",
-		{"registry:5000/x/y:latest", "sha256:dddd"}: "registry:5000/x/y@sha256:dddd",
+		{"registry:5000/x/y:latest", "sha256:dddd"}: "registry:5000/x/y:latest@sha256:dddd",
 	}
 	for in, want := range cases {
 		if got := ImageRef(imageRef(in[0], in[1])); got != want {

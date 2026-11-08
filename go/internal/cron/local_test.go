@@ -203,7 +203,7 @@ func TestScheduledRunUsesServiceContainerAndRedacts(t *testing.T) {
 		t.Fatalf("last lines = %q, want %q", r.GetLastLines(), want)
 	}
 	spec := h.runner.Specs()[0]
-	if spec.Image != "127.0.0.1:5755/svc1@sha256:abc" {
+	if spec.Image != "127.0.0.1:5755/svc1:7@sha256:abc" {
 		t.Errorf("image = %q", spec.Image)
 	}
 	if !slices.Equal(spec.Cmd, []string{"php", "artisan", "x"}) || !slices.Equal(spec.Entrypoint, []string{"/entry"}) || spec.User != "1000" || spec.WorkingDir != "/app" {

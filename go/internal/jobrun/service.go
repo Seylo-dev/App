@@ -14,7 +14,9 @@ import (
 // same image, env, volumes and network as the service.
 
 // ImageRef is the reference to run: pinned to the digest when the panel
-// sent one (that is what makes rollbacks exact), else the reference.
+// sent one (that is what makes rollbacks exact), else the reference. A tag
+// stays (repo:tag@digest): Docker runs the digest and ignores the tag, and
+// docker ps shows repo:tag instead of a bare image id.
 func ImageRef(ref *agentv1.ImageRef) string {
 	r, digest := ref.GetReference(), ref.GetDigest()
 	if digest == "" || strings.Contains(r, "@") {
@@ -23,13 +25,7 @@ func ImageRef(ref *agentv1.ImageRef) string {
 	if r == "" {
 		return digest
 	}
-	// Drop a tag: it is after the last ':' only when no '/' follows it
-	// (a ':' before the last '/' is a registry port).
-	name := r
-	if i := strings.LastIndexByte(r, ':'); i > strings.LastIndexByte(r, '/') {
-		name = r[:i]
-	}
-	return name + "@" + digest
+	return r + "@" + digest
 }
 
 // KindLabel is the seylo.kind label value of a service kind: "app",
