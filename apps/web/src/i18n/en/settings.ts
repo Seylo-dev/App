@@ -74,6 +74,15 @@ export default {
       description: "Where people and agents reach the panel, and whether it still answers on its IP address.",
       saveDomain: "Save domain",
       removeReopens: "Removing or changing the domain reopens IP access at once, unless the tailnet keeps working.",
+      nodesOffline: {
+        one: "{nodes} connects over https://{domain} and goes offline without it. If it joined over the domain, it stays offline until you join it again with a new command from Nodes > Add node (--force). If it moved there from the agents' port, it comes back over that port in about 5 minutes.",
+        other:
+          "{nodes} connect over https://{domain} and go offline without it. A node that joined over the domain stays offline until you join it again with a new command from Nodes > Add node (--force). A node that moved there from the agents' port comes back over that port in about 5 minutes.",
+      },
+      removeTitle: "Remove the panel domain?",
+      changeTitle: "Change the panel domain?",
+      removeConfirm: "Remove the domain",
+      changeConfirm: "Change the domain",
       youAreHere: "You are here",
       paths: "Ways in without IP:port",
       pathKinds: { domain: "Domain", tailnet: "Tailnet" },

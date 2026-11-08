@@ -180,6 +180,36 @@ test("the agents' port closes only with IP access, and only when every other nod
   expect(decidePanelIpAccess(panel.deps).agentPortClosed).toBe(false);
 });
 
+test("the panel node's own agent on a public address keeps what it dials open", () => {
+  activeDomain();
+  want({ serveOnIp: false, agentPortOpen: false });
+  const decide = () => {
+    const d = decidePanelIpAccess(panel.deps);
+    return { closed: d.closed, agentPortClosed: d.agentPortClosed };
+  };
+  // Joined again with an Add node command: the loopback publish would not take its dial.
+  recordDialedUrl(panel.deps.db, panelNode, "http://203.0.113.10:3000");
+  expect(decide()).toEqual({ closed: false, agentPortClosed: false });
+  expect(decidePanelIpAccess(panel.deps).why).toBe("the panel node's agent connects over http://203.0.113.10:3000, not over 127.0.0.1");
+  recordDialedUrl(panel.deps.db, panelNode, "https://203.0.113.10:3443");
+  expect(decide()).toEqual({ closed: true, agentPortClosed: false });
+  // Loopback, as the installer sets it up, and the domain close both.
+  for (const url of ["http://127.0.0.1:3000", "http://[::1]:3000", "http://localhost:3000", "https://panel.example.com"]) {
+    recordDialedUrl(panel.deps.db, panelNode, url);
+    expect(decide()).toEqual({ closed: true, agentPortClosed: true });
+  }
+
+  // Applied and then joined again on the public address: the next decision reopens.
+  applyPanelIpAccess(panel.deps, "test");
+  expect(readIpAccessApplied(panel.deps)).toMatchObject({ closed: true, agentPortClosed: true });
+  recordDialedUrl(panel.deps.db, panelNode, "http://203.0.113.10:3000");
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check")).toMatchObject({
+    closed: false,
+    agentPortClosed: false,
+    reason: "the panel node's agent connects over http://203.0.113.10:3000, not over 127.0.0.1",
+  });
+});
+
 test("closing rolls the panel once: a new generation, 127.0.0.1 in the spec, an alert and an audit row", () => {
   activeDomain();
   want({ serveOnIp: false, agentPortOpen: false });

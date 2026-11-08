@@ -4,7 +4,11 @@
 // (plus the agents' port when no other node needs it) through
 // settings.updatePanelAccess, then removes the panel domain if ticked. The
 // panel only allows it from a page opened on the tailnet URL; the button
-// says so before the panel has to.
+// says so before the panel has to. Nodes that connect over the domain
+// (settings.general domainNodes) are named next to the domain tick and in
+// the confirmation, since removing the domain takes them offline; the
+// agents' port then stays open, the way back for nodes that moved to the
+// domain from it.
 
 import { settings } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -21,12 +25,14 @@ import { IconCircleCheck, IconCircleDashed } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
+import { formatNames } from "../../../lib/format";
 import { isReauthCancelled } from "../../../lib/reauth";
 import { invalidateOps } from "../mutation";
 import { QueryView } from "../op-state";
 import { commands, type TailscaleStatus } from "./shared";
 
 type PanelAccess = settings.PanelAccess;
+type DomainNode = { id: string; name: string };
 
 function Row({ ok, children }: { ok: boolean; children: ReactNode }) {
   const Icon = ok ? IconCircleCheck : IconCircleDashed;
@@ -44,13 +50,25 @@ export function LockChecklist({ status }: { status: TailscaleStatus }) {
   return (
     <SectionCard title={t("settingsTailscale.lock.title")} description={t("settingsTailscale.lock.description")}>
       <QueryView query={access} skeletonRows={4} className="flex flex-col gap-3">
-        {(data) => <Checklist status={status} access={data} domain={general.data?.domain ?? null} />}
+        {(data) => (
+          <Checklist status={status} access={data} domain={general.data?.domain ?? null} domainNodes={general.data?.domainNodes ?? []} />
+        )}
       </QueryView>
     </SectionCard>
   );
 }
 
-function Checklist({ status, access, domain }: { status: TailscaleStatus; access: PanelAccess; domain: string | null }) {
+function Checklist({
+  status,
+  access,
+  domain,
+  domainNodes,
+}: {
+  status: TailscaleStatus;
+  access: PanelAccess;
+  domain: string | null;
+  domainNodes: readonly DomainNode[];
+}) {
   const [saved, setSaved] = useState(false);
   const [removeDomain, setRemoveDomain] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -63,14 +81,27 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
   const serving = status.serve.state === "active" && status.serve.panelAnswers;
   const url = status.serve.url;
   const onAgentPort = access.agentPortBlocked.find((block) => block.code === "nodesOnAgentPort");
-  const agentPortCloses = access.agentPort !== null && access.agentPortOpen && access.agentPortBlocked.length === 0;
+  // What keeps only the agents' port open (the rest keeps IP access open too, and is listed below).
+  const portOnly = access.agentPortBlocked.find((block) => !access.blocked.some((b) => b.code === block.code));
+  const removing = removeDomain && domain !== null;
+  // Nodes that connect over the domain go offline without it; the ones that moved there from the agents' port come back over it.
+  const offline = removing && domainNodes.length > 0;
+  const agentPortCloses = access.agentPort !== null && access.agentPortOpen && access.agentPortBlocked.length === 0 && !offline;
   const ready = running && serving && status.viaTailnet && access.blocked.length === 0;
+  const nodesOffline =
+    domain && domainNodes.length > 0
+      ? t("settings.general.domainCard.nodesOffline", {
+          nodes: formatNames(domainNodes.map((node) => node.name)),
+          domain,
+          count: domainNodes.length,
+        })
+      : null;
 
   async function lock() {
     try {
       await update.mutateAsync({ serveOnIp: false, ...(agentPortCloses ? { agentPortOpen: false } : {}) });
-      if (removeDomain && domain) {
-        await updateGeneral.mutateAsync({ domain: null });
+      if (removing) {
+        await updateGeneral.mutateAsync({ domain: null, ...(offline ? { acknowledgeNodesOffline: true } : {}) });
         toast.success(t("settingsTailscale.lock.domainRemoved"));
       }
       await invalidateOps([settings.panelAccess, settings.general]);
@@ -102,11 +133,20 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
         </Row>
         <Row ok={false}>{t("settingsTailscale.lock.rows.serveOnIp", { port: access.panelPort })}</Row>
         <Row ok={false}>
-          {access.agentPort === null
-            ? t("settingsTailscale.lock.rows.agentPortOff")
-            : onAgentPort
-              ? t("settingsTailscale.lock.rows.agentPortStays", { port: access.agentPort, count: onAgentPort.nodeIds?.length ?? 1 })
-              : t("settingsTailscale.lock.rows.agentPortCloses", { port: access.agentPort })}
+          {access.agentPort === null ? (
+            t("settingsTailscale.lock.rows.agentPortOff")
+          ) : onAgentPort ? (
+            t("settingsTailscale.lock.rows.agentPortStays", { port: access.agentPort, count: onAgentPort.nodeIds?.length ?? 1 })
+          ) : portOnly ? (
+            <>
+              {t("settingsTailscale.lock.rows.agentPortStaysOpen", { port: access.agentPort })}
+              <span className="block text-xs text-muted-foreground">{portOnly.message}</span>
+            </>
+          ) : offline ? (
+            t("settingsTailscale.lock.rows.agentPortStaysNoDomain", { port: access.agentPort })
+          ) : (
+            t("settingsTailscale.lock.rows.agentPortCloses", { port: access.agentPort })
+          )}
         </Row>
         {domain ? (
           <li className="flex items-start gap-2 text-[13px]">
@@ -119,6 +159,7 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
             <label htmlFor="lock-remove-domain" className="flex cursor-pointer flex-col gap-0.5">
               <span className="text-ink-strong">{t("settingsTailscale.lock.rows.domain", { domain })}</span>
               <span className="text-xs text-muted-foreground">{t("settingsTailscale.lock.rows.domainHint")}</span>
+              {nodesOffline && <span className="text-xs text-muted-foreground">{nodesOffline}</span>}
             </label>
           </li>
         ) : (
@@ -173,7 +214,9 @@ function Checklist({ status, access, domain }: { status: TailscaleStatus; access
         description={t("settingsTailscale.lock.confirm", { port: access.panelPort })}
         confirmLabel={t("settingsTailscale.lock.button")}
         onConfirm={lock}
-      />
+      >
+        {offline && nodesOffline && <p className="m-0 text-[13px] text-ink-strong">{nodesOffline}</p>}
+      </ConfirmDialog>
     </>
   );
 }

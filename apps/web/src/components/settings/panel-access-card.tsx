@@ -3,7 +3,9 @@
 // turn off asks first, each change restarts the panel), what happens when
 // the domain stops working, and the commands that get the owner back in.
 // The panel decides and refuses (settings.panelAccess / updatePanelAccess);
-// the card shows its reasons and never guesses.
+// the card shows its reasons and never guesses. Removing or changing a
+// domain that nodes connect over (settings.general domainNodes) asks first
+// and names them: they go offline.
 
 import { nodes, type OpOutput, settings } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -22,7 +24,7 @@ import { Switch } from "@seylo/ui/components/switch";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { t } from "../../i18n/t";
-import { formatAgo, formatExpiresIn } from "../../lib/format";
+import { formatAgo, formatExpiresIn, formatNames } from "../../lib/format";
 import { isReauthCancelled } from "../../lib/reauth";
 import { useSettingsMutation } from "./mutation";
 import { QueryView } from "./op-state";
@@ -59,56 +61,100 @@ export function PanelDomainCard({ general }: { general: General }) {
 
 function DomainForm({ general, closed }: { general: General; closed: boolean }) {
   const [domain, setDomain] = useState(general.domain ?? "");
-  const save = useSettingsMutation(settings.updateGeneral, {
-    invalidates: [settings.general, settings.panelAccess, settings.boot],
-    success: t("settings.saved"),
-  });
+  // The domain to save once the person confirmed that the nodes on the current one go offline.
+  const [asking, setAsking] = useState<{ domain: string | null } | null>(null);
+  const options = { invalidates: [settings.general, settings.panelAccess, settings.boot], success: t("settings.saved") };
+  const save = useSettingsMutation(settings.updateGeneral, options);
+  // The dialog shows a refusal itself.
+  const confirmed = useSettingsMutation(settings.updateGeneral, { ...options, failure: false });
   const trimmed = domain.trim().toLowerCase();
   const error = trimmed !== "" && !hostnamePattern.test(trimmed) ? t("settings.general.domainInvalid") : null;
   const dirty = (trimmed || null) !== general.domain;
+  const busy = save.isPending || confirmed.isPending;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (error) return;
-    save.mutate({ domain: trimmed === "" ? null : trimmed });
+    const next = trimmed === "" ? null : trimmed;
+    if (general.domain && general.domainNodes.length > 0) setAsking({ domain: next });
+    else save.mutate({ domain: next });
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
-      <Field
-        label={t("settings.general.domain")}
-        hint={closed ? t("settings.general.domainCard.removeReopens") : t("settings.general.domainHint")}
-        error={error}
-        htmlFor="general-domain"
-      >
-        <div className="flex flex-wrap gap-2">
-          <Input
-            id="general-domain"
-            value={domain}
-            placeholder="panel.example.com"
-            className="min-w-0 flex-1 font-mono text-[12.5px]"
-            spellCheck={false}
-            autoCapitalize="off"
-            onChange={(e) => setDomain(e.target.value)}
-          />
-          <Button type="submit" variant="primary" disabled={!dirty || save.isPending || !!error}>
-            {save.isPending ? t("settings.saving") : t("settings.general.domainCard.saveDomain")}
-          </Button>
+    <>
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <Field
+          label={t("settings.general.domain")}
+          hint={closed ? t("settings.general.domainCard.removeReopens") : t("settings.general.domainHint")}
+          error={error}
+          htmlFor="general-domain"
+        >
+          <div className="flex flex-wrap gap-2">
+            <Input
+              id="general-domain"
+              value={domain}
+              placeholder="panel.example.com"
+              className="min-w-0 flex-1 font-mono text-[12.5px]"
+              spellCheck={false}
+              autoCapitalize="off"
+              onChange={(e) => setDomain(e.target.value)}
+            />
+            <Button type="submit" variant="primary" disabled={!dirty || busy || !!error}>
+              {busy ? t("settings.saving") : t("settings.general.domainCard.saveDomain")}
+            </Button>
+          </div>
+        </Field>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13px] font-medium text-ink-strong">{t("settings.general.domainState")}</span>
+          <Chip tone={domainTones[general.domainStatus.state]}>{t(`settings.general.domainStates.${general.domainStatus.state}`)}</Chip>
         </div>
-      </Field>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-medium text-ink-strong">{t("settings.general.domainState")}</span>
-        <Chip tone={domainTones[general.domainStatus.state]}>{t(`settings.general.domainStates.${general.domainStatus.state}`)}</Chip>
-      </div>
-      {general.domainStatus.message && <p className="m-0 text-[12.5px] text-muted-foreground">{general.domainStatus.message}</p>}
-      <CopyField value={general.publicUrl} aria-label={t("settings.general.publicUrl")} />
-      <p className="m-0 text-[12.5px] text-muted-foreground">
-        {t("settings.general.updatesHint")}{" "}
-        <Link to="/settings/updates" className="text-link hover:text-link-hover">
-          {t("settings.sections.updates")}
-        </Link>
-      </p>
-    </form>
+        {general.domainStatus.message && <p className="m-0 text-[12.5px] text-muted-foreground">{general.domainStatus.message}</p>}
+        <CopyField value={general.publicUrl} aria-label={t("settings.general.publicUrl")} />
+        <p className="m-0 text-[12.5px] text-muted-foreground">
+          {t("settings.general.updatesHint")}{" "}
+          <Link to="/settings/updates" className="text-link hover:text-link-hover">
+            {t("settings.sections.updates")}
+          </Link>
+        </p>
+      </form>
+      <NodesOfflineDialog
+        general={general}
+        asking={asking}
+        onClose={() => setAsking(null)}
+        onConfirm={(next) => confirmed.mutateAsync({ domain: next, acknowledgeNodesOffline: true })}
+      />
+    </>
+  );
+}
+
+/** Asks before removing or changing a domain that nodes connect over. Kept out of the domain form: React bubbles the dialog's own submit through the portal. */
+function NodesOfflineDialog({
+  general,
+  asking,
+  onClose,
+  onConfirm,
+}: {
+  general: General;
+  asking: { domain: string | null } | null;
+  onClose: () => void;
+  onConfirm: (domain: string | null) => Promise<unknown>;
+}) {
+  return (
+    <ConfirmDialog
+      open={asking !== null}
+      onOpenChange={(open) => !open && onClose()}
+      destructive
+      title={t(asking?.domain ? "settings.general.domainCard.changeTitle" : "settings.general.domainCard.removeTitle")}
+      description={t("settings.general.domainCard.nodesOffline", {
+        nodes: formatNames(general.domainNodes.map((node) => node.name)),
+        domain: general.domain ?? "",
+        count: general.domainNodes.length,
+      })}
+      confirmLabel={t(asking?.domain ? "settings.general.domainCard.changeConfirm" : "settings.general.domainCard.removeConfirm")}
+      onConfirm={async () => {
+        await onConfirm(asking?.domain ?? null);
+      }}
+    />
   );
 }
 

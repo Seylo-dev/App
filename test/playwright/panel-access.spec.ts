@@ -9,7 +9,9 @@
 
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
+import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
+import { fixtures as settingsFixtures } from "./demo/settings";
 import { expect, stateFile, test } from "./helpers";
 
 type Input = Record<string, any>;
@@ -195,6 +197,46 @@ test.describe("panel access", () => {
     await expect
       .poll(() => sent["settings.updatePanelAccess"])
       .toEqual([{ onFailure: "stayClosed", savedRecovery: true }, { onFailure: "reopen" }]);
+  });
+
+  test("removing a domain that nodes connect over asks first, names them and sends the acknowledgement", async ({ page }) => {
+    let domain: string | null = "panel.acme.dev";
+    const onDomain = [
+      { id: ids.us, name: "us-ash-1" },
+      { id: ids.il, name: "il-tlv-1" },
+    ];
+    const general = () => ({ ...settingsFixtures["settings.general"], domain, domainNodes: domain ? onDomain : [] });
+    await installDemo(page, {
+      overrides: {
+        ...statefulAccess(access()),
+        "settings.general": general,
+        "settings.updateGeneral": (input: Input) => {
+          if (input.domain !== undefined) domain = input.domain;
+          return general();
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    const field = card(page).getByRole("textbox", { name: "Panel domain" });
+    await field.fill("");
+    await card(page).getByRole("button", { name: "Save domain" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Remove the panel domain?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("us-ash-1 and il-tlv-1 connect over https://panel.acme.dev and go offline without it.", { exact: false })).toBeVisible();
+    await page.screenshot({ path: `${shots}/remove-domain.png` });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(sent["settings.updateGeneral"]).toBeUndefined();
+
+    // A new domain asks the same way.
+    await field.fill("cloud.acme.dev");
+    await card(page).getByRole("button", { name: "Save domain" }).click();
+    const change = page.getByRole("alertdialog", { name: "Change the panel domain?" });
+    await expect(change).toBeVisible();
+    await change.getByRole("button", { name: "Change the domain" }).click();
+    await expect(change).toBeHidden();
+    expect(sent["settings.updateGeneral"]).toEqual([{ domain: "cloud.acme.dev", acknowledgeNodesOffline: true }]);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
   });
 
   test("an admin sees the reasons and cannot choose keep-closed", async ({ page }) => {

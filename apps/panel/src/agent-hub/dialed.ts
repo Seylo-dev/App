@@ -3,7 +3,10 @@
 // restart. The panel access guards (modules/settings/panel-access.ts) read
 // it: closing IP access is refused while an enabled node dials plain
 // http://, and closing the agents' port while a node dials anything but
-// https://<panel domain>. Recorded when a session starts, from
+// https://<panel domain>. The panel node's own agent must dial loopback for
+// either (a re-join with an Add node command points it at the public
+// address). Removing or changing the domain asks first while nodes dial
+// https://<domain> (settings/ops.ts). Recorded when a session starts, from
 // hub.dialedAddress (the base URL the agent's connect reached).
 
 import { eq, isNull } from "drizzle-orm";
@@ -60,16 +63,54 @@ export interface DialingNode {
   url: string | null;
 }
 
-/** Every enabled node except the panel node (whose agent dials loopback), with the address it dials. */
-export function dialingNodes(deps: Pick<Deps, "db" | "agents">): DialingNode[] {
+/** Every enabled node, the panel node too, with the address it dials. */
+function enabledNodes(deps: Pick<Deps, "db" | "agents">): (DialingNode & { isPanelNode: boolean })[] {
   const stored = readDialedUrls(deps.db);
   return deps.db
     .select({ id: nodes.id, name: nodes.name, isPanelNode: nodes.isPanelNode })
     .from(nodes)
     .where(isNull(nodes.disabledAt))
     .all()
-    .filter((row) => !row.isPanelNode)
-    .map((row) => ({ id: row.id, name: row.name, online: deps.agents.isOnline(row.id), url: dialedUrlOf(deps, row.id, stored) }));
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      isPanelNode: row.isPanelNode,
+      online: deps.agents.isOnline(row.id),
+      url: dialedUrlOf(deps, row.id, stored),
+    }));
+}
+
+const dialing = ({ isPanelNode: _isPanelNode, ...node }: DialingNode & { isPanelNode: boolean }): DialingNode => node;
+
+/** Every enabled node except the panel node (whose agent dials loopback, see panelNodeDialing), with the address it dials. */
+export function dialingNodes(deps: Pick<Deps, "db" | "agents">): DialingNode[] {
+  return enabledNodes(deps)
+    .filter((node) => !node.isPanelNode)
+    .map(dialing);
+}
+
+/** The panel node's own agent with the address it dials (loopback, as the installer sets it up); null without a panel node. */
+export function panelNodeDialing(deps: Pick<Deps, "db" | "agents">): DialingNode | null {
+  const row = deps.db.select({ id: nodes.id, name: nodes.name }).from(nodes).where(eq(nodes.isPanelNode, true)).get();
+  if (!row) return null;
+  return { id: row.id, name: row.name, online: deps.agents.isOnline(row.id), url: dialedUrlOf(deps, row.id) };
+}
+
+/** Enabled nodes, the panel node too, that dial https://<domain>: removing or changing the domain cuts them off. */
+export function nodesDialingDomain(deps: Pick<Deps, "db" | "agents">, domain: string | null): DialingNode[] {
+  if (!domain) return [];
+  return enabledNodes(deps)
+    .filter((node) => dialsDomain(node.url, domain))
+    .map(dialing);
+}
+
+/** "b1", "b1 and b2", "b1, b2 and b3": node names for a message. */
+export function nodeNames(list: readonly { name: string }[]): string {
+  if (list.length <= 2) return list.map((node) => node.name).join(" and ");
+  return `${list
+    .slice(0, -1)
+    .map((node) => node.name)
+    .join(", ")} and ${list.at(-1)?.name}`;
 }
 
 /** True when `url` is https://<domain> (port 443 or none). */
@@ -86,6 +127,17 @@ export function dialsDomain(url: string | null, domain: string | null): boolean 
 /** True for a plain http:// address. */
 export function dialsPlainHttp(url: string | null): boolean {
   return url?.toLowerCase().startsWith("http://") ?? false;
+}
+
+/** True for an address on the server itself: localhost, 127.0.0.0/8 or [::1]. */
+export function dialsLoopback(url: string | null): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "[::1]" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+  } catch {
+    return false;
+  }
 }
 
 /** Records every session's address as it starts. Call once from a module's start(). */

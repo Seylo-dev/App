@@ -11,6 +11,7 @@ const general = {
   publicUrl: "https://panel.acme.dev",
   uptimeAllowInternalTargets: false,
   auditRetentionDays: null,
+  domainNodes: [],
 };
 
 const access = (over: Record<string, unknown> = {}) => ({

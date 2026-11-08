@@ -486,4 +486,44 @@ test.describe("settings > tailscale", () => {
     expect(sent["settings.updatePanelAccess"]).toEqual([{ serveOnIp: false, agentPortOpen: false }]);
     expect(sent["settings.updateGeneral"]).toBeUndefined();
   });
+
+  test("Lock with nodes on the domain: names them, keeps the agents' port and acknowledges the removal", async ({ page }) => {
+    let access = panelAccess();
+    let domain: string | null = "panel.acme.dev";
+    const onDomain = [{ id: ids.us, name: "us-ash-1" }];
+    await installDemo(page, {
+      overrides: {
+        "tailscale.get": () => serving({ viaTailnet: true }),
+        "settings.panelAccess": () => access,
+        "settings.updatePanelAccess": (input) => {
+          access = { ...access, ...input, actual: { ip: "closed", agentPort: input.agentPortOpen === false ? "closed" : "open" } };
+          return access;
+        },
+        "settings.general": () => ({ ...general, domain, domainNodes: domain ? onDomain : [] }),
+        "settings.updateGeneral": (input) => {
+          if (input.domain !== undefined) domain = input.domain;
+          return { ...general, domain, domainNodes: [] };
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/tailscale");
+    const checklist = page.getByRole("list", { name: "Lock to Tailscale" });
+    const offline = "us-ash-1 connects over https://panel.acme.dev and goes offline without it.";
+    await expect(checklist.getByText(offline, { exact: false })).toBeVisible();
+    // Every other node dials the domain, so the agents' port would close with IP access.
+    await expect(checklist.getByText("The agents' port 3443 closes too: no other node connects over it")).toBeVisible();
+    await page.getByLabel("I saved these").check();
+    await page.getByLabel("Remove the panel domain panel.acme.dev").check();
+    // Without the domain, the nodes that moved there from the agents' port come back over it.
+    await expect(checklist.getByText("The agents' port 3443 stays open: without the domain, nodes connect over it")).toBeVisible();
+    await page.getByRole("button", { name: "Lock to Tailscale" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByText(offline, { exact: false })).toBeVisible();
+    await page.screenshot({ path: `${shots}/lock-domain-nodes.png` });
+    await dialog.getByRole("button", { name: "Lock to Tailscale" }).click();
+    await expect(page.getByText("The panel is locked to Tailscale")).toBeVisible();
+    expect(sent["settings.updatePanelAccess"]).toEqual([{ serveOnIp: false }]);
+    expect(sent["settings.updateGeneral"]).toEqual([{ domain: null, acknowledgeNodesOffline: true }]);
+  });
 });

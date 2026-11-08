@@ -32,6 +32,7 @@ export const fixtures: Record<string, unknown> = {
     publicUrl: "https://panel.acme.dev",
     uptimeAllowInternalTargets: false,
     auditRetentionDays: 365,
+    domainNodes: [],
   },
 
   "updates.history": {

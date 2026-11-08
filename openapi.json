@@ -62275,7 +62275,8 @@
                     "defaultNodeId",
                     "publicUrl",
                     "uptimeAllowInternalTargets",
-                    "auditRetentionDays"
+                    "auditRetentionDays",
+                    "domainNodes"
                   ],
                   "properties": {
                     "name": {
@@ -62362,6 +62363,26 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "domainNodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -62599,6 +62620,10 @@
                               {
                                 "const": "noAgentPort",
                                 "type": "string"
+                              },
+                              {
+                                "const": "panelNodeNotLoopback",
+                                "type": "string"
                               }
                             ]
                           },
@@ -62669,6 +62694,10 @@
                               },
                               {
                                 "const": "noAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeNotLoopback",
                                 "type": "string"
                               }
                             ]
@@ -63223,7 +63252,7 @@
       "post": {
         "operationId": "settings.updateGeneral",
         "summary": "Update general settings",
-        "description": "Changes the panel name, the panel domain (null removes it and goes back to IP:port), the default node or how long the audit log keeps entries. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect.",
+        "description": "Changes the panel name, the panel domain (null removes it and goes back to IP:port), the default node or how long the audit log keeps entries. Omitted fields keep their value. Setting a domain starts the DNS check and certificate; agents learn the new URL on their next connect. Removing or changing the domain while settings.general domainNodes lists nodes takes them offline: it is refused (CONFLICT, details.reason \"nodesOnDomain\", details.nodeIds) unless acknowledgeNodesOffline is true.",
         "tags": [
           "settings"
         ],
@@ -63288,6 +63317,9 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "acknowledgeNodesOffline": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -63308,7 +63340,8 @@
                     "defaultNodeId",
                     "publicUrl",
                     "uptimeAllowInternalTargets",
-                    "auditRetentionDays"
+                    "auditRetentionDays",
+                    "domainNodes"
                   ],
                   "properties": {
                     "name": {
@@ -63395,6 +63428,26 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "domainNodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -63665,6 +63718,10 @@
                               {
                                 "const": "noAgentPort",
                                 "type": "string"
+                              },
+                              {
+                                "const": "panelNodeNotLoopback",
+                                "type": "string"
                               }
                             ]
                           },
@@ -63735,6 +63792,10 @@
                               },
                               {
                                 "const": "noAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeNotLoopback",
                                 "type": "string"
                               }
                             ]

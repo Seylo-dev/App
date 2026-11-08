@@ -15,4 +15,6 @@ export default {
   seconds: "{count}s",
   minutesSeconds: "{minutes}m {seconds}s",
   separator: " · ",
+  namesTwo: "{first} and {last}",
+  namesMany: "{list} and {last}",
 } as const;

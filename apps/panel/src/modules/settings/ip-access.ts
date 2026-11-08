@@ -8,9 +8,11 @@
 //
 // The rule (decidePanelIpAccess):
 //   closed = !serveOnIp && the panel node's agent can bind 127.0.0.1
+//            && it dials no plain http:// address but loopback
 //            && (a private path works || (stayClosed && already closed))
 //   agentPortClosed = closed && !agentPortOpen
 //            && every enabled node but the panel node dials https://<domain>
+//            && the panel node dials loopback or https://<domain>
 // It fails open: a missing capability, a panel not run by its agent, no
 // working path (in "reopen" mode) and a failed roll all leave or put the
 // port open. After an automatic reopen it closes again only once a path
@@ -23,7 +25,7 @@ import { slug } from "@seylo/brand";
 import type { settings as settingOps } from "@seylo/ops";
 import { DeployStage } from "@seylo/proto";
 import { and, eq } from "drizzle-orm";
-import { dialingNodes, dialsDomain } from "../../agent-hub/dialed";
+import { type DialingNode, dialingNodes, dialsDomain, dialsLoopback, dialsPlainHttp, panelNodeDialing } from "../../agent-hub/dialed";
 import { auditLog, nodes, servicePlacements, updateRuns } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting, setSetting } from "../../settings";
@@ -154,10 +156,35 @@ export function agentPortOf(deps: Pick<Deps, "db" | "agentTls">): number | null 
   return deps.agentTls?.port ?? getSetting(deps.db, "panelAgentTlsPort") ?? null;
 }
 
-/** Enabled nodes (not the panel node) that do not dial https://<panel domain>: closing the agents' port would cut them off. */
-export function nodesOffDomain(deps: Pick<Deps, "db" | "agents">) {
+/**
+ * Enabled nodes that do not dial https://<panel domain>: closing the
+ * agents' port would cut them off. The panel node counts only when it
+ * dials neither loopback nor the domain (panelNodeOffDomain).
+ */
+export function nodesOffDomain(deps: Pick<Deps, "db" | "agents">): DialingNode[] {
   const domain = getSetting(deps.db, "panelDomain") ?? null;
-  return dialingNodes(deps).filter((node) => !dialsDomain(node.url, domain));
+  const panelNode = panelNodeOffDomain(deps);
+  return [...dialingNodes(deps).filter((node) => !dialsDomain(node.url, domain)), ...(panelNode ? [panelNode] : [])];
+}
+
+/**
+ * The panel node, when its own agent dials a plain http:// address that is
+ * not loopback (it was joined again with an Add node command). With IP
+ * access closed the panel port answers on 127.0.0.1 only, and Docker's
+ * loopback publish does not take a dial to the server's own public
+ * address, so the agent could not reach the panel and nothing could reopen
+ * it from Settings. Null when it dials loopback or https://.
+ */
+export function panelNodeOnIp(deps: Pick<Deps, "db" | "agents">): DialingNode | null {
+  const node = panelNodeDialing(deps);
+  return node && dialsPlainHttp(node.url) && !dialsLoopback(node.url) ? node : null;
+}
+
+/** The panel node, when its own agent dials neither loopback nor https://<panel domain>: the agents' port must stay open for it. */
+export function panelNodeOffDomain(deps: Pick<Deps, "db" | "agents">): DialingNode | null {
+  const node = panelNodeDialing(deps);
+  if (!node?.url || dialsLoopback(node.url)) return null;
+  return dialsDomain(node.url, getSetting(deps.db, "panelDomain") ?? null) ? null : node;
 }
 
 /** The registered private paths with their state, in display order. */
@@ -189,6 +216,8 @@ export function decidePanelIpAccess(deps: Pick<Deps, "db" | "agents" | "agentTls
   if (!panel.capable) {
     return { ...open, why: "the panel node's agent cannot publish the panel port on 127.0.0.1 only (update it)", reclosesAt: null };
   }
+  const onIp = panelNodeOnIp(deps);
+  if (onIp) return { ...open, why: `the panel node's agent connects over ${onIp.url}, not over 127.0.0.1`, reclosesAt: null };
   const paths = pathStates(deps);
   const working = paths.filter((path) => path.working);
   let closed: boolean;
@@ -422,8 +451,8 @@ export function watchPanelIpAccess(deps: Deps): void {
     }
   };
   deps.agents.onConnection((nodeId, online) => {
-    // Node rows and blocked reasons change with every connect; the card refetches.
-    deps.live.publish("panel", { type: "invalidate", ops: ["settings.panelAccess"] });
+    // Node rows, blocked reasons and the nodes on the domain change with every connect; the cards refetch.
+    deps.live.publish("panel", { type: "invalidate", ops: ["settings.panelAccess", "settings.general"] });
     if (!online || nodeId !== panelNodeState(deps).nodeId) return;
     safely("applying IP access after the panel node connected failed", () => applyPanelIpAccess(deps, "the panel node's agent connected"));
   });
