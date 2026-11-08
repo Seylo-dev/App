@@ -24,8 +24,12 @@ export interface LiveHub {
    * also re-checked every few seconds, so this only makes it immediate.
    */
   disconnect(match: DisconnectMatch): void;
-  /** Wired by the live endpoint; other code calls disconnect(). */
-  setDisconnector(fn: (match: DisconnectMatch) => void): void;
+  /**
+   * Wired by each live endpoint (the panel port and the tailnet socket each
+   * have one); other code calls disconnect(). Returns a function that
+   * removes it.
+   */
+  addDisconnector(fn: (match: DisconnectMatch) => void): () => void;
   /** Topics a socket follows now. */
   topics(socket: LiveSocket): LiveTopic[];
   /**
@@ -34,15 +38,15 @@ export interface LiveHub {
    * Sockets are also re-checked every few seconds.
    */
   recheck(match: { userId: string }): void;
-  /** Wired by the live endpoint; other code calls recheck(). */
-  setRechecker(fn: (match: { userId: string }) => void): void;
+  /** Wired by each live endpoint, like addDisconnector; other code calls recheck(). */
+  addRechecker(fn: (match: { userId: string }) => void): () => void;
 }
 
 export function createLiveHub(): LiveHub {
   const byTopic = new Map<LiveTopic, Map<string, LiveSocket>>();
   const bySocket = new Map<string, Set<LiveTopic>>();
-  let disconnector: ((match: DisconnectMatch) => void) | undefined;
-  let rechecker: ((match: { userId: string }) => void) | undefined;
+  const disconnectors = new Set<(match: DisconnectMatch) => void>();
+  const recheckers = new Set<(match: { userId: string }) => void>();
 
   const unsubscribe = (socket: LiveSocket, topic: LiveTopic) => {
     byTopic.get(topic)?.delete(socket.id);
@@ -68,19 +72,21 @@ export function createLiveHub(): LiveHub {
       for (const socket of byTopic.get(topic)?.values() ?? []) socket.send({ type: "event", topic, event });
     },
     disconnect(match) {
-      disconnector?.(match);
+      for (const fn of disconnectors) fn(match);
     },
-    setDisconnector(fn) {
-      disconnector = fn;
+    addDisconnector(fn) {
+      disconnectors.add(fn);
+      return () => disconnectors.delete(fn);
     },
     topics(socket) {
       return [...(bySocket.get(socket.id) ?? [])];
     },
     recheck(match) {
-      rechecker?.(match);
+      for (const fn of recheckers) fn(match);
     },
-    setRechecker(fn) {
-      rechecker = fn;
+    addRechecker(fn) {
+      recheckers.add(fn);
+      return () => recheckers.delete(fn);
     },
   };
 }

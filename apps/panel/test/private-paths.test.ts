@@ -1,7 +1,7 @@
 // The private-path registry and the panel domain path (added in 0.2.1), and
 // the WP0 stubs built on them: IP access stays open until WP-F2b, the
 // panel access ops answer NOT_IMPLEMENTED, and tailscale.get reports
-// Tailscale as not detected.
+// Tailscale as not detected before the panel node reported it.
 
 import { afterEach, expect, test } from "bun:test";
 import { settings as settingOps, tailscale } from "@seylo/ops";
@@ -95,13 +95,7 @@ test("the panel access ops are routed but not built, and tailscale.get says not 
   const { cookie } = await createUser(panel, "owner");
   expect((await callOp(panel, settingOps.panelAccess, {}, { cookie })).status).toBe(501);
   expect((await callOp(panel, settingOps.updatePanelAccess, { serveOnIp: true }, { cookie })).status).toBe(501);
-  for (const [op, input] of [
-    [tailscale.setServe, { serve: true }],
-    [tailscale.signIn, {}],
-    [tailscale.setDns, { acceptDns: false }],
-  ] as const) {
-    expect((await callOp(panel, op, input as never, { cookie })).status).toBe(501);
-  }
+  // The tailscale changes are built (WP-F3b): tailscale-ops.test.ts.
   const status = await callOp(panel, tailscale.get, {}, { cookie });
   expect(status.status).toBe(200);
   expect(status.body).toMatchObject({

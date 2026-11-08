@@ -12,8 +12,12 @@ import { jsonResponse } from "./compress";
 import { secureSession } from "./https";
 import { isSameOrigin } from "./origin";
 import { requestOrigin } from "./request-origin";
+import { tailscaleUserLogin } from "./tailnet-host";
 
-export function httpOpHandler(execute: ExecuteOp, deps: Pick<Deps, "config" | "db" | "proxy">) {
+export function httpOpHandler(execute: ExecuteOp, deps: Pick<Deps, "config" | "db" | "proxy" | "listener">) {
+  // Only the tailnet listener's own adapter marks calls: nothing a request
+  // sends on the main port can (added in 0.2.1).
+  const tailnet = deps.listener === "tailnet";
   return async ({ op, rawInput, request, socketIp }: OpHttpCall): Promise<Response> => {
     const headers = new Headers({ "cache-control": "no-store" });
     const trusted = deps.proxy.trusts(socketIp);
@@ -32,6 +36,7 @@ export function httpOpHandler(execute: ExecuteOp, deps: Pick<Deps, "config" | "d
       userAgent: request.headers.get("user-agent"),
       http: sessionEffects(headers, secure),
       origin: requestOrigin(request, trusted),
+      ...(tailnet ? { via: "tailnet" as const, viaLogin: tailscaleUserLogin(request) } : {}),
     });
     if (outcome.ok) return jsonResponse(request, outcome.output, headers);
     return withRetryAfter(outcome.error, headers);

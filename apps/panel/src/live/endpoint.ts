@@ -103,9 +103,9 @@ export function liveEndpoint(
       }
     }
   };
-  deps.live.setRechecker(({ userId }) => revalidate(userId));
+  deps.live.addRechecker(({ userId }) => revalidate(userId));
 
-  deps.live.setDisconnector((match) => {
+  deps.live.addDisconnector((match) => {
     for (const [id, connection] of connections) {
       const p = connection.access.principal;
       if (p.type === "anonymous") continue;

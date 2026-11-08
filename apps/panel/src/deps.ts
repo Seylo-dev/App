@@ -42,4 +42,10 @@ export interface Deps {
   proxy: ProxyTrust;
   /** The agents' TLS listener (security/agent-tls.ts), or null when it is off. */
   agentTls: { port: number; pin: string } | null;
+  /**
+   * The listener these deps serve: "tailnet" for the copy panel.ts gives
+   * the unix socket Tailscale Serve proxies to (http/tailnet-host.ts),
+   * absent or "main" everywhere else. added in 0.2.1
+   */
+  listener?: "main" | "tailnet";
 }
