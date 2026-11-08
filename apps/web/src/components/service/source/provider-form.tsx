@@ -67,6 +67,8 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
       </LoadingRegion>
     );
   if (connections.isError) return <OpErrorNote error={connections.error} />;
+  // Someone who may not set sources anywhere (a viewer) gets no connections: show what is connected instead.
+  if (connections.data.hidden) return <ReadOnlyProvider service={service} kind={kind} src={src} />;
   const list = connections.data.items.filter((c) => c.kind === kind);
   const providerName = t(`serviceSource.types.${kind}.name`);
   if (list.length === 0) {
@@ -159,6 +161,30 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
         </div>
       </form>
       {src && <WebhookStatus service={service} kind={kind} />}
+    </div>
+  );
+}
+
+type ProviderSource = Extract<ServiceDetail["sourceConfig"], { type: "provider" }>;
+
+/** A provider source for someone who may not change it: repository, branch and the webhook, no pickers. */
+function ReadOnlyProvider({ service, kind, src }: { service: ServiceDetail; kind: ProviderKind; src: ProviderSource | null }) {
+  return (
+    <div className="flex flex-col gap-4">
+      {src && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label={t("serviceSource.provider.repository")} htmlFor="provider-repo-readonly">
+            <Input id="provider-repo-readonly" className="font-mono" value={src.repo} readOnly />
+          </Field>
+          <Field label={t("serviceSource.provider.branch")} htmlFor="provider-branch-readonly">
+            <Input id="provider-branch-readonly" className="font-mono" value={src.branch} readOnly />
+          </Field>
+        </div>
+      )}
+      <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">
+        {t("serviceSource.provider.readOnly", { provider: t(`serviceSource.types.${kind}.name`) })}
+      </p>
+      {src && <WebhookStatus service={service} kind={kind} readOnly />}
     </div>
   );
 }
@@ -301,7 +327,8 @@ function BranchSelect({
   );
 }
 
-function WebhookStatus({ service, kind }: { service: ServiceDetail; kind: ProviderKind }) {
+/** `readOnly`: no "Create webhook again" (it needs services.update). */
+function WebhookStatus({ service, kind, readOnly = false }: { service: ServiceDetail; kind: ProviderKind; readOnly?: boolean }) {
   const hook = useOp(gitProviders.webhook, { serviceId: service.id }, { retry: retryOp });
   const invalidate = useInvalidate();
   const repair = useOpMutation(gitProviders.repairWebhook, {
@@ -321,7 +348,7 @@ function WebhookStatus({ service, kind }: { service: ServiceDetail; kind: Provid
   }
   if (hook.isError) return <OpErrorNote error={hook.error} />;
   const data = hook.data;
-  const repairButton = (
+  const repairButton = readOnly ? undefined : (
     <Button size="sm" onClick={() => repair.mutate({ serviceId: service.id })} disabled={repair.isPending}>
       <IconRefresh size={15} stroke={1.8} />
       {t("serviceSource.provider.repair")}

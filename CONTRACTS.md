@@ -1583,10 +1583,18 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   list, no install link and `hidden: true`, so the Source tab shows a
   GitHub-connected service's repository and branch read-only instead of
   "Connect GitHub first"; `github.manage` sees them too) need
-  `services.create` or `services.update` on some project or service,
+  `services.create` or `services.update` on some project or service
+  (`gitProviders.list` answers `hidden: true` then, and the Source tab shows
+  a provider source's repository, branch and webhook state read-only,
+  without "Create webhook again"),
   notification channels and
   backup destination choices `services.view` (or the edit action) somewhere;
-  a key counts only its own actions and projects. `apiKeys.list all` and
+  a key counts only its own actions and projects. The node field of every
+  create form (`NodePicker`, the Docker Hub dialog's architecture) reads
+  `nodes.choices`: nodes that are not disabled with id, name, online or
+  offline, wildcard domain and arch only, for `services.create` somewhere
+  or `nodes.view`, else an empty list; `nodes.list` (addresses, usage,
+  settings) stays `nodes.view`, which members never hold. `apiKeys.list all` and
   `approvals.approve` need a browser session (deny works with keys).
 - Git addresses (`modules/git/targets.ts` `assertGitTarget`): a generic git
   source (service, compose stack, clone) must resolve to public addresses
@@ -1669,7 +1677,9 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   metadata address; the node's refusal message names the op).
   `git.listInternalHosts {projectId}` lists a project's hosts (who allowed
   each, `approvedBy` null for the seed's rows or a removed account, and
-  `usedBy`, its generic git and stack sources on the host) and
+  `usedBy`, its sources that clone from the host: generic git and stack
+  git sources by URL, GitHub sources as `github.com`, provider sources by
+  their connection's host) and
   `git.removeInternalHost {projectId, host}` takes one off (NOT_FOUND when
   it is not there); both `git.manage`. A host is recorded as `urlHost` of
   the URL, lower case, with whatever a URL's host holds (`git_srv.lan`, an
@@ -1680,16 +1690,20 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   recorded host lists and can be taken off. A refusal an admin can lift
   (BAD_REQUEST `internalTarget` or `unresolvable` from saving a source or
   `git.branches`, never a metadata address) carries `details.host`, the
-  host as it would be recorded. The web app shows "Allow this host for
-  <project>" under such a refusal on the git source form for owners and
-  admins (a confirm step, then `git.allowInternalHost`, then the check or
-  save again) and tells members only an owner or admin can allow it; the
-  provider form has no such refusal (`gitProviders.connectRepo` never
-  refuses a host, `providerGitVerdict` decides at build time), so a
-  failed deployment whose error is the node's or the panel's refusal for
-  the source's host (git or provider) offers admins the same; project Settings >
-  Internal git hosts lists them for admins with Remove and an "Allow a
-  host" field. `git.branches` (checking access to a generic git URL) reads the
+  host as it would be recorded. Only callers without `git.manage` get one:
+  an admin's save records the host and an admin's `git.branches` reads it,
+  and `gitProviders.connectRepo` never judges the host
+  (`providerGitVerdict` decides at build time). Under such a refusal on
+  the git source form the web app tells members that only an owner or
+  admin can allow the host (`internalTarget`), or to check the address and
+  that an owner or admin can allow a name only their network knows
+  (`unresolvable`); the provider form has no such refusal. A failed
+  deployment whose error is the node's or the panel's refusal for the
+  source's host (git or provider) offers admins "Allow this host for
+  <project>" (a confirm step, then `git.allowInternalHost`); project
+  Settings > Internal git hosts lists them for admins with Remove and an
+  "Allow a host" field. `git.branches` (checking access to a generic git
+  URL) reads the
   repository from the panel under the same rule: public addresses, a host
   in `git_internal_hosts` for the project, or any internal host for a
   `git.manage` caller; never metadata, and the uptime "allow internal
@@ -2331,8 +2345,9 @@ theirs from one env graph per project per compile (`ctx.memo`), not one
 per service.
 
 Live topics the nodes module publishes (`modules/nodes/live.ts`): `panel` invalidates
-`nodes.list`, `system.info`, `updates.status` on node changes; `node:<id>`
-invalidates `nodes.get`, `nodes.healthReport`; `service:<id>` invalidates
+`nodes.list`, `nodes.choices`, `system.info`, `updates.status` on node
+changes; `node:<id>` invalidates `nodes.get`, `nodes.healthReport`;
+`service:<id>` invalidates
 `services.get` (with `project:<id>` -> `services.list`) whenever a node
 reports a change in the service's status. Metrics samples (about every 10 s
 per node) follow `modules/metrics/live.ts`, since the stored series change
@@ -2831,14 +2846,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   dialog fails the call with `isReauthCancelled(error)` true, which
   `toastError` and the screens keep quiet. `/reauth?redirect=<path>` is the
   same form as a page (for the MCP consent page). `?redirect=` on `/login`
-  and `/reauth` goes through `lib/redirect.ts` `safeRedirectPath`, and
-  `validateSearch` always returns the key, because the router keeps raw
+  and `/reauth` goes through `lib/redirect.ts` `safeRedirectPath` (a path
+  on this origin whose parsed path does not start with `//`, so
+  `/..//evil.example` is refused), and `validateSearch` always returns the key, because the router keeps raw
   search values a route leaves out.
 - Shared helpers: `lib/theme.ts` (`refreshBoot()` after an appearance or
   branding save, `useBoot()`), `lib/format.ts`, `lib/types.ts`,
   `lib/service-display.ts`, `components/query-error.tsx` (`QueryError`
-  renders 501 as "not built yet"), `components/pickers.tsx` (`NodePicker`,
-  `ProjectPicker`). In `components/service/`: `editor/code-editor.tsx`
+  renders 501 as "not built yet"), `components/pickers.tsx` (`NodePicker` from
+  `nodes.choices`, `ProjectPicker`). In `components/service/`: `editor/code-editor.tsx`
   (`CodeEditor`, lazy Monaco with only the editor worker),
   `editor/env-editor.tsx` (.env editor with env-analyzer markers, hovers,
   completions), `terminal/xterm-view.tsx` +
@@ -2874,9 +2890,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo
-  data, with the ops answered and recorded per test) and
+  data, with the ops answered and recorded per test), `env-save.spec.ts`
+  (typing during a slow service or shared environment save keeps the new
+  text unsaved) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
-  four theme presets, plus the phone width and the accent check;
+  four theme presets, plus the phone width, the service tab bar and the
+  accent check;
   screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`
   narrow it).
 

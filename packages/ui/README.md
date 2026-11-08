@@ -16,6 +16,12 @@ variants) restyled to the approved design, plus the design tokens.
   (`import { Button, DataTable } from "@seylo/ui"`) or one file
   (`@seylo/ui/components/button`).
 
+A row that may not fit (tabs on a phone, a view switcher in a sheet) gets
+the `scroll-row` utility and `ref={scrollFadeRef}` (`lib/scroll-fade`): it
+scrolls sideways without a scrollbar, and the edge that hides items fades
+out. Rows people use with a mouse wrap from `md` up instead, so nothing
+sits out of reach.
+
 Components never use literal colors; add a token first. They hold no
 English either: see "Setup".
 
@@ -54,8 +60,8 @@ i18n section. Without the provider each label shows its own key.
 | `input`, `textarea` | `Input`, `Label`, `Textarea` (`mono`) | |
 | `select` | `Select`, `SelectTrigger` (size sm), `SelectContent`, `SelectItem`, ... | looks like `Input` |
 | `switch`, `checkbox`, `radio-group` | `Switch` (size sm), `Checkbox` (indeterminate), `RadioGroup`, `RadioGroupItem`, `RadioCard` | `RadioCard` for big choices (builders, plans) |
-| `segmented` | `Segmented`, `SegmentedItem` | single-choice track (ranges, views) |
-| `tabs` | `TabList`, `tabClassName` | underlined route tabs |
+| `segmented` | `Segmented`, `SegmentedItem` | single-choice track (ranges, views); `ref` reaches the track |
+| `tabs` | `TabList`, `tabClassName` | underlined route tabs; wraps by default |
 | `copy-field` | `CopyField` copies on click or focus; `secret` masks with an eye toggle; `copyText`, `useCopy` | works on plain HTTP too |
 | `code-block` | `CodeBlock` light or dark, title, copy | no syntax colors (Monaco edits) |
 | `dropdown-menu` | `DropdownMenu*` items, checkbox/radio items, labels, separators, sub menus | `destructive` items |

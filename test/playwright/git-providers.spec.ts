@@ -7,7 +7,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { installDemo } from "./demo/routes";
 import { handlers as serviceHandlers, ids as svc } from "./demo/service";
-import { ids } from "./demo/fixtures";
+import { ids, viewer } from "./demo/fixtures";
 import { stateFile } from "./helpers";
 
 type Input = Record<string, any>;
@@ -146,6 +146,48 @@ test.describe("git providers", () => {
     await page.getByRole("radio", { name: /Bitbucket/ }).click();
     await expect(page.getByText("Connect Bitbucket first")).toBeVisible();
     await expect(page.getByRole("link", { name: "Add a connection" })).toHaveAttribute("href", "/settings/git-providers");
+    expect(errors).toEqual([]);
+  });
+
+  test("a viewer sees a GitLab source read-only, and its Deployments tab says pushes deploy", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installDemo(page, {
+      overrides: {
+        "auth.whoami": () => ({ viewer: { ...viewer, role: "member" }, via: "session" }),
+        // What the panel answers someone who may create or update services nowhere.
+        "gitProviders.list": () => ({ items: [], hidden: true }),
+        "gitProviders.webhook": () => ({
+          configured: true,
+          kind: "gitlab",
+          repo: "acme/shop",
+          url: null,
+          created: false,
+          error: "GitLab answered 403.",
+          insecure: false,
+          lastDeliveryAt: null,
+          createdAt: now,
+        }),
+        "services.get": (input) => ({
+          ...(serviceDetail(input.serviceId as string) as object),
+          source: { type: "gitlab", label: "acme/shop", branch: "main", builder: "railpack" },
+          sourceConfig: { type: "provider", providerId: gitlab.id, provider: "gitlab", repo: "acme/shop", branch: "main", deployOnPush: true },
+        }),
+      },
+    });
+    await page.goto(`/p/${ids.acme}/s/${svc.api}/source`);
+    await expect(page.getByLabel("Repository")).toHaveValue("acme/shop");
+    await expect(page.getByLabel("Branch")).toHaveValue("main");
+    await expect(page.getByText("Connecting or changing a GitLab repository needs the right to create or update services.")).toBeVisible();
+    await expect(page.getByText("Connect GitLab first")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Add a connection" })).toHaveCount(0);
+    // The webhook state shows, without a repair button the viewer could not use.
+    await expect(page.getByText("The webhook could not be created")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create webhook again" })).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/source-viewer.png`, fullPage: true });
+
+    await page.goto(`/p/${ids.acme}/s/${svc.api}/deployments`);
+    await expect(page.getByText("Deploy on push: on")).toBeVisible();
     expect(errors).toEqual([]);
   });
 

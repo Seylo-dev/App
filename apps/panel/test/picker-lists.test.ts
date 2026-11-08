@@ -128,9 +128,13 @@ test("a viewer reads channel and destination names; source pickers need a source
   grant(panel, viewer.user.id, "project", projectId, ["services.view"]);
   expect(await lists({ cookie: viewer.cookie })).toEqual({ ...none, channels: 1, destinations: 1 });
 
+  // The provider list says it is hidden, so the Source tab shows a provider source read-only, not "Connect GitLab first".
+  expect((await callOp(panel, gitProviders.list, {}, { cookie: viewer.cookie })).body).toEqual({ items: [], hidden: true });
+
   const builder = await createUser(panel, "member");
   grant(panel, builder.user.id, "project", projectId, ["services.view", "services.create"]);
   expect(await lists({ cookie: builder.cookie })).toEqual(everything);
+  expect((await callOp(panel, gitProviders.list, {}, { cookie: builder.cookie })).body).toMatchObject({ hidden: false });
 
   const editor = await createUser(panel, "member");
   grant(panel, editor.user.id, "project", projectId, ["services.view", "services.update"]);

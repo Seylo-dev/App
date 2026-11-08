@@ -19,6 +19,7 @@ import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
+import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { IconFileText, IconPower, IconRefresh, IconSparkles } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -95,7 +96,8 @@ function NodeSheetBody({
           value={view}
           onValueChange={(v) => onViewChange(v as NodeView)}
           // Five views: on a phone the track scrolls inside the header instead of widening the sheet.
-          className="mt-2 max-w-full self-start overflow-x-auto"
+          ref={scrollFadeRef}
+          className="scroll-row mt-2 max-w-full self-start"
         >
           <SegmentedItem value="overview">{t("nodes.sheet.overview")}</SegmentedItem>
           <SegmentedItem value="health">{t("nodes.health")}</SegmentedItem>

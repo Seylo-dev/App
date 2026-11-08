@@ -19,8 +19,9 @@ export function SharedEnv({ projectId }: { projectId: string }) {
   const current = useOp(env.getShared, { projectId });
   const [text, setText] = useState<string | null>(null);
   const save = useOpMutation(env.setShared, {
-    onSuccess: (result) => {
-      setText(null);
+    onSuccess: (result, sent) => {
+      // Keep what was typed during the save: it is not saved yet.
+      setText((local) => (local === sent.text ? null : local));
       void current.refetch();
       toast.success(
         result.affectedServiceIds.length > 0

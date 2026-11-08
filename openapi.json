@@ -32571,7 +32571,7 @@
       "get": {
         "operationId": "git.listInternalHosts",
         "summary": "List a project's internal git hosts",
-        "description": "Lists the git hosts a project's nodes may clone from internal addresses (private, loopback, link-local, a node's own and the like): recorded when an admin saved a source with an internal host there, by git.allowInternalHost, or by the first start of 0.2 for sources saved before. approvedBy is null for hosts the first start recorded (or whose admin account is gone); usedBy counts the project's generic git and compose stack sources on the host.",
+        "description": "Lists the git hosts a project's nodes may clone from internal addresses (private, loopback, link-local, a node's own and the like): recorded when an admin saved a source with an internal host there, by git.allowInternalHost, or by the first start of 0.2 for sources saved before. approvedBy is null for hosts the first start recorded (or whose admin account is gone); usedBy counts the project's sources that clone from the host: generic git and compose stack git sources by URL, GitHub sources as github.com, and git provider sources by their connection's host.",
         "tags": [
           "git"
         ],
@@ -37305,7 +37305,7 @@
       "get": {
         "operationId": "gitProviders.list",
         "summary": "List git provider connections",
-        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only. Empty for callers who may create or edit services nowhere.",
+        "description": "Lists the panel's GitLab, Gitea/Forgejo and Bitbucket connections by name, kind and host (never the token), so people can pick one for a service's source. The account and user name are shown to people who manage connections only. Empty, with hidden true, for callers who may create or edit services nowhere.",
         "tags": [
           "gitProviders"
         ],
@@ -37327,7 +37327,8 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "items"
+                    "items",
+                    "hidden"
                   ],
                   "properties": {
                     "items": {
@@ -37442,6 +37443,10 @@
                           }
                         }
                       }
+                    },
+                    "hidden": {
+                      "description": "True when the caller may not see the connections: the list is then empty whatever is connected, and a provider source shows its repository and branch read-only.",
+                      "type": "boolean"
                     }
                   }
                 }
@@ -42467,6 +42472,104 @@
         },
         "x-op-kind": "query",
         "x-permission": "nodes.manage",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/nodes.choices": {
+      "get": {
+        "operationId": "nodes.choices",
+        "summary": "List nodes to place a service on",
+        "description": "Lists the nodes a new service can go on (every node that is not disabled, panel node first) with only what a create form needs: name, online or offline, wildcard domain and CPU architecture. For anyone who may create services somewhere (services.create on a project) and for nodes.view; anyone else gets an empty list. nodes.list has the full rows.",
+        "tags": [
+          "nodes"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "nodes"
+                  ],
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "status",
+                          "wildcardDomain",
+                          "arch"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "anyOf": [
+                              {
+                                "const": "online",
+                                "type": "string"
+                              },
+                              {
+                                "const": "offline",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "wildcardDomain": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "arch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
         "x-mcp": true
       }
     },

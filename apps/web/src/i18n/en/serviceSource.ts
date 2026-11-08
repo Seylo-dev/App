@@ -46,6 +46,7 @@ export default {
     noConnectionBody:
       "Add a connection with an access token in Settings, Git providers. The panel lists repositories, clones and creates the webhook with it.",
     addConnection: "Add a connection",
+    readOnly: "Connecting or changing a {provider} repository needs the right to create or update services.",
     connection: "Connection",
     repository: "Repository",
     searchRepos: "Search repositories",

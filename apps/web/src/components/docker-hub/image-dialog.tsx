@@ -100,8 +100,9 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
   const tags = useOp(dockerHub.tags, { repository: target.repository }, { retry: retryOp, staleTime: 5 * 60_000 });
   // The suggested tag (pinned to latest's version) until the person picks another.
   const chosenTag = tag ?? tags.data?.suggested ?? null;
-  const nodeList = useOp(nodes.list, {}, { retry: retryOp });
-  const nodeArch = nodeList.data?.nodes.find((n) => n.id === nodeId)?.facts?.arch === "arm64" ? "arm64" : "amd64";
+  // The same list the node field reads, so members get the architecture too.
+  const nodeList = useOp(nodes.choices, {}, { retry: retryOp });
+  const nodeArch = nodeList.data?.nodes.find((n) => n.id === nodeId)?.arch === "arm64" ? "arm64" : "amd64";
   const inspect = useOp(
     dockerHub.inspect,
     { repository: target.repository, tag: chosenTag ?? "latest", arch: nodeArch },

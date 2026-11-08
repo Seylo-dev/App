@@ -38,7 +38,8 @@ export default {
       api: "It can look at things but never change them.",
       mcp: "Recommended. The tool can look but not change anything.",
     },
-    mcpWrites: "Changes an MCP tool asks for still wait in Approvals until a person approves them.",
+    mcpWrites:
+      "Deploys, restarts and edits (env, domains, files) run right away. Deleting something or changing it for good, such as a backup restore, waits in Approvals until a person approves it.",
     projects: "Projects",
     allProjects: "All projects",
     allProjectsHint: "Everything you can reach, including panel settings if you can change them.",
@@ -63,7 +64,7 @@ export default {
     enabledHint: "Off refuses every token and sign-in from AI tools but keeps them, so turning it back on restores access.",
     safetyTitle: "Read-only by default",
     safety:
-      "AI tools see the same actions as you, but tokens start read-only, and anything that changes or deletes something waits until a person approves it.",
+      "AI tools see the same actions as you, but tokens start read-only, and anything that deletes something or changes it for good waits until a person approves it.",
     approvalsLink: "Open Approvals",
     url: "Server URL",
     oauth: "OAuth metadata",

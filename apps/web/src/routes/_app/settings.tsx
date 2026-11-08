@@ -4,6 +4,7 @@
 // slides between sections, and a section's content fades in when it opens.
 
 import { ActiveIndicator, EnterOnChange } from "@seylo/ui/components/motion";
+import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { cn } from "@seylo/ui/lib/utils";
 import { createFileRoute, Link, Outlet, useChildMatches } from "@tanstack/react-router";
 import type * as React from "react";
@@ -19,8 +20,9 @@ function SettingsLayout() {
   return (
     <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:gap-7">
       <nav
+        ref={scrollFadeRef}
         aria-label={t("settings.title")}
-        className="-mx-4 flex shrink-0 gap-0.5 overflow-x-auto px-4 pb-1 text-[13.5px] md:mx-0 md:w-[190px] md:flex-col md:overflow-visible md:px-0 md:pb-0"
+        className="scroll-row -mx-4 flex shrink-0 gap-0.5 px-4 pb-1 text-[13.5px] md:mx-0 md:w-[190px] md:flex-col md:overflow-visible md:px-0 md:pb-0"
       >
         <GroupLabel>{t("settings.title")}</GroupLabel>
         {settingsNav.map((item) => (

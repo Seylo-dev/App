@@ -39,7 +39,7 @@ import { compareVersions, parseVersion } from "../../agent-hub/version";
 import type { Access } from "../../auth/access";
 import { type Principal, userOf } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
-import { gitInternalHosts, nodes, projects, services, users } from "../../db/schema";
+import { gitInternalHosts, gitProviders, nodes, projects, services, users } from "../../db/schema";
 import type { Logger } from "../../logger";
 import { deleteSetting, getSetting, setSetting } from "../../settings";
 import { blockedTarget, checkTarget, type NodeAddressScope, type TargetCheck } from "../uptime/targets";
@@ -254,11 +254,39 @@ function gitSourceRows(db: PanelDb, filter?: SQL): { id: string; projectId: stri
   });
 }
 
-/** The git hosts of each generic git source and compose stack source in a project, per host. */
+/**
+ * The git hosts (urlHost form) a project's sources clone from, per host:
+ * generic git sources and compose stack git sources by their URL, GitHub
+ * sources as github.com and git provider sources by their connection's host.
+ * A recorded row matters at build time for all of them (gitHostRecorded,
+ * providerGitVerdict), so removing one in use should say so.
+ */
 function sourceHostCounts(db: PanelDb, projectId: string): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const row of gitSourceRows(db, eq(services.projectId, projectId)))
-    for (const host of row.hosts) counts.set(host, (counts.get(host) ?? 0) + 1);
+  const count = (host: string | undefined) => {
+    if (host) counts.set(host, (counts.get(host) ?? 0) + 1);
+  };
+  for (const row of gitSourceRows(db, eq(services.projectId, projectId))) for (const host of row.hosts) count(host);
+  const rows = db
+    .select({
+      source: sql<string | null>`json_extract(${services.spec}, '$.source.type')`,
+      providerId: sql<string | null>`json_extract(${services.spec}, '$.source.providerId')`,
+    })
+    .from(services)
+    .where(eq(services.projectId, projectId))
+    .all();
+  const providerHosts = new Map<string, string>();
+  if (rows.some((row) => row.source === "provider")) {
+    for (const provider of db.select({ id: gitProviders.id, url: gitProviders.url }).from(gitProviders).all()) {
+      try {
+        providerHosts.set(provider.id, new URL(provider.url).host.toLowerCase());
+      } catch {}
+    }
+  }
+  for (const row of rows) {
+    if (row.source === "github") count("github.com");
+    if (row.source === "provider" && row.providerId) count(providerHosts.get(row.providerId));
+  }
   return counts;
 }
 

@@ -4,11 +4,11 @@
 export default {
   thisProject: "this project",
   note: {
-    admin:
-      "{host} is on an internal address: a private network, or one of this panel's nodes. The project's nodes clone it only once an admin allows it.",
     allow: "Allow this host for {project}",
     askAdmin:
       "{host} is on an internal address: a private network, or one of this panel's nodes. Only an owner or admin of this panel can allow it for {project}. Ask one of them to allow it in the project's Settings, or to save this source once.",
+    unresolvable:
+      "{host} does not resolve from the panel. Check the address. If it is a name only your network knows, an owner or admin of this panel can allow it for {project} in the project's Settings.",
   },
   allow: {
     title: "Allow {host} for {project}?",

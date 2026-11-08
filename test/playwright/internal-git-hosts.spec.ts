@@ -1,7 +1,8 @@
 // Internal git hosts in the browser, on the demo data: a member refused for
-// an internal git host on the Source tab sees who can allow it; an owner
-// allows it right there after a confirm step (git.allowInternalHost), lists
-// and removes the project's hosts in its Settings, and allows a host from a
+// an internal git host on the Source tab sees who can allow it, and one whose
+// host does not resolve is told to check the address; an owner (whose save
+// records the host, so the panel never refuses them there) lists, allows and
+// removes the project's hosts in its Settings, and allows a host from a
 // deployment the node refused for it.
 
 import { expect, type Page, test } from "@playwright/test";
@@ -36,25 +37,27 @@ const gitSource = (input: Input) => ({
   sourceConfig: { type: "git", url: repo, branch: "main", credentialId: null, deployOnPush: false },
 });
 
-/** git.branches refused like the panel refuses a host on one of its nodes, until `allowed()` says otherwise. */
-async function refuseBranches(page: Page, allowed: () => boolean) {
+/** git.branches refused the way the panel refuses a member for where the host is. */
+async function refuseBranches(page: Page, refusal: "internalTarget" | "unresolvable" = "internalTarget") {
+  const error =
+    refusal === "internalTarget"
+      ? {
+          code: "BAD_REQUEST",
+          message:
+            "The git host is an address of one of this panel's nodes (51.15.20.30). Only an admin can use an internal git host; once an admin saves a source with it in this project (or allows it with git.allowInternalHost), its members can use it too.",
+          details: { field: "url", reason: "internalTarget", host: "git.example.com" },
+        }
+      : {
+          code: "BAD_REQUEST",
+          message: "The name git.example.com did not resolve.",
+          details: { field: "url", reason: "unresolvable", host: "git.example.com" },
+        };
   await page.route(/\/api\/v1\/git\.branches/, (route) =>
-    allowed()
-      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ branches: ["main", "next"], defaultBranch: "main" }) })
-      : route.fulfill({
-          status: 400,
-          contentType: "application/json",
-          body: JSON.stringify({
-            error: {
-              code: "BAD_REQUEST",
-              message:
-                "The git host is an address of one of this panel's nodes (51.15.20.30). Only an admin can use an internal git host; once an admin saves a source with it in this project (or allows it with git.allowInternalHost), its members can use it too.",
-              details: { field: "url", reason: "internalTarget", host: "git.example.com" },
-            },
-          }),
-        }),
+    route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error }) }),
   );
 }
+
+const asMember = { "auth.whoami": () => ({ viewer: { ...viewer, role: "member" }, via: "session" }) };
 
 test.describe("internal git hosts", () => {
   test.use({ storageState: stateFile });
@@ -63,53 +66,28 @@ test.describe("internal git hosts", () => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await installDemo(page, {
-      overrides: {
-        "auth.whoami": () => ({ viewer: { ...viewer, role: "member" }, via: "session" }),
-        "services.get": gitSource,
-        "git.listCredentials": () => ({ items: [] }),
-      },
+      overrides: { ...asMember, "services.get": gitSource, "git.listCredentials": () => ({ items: [] }) },
     });
-    await refuseBranches(page, () => false);
+    await refuseBranches(page);
     await page.goto(`/p/${ids.acme}/s/${svc.api}/source`);
     await page.getByRole("button", { name: "Check access" }).click();
     await expect(page.getByText(/an address of one of this panel's nodes/)).toBeVisible();
     await expect(page.getByText(/Only an owner or admin of this panel can allow it for acme-shop/)).toBeVisible();
     await expect(page.getByRole("button", { name: /Allow this host/ })).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/source-refused.png`, fullPage: true });
     expect(errors).toEqual([]);
   });
 
-  test("an owner allows the host from the Source tab after a confirm step", async ({ page }) => {
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    const calls = watchApi(page);
-    let allowed = false;
+  test("a member whose git host does not resolve is told to check the address", async ({ page }) => {
     await installDemo(page, {
-      overrides: {
-        "services.get": gitSource,
-        "git.listCredentials": () => ({ items: [] }),
-        "git.allowInternalHost": () => {
-          allowed = true;
-          return { host: "git.example.com" };
-        },
-      },
+      overrides: { ...asMember, "services.get": gitSource, "git.listCredentials": () => ({ items: [] }) },
     });
-    await refuseBranches(page, () => allowed);
+    await refuseBranches(page, "unresolvable");
     await page.goto(`/p/${ids.acme}/s/${svc.api}/source`);
     await page.getByRole("button", { name: "Check access" }).click();
-    const allow = page.getByRole("button", { name: "Allow this host for acme-shop" });
-    await expect(allow).toBeVisible();
-    await page.screenshot({ path: `${shots}/source-refused.png`, fullPage: true });
-    await allow.click();
-    const dialog = page.getByRole("alertdialog");
-    await expect(dialog.getByText("Allow git.example.com for acme-shop?")).toBeVisible();
-    // Nothing is called before the confirm.
-    expect(calls.some((c) => c.op === "git.allowInternalHost")).toBe(false);
-    await dialog.getByRole("button", { name: "Allow host" }).click();
-    await expect(page.getByText("git.example.com allowed for acme-shop.")).toBeVisible();
-    expect(calls.find((c) => c.op === "git.allowInternalHost")?.input).toEqual({ projectId: ids.acme, url: repo });
-    // The check runs again and passes.
-    await expect(page.getByText("Reachable: 2 branches, default main.")).toBeVisible();
-    expect(errors).toEqual([]);
+    await expect(page.getByText("The name git.example.com did not resolve.")).toBeVisible();
+    await expect(page.getByText(/git\.example\.com does not resolve from the panel\. Check the address\./)).toBeVisible();
+    await expect(page.getByText(/is on an internal address/)).toHaveCount(0);
   });
 
   test("an owner lists, allows and removes the project's internal git hosts in its Settings", async ({ page }) => {

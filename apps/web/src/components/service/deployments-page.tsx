@@ -29,6 +29,7 @@ import { type ReactNode, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { useLiveUp } from "../../lib/live";
+import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
@@ -391,8 +392,9 @@ function BuildFacts({ service }: { service: ServiceDetail }) {
       icon: IconPackage,
       text: t("serviceDeploys.facts.builder", { builder: t(`serviceSource.builders.${service.source.builder}.name`) }),
     });
-  if (src.type === "github" || src.type === "git")
-    facts.push({ icon: IconRefresh, text: src.deployOnPush ? t("serviceDeploys.facts.pushOn") : t("serviceDeploys.facts.pushOff") });
+  const onPush = deploysOnPush(src);
+  if (onPush !== null)
+    facts.push({ icon: IconRefresh, text: onPush ? t("serviceDeploys.facts.pushOn") : t("serviceDeploys.facts.pushOff") });
   facts.push({
     icon: IconShieldCheck,
     text: service.deploy.mode === "rolling" ? t("serviceDeploys.facts.rolling") : t("serviceDeploys.facts.recreate"),

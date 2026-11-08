@@ -124,6 +124,32 @@
   transition-duration: var(--tw-duration, var(--default-transition-duration));
 }
 
+/*
+ * A row that scrolls sideways when it does not fit (tab bars, view
+ * switchers on a phone): no scrollbar, and the edge that hides items fades
+ * out. scrollFadeRef (lib/scroll-fade.ts) sets the data-fade-* attributes.
+ */
+@utility scroll-row {
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  &[data-fade-end] {
+    mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  }
+
+  &[data-fade-start] {
+    mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  }
+
+  &[data-fade-start][data-fade-end] {
+    mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  }
+}
+
 /* Loading placeholders: a soft light sweep over the muted block. */
 @utility skeleton-shimmer {
   overflow: hidden;
