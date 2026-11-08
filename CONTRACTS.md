@@ -1825,7 +1825,14 @@ SHA-256, runs `<new> version`, keeps the old binary in
 The new agent confirms after its first accepted handshake; otherwise the
 guard restores the old binary and restarts it. Either way exactly one
 durable `UpdateResult` (target AGENT) reaches the panel. Failures before
-the swap are reported at once and returned as the RPC error. The guard
+the swap are reported at once and returned as the RPC error. While a
+deploy on the node is between changing its containers and verifying the
+new generation (`reconcile.Runtime.Unverified`; an agent stop then rolls
+it back and it runs again after the start), the update answers once the
+download is checked and swaps, arms the guard and restarts only when no
+deploy is left unverified, at most 5 minutes later
+(`update.DefaultRolloutWait`); a failure from there on is only reported,
+as a durable `UpdateResult`. The guard
 also counts the rollback in `<dataDir>/update/agent-rollbacks.json`
 (by version, kept across restarts; `update/rollbacks.go`): automatic
 installs of that release (auto-update on connect, the AGENT_TOO_OLD

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/reconcile"
 	"github.com/seylo-dev/app/go/internal/rpc"
 	"github.com/seylo-dev/app/go/internal/update"
 )
@@ -30,5 +31,24 @@ func TestUpdateStatusWaiting(t *testing.T) {
 	err = updateStatus(update.ErrBusy)
 	if !errors.As(err, &rpcErr) || rpcErr.Code != agentv1.StatusCode_STATUS_CODE_ABORTED || rpcErr.Details != nil {
 		t.Fatalf("busy = %v", err)
+	}
+}
+
+type unverifiedEngine struct {
+	reconcile.Engine
+	n int
+}
+
+func (e unverifiedEngine) Unverified() int { return e.n }
+
+// The agent updater reads the runtime's unverified deploys, and 0 before
+// the runtime is wired.
+func TestUnverifiedDeploysReadsTheRuntime(t *testing.T) {
+	var _ interface{ Unverified() int } = (*reconcile.Runtime)(nil)
+	if n := unverifiedDeploys(nil); n != 0 {
+		t.Fatalf("before the runtime: %d", n)
+	}
+	if n := unverifiedDeploys(unverifiedEngine{n: 2}); n != 2 {
+		t.Fatalf("Unverified = %d, want 2", n)
 	}
 }

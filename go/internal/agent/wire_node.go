@@ -22,6 +22,7 @@ import (
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/nodecheck"
+	"github.com/seylo-dev/app/go/internal/reconcile"
 	"github.com/seylo-dev/app/go/internal/rpc"
 	"github.com/seylo-dev/app/go/internal/state"
 	"github.com/seylo-dev/app/go/internal/systemd"
@@ -62,6 +63,9 @@ func provideNode(d *Deps) error {
 		PublicKey:      key,
 		Report:         report,
 		Logger:         d.Logger.With("component", "update"),
+		// The restart waits for deploys in their health check, which it would
+		// roll back. Read at call time: Reconcile is set in the wire phase.
+		Unverified: func() int { return unverifiedDeploys(d.Reconcile) },
 	}, lock)
 	if err != nil {
 		return err
@@ -248,6 +252,15 @@ func wireNode(reg *Registry, d *Deps) error {
 		}()
 	})
 	return nil
+}
+
+// unverifiedDeploys is how many deploys an agent restart would roll back
+// now (reconcile.Runtime.Unverified); 0 before the runtime is wired.
+func unverifiedDeploys(e reconcile.Engine) int {
+	if u, ok := e.(interface{ Unverified() int }); ok {
+		return u.Unverified()
+	}
+	return 0
 }
 
 // diskPaths are the folders DISK_LOW watches: the data dir and, while

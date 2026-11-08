@@ -108,7 +108,24 @@ type AgentOptions struct {
 	RunVersion func(ctx context.Context, binary string) (string, error)
 	// Now defaults to time.Now.
 	Now func() time.Time
+	// Unverified, when set, says how many deploys on the node are between
+	// changing their containers and verifying the new generation
+	// (reconcile.Runtime.Unverified). A restart then rolls them back, so
+	// the update waits until none is left, up to RolloutWait, before it
+	// swaps the binary and restarts.
+	Unverified func() int
+	// RolloutWait bounds that wait. Default DefaultRolloutWait.
+	RolloutWait time.Duration
 }
+
+// DefaultRolloutWait is how long an update waits for deploys to be
+// verified before it restarts the agent anyway: the default health check
+// timeout (reconcile.DefaultHealthTimeout), well inside the panel's
+// 10-minute update step that also covers the download and the reconnect.
+const DefaultRolloutWait = 5 * time.Minute
+
+// rolloutPoll is how often the wait for deploys checks again.
+var rolloutPoll = time.Second
 
 // AgentUpdater installs new agent binaries with a rollback guard.
 type AgentUpdater struct {
@@ -167,6 +184,9 @@ func NewAgentUpdater(opts AgentOptions, lock *Lock) (*AgentUpdater, error) {
 	if opts.Report == nil {
 		opts.Report = func(context.Context, *agentv1.Event) error { return nil }
 	}
+	if opts.RolloutWait <= 0 {
+		opts.RolloutWait = DefaultRolloutWait
+	}
 	if lock == nil {
 		lock = &Lock{}
 	}
@@ -195,6 +215,12 @@ func (u *AgentUpdater) path(name string) string {
 // back). Failures before the swap are reported and returned. An automatic
 // request (req.automatic) first checks the waits of automatic updates and
 // returns a *WaitError, reporting nothing, while one applies.
+//
+// While a deploy on the node is unverified (AgentOptions.Unverified),
+// Update returns once the download is checked, and the swap, the guard
+// and the restart follow in the background when no deploy is left
+// unverified or RolloutWait passed; a failure from there on is only
+// reported.
 func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentRequest) error {
 	if req.GetAutomatic() {
 		if err := u.automaticWait(req); err != nil {
@@ -206,18 +232,35 @@ func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentReque
 		return fmt.Errorf("%w (%s)", ErrBusy, u.lock.Holder())
 	}
 	started := u.opts.Now()
-	m, err := u.install(ctx, req)
+	m, staged, err := u.stage(ctx, req)
 	if err != nil {
-		release()
-		to := req.GetTargetVersion()
-		if m != nil {
-			to = m.Version
-		}
-		if req.GetAutomatic() && !errors.Is(err, ErrUpToDate) {
-			u.noteAutoFailure(to)
-		}
-		u.reportFailure(ctx, req.GetUpdateId(), to, started, err)
-		return err
+		return u.failed(ctx, req, m, started, release, err, false)
+	}
+	if n := u.unverified(); n > 0 {
+		// Restarting now would roll those deploys back and run them again
+		// after the restart (a panel deploy flips the panel twice). The
+		// request returns now; its RPC deadline is far shorter than a
+		// health check.
+		u.opts.Logger.Info("waiting for deploys to be verified before restarting into the new agent",
+			"deploys", n, "to", m.Version, "max_wait", u.opts.RolloutWait)
+		bg := context.WithoutCancel(ctx)
+		go func() {
+			u.waitForRollouts(bg)
+			_ = u.swapAndRestart(bg, req, m, staged, started, release, true)
+		}()
+		return nil
+	}
+	return u.swapAndRestart(ctx, req, m, staged, started, release, false)
+}
+
+// swapAndRestart installs the staged binary and schedules the restart
+// into it. late: Update already returned, so nobody but the report hears
+// of a failure.
+func (u *AgentUpdater) swapAndRestart(ctx context.Context, req *agentv1.UpdateAgentRequest, m *Manifest, staged string,
+	started time.Time, release func(), late bool) error {
+	defer os.Remove(staged)
+	if err := u.swap(ctx, req, m, staged); err != nil {
+		return u.failed(ctx, req, m, started, release, err, late)
 	}
 	// The lock stays held: this process is about to be replaced.
 	go func() {
@@ -227,6 +270,57 @@ func (u *AgentUpdater) Update(ctx context.Context, req *agentv1.UpdateAgentReque
 		}
 	}()
 	return nil
+}
+
+// failed releases the lock and reports a failure before the swap. An
+// automatic request remembers it, and so does a late one (its caller saw
+// success and cannot).
+func (u *AgentUpdater) failed(ctx context.Context, req *agentv1.UpdateAgentRequest, m *Manifest,
+	started time.Time, release func(), err error, late bool) error {
+	release()
+	to := req.GetTargetVersion()
+	if m != nil {
+		to = m.Version
+	}
+	if (req.GetAutomatic() || late) && !errors.Is(err, ErrUpToDate) {
+		u.noteAutoFailure(to)
+	}
+	if late {
+		u.opts.Logger.Error("the agent update failed after the wait for deploys", "to", to, "err", err)
+	}
+	u.reportFailure(ctx, req.GetUpdateId(), to, started, err)
+	return err
+}
+
+// unverified is how many deploys a restart would roll back now.
+func (u *AgentUpdater) unverified() int {
+	if u.opts.Unverified == nil {
+		return 0
+	}
+	return u.opts.Unverified()
+}
+
+// waitForRollouts waits until no deploy is unverified, at most RolloutWait.
+func (u *AgentUpdater) waitForRollouts(ctx context.Context) {
+	deadline := time.NewTimer(u.opts.RolloutWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(rolloutPoll)
+	defer tick.Stop()
+	for {
+		n := u.unverified()
+		if n == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			u.opts.Logger.Warn("deploys are still unverified; restarting into the new agent anyway: they roll back and run again after the restart",
+				"deploys", n, "waited", u.opts.RolloutWait)
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 // autoKey is the key of a version in failedAuto.
@@ -271,39 +365,50 @@ func (u *AgentUpdater) automaticWait(req *agentv1.UpdateAgentRequest) error {
 	return nil
 }
 
-func (u *AgentUpdater) install(ctx context.Context, req *agentv1.UpdateAgentRequest) (*Manifest, error) {
+// stage verifies req and downloads the binary it names next to the
+// installed one; it returns the staged path, which the caller removes once
+// swap moved it in or gave up. A failure removes it here.
+func (u *AgentUpdater) stage(ctx context.Context, req *agentv1.UpdateAgentRequest) (*Manifest, string, error) {
 	m, err := VerifyManifest(req.GetManifest(), req.GetManifestSignature(), u.opts.PublicKey)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if t := req.GetTargetVersion(); t != "" && Compare(t, m.Version) != 0 {
-		return m, fmt.Errorf("%w: asked for %s but the manifest is for %s", ErrRejected, t, m.Version)
+		return m, "", fmt.Errorf("%w: asked for %s but the manifest is for %s", ErrRejected, t, m.Version)
 	}
 	if err := CheckAgentRules(u.opts.CurrentVersion, m); err != nil {
-		return m, err
+		return m, "", err
 	}
 	asset, err := m.Agent(u.opts.GOOS, u.opts.GOARCH)
 	if err != nil {
-		return m, fmt.Errorf("%w: %v", ErrRejected, err)
+		return m, "", fmt.Errorf("%w: %v", ErrRejected, err)
 	}
 
 	exe := u.opts.Executable
 	staged := filepath.Join(filepath.Dir(exe), "."+filepath.Base(exe)+".new")
-	defer os.Remove(staged)
 	if err := download(ctx, u.opts.HTTP, asset, staged); err != nil {
-		return m, err
+		_ = os.Remove(staged)
+		return m, "", err
 	}
 	out, err := u.opts.RunVersion(ctx, staged)
 	if err != nil {
-		return m, fmt.Errorf("the downloaded agent does not run on this machine: %w", err)
+		_ = os.Remove(staged)
+		return m, "", fmt.Errorf("the downloaded agent does not run on this machine: %w", err)
 	}
 	if !strings.Contains(out, strings.TrimPrefix(m.Version, "v")) {
-		return m, fmt.Errorf("the downloaded agent reports %q, want version %s", strings.TrimSpace(out), m.Version)
+		_ = os.Remove(staged)
+		return m, "", fmt.Errorf("the downloaded agent reports %q, want version %s", strings.TrimSpace(out), m.Version)
 	}
+	return m, staged, nil
+}
 
+// swap keeps a copy of the current binary, writes the update record, arms
+// the guard and moves the staged binary in.
+func (u *AgentUpdater) swap(ctx context.Context, req *agentv1.UpdateAgentRequest, m *Manifest, staged string) error {
+	exe := u.opts.Executable
 	backup := u.path(agentBackup)
 	if err := copyFile(exe, backup, 0o755); err != nil {
-		return m, fmt.Errorf("keeping a copy of the current agent: %w", err)
+		return fmt.Errorf("keeping a copy of the current agent: %w", err)
 	}
 	p := pendingAgent{
 		UpdateID:    req.GetUpdateId(),
@@ -317,21 +422,21 @@ func (u *AgentUpdater) install(ctx context.Context, req *agentv1.UpdateAgentRequ
 	_ = removeIfExists(u.path(agentConfirmed))
 	_ = removeIfExists(u.path(agentRollback))
 	if err := writeJSON(u.path(agentPending), p); err != nil {
-		return m, fmt.Errorf("writing the update record: %w", err)
+		return fmt.Errorf("writing the update record: %w", err)
 	}
 	// Arm the guard before the swap: if it fires without a swap it only
 	// copies the same binary back.
 	if err := u.opts.System.ArmGuard(ctx, backup, u.opts.DataDir, u.opts.GuardTimeout); err != nil {
 		_ = os.Remove(u.path(agentPending))
-		return m, err
+		return err
 	}
 	if err := os.Rename(staged, exe); err != nil {
 		_ = u.opts.System.DisarmGuard(ctx)
 		_ = os.Remove(u.path(agentPending))
-		return m, fmt.Errorf("swapping the agent binary: %w", err)
+		return fmt.Errorf("swapping the agent binary: %w", err)
 	}
 	u.opts.Logger.Info("agent binary swapped, restarting", "from", p.FromVersion, "to", p.ToVersion, "update_id", p.UpdateID)
-	return m, nil
+	return nil
 }
 
 // CheckAgentRules applies the version rules for moving current to m.

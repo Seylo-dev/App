@@ -198,7 +198,16 @@ type Runtime struct {
 	reattached sync.Map
 	// webUI reads a database web UI's state (SetWebUIStatus).
 	webUI atomic.Pointer[func(serviceID string) *agentv1.ToolStatus]
+	// unverified counts rollouts between their first container change and
+	// the verification of the new generation (Unverified).
+	unverified atomic.Int64
 }
+
+// Unverified is how many deploys are between changing containers and
+// verifying the new generation: an agent stop or restart now rolls them
+// back (record.Rolling), and they run again after the next start. The
+// agent updater waits for it to reach 0 before it restarts.
+func (r *Runtime) Unverified() int { return int(r.unverified.Load()) }
 
 // SetWebUIStatus sets where service status reads the state of a database
 // web UI (dbtools); nil stops reporting it.

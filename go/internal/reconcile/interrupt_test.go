@@ -255,3 +255,33 @@ func TestFailedDeployKeepsTheOldFileMount(t *testing.T) {
 		t.Fatalf("files folder holds %v, want only %s", names, SpecHash(s3))
 	}
 }
+
+// Unverified counts a deploy from its first container change until the new
+// generation is verified, so the agent updater can wait for it instead of
+// restarting the agent under it.
+func TestUnverifiedCountsDeploysInTheirHealthCheck(t *testing.T) {
+	h, _ := newMobyHarness(t)
+	s1 := appSpec("svc", 1, "app:v1")
+	h.apply(1, s1)
+	if p := h.deployResult("svc", 1); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 1: %v", p)
+	}
+	if n := h.rt.Unverified(); n != 0 {
+		t.Fatalf("after a verified deploy: Unverified = %d", n)
+	}
+	startBrokenDeploy(h, s1)
+	if n := h.rt.Unverified(); n != 1 {
+		t.Fatalf("during the health check: Unverified = %d, want 1", n)
+	}
+	if p := h.deployResult("svc", 2); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
+		t.Fatalf("gen 2: %v", p)
+	}
+	h.waitFor("the rolled back deploy to leave the count", func() bool { return h.rt.Unverified() == 0 })
+
+	// A deploy that passes leaves it too.
+	h.apply(3, cloneSpec(s1, 3, func(s *agentv1.ServiceSpec) { s.Image.Reference = "app:v3" }))
+	if p := h.deployResult("svc", 3); p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_SUCCEEDED {
+		t.Fatalf("gen 3: %v", p)
+	}
+	h.waitFor("the verified deploy to leave the count", func() bool { return h.rt.Unverified() == 0 })
+}

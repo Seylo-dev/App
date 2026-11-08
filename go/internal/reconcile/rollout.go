@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -106,6 +107,9 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	}
 	w.rec.Rolling = pending
 	w.saveRecord()
+	w.r.unverified.Add(1)
+	verified := sync.OnceFunc(func() { w.r.unverified.Add(-1) })
+	defer verified()
 
 	// Recreate mode (or a name clash with the old containers): old goes
 	// first. Collisions must be removed; plain recreate keeps the stopped
@@ -278,6 +282,7 @@ func (w *worker) rollout(ctx context.Context, spec *agentv1.ServiceSpec, hash st
 	// after an agent restart.
 	w.rec.Rolling = nil
 	w.saveRecord()
+	verified()
 	oldGone := true
 	if len(old) > 0 || len(stoppedOld) > 0 {
 		w.progress(gen, agentv1.DeployStage_DEPLOY_STAGE_STOPPING_OLD, "")
