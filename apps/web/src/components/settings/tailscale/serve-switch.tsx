@@ -3,7 +3,9 @@
 // once the server can serve (the reason shows otherwise). Off while the
 // tailnet is the only way into a closed panel in "stay closed" mode asks to
 // reopen IP access too. Active: the URL with Copy and Open, whether this
-// page came over the tailnet, and the exact entry the agent owns.
+// page came over the tailnet, and the exact entry the agent owns. On another
+// tailnet than the one Serve was turned on for: both tailnets, and the
+// owner's button to serve the panel on the new one.
 
 import { displayName } from "@seylo/brand";
 import { OpError, settings, tailscale } from "@seylo/ops";
@@ -23,7 +25,7 @@ import { isReauthCancelled } from "../../../lib/reauth";
 import { invalidateOps } from "../mutation";
 import { toastError } from "../op-state";
 import { SettingRow } from "../page";
-import { serveBlockedReason, type TailscaleStatus } from "./shared";
+import { isStopped, serveBlockedReason, type TailscaleStatus } from "./shared";
 
 const stateTitles = {
   conflict: "settingsTailscale.serve.conflict",
@@ -62,7 +64,11 @@ export function ServeSwitch({ status }: { status: TailscaleStatus }) {
           !serve.wanted && !status.canManage
             ? t("settingsTailscale.serve.ownerOnly")
             : !serve.wanted && blocked
-              ? t(`settingsTailscale.serve.blocked.${blocked}`)
+              ? t(
+                  blocked === "notSignedIn" && isStopped(status)
+                    ? "settingsTailscale.serve.blocked.stopped"
+                    : `settingsTailscale.serve.blocked.${blocked}`,
+                )
               : t("settingsTailscale.serve.toggleHint")
         }
         control={
@@ -74,7 +80,12 @@ export function ServeSwitch({ status }: { status: TailscaleStatus }) {
           />
         }
       />
-      {serve.wanted && <ServeState status={status} />}
+      {serve.wanted &&
+        (serve.onOtherTailnet ? (
+          <OtherTailnet status={status} pending={setServe.isPending} onServe={() => setServe.mutate({ serve: true })} />
+        ) : (
+          <ServeState status={status} />
+        ))}
       <ConfirmDialog
         open={askReopen}
         onOpenChange={setAskReopen}
@@ -91,6 +102,28 @@ export function ServeSwitch({ status }: { status: TailscaleStatus }) {
         }}
       />
     </SectionCard>
+  );
+}
+
+/** Serve was turned on for another tailnet than the server is signed in to now: nothing is served until the owner says so. */
+function OtherTailnet({ status, pending, onServe }: { status: TailscaleStatus; pending: boolean; onServe: () => void }) {
+  const from = status.serve.tailnet ?? "?";
+  const to = status.tailnet ?? status.dnsName ?? "?";
+  return (
+    <Alert
+      tone="danger"
+      title={t("settingsTailscale.serve.otherTailnetTitle")}
+      action={
+        status.canManage && (
+          <Button size="sm" disabled={pending} onClick={onServe}>
+            {t("settingsTailscale.serve.serveHere", { to })}
+          </Button>
+        )
+      }
+    >
+      {t("settingsTailscale.serve.otherTailnet", { from, to })}
+      {!status.canManage && ` ${t("settingsTailscale.serve.otherTailnetOwner", { to })}`}
+    </Alert>
   );
 }
 

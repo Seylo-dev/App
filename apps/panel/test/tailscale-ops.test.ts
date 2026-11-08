@@ -8,9 +8,9 @@
 // panel.db.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { type OpInput, tailscale } from "@seylo/ops";
+import { type OpInput, settings as settingOps, tailscale } from "@seylo/ops";
 import { StatusCode } from "@seylo/proto";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import pino from "pino";
 import { alerts, auditLog, sessions, settings as settingsTable } from "../src/db/schema";
 import { ensurePanelService } from "../src/modules/nodes/panel-service";
@@ -127,7 +127,15 @@ test("an active entry shows its URL and the exact Serve entry the agent owns", a
     }),
   );
   const got = (await callOp(panel, tailscale.get, {}, { cookie: owner.cookie })).body;
-  expect(got.serve).toEqual({ wanted: false, state: "active", url: `https://${dnsName}`, message: "", panelAnswers: true });
+  expect(got.serve).toEqual({
+    wanted: false,
+    tailnet: null,
+    onOtherTailnet: false,
+    state: "active",
+    url: `https://${dnsName}`,
+    message: "",
+    panelAnswers: true,
+  });
   expect(got.owned).toEqual({ hostPort: `${dnsName}:443`, path: "/", proxy: "unix:/var/lib/seylo/panel/tailnet.sock" });
   // HTTP mode: no certificates for the tailnet.
   await report(
@@ -234,8 +242,74 @@ test("turning Serve on reaches the agent, raises a security alert and audits the
   const off = await callOp(panel, tailscale.setServe, { serve: false }, { cookie: owner.cookie });
   expect(off.status).toBe(200);
   expect(getSetting(panel.deps.db, "tailscaleServe")).toBe(false);
+  expect(getSetting(panel.deps.db, "tailscaleServeTailnet")).toBeUndefined();
   for (let i = 0; i < 200 && agent.requests("SyncDesired").at(-1)?.state?.settings?.tailnet; i++) await Bun.sleep(10);
   expect(agent.requests("SyncDesired").at(-1)?.state?.settings?.tailnet).toBeUndefined();
+});
+
+/** Whether the last desired state the agent got asks for the Serve entry, once it is `want` (or after 2 s). */
+async function servedToAgent(want: boolean): Promise<boolean> {
+  const now = () => agent.requests("SyncDesired").at(-1)?.state?.settings?.tailnet?.panel === true;
+  for (let i = 0; i < 200 && now() !== want; i++) await Bun.sleep(10);
+  return now();
+}
+
+const active = (name: string) => ({ state: 3, url: `https://${name}`, panelAnswers: true, proxy: "unix:/x/tailnet.sock" });
+
+test("Serve stays on the tailnet it was turned on for: another tailnet gets nothing until the owner turns it on there", async () => {
+  expect((await callOp(panel, tailscale.setServe, { serve: true }, { cookie: owner.cookie })).status).toBe(200);
+  expect(getSetting(panel.deps.db, "tailscaleServeTailnet")).toEqual({ tailnet: "example.com", dnsName });
+  expect(await servedToAgent(true)).toBe(true);
+  await report(info({ serve: active(dnsName) }));
+  expect(getSetting(panel.deps.db, "tailscaleSeen")?.working).toBe(true);
+
+  // A DNS rename keeps the tailnet: still served.
+  const renamed = "panel.cat-crocodile.ts.net";
+  await report(info({ dnsName: `${renamed}.`, serve: active(renamed) }));
+  expect(getSetting(panel.deps.db, "tailscaleSeen")?.working).toBe(true);
+  expect((await callOp(panel, tailscale.get, {}, { cookie: owner.cookie })).body.serve.onOtherTailnet).toBe(false);
+
+  // Signed in to another tailnet (an expired key and the wrong account, or --force-reauth): the
+  // agent already moved its entry there. The path stops at once and the entry goes.
+  const other = "panel.tail9999.ts.net";
+  const onWork = { tailnet: "work.example", dnsName: `${other}.`, loginName: "someone@work.example" };
+  await report(info({ ...onWork, serve: active(other) }));
+  expect(getSetting(panel.deps.db, "tailscaleSeen")).toMatchObject({ working: false, reported: false });
+  expect(await servedToAgent(false)).toBe(false);
+  const view = (await callOp(panel, tailscale.get, {}, { cookie: owner.cookie })).body;
+  expect(view.serve).toMatchObject({ wanted: true, tailnet: "example.com", onOtherTailnet: true });
+  const securityAlerts = () => panel.deps.db.select().from(alerts).where(eq(alerts.event, "security_change")).all();
+  const moved = securityAlerts().filter((a) => a.eventKey.startsWith("tailnet-moved:"));
+  expect(moved).toHaveLength(1);
+  expect(moved[0]?.title).toContain("from the tailnet example.com to work.example");
+  expect(moved[0]?.resolvedAt).toBeNull();
+  // The tailnet listener serves nothing on the new name meanwhile.
+  const onTailnet = await panel.tailnetApp.handle(
+    new Request("http://localhost/", { headers: { host: "localhost", "x-forwarded-host": other, "x-forwarded-proto": "https" } }),
+  );
+  expect(onTailnet.status).toBe(403);
+  // The agent reports the entry gone: still one alert.
+  await report(info({ ...onWork, serve: { state: 1 } }));
+  expect(securityAlerts().filter((a) => a.eventKey.startsWith("tailnet-moved:"))).toHaveLength(1);
+
+  // The owner turns Serve on for the new tailnet.
+  const again = await callOp(panel, tailscale.setServe, { serve: true }, { cookie: owner.cookie });
+  expect(again.status).toBe(200);
+  expect(again.body.tailscale.serve).toMatchObject({ wanted: true, tailnet: "work.example", onOtherTailnet: false });
+  expect(getSetting(panel.deps.db, "tailscaleServeTailnet")).toEqual({ tailnet: "work.example", dnsName: other });
+  expect(await servedToAgent(true)).toBe(true);
+  expect(securityAlerts().find((a) => a.eventKey.startsWith("tailnet-moved:"))?.resolvedAt).not.toBeNull();
+  const serveOn = securityAlerts().filter((a) => a.eventKey.startsWith("tailnet-serve-on:"));
+  expect(serveOn).toHaveLength(2);
+  expect(serveOn.at(-1)?.title).toContain("on the tailnet work.example");
+  expect(serveOn.at(-1)?.message).toContain("It was served on example.com before.");
+  await report(info({ ...onWork, serve: active(other) }));
+  expect(getSetting(panel.deps.db, "tailscaleSeen")?.working).toBe(true);
+
+  // Back on the first tailnet now: that one is the other tailnet.
+  await report(info({ serve: active(dnsName) }));
+  expect(getSetting(panel.deps.db, "tailscaleSeen")?.working).toBe(false);
+  expect(await servedToAgent(false)).toBe(false);
 });
 
 /** Serve on and working (reported active with the panel answering), IP access closed on a panel its agent runs. */
@@ -292,11 +366,33 @@ test("Serve off when another way in works, or IP access is open: just off", asyn
   expect(getSetting(panel.deps.db, "panelServeOnIp")).toBe(false);
 });
 
+test("locked to Tailscale and the server moves to another tailnet: IP access reopens at once in reopen mode", async () => {
+  // Serve was turned on before the panel kept the tailnet: the first report pins it.
+  await closedOverTailnet("reopen");
+  expect(getSetting(panel.deps.db, "tailscaleServeTailnet")).toEqual({ tailnet: "example.com", dnsName });
+  const other = "panel.tail9999.ts.net";
+  await report(info({ tailnet: "work.example", dnsName: `${other}.`, serve: active(other) }));
+  expect(getSetting(panel.deps.db, "panelIpAccessApplied")).toMatchObject({ closed: false, by: "system" });
+  const open = panel.deps.db.select().from(alerts).where(isNull(alerts.resolvedAt)).all();
+  // One alert for the move, saying IP access reopened; no tailnet-stopped alert on top of it.
+  expect(open.find((a) => a.eventKey.startsWith("tailnet-moved:"))?.message).toContain("IP access reopened");
+  expect(open.filter((a) => a.eventKey.startsWith("tailnet-stopped:"))).toEqual([]);
+  // The tailnet path no longer counts, so nothing closes IP access again an hour later.
+  const access = (await callOp(panel, settingOps.panelAccess, {}, { cookie: owner.cookie })).body;
+  expect(access.privatePaths).toEqual([expect.objectContaining({ kind: "tailnet", url: `https://${dnsName}`, working: false })]);
+});
+
 test("sign-in: owner only, only while signed out; the link is in memory and nowhere else", async () => {
   // Running: nothing to sign in.
   const signedIn = await callOp(panel, tailscale.signIn, {}, { cookie: owner.cookie });
   expect(signedIn.status).toBe(409);
   expect(signedIn.body.error.details).toMatchObject({ reason: "signedIn" });
+  // Stopped (`tailscale down`): signed in too, and the agent would refuse the link. Only the server starts it.
+  await report(info({ backendState: "Stopped" }));
+  const stopped = await callOp(panel, tailscale.signIn, {}, { cookie: owner.cookie });
+  expect(stopped.status).toBe(409);
+  expect(stopped.body.error.details).toMatchObject({ reason: "stopped" });
+  expect(stopped.body.error.message).toContain("sudo tailscale up --accept-dns=false");
 
   await report(info({ backendState: "NeedsLogin", tailnet: "", dnsName: "", addresses: [], loginName: "" }));
   agent.handle("TailscaleLogin", () => ({ authUrl: loginUrl, info: info({ backendState: "NeedsLogin" }) }));

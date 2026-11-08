@@ -32,14 +32,14 @@ export function secureSession(deps: Pick<Deps, "db" | "proxy" | "config">, reque
   return deps.config.secureCookies || servedOverHttps(deps, request, socketIp);
 }
 
-/** Headers every panel response carries; HSTS only on HTTPS. */
-export function securityHeaders(https: boolean): Record<string, string> {
+/** Headers every panel response carries; HSTS only when asked (HTTPS on the main listener). */
+export function securityHeaders(options: { hsts: boolean }): Record<string, string> {
   return {
     "x-content-type-options": "nosniff",
     "referrer-policy": "same-origin",
     // Nothing of the panel is meant to be framed: a page on a member's app
     // (same site as the panel) could otherwise lay a fake button over it.
     "x-frame-options": "DENY",
-    ...(https ? { "strict-transport-security": "max-age=31536000" } : {}),
+    ...(options.hsts ? { "strict-transport-security": "max-age=31536000" } : {}),
   };
 }

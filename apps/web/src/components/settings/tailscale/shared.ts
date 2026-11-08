@@ -19,9 +19,18 @@ export const commands = {
   status: `sudo ${slug} panel tailscale status`,
 } as const;
 
-/** tailscaled still has to sign in (no BackendState counts as signed out too). */
+/**
+ * tailscaled still has to sign in (no BackendState counts as signed out too).
+ * Not "Stopped": that server is signed in, the agent refuses a sign-in link
+ * for it, and only `tailscale up` on the server starts it again.
+ */
 export function isSignedOut(status: Pick<TailscaleStatus, "backendState">): boolean {
-  return !status.backendState || ["NoState", "NeedsLogin", "Stopped"].includes(status.backendState);
+  return !status.backendState || ["NoState", "NeedsLogin"].includes(status.backendState);
+}
+
+/** Signed in and stopped on the server (`tailscale down`). */
+export function isStopped(status: Pick<TailscaleStatus, "backendState">): boolean {
+  return status.backendState === "Stopped";
 }
 
 /** Why tailscale.setServe would refuse to turn Serve on, in the order the panel checks; null when it can. */

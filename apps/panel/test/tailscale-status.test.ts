@@ -14,7 +14,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { alerts, nodes } from "../src/db/schema";
 import * as ipAccess from "../src/modules/settings/ip-access";
 import { anyPrivatePathWorking, listPrivatePaths } from "../src/modules/settings/private-paths";
-import { tailnetServeCapability } from "../src/modules/tailscale/facts";
+import { onOtherTailnet, tailnetServeCapability } from "../src/modules/tailscale/facts";
 import { agentDisconnected, recordReport, serveTurnedOff, settle, tailnetDownMs, tailnetPathState } from "../src/modules/tailscale/status";
 import { getSetting, setSetting } from "../src/settings";
 import { type TestPanel, testPanel } from "./helpers";
@@ -166,6 +166,73 @@ test("turning Serve off stops the path at once, without the grace period", () =>
   // setServe asks applyPanelIpAccess itself; no stopped alert for an owner's choice.
   expect(applies).toEqual(["the tailnet works"]);
   expect(openAlerts("tailnet-stopped:")).toHaveLength(0);
+});
+
+test("Serve stays on its tailnet: a report from another one stops the path at once, a DNS rename does not", () => {
+  setSetting(panel.deps.db, "tailscaleServe", true);
+  setSetting(panel.deps.db, "tailscaleServeTailnet", { tailnet: "example.com", dnsName });
+  const dirty = spyOn(panel.deps.agents.desired, "markDirty");
+  const active = (name: string) => ({ state: TailnetServeState.ACTIVE, url: `https://${name}`, panelAnswers: true });
+  report(running(), t0);
+  expect(working(t0)).toBe(true);
+
+  // The tailnet's DNS name was renamed: the same tailnet, still working.
+  const renamed = "panel.cat-crocodile.ts.net";
+  report(running({ dnsName: `${renamed}.`, serve: active(renamed) }), t0 + minute);
+  expect(working(t0 + minute)).toBe(true);
+  expect(dirty).not.toHaveBeenCalled();
+
+  // Signed in to another tailnet, where the agent already moved its entry and the panel answers.
+  const other = "panel.tail9999.ts.net";
+  report(running({ tailnet: "work.example", dnsName: `${other}.`, serve: active(other) }), t0 + 2 * minute);
+  expect(working(t0 + 2 * minute)).toBe(false);
+  expect(getSetting(panel.deps.db, "tailscaleSeen")).toMatchObject({ reported: false, working: false, stoppedAt: t0 + 2 * minute });
+  expect(applies).toEqual(["the tailnet works", "the panel server is on another tailnet"]);
+  // The desired state drops tailnet.panel, so the agent removes the entry.
+  expect(dirty).toHaveBeenCalledTimes(1);
+  // Listed under the address Serve was turned on for, not working.
+  expect(listPrivatePaths(panel.deps)).toEqual([
+    { kind: "tailnet", url: `https://${dnsName}`, working: false, since: new Date(t0 + 2 * minute).toISOString(), usingNow: false },
+  ]);
+  const moved = openAlerts("tailnet-moved:");
+  expect(moved).toHaveLength(1);
+  expect(moved[0]?.event).toBe("security_change");
+  expect(moved[0]?.title).toBe("Tailscale on panel-1 moved from the tailnet example.com to work.example");
+  expect(openAlerts("tailnet-stopped:")).toHaveLength(0);
+  // Five minutes later nothing has changed: still not working, still one alert.
+  report(running({ tailnet: "work.example", dnsName: `${other}.`, serve: active(other) }), t0 + 9 * minute);
+  settle(panel.deps, t0 + 9 * minute);
+  expect(working(t0 + 9 * minute)).toBe(false);
+  expect(openAlerts("tailnet-moved:")).toHaveLength(1);
+  expect(dirty).toHaveBeenCalledTimes(1);
+
+  // Back on example.com: working again, the alert resolved, the entry asked for again.
+  report(running(), t0 + 10 * minute);
+  expect(working(t0 + 10 * minute)).toBe(true);
+  expect(openAlerts("tailnet-moved:")).toHaveLength(0);
+  expect(dirty).toHaveBeenCalledTimes(2);
+  dirty.mockRestore();
+});
+
+test("another tailnet is told by name, by MagicDNS suffix when a name is missing, and a signed-out server is on none", () => {
+  const approved = { tailnet: "example.com", dnsName };
+  expect(onOtherTailnet(null, "work.example", "panel.tail9999.ts.net")).toBe(false);
+  expect(onOtherTailnet(approved, "example.com", "panel.cat-crocodile.ts.net")).toBe(false);
+  expect(onOtherTailnet(approved, "work.example", dnsName)).toBe(true);
+  expect(onOtherTailnet(approved, "", "")).toBe(false);
+  const unnamed = { tailnet: "", dnsName };
+  expect(onOtherTailnet(unnamed, "", "panel.tail9999.ts.net")).toBe(true);
+  expect(onOtherTailnet(unnamed, "example.com", "seylo.tail1234.ts.net")).toBe(false);
+});
+
+test("Serve on without a recorded tailnet (an early 0.2.1 build): the first Running report pins it", () => {
+  setSetting(panel.deps.db, "tailscaleServe", true);
+  report(running({ backendState: "NeedsLogin", tailnet: "", dnsName: "", serve: { state: TailnetServeState.OFF } }), t0);
+  expect(getSetting(panel.deps.db, "tailscaleServeTailnet")).toBeUndefined();
+  report(running(), t0 + minute);
+  expect(getSetting(panel.deps.db, "tailscaleServeTailnet")).toEqual({ tailnet: "example.com", dnsName });
+  report(running({ tailnet: "work.example" }), t0 + 2 * minute);
+  expect(working(t0 + 2 * minute)).toBe(false);
 });
 
 test("the stopped alert says whether IP access reopened or stays closed", () => {

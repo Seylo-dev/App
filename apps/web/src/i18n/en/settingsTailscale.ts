@@ -29,7 +29,7 @@ export default {
     notSignedIn: "Not signed in",
     stopped: "Stopped",
     notSignedInHint: "This puts the server on the tailnet you sign in to. It also turns off Tailscale DNS on the server.",
-    stoppedHint: "Tailscale is stopped on the server. Start it over SSH, or sign in again here.",
+    stoppedHint: "Tailscale is signed in but stopped on the server. Only the server can start it again. Run this there over SSH:",
     signIn: "Sign in to Tailscale",
     signingIn: "Asking Tailscale...",
     signInLink: "Open the sign-in link",
@@ -81,6 +81,7 @@ export default {
     blocked: {
       notInstalled: "Install Tailscale on the server first.",
       notSignedIn: "Sign the server in to Tailscale first.",
+      stopped: "Start Tailscale on the server first.",
       needsApproval: "Approve the machine in the Tailscale admin console first.",
       tooOld: "Update Tailscale on the server first.",
       magicDnsOff: "Turn on MagicDNS for the tailnet first.",
@@ -102,6 +103,11 @@ export default {
     conflict: "Another Serve entry uses this address",
     error: "The Serve config could not be changed",
     unsupported: "This Tailscale cannot serve the panel",
+    otherTailnetTitle: "The server is on another tailnet",
+    otherTailnet:
+      "Serve was turned on for {from}, and the server is now signed in to {to}. The panel is not served on {to}, and its Serve entry is removed.",
+    otherTailnetOwner: "Only the owner can serve the panel on {to}.",
+    serveHere: "Serve on {to}",
     onlyPathTitle: "Turn off Serve and reopen IP access?",
     onlyPath:
       "The tailnet is the only way into the panel right now, and IP access is set to stay closed. Turning Serve off also reopens http://<ip>:<port>.",

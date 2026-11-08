@@ -156,7 +156,11 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
       .onRequest(({ request, set, server }) => {
         // A Response's own headers win, so pages with stricter rules keep them.
         const https = servedOverHttps(deps, request, server?.requestIP(request)?.address ?? null);
-        Object.assign(set.headers, securityHeaders(https));
+        // Never HSTS on the tailnet name: when the tailnet turns HTTPS certificates
+        // off, the agent moves the panel to plain HTTP there, and HSTS would keep
+        // every browser that visited on a dead https:// for a year while the path
+        // counts as working. WireGuard already encrypts and authenticates that path.
+        Object.assign(set.headers, securityHeaders({ hsts: https && !options.tailnet }));
       })
       .use(health(deps))
       .use(opRoutes(allOps, httpOpHandler(execute, deps)))

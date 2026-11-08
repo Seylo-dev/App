@@ -22,16 +22,19 @@ import { panelNodeId } from "./facts";
 import { readServeWanted } from "./keys";
 import { getOp, setDns, setServe, signIn } from "./ops";
 import { tailnetPath } from "./private-path";
-import { checkJob, watchTailscale } from "./status";
+import { checkJob, seenOnOtherTailnet, watchTailscale } from "./status";
 
 function start(deps: Deps) {
   registerPrivatePath(tailnetPath);
   // Only the panel node gets the switch, and only while it is on: an
   // install that never served the panel on a tailnet sends what 0.2.0 sent.
+  // A server signed in to another tailnet than the one Serve was turned on
+  // for gets it off, so the agent removes its entry (status.ts).
   deps.agents.desired.contribute({
     name: "tailscale",
     node(ctx) {
       if (!readServeWanted(ctx.db) || panelNodeId(ctx.db) !== ctx.nodeId) return;
+      if (seenOnOtherTailnet(ctx)) return;
       ctx.settings.tailnet = create(TailnetServeSchema, { panel: true });
     },
   });

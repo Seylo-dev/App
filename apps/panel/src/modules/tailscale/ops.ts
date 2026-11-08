@@ -2,7 +2,8 @@
 //
 // tailscale.get reads what the panel node's agent reported. setServe turns
 // the one Serve entry on or off through NodeSettings.tailnet (the agent
-// writes it); signIn and setDns call the agent (tailnet.login.v1). Turning
+// writes it), for the tailnet the server is signed in to then (status.ts
+// keeps it there); signIn and setDns call the agent (tailnet.login.v1). Turning
 // Serve on, signing in and changing DNS are the owner's, from a browser
 // session with a fresh sign-in, over HTTP. Turning Serve off only needs
 // settings.manage, unless it would leave a closed panel without a way in.
@@ -12,13 +13,22 @@ import type { TailscaleInfo } from "@seylo/proto";
 import { requireFreshSignIn } from "../../auth/fresh";
 import { requireSession } from "../../auth/sign-in";
 import { implement, type OpContext } from "../../ops/implement";
-import { setSetting } from "../../settings";
+import { deleteSetting, setSetting } from "../../settings";
 import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted, writePanelAccessChoice } from "../settings/ip-access";
 import { privatePathSources } from "../settings/private-paths";
 import { panelIpUrl } from "../settings/public-url";
-import { serveOnAlert } from "./alerts";
-import { agentReadsTailscale, dnsNameOf, panelNodeFacts, panelNodeId, signedOutStates, versionAtLeast } from "./facts";
-import { readServeWanted } from "./keys";
+import { resolveMovedAlert, serveOnAlert } from "./alerts";
+import {
+  agentReadsTailscale,
+  dnsNameOf,
+  onOtherTailnet,
+  panelNodeFacts,
+  panelNodeId,
+  signedOutStates,
+  tailnetLabel,
+  versionAtLeast,
+} from "./facts";
+import { readServeTailnet, readServeWanted } from "./keys";
 import { rememberSignInLink } from "./sign-in";
 import { invalidateTailscale, serveTurnedOff, tailnetPathState } from "./status";
 import { tailscaleView } from "./view";
@@ -41,6 +51,9 @@ function requireOwnerAtBrowser(ctx: OpContext, what: string): void {
 }
 
 const blocked = (reason: tailscale.ServeBlockedReason, message: string) => new OpError("CONFLICT", message, { reason });
+
+/** `tailscale down` on the server: signed in, and only the owner there starts it again. */
+const stoppedMessage = "Tailscale is signed in but stopped on the server. Start it there with `sudo tailscale up --accept-dns=false`";
 
 /** The panel node, online, with an agent that reads Tailscale and found tailscaled. */
 function readyServer(ctx: OpContext): { nodeId: string; info: TailscaleInfo } {
@@ -76,6 +89,9 @@ function assertCanServe(ctx: OpContext): { nodeId: string; info: TailscaleInfo }
   if (info.backendState === "NeedsMachineAuth") {
     throw blocked("needsApproval", "The server waits for approval. Approve it in the Tailscale admin console under Machines first.");
   }
+  if (info.backendState === "Stopped") {
+    throw blocked("notSignedIn", `${stoppedMessage} first.`);
+  }
   if (info.backendState !== "Running") {
     throw blocked("notSignedIn", "The server is not signed in to Tailscale. Sign in first.");
   }
@@ -98,15 +114,26 @@ export const setServe = implement(tailscale.setServe, (input, ctx) => {
     const tailnet = info.tailnet;
     const dnsName = dnsNameOf(info);
     ctx.auditDetails?.({ tailnet, dnsName });
-    if (!wanted) {
+    const approved = readServeTailnet(ctx.db);
+    // On again while the server is signed in to another tailnet: the owner serves the panel there now.
+    const moved = wanted && onOtherTailnet(approved, tailnet, dnsName);
+    if (!wanted || moved || !approved) {
+      setSetting(ctx.db, "tailscaleServeTailnet", { tailnet, dnsName });
       setSetting(ctx.db, "tailscaleServe", true);
       ctx.agents.desired.markDirty({ nodeId: serverId });
-      serveOnAlert(
-        ctx,
-        { tailnet, url: dnsName ? `${info.https ? "https" : "http"}://${dnsName}` : null },
-        info.loginName || null,
-        serverId,
-      );
+      resolveMovedAlert(ctx);
+      if (!wanted || moved) {
+        serveOnAlert(
+          ctx,
+          {
+            tailnet,
+            url: dnsName ? `${info.https ? "https" : "http"}://${dnsName}` : null,
+            previousTailnet: moved && approved ? tailnetLabel(approved.tailnet, approved.dnsName) : null,
+          },
+          info.loginName || null,
+          serverId,
+        );
+      }
       invalidateTailscale(ctx);
     }
     return { tailscale: tailscaleView(ctx), reopenedUrl: null };
@@ -138,6 +165,7 @@ export const setServe = implement(tailscale.setServe, (input, ctx) => {
     }
   }
   setSetting(ctx.db, "tailscaleServe", false);
+  deleteSetting(ctx.db, "tailscaleServeTailnet");
   if (nodeId) ctx.agents.desired.markDirty({ nodeId });
   serveTurnedOff(ctx);
   const after = applyPanelIpAccess(ctx, "Tailscale Serve was turned off", { by, resetHold: reopened });
@@ -167,6 +195,10 @@ export const signIn = implement(tailscale.signIn, async (_input, ctx) => {
       "needsApproval",
       "The server is signed in and waits for approval. Approve it in the Tailscale admin console under Machines.",
     );
+  }
+  // The agent refuses a link for a stopped server too: it is signed in.
+  if (info.backendState === "Stopped") {
+    throw new OpError("CONFLICT", `${stoppedMessage}.`, { reason: "stopped" });
   }
   if (!signedOutStates.has(info.backendState)) {
     throw new OpError("CONFLICT", "The server is signed in to Tailscale already.", { reason: "signedIn" });
