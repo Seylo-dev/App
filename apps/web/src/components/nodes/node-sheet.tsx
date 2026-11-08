@@ -15,6 +15,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { KeyValue } from "@seylo/ui/components/key-value";
+import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
@@ -107,32 +108,35 @@ function NodeSheetBody({
         </Segmented>
       </SheetHeader>
       <SheetBody className="pb-6">
-        {node.isError ? (
-          <QueryError error={node.error} onRetry={() => void node.refetch()} />
-        ) : node.isPending ? (
-          // The health checks and the cleanup only need the node's id; the other views wait for the node.
-          view === "health" ? (
+        {/* A view fades in when you switch views, like a tab's screen. */}
+        <EnterOnChange motionKey={view} subtle className="flex flex-col gap-4">
+          {node.isError ? (
+            <QueryError error={node.error} onRetry={() => void node.refetch()} />
+          ) : node.isPending ? (
+            // The health checks and the cleanup only need the node's id; the other views wait for the node.
+            view === "health" ? (
+              <NodeHealth nodeId={nodeId} />
+            ) : view === "cleanup" ? (
+              <NodeCleanup nodeId={nodeId} />
+            ) : view === "shell" ? (
+              <ShellSkeleton />
+            ) : (
+              <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
+                {view === "overview" ? <OverviewSkeleton /> : <SettingsSkeleton />}
+              </LoadingRegion>
+            )
+          ) : view === "overview" ? (
+            <Overview node={node.data} onClose={onClose} />
+          ) : view === "health" ? (
             <NodeHealth nodeId={nodeId} />
           ) : view === "cleanup" ? (
             <NodeCleanup nodeId={nodeId} />
           ) : view === "shell" ? (
-            <ShellSkeleton />
+            <NodeShell node={node.data} />
           ) : (
-            <LoadingRegion label={t("common.loading")} className="flex flex-col gap-4">
-              {view === "overview" ? <OverviewSkeleton /> : <SettingsSkeleton />}
-            </LoadingRegion>
-          )
-        ) : view === "overview" ? (
-          <Overview node={node.data} onClose={onClose} />
-        ) : view === "health" ? (
-          <NodeHealth nodeId={nodeId} />
-        ) : view === "cleanup" ? (
-          <NodeCleanup nodeId={nodeId} />
-        ) : view === "shell" ? (
-          <NodeShell node={node.data} />
-        ) : (
-          <NodeSettingsForm key={node.data.updatedAt} node={node.data} onRemoved={onClose} />
-        )}
+            <NodeSettingsForm key={node.data.updatedAt} node={node.data} onRemoved={onClose} />
+          )}
+        </EnterOnChange>
       </SheetBody>
     </>
   );

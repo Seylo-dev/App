@@ -13,7 +13,8 @@ export interface KeyValueItem {
 /**
  * Label and value rows (service details, node facts, a deploy's metadata).
  * "rows" puts each pair on a line with dividers; "grid" packs pairs into
- * columns with the label above the value.
+ * columns with the label above the value. Either way a long value (a URL,
+ * a hostname) wraps; nothing ends in an ellipsis.
  */
 export function KeyValue({ items, layout = "rows", className }: { items: KeyValueItem[]; layout?: "rows" | "grid"; className?: string }) {
   if (layout === "grid") {
@@ -22,7 +23,12 @@ export function KeyValue({ items, layout = "rows", className }: { items: KeyValu
         {items.map((item, i) => (
           <div key={item.key ?? (typeof item.label === "string" ? item.label : i)} className="flex min-w-0 flex-col gap-1">
             <dt className="text-[12px] text-muted-foreground">{item.label}</dt>
-            <dd className={cn("m-0 min-w-0 truncate text-[13.5px] font-medium text-foreground", item.mono && "font-mono text-[12.5px]")}>
+            <dd
+              className={cn(
+                "m-0 min-w-0 text-[13.5px] font-medium [overflow-wrap:anywhere] text-foreground",
+                item.mono && "font-mono text-[12.5px]",
+              )}
+            >
               {item.value}
             </dd>
           </div>

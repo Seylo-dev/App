@@ -80,8 +80,8 @@ export default {
     feedOnly: "Feed only",
   },
   events: {
-    crash: { name: "Crash", hint: "Exit code and the last 50 log lines, once per crash streak" },
-    crash_limit: { name: "Stopped after repeated crashes", hint: "When restart on crash is off and the limit is reached" },
+    crash: { name: "Crash", hint: "Exit code or out of memory, once per crash streak" },
+    crash_limit: { name: "Stopped after repeated crashes", hint: "Restarts are on and Stop after crashes in a row was reached" },
     deploy_failed: { name: "Deploy failed", hint: "Build error or failed health check" },
     deploy_succeeded: { name: "Deploy succeeded", hint: "A new version is live" },
     build_failed: { name: "Build failed", hint: "The image could not be built" },

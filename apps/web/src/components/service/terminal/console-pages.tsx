@@ -4,6 +4,7 @@
 
 import { databases, terminals } from "@seylo/ops";
 import { useOpClient } from "@seylo/ops/react";
+import { ActiveIndicator } from "@seylo/ui/components/motion";
 import { cn } from "@seylo/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { useMemo, useRef } from "react";
@@ -28,17 +29,23 @@ function idleText(seconds: number): string {
     : t("serviceTerminal.idleSeconds", { count: seconds });
 }
 
-function Switcher({ service, current }: { service: ServiceDetail; current: "console" | "shell" }) {
+/**
+ * Console | Shell in the terminal header. The current item's background is
+ * one shared element (layoutId "terminal-switch") that slides to the item
+ * you click, like every other tab group.
+ */
+export function Switcher({ service, current }: { service: Pick<ServiceDetail, "id" | "projectId">; current: "console" | "shell" }) {
   const item = (to: "console" | "shell", label: string) => (
     <Link
       to={to === "console" ? "/p/$projectId/s/$serviceId/console" : "/p/$projectId/s/$serviceId/shell"}
       params={{ projectId: service.projectId, serviceId: service.id }}
       aria-current={current === to ? "page" : undefined}
       className={cn(
-        "rounded-chip px-3 py-[5px] text-[12.5px] font-medium",
-        current === to ? "bg-terminal-field text-terminal-foreground" : "text-terminal-muted hover:text-terminal-foreground",
+        "relative isolate cursor-pointer rounded-chip px-3 py-[5px] text-[12.5px] font-medium transition-interactive",
+        current === to ? "text-terminal-foreground" : "text-terminal-muted hover:text-terminal-foreground",
       )}
     >
+      {current === to && <ActiveIndicator layoutId="terminal-switch" className="rounded-chip bg-terminal-field" />}
       {label}
     </Link>
   );

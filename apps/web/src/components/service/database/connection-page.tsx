@@ -8,6 +8,7 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
+import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
@@ -127,11 +128,14 @@ function ConnectionSkeleton() {
   );
 }
 
+/** A label over a value. Long values (a generated user name, a host) wrap instead of ending in an ellipsis. */
 function Tile({ label, value, secret = false }: { label: string; value: string; secret?: boolean }) {
   return (
     <div className="flex min-w-0 flex-col gap-[5px]">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="truncate rounded-control bg-field px-[11px] py-2 font-mono text-[13px]">{secret ? "••••••••" : value || "-"}</span>
+      <span className="flex-1 rounded-control bg-field px-[11px] py-2 font-mono text-[13px] [overflow-wrap:anywhere]">
+        {secret ? "••••••••" : value || "-"}
+      </span>
     </div>
   );
 }
@@ -191,9 +195,7 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
       </div>
       {db.variant === "pgvector" && (
         <p className="m-0 text-[12.5px] leading-normal text-ink-strong">
-          {t("serviceDatabase.pgvectorBefore")}{" "}
-          <code className="rounded-[5px] bg-field px-[5px] py-px font-mono text-xs">CREATE EXTENSION vector;</code>{" "}
-          {t("serviceDatabase.pgvectorAfter")}
+          {t("serviceDatabase.pgvectorBefore")} <CopyCode code="CREATE EXTENSION vector;" /> {t("serviceDatabase.pgvectorAfter")}
         </p>
       )}
       {reset && <ResetPassword service={service} which="internal" onClose={() => setReset(false)} />}

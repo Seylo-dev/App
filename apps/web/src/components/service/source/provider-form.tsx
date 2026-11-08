@@ -316,17 +316,16 @@ export function BranchSelect({
 }) {
   const branches = useOp(gitProviders.branches, { projectId, providerId, repo }, { retry: retryOp });
   const list = branches.data?.branches ?? (value ? [value] : []);
-  const placeholder = branches.isPending
-    ? t("service.loading")
-    : branches.isError
-      ? t("serviceSource.provider.branchesFailed")
-      : list.length === 0
-        ? t("serviceSource.provider.noBranches")
-        : t("serviceSource.provider.pickBranch");
+  // While the list loads the trigger shows a skeleton (loading), never a "Loading" placeholder.
+  const placeholder = branches.isError
+    ? t("serviceSource.provider.branchesFailed")
+    : list.length === 0
+      ? t("serviceSource.provider.noBranches")
+      : t("serviceSource.provider.pickBranch");
   return (
     <>
       <Select value={value ?? undefined} onValueChange={onChange} disabled={list.length === 0}>
-        <SelectTrigger aria-label={t("serviceSource.provider.branch")} className="font-mono">
+        <SelectTrigger aria-label={t("serviceSource.provider.branch")} className="font-mono" loading={branches.isPending && !value}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

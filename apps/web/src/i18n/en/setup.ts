@@ -38,7 +38,7 @@ export default {
   doneHint: "Opening the dashboard.",
   openDashboard: "Open the dashboard",
   badLinkTitle: "This setup link does not work",
-  badLinkHint: "It has expired or was already used. Run {command} on the node the panel runs on to get a new one.",
+  badLinkHint: "It has expired or was already used. To get a new one, run this on the node the panel runs on:",
   ownerExistsTitle: "The owner account exists",
   ownerExistsHint: "Sign in with it to finish the remaining setup steps.",
   completedTitle: "Setup is done",

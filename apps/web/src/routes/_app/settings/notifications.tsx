@@ -8,7 +8,9 @@ import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
+import { cn } from "@seylo/ui/lib/utils";
 import { IconBell } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -25,6 +27,8 @@ export const Route = createFileRoute("/_app/settings/notifications")({
 });
 
 type Channel = notifications.Channel;
+
+const channelGrid = "grid grid-cols-[repeat(auto-fit,minmax(min(320px,100%),1fr))] gap-4";
 
 const kindTones = {
   smtp: "blue",
@@ -56,11 +60,13 @@ function NotificationsPage() {
       {list.error ? (
         <OpErrorCallout error={list.error} onRetry={() => void list.refetch()} />
       ) : (
-        <section
-          aria-label={t("settingsNotifications.channels")}
-          className="grid grid-cols-[repeat(auto-fit,minmax(min(320px,100%),1fr))] gap-4"
-        >
-          {list.isPending && <Card className="h-[104px] animate-pulse" />}
+        <section aria-label={t("settingsNotifications.channels")} className={channelGrid}>
+          {list.isPending && (
+            <LoadingRegion label={t("common.loading")} className={cn("col-span-full", channelGrid)}>
+              <ChannelCardSkeleton canEdit={canEdit} />
+              <ChannelCardSkeleton canEdit={canEdit} />
+            </LoadingRegion>
+          )}
           {!list.isPending && channels.length === 0 && (
             <Card className="col-span-full">
               <EmptyState
@@ -82,6 +88,26 @@ function NotificationsPage() {
         <DefaultAlerts channels={channels} canEdit={canEdit} />
       </div>
     </SettingsPage>
+  );
+}
+
+/** A channel card while the list loads: the kind chip and name, the two buttons for editors, the target and the usage line. */
+function ChannelCardSkeleton({ canEdit }: { canEdit: boolean }) {
+  return (
+    <Card aria-hidden="true" className="min-w-0 gap-[9px] px-[18px] py-4">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Skeleton className="h-[22px] w-16 rounded-chip" />
+        <SkeletonText className="w-28 text-sm" />
+        {canEdit && (
+          <span className="ml-auto flex gap-1.5">
+            <ButtonSkeleton size="sm" className="h-[30px] w-[78px]" />
+            <ButtonSkeleton size="sm" className="h-[30px] w-11" />
+          </span>
+        )}
+      </div>
+      <SkeletonText className="w-40 font-mono text-xs" />
+      <SkeletonText className="w-32 text-xs" />
+    </Card>
   );
 }
 

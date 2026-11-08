@@ -64,8 +64,8 @@ function CleanupPage() {
               setRan(null);
             }}
           >
-            <SelectTrigger id="cleanup-node" className="sm:w-72">
-              <SelectValue placeholder={nodeList.isPending ? t("common.loading") : t("settings.cleanup.pickNode")} />
+            <SelectTrigger id="cleanup-node" className="sm:w-72" loading={nodeList.isPending}>
+              <SelectValue placeholder={t("settings.cleanup.pickNode")} />
             </SelectTrigger>
             <SelectContent>
               {nodeList.data?.nodes.map((n) => (

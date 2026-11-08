@@ -7,7 +7,7 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
-import { CodeBlock } from "@seylo/ui/components/code-block";
+import { CodeBlock, CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { DataTable } from "@seylo/ui/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
@@ -94,7 +94,7 @@ function JobRow({ service, job: j, onEdit }: { service: ServiceDetail; job: Job;
           {describeCron(j.schedule)} · {j.timeZone}
         </span>
       </span>
-      <code className="min-w-0 truncate rounded-chip bg-field px-2 py-1 font-mono text-xs">{j.command}</code>
+      {j.command && <CopyCode code={j.command} aria-label={t("serviceCron.command")} />}
       <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         {j.lastRun && <Chip tone={resultTone[j.lastRun.result]}>{t(`serviceCron.result.${j.lastRun.result}`)}</Chip>}
         {j.enabled && j.nextRunAt && <span>{t("serviceBackups.next", { when: formatRelative(j.nextRunAt) })}</span>}
@@ -335,7 +335,7 @@ function RunOutput({ service, run, onClose }: { service: ServiceDetail; run: Run
           <>
             <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
               <Chip tone={resultTone[detail.data.run.result]}>{t(`serviceCron.result.${detail.data.run.result}`)}</Chip>
-              <code className="rounded-chip bg-field px-2 py-1 font-mono text-xs">{detail.data.command}</code>
+              {detail.data.command && <CopyCode code={detail.data.command} aria-label={t("serviceCron.command")} />}
               {detail.data.run.exitCode != null && (
                 <span className="text-muted-foreground">{t("serviceCron.exit", { code: detail.data.run.exitCode })}</span>
               )}

@@ -8,6 +8,7 @@ import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
+import { CopyCode } from "@seylo/ui/components/code-block";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
@@ -209,7 +210,7 @@ function UsagePanel({ service }: { service: ServiceDetail }) {
           ))}
         </LoadingRegion>
       ) : points.length < 2 ? (
-        <p className="m-0 text-[12.5px] text-muted-foreground">{data.isPending ? t("service.loading") : t("serviceMetrics.noData")}</p>
+        <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceMetrics.noData")}</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1">
@@ -244,15 +245,17 @@ function UsagePanel({ service }: { service: ServiceDetail }) {
   );
 }
 
-function DomainsPanel({ service }: { service: ServiceDetail }) {
+export function DomainsPanel({ service }: { service: ServiceDetail }) {
   const list = useOp(domains.list, { serviceId: service.id }, { retry: retryOp });
   const rows = list.data?.domains.slice(0, 4) ?? [];
   return (
     <Panel title={t("service.tabs.domains")}>
       {list.isError ? (
         <OpErrorNote error={list.error} compact />
+      ) : list.isPending ? (
+        <DomainRowsSkeleton />
       ) : rows.length === 0 ? (
-        <p className="m-0 text-[12.5px] text-muted-foreground">{list.isPending ? t("service.loading") : t("serviceDomains.empty")}</p>
+        <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceDomains.empty")}</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {rows.map((d) => (
@@ -269,6 +272,20 @@ function DomainsPanel({ service }: { service: ServiceDetail }) {
         </ul>
       )}
     </Panel>
+  );
+}
+
+/** Domain rows while domains.list loads: the lock or globe, and the host. */
+function DomainRowsSkeleton() {
+  return (
+    <LoadingRegion label={t("common.loading")} className="flex flex-col gap-2">
+      {["w-44", "w-36"].map((width) => (
+        <span key={width} className="flex items-center gap-2 text-[12.5px]">
+          <Skeleton className="size-[13px] shrink-0 rounded-full" />
+          <SkeletonText className={`${width} font-mono`} />
+        </span>
+      ))}
+    </LoadingRegion>
   );
 }
 
@@ -322,7 +339,15 @@ function CronOverview({ service }: { service: ServiceDetail }) {
             layout="grid"
             items={[
               { key: "when", label: t("serviceCron.schedule"), value: `${describeCron(c.schedule)} · ${c.timeZone}` },
-              { key: "cmd", label: t("serviceCron.command"), value: c.command.join(" ") || t("serviceOverview.imageDefault"), mono: true },
+              {
+                key: "cmd",
+                label: t("serviceCron.command"),
+                value: c.command.join(" ") ? (
+                  <CopyCode code={c.command.join(" ")} aria-label={t("serviceCron.command")} />
+                ) : (
+                  t("serviceOverview.imageDefault")
+                ),
+              },
               { key: "limit", label: t("serviceCron.timeout"), value: `${c.timeoutSeconds}s` },
               { key: "conc", label: t("serviceCron.concurrency"), value: t(`serviceCron.concurrencyOptions.${c.concurrency}`) },
             ]}
