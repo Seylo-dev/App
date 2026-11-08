@@ -9971,8 +9971,11 @@
                     "type": "string"
                   },
                   "repository": {
+                    "minLength": 1,
                     "maxLength": 500,
-                    "pattern": "^https://",
+                    "pattern": "^https://[^/@\\s]+(/\\S*)?$",
+                    "description": "https:// git URL, without a user name or token in it.",
+                    "errorMessage": "put no user name or token in a repository URL: everyone who can view the Box would see it. Clone a private repository from the Box's terminal instead",
                     "type": "string"
                   },
                   "idleMinutes": {

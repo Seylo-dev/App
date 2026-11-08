@@ -1397,7 +1397,11 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   reaches a spec or the audit log; the stored spec schema still loads
   sources saved before (`services/spec.ts` `StoredGitUrl`) and every
   answer that shows one drops it (`services/git-url.ts`: `toDetail`,
-  `compose.get`, compose read errors). Input errors inside a union name
+  `compose.get`, compose read errors). A Box's `repository`
+  (`boxes.create`) is an `HttpsGitUrl`: https:// only, no user name or
+  token (Boxes have no git credential; private repositories are cloned
+  from the Box's terminal); `boxes.get` and clones drop one saved before,
+  and only the Box's own `BOX_REPOSITORY` keeps it. Input errors inside a union name
   the field of the variant the caller picked (`ops/validate.ts`). A git
   credential only goes to its own host and a registry login to its own
   registry (checked on save and again before the token leaves the panel at

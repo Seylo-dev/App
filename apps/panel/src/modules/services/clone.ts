@@ -57,6 +57,7 @@ import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { copyRunning, toDataCopy } from "./copies";
+import { withoutCredentials } from "./git-url";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
 import { assertNode, insertService, writeSpec } from "./insert";
 import { relayVolume, waitStopped } from "./move";
@@ -396,7 +397,11 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
       }
     }
     const box = tx.select().from(serviceBoxes).where(eq(serviceBoxes.serviceId, svc.id)).get();
-    if (box) tx.insert(serviceBoxes).values({ serviceId: id, repository: box.repository, idleMinutes: box.idleMinutes }).run();
+    // A token in an older Box's URL stays with that Box.
+    if (box)
+      tx.insert(serviceBoxes)
+        .values({ serviceId: id, repository: box.repository ? withoutCredentials(box.repository) : null, idleMinutes: box.idleMinutes })
+        .run();
     let domain: string | null = null;
     if (input.autoDomain && plan.autoDomain) {
       domain = insertDomain(ctx, tx, {
