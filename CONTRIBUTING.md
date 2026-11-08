@@ -128,13 +128,14 @@ theme presets). `test/playwright/run.sh --project smoke` runs one suite;
 `make e2e` builds test-signed releases (agents, panel image, installer),
 creates three fresh VMs (two Colima VMs with Docker and one plain Lima
 Ubuntu 24.04 VM without Docker), installs Seylo on them with the real
-installer and runs 38 checks: joins, builds, deploys, zero-downtime
+installer and runs 40 checks: joins, builds, deploys, zero-downtime
 redeploys, crash policy, databases, backups to MinIO, cron, logs, moves,
 replicas, updates with rollback, the CLI, MCP, the panel domain with an
 ACME certificate from Pebble, uninstall, Docker Hub, a Gitea provider with
 watch paths, scheduled cleanup, host shells, clone and move, Valkey,
-ClickHouse and pgvector, and an upgrade from the last release (0.1.1,
-built from its tag) through the normal update. It takes about 50 minutes
+ClickHouse and pgvector, an upgrade from the last release (0.1.1,
+built from its tag) through the normal update, the build default and
+closing IP access over the domain, and the panel on a Headscale tailnet. It takes about 50 minutes
 on an Apple silicon Mac and needs Colima, Lima, minisign, jq, python3,
 psql and Node.js (check 30 runs Playwright). The results and their evidence go to
 `test/e2e-colima/RESULTS.md`.
@@ -146,8 +147,13 @@ make e2e-refresh                 # move kept VMs to the working tree through the
 make e2e-down                    # delete the VMs and ~/.cache/seylo-e2e
 ```
 
-The scripts only use VM profiles named `seylo-e2e-*`. Details:
-[test/e2e-colima/README.md](test/e2e-colima/README.md).
+The scripts only use VM profiles named `seylo-e2e-*` (and
+`test/e2e-colima/extra-installs.sh`, the Debian 12 and ufw installs outside
+the 40, only `seylo-x-deb` and `seylo-x-ufw`). Details:
+[test/e2e-colima/README.md](test/e2e-colima/README.md). After a release is
+published, `.github/workflows/install-smoke.yml` installs it with its own
+install.sh on GitHub's amd64 and arm64 runners and deploys traefik/whoami
+through the API (`test/install-smoke/smoke.sh`); run it by hand with a tag.
 
 ## Commits and pull requests
 
@@ -174,7 +180,8 @@ Maintainers only. Releases are built by GitHub Actions
 the Build and test job tests the tag and builds the web app and the panel,
 the Draft release job makes an unsigned draft release from that build, the
 Sign job signs it, and the Publish job checks the draft on its own and
-publishes it.
+publishes it. A fifth, small job then starts the install smoke test on the
+published release.
 
 Only the Build and test job runs npm packages (`make install`, `make test`,
 `make build-ts`, about 550 of them). Its token can only read and it gets no
@@ -301,6 +308,13 @@ Each release:
    to the `App` repository, change its visibility to public (Package
    settings > Change visibility), then re-run the Publish job (the run's
    page > Publish > Re-run this job). It stays public for later releases.
+6. Once the release is published, the Start the install smoke test job
+   starts `.github/workflows/install-smoke.yml` for the tag (a release
+   published with the workflow's token starts no `release: published`
+   workflow, so it is started by hand there; one published by a person
+   starts it by itself). It installs the release with its own `install.sh`
+   on an amd64 and an arm64 runner, sets the panel up through the API and
+   deploys traefik/whoami; a failed run keeps the logs as an artifact.
 
 To keep a release from going out on its own:
 

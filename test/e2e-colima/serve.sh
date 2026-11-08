@@ -11,6 +11,9 @@
 #     git URLs, so the build checks clone /git/<app>.git (dumb HTTP) from here.
 #     The certificate comes from a test-only CA that this script adds to each
 #     VM's trust store.
+#   /e2e-tools/tailscale_<version>_<arch>.tgz  Tailscale's static release for
+#     check 40, fetched once from pkgs.tailscale.com and checked against the
+#     sha256 in lib.sh.
 #
 # Usage: test/e2e-colima/serve.sh [stop]
 source "$(dirname "$0")/lib.sh"
@@ -39,6 +42,24 @@ if [ ! -s "$tls/server.crt" ]; then
   printf 'subjectAltName=IP:%s\nextendedKeyUsage=serverAuth\n' "$(host_ip)" >"$tls/ext.cnf"
   openssl x509 -req -in "$tls/server.csr" -CA "$tls/ca.crt" -CAkey "$tls/ca.key" -CAcreateserial \
     -days 30 -extfile "$tls/ext.cnf" -out "$tls/server.crt" 2>/dev/null
+fi
+
+ts_file=$(e2e_ts_file)
+if [ ! -s "$E2E_REL/e2e-tools/$ts_file" ]; then
+  ts_sha=$(e2e_ts_sha256)
+  if [ -z "$ts_sha" ]; then
+    log "note: lib.sh has no sha256 for Tailscale $E2E_TS_VERSION, so it is not fetched and check 40 is BLOCKED"
+  else
+    log "fetching $ts_file for check 40"
+    mkdir -p "$E2E_REL/e2e-tools"
+    if curl -fsSL -o "$E2E_REL/e2e-tools/$ts_file.part" "https://pkgs.tailscale.com/stable/$ts_file" &&
+      [ "$(shasum -a 256 "$E2E_REL/e2e-tools/$ts_file.part" | cut -d' ' -f1)" = "$ts_sha" ]; then
+      mv "$E2E_REL/e2e-tools/$ts_file.part" "$E2E_REL/e2e-tools/$ts_file"
+    else
+      rm -f "$E2E_REL/e2e-tools/$ts_file.part"
+      log "note: could not fetch $ts_file with sha256 $ts_sha, so check 40 is BLOCKED"
+    fi
+  fi
 fi
 
 nohup python3 -I -m http.server "$E2E_REL_PORT" --bind "$(host_ip)" --directory "$E2E_REL" \

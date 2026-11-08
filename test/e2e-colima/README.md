@@ -1,14 +1,14 @@
 # End-to-end harness (three VMs)
 
 `make e2e` (or `test/e2e-colima/run.sh`) builds test releases, installs Seylo on
-three VMs with the real installer and runs the 38-check checklist. Results go to
+three VMs with the real installer and runs the 40-check checklist. Results go to
 `RESULTS.md` here (PASS / FAIL / BLOCKED with evidence per check).
 
 | VM | What | Role |
 |---|---|---|
-| `seylo-e2e-a` | Colima (vz, `--network-address`), Docker | "panel + node here", can build; also the unlabeled infra containers `e2e-registry` (127.0.0.1:15000, panel images), `e2e-minio` (:19000, bucket `e2e-backups`), `e2e-pebble` (:14000) and, from check 33, `e2e-gitea` (:13000, HTTPS) |
+| `seylo-e2e-a` | Colima (vz, `--network-address`), Docker | "panel + node here", can build; also the unlabeled infra containers `e2e-registry` (127.0.0.1:15000, panel images), `e2e-minio` (:19000, bucket `e2e-backups`), `e2e-pebble` (:14000), `e2e-headscale` (:18443 HTTPS, 3478/udp, check 40) and, from check 33, `e2e-gitea` (:13000, HTTPS) |
 | `seylo-e2e-b` | Colima, Docker | joined node, most app checks |
-| `seylo-e2e-c` | plain Lima Ubuntu 24.04, no Docker | joined node; `install.sh --yes` installs Docker (systemd cgroup driver) |
+| `seylo-e2e-c` | plain Lima Ubuntu 24.04, no Docker | joined node; `install.sh` installs the missing Docker by itself (systemd cgroup driver), no `--yes` needed |
 
 On the Mac (`serve.sh`, at the vzNAT bridge address, normally 192.168.64.1):
 
@@ -16,6 +16,8 @@ On the Mac (`serve.sh`, at the vzNAT bridge address, normally 192.168.64.1):
   `/releases/latest/download/...`, the API shape at `/repos/<org>/<repo>/releases/latest`, `/install.sh`).
 - `https://<mac>:18556/git/<app>.git` smart-HTTP git (the panel takes only `https://` URLs and the agent
   clones shallow). The certificate comes from a test-only CA that `serve.sh` adds to each VM's trust store.
+- `http://<mac>:18555/e2e-tools/tailscale_<version>_<arch>.tgz` Tailscale's static release for check 40,
+  fetched once from pkgs.tailscale.com and checked against the sha256 in `lib.sh` (`E2E_TS_VERSION`).
 
 Releases: N (`0.2.0`, installed), N+1 (`0.2.1`, self-update target), N+2 (`0.2.2`, a panel image that
 exits at once, for the swap rollback), all from the working tree, and the base release (`0.1.1`,
@@ -40,8 +42,22 @@ test/e2e-colima/build.sh       # agents panel release git base (any subset)
 test/e2e-colima/publish.sh 0.2.1   # make a built release "latest"
 test/e2e-colima/checks.sh 7 8  # rerun some checks (make e2e-checks CHECKS="7 8")
 test/e2e-colima/refresh.sh     # put the working tree on the kept VMs (make e2e-refresh)
+test/e2e-colima/extra-installs.sh [deb] [ufw]  # install.sh on Debian 12 and on Ubuntu with ufw (not one of the 40)
 test/e2e-colima/down.sh        # delete the VMs and ~/.cache/seylo-e2e
 ```
+
+`extra-installs.sh` creates a fresh plain Lima VM for each run, `seylo-x-deb` (Debian 12, template
+`debian-12`) and `seylo-x-ufw` (Ubuntu 24.04 with ufw on: deny incoming, ssh allowed), installs the
+published release there as a panel with its own `install.sh` (Docker comes from get.docker.com), then
+`test/install-smoke/smoke.sh` from the Mac sets the panel up through its API (owner, API key, a project,
+`traefik/whoami` live) and curls the service's IP:port. On the ufw VM that address stays closed until the
+`ufw allow <port>/tcp` the panel shows is run (the agent serves it itself, so ufw applies). The VMs pull the
+pinned panel image from A's registry through relays (`e2e-regfwd-x` on A, port 15003) like check 38, then
+are deleted (`KEEP_X=1` keeps them). It needs A running, `serve.sh`, `infra.sh` and `build.sh`; logs go to
+`~/.cache/seylo-e2e/state/extra/`. It only creates and deletes VMs with those two names.
+
+The same `smoke.sh` runs on GitHub's amd64 and arm64 runners after a release is published
+(`.github/workflows/install-smoke.yml`, or by hand with a tag).
 
 `refresh.sh` builds the next test release from the working tree (0.2.3, then 0.2.4, ...; `build.sh`
 with `E2E_BUILD_VERSIONS`), publishes it and runs the panel's own update (panel first, then the
@@ -68,7 +84,36 @@ refreshed version instead of N.
   another server is refused without `--insecure`.
 - The first-run port closes 24 h after its domain is live; check 4 moves that stored time into the past
   (one SQLite write in the panel container) and waits for the panel's minute sweep to close it.
-- The default order is 1..30, 32..38, then 31.
+- The default order is 1..30, 32..40, then 31.
+- Check 3 joins C without `--yes`: the installer installs the missing Docker by itself and waits for the
+  agent's first connection ("Connected: the node shows up in the panel now."). B and C join with the default
+  join command, so they build images (canBuild), and check 6's inline and uploaded builds run on B, their own
+  node (a kept B joined before 0.2.1 only gets a note).
+- Check 39 takes C out of the panel (like check 38) and joins it with a join command made with "Build images
+  on this node" unticked plus the node's own `--can-build`: C must not build. The same, now used, command
+  again must exit 3 with "the panel refused this node". C then joins with a default command and builds.
+  Then it gives the panel a domain the way check 31 does (`p31_domain_up`, and `p31_cleanup` afterwards),
+  signs the owner in over the domain and turns "Serve on IP address" off from there (an API key and an
+  IP:port session with a forged `Host` are refused first). http://<A>:3000 must stop answering from the
+  Mac, B and C while 127.0.0.1 on A, the domain and A's own agent keep working; with B and C on the domain
+  the agents' port closes too. `seylo panel ip-access on` opens both again. Last, the domain dies for the
+  panel (the test CA goes, and one failed check is backdated so the next is the second in a row): IP access
+  reopens by itself; with the CA back and the hour backdated it closes again. While IP access is closed the
+  check reaches the API from A itself over 127.0.0.1 (`api_loop`), as the SSH tunnel would.
+- Check 40 runs Tailscale against `e2e-headscale` (`headscale/headscale:v0.29.7`, pinned by digest, on A;
+  `infra.sh` starts it with a certificate from `serve.sh`'s test CA, so run `serve.sh` first). A's own
+  tailscaled is the owner's server (kernel mode, or userspace when A has no `/dev/net/tun`), C's tailscaled
+  the laptop (userspace, curl through its SOCKS5 proxy on 127.0.0.1:1055). Both sign in with a Headscale
+  pre-auth key (`tailscale up --login-server ... --accept-dns=false`). Headscale gives no HTTPS
+  certificates, so Serve runs in HTTP mode on `http://e2e-a.ts.e2e.test`. The check turns Serve on through
+  `tailscale.setServe` from the owner's IP:port session, reaches the panel from C over the tailnet, signs in
+  there and closes IP access from that session (Lock to Tailscale). Then: an agent restart during a request
+  loop drops nothing, `tailscale serve reset` gets the entry back, a panel restart replaces the socket,
+  `tailscale down` for 5 minutes (backdated) reopens IP access and `tailscale up` plus a backdated hour
+  closes it again, `seylo panel tailscale status` works with the agent stopped, `seylo panel ip-access on`
+  reopens, `seylo panel tailscale off` / `on` remove and restore the entry. It cleans up: Serve off, IP access
+  open, tailscaled removed from A and C, the Headscale nodes deleted. HTTPS mode and the real
+  login.tailscale.com sign-in link stay a manual check.
 - Check 31 (panel domain) runs last and puts everything back: it gives the panel a new
   `panel<time>.<A dashed>.sslip.io` name each run (so a certificate from an earlier Pebble never
   gets in the way), points A's ACME client at Pebble, adds Pebble's root (from its management port,
