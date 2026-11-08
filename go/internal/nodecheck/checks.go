@@ -133,7 +133,7 @@ func diskResult(at string, total, free uint64) *agentv1.NodeCheckResult {
 	if total > 0 {
 		pct = float64(free) * 100 / float64(total)
 	}
-	hint := "Free space: remove unused images and build cache from Settings > Cleanup, or grow the disk."
+	hint := "Free space: remove unused images and build cache in Settings > Docker cleanup (or schedule it in the node's Cleanup view), or grow the disk."
 	switch {
 	case free < 2*gib || pct < 5:
 		return fail(detail, hint)

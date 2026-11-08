@@ -205,6 +205,10 @@ func TestDiskThresholds(t *testing.T) {
 			t.Errorf("disk %d/%d = %v, want %v", c.free, c.total, got, c.want)
 		}
 	}
+	// The hint names the screens as the web app does.
+	if h := diskResult("/", 20*gib, gib).GetFixHint(); !strings.Contains(h, "Settings > Docker cleanup") || !strings.Contains(h, "node's Cleanup view") {
+		t.Errorf("disk hint = %q", h)
+	}
 	if inodeResult("/", 0, 0).GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_PASS ||
 		inodeResult("/", 1000, 50).GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_WARN ||
 		inodeResult("/", 1000, 10).GetStatus() != agentv1.NodeCheckStatus_NODE_CHECK_STATUS_FAIL {
