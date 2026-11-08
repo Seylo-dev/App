@@ -4,8 +4,10 @@
 // ServiceStatus.message kept in the state store for the process lifetime.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { create } from "@bufbuild/protobuf";
+import { NodeFactsSchema } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { maxAgentVersionLength, statusLimits } from "../src/agent-hub/field-caps";
+import { capFields, factsLimits, maxAgentVersionLength, statusLimits } from "../src/agent-hub/field-caps";
 import { nodes } from "../src/db/schema";
 import { toNode } from "../src/modules/nodes/view";
 import type { FakeAgent } from "./fake-agent";
@@ -114,4 +116,33 @@ test("a snapshot's ServiceStatus entries are cut before the state store keeps th
   agent.event({ payload: { case: "stateDelta", value: { epoch: 2n, seq: 1n, change: { case: "appliedRevision", value: 0n } } } });
   await applied;
   expectCapped(panel.deps.agents.state.serviceStatuses(svc.id)[0]?.status);
+});
+
+test("NodeFacts from 0.2.1 (buildx, Tailscale) are cut too, the Serve URL and message to their own limits", () => {
+  const facts = create(NodeFactsSchema, {
+    hostname: "h".repeat(4096),
+    buildx: { installed: true, version: "v".repeat(4096) },
+    tailscale: {
+      version: "1".repeat(4096),
+      dnsName: "d".repeat(4096),
+      addresses: Array.from({ length: 1000 }, (_, i) => `100.64.0.${i}${"x".repeat(300)}`),
+      tags: Array.from({ length: 1000 }, () => "tag:server"),
+      serve: { url: `https://${"u".repeat(4096)}`, message: "m".repeat(8192), proxy: `unix:${"/p".repeat(4096)}` },
+    },
+  });
+  capFields(facts, factsLimits);
+  expect(facts.hostname.length).toBe(factsLimits.maxString);
+  expect(facts.buildx?.version.length).toBe(factsLimits.maxString);
+  expect(facts.tailscale?.version.length).toBe(factsLimits.maxString);
+  expect(facts.tailscale?.dnsName.length).toBe(factsLimits.maxString);
+  expect(facts.tailscale?.addresses.length).toBe(factsLimits.maxList);
+  for (const address of facts.tailscale?.addresses ?? []) expect(address.length).toBeLessThanOrEqual(factsLimits.maxListItem);
+  expect(facts.tailscale?.tags.length).toBe(factsLimits.maxList);
+  expect(facts.tailscale?.serve?.url.length).toBe(512);
+  expect(facts.tailscale?.serve?.message.length).toBe(1024);
+  expect(facts.tailscale?.serve?.proxy.length).toBe(factsLimits.maxString);
+  // A normal Serve URL is kept whole: a 253-character MagicDNS name fits.
+  const normal = create(NodeFactsSchema, { tailscale: { serve: { url: `https://${"a".repeat(253)}` } } });
+  capFields(normal, factsLimits);
+  expect(normal.tailscale?.serve?.url.length).toBe(261);
 });

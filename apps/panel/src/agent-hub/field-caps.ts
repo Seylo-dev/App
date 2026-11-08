@@ -13,6 +13,8 @@ export interface FieldLimits {
   maxList: number;
   /** Longest string entry of a repeated field (one output line). */
   maxListItem: number;
+  /** String fields, by field name at any depth, that may be longer than maxString. */
+  longer?: Readonly<Record<string, number>>;
 }
 
 /** What modules see of a report. Crash reports keep 100 lines of 2000 characters (panel-service.ts). */
@@ -21,8 +23,14 @@ export const reportFieldLimits: FieldLimits = { maxString: 4096, maxList: 200, m
 /** What agent_reports stores of an event. */
 export const storedReportLimits: FieldLimits = { maxString: 1024, maxList: 20, maxListItem: 1024 };
 
-/** NodeFacts (hello and nodeFacts events): host names, versions, addresses and capability names are short. */
-export const factsLimits: FieldLimits = { maxString: 256, maxList: 256, maxListItem: 128 };
+/**
+ * NodeFacts (hello and nodeFacts events): host names, versions, addresses
+ * and capability names are short. TailscaleInfo.serve (added in 0.2.1) holds
+ * the two longer ones: `url` is a MagicDNS name of up to 253 characters
+ * with its scheme, `message` the agent's words for a Serve conflict or
+ * error. No other NodeFacts field has these names.
+ */
+export const factsLimits: FieldLimits = { maxString: 256, maxList: 256, maxListItem: 128, longer: { url: 512, message: 1024 } };
 
 /** The hello's agent_version (nodes.agent_version, shown on the Nodes and Updates pages). */
 export const maxAgentVersionLength = 64;
@@ -58,7 +66,8 @@ function capObject(value: Record<string, unknown>, limits: FieldLimits, depth: n
     if (key === "$typeName") continue;
     const field = value[key];
     if (typeof field === "string") {
-      if (field.length > limits.maxString) value[key] = field.slice(0, limits.maxString);
+      const max = limits.longer?.[key] ?? limits.maxString;
+      if (field.length > max) value[key] = field.slice(0, max);
     } else if (Array.isArray(field)) {
       const kept =
         field.length <= limits.maxList ? field : tailLists.has(key) ? field.slice(-limits.maxList) : field.slice(0, limits.maxList);
