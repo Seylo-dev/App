@@ -10,7 +10,22 @@ import type { PanelDb } from "../db/client";
 import { joinTokens, nodes } from "../db/schema";
 import { blockedReason } from "../modules/uptime/targets";
 import { hashToken } from "../security/tokens";
+import { getSetting, setSetting } from "../settings";
 import { helloSignedBytes, verifyEd25519 } from "./signature";
+
+declare module "../settings" {
+  interface SettingValues {
+    /**
+     * The public address each node last connected from, as the panel saw it
+     * (behind the panel's Traefik, the forwarded one), by node id; none for
+     * a node that connects over a private network or loopback. Unlike
+     * public_ipv4/public_ipv6, which the agent's own facts fill first, an
+     * agent cannot make it up, so git sources count it among a node's
+     * trusted addresses (uptime/targets.ts NodeAddressScope).
+     */
+    nodeConnectAddresses: Record<string, string>;
+  }
+}
 
 export type HelloDecision = { ok: true; nodeId: string; joined: boolean } | { ok: false; reason: HelloRejectReason; message: string };
 
@@ -31,6 +46,16 @@ export interface HelloOptions {
    */
   panelNodeFromInstallerOnly?: boolean;
   now?: Date;
+}
+
+/** Keeps nodeConnectAddresses up to date: the node's public connect address, or none (null). */
+export function rememberConnectAddress(db: PanelDb, nodeId: string, address: string | null): void {
+  const all = getSetting(db, "nodeConnectAddresses") ?? {};
+  if ((all[nodeId] ?? null) === address) return;
+  const next = { ...all };
+  if (address) next[nodeId] = address;
+  else delete next[nodeId];
+  setSetting(db, "nodeConnectAddresses", next);
 }
 
 /** A public address the agent connected from, by family; null when it is private or unknown. */
@@ -67,6 +92,7 @@ export function decideHello(
         return reject(HelloRejectReason.BAD_SIGNATURE, "The node's signature does not match its registered key.");
       }
       db.update(nodes).set(report).where(eq(nodes.id, nodeId)).run();
+      rememberConnectAddress(db, nodeId, seen.v4 ?? seen.v6);
       return { ok: true, nodeId, joined: false };
     }
 
@@ -84,7 +110,7 @@ export function decideHello(
         return reject(HelloRejectReason.BAD_SIGNATURE, "The join signature is not valid.");
       }
 
-      return db.transaction((tx) => {
+      const decision = db.transaction((tx): HelloDecision => {
         // Claim the token first; the usedAt condition makes a second use lose.
         const claimed = tx
           .update(joinTokens)
@@ -122,6 +148,8 @@ export function decideHello(
         tx.update(joinTokens).set({ nodeId: node.id }).where(eq(joinTokens.id, row.id)).run();
         return { ok: true as const, nodeId: node.id, joined: true };
       });
+      if (decision.ok) rememberConnectAddress(db, decision.nodeId, seen.v4 ?? seen.v6);
+      return decision;
     }
 
     default:

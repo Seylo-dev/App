@@ -27,6 +27,7 @@ import { helloSignedBytes } from "../src/agent-hub/signature";
 import { joinTokens, nodes, projects, servicePlacements, services, users } from "../src/db/schema";
 import { flusherFor } from "../src/modules/nodes/index";
 import { hashToken } from "../src/security/tokens";
+import { getSetting } from "../src/settings";
 import { type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -111,6 +112,27 @@ describe("decideHello: re-join, panel node, NAT address", () => {
       .get();
     expect(localRow?.isPanelNode).toBe(true);
     expect(localRow?.publicIpv4).toBeNull();
+  });
+
+  test("the panel keeps the public address a node connected from, apart from what its facts claim", () => {
+    // Git sources count it among the node's trusted addresses; public_ipv4 is the agent's word first.
+    const key = agentKey();
+    addJoinToken("seen");
+    const hello = joinHello(nonce, "seen", key);
+    hello.facts = create(NodeFactsSchema, { hostname: "host-a", publicIpv4: "140.82.121.4" });
+    const joined = decideHello(panel.deps.db, panel.deps.panelId, nonce, hello, { remoteIp: "93.184.216.20" });
+    const nodeId = (joined as { nodeId: string }).nodeId;
+    expect(panel.deps.db.select().from(nodes).where(eq(nodes.id, nodeId)).get()?.publicIpv4).toBe("140.82.121.4");
+    expect(getSetting(panel.deps.db, "nodeConnectAddresses")).toEqual({ [nodeId]: "93.184.216.20" });
+    // Back over a private network: no public connect address any more.
+    expect(
+      decideHello(panel.deps.db, panel.deps.panelId, nonce, resumeHello(nonce, nodeId, key.privateKey), { remoteIp: "10.0.0.5" }),
+    ).toMatchObject({
+      ok: true,
+    });
+    expect(getSetting(panel.deps.db, "nodeConnectAddresses")).toEqual({});
+    decideHello(panel.deps.db, panel.deps.panelId, nonce, resumeHello(nonce, nodeId, key.privateKey), { remoteIp: "2a01:4f8::9" });
+    expect(getSetting(panel.deps.db, "nodeConnectAddresses")).toEqual({ [nodeId]: "2a01:4f8::9" });
   });
 });
 

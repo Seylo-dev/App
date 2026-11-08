@@ -7,6 +7,7 @@ import { installUrl } from "@seylo/brand";
 import { nodes as nodeOps, OpError } from "@seylo/ops";
 import { NodeCheckStatus } from "@seylo/proto";
 import { and, asc, count, desc, eq, gt, isNull } from "drizzle-orm";
+import { rememberConnectAddress } from "../../agent-hub/handshake";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { userOf } from "../../auth/principal";
 import { joinTokens, type NodeHealthReport, nodes, servicePlacements, updateRuns, updateSteps } from "../../db/schema";
@@ -240,6 +241,7 @@ const remove = implement(nodeOps.remove, (input, ctx) => {
     throw new OpError("CONFLICT", `Move or delete the ${placed} service(s) on this node first.`, { services: String(placed) });
   }
   ctx.db.delete(nodes).where(eq(nodes.id, row.id)).run();
+  rememberConnectAddress(ctx.db, row.id, null);
   ctx.agents.forgetNode(row.id, "node removed from the panel");
   metricsFor(ctx).forgetNode(row.id);
   forgetNodeCertificate(ctx, row.id);
