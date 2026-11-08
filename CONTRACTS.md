@@ -2526,9 +2526,12 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo
-  data, with the ops answered and recorded per test) and
+  data, with the ops answered and recorded per test), `env-save.spec.ts`
+  (typing during a slow service or shared environment save keeps the new
+  text unsaved) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
-  four theme presets, plus the phone width and the accent check;
+  four theme presets, plus the phone width, the service tab bar and the
+  accent check;
   screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`
   narrow it).
 

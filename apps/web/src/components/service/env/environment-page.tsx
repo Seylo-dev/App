@@ -61,8 +61,10 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
   const fail = (error: unknown) =>
     toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed")));
   const save = useOpMutation(env.set, {
-    onSuccess: (res) => {
-      setBase({ text, updatedAt: res.updatedAt });
+    // The text that was sent, not the editor's text now: TanStack Query runs the
+    // newest render's onSuccess, and anything typed during the save is still unsaved.
+    onSuccess: (res, sent) => {
+      setBase({ text: sent.text, updatedAt: res.updatedAt });
       setRestartNeeded(res.restartNeeded);
       setConflict(false);
       invalidate(env.references, env.analyze);
