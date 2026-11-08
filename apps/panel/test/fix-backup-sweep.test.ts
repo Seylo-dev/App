@@ -36,7 +36,12 @@ test("stale running backups fail with an alert; a late success upgrades them", (
       .all()
       .map((a) => a.event),
   ).toContain("backup_failed");
-  const late = create(BackupResultSchema, { runId: run.id, success: true, objectKey: "k", sizeBytes: 10n });
+  const late = create(BackupResultSchema, {
+    runId: run.id,
+    success: true,
+    objectKey: `seylo/${service.id}/manual/20260101T030000Z-${run.id}.dump`,
+    sizeBytes: 10n,
+  });
   expect(recordBackupResult(panel.deps, node.id, late)).toBe(true);
   expect(panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, run.id)).get()?.status).toBe("succeeded");
   panel.close();

@@ -4,6 +4,7 @@ import { backups as backupOps, databases as dbOps } from "@seylo/ops";
 import { EventSchema } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../src/db/schema";
+import { ownObjectKey } from "../src/modules/backups/runs";
 import { runDueBackups } from "../src/modules/backups/schedule";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
@@ -69,7 +70,13 @@ async function setup() {
   return { project, node, dbId: db.body.serviceId as string, destinationId: dest.body.id as string };
 }
 
-function backupResult(nodeId: string, runId: string, ok = true, key = `seylo/x/${runId}.dump`) {
+/** The key the agent writes for a run (go/internal/backup/keys.go). */
+function keyFor(runId: string, ext = ".dump") {
+  const run = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, runId)).get();
+  return `seylo/${run?.serviceId}/${run?.policyId ?? "manual"}/20260101T030000Z-${runId}${ext}`;
+}
+
+function backupResult(nodeId: string, runId: string, ok = true, key = keyFor(runId)) {
   panel.deps.agents.emitEvent(
     nodeId,
     create(EventSchema, {
@@ -186,7 +193,7 @@ describe("schedules and runs", () => {
       ["succeeded", false],
       ["succeeded", true],
     ]);
-    expect(runs.body.runs[0]).toMatchObject({ sizeBytes: 1234, objectKey: `seylo/x/${runIds[2]}.dump` });
+    expect(runs.body.runs[0]).toMatchObject({ sizeBytes: 1234, objectKey: keyFor(runIds[2] as string) });
     const policies = await callOp(panel, backupOps.listPolicies, { serviceId: dbId }, { cookie });
     expect(policies.body.policies[0].lastRun).toMatchObject({ id: runIds[2], status: "succeeded" });
 
@@ -259,7 +266,7 @@ describe("schedules and runs", () => {
       },
     });
     const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
-    const key = "seylo/db/manual/backup.dump";
+    const key = keyFor(run.body.id);
     objects.set(`/backups/${key}`, "dump bytes");
     backupResult(node.id, run.body.id, true, key);
 
@@ -281,5 +288,72 @@ describe("schedules and runs", () => {
     const gone = await callOp(panel, backupOps.restore, { serviceId: dbId, runId: run.body.id, confirmName: "db" }, { cookie });
     expect(gone.status).toBe(400);
     agent.disconnect();
+  });
+
+  test("a node may only report its own run's object; older rows naming another object are neither restored nor deleted", async () => {
+    const { node, project, dbId, destinationId } = await setup();
+    const other = seedService(panel, { projectId: project.id, name: "other", nodeIds: [node.id] });
+    const restoreCalls: { objectKey: string }[] = [];
+    const agent = fakeAgent(panel, node.id, {
+      runBackup: () => ({}),
+      restoreBackup: (req) => {
+        restoreCalls.push(req);
+        return { restoredBytes: 1n };
+      },
+    });
+    const othersKey = `seylo/${other.id}/manual/20260101T030000Z-${crypto.randomUUID()}.tar.gz`;
+    objects.set(`/backups/${othersKey}`, "someone else's volume");
+
+    // Another service's object, a key without this run's id, a path trick: all refused.
+    for (const key of [othersKey, `seylo/${dbId}/manual/20260101T030000Z-x.dump`, `seylo/../${dbId}/manual/20260101T030000Z-RUN.dump`]) {
+      const run = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+      backupResult(node.id, run.body.id, true, key.replace("RUN", run.body.id));
+      const row = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, run.body.id)).get();
+      expect(row).toMatchObject({ status: "failed", objectKey: null });
+      expect(row?.error).toContain("outside this backup's folder");
+    }
+    // Its own key is kept.
+    const good = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    backupResult(node.id, good.body.id);
+    expect(panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, good.body.id)).get()).toMatchObject({
+      status: "succeeded",
+      objectKey: keyFor(good.body.id),
+    });
+
+    // A row recorded before the check, naming the other service's object.
+    const old = await callOp(panel, backupOps.runNow, { serviceId: dbId, target: "database", destinationId }, { cookie });
+    panel.deps.db.update(backupRuns).set({ status: "succeeded", objectKey: othersKey }).where(eq(backupRuns.id, old.body.id)).run();
+    const restore = await callOp(panel, backupOps.restore, { serviceId: dbId, runId: old.body.id, confirmName: "db" }, { cookie });
+    await panel.runner.runDue(panel.deps);
+    expect(restoreCalls).toEqual([]);
+    const failed = panel.deps.db.select().from(backupRuns).where(eq(backupRuns.id, restore.body.id)).get();
+    expect(failed?.status).toBe("failed");
+    const deleted = await callOp(panel, backupOps.deleteRun, { serviceId: dbId, runId: old.body.id }, { cookie });
+    expect(deleted.body.deletedAt).not.toBeNull();
+    expect(objects.has(`/backups/${othersKey}`)).toBe(true);
+    agent.disconnect();
+  });
+
+  test("ownObjectKey follows the agent's key layout", () => {
+    const run = { id: "r1", serviceId: "s1" };
+    for (const key of [
+      "s1/manual/20260101T030000Z-r1.dump",
+      "seylo/s1/p1/20260101T030000Z-r1.tar.gz",
+      "a/b/s1/manual/20260101T030000Z-r1.clickhouse.zip",
+    ])
+      expect(ownObjectKey(run, key)).toBe(true);
+    for (const key of [
+      "",
+      "s2/manual/20260101T030000Z-r1.dump",
+      "s1/manual/20260101T030000Z-r2.dump",
+      "s1/manual/20260101T030000Z-r1.exe",
+      "s1/manual/2026-01-01-r1.dump",
+      "/s1/manual/20260101T030000Z-r1.dump",
+      "a//s1/manual/20260101T030000Z-r1.dump",
+      "../s1/manual/20260101T030000Z-r1.dump",
+      "s1/man.ual/20260101T030000Z-r1.dump",
+      "s1/20260101T030000Z-r1.dump",
+    ])
+      expect(ownObjectKey(run, key)).toBe(false);
   });
 });

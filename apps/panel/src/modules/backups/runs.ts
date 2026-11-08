@@ -57,6 +57,35 @@ export function nextRun(schedule: string, from = new Date()): Date {
   return next;
 }
 
+/** The extensions go/internal/backup/keys.go gives the objects it writes. */
+const objectExtensions = [".clickhouse.zip", ".tar.gz", ".sql.gz", ".archive.gz", ".rdb.gz", ".dump"];
+const keySegment = /^[A-Za-z0-9_-]{1,64}$/;
+const keyTime = /^\d{8}T\d{6}Z$/;
+
+/**
+ * Whether `key` names this run's object the way the agent lays keys out
+ * (go/internal/backup/keys.go): [<prefix>/]<service id>/<backup id>/<UTC
+ * time>-<run id><ext>. Every node holds the destination's keys, so a node
+ * could report any key in the bucket; the panel records, restores and
+ * deletes only a key named for this run of this service. Run ids are
+ * random, so no other service's object carries one. The prefix is not
+ * compared: it may have been edited since the run.
+ */
+export function ownObjectKey(run: Pick<RunRow, "id" | "serviceId">, key: string): boolean {
+  if (!key || key.length > 1024) return false;
+  const parts = key.split("/");
+  if (parts.length < 3) return false;
+  const [service, backup, name] = parts.slice(-3) as [string, string, string];
+  if (parts.slice(0, -3).some((p) => p === "" || p === "." || p === "..")) return false;
+  if (service !== run.serviceId || !keySegment.test(backup)) return false;
+  const ext = objectExtensions.find((e) => name.endsWith(e));
+  if (!ext) return false;
+  return keyTime.test(name.slice(0, 16)) && name.slice(16) === `-${run.id}${ext}`;
+}
+
+/** Why a run's object is refused, for the run's error and the restore. */
+export const foreignKeyError = "The node reported a backup object outside this backup's folder, so the panel did not keep it.";
+
 export interface BackupWhat {
   serviceId: string;
   target: "database" | "volume";
@@ -160,16 +189,19 @@ export function recordBackupResult(deps: Pick<Deps, "db" | "live">, nodeId: stri
   const finishedAt = result.finishedAt
     ? new Date(Number(result.finishedAt.seconds) * 1000 + Math.floor(result.finishedAt.nanos / 1e6))
     : new Date();
+  // A node could name another service's object here, which the owner would
+  // later restore or delete with the panel's keys.
+  const succeeded = result.success && ownObjectKey(run, result.objectKey);
   deps.db
     .update(backupRuns)
     .set(
-      result.success
+      succeeded
         ? { status: "succeeded", objectKey: result.objectKey, sizeBytes: Number(result.sizeBytes), error: null, finishedAt }
-        : { status: "failed", error: result.error || "The backup failed.", finishedAt },
+        : { status: "failed", error: result.success ? foreignKeyError : result.error || "The backup failed.", finishedAt },
     )
     .where(eq(backupRuns.id, run.id))
     .run();
-  if (result.success && run.policyId) applyRetention(deps.db, run.policyId);
+  if (succeeded && run.policyId) applyRetention(deps.db, run.policyId);
   invalidateService(deps, run.serviceId, [backupOps.listRuns.id, backupOps.listPolicies.id]);
   return true;
 }
@@ -262,6 +294,8 @@ export async function runRestore(
   };
   const source = restore.sourceRunId ? deps.db.select().from(backupRuns).where(eq(backupRuns.id, restore.sourceRunId)).get() : undefined;
   if (!source?.objectKey || !source.destinationId) return fail("The backup to restore is gone.");
+  // Rows recorded before the panel checked keys may name another service's object.
+  if (!ownObjectKey(source, source.objectKey)) return fail(foreignKeyError);
   const destination = deps.db.select().from(backupDestinations).where(eq(backupDestinations.id, source.destinationId)).get();
   if (!destination) return fail("The backup's destination was deleted.");
   const node = serviceNodes(deps.db, restore.serviceId)[0];

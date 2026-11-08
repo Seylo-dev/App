@@ -1647,6 +1647,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
 | Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
 | An admin opt-in for plain-HTTP git servers: `GitSource.allow_plain_http` exists, but the panel stores no `http://` git source, so it never sets it | Saving an `http://` git URL is BAD_REQUEST; 0.2 agents refuse `http://` without the flag |
+| Backups scoped per node: a node gets the destination's whole key, not per-run presigned URLs or a key limited to its own prefix, so one compromised node can read and delete every backup in that destination | SECURITY.md says so; one destination per node is the workaround |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed database users through the real panel ran for Postgres (e2e checks 10 and 37: TLS-only user, `psql sslmode=require`, plain refused), Valkey (`valkey-cli --tls`, plain refused) and ClickHouse (`clickhouse-client --secure`) in check 37; MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests |
@@ -2414,7 +2415,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `tunnels.expire`; restores run as the `backups.restore` job (one
   attempt). Backup results come from durable `BackupResult` events;
   `backup_id` is the policy id, or `manual` for one-off runs (kept until
-  deleted).
+  deleted). A result's `object_key` must name that run's object,
+  `[<prefix>/]<service id>/<backup id>/<UTC time>-<run id><ext>` with one
+  of the agent's extensions (`ownObjectKey` in `modules/backups/runs.ts`;
+  the prefix is not compared, it may have been edited): any other key
+  fails the run, and a key recorded earlier that does not match is never
+  restored (the restore fails) or deleted from the bucket (`deleteRun`
+  only drops the row). `RunBackup` and `RestoreBackup` carry the
+  destination's access key and secret, so every node that backs up to a
+  destination can reach all of it (SECURITY.md).
 - Database engines (`modules/databases/engines.ts`, listed by the
   `databases.engines` op): Postgres 18 (default, data at
   `/var/lib/postgresql`), 17, 16, 15 and the `pgvector` variant of each

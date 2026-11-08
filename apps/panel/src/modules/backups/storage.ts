@@ -131,7 +131,7 @@ export async function testStorage(config: StorageConfig): Promise<TestResult> {
   };
 }
 
-/** Deletes one backup object. The key is the full key the agent reported. */
+/** Deletes one backup object. The key is the full key the agent reported, checked by ownObjectKey. */
 export async function deleteObject(config: StorageConfig, key: string): Promise<void> {
   await client(config).delete(key);
 }
