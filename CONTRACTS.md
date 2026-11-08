@@ -376,7 +376,19 @@ Summary; the full rules are in `proto/README.md` and the comments of
   in `go/internal/rpc/accept_test.go`, key from seed 0..31). The panel
   sends it on every HelloAccepted (`agent-hub/signature.ts` `signAccept`,
   the same vector in `apps/panel/test/fix-panel-accept-signature.test.ts`),
-  signed with the edge ticket key. It does not bind the TLS connection, so
+  signed with the edge ticket key. HelloRejected carries a
+  `panel_signature` too, over `<slug>-panel-reject-v1` 0x00 panel_id 0x00
+  nonce 0x00 client signature (empty without a ClientHello) 0x00 reason
+  (decimal) 0x00 min_agent_version (`rpc.PanelRejectSignedBytes`,
+  `signReject`, vectors in the same two tests; the message is not
+  signed). A rejection arrives before the identity checks, so the agent
+  takes it as the panel's answer (5 minutes, AGENT_TOO_OLD self-update)
+  only over a pinned connection, when it verifies with the recorded key,
+  or when there is nothing to check it against (no identity recorded yet;
+  a panel that never signed, unless a standing fallback is there to try).
+  Any other rejection (unsigned once `panel_proves` is set, or signed with
+  another key) counts as a failed connect: normal backoff, the standing
+  fallback, no self-update. It does not bind the TLS connection, so
   a relay of a whole session to the real panel is not detected; the pinned
   standing fallback is what keeps a node of a taken-over domain with its
   panel. The panel's identity never changes on an existing data dir:

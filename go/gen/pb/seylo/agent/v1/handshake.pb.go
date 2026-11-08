@@ -633,8 +633,23 @@ type HelloRejected struct {
 	// Set with HELLO_REJECT_REASON_AGENT_TOO_OLD: the minimum version the
 	// panel accepts. The agent updates itself before reconnecting.
 	MinAgentVersion string `protobuf:"bytes,3,opt,name=min_agent_version,json=minAgentVersion,proto3" json:"min_agent_version,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The panel's identity key (as in HelloAccepted.panel_signature) over
+	//
+	//   "seylo-panel-reject-v1" 0x00 panel_id 0x00 nonce 0x00
+	//   client_signature 0x00 reason 0x00 min_agent_version
+	//
+	// with panel_id and nonce from the ServerHello, client_signature the
+	// ClientHello's join or resume signature (empty when none arrived) and
+	// reason as a decimal number. A rejection arrives before the identity
+	// checks, so on a connection only the public CA vouches for (a node
+	// that moved to the panel's domain) anyone answering there could send
+	// one: an agent that knows its panel signs treats an unsigned or wrongly
+	// signed rejection like a failed connection (normal backoff, the
+	// standing fallback, no self-update on AGENT_TOO_OLD). Added in
+	// 0.2.0-rc.2; older agents ignore it.
+	PanelSignature []byte `protobuf:"bytes,4,opt,name=panel_signature,json=panelSignature,proto3" json:"panel_signature,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HelloRejected) Reset() {
@@ -688,6 +703,13 @@ func (x *HelloRejected) GetMinAgentVersion() string {
 	return ""
 }
 
+func (x *HelloRejected) GetPanelSignature() []byte {
+	if x != nil {
+		return x.PanelSignature
+	}
+	return nil
+}
+
 var File_seylo_agent_v1_handshake_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
@@ -727,11 +749,12 @@ const file_seylo_agent_v1_handshake_proto_rawDesc = "" +
 	"\x16edge_ticket_public_key\x18\x03 \x01(\fR\x13edgeTicketPublicKey\x12\x1b\n" +
 	"\tpanel_url\x18\x04 \x01(\tR\bpanelUrl\x12\x1b\n" +
 	"\tpanel_pin\x18\x05 \x01(\tR\bpanelPin\x12'\n" +
-	"\x0fpanel_signature\x18\x06 \x01(\fR\x0epanelSignature\"\x90\x01\n" +
+	"\x0fpanel_signature\x18\x06 \x01(\fR\x0epanelSignature\"\xb9\x01\n" +
 	"\rHelloRejected\x129\n" +
 	"\x06reason\x18\x01 \x01(\x0e2!.seylo.agent.v1.HelloRejectReasonR\x06reason\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12*\n" +
-	"\x11min_agent_version\x18\x03 \x01(\tR\x0fminAgentVersion*\xcc\x02\n" +
+	"\x11min_agent_version\x18\x03 \x01(\tR\x0fminAgentVersion\x12'\n" +
+	"\x0fpanel_signature\x18\x04 \x01(\fR\x0epanelSignature*\xcc\x02\n" +
 	"\x11HelloRejectReason\x12#\n" +
 	"\x1fHELLO_REJECT_REASON_UNSPECIFIED\x10\x00\x12%\n" +
 	"!HELLO_REJECT_REASON_INVALID_TOKEN\x10\x01\x12%\n" +

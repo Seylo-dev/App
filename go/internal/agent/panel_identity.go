@@ -37,6 +37,55 @@ import (
 // not detected by this; the pinned standing fallback (move.go) is what
 // keeps such a node reachable for its real panel.
 
+// unprovenRejectionError is a HelloRejected the node does not take as its
+// panel's word (unprovenRejection). It is not an *rpc.RejectedError: the
+// connector treats it like a failed connection (normal backoff, counts
+// toward the standing fallback, no self-update on AGENT_TOO_OLD).
+type unprovenRejectionError struct {
+	url      string
+	rejected *rpc.RejectedError
+	why      string
+}
+
+func (e *unprovenRejectionError) Error() string {
+	return fmt.Sprintf("%s refused the agent (%s), but %s: not taken as the panel's answer", e.url, e.rejected.Rejected.GetReason(), e.why)
+}
+
+// unprovenRejection returns why a HelloRejected is not the panel's word,
+// or "" when it is. A rejection arrives before the identity checks, so on
+// a connection only the public CA vouches for (a node that moved to the
+// panel's domain) anyone answering there with the public panel_id could
+// send one: believed, it keeps the node 5 minutes between tries, away from
+// its pinned standing fallback, and AGENT_TOO_OLD makes it update itself.
+// A rejection counts when the connection was pinned (TLS proves the
+// panel), when it carries panel_signature by the recorded identity key, or
+// when there is nothing to check it against: no identity recorded yet (a
+// first join), or a panel that never signed with no standing fallback to
+// try instead.
+func (c *connector) unprovenRejection(target panelTarget, rej *rpc.RejectedError) string {
+	if target.pin != "" {
+		return ""
+	}
+	cfg := c.config()
+	if cfg.PanelKey == "" {
+		return ""
+	}
+	key, _ := decodePanelKey(cfg.PanelKey) // Validate checked it
+	if len(rej.Rejected.GetPanelSignature()) > 0 {
+		if rpc.VerifyPanelReject(key, rej.Server, rej.Client, rej.Rejected) {
+			return ""
+		}
+		return "its signature does not match the panel's identity key"
+	}
+	if cfg.PanelProves {
+		return "it is not signed, and this node's panel signs"
+	}
+	if cfg.Fallback != nil && cfg.Fallback.Standing && rej.Rejected.GetReason() != agentv1.HelloRejectReason_HELLO_REJECT_REASON_ALREADY_CONNECTED {
+		return "it is not signed, so the pinned previous address is tried too"
+	}
+	return ""
+}
+
 // errOtherPanel: the address answered as a panel other than the one this
 // node belongs to.
 var errOtherPanel = errors.New("not the panel this node belongs to")

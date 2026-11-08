@@ -143,8 +143,8 @@ func (p *FakePanel) ServeTLS() *httptest.Server {
 	return srv
 }
 
-// SignAccepts makes every HelloAccepted carry panel_signature (a panel
-// that proves its identity key) or not.
+// SignAccepts makes every HelloAccepted and HelloRejected carry
+// panel_signature (a panel that proves its identity key) or not.
 func (p *FakePanel) SignAccepts(sign bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -383,6 +383,9 @@ func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
 		p.hellos = append(p.hellos, proto.Clone(h).(*agentv1.ClientHello))
 		id, rej := p.decide(h, nonce)
 		if rej != nil {
+			if p.signAccepts {
+				rej.PanelSignature = rpc.SignPanelReject(p.EdgePrivate, server, h, rej)
+			}
 			p.rejects = append(p.rejects, rej)
 			p.notify()
 			return nil, rej

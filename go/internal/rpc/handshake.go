@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"google.golang.org/protobuf/proto"
 
@@ -85,6 +86,45 @@ func VerifyPanelAccept(pub ed25519.PublicKey, server *agentv1.ServerHello, clien
 	return len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, PanelAcceptSignedBytes(server, client, acc), acc.GetPanelSignature())
 }
 
+// PanelRejectContext prefixes HelloRejected.panel_signature.
+const PanelRejectContext = brand.Slug + "-panel-reject-v1"
+
+// PanelRejectSignedBytes returns what the panel signs with its identity key
+// in HelloRejected.panel_signature:
+//
+//	PanelRejectContext 0x00 panel_id 0x00 nonce 0x00 client_signature
+//	0x00 reason 0x00 min_agent_version
+//
+// client is nil (empty client_signature) when no ClientHello arrived;
+// reason is the enum's decimal number.
+func PanelRejectSignedBytes(server *agentv1.ServerHello, client *agentv1.ClientHello, rej *agentv1.HelloRejected) []byte {
+	var out []byte
+	out = append(out, PanelRejectContext...)
+	var sig []byte
+	if client != nil {
+		sig = clientSignature(client)
+	}
+	for _, part := range [][]byte{
+		[]byte(server.GetPanelId()), server.GetNonce(), sig,
+		[]byte(strconv.Itoa(int(rej.GetReason()))), []byte(rej.GetMinAgentVersion()),
+	} {
+		out = append(out, 0)
+		out = append(out, part...)
+	}
+	return out
+}
+
+// SignPanelReject makes HelloRejected.panel_signature (fake panels in
+// tests; the real panel is TypeScript).
+func SignPanelReject(key ed25519.PrivateKey, server *agentv1.ServerHello, client *agentv1.ClientHello, rej *agentv1.HelloRejected) []byte {
+	return ed25519.Sign(key, PanelRejectSignedBytes(server, client, rej))
+}
+
+// VerifyPanelReject checks HelloRejected.panel_signature against pub.
+func VerifyPanelReject(pub ed25519.PublicKey, server *agentv1.ServerHello, client *agentv1.ClientHello, rej *agentv1.HelloRejected) bool {
+	return len(pub) == ed25519.PublicKeySize && ed25519.Verify(pub, PanelRejectSignedBytes(server, client, rej), rej.GetPanelSignature())
+}
+
 // HandshakeResult is what the agent learns from a successful handshake.
 type HandshakeResult struct {
 	Server *agentv1.ServerHello
@@ -97,6 +137,10 @@ type HandshakeResult struct {
 // agent (bad token, unknown node, agent too old, ...).
 type RejectedError struct {
 	Rejected *agentv1.HelloRejected
+	// Server and Client are the hellos of the refused handshake, to check
+	// Rejected.panel_signature with (VerifyPanelReject).
+	Server *agentv1.ServerHello
+	Client *agentv1.ClientHello
 }
 
 func (e *RejectedError) Error() string {
@@ -136,7 +180,7 @@ func AgentHandshake(ctx context.Context, t conn.Transport, hello func(*agentv1.S
 	case *agentv1.Handshake_Accepted:
 		return &HandshakeResult{Server: server, Client: client, Accepted: s.Accepted}, nil
 	case *agentv1.Handshake_Rejected:
-		return nil, &RejectedError{Rejected: s.Rejected}
+		return nil, &RejectedError{Rejected: s.Rejected, Server: server, Client: client}
 	default:
 		return nil, fmt.Errorf("%w: expected HelloAccepted or HelloRejected, got %T", ErrHandshake, s)
 	}

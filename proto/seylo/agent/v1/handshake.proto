@@ -112,6 +112,21 @@ message HelloRejected {
   // Set with HELLO_REJECT_REASON_AGENT_TOO_OLD: the minimum version the
   // panel accepts. The agent updates itself before reconnecting.
   string min_agent_version = 3;
+  // The panel's identity key (as in HelloAccepted.panel_signature) over
+  //
+  //   "seylo-panel-reject-v1" 0x00 panel_id 0x00 nonce 0x00
+  //   client_signature 0x00 reason 0x00 min_agent_version
+  //
+  // with panel_id and nonce from the ServerHello, client_signature the
+  // ClientHello's join or resume signature (empty when none arrived) and
+  // reason as a decimal number. A rejection arrives before the identity
+  // checks, so on a connection only the public CA vouches for (a node
+  // that moved to the panel's domain) anyone answering there could send
+  // one: an agent that knows its panel signs treats an unsigned or wrongly
+  // signed rejection like a failed connection (normal backoff, the
+  // standing fallback, no self-update on AGENT_TOO_OLD). Added in
+  // 0.2.0-rc.2; older agents ignore it.
+  bytes panel_signature = 4;
 }
 
 enum HelloRejectReason {
