@@ -2,7 +2,17 @@
 // node of this panel, issuing_certificate until HTTPS answers with this
 // panel's health endpoint, then active. A recurring job re-checks it:
 // every 5 minutes while it is not active or while IP access is closed (or
-// meant to be), hourly otherwise.
+// meant to be), hourly otherwise; "Check now" (settings.checkDomain) runs
+// the same check at once.
+//
+// A domain proxied by Cloudflare (every record a Cloudflare address,
+// domains/dns.ts) hides the node's address, so the address comparison is
+// skipped and only the HTTPS probe through Cloudflare decides. An active
+// domain that gets proxied later stays active while that probe passes.
+// The certificate still comes from the node's Traefik over HTTP-01 on
+// port 80, which Cloudflare's "Always Use HTTPS" redirect breaks (it sends
+// Let's Encrypt to port 443, where Traefik does not answer the challenge),
+// so the message says what to set in Cloudflare.
 //
 // As a private path (private-paths.ts) the domain is debounced: once it
 // worked it counts as down only after 2 failed checks in a row, so one
@@ -13,6 +23,7 @@ import { resolve4, resolve6 } from "node:dns/promises";
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
+import type { settings } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { askNodesToMove } from "../../agent-hub/move-target";
 import { nodes } from "../../db/schema";
@@ -20,11 +31,14 @@ import type { Deps } from "../../deps";
 import { healthPath } from "../../http/health";
 import { defineJob } from "../../jobs/queue";
 import { getSetting, setSetting } from "../../settings";
+import { classifyRecords } from "../domains/dns";
 import { testReleaseOverrides } from "../updates/manifest";
 import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "./ip-access";
 import "./keys";
 
 export type DomainState = "none" | "pending_dns" | "issuing_certificate" | "active" | "error";
+
+type PanelDomainStatus = settings.PanelDomainStatus;
 
 export interface StoredDomainStatus {
   domain: string;
@@ -41,6 +55,8 @@ export interface StoredDomainStatus {
   since?: number;
   /** Checks in a row that did not find the domain active. */
   failedChecks?: number;
+  /** Every A/AAAA record was a Cloudflare proxy address at this check (absent on rows from before 0.2.1). */
+  proxied?: boolean;
 }
 
 /** Failed checks in a row after which a domain that worked counts as down (5-10 minutes at one check per 5 minutes). */
@@ -121,15 +137,20 @@ export function setDomainProbes(next: DomainProbes | null): void {
   probes = next ?? defaultProbes;
 }
 
-export function readDomainStatus(deps: Pick<Deps, "db">): { state: DomainState; message: string } {
+export function readDomainStatus(deps: Pick<Deps, "db">): PanelDomainStatus {
   const domain = getSetting(deps.db, "panelDomain") ?? null;
-  if (!domain) return { state: "none", message: "" };
+  if (!domain) return { state: "none", message: "", checkedAt: null, proxied: false };
   const status = getSetting(deps.db, "panelDomainStatus");
-  if (!status || status.domain !== domain) return { state: "pending_dns", message: "Checking DNS..." };
-  return { state: status.state, message: status.message };
+  if (!status || status.domain !== domain) return { state: "pending_dns", message: "Checking DNS...", checkedAt: null, proxied: false };
+  return {
+    state: status.state,
+    message: status.message,
+    checkedAt: new Date(status.checkedAt).toISOString(),
+    proxied: status.proxied ?? false,
+  };
 }
 
-/** Panel node addresses first; any node of this panel counts, since agents route the panel too. */
+/** Panel node addresses first; any node of this panel counts, since agents route the panel too. Lower case, as classifyRecords compares them. */
 function nodeAddresses(deps: Pick<Deps, "db">): { all: Set<string>; panel: string | null } {
   const rows = deps.db
     .select({ v4: nodes.publicIpv4, v6: nodes.publicIpv6, address: nodes.publicAddress, isPanel: nodes.isPanelNode })
@@ -137,10 +158,10 @@ function nodeAddresses(deps: Pick<Deps, "db">): { all: Set<string>; panel: strin
     .all();
   const all = new Set<string>();
   for (const row of rows) {
-    if (row.v4) all.add(row.v4);
-    if (row.v6) all.add(row.v6);
+    if (row.v4) all.add(row.v4.toLowerCase());
+    if (row.v6) all.add(row.v6.toLowerCase());
     // The owner's address counts when it is an IP; a name is not what an A record holds.
-    if (row.address && isIP(row.address)) all.add(row.address);
+    if (row.address && isIP(row.address)) all.add(row.address.toLowerCase());
   }
   const panelRow = rows.find((r) => r.isPanel) ?? rows[0];
   const panelIp = panelRow?.address && isIP(panelRow.address) ? panelRow.address : null;
@@ -153,7 +174,7 @@ export async function checkDomain(
 ): Promise<StoredDomainStatus | null> {
   const domain = getSetting(deps.db, "panelDomain") ?? null;
   if (!domain) return null;
-  const save = (state: DomainState, message: string): StoredDomainStatus => {
+  const save = (state: DomainState, message: string, proxied = false): StoredDomainStatus => {
     const before = getSetting(deps.db, "panelDomainStatus");
     const previous = before?.domain === domain ? before : undefined;
     const was = domainWorking(previous, domain);
@@ -168,13 +189,18 @@ export async function checkDomain(
       working,
       ...(since !== null ? { since } : {}),
       failedChecks,
+      proxied,
     };
     // The domain may have changed while DNS was resolving.
     if ((getSetting(deps.db, "panelDomain") ?? null) !== domain) return status;
     setSetting(deps.db, "panelDomainStatus", status);
-    if (before?.state !== state || before?.domain !== domain || working !== was.working) {
-      deps.live.publish("panel", { type: "invalidate", ops: ["settings.general", "settings.panelAccess", "system.features", "mcp.info"] });
-    }
+    const changed =
+      before?.state !== state || before?.domain !== domain || working !== was.working || (before?.proxied ?? false) !== proxied;
+    // Every check moves checkedAt ("Checked 2 min ago" on the card); the rest only follows a change.
+    deps.live.publish("panel", {
+      type: "invalidate",
+      ops: changed ? ["settings.general", "settings.panelAccess", "system.features", "mcp.info"] : ["settings.general"],
+    });
     return status;
   };
 
@@ -185,22 +211,45 @@ export async function checkDomain(
   } catch {
     found = [];
   }
-  if (found.length === 0) {
-    return save(
-      "pending_dns",
-      panel ? `Add an A record for ${domain} pointing at ${panel}.` : `Add an A record for ${domain} pointing at the panel node.`,
-    );
+  const answers = () => probes.https(domain, testCa(deps.config?.dataDir));
+  switch (classifyRecords(found, all)) {
+    case "missing":
+      return save(
+        "pending_dns",
+        panel ? `Add an A record for ${domain} pointing at ${panel}.` : `Add an A record for ${domain} pointing at the panel node.`,
+      );
+    case "wrongTarget":
+      return save(
+        "pending_dns",
+        `${domain} points at ${found.join(", ")}, not at a node of this panel${panel ? ` (expected ${panel})` : ""}. DNS changes can take a while.`,
+      );
+    case "proxied":
+      // Cloudflare hides the origin: only HTTPS through it tells whether the record and the certificate are right.
+      if (await answers()) return save("active", "", true);
+      return save("issuing_certificate", cloudflareWaitMessage(domain, panel), true);
+    case "ok":
+      if (!(await answers()))
+        return save("issuing_certificate", `DNS is right. Waiting for a certificate and for https://${domain} to answer.`);
+      return save("active", "");
   }
-  if (!found.some((ip) => all.has(ip))) {
-    return save(
-      "pending_dns",
-      `${domain} points at ${found.join(", ")}, not at a node of this panel${panel ? ` (expected ${panel})` : ""}. DNS changes can take a while.`,
-    );
-  }
-  if (!(await probes.https(domain, testCa(deps.config?.dataDir)))) {
-    return save("issuing_certificate", `DNS is right. Waiting for a certificate and for https://${domain} to answer.`);
-  }
-  return save("active", "");
+}
+
+/**
+ * What to set in Cloudflare while a proxied domain does not answer over
+ * HTTPS. Traefik gets the certificate over HTTP-01 on port 80; with
+ * "Always Use HTTPS" Cloudflare redirects Let's Encrypt to port 443, where
+ * the challenge is not answered (and Full (strict) refuses the origin
+ * until it has a certificate), so the first certificate and every renewal
+ * fail. Turning the proxy off only gets the first one. The panel's route
+ * redirects HTTP to HTTPS itself, so nothing is lost without the setting.
+ * Flexible loops on that redirect, so the mode is Full (strict).
+ */
+export function cloudflareWaitMessage(domain: string, panel: string | null): string {
+  return (
+    `${domain} is proxied by Cloudflare, and https://${domain} does not answer through it yet. ` +
+    `In Cloudflare, point the record at ${panel ?? "the panel node"}, set SSL/TLS to Full (strict) and turn off Always Use HTTPS: ` +
+    `Let's Encrypt gets the certificate over http://${domain}/.well-known/acme-challenge/, and the panel redirects to HTTPS itself.`
+  );
 }
 
 /**
@@ -212,25 +261,49 @@ export function checksOftenForIpAccess(deps: Pick<Deps, "db">): boolean {
   return !readPanelAccessWanted(deps).serveOnIp || readIpAccessApplied(deps).closed;
 }
 
-export const domainCheckJob = defineJob<Record<string, unknown>>({
+/** Checks running now, by panel database: one at a time, so "Check now" during a scheduled run waits for it instead of probing twice. */
+const running = new WeakMap<object, Promise<StoredDomainStatus | null>>();
+
+/**
+ * One check with what follows it: nodes move to a domain that just went
+ * live, and IP access follows the debounced private path. The job and
+ * settings.checkDomain both run it; a call while a check runs gets that
+ * check's result.
+ */
+export function checkDomainNow(deps: Deps): Promise<StoredDomainStatus | null> {
+  const current = running.get(deps.db);
+  if (current) return current;
+  const check = checkAndFollow(deps).finally(() => running.delete(deps.db));
+  running.set(deps.db, check);
+  return check;
+}
+
+async function checkAndFollow(deps: Deps): Promise<StoredDomainStatus | null> {
+  const status = getSetting(deps.db, "panelDomainStatus");
+  const before = domainWorking(status, getSetting(deps.db, "panelDomain") ?? null);
+  const after = await checkDomain(deps);
+  // The domain just went live, so nodes that joined over an IP address move to it now.
+  if (after?.state === "active" && !(status?.state === "active" && status.domain === after.domain)) askNodesToMove(deps);
+  // The domain is a private path: IP access may close or reopen with it.
+  const now = domainWorking(getSetting(deps.db, "panelDomainStatus"), getSetting(deps.db, "panelDomain") ?? null);
+  if (now.working !== before.working) {
+    applyPanelIpAccess(deps, now.working ? "the panel domain works again" : "the panel domain stopped working");
+  }
+  return after;
+}
+
+/** `force` checks an active domain even within its hour (a save of the domain enqueues it so). */
+export const domainCheckJob = defineJob<{ force?: boolean }>({
   type: domainCheckJobType,
   maxAttempts: 1,
-  async run(_payload, ctx) {
+  async run(payload, ctx) {
     const status = getSetting(ctx.db, "panelDomainStatus");
     const domain = getSetting(ctx.db, "panelDomain") ?? null;
     // Active domains are re-checked hourly while IP access is open; pending ones on every run.
-    const hourly = !checksOftenForIpAccess(ctx);
+    const hourly = payload?.force !== true && !checksOftenForIpAccess(ctx);
     if (hourly && domain && status?.domain === domain && status.state === "active" && Date.now() - status.checkedAt < 60 * 60 * 1000)
       return;
-    const before = domainWorking(status, domain);
-    const after = await checkDomain(ctx);
-    // The domain just went live, so nodes that joined over an IP address move to it now.
-    if (after?.state === "active" && !(status?.state === "active" && status.domain === after.domain)) askNodesToMove(ctx);
-    // The domain is a private path: IP access may close or reopen with it.
-    const now = domainWorking(getSetting(ctx.db, "panelDomainStatus"), getSetting(ctx.db, "panelDomain") ?? null);
-    if (now.working !== before.working) {
-      applyPanelIpAccess(ctx, now.working ? "the panel domain works again" : "the panel domain stopped working");
-    }
+    await checkDomainNow(ctx);
   },
 });
 

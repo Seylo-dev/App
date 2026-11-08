@@ -5,7 +5,8 @@
 // Cloudflare sets on every request it forwards (a client cannot choose it
 // through Cloudflare). Anyone can send that header straight to the node,
 // so it is believed only when the address Traefik vouches for is one of
-// Cloudflare's.
+// Cloudflare's. DNS checks use the same list to tell a proxied record from
+// one that points somewhere else (modules/domains/dns.ts).
 //
 // Source: https://www.cloudflare.com/ips-v4 and https://www.cloudflare.com/ips-v6
 // (https://www.cloudflare.com/ips/), checked 2026-11-07. The list changes

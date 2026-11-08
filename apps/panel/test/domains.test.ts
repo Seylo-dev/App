@@ -95,6 +95,8 @@ describe("domains ops", () => {
       expected: [{ type: "A", name: "shop", value: "203.0.113.10" }],
       found: [{ type: "A", name: "shop", value: "104.16.1.1" }],
     });
+    // Let's Encrypt checks over plain HTTP, so the message says what Cloudflare needs for the certificate.
+    expect(proxied.body.dns.message).toContain("point it at 203.0.113.10, set SSL/TLS to Full (strict) and turn off Always Use HTTPS");
 
     const ok = await callOp(
       panel,

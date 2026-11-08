@@ -2283,7 +2283,19 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   `panelDomainStatus` is `active` for the current domain (the hourly check
   reached `/api/health` there with the panel's public roots, so agents
   verify it with their system roots; `agent-hub/move-target.ts`); nothing
-  before. When the domain check job sees the domain turn active, it closes
+  before. A domain proxied by Cloudflare (every A/AAAA answer in
+  `http/cloudflare.ts`'s ranges, `domains/dns.ts` `classifyRecords`) skips
+  the node-address comparison: the HTTPS probe through Cloudflare alone
+  decides (`proxied: true` in `settings.general.domainStatus`), an active
+  domain stays active when it turns proxied while the probe passes, and
+  agents verify Cloudflare's certificate with their system roots (the
+  panel identity signature does not bind TLS, so it holds through the
+  proxy). `settings.checkDomain` (`settings.manage`, added in 0.2.1) runs
+  the same check in the request through the job's single flight
+  (`checkDomainNow`), once per 10 s per panel (RATE_LIMITED with
+  `retryAfter`), and returns the fresh status with `checkedAt`; saving the
+  domain enqueues a forced check that ignores the hourly skip of an active
+  domain. When the domain check job sees the domain turn active, it closes
   the connection of every online node that did not dial the domain (the
   session's Host header, `hub.dialedHost`), so each reconnects and moves at
   once. `hub.dialedAddress` is the base URL the session reached
