@@ -54,7 +54,8 @@ export function KeyTable({
         loading={list.isPending}
         rows={list.data?.keys ?? []}
         getRowId={(key) => key.id}
-        minWidth={600}
+        // From md up the table scrolls below 600px; a phone hides columns instead, so nothing runs off the card.
+        className="md:[&>table]:min-w-[600px]"
         empty={<EmptyState compact icon={<IconKey />} title={empty} />}
         rowActions={(key) =>
           key.revokedAt ? [] : [{ label: t("settingsKeys.revoke"), destructive: true, onSelect: () => setRevoking(key) }]
@@ -67,7 +68,8 @@ export function KeyTable({
             skeletonLines: 2,
             sortValue: (key) => key.name,
             cell: (key) => (
-              <span className="flex min-w-0 flex-col">
+              // On a phone the prefix and the client are cut short, so the scope and the menu stay on the card.
+              <span className="flex min-w-0 flex-col max-md:max-w-[160px]">
                 <span className="flex items-center gap-2">
                   <span className="truncate font-medium">{key.name}</span>
                   {key.revokedAt && <Chip tone="red">{t("settingsKeys.revokedChip")}</Chip>}

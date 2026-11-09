@@ -191,10 +191,20 @@ function Checklist({
       <div className="flex flex-col gap-2">
         <h3 className="m-0 text-[13.5px] font-semibold">{t("settingsTailscale.lock.recoveryTitle")}</h3>
         <p className="m-0 text-[12.5px] text-muted-foreground">{t("settingsTailscale.lock.recoveryHint")}</p>
-        {/* The tunnel's local end is always 3000 (settings.panelAccess), whatever port the panel has on the server. */}
-        <CodeBlock title={t("settingsTailscale.lock.sshTunnel")} code={access.recovery.sshTunnel} tone="dark" />
-        <CodeBlock title={t("settingsTailscale.lock.reopenCli")} code={access.recovery.cli} tone="dark" />
-        <CodeBlock title={t("settingsTailscale.lock.statusCli")} code={commands.status} tone="dark" />
+        {/* The tunnel's local end is always 3000 (settings.panelAccess), whatever port the panel has on the server.
+            Each label is a sentence above its block (as on Settings > General), so it wraps on a phone instead of being cut. */}
+        {(
+          [
+            ["sshTunnel", access.recovery.sshTunnel],
+            ["reopenCli", access.recovery.cli],
+            ["statusCli", commands.status],
+          ] as const
+        ).map(([label, code]) => (
+          <div key={label} className="flex flex-col gap-1.5">
+            <span className="text-[12.5px] text-muted-foreground">{t(`settingsTailscale.lock.${label}`)}</span>
+            <CodeBlock code={code} tone="dark" />
+          </div>
+        ))}
         <div className="flex items-center gap-2">
           <Checkbox id="lock-saved" checked={saved} onCheckedChange={(v) => setSaved(v === true)} />
           <label htmlFor="lock-saved" className="cursor-pointer text-[13px] text-ink-strong">

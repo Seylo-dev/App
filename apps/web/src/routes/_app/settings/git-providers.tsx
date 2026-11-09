@@ -3,7 +3,7 @@
 // token is checked with the provider before it is saved.
 
 import { gitProviders, type OpOutput } from "@seylo/ops";
-import { useOp } from "@seylo/ops/react";
+import { useOp, useOpClient } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
@@ -19,7 +19,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { invalidateOps, useSettingsMutation } from "../../../components/settings/mutation";
 import { errorText, OpErrorCallout } from "../../../components/settings/op-state";
-import { Field, FormGrid, SettingRow, SettingsPage } from "../../../components/settings/page";
+import { Field, FormActions, FormGrid, SettingRow, SettingsPage } from "../../../components/settings/page";
 import { t } from "../../../i18n/t";
 
 export const Route = createFileRoute("/_app/settings/git-providers")({
@@ -43,9 +43,28 @@ function GitProvidersPage() {
 
 function Connections() {
   const list = useOp(gitProviders.list, {});
+  const client = useOpClient();
   const [removing, setRemoving] = useState<Provider | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
   const update = useSettingsMutation(gitProviders.update, { invalidates: refresh });
   const remove = useSettingsMutation(gitProviders.remove, { invalidates: refresh, success: t("settingsGitProviders.list.removed") });
+
+  /** Asks the provider whether the stored token still works. */
+  async function check(provider: Provider) {
+    setChecking(provider.id);
+    const pending = toast(t("settingsGitProviders.list.checkingToken", { name: provider.name }));
+    try {
+      const res = await client.call(gitProviders.check, { providerId: provider.id });
+      if (res.ok) toast.success(t("settingsGitProviders.list.checkOk"), { description: res.message });
+      else toast.error(t("settingsGitProviders.list.checkFailed"), { description: res.message });
+    } catch (error) {
+      toast.error(t("settingsGitProviders.list.checkFailed"), { description: errorText(error) });
+    } finally {
+      toast.dismiss(pending);
+      setChecking(null);
+      void invalidateOps(refresh);
+    }
+  }
 
   return (
     <SectionCard title={t("settingsGitProviders.list.title")} description={t("settingsGitProviders.list.description")} flush>
@@ -66,15 +85,23 @@ function Connections() {
               description={t("settingsGitProviders.list.emptyHint")}
             />
           }
+          // Check and Delete sit in the row menu like every other settings table, so a phone row keeps them.
+          rowActions={(p) => [
+            {
+              label: checking === p.id ? t("settingsGitProviders.list.checking") : t("settingsGitProviders.list.check"),
+              disabled: checking === p.id,
+              onSelect: () => void check(p),
+            },
+            { label: t("settingsGitProviders.list.remove"), destructive: true, separated: true, onSelect: () => setRemoving(p) },
+          ]}
           columns={[
             {
               id: "name",
               header: t("settingsGitProviders.list.name"),
-              skeletonWidth: "34.5%",
               cell: (p) => {
                 const Icon = icons[p.kind];
                 return (
-                  <span className="flex items-center gap-2">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Icon size={16} stroke={1.8} className="shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span className="font-medium">{p.name}</span>
                     <Chip tone="gray">{t(`settingsGitProviders.add.kinds.${p.kind}`)}</Chip>
@@ -85,13 +112,15 @@ function Connections() {
             {
               id: "host",
               header: t("settingsGitProviders.list.host"),
-              skeletonWidth: "15.3%",
+              hideOnMobile: true,
+              skeletonWidth: "19.4%",
               cell: (p) => <span className="font-mono text-[12.5px]">{p.workspace ? `${p.host}/${p.workspace}` : p.host}</span>,
             },
             {
               id: "account",
               header: t("settingsGitProviders.list.account"),
-              skeletonWidth: "13.7%",
+              hideOnMobile: true,
+              skeletonWidth: "17.4%",
               skeletonLines: 2,
               cell: (p) => (
                 <span className="flex flex-col">
@@ -105,26 +134,14 @@ function Connections() {
             {
               id: "status",
               header: t("settingsGitProviders.list.statusNotes"),
-              skeletonWidth: "11.3%",
+              align: "right",
+              skeletonWidth: "14.3%",
               cell: (p) => (
                 <Switch
                   checked={p.statusNotes}
                   aria-label={`${t("settingsGitProviders.list.statusNotes")}: ${p.name}`}
                   onCheckedChange={(statusNotes) => update.mutate({ providerId: p.id, statusNotes })}
                 />
-              ),
-            },
-            {
-              id: "actions",
-              header: "",
-              align: "right",
-              cell: (p) => (
-                <span className="flex justify-end gap-1">
-                  <CheckButton provider={p} />
-                  <Button size="sm" variant="ghost" onClick={() => setRemoving(p)}>
-                    {t("settingsGitProviders.list.remove")}
-                  </Button>
-                </span>
               ),
             },
           ]}
@@ -147,23 +164,6 @@ function Connections() {
         }
       />
     </SectionCard>
-  );
-}
-
-/** Asks the provider whether the stored token still works (a query, run on click). */
-function CheckButton({ provider }: { provider: Provider }) {
-  const check = useOp(gitProviders.check, { providerId: provider.id }, { enabled: false, retry: false, gcTime: 0 });
-  async function run() {
-    const res = await check.refetch();
-    if (res.error) toast.error(t("settingsGitProviders.list.checkFailed"), { description: errorText(res.error) });
-    else if (res.data?.ok) toast.success(t("settingsGitProviders.list.checkOk"), { description: res.data.message });
-    else toast.error(t("settingsGitProviders.list.checkFailed"), { description: res.data?.message ?? "" });
-    void invalidateOps(refresh);
-  }
-  return (
-    <Button size="sm" variant="ghost" disabled={check.isFetching} onClick={() => void run()}>
-      {check.isFetching ? t("settingsGitProviders.list.checking") : t("settingsGitProviders.list.check")}
-    </Button>
   );
 }
 
@@ -227,8 +227,8 @@ function AddConnection() {
             {(["gitlab", "gitea", "bitbucket"] as const).map((k) => {
               const Icon = icons[k];
               return (
-                <SegmentedItem key={k} value={k} className="inline-flex items-center gap-1.5">
-                  <Icon size={15} stroke={1.8} aria-hidden="true" />
+                <SegmentedItem key={k} value={k} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  <Icon size={15} stroke={1.8} aria-hidden="true" className="max-sm:hidden" />
                   {t(`settingsGitProviders.add.kinds.${k}`)}
                 </SegmentedItem>
               );
@@ -312,11 +312,11 @@ function AddConnection() {
           description={t("settingsGitProviders.add.statusNotesHint")}
           control={<Switch checked={statusNotes} onCheckedChange={setStatusNotes} aria-label={t("settingsGitProviders.add.statusNotes")} />}
         />
-        <div>
+        <FormActions>
           <Button type="submit" variant="primary" disabled={!ready || create.isPending}>
             {create.isPending ? t("settingsGitProviders.add.saving") : t("settingsGitProviders.add.save")}
           </Button>
-        </div>
+        </FormActions>
       </form>
     </SectionCard>
   );

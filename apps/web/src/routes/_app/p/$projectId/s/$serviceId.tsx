@@ -59,11 +59,12 @@ function ServiceLayout() {
       {service.isPending && usageStripTabs.has(tabPath) && <UsageStripSkeleton />}
       {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
       {/*
-        One row at every width: an app's 17 tabs scroll sideways (the hidden edge fades) instead of
+        One row at every width: an app's tabs scroll sideways (the hidden edge fades) instead of
         wrapping, and TabList keeps the current tab in view (arriving on Console from the Overview's
-        "Open full" used to leave it off screen). Only the row scrolls, never the page.
+        "Open full" used to leave it off screen). Only the row scrolls, never the page. From md up the
+        tabs sit a little closer together, so an app's 16 tabs fit one row at 1440px.
       */}
-      <TabList aria-label={t("service.sections")}>
+      <TabList aria-label={t("service.sections")} className="md:gap-0">
         {tabs.map((tab) => (
           <Link
             key={tab.path}
@@ -71,7 +72,7 @@ function ServiceLayout() {
             params={{ projectId, serviceId }}
             // A tab's own search (the Console tab's ?mode=shell) keeps the tab current.
             activeOptions={{ exact: true, includeSearch: false }}
-            className={tabClassName}
+            className={`${tabClassName} md:px-2`}
           >
             {({ isActive }) => (
               <>

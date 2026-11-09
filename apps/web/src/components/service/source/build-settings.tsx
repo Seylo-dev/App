@@ -18,6 +18,7 @@ import { cantBuildNote } from "../build-node";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import type { ServiceDetail } from "../use-service";
 
 type Settings = OpOutput<typeof builds.getSettings>;
@@ -190,13 +191,13 @@ function BuildForm({ service, data, dockerfileOnly }: { service: ServiceDetail; 
           </Select>
         </Field>
       </div>
-      <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={save.isPending}>
+      <CardSaveBar className="mt-1">
+        <Button type="submit" size="sm" variant="primary" disabled={save.isPending}>
           {save.isPending ? t("service.saving") : t("service.save")}
         </Button>
-        <span className="text-xs text-muted-foreground">{t("serviceSource.build.nextDeploy")}</span>
+        <span>{t("serviceSource.build.nextDeploy")}</span>
         <MutationError error={save.error} />
-      </div>
+      </CardSaveBar>
     </form>
   );
 }

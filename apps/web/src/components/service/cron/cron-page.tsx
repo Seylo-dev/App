@@ -284,14 +284,24 @@ export function CronRuns({ service }: { service: ServiceDetail }) {
                 header: t("serviceCron.resultLabel"),
                 cell: (r) => <Chip tone={resultTone[r.result]}>{t(`serviceCron.result.${r.result}`)}</Chip>,
               },
-              { id: "job", header: t("serviceCron.name"), cell: (r) => jobName(r.cronJobId) },
-              { id: "started", header: t("serviceCron.started"), cell: (r) => formatDateTime(r.startedAt), sortValue: (r) => r.startedAt },
               {
-                id: "took",
-                header: t("serviceCron.took"),
-                align: "right",
-                cell: (r) => (r.durationMs != null ? formatDuration(r.durationMs) : ""),
+                id: "job",
+                header: t("serviceCron.name"),
+                cell: (r) => (
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {jobName(r.cronJobId)}
+                    {r.manual && <Chip tone="gray">{t("serviceCron.manual")}</Chip>}
+                  </span>
+                ),
               },
+              {
+                id: "started",
+                header: t("serviceCron.started"),
+                className: "whitespace-nowrap",
+                cell: (r) => formatDateTime(r.startedAt),
+                sortValue: (r) => r.startedAt,
+              },
+              // Took stays the last column at every width, so a phone row keeps the card's right padding.
               {
                 id: "exit",
                 header: t("serviceCron.exitCode"),
@@ -300,10 +310,11 @@ export function CronRuns({ service }: { service: ServiceDetail }) {
                 cell: (r) => (r.exitCode ?? "").toString(),
               },
               {
-                id: "manual",
-                header: "",
-                hideOnMobile: true,
-                cell: (r) => (r.manual ? <Chip tone="gray">{t("serviceCron.manual")}</Chip> : null),
+                id: "took",
+                header: t("serviceCron.took"),
+                align: "right",
+                className: "whitespace-nowrap",
+                cell: (r) => (r.durationMs != null ? formatDuration(r.durationMs) : ""),
               },
             ]}
           />

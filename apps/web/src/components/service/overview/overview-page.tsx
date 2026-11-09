@@ -5,21 +5,19 @@
 // Databases have no overview; their first tab is Connection.
 
 import { boxes, deployments, domains, metrics, services } from "@seylo/ops";
-import { useOp, useOpMutation } from "@seylo/ops/react";
+import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
 import { EmptyState } from "@seylo/ui/components/empty-state";
 import { KeyValue } from "@seylo/ui/components/key-value";
-import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
-import { toast } from "@seylo/ui/components/toast";
 import { IconArrowUpRight, IconLock, IconWorld } from "@tabler/icons-react";
 import { Link, Navigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
-import { errorMessage } from "../../../lib/api";
 import { useLiveUp } from "../../../lib/live";
 import { CronRuns } from "../cron/cron-page";
 import { describeCron } from "../cron-text";
@@ -27,7 +25,7 @@ import { StepChips } from "../deploy-steps";
 import { deploymentTitle, deploymentVersion } from "../deployment-meta";
 import { formatBytes, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
-import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
+import { OpErrorNote, retryOp } from "../op-state";
 import { PrivateRepoHint } from "../private-repo-hint";
 import { TerminalSkeleton } from "../service-skeletons";
 import { hasRunningInstance, isActiveDeployment, isDatabaseKind } from "../status";
@@ -429,19 +427,15 @@ function CronOverview({ service }: { service: ServiceDetail }) {
   );
 }
 
+/** The Box card. Open editor is the header's button, so the card has none of its own. */
 function BoxOverview({ service }: { service: ServiceDetail }) {
   const box = useOp(boxes.get, { serviceId: service.id }, { retry: retryOp, refetchInterval: 15_000 });
-  const open = useOpMutation(boxes.open, {
-    onSuccess: (res) => window.open(res.url, "_blank", "noopener"),
-    onError: (error) => toast.error(isNotBuilt(error) ? t("service.notBuilt.title") : errorMessage(error, t("service.actionFailed"))),
-  });
   if (box.isPending)
     return (
       <LoadingRegion label={t("common.loading")}>
         <Card>
           <div className="flex items-center gap-2">
             <SkeletonText className="w-24 text-[15px]" />
-            <ButtonSkeleton size="sm" className="ml-auto w-24" />
           </div>
           <SkeletonText className="w-96 max-w-full text-[13px]" />
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-6 gap-y-4">
@@ -459,14 +453,7 @@ function BoxOverview({ service }: { service: ServiceDetail }) {
   const b = box.data;
   const tone = b.state === "running" ? "green" : b.state === "starting" ? "amber" : "gray";
   return (
-    <Panel
-      title={t("serviceOverview.box.title")}
-      action={
-        <Button variant="primary" size="sm" onClick={() => open.mutate({ serviceId: service.id })} disabled={open.isPending}>
-          {t("service.header.openBox")}
-        </Button>
-      }
-    >
+    <Panel title={t("serviceOverview.box.title")}>
       <p className="m-0 text-[13px] text-ink-strong">{t("serviceOverview.box.description")}</p>
       <KeyValue
         layout="grid"

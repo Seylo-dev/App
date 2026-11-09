@@ -15,6 +15,7 @@ import { t } from "../../../i18n/t";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import type { ServiceDetail } from "../use-service";
 
 const lines = (text: string) =>
@@ -105,8 +106,9 @@ export function WatchPathsCard({ service }: { service: ServiceDetail }) {
         </div>
       )}
       <p className="m-0 text-xs text-muted-foreground">{t("serviceSource.watch.unknownFiles")}</p>
-      <div className="flex items-center gap-3">
+      <CardSaveBar>
         <Button
+          size="sm"
           variant="primary"
           disabled={!changed || problems.length > 0 || save.isPending}
           onClick={() => save.mutate({ serviceId: service.id, watchPaths: patterns })}
@@ -114,7 +116,7 @@ export function WatchPathsCard({ service }: { service: ServiceDetail }) {
           {t("serviceSource.watch.save")}
         </Button>
         <MutationError error={save.error} />
-      </div>
+      </CardSaveBar>
     </SectionCard>
   );
 }

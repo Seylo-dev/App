@@ -23,6 +23,7 @@ import { CheckLabel, Field, parseIntOrNull, ToggleRow } from "../field";
 import { formatRelative, shortSha } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import { RowsSkeleton } from "../service-skeletons";
 import { DeploymentStatusChip } from "../status-chip";
 import type { ServiceDetail } from "../use-service";
@@ -36,7 +37,11 @@ export function PreviewsPage({ service }: { service: ServiceDetail }) {
     <div className="flex flex-col gap-4">
       {settings.isPending ? (
         <LoadingRegion label={t("common.loading")}>
-          <SectionCardSkeleton titleWidth="w-40" description="w-[min(520px,100%)]">
+          <SectionCardSkeleton
+            titleWidth="w-40"
+            description="w-[min(520px,100%)]"
+            footer={<ButtonSkeleton size="sm" className="w-[52px]" />}
+          >
             <div className="flex items-center gap-3">
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <SkeletonText className="w-20 text-[13.5px]" />
@@ -49,7 +54,6 @@ export function PreviewsPage({ service }: { service: ServiceDetail }) {
               <FieldSkeleton hint />
               <FieldSkeleton labelWidth="w-20" hint />
             </div>
-            <ButtonSkeleton className="w-[61px]" />
           </SectionCardSkeleton>
         </LoadingRegion>
       ) : settings.isError ? (
@@ -117,8 +121,9 @@ function SettingsCard({ service, data }: { service: ServiceDetail; data: Setting
               <Input id="pv-max" inputMode="numeric" value={max} onChange={(e) => setMax(e.target.value)} />
             </Field>
           </div>
-          <div className="flex items-center gap-3">
+          <CardSaveBar>
             <Button
+              size="sm"
               variant="primary"
               disabled={update.isPending || (pattern === s.domainPattern && max === String(s.maxPreviews))}
               onClick={() =>
@@ -128,7 +133,7 @@ function SettingsCard({ service, data }: { service: ServiceDetail; data: Setting
               {t("service.save")}
             </Button>
             <MutationError error={update.error} />
-          </div>
+          </CardSaveBar>
         </>
       )}
       <ConfirmDialog

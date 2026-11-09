@@ -194,7 +194,7 @@ function StatusSections({ data }: { data: Status }) {
               cell: (row) => (
                 <span className="flex items-center gap-2">
                   <StatusDot status={row.online ? "ok" : "off"} />
-                  <span className="font-medium">{row.name}</span>
+                  <span className="font-medium whitespace-nowrap">{row.name}</span>
                 </span>
               ),
               sortValue: (row) => row.name,
@@ -202,6 +202,8 @@ function StatusSections({ data }: { data: Status }) {
             {
               id: "version",
               header: t("settings.updates.version"),
+              // A phone keeps the name, the state and Update now.
+              hideOnMobile: true,
               cell: (row) => <span className="font-mono text-[12.5px]">{row.version ?? "-"}</span>,
             },
             {

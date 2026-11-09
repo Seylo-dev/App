@@ -45,7 +45,7 @@ export default {
   },
   device: {
     title: "Private repositories without the App",
-    description: "Connect a GitHub account whose token clones private repos, like `gh auth login`. Opt-in.",
+    description: "Connect a GitHub account whose token clones private repos, like gh auth login. Opt-in.",
     unavailable: "This panel has no GitHub OAuth client set up, so an account cannot be connected.",
     recommendApp: "The GitHub App gives narrower access and is the better choice. Use this only for repos the App cannot reach.",
     connect: "Connect a GitHub account",

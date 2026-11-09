@@ -87,7 +87,8 @@ function UsersSection() {
           rows={list.data?.users ?? []}
           getRowId={(u) => u.id}
           onRowClick={(u) => setOpenId(u.id)}
-          minWidth={560}
+          // From md up the table scrolls below 560px; a phone hides columns instead, so nothing runs off the card.
+          className="md:[&>table]:min-w-[560px]"
           empty={<EmptyState compact icon={<IconUsers />} title={t("settingsPeople.users.empty")} />}
           columns={[
             {
@@ -111,7 +112,17 @@ function UsersSection() {
               header: t("settingsPeople.invite.role"),
               skeletonWidth: "10%",
               sortValue: (u) => ["owner", "admin", "member"].indexOf(u.role),
-              cell: (u) => <Chip tone={u.role === "member" ? "gray" : "blue"}>{t(`roles.${u.role}`)}</Chip>,
+              cell: (u) => (
+                <span className="flex flex-wrap gap-1">
+                  <Chip tone={u.role === "member" ? "gray" : "blue"}>{t(`roles.${u.role}`)}</Chip>
+                  {/* A phone has no Status column: only a disabled account says so, here. */}
+                  {u.status !== "active" && (
+                    <Chip tone="red" className="md:hidden">
+                      {t(`settingsPeople.status.${u.status}`)}
+                    </Chip>
+                  )}
+                </span>
+              ),
             },
             {
               id: "access",
@@ -155,6 +166,7 @@ function UsersSection() {
               id: "status",
               header: t("settingsPeople.users.status"),
               align: "right",
+              hideOnMobile: true,
               skeletonWidth: "11.5%",
               cell: (u) => <Chip tone={u.status === "active" ? "green" : "red"}>{t(`settingsPeople.status.${u.status}`)}</Chip>,
             },
@@ -203,7 +215,7 @@ function InvitesSection({ onInvite }: { onInvite: () => void }) {
           loading={list.isPending}
           rows={list.data?.invites ?? []}
           getRowId={(i) => i.id}
-          minWidth={560}
+          className="md:[&>table]:min-w-[560px]"
           empty={
             <EmptyState
               compact

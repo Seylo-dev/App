@@ -29,10 +29,11 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
-import { Field, parseIntOrNull, ToggleRow } from "../field";
+import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
 import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import { RowsSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
 
@@ -75,7 +76,9 @@ function RulesCard({ service }: { service: ServiceDetail }) {
               </div>
             ))}
           </div>
-          <ButtonSkeleton className="w-[60px]" />
+          <CardSaveBar>
+            <ButtonSkeleton size="sm" className="w-[52px]" />
+          </CardSaveBar>
         </LoadingRegion>
       ) : data.isError ? (
         <OpErrorNote error={data.error} />
@@ -156,8 +159,9 @@ function RulesEditor({
           </div>
         ))}
       </div>
-      <div className="flex items-center gap-3">
+      <CardSaveBar>
         <Button
+          size="sm"
           variant="primary"
           disabled={save.isPending}
           onClick={() => save.mutate({ serviceId: service.id, useDefaults, ...(useDefaults ? {} : { rules }) })}
@@ -165,7 +169,7 @@ function RulesEditor({
           {t("service.save")}
         </Button>
         <MutationError error={save.error} />
-      </div>
+      </CardSaveBar>
     </>
   );
 }
@@ -260,29 +264,34 @@ function CheckRow({ service, check: c, onEdit }: { service: ServiceDetail; check
         <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
           {c.method} {c.url}
         </span>
-        <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          {c.uptime24h != null && <span>{t("serviceAlerts.uptime24h", { percent: c.uptime24h.toFixed(2) })}</span>}
-          {c.lastLatencyMs != null && <span>{c.lastLatencyMs} ms</span>}
-          {c.lastCheckedAt && <span>{formatRelative(c.lastCheckedAt)}</span>}
-          <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-            {t("serviceAlerts.history")}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label={t("serviceAlerts.checkActions", { name: c.name })}>
-                <IconDots size={15} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onEdit}>{t("service.edit")}</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => update.mutate({ serviceId: service.id, checkId: c.id, enabled: !c.enabled })}>
-                {c.enabled ? t("serviceAlerts.pause") : t("serviceAlerts.resume")}
-              </DropdownMenuItem>
-              <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-                {t("service.remove")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {/* Each figure stays on one line; on a phone the figures wrap between them, never inside one. */}
+          <span className="flex flex-wrap gap-x-3 gap-y-1 whitespace-nowrap">
+            {c.uptime24h != null && <span>{t("serviceAlerts.uptime24h", { percent: c.uptime24h.toFixed(2) })}</span>}
+            {c.lastLatencyMs != null && <span>{c.lastLatencyMs} ms</span>}
+            {c.lastCheckedAt && <span>{formatRelative(c.lastCheckedAt)}</span>}
+          </span>
+          <span className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+              {t("serviceAlerts.history")}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="ghost" aria-label={t("serviceAlerts.checkActions", { name: c.name })}>
+                  <IconDots size={15} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={onEdit}>{t("service.edit")}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => update.mutate({ serviceId: service.id, checkId: c.id, enabled: !c.enabled })}>
+                  {c.enabled ? t("serviceAlerts.pause") : t("serviceAlerts.resume")}
+                </DropdownMenuItem>
+                <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
+                  {t("service.remove")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
         </span>
       </div>
       {c.lastError && c.status === "down" && <span className="text-[12.5px] text-chip-red-fg">{c.lastError}</span>}
@@ -312,7 +321,7 @@ function CheckHistory({ serviceId, checkId }: { serviceId: string; checkId: stri
   const h = history.data;
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex gap-4 text-xs text-muted-foreground">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs whitespace-nowrap text-muted-foreground">
         {h.uptimePercent != null && <span>{t("serviceAlerts.uptime24h", { percent: h.uptimePercent.toFixed(2) })}</span>}
         {h.avgLatencyMs != null && <span>{t("serviceAlerts.avgLatency", { ms: Math.round(h.avgLatencyMs) })}</span>}
         <span>{t("serviceAlerts.incidents", { count: h.incidents.length })}</span>
@@ -380,7 +389,7 @@ function CheckDialog({ service, check, onClose }: { service: ServiceDetail; chec
               placeholder="https://shop.example.com/health"
             />
           </Field>
-          <div className="grid grid-cols-3 gap-3">
+          <FieldGrid className="grid-cols-1 gap-x-3 sm:grid-cols-3">
             <Field label={t("serviceAlerts.interval")} htmlFor="u-int">
               <Input id="u-int" inputMode="numeric" value={interval} onChange={(e) => setIntervalSeconds(e.target.value)} />
             </Field>
@@ -390,7 +399,7 @@ function CheckDialog({ service, check, onClose }: { service: ServiceDetail; chec
             <Field label={t("serviceAlerts.threshold")} htmlFor="u-thr">
               <Input id="u-thr" inputMode="numeric" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
             </Field>
-          </div>
+          </FieldGrid>
           <MutationError error={create.error ?? update.error} />
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>{t("service.cancel")}</Button>
@@ -426,7 +435,10 @@ function RecentAlerts({ service }: { service: ServiceDetail }) {
           <div key={a.id} className="flex flex-wrap items-center gap-3 border-t border-divider px-5 py-2.5 text-[13px]">
             <StatusDot status={severityDot[a.severity]} />
             <b className="font-semibold">{a.title}</b>
-            <span className="min-w-0 flex-1 truncate text-ink-strong">{a.message}</span>
+            {/* On a phone the message gets its own line under the title instead of shrinking to nothing. */}
+            <span className="min-w-0 flex-1 truncate text-ink-strong max-sm:order-last max-sm:basis-full max-sm:whitespace-normal">
+              {a.message}
+            </span>
             {a.resolvedAt && <Chip tone="green">{t("serviceAlerts.resolved")}</Chip>}
             {a.muted && <Chip tone="gray">{t("serviceAlerts.muted")}</Chip>}
             <span className="text-xs text-muted-foreground">{formatRelative(a.createdAt)}</span>

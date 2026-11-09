@@ -132,6 +132,7 @@ export default {
     upload: "Upload custom HTML",
     useGlobal: "Use the global page",
     message: "Message",
+    editMessage: "Edit message",
     mode: "Maintenance mode",
     tooBig: "The page is larger than 512 KB.",
     globalOn: "Global maintenance mode is on, so visitors see the page anyway.",

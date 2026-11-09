@@ -43,13 +43,17 @@ export function ActionPicker({
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => onChange(new Set(available.filter(usable).map((info) => info.action)))}>
+        <Button
+          size="sm"
+          className="bg-muted shadow-none"
+          onClick={() => onChange(new Set(available.filter(usable).map((info) => info.action)))}
+        >
           {t("settingsPeople.picker.everything")}
         </Button>
-        <Button size="sm" onClick={() => onChange(new Set(readOnlyActions(available)))}>
+        <Button size="sm" className="bg-muted shadow-none" onClick={() => onChange(new Set(readOnlyActions(available)))}>
           {t("settingsPeople.picker.viewOnly")}
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => onChange(new Set())}>
+        <Button size="sm" className="bg-muted shadow-none" onClick={() => onChange(new Set())}>
           {t("settingsPeople.picker.none")}
         </Button>
         <span className="ml-auto self-center text-xs text-muted-foreground">

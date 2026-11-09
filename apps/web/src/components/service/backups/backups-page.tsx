@@ -330,7 +330,7 @@ function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: () => vo
           .filter(Boolean)
           .join(" · ")}
       </span>
-      {r.kind === "backup" && r.status === "succeeded" && !r.deletedAt && (
+      {r.kind === "backup" && r.status === "succeeded" && !r.deletedAt ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="icon" variant="ghost" aria-label={t("serviceBackups.actions")}>
@@ -344,6 +344,9 @@ function RunRow({ run: r, onRestore, onDelete }: { run: Run; onRestore: () => vo
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      ) : (
+        // A row without actions keeps the menu's place, so sizes and times line up on the right.
+        <span aria-hidden="true" className="size-[30px] shrink-0" />
       )}
     </div>
   );

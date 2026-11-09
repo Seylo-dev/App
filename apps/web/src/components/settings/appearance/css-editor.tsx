@@ -51,6 +51,11 @@ export function CssEditor({
           lineNumbersMinChars: 3,
           padding: { top: 12, bottom: 16 },
           scrollBeyondLastLine: false,
+          // No overview ruler or scrollbar track while the CSS fits, as in the service editor.
+          overviewRulerLanes: 0,
+          overviewRulerBorder: false,
+          hideCursorInOverviewRuler: true,
+          scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8, useShadows: false },
           tabSize: 2,
           ariaLabel: label,
         });

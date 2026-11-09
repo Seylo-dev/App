@@ -62,22 +62,25 @@ export function SourcePage({ service }: { service: ServiceDetail }) {
   return (
     <div className="flex flex-col gap-4">
       <SectionCard title={t("serviceSource.title")} description={t("serviceSource.description")}>
-        <RadioGroup
-          value={type}
-          onValueChange={(v) => setType(v as Pickable)}
-          aria-label={t("serviceSource.title")}
-          className="grid-cols-[repeat(auto-fit,minmax(170px,1fr))]"
-        >
-          {choices.map((c) => (
-            <RadioCard
-              key={c.type}
-              value={c.type}
-              icon={<c.icon size={17} stroke={1.8} />}
-              title={t(`serviceSource.types.${c.type}.name`)}
-              description={c.type === current ? t("serviceSource.current") : t(`serviceSource.types.${c.type}.hint`)}
-            />
-          ))}
-        </RadioGroup>
+        {/* Eight tiles in even rows: 4 + 4 on a wide card, 2 per row on a narrow one, one per row on a phone. */}
+        <div className="@container">
+          <RadioGroup
+            value={type}
+            onValueChange={(v) => setType(v as Pickable)}
+            aria-label={t("serviceSource.title")}
+            className="grid-cols-1 @md:grid-cols-2 @2xl:grid-cols-4"
+          >
+            {choices.map((c) => (
+              <RadioCard
+                key={c.type}
+                value={c.type}
+                icon={<c.icon size={17} stroke={1.8} />}
+                title={t(`serviceSource.types.${c.type}.name`)}
+                description={c.type === current ? t("serviceSource.current") : t(`serviceSource.types.${c.type}.hint`)}
+              />
+            ))}
+          </RadioGroup>
+        </div>
         <div className="border-t border-divider pt-4">
           {type === "github" && <GithubForm service={service} />}
           {(type === "gitlab" || type === "gitea" || type === "bitbucket") && <ProviderForm key={type} service={service} kind={type} />}

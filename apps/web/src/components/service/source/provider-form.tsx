@@ -32,7 +32,6 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
   const [providerId, setProviderId] = useState<string | null>(src?.providerId ?? null);
   const [repo, setRepo] = useState<string | null>(src?.repo ?? null);
   const [branch, setBranch] = useState<string | null>(src?.branch ?? null);
-  const [rootDir, setRootDir] = useState(service.build.contextPath);
   const [deployOnPush, setDeployOnPush] = useState(src?.deployOnPush ?? true);
   const invalidate = useInvalidate();
   const connect = useOpMutation(gitProviders.connectRepo, {
@@ -95,7 +94,7 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
         onSubmit={(e) => {
           e.preventDefault();
           if (!chosen || !repo || !branch) return;
-          connect.mutate({ serviceId: service.id, providerId: chosen, repo, branch, rootDir, deployOnPush });
+          connect.mutate({ serviceId: service.id, providerId: chosen, repo, branch, deployOnPush });
         }}
       >
         <div className="grid gap-4 md:grid-cols-2">
@@ -139,15 +138,6 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
             }}
           />
         )}
-        <Field label={t("serviceSource.rootDir")} htmlFor="provider-root" hint={t("serviceSource.rootDirHint")}>
-          <Input
-            id="provider-root"
-            className="font-mono"
-            value={rootDir}
-            onChange={(e) => setRootDir(e.target.value)}
-            placeholder="apps/web"
-          />
-        </Field>
         <ToggleRow
           title={t("serviceSource.deployOnPush")}
           description={t("serviceSource.deployOnPushHint")}

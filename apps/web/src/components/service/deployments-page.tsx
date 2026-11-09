@@ -68,7 +68,7 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
     <>
       <BuildFacts service={service} />
       <div className="flex flex-wrap items-start gap-4">
-        <Card aria-label={t("serviceDeploys.history")} className="min-w-0 flex-[999_1_520px] gap-0 overflow-hidden p-0">
+        <Card aria-label={t("serviceDeploys.history")} className="min-w-0 flex-[1_1_560px] gap-0 overflow-hidden p-0">
           <div className="flex flex-wrap items-center gap-2.5 px-5 pt-4 pb-3.5">
             <h2 className="m-0 text-[15px] font-semibold">{t("serviceDeploys.history")}</h2>
             {first.data && first.data.keptImages > 0 && (
@@ -109,7 +109,7 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
           )}
         </Card>
         {side && <SideLog service={service} d={side} />}
-        {first.isPending && <Skeleton className="min-w-0 flex-[1_1_420px] self-stretch rounded-card bg-terminal" />}
+        {first.isPending && <Skeleton className="min-w-0 flex-[1_1_440px] self-stretch rounded-card bg-terminal" />}
       </div>
       <DeployLogModal serviceId={service.id} source={service.source} deployment={open} onClose={() => setOpen(null)} />
     </>
@@ -338,7 +338,7 @@ function SideLog({ service, d }: { service: ServiceDetail; d: Deployment }) {
   const running = isActiveDeployment(d.status);
   const took = deploymentDurationMs(d, now);
   return (
-    <section aria-label={t("serviceDeploys.buildLog")} className="min-w-0 flex-[1_1_420px]">
+    <section aria-label={t("serviceDeploys.buildLog")} className="min-w-0 flex-[1_1_440px]">
       {log.error && log.lines === 0 && !isNotBuilt(log.error) ? (
         <OpErrorNote error={log.error} />
       ) : (
@@ -379,7 +379,7 @@ function SideLog({ service, d }: { service: ServiceDetail; d: Deployment }) {
   );
 }
 
-/** The chips above the history: source, builder, push, strategy, build node. */
+/** The chips above the history: source, builder, push, strategy, build node. Read-only facts, so a plain fill, not the button look. */
 function BuildFacts({ service }: { service: ServiceDetail }) {
   const settings = useOp(builds.getSettings, { serviceId: service.id }, { retry: retryOp });
   const src = service.sourceConfig;
@@ -408,7 +408,7 @@ function BuildFacts({ service }: { service: ServiceDetail }) {
   return (
     <div className="flex flex-wrap gap-2 text-[12.5px] text-ink-strong">
       {facts.map((f) => (
-        <span key={f.text} className="flex items-center gap-[7px] rounded-control bg-card px-[11px] py-1.5 shadow-control">
+        <span key={f.text} className="flex items-center gap-[7px] rounded-control bg-track px-[11px] py-1.5">
           <f.icon size={13} stroke={2} className="text-muted-foreground" aria-hidden="true" />
           {f.text}
         </span>

@@ -83,7 +83,7 @@ function KeyForm({ kind, onDone }: { kind: Kind; onDone: () => void }) {
         <SheetBody>
           <Alert tone="warning">{t("settingsKeys.create.onlyOnce")}</Alert>
           <Field label={t("settingsKeys.create.token")}>
-            <CopyField value={created.token} secret aria-label={t("settingsKeys.create.token")} />
+            <CopyField value={created.token} aria-label={t("settingsKeys.create.token")} />
           </Field>
           {kind === "api" ? (
             <CodeBlock title={t("settingsKeys.create.tryIt")} code={example} tone="dark" />

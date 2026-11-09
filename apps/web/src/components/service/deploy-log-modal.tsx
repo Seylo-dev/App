@@ -79,75 +79,78 @@ function ModalBody({ serviceId, source, initial }: { serviceId: string; source?:
 
   return (
     <>
-      <div className="flex items-start gap-3 px-5 pt-[18px] pb-3.5">
-        <div className="flex min-w-0 flex-col gap-[7px]">
-          <DialogTitle className="text-base leading-[1.35] tracking-[-0.01em]">
-            {version ? (
-              <>
-                {t("serviceDeploys.modal.deploy")} <span className="font-mono text-[14.5px] font-medium">{version}</span> ·{" "}
-              </>
-            ) : null}
-            {deploymentTitle(d, source)}
-          </DialogTitle>
-          <DialogDescription asChild>
-            <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-              {healthFailed(d) ? (
-                <span className="rounded-chip bg-chip-red-bg px-[7px] py-0.5 text-[11.5px] font-medium text-chip-red-fg">
-                  {t("serviceDeploys.healthFailed")}
-                </span>
-              ) : (
-                <DeploymentStatusChip status={d.status} />
-              )}
-              <span>{meta.join(" · ")}</span>
-            </div>
-          </DialogDescription>
+      {/* Everything above the buttons scrolls when the screen is short (a phone stacks the step cards), so Copy, Download and Close stay in reach. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex items-start gap-3 px-5 pt-[18px] pb-3.5">
+          <div className="flex min-w-0 flex-col gap-[7px]">
+            <DialogTitle className="text-base leading-[1.35] tracking-[-0.01em]">
+              {version ? (
+                <>
+                  {t("serviceDeploys.modal.deploy")} <span className="font-mono text-[14.5px] font-medium">{version}</span> ·{" "}
+                </>
+              ) : null}
+              {deploymentTitle(d, source)}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                {healthFailed(d) ? (
+                  <span className="rounded-chip bg-chip-red-bg px-[7px] py-0.5 text-[11.5px] font-medium text-chip-red-fg">
+                    {t("serviceDeploys.healthFailed")}
+                  </span>
+                ) : (
+                  <DeploymentStatusChip status={d.status} />
+                )}
+                <span>{meta.join(" · ")}</span>
+              </div>
+            </DialogDescription>
+          </div>
+          <DialogClose asChild>
+            <Button
+              size="icon"
+              variant="secondary"
+              className="ml-auto size-8 rounded-control bg-muted shadow-none"
+              aria-label={t("serviceDeploys.modal.closeLogs")}
+            >
+              <IconX size={14} stroke={2.2} />
+            </Button>
+          </DialogClose>
         </div>
-        <DialogClose asChild>
-          <Button
-            size="icon"
-            variant="secondary"
-            className="ml-auto size-8 rounded-control bg-muted shadow-none"
-            aria-label={t("serviceDeploys.modal.closeLogs")}
-          >
-            <IconX size={14} stroke={2.2} />
-          </Button>
-        </DialogClose>
+        <div className="px-5 pb-4">
+          <StepCards steps={d.steps} />
+        </div>
+        {d.error && <p className="m-0 px-5 pb-3 text-[12.5px] leading-[1.45] text-chip-red-fg">{d.error}</p>}
+        <div className="shrink-0 px-5">
+          {log.error && log.lines === 0 ? (
+            <OpErrorNote error={log.error} />
+          ) : (
+            <LogViewer
+              buffer={buffer}
+              aria-label={t("serviceDeploys.modal.deployLog")}
+              title={
+                <span className="flex items-center gap-2.5">
+                  {t("serviceDeploys.modal.deployLog")}
+                  {version && <span className="font-mono text-xs font-normal text-terminal-muted">{version}</span>}
+                </span>
+              }
+              actions={
+                <span className="text-xs text-terminal-muted">
+                  {t("serviceDeploys.modal.summary", { count: log.lines, duration: took != null ? formatDuration(took) : "-" })}
+                </span>
+              }
+              showTimestamps
+              showSource
+              formatTime={(ts) => formatTimeOfDay(ts)}
+              height="min(360px, 50dvh)"
+              empty={
+                <span className="text-terminal-muted">
+                  {log.done ? t("serviceDeploys.modal.emptyLog") : t("serviceDeploys.modal.waiting")}
+                </span>
+              }
+            />
+          )}
+        </div>
       </div>
-      <div className="px-5 pb-4">
-        <StepCards steps={d.steps} />
-      </div>
-      {d.error && <p className="m-0 px-5 pb-3 text-[12.5px] leading-[1.45] text-chip-red-fg">{d.error}</p>}
-      <div className="min-h-0 flex-1 px-5">
-        {log.error && log.lines === 0 ? (
-          <OpErrorNote error={log.error} />
-        ) : (
-          <LogViewer
-            buffer={buffer}
-            aria-label={t("serviceDeploys.modal.deployLog")}
-            title={
-              <span className="flex items-center gap-2.5">
-                {t("serviceDeploys.modal.deployLog")}
-                {version && <span className="font-mono text-xs font-normal text-terminal-muted">{version}</span>}
-              </span>
-            }
-            actions={
-              <span className="text-xs text-terminal-muted">
-                {t("serviceDeploys.modal.summary", { count: log.lines, duration: took != null ? formatDuration(took) : "-" })}
-              </span>
-            }
-            showTimestamps
-            showSource
-            formatTime={(ts) => formatTimeOfDay(ts)}
-            height={360}
-            empty={
-              <span className="text-terminal-muted">
-                {log.done ? t("serviceDeploys.modal.emptyLog") : t("serviceDeploys.modal.waiting")}
-              </span>
-            }
-          />
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-[18px]">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 px-5 pt-4 pb-[18px]">
         {foot && <span className="text-[12.5px] text-muted-foreground">{foot}</span>}
         <span className="ml-auto flex flex-wrap gap-2">
           <Button className="h-9 bg-muted shadow-none" onClick={() => void copy(bufferText(buffer))} disabled={log.lines === 0}>

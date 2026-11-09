@@ -22,6 +22,7 @@ import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
+import { IconRefresh } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { t } from "../../i18n/t";
@@ -209,6 +210,7 @@ function DomainState({ general, dirty }: { general: General; dirty: boolean }) {
           disabled={check.isPending || dirty}
           onClick={() => check.mutate({})}
         >
+          <IconRefresh size={15} stroke={1.8} />
           {check.isPending ? t("settings.general.domainCard.checking") : t("settings.general.domainCard.checkNow")}
         </Button>
       )}

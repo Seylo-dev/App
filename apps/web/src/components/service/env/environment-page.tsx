@@ -11,7 +11,7 @@ import { Kbd } from "@seylo/ui/components/kbd";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconAlertCircle, IconBraces, IconEye, IconEyeOff } from "@tabler/icons-react";
+import { IconAlertCircle, IconBraces, IconEye, IconEyeOff, IconStack2 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
@@ -170,23 +170,14 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
         <section aria-label={t("serviceEnv.title")} className="min-w-0 flex-[999_1_520px] rounded-card bg-card shadow-card">
           <div className="flex flex-wrap items-center gap-2.5 border-b border-divider px-4 py-3.5">
             <h2 className="m-0 text-[15px] font-semibold">{t("serviceEnv.title")}</h2>
-            {initial.sharedCount > 0 ? (
-              <button
-                type="button"
-                onClick={() => setSharedOpen(true)}
-                className="cursor-pointer border-0 bg-transparent p-0 text-[12.5px] text-muted-foreground hover:text-foreground"
-              >
-                {t("serviceEnv.sharedCount", { count: initial.sharedCount })}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setSharedOpen(true)}
-                className="cursor-pointer border-0 bg-transparent p-0 text-[12.5px] text-muted-foreground hover:text-foreground"
-              >
-                {t("serviceEnv.sharedEdit")}
-              </button>
-            )}
+            {/* The only way into the project's shared variables, so it looks like the button it is. */}
+            <Button size="sm" className="h-[34px] bg-muted shadow-none" onClick={() => setSharedOpen(true)}>
+              <IconStack2 size={14} />
+              {t("serviceEnv.sharedEdit")}
+              {initial.sharedCount > 0 && (
+                <span className="rounded-chip bg-track px-1.5 text-[11.5px] tabular-nums text-ink-strong">{initial.sharedCount}</span>
+              )}
+            </Button>
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {problems.length > 0 && (
                 <span className="flex items-center gap-1.5 rounded-chip bg-chip-red-bg px-2 py-[3px] text-xs font-medium whitespace-nowrap text-chip-red-fg">
