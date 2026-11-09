@@ -1,14 +1,19 @@
 import { expect, test } from "bun:test";
-import { services } from "@seylo/ops";
+import { OpError, services } from "@seylo/ops";
 import { parseRepoInput } from "./repo-input";
 import {
   type Connection,
   connectionsOf,
   decideSource,
   type FoundRepo,
+  knownHostsOf,
+  listFor,
+  lookupStateOf,
+  mayConnectIn,
   pathIn,
   type RepoInfo,
   type RepoLookup,
+  repoKeyOf,
   sourceFor,
   textFor,
 } from "./repo-source";
@@ -42,7 +47,17 @@ const parsed = (text: string) => {
   if (!result.ok) throw new Error(text);
   return result.repo;
 };
-const done = (connection: Connection, path: string, repos: RepoInfo[]): RepoLookup => ({ connection, path, state: "done", repos });
+const answered = (connection: Connection, path: string, state: RepoLookup["state"]): RepoLookup => ({
+  connection,
+  path,
+  state,
+  defaultBranch: null,
+  error: null,
+});
+const found = (connection: Connection, path: string, defaultBranch = "main"): RepoLookup => ({
+  ...answered(connection, path, "found"),
+  defaultBranch,
+});
 
 test("connections: installations that are not suspended and every provider, none from a hidden list", () => {
   const installations = {
@@ -111,15 +126,18 @@ test("picked from Browse: the connection's source with deploy on push, like the 
   });
 });
 
-test("typed owner/repo that the installation lists becomes a GitHub source, with the name as GitHub spells it", () => {
-  const decision = decideSource(parseRepoInput("ACME/Shop-API"), null, [done(acme, "ACME/Shop-API", [repo("acme/shop-api")])]);
-  expect(decision).toEqual({ type: "connected", found: { connection: acme, repo: repo("acme/shop-api") } });
+test("typed owner/repo that the installation reads becomes a GitHub source, with the repository's default branch", () => {
+  const decision = decideSource(parseRepoInput("acme/shop-api"), null, [found(acme, "acme/shop-api", "trunk")]);
+  expect(decision).toEqual({
+    type: "connected",
+    found: { connection: acme, repo: { fullName: "acme/shop-api", private: null, defaultBranch: "trunk", updatedAt: null } },
+  });
   expect(sourceFor(decision, "main")).toMatchObject({ type: "github", repo: "acme/shop-api" });
 });
 
-test("typed owner/repo that no installation lists is a public GitHub URL, and says which one missed it", () => {
+test("typed owner/repo that the installation cannot read (NOT_FOUND) is a public GitHub URL, and says which one missed it", () => {
   const typed = parseRepoInput("acme/secret");
-  const decision = decideSource(typed, null, [done(acme, "acme/secret", [repo("acme/secret-sauce")])]);
+  const decision = decideSource(typed, null, [answered(acme, "acme/secret", "missing")]);
   expect(decision).toMatchObject({ type: "git", missedIn: acme });
   expect(sourceFor(decision, "main")).toEqual({
     type: "git",
@@ -132,18 +150,96 @@ test("typed owner/repo that no installation lists is a public GitHub URL, and sa
   expect(decideSource(parseRepoInput("torvalds/linux"), null, [])).toMatchObject({ type: "git", missedIn: null });
 });
 
-test("a connection that has not answered keeps the field checking; one that failed does not hold it", () => {
+test("a connection that has not answered keeps the field checking; one that refused does not hold it, quietly", () => {
   const typed = parseRepoInput("gitlab.com/group/app");
-  const pending: RepoLookup = { connection: gitlab, path: "group/app", state: "pending", repos: [] };
+  const pending = answered(gitlab, "group/app", "pending");
   expect(decideSource(typed, null, [pending]).type).toBe("checking");
   expect(sourceFor(decideSource(typed, null, [pending]), "main")).toBeNull();
   // FORBIDDEN for someone the connection is not shared with in this project: a plain URL, quietly.
-  const failed: RepoLookup = { ...pending, state: "failed" };
-  expect(decideSource(typed, null, [failed])).toMatchObject({ type: "git", missedIn: null });
-  // Two connections of the same host: the first that lists it wins.
+  expect(decideSource(typed, null, [answered(gitlab, "group/app", "refused")])).toMatchObject({ type: "git", missedIn: null });
+  // Two connections of the same host: the first that reads it wins.
   const second: Connection = { ...gitlab, id: "gp00000000000009", label: "Other GitLab" };
-  const decision = decideSource(typed, null, [done(gitlab, "group/app", []), done(second, "group/app", [repo("group/app")])]);
+  const decision = decideSource(typed, null, [answered(gitlab, "group/app", "missing"), found(second, "group/app")]);
   expect(decision).toMatchObject({ type: "connected", found: { connection: second } });
+});
+
+test("a connection that failed to answer leaves the field unchecked: no public URL is made of a repository it may hold", () => {
+  // GitLab answering 502, a rate limit, a timeout: nothing says the repository is public.
+  const typed = parseRepoInput("gitlab.com/acme/private-api");
+  const error = new OpError("UNAVAILABLE", "GitLab answered 502.");
+  const failed: RepoLookup = { ...answered(gitlab, "acme/private-api", "failed"), error };
+  const decision = decideSource(typed, null, [failed]);
+  expect(decision).toMatchObject({ type: "unchecked", failed: gitlab, error });
+  expect(sourceFor(decision, "main")).toBeNull();
+  // Another connection reading it is still an answer.
+  const second: Connection = { ...gitlab, id: "gp00000000000009", label: "Other GitLab" };
+  expect(decideSource(typed, null, [failed, found(second, "acme/private-api")])).toMatchObject({ type: "connected" });
+  // One that cannot read it does not outweigh one that did not answer.
+  expect(decideSource(typed, null, [answered(second, "acme/private-api", "missing"), failed]).type).toBe("unchecked");
+});
+
+test("only NOT_FOUND for the repository and FORBIDDEN are answers", () => {
+  expect(lookupStateOf(new OpError("NOT_FOUND", "The App cannot read acme/x.", { field: "repo" }))).toBe("missing");
+  expect(lookupStateOf(new OpError("FORBIDDEN", "Only admins can use this GitHub installation in a new project."))).toBe("refused");
+  // The connection itself is gone: that says nothing about the repository.
+  expect(lookupStateOf(new OpError("NOT_FOUND", "No git provider connection with this id.", { field: "providerId" }))).toBe("failed");
+  for (const code of ["UNAVAILABLE", "INTERNAL", "RATE_LIMITED", "BAD_REQUEST"] as const) {
+    expect(lookupStateOf(new OpError(code, "x"))).toBe("failed");
+  }
+  expect(lookupStateOf(new TypeError("Failed to fetch"))).toBe("failed");
+});
+
+test("names the lookups would refuse are not looked up", () => {
+  // github.branches takes owner/name of [A-Za-z0-9_.-]; a ~ cannot be a GitHub repository.
+  expect(pathIn(acme, parsed("github.com/acme/app~1"))).toBeNull();
+  expect(pathIn(gitlab, parsed("gitlab.com/acme/app"))).toBe("acme/app");
+  expect(pathIn(gitlab, parsed("gitlab.com/acme/app~1"))).toBeNull();
+});
+
+test("a typed repository's connections come from the GitHub App list for github.com and the providers for the rest", () => {
+  expect(listFor(parsed("acme/app"))).toBe("github");
+  expect(listFor(parsed("git@github.com:acme/app.git"))).toBe("github");
+  expect(listFor(parsed("gitlab.com/acme/app"))).toBe("providers");
+  expect(listFor(parsed("git.example.com:3000/team/app"))).toBe("providers");
+});
+
+test("the repository key is the same however it is typed, and changes with the repository", () => {
+  const key = (text: string) => repoKeyOf(parseRepoInput(text));
+  expect(key("acme/app")).toBe("github.com/acme/app");
+  expect(key("https://github.com/Acme/App.git")).toBe("github.com/acme/app");
+  expect(key("git@github.com:acme/app.git")).toBe("github.com/acme/app");
+  expect(key("https://github.com/acme/app/tree/dev")).toBe("github.com/acme/app");
+  expect(key("acme/api")).not.toBe(key("acme/app"));
+  expect(key("")).toBe("");
+});
+
+test("the connections' servers are known hosts, under their path", () => {
+  expect(knownHostsOf([acme, gitlab, gitea, bitbucket])).toEqual([
+    { host: "github.com", kind: "github", prefix: "" },
+    { host: "gitlab.com", kind: "gitlab", prefix: "" },
+    { host: "git.example.com", kind: "gitea", prefix: "gitea" },
+    { host: "bitbucket.org", kind: "bitbucket", prefix: "" },
+  ]);
+  // A self-managed Gitea's page address reaches its connection as the repository.
+  const page = parseRepoInput("https://git.example.com/gitea/team/app/src/branch/main/docs", knownHostsOf([gitea]));
+  expect(page.ok && pathIn(gitea, page.repo)).toBe("team/app");
+});
+
+test("connecting needs services.update in the project: owners and admins, or a member's project grant", () => {
+  const grant = (actions: string[], scopeId = "prj1prj1prj1prj1", scopeType: "project" | "service" = "project") => ({
+    scopeType,
+    scopeId,
+    actions,
+  });
+  expect(mayConnectIn("owner", [], "prj1prj1prj1prj1")).toBe(true);
+  expect(mayConnectIn("admin", [], "prj1prj1prj1prj1")).toBe(true);
+  expect(mayConnectIn("member", [grant(["services.create", "services.update"])], "prj1prj1prj1prj1")).toBe(true);
+  expect(mayConnectIn("member", [grant(["services.*"])], "prj1prj1prj1prj1")).toBe(true);
+  expect(mayConnectIn("member", [grant(["*"])], "prj1prj1prj1prj1")).toBe(true);
+  // Create and deploy without update: connectRepo would refuse after the app exists.
+  expect(mayConnectIn("member", [grant(["services.create", "services.deploy"])], "prj1prj1prj1prj1")).toBe(false);
+  expect(mayConnectIn("member", [grant(["services.update"], "prj2prj2prj2prj2")], "prj1prj1prj1prj1")).toBe(false);
+  expect(mayConnectIn("member", [grant(["services.update"], "svc1svc1svc1svc1", "service")], "prj1prj1prj1prj1")).toBe(false);
 });
 
 test("pasted URLs stay as written, and nothing typed creates nothing", () => {

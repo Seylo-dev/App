@@ -388,6 +388,37 @@ describe("GitHub pushes with watch paths and [skip ci]", () => {
   });
 });
 
+describe("github.branches", () => {
+  // The New app dialog asks it for a typed owner/repo by name: it must tell "the App cannot read it"
+  // (a public URL is the honest fallback) from "GitHub did not answer" (nothing is known).
+  test("reads one repository: NOT_FOUND for the repo when the App cannot read it, UNAVAILABLE when GitHub fails", async () => {
+    const fake = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      const json = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+      if (url.pathname === "/repos/acme/shop") return json(200, { default_branch: "trunk" });
+      if (url.pathname === "/repos/acme/shop/branches") return json(200, [{ name: "trunk" }, { name: "dev" }]);
+      if (url.pathname.startsWith("/repos/acme/flaky")) return json(502, { message: "Server Error" });
+      return fake(input, init);
+    }) as typeof fetch;
+    const ask = (repo: string) => callOp(panel, github.branches, { projectId, installationId: installationRowId, repo }, { cookie });
+
+    const shop = await ask("acme/shop");
+    expect(shop.status).toBe(200);
+    expect(shop.body).toEqual({ defaultBranch: "trunk", branches: ["trunk", "dev"] });
+
+    const secret = await ask("acme/secret");
+    expect(secret.status).toBe(404);
+    expect(secret.body.error).toMatchObject({ code: "NOT_FOUND", details: { field: "repo" } });
+    expect(secret.body.error.message).toContain("acme/secret");
+
+    const flaky = await ask("acme/flaky");
+    expect(flaky.status).toBe(503);
+    expect(flaky.body.error).toMatchObject({ code: "UNAVAILABLE", details: { field: "repo" } });
+  });
+});
+
 describe("deploy trigger URLs", () => {
   test("rotate, call, and delete", async () => {
     const id = (

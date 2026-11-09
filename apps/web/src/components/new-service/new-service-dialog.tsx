@@ -13,7 +13,8 @@
 // such source: github.connectRepo and gitProviders.connectRepo check the
 // connection can read it, and the provider one creates the webhook), then
 // deployed when "Deploy right away" is ticked; if connecting fails, the
-// service's Source tab opens instead.
+// service's Source tab opens instead. An SSH URL is created without the
+// first deploy: it has no deploy key yet.
 
 import { boxes, compose, databases, deployments, github, gitProviders, OpError, type OpInput, type OpOutput, services } from "@seylo/ops";
 import { useOp, useOpClient, useOpMutation } from "@seylo/ops/react";
@@ -27,9 +28,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FieldSkeleton, LoadingRegion } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
+import { cn } from "@seylo/ui/lib/utils";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { ComposePreview } from "../../lib/types";
@@ -38,7 +40,8 @@ import { NodePicker, ProjectPicker } from "../pickers";
 import { QueryError } from "../query-error";
 import { type CatalogKind, KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
 import { BranchField, RepoField, RepoNote, useBranchSuggestions, useRepoSource } from "./repo-field";
-import { type FoundRepo, sourceFor, textFor } from "./repo-source";
+import { branchFromRef } from "./repo-input";
+import { type FoundRepo, repoKeyOf, sourceFor, textFor } from "./repo-source";
 import { shortImage } from "./short-image";
 
 type FormKind = Exclude<NewServiceKind, CatalogKind>;
@@ -107,11 +110,11 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   const [appSource, setAppSource] = useState<AppSource>("image");
   const [image, setImage] = useState("");
   const [repoText, setRepoText] = useState("");
-  // A repository picked from Browse, while the field still shows what picking it wrote.
-  const [picked, setPicked] = useState<{ text: string; found: FoundRepo } | null>(null);
-  const [branch, setBranch] = useState("main");
-  // Until someone edits the branch, it follows the repository's default.
-  const [branchEdited, setBranchEdited] = useState(false);
+  // A repository picked from Browse, while the field still shows what picking it wrote, in the project it was picked for.
+  const [picked, setPicked] = useState<{ text: string; projectId: string; found: FoundRepo } | null>(null);
+  // A branch someone typed or picked, for the repository it was chosen for (repoKeyOf). Otherwise the
+  // branch follows the repository: the one its page address names, else its default.
+  const [branchEdit, setBranchEdit] = useState<{ key: string; value: string } | null>(null);
   const [port, setPort] = useState("");
   const [deployNow, setDeployNow] = useState(true);
   const [schedule, setSchedule] = useState("0 * * * *");
@@ -193,16 +196,26 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   const repoSource = useRepoSource({
     projectId,
     text: repoText,
-    picked: picked && picked.text === repoText ? picked.found : null,
+    // Picked in another project: the text is looked up again in this one (connectRepo checks the project's sharing).
+    picked: picked && picked.text === repoText && picked.projectId === projectId ? picked.found : null,
     enabled: gitTab,
   });
   const branches = useBranchSuggestions(projectId, repoSource.decision, gitTab);
-  // A branch the address names (".../tree/dev") wins over the repository's default.
-  const suggestedBranch = (repoSource.parse.ok ? repoSource.parse.repo.branch : null) ?? branches.defaultBranch;
-  useEffect(() => {
-    if (gitTab && !branchEdited && suggestedBranch) setBranch(suggestedBranch);
-  }, [gitTab, branchEdited, suggestedBranch]);
-  const repoSourceToCreate = gitTab && branchPattern.test(branch.trim()) ? sourceFor(repoSource.decision, branch.trim()) : null;
+  const repoKey = repoKeyOf(repoSource.parse);
+  const edited = branchEdit !== null && branchEdit.key === repoKey;
+  // A page address (".../tree/feat/queue/src") names the branch, maybe with a folder after it: the
+  // longest start that is one of the repository's branches. Until they are read it waits.
+  const ref = repoSource.parse.ok ? repoSource.parse.repo.ref : null;
+  const refPending = !edited && ref !== null && branches.loading;
+  const listedBranches = branches.available && !branches.error ? (branches.branches ?? null) : null;
+  const suggestedBranch = (refPending ? null : branchFromRef(ref, listedBranches)) ?? branches.defaultBranch ?? "main";
+  const branch = edited ? branchEdit.value : suggestedBranch;
+  // An empty field is the suggested branch, as the placeholder shows.
+  const branchToUse = branch.trim() || suggestedBranch;
+  const branchValid = branchPattern.test(branchToUse);
+  const repoSourceToCreate = gitTab && branchValid && !refPending ? sourceFor(repoSource.decision, branchToUse) : null;
+  // An SSH URL has no deploy key yet: its first deploy can only fail.
+  const deployBlocked = gitTab && repoSource.decision.type === "git" && repoSource.decision.repo.ssh;
 
   const nameValid = namePattern.test(name);
   const ready =
@@ -250,11 +263,12 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
           : appSource === "git"
             ? (repoSourceToCreate ?? undefined)
             : undefined;
+      const deploy = deployNow && !deployBlocked;
       if (source?.type === "github" || source?.type === "provider") {
-        createAndConnect.mutate({ create: { ...base, kind: "app", ports, deployNow: false }, source, deployNow });
+        createAndConnect.mutate({ create: { ...base, kind: "app", ports, deployNow: false }, source, deployNow: deploy });
         return;
       }
-      createService.mutate({ ...base, kind: "app", source, ports, deployNow: appSource !== "none" && deployNow });
+      createService.mutate({ ...base, kind: "app", source, ports, deployNow: appSource !== "none" && deploy });
     }
   };
 
@@ -315,7 +329,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
               <Field
                 id="ns-git"
                 label="newService.gitRepo"
-                note={<RepoNote id="ns-git-note" text={repoText} decision={repoSource.decision} />}
+                note={<RepoNote id="ns-git-note" text={repoText} decision={repoSource.decision} onRetry={repoSource.retry} />}
               >
                 <RepoField
                   id="ns-git"
@@ -324,7 +338,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
                   onChange={setRepoText}
                   onPick={(found) => {
                     const text = textFor(found);
-                    setPicked({ text, found });
+                    setPicked({ text, projectId, found });
                     setRepoText(text);
                   }}
                   projectId={projectId}
@@ -332,14 +346,14 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
                   canManage={canManageGit}
                 />
               </Field>
-              <Field id="ns-branch" label="newService.branch">
+              <Field id="ns-branch" label="newService.branch" hint={branchValid ? undefined : "newService.branchInvalid"}>
                 <BranchField
                   id="ns-branch"
                   value={branch}
-                  onChange={(next) => {
-                    setBranch(next);
-                    setBranchEdited(true);
-                  }}
+                  placeholder={suggestedBranch}
+                  invalid={!branchValid}
+                  describedBy={branchValid ? undefined : "ns-branch-hint"}
+                  onChange={(next) => setBranchEdit({ key: repoKey, value: next })}
                   suggestions={branches}
                 />
               </Field>
@@ -470,8 +484,20 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
       )}
 
       {(kind === "compose" || (kind === "app" && appSource !== "none")) && (
-        <label htmlFor="ns-deploy" className="flex items-center gap-2.5 text-[13px] text-ink-strong">
-          <Checkbox id="ns-deploy" checked={deployNow} onCheckedChange={(v) => setDeployNow(v === true)} />
+        <label
+          htmlFor="ns-deploy"
+          // The checkbox fades itself when disabled; the words go quiet beside it.
+          className={cn(
+            "flex items-center gap-2.5 text-[13px] text-ink-strong transition-colors duration-200",
+            deployBlocked && "text-muted-foreground",
+          )}
+        >
+          <Checkbox
+            id="ns-deploy"
+            checked={deployNow && !deployBlocked}
+            disabled={deployBlocked}
+            onCheckedChange={(v) => setDeployNow(v === true)}
+          />
           {t("newService.deployNow")}
         </label>
       )}
@@ -602,7 +628,11 @@ function Field({
     <div className="flex min-w-0 flex-col gap-1.5">
       <Label htmlFor={id}>{t(label)}</Label>
       {children}
-      {hint && <span className="text-xs text-muted-foreground">{t(hint)}</span>}
+      {hint && (
+        <span id={`${id}-hint`} className="text-xs text-muted-foreground">
+          {t(hint)}
+        </span>
+      )}
       {note}
     </div>
   );

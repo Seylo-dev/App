@@ -11,6 +11,7 @@
 import type { Page, Route } from "@playwright/test";
 import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
+import { DemoRefusal } from "./refusal";
 import { handlers as repoHandlers } from "./repos";
 import { handlers as serviceHandlers, logEntries } from "./service";
 import { fixtures as settingsFixtures } from "./settings";
@@ -264,7 +265,15 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     if (!handler) return route.continue();
     const wait = typeof options.delay === "function" ? options.delay(opId) : (options.delay ?? 0);
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(handler(inputOf(route))) });
+    let answer: unknown;
+    try {
+      answer = handler(inputOf(route));
+    } catch (error) {
+      if (!(error instanceof DemoRefusal)) throw error;
+      const body = { error: { code: error.code, message: error.message, details: error.details } };
+      return route.fulfill({ status: error.status, contentType: "application/json", body: JSON.stringify(body) });
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(answer) });
   });
   await installSockets(page);
 }

@@ -5,14 +5,17 @@
 // forms; anything else becomes a plain git URL (owner/repo expanded to
 // https://github.com/owner/repo.git), public, deploying only through the
 // deploy trigger. A typed repository counts as one of a connection's when
-// that connection lists it (github.repos / gitProviders.repos): the
-// account alone says nothing about which repositories an installation may
-// read.
+// that connection reads it by its exact name (github.branches /
+// gitProviders.branches, the same check connectRepo makes): the account
+// alone says nothing about which repositories an installation may read.
+// Only a clear answer decides: NOT_FOUND (it cannot read it) and FORBIDDEN
+// (the connection is not usable here); any other failure leaves the field
+// unchecked, so a private repository never quietly becomes a public URL.
 
-import type { services } from "@seylo/ops";
-import type { RepoParse, RepoProblem, RepoRef } from "./repo-input";
+import { actionAllowed, OpError, services } from "@seylo/ops";
+import type { HostKind, KnownHost, RepoParse, RepoProblem, RepoRef } from "./repo-input";
 
-export type ConnectionKind = "github" | "gitlab" | "gitea" | "bitbucket";
+export type ConnectionKind = HostKind;
 
 /** A place the panel lists repositories from. */
 export interface Connection {
@@ -30,7 +33,8 @@ export interface Connection {
 export interface RepoInfo {
   /** "owner/name", "group/sub/project" or "workspace/slug". */
   fullName: string;
-  private: boolean;
+  /** null when not known (a typed repository the connection was asked for by name). */
+  private: boolean | null;
   /** null for an empty repository. */
   defaultBranch: string | null;
   /** Last push or activity, for the list. */
@@ -43,23 +47,35 @@ export interface FoundRepo {
   repo: RepoInfo;
 }
 
-/** What a connection answered when asked for a typed repository. */
+/**
+ * What a connection answered when asked for a typed repository by name:
+ * found (it reads it), missing (NOT_FOUND: it cannot, or there is no such
+ * repository), refused (FORBIDDEN: not usable in this project), failed (no
+ * answer to go by: the provider is down, a rate limit, a timeout).
+ */
 export interface RepoLookup {
   connection: Connection;
   /** The repository's full name in that connection. */
   path: string;
-  state: "pending" | "done" | "failed";
-  repos: RepoInfo[];
+  state: "pending" | "found" | "missing" | "refused" | "failed";
+  /** The default branch, once found. */
+  defaultBranch: string | null;
+  error: unknown;
 }
+
+/** The list a typed repository's connections come from. */
+export type ConnectionList = "github" | "providers";
 
 export type RepoDecision =
   /** Nothing usable typed. */
   | { type: "none"; problem: RepoProblem }
-  /** Still asking the connections whether they hold it. */
-  | { type: "checking"; repo: RepoRef }
+  /** Still asking the connections whether they hold it; needsProject: they can only be asked once a project is picked. */
+  | { type: "checking"; repo: RepoRef; needsProject?: boolean }
+  /** A connection, or the list of them, did not answer: nothing to create until it does. */
+  | { type: "unchecked"; repo: RepoRef; failed: Connection | ConnectionList; error: unknown }
   /** Through a GitHub App installation or a git provider connection: deploys on push. */
   | { type: "connected"; found: FoundRepo }
-  /** A plain git URL. missedIn: a connection that could have held it but does not list it. */
+  /** A plain git URL. missedIn: a connection that could have held it and cannot read it. */
   | { type: "git"; repo: RepoRef; missedIn: Connection | null };
 
 type Installation = { id: string; accountLogin: string; suspended: boolean };
@@ -96,11 +112,24 @@ function baseOf(connection: Connection): { host: string; hostname: string; prefi
   }
 }
 
+/** The connections' servers, so the parser reads a self-managed GitLab's or Gitea's page addresses like gitlab.com's. */
+export function knownHostsOf(connections: readonly Connection[]): KnownHost[] {
+  return connections.flatMap((connection) => {
+    const base = baseOf(connection);
+    return base.host ? [{ host: base.host, kind: connection.kind, prefix: base.prefix }] : [];
+  });
+}
+
+/** The repository names github.branches and gitProviders.branches take. */
+const githubRepoName = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const providerRepoName = new RegExp(services.RepoFullPath.pattern as string);
+
 /**
  * The full name a typed repository would have in a connection, or null
  * when it cannot be in it (another host, another GitHub account, a path
- * outside a self-managed server's prefix). SSH addresses match on the
- * host name alone: the connection clones over https with its token.
+ * outside a self-managed server's prefix, a name the connection's ops
+ * refuse). SSH addresses match on the host name alone: the connection
+ * clones over https with its token.
  */
 export function pathIn(connection: Connection, repo: RepoRef): string | null {
   const base = baseOf(connection);
@@ -118,7 +147,25 @@ export function pathIn(connection: Connection, repo: RepoRef): string | null {
     if (parts.length !== 2) return null;
     if (connection.owner && parts[0]?.toLowerCase() !== connection.owner.toLowerCase()) return null;
   }
-  return path;
+  const valid = connection.kind === "github" ? githubRepoName.test(path) : providerRepoName.test(path) && path.length <= 300;
+  return valid ? path : null;
+}
+
+/** The list a typed repository's connections are in: the GitHub App's installations for github.com, the providers for any other host. */
+export function listFor(repo: RepoRef): ConnectionList {
+  return repo.host.replace(/:\d+$/, "") === "github.com" ? "github" : "providers";
+}
+
+/**
+ * What a failed lookup says. NOT_FOUND for the repository (details.field
+ * "repo": the connection cannot read it) and FORBIDDEN are answers; anything
+ * else is none, a NOT_FOUND for the connection itself (deleted meanwhile)
+ * included.
+ */
+export function lookupStateOf(error: unknown): "missing" | "refused" | "failed" {
+  if (error instanceof OpError && error.code === "NOT_FOUND" && error.details?.field === "repo") return "missing";
+  if (error instanceof OpError && error.code === "FORBIDDEN") return "refused";
+  return "failed";
 }
 
 /** The text the Repository field shows for a picked repository: what typing it would find again. */
@@ -130,23 +177,26 @@ export function textFor(found: FoundRepo): string {
 
 /**
  * The source for the field: a picked repository; else the first
- * connection (in order) that lists the typed one; else a plain git URL.
- * While a connection that could hold it has not answered, "checking".
- * A connection that failed to answer (FORBIDDEN for someone it is not
- * shared with in this project, a rate limit) does not hold it.
+ * connection (in order) that reads the typed one; else, when one did not
+ * answer, unchecked; else a plain git URL. While a connection that could
+ * hold it has not answered, "checking". A connection that refused
+ * (FORBIDDEN for someone it is not shared with in this project) does not
+ * hold it and is not mentioned; one that cannot read it (NOT_FOUND) is the
+ * one the line names.
  */
 export function decideSource(parse: RepoParse, picked: FoundRepo | null, lookups: RepoLookup[]): RepoDecision {
   if (picked) return { type: "connected", found: picked };
   if (!parse.ok) return { type: "none", problem: parse.problem };
-  let missedIn: Connection | null = null;
-  for (const lookup of lookups) {
-    if (lookup.state === "pending") return { type: "checking", repo: parse.repo };
-    if (lookup.state === "failed") continue;
-    const hit = lookup.repos.find((r) => r.fullName.toLowerCase() === lookup.path.toLowerCase());
-    if (hit) return { type: "connected", found: { connection: lookup.connection, repo: hit } };
-    missedIn ??= lookup.connection;
+  if (lookups.some((lookup) => lookup.state === "pending")) return { type: "checking", repo: parse.repo };
+  const found = lookups.find((lookup) => lookup.state === "found");
+  if (found) {
+    const repo: RepoInfo = { fullName: found.path, private: null, defaultBranch: found.defaultBranch, updatedAt: null };
+    return { type: "connected", found: { connection: found.connection, repo } };
   }
-  return { type: "git", repo: parse.repo, missedIn };
+  const failed = lookups.find((lookup) => lookup.state === "failed");
+  if (failed) return { type: "unchecked", repo: parse.repo, failed: failed.connection, error: failed.error };
+  const missed = lookups.find((lookup) => lookup.state === "missing");
+  return { type: "git", repo: parse.repo, missedIn: missed?.connection ?? null };
 }
 
 type Source = (typeof services.Source)["static"];
@@ -169,9 +219,26 @@ export function sourceFor(decision: RepoDecision, branch: string): Source | null
   return null;
 }
 
-/** A stable key for the repository a decision names, to tell when it changed. */
-export function decisionKey(decision: RepoDecision): string {
-  if (decision.type === "connected") return `${decision.found.connection.id}:${decision.found.repo.fullName.toLowerCase()}`;
-  if (decision.type === "git" || decision.type === "checking") return decision.repo.url;
-  return "";
+/**
+ * Which repository the text names, whatever it is typed as and whatever
+ * the connections answer: "github.com/acme/app" for acme/app, its URL and
+ * git@github.com:acme/app.git alike. "" for no repository. A branch edited
+ * for one repository is dropped when this changes.
+ */
+export function repoKeyOf(parse: RepoParse): string {
+  return parse.ok ? `${parse.repo.host.replace(/:\d+$/, "")}/${parse.repo.path}`.toLowerCase() : "";
+}
+
+type Grant = { scopeType: "project" | "service"; scopeId: string; actions: readonly string[] };
+
+/**
+ * Whether connecting a repository can work for the person: connectRepo
+ * needs services.update on the new service, which owners and admins hold
+ * and a member holds through a project grant (a service grant cannot cover
+ * a service that does not exist yet). Without it the field makes plain git
+ * URLs, which services.create alone stores.
+ */
+export function mayConnectIn(role: string | undefined, grants: readonly Grant[], projectId: string): boolean {
+  if (role === "owner" || role === "admin") return true;
+  return grants.some((g) => g.scopeType === "project" && g.scopeId === projectId && actionAllowed(g.actions, "services.update"));
 }

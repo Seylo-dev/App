@@ -16,7 +16,7 @@ import { publishService, updateSpec } from "../services/ops";
 import { loadService, toDetail } from "../services/rows";
 import { assertMayUseSomewhere, assertSourceAllowed } from "../services/source-guard";
 import { readPanelName } from "../settings/keys";
-import { githubPages, githubRequest } from "./api";
+import { GithubApiError, githubPages, githubRequest } from "./api";
 import {
   appJwt,
   appRow,
@@ -285,15 +285,30 @@ const repos = implement(githubOps.repos, async (input, ctx) => {
   };
 });
 
-/** Branches of a repo through the App, default branch first. */
+/**
+ * Branches of a repo through the App, default branch first. GitHub answers
+ * 404 for a repository the installation cannot read (or that does not
+ * exist): NOT_FOUND with field repo, so the New app dialog can tell it from
+ * GitHub not answering (UNAVAILABLE), which says nothing about the repository.
+ */
 export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, installationRowId: string, repo: string) {
   const token = await tokenForInstallation(ctx.db, ctx.secrets, installationRowId);
-  const [info, names] = await Promise.all([
-    githubRequest<{ default_branch: string }>(`/repos/${repo}`, { auth: token }),
-    githubPages<string>(`/repos/${repo}/branches`, token, (page) => (page as { name: string }[]).map((b) => b.name), 10),
-  ]);
-  const defaultBranch = info.data.default_branch;
-  return { defaultBranch, branches: [defaultBranch, ...names.filter((b) => b !== defaultBranch).sort()] };
+  try {
+    const [info, names] = await Promise.all([
+      githubRequest<{ default_branch: string }>(`/repos/${repo}`, { auth: token }),
+      githubPages<string>(`/repos/${repo}/branches`, token, (page) => (page as { name: string }[]).map((b) => b.name), 10),
+    ]);
+    const defaultBranch = info.data.default_branch;
+    return { defaultBranch, branches: [defaultBranch, ...names.filter((b) => b !== defaultBranch).sort()] };
+  } catch (error) {
+    if (!(error instanceof GithubApiError)) throw error;
+    if (error.status === 404) {
+      throw new OpError("NOT_FOUND", `The App cannot read ${repo}, or there is no such repository. Give the App access to it on GitHub.`, {
+        field: "repo",
+      });
+    }
+    throw new OpError("UNAVAILABLE", error.message, { field: "repo" });
+  }
 }
 
 const branches = implement(githubOps.branches, async (input, ctx) => {

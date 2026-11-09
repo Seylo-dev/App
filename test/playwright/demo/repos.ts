@@ -1,9 +1,11 @@
 // Demo answers for picking a repository: the acme GitHub App installation
 // and a GitLab connection with their repositories (filtered by the query
-// and paged like the panel), branches per repository, git.branches for a
-// plain URL, and creating and connecting a new app. Same world as
-// service.ts; loosely typed like the rest of demo/.
+// and paged like the panel), branches per repository (NOT_FOUND for one the
+// connection does not hold), git.branches for a plain URL, and creating and
+// connecting a new app. Same world as service.ts; loosely typed like the
+// rest of demo/.
 
+import { DemoRefusal } from "./refusal";
 import { handlers as serviceHandlers, ids } from "./service";
 
 type Input = Record<string, any>;
@@ -88,7 +90,17 @@ function page<T extends { fullName: string }>(all: T[], input: Input) {
   return { repos: list.slice((at - 1) * pageSize, at * pageSize), hasMore: list.length > at * pageSize };
 }
 
-function branches(repo: string) {
+/**
+ * A repository's branches through a connection that holds it, as the panel
+ * answers github.branches and gitProviders.branches; NOT_FOUND for the repo
+ * when the connection cannot read it (the New app dialog looks typed
+ * repositories up this way).
+ */
+function branches(held: { fullName: string }[], input: Input) {
+  const repo = held.find((r) => r.fullName.toLowerCase() === String(input.repo).toLowerCase())?.fullName;
+  if (!repo) {
+    throw new DemoRefusal(404, "NOT_FOUND", `The connection cannot read ${input.repo}, or there is no such repository.`, { field: "repo" });
+  }
   const list = branchesOf[repo] ?? ["main"];
   return { branches: list, defaultBranch: list[0] ?? null };
 }
@@ -108,10 +120,10 @@ export const handlers: Record<string, (input: Input) => unknown> = {
     hidden: false,
   }),
   "github.repos": (input) => page(githubRepos[String(input.installationId)] ?? [], input),
-  "github.branches": (input) => branches(String(input.repo)),
+  "github.branches": (input) => branches(githubRepos[String(input.installationId)] ?? [], input),
   "gitProviders.list": () => ({ items: [gitlabConnection], hidden: false }),
   "gitProviders.repos": (input) => page(gitlabRepos, input),
-  "gitProviders.branches": (input) => branches(String(input.repo)),
+  "gitProviders.branches": (input) => branches(gitlabRepos, input),
   "git.branches": (input) => publicBranches[String(input.url)] ?? { branches: ["main", "develop"], defaultBranch: "main" },
   "services.create": createdService,
   "github.connectRepo": (input) => serviceHandlers["services.get"]?.({ serviceId: input.serviceId }),

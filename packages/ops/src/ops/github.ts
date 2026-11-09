@@ -189,7 +189,8 @@ export const branches = defineOp({
   id: "github.branches",
   kind: "query",
   summary: "List a repository's branches",
-  description: "Lists the branches of a repository through the App, default branch first.",
+  description:
+    "Lists the branches of a repository through the App, default branch first. Fails with NOT_FOUND (details.field repo) when the installation cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
   input: Type.Object({
     projectId: Id,
     installationId: Id,

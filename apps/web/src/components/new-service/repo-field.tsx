@@ -8,9 +8,11 @@
 // hidden installation or provider list gives none, a suspended
 // installation is left out, and one whose repositories the panel refuses
 // (FORBIDDEN for a member it is not shared with in the project) drops out
-// of the list and of matching what was typed, as on the Source tab.
+// of the list and of matching what was typed, as on the Source tab. A
+// member who may create services but not change them (connectRepo needs
+// services.update) gets plain git URLs only.
 
-import { git, github, gitProviders, OpError, type OpOutput } from "@seylo/ops";
+import { auth, git, github, gitProviders, grants, OpError, type OpOutput } from "@seylo/ops";
 import type { OpClient } from "@seylo/ops/client";
 import { opQueryKey, useOp, useOpClient } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
@@ -32,7 +34,7 @@ import {
 } from "@tabler/icons-react";
 import { type QueryKey, type UseQueryOptions, useQueries } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { useDebounced } from "../docker-hub/use-debounced";
@@ -42,9 +44,14 @@ import { parseRepoInput, type RepoParse } from "./repo-input";
 import {
   type Connection,
   type ConnectionKind,
+  type ConnectionList,
   connectionsOf,
   decideSource,
   type FoundRepo,
+  knownHostsOf,
+  listFor,
+  lookupStateOf,
+  mayConnectIn,
   pathIn,
   type RepoDecision,
   type RepoInfo,
@@ -53,6 +60,9 @@ import {
 
 type RepoPage = { repos: RepoInfo[]; hasMore: boolean };
 type RepoQuery = UseQueryOptions<unknown, OpError, RepoPage, QueryKey>;
+/** What a lookup by name needs from github.branches / gitProviders.branches. */
+type Lookup = { defaultBranch: string | null };
+type LookupQuery = UseQueryOptions<Lookup, OpError, Lookup, QueryKey>;
 
 const kindIcons: Record<ConnectionKind, typeof IconBrandGithub> = {
   github: IconBrandGithub,
@@ -62,6 +72,7 @@ const kindIcons: Record<ConnectionKind, typeof IconBrandGithub> = {
 };
 
 const isForbidden = (error: unknown) => error instanceof OpError && error.code === "FORBIDDEN";
+const message = (error: unknown) => errorMessage(error, t("common.unknownError"));
 
 /**
  * One page of a connection's repositories, kept in the cache as the op
@@ -100,21 +111,67 @@ function reposQuery(client: OpClient, projectId: string, connection: Connection,
   };
 }
 
+/**
+ * A typed repository asked for by its exact name through a connection: the
+ * branches op, which reads that one repository and fails with NOT_FOUND
+ * when the connection cannot (FORBIDDEN when it is not usable here). The
+ * same query the branch suggestions make once it is found, so it is asked
+ * once.
+ */
+function lookupQuery(client: OpClient, projectId: string, connection: Connection, repo: string, enabled: boolean): LookupQuery {
+  const shared = { enabled: enabled && projectId !== "", retry: retryOp, staleTime: 60_000 };
+  if (connection.kind === "github") {
+    const input = { projectId, installationId: connection.id, repo };
+    return {
+      ...shared,
+      queryKey: opQueryKey(github.branches, input),
+      queryFn: ({ signal }) => client.call(github.branches, input, { signal }),
+    };
+  }
+  const input = { projectId, providerId: connection.id, repo };
+  return {
+    ...shared,
+    queryKey: opQueryKey(gitProviders.branches, input),
+    queryFn: ({ signal }) => client.call(gitProviders.branches, input, { signal }),
+  };
+}
+
+/**
+ * Whether connecting a repository can work in the project (repo-source.ts
+ * mayConnectIn): owners and admins at once, members once their grants
+ * (grants.mine) are read. A failed grants list does not block: the panel
+ * still checks the connect.
+ */
+export function useCanConnect(projectId: string, enabled: boolean): { pending: boolean; can: boolean } {
+  const me = useOp(auth.whoami, {});
+  const role = me.data?.viewer.role;
+  const mine = useOp(grants.mine, {}, { enabled: enabled && role === "member", retry: retryOp, staleTime: 60_000 });
+  if (!role) return me.isError ? { pending: false, can: true } : { pending: true, can: false };
+  if (role !== "member" || mine.isError) return { pending: false, can: true };
+  if (!mine.data) return { pending: true, can: false };
+  return { pending: false, can: mayConnectIn(role, mine.data.grants, projectId) };
+}
+
 export interface RepoSource {
   parse: RepoParse;
   decision: RepoDecision;
   connections: Connection[];
-  /** The installation and provider lists are still loading. */
+  /** The installation and provider lists (and a member's grants) are still loading. */
   listsPending: boolean;
-  /** Both lists failed: the first error. One failing alone leaves the other's connections. */
-  listsError: unknown;
+  /** Each list's error, null when it loaded. */
+  listErrors: Record<ConnectionList, unknown>;
+  /** Whether repositories may be connected here (see useCanConnect); without it, Browse says why and typing gives git URLs. */
+  canConnect: boolean;
+  /** Asks again what did not answer: a failed list or lookup. */
+  retry: () => void;
 }
 
 /**
  * The source the field's text (or a picked repository) becomes. A typed
- * repository that a connection could hold is looked up in it (github.repos
- * with the name, gitProviders.repos with the last segment) once the text
- * rests for 300ms; until then and while the lists load it is "checking".
+ * repository that a connection could hold is looked up in it by name once
+ * the text rests for 300ms; until then and while the lists load it is
+ * "checking". Page addresses of the connections' own servers (a
+ * self-managed GitLab or Gitea) are read like gitlab.com's.
  */
 export function useRepoSource({
   projectId,
@@ -128,42 +185,66 @@ export function useRepoSource({
   enabled: boolean;
 }): RepoSource {
   const client = useOpClient();
+  const access = useCanConnect(projectId, enabled);
   const installs = useOp(github.installations, {}, { enabled, retry: retryOp, staleTime: 60_000 });
   const providers = useOp(gitProviders.list, {}, { enabled, retry: retryOp, staleTime: 60_000 });
   const connections = useMemo(() => connectionsOf(installs.data, providers.data), [installs.data, providers.data]);
-  const listsPending = installs.isPending || providers.isPending;
+  const known = useMemo(() => knownHostsOf(connections), [connections]);
+  const listsPending = installs.isPending || providers.isPending || access.pending;
+  const usable = access.can;
+  const chosen = usable ? picked : null;
 
-  const parse = useMemo(() => parseRepoInput(text), [text]);
+  const parse = useMemo(() => parseRepoInput(text, known), [text, known]);
   const settled = useDebounced(text, 300);
   const typing = settled !== text;
   const candidates = useMemo(() => {
-    const settledParse = parseRepoInput(settled);
-    if (picked || !settledParse.ok) return [];
+    const settledParse = parseRepoInput(settled, known);
+    if (chosen || !usable || !settledParse.ok) return [];
     return connections.flatMap((connection) => {
       const path = pathIn(connection, settledParse.repo);
       return path ? [{ connection, path }] : [];
     });
-  }, [settled, picked, connections]);
+  }, [settled, known, chosen, usable, connections]);
   const results = useQueries({
-    queries: candidates.map(({ connection, path }) =>
-      reposQuery(client, projectId, connection, connection.kind === "github" ? path : (path.split("/").pop() ?? path), 1, enabled),
-    ),
+    queries: candidates.map(({ connection, path }) => lookupQuery(client, projectId, connection, path, enabled)),
   });
   const lookups: RepoLookup[] = candidates.map(({ connection, path }, index) => {
     const result = results[index];
-    if (projectId === "" || !result || result.isError) return { connection, path, state: "failed", repos: [] };
-    if (result.data) return { connection, path, state: "done", repos: result.data.repos };
-    return { connection, path, state: "pending", repos: [] };
+    const base = { connection, path, defaultBranch: null, error: null };
+    if (result?.data) return { ...base, state: "found", defaultBranch: result.data.defaultBranch };
+    // A failure being asked again (Try again) is checking, not failed.
+    if (result?.isError && !result.isFetching) return { ...base, state: lookupStateOf(result.error), error: result.error };
+    return { ...base, state: "pending" };
   });
 
   let decision: RepoDecision;
-  if (picked) decision = decideSource(parse, picked, []);
-  else if (parse.ok && (listsPending || (typing && connections.some((c) => pathIn(c, parse.repo) !== null))))
-    decision = { type: "checking", repo: parse.repo };
-  else decision = decideSource(parse, null, typing ? [] : lookups);
+  if (chosen) decision = decideSource(parse, chosen, []);
+  else if (!parse.ok) decision = decideSource(parse, null, []);
+  else {
+    const repo = parse.repo;
+    const list = listFor(repo) === "github" ? installs : providers;
+    const couldHold = usable && connections.some((c) => pathIn(c, repo) !== null);
+    if (listsPending || (usable && list.isError && list.isFetching)) decision = { type: "checking", repo };
+    else if (usable && list.isError) decision = { type: "unchecked", repo, failed: listFor(repo), error: list.error };
+    else if (typing && couldHold) decision = { type: "checking", repo };
+    else if (projectId === "" && couldHold) decision = { type: "checking", repo, needsProject: true };
+    else decision = decideSource(parse, null, typing ? [] : lookups);
+  }
 
-  const listsError = installs.isError && providers.isError ? installs.error : null;
-  return { parse, decision, connections, listsPending: enabled && listsPending, listsError };
+  const retry = () => {
+    if (installs.isError) void installs.refetch();
+    if (providers.isError) void providers.refetch();
+    for (const result of results) if (result.isError) void result.refetch();
+  };
+  return {
+    parse,
+    decision,
+    connections,
+    listsPending: enabled && listsPending,
+    listErrors: { github: installs.isError ? installs.error : null, providers: providers.isError ? providers.error : null },
+    canConnect: usable,
+    retry,
+  };
 }
 
 export interface BranchSuggestions {
@@ -210,6 +291,28 @@ export function useBranchSuggestions(projectId: string, decision: RepoDecision, 
     loading: active.isPending || (plain !== null && url !== plain.url),
     error: active.error,
   };
+}
+
+/**
+ * Arrow keys, Home and End between a list's options (and its Show more
+ * buttons), for lists marked listbox; Up on the first one calls onTop.
+ */
+function moveInList(event: KeyboardEvent<HTMLElement>, onTop?: () => void) {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="option"], [data-more]'));
+  if (items.length === 0) return;
+  event.preventDefault();
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  if (event.key === "ArrowUp" && at <= 0) return onTop?.();
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? Math.min(at + 1, items.length - 1)
+          : at - 1;
+  items[next]?.focus();
 }
 
 /** The Repository field: free text with a Browse list inside it. */
@@ -259,7 +362,12 @@ export function RepoField({
           </PopoverTrigger>
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-[min(max(var(--radix-popover-trigger-width),420px),calc(100vw-32px))] p-0">
+      {/* The field's width on phones, at least 420px from sm up; never closer than 16px to the window's edges. */}
+      <PopoverContent
+        align="start"
+        collisionPadding={16}
+        className="w-(--radix-popover-trigger-width) p-0 sm:w-[max(var(--radix-popover-trigger-width),420px)]"
+      >
         <RepoBrowser
           projectId={projectId}
           source={source}
@@ -283,6 +391,8 @@ export interface RepoGroup {
   repos: RepoInfo[];
   hasMore: boolean;
   loadingMore: boolean;
+  /** The next page failed: said under the rows, and Show more asks for it again. */
+  moreError?: unknown;
 }
 
 /** The Browse list's search and its repositories, one page per connection until "Show more". */
@@ -300,6 +410,8 @@ function RepoBrowser({
   onPick: (found: FoundRepo) => void;
 }) {
   const client = useOpClient();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState("");
   const query = useDebounced(search.trim(), 300);
   const [pages, setPages] = useState<Record<string, number>>({});
@@ -307,7 +419,7 @@ function RepoBrowser({
     Array.from({ length: pages[connection.id] ?? 1 }, (_, index) => ({ connection, page: index + 1 })),
   );
   const results = useQueries({
-    queries: specs.map(({ connection, page }) => reposQuery(client, projectId, connection, query, page, true)),
+    queries: specs.map(({ connection, page }) => reposQuery(client, projectId, connection, query, page, source.canConnect)),
   });
   const groups: RepoGroup[] = source.connections.map((connection) => {
     const own = results.filter((_, index) => specs[index]?.connection.id === connection.id);
@@ -316,14 +428,25 @@ function RepoBrowser({
     const base = { connection, error: null, repos: [], hasMore: false, loadingMore: false };
     if (!first || first.isPending) return { ...base, status: "loading" };
     if (first.isError) return isForbidden(first.error) ? { ...base, status: "hidden" } : { ...base, status: "error", error: first.error };
+    const later = own.length > 1 ? last : undefined;
+    const loadingMore = later?.isPending === true || (later?.isError === true && later.isFetching);
+    const moreFailed = later?.isError === true && !later.isFetching;
     return {
       ...base,
       status: "ready",
       repos: own.flatMap((r) => r.data?.repos ?? []),
-      hasMore: last?.data?.hasMore ?? false,
-      loadingMore: own.length > 1 && last?.isPending === true,
+      // While the next page loads, or after it failed, the page before it said there is more.
+      hasMore: loadingMore || moreFailed || (last?.data?.hasMore ?? false),
+      loadingMore,
+      moreError: moreFailed ? later?.error : null,
     };
   });
+  const more = (connectionId: string) => {
+    const own = results.filter((_, index) => specs[index]?.connection.id === connectionId);
+    const last = own[own.length - 1];
+    if (own.length > 1 && last?.isError) void last.refetch();
+    else setPages((p) => ({ ...p, [connectionId]: (p[connectionId] ?? 1) + 1 }));
+  };
 
   return (
     <div className="flex flex-col">
@@ -331,12 +454,20 @@ function RepoBrowser({
         <label className="flex h-9 items-center gap-2 rounded-control bg-raised px-2.5">
           <IconSearch size={15} className="shrink-0 text-muted-foreground" aria-hidden="true" />
           <input
+            ref={searchRef}
             // biome-ignore lint/a11y/noAutofocus: the list opens to be searched
             autoFocus
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setPages({});
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowDown") return;
+              const first = listRef.current?.querySelector<HTMLElement>('[role="option"], [data-more]');
+              if (!first) return;
+              e.preventDefault();
+              first.focus();
             }}
             placeholder={t("newService.repo.search")}
             aria-label={t("newService.repo.search")}
@@ -345,15 +476,18 @@ function RepoBrowser({
         </label>
       </div>
       <RepoList
+        listRef={listRef}
         projectId={projectId}
         listsPending={source.listsPending}
-        listsError={source.listsError}
+        listErrors={source.listErrors}
+        canConnect={source.canConnect}
         groups={groups}
         canManage={canManage}
         query={query}
         selected={selected}
         onPick={onPick}
-        onMore={(connectionId) => setPages((p) => ({ ...p, [connectionId]: (p[connectionId] ?? 1) + 1 }))}
+        onMore={more}
+        onTop={() => searchRef.current?.focus()}
       />
     </div>
   );
@@ -364,61 +498,112 @@ const groupLabel = (connection: Connection) =>
 
 /** What the Browse list shows: the states before there are repositories, then the repositories by connection. */
 export function RepoList({
+  listRef: givenRef,
   projectId,
   listsPending,
-  listsError,
+  listErrors,
+  canConnect,
   groups,
   canManage,
   query,
   selected,
   onPick,
   onMore,
+  onTop,
 }: {
+  listRef?: RefObject<HTMLDivElement | null>;
   projectId: string;
   listsPending: boolean;
-  listsError: unknown;
+  listErrors: Record<ConnectionList, unknown>;
+  canConnect: boolean;
   groups: RepoGroup[];
   canManage: boolean;
   query: string;
   selected: FoundRepo | null;
   onPick: (found: FoundRepo) => void;
   onMore: (connectionId: string) => void;
+  /** Up on the first option: back to the search box. */
+  onTop?: () => void;
 }) {
+  const ownRef = useRef<HTMLDivElement>(null);
+  const listRef = givenRef ?? ownRef;
+  // After "Show more", focus goes to the first row the page brought (or back to the button), not to the page.
+  const [focusAfterMore, setFocusAfterMore] = useState<{ connectionId: string; index: number } | null>(null);
+  useEffect(() => {
+    if (!focusAfterMore) return;
+    const group = groups.find((g) => g.connection.id === focusAfterMore.connectionId);
+    if (group?.loadingMore) return;
+    setFocusAfterMore(null);
+    const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-group], [data-more]") ?? []);
+    const row = items.find((el) => el.dataset.group === focusAfterMore.connectionId && el.dataset.index === String(focusAfterMore.index));
+    (row ?? items.find((el) => el.dataset.more === focusAfterMore.connectionId))?.focus();
+  }, [focusAfterMore, groups, listRef]);
+
   const body = (() => {
     if (projectId === "") return <Line>{t("newService.repo.pickProject")}</Line>;
     if (listsPending) return <RepoRowsSkeleton />;
-    if (listsError) return <Line>{t("newService.repo.loadFailed", { message: errorMessage(listsError, t("common.unknownError")) })}</Line>;
-    if (groups.length === 0) return <NoConnections canManage={canManage} />;
+    const failed = (["github", "providers"] as const).filter((list) => listErrors[list] != null);
+    if (failed.length === 2) return <Line>{t("newService.repo.loadFailed", { message: message(listErrors.github) })}</Line>;
+    // One list failing says so; the other list's connections still show.
+    const failedLines = failed.map((list) => (
+      <Line key={list}>{t(`newService.repo.listFailed.${list}`, { message: message(listErrors[list]) })}</Line>
+    ));
+    if (groups.length === 0) return failed.length > 0 ? failedLines : <NoConnections canManage={canManage} />;
+    if (!canConnect) return <Line>{t("newService.repo.cannotConnect")}</Line>;
     const shown = groups.filter((g) => g.status !== "hidden" && !(g.status === "ready" && g.repos.length === 0));
     if (shown.length === 0) {
-      return <Line>{query ? t("newService.repo.noMatch", { query }) : t("newService.repo.noRepos")}</Line>;
+      return [...failedLines, <Line key="none">{query ? t("newService.repo.noMatch", { query }) : t("newService.repo.noRepos")}</Line>];
     }
-    return shown.map((group) => (
-      <div key={group.connection.id} className="flex flex-col">
-        <GroupHeading connection={group.connection} />
-        {group.status === "loading" && <RepoRowsSkeleton />}
-        {group.status === "error" && (
-          <Line>{t("newService.repo.groupFailed", { message: errorMessage(group.error, t("common.unknownError")) })}</Line>
-        )}
-        {group.repos.map((repo) => (
-          <RepoOption
-            key={repo.fullName}
-            repo={repo}
-            selected={selected?.connection.id === group.connection.id && selected.repo.fullName === repo.fullName}
-            onPick={() => onPick({ connection: group.connection, repo })}
-          />
-        ))}
-        {group.loadingMore && <RepoRowsSkeleton rows={1} />}
-        {group.hasMore && !group.loadingMore && (
-          <Button size="sm" variant="ghost" className="mx-1 self-start" onClick={() => onMore(group.connection.id)}>
-            {t("newService.repo.more")}
-          </Button>
-        )}
-      </div>
-    ));
+    return [
+      ...failedLines,
+      ...shown.map((group) => (
+        <div key={group.connection.id} className="flex flex-col">
+          <GroupHeading connection={group.connection} />
+          {group.status === "loading" && <RepoRowsSkeleton />}
+          {group.status === "error" && <Line>{t("newService.repo.groupFailed", { message: message(group.error) })}</Line>}
+          {group.repos.map((repo, index) => (
+            <RepoOption
+              key={repo.fullName}
+              groupId={group.connection.id}
+              index={index}
+              repo={repo}
+              selected={selected?.connection.id === group.connection.id && selected.repo.fullName === repo.fullName}
+              onPick={() => onPick({ connection: group.connection, repo })}
+            />
+          ))}
+          {group.loadingMore && <RepoRowsSkeleton rows={1} />}
+          {group.moreError != null && <Line>{t("newService.repo.groupFailed", { message: message(group.moreError) })}</Line>}
+          {/* Stays while the next page loads (aria-disabled keeps the focus on it), so the keyboard does not land on the page. */}
+          {group.hasMore && (
+            <Button
+              size="sm"
+              variant="ghost"
+              data-more={group.connection.id}
+              aria-disabled={group.loadingMore}
+              className="mx-1 self-start aria-disabled:opacity-60"
+              onClick={() => {
+                if (group.loadingMore) return;
+                setFocusAfterMore({ connectionId: group.connection.id, index: group.repos.length });
+                onMore(group.connection.id);
+              }}
+            >
+              {t("newService.repo.more")}
+            </Button>
+          )}
+        </div>
+      )),
+    ];
   })();
   return (
-    <div role="listbox" aria-label={t("newService.repo.list")} aria-busy={listsPending} className="max-h-80 overflow-y-auto p-1.5">
+    <div
+      ref={listRef}
+      role="listbox"
+      aria-label={t("newService.repo.list")}
+      aria-busy={listsPending}
+      onKeyDown={(e) => moveInList(e, onTop)}
+      // At most 20rem, and never past the window: the space Radix leaves below (or above) the field, less the search box.
+      className="max-h-[min(20rem,calc(var(--radix-popover-content-available-height)_-_56px))] overflow-y-auto p-1.5"
+    >
       {body}
     </div>
   );
@@ -434,27 +619,40 @@ function GroupHeading({ connection }: { connection: Connection }) {
   );
 }
 
-function RepoOption({ repo, selected, onPick }: { repo: RepoInfo; selected: boolean; onPick: () => void }) {
+function RepoOption({
+  groupId,
+  index,
+  repo,
+  selected,
+  onPick,
+}: {
+  groupId: string;
+  index: number;
+  repo: RepoInfo;
+  selected: boolean;
+  onPick: () => void;
+}) {
   return (
     <button
       type="button"
       role="option"
       aria-selected={selected}
+      data-group={groupId}
+      data-index={index}
       onClick={onPick}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent px-2.5 py-2 text-left transition-interactive duration-200 hover:bg-accent",
+        "flex w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent px-2.5 py-2 text-left transition-interactive duration-200 hover:bg-accent focus-visible:bg-accent",
         selected && "bg-accent",
       )}
     >
       <span className="min-w-0 truncate font-mono text-[12.5px] text-foreground">{repo.fullName}</span>
-      {repo.private ? (
+      {repo.private === true && (
         <Chip tone="gray" className="shrink-0 py-0">
           <IconLock size={11} aria-hidden="true" />
           {t("newService.repo.private")}
         </Chip>
-      ) : (
-        <span className="shrink-0 text-xs text-muted-foreground">{t("newService.repo.public")}</span>
       )}
+      {repo.private === false && <span className="shrink-0 text-xs text-muted-foreground">{t("newService.repo.public")}</span>}
       <span className="ml-auto flex shrink-0 items-center gap-1.5">
         {repo.updatedAt && <span className="text-xs whitespace-nowrap text-muted-foreground">{formatRelative(repo.updatedAt)}</span>}
         {selected && <IconCheck size={15} stroke={2} className="text-primary" aria-hidden="true" />}
@@ -503,15 +701,33 @@ function RepoRowsSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** The quiet line under the Repository field: which source the text becomes, or what is wrong with it. */
-export function RepoNote({ id, text, decision }: { id: string; text: string; decision: RepoDecision }) {
+/**
+ * The quiet line under the Repository field: which source the text
+ * becomes, or what is wrong with it. When a connection did not answer, it
+ * says so with Try again (onRetry), and nothing is created until it does.
+ */
+export function RepoNote({ id, text, decision, onRetry }: { id: string; text: string; decision: RepoDecision; onRetry?: () => void }) {
   const loud = decision.type === "none" && (decision.problem === "credentials" || decision.problem === "insecure");
   return (
     <span id={id} className={cn("text-xs leading-normal", loud ? "text-destructive" : "text-muted-foreground")}>
       {noteText(text, decision)}
+      {decision.type === "unchecked" && onRetry && (
+        <>
+          {" "}
+          <button
+            type="button"
+            onClick={onRetry}
+            className="cursor-pointer border-0 bg-transparent p-0 font-medium text-foreground underline underline-offset-2 transition-colors duration-200 hover:text-primary"
+          >
+            {t("newService.repo.retry")}
+          </button>
+        </>
+      )}
     </span>
   );
 }
+
+const providerName = (connection: Connection) => t(`serviceSource.types.${connection.kind}.name`);
 
 function noteText(text: string, decision: RepoDecision): string {
   switch (decision.type) {
@@ -524,28 +740,30 @@ function noteText(text: string, decision: RepoDecision): string {
           .replace(/\.git$/i, ""),
       });
     case "checking":
-      return t("newService.repo.checking", { path: decision.repo.path });
+      return t(decision.needsProject ? "newService.repo.checkingNoProject" : "newService.repo.checking", { path: decision.repo.path });
+    case "unchecked": {
+      const { failed } = decision;
+      if (typeof failed === "string") return t(`newService.repo.listFailed.${failed}`, { message: message(decision.error) });
+      if (failed.kind === "github")
+        return t("newService.repo.uncheckedGithub", { account: failed.label, message: message(decision.error) });
+      return t("newService.repo.uncheckedProvider", {
+        name: failed.label,
+        provider: providerName(failed),
+        message: message(decision.error),
+      });
+    }
     case "connected": {
       const { connection } = decision.found;
       if (connection.kind === "github") return t("newService.repo.fromGithub", { account: connection.label });
-      return t("newService.repo.fromProvider", { provider: t(`serviceSource.types.${connection.kind}.name`), name: connection.label });
+      return t("newService.repo.fromProvider", { name: connection.label, provider: providerName(connection) });
     }
     case "git": {
       const { repo, missedIn } = decision;
       if (repo.ssh) return t("newService.repo.ssh", { host: repo.host });
-      if (repo.host === "github.com") {
-        return missedIn
-          ? t("newService.repo.publicGithubMissed", { path: repo.path, account: missedIn.label })
-          : t("newService.repo.publicGithub", { path: repo.path });
-      }
-      const address = `${repo.host}/${repo.path}`;
-      return missedIn
-        ? t("newService.repo.publicGitMissed", {
-            address,
-            provider: t(`serviceSource.types.${missedIn.kind}.name`),
-            name: missedIn.label,
-          })
-        : t("newService.repo.publicGit", { address });
+      if (missedIn?.kind === "github") return t("newService.repo.missedGithub", { account: missedIn.label });
+      if (missedIn) return t("newService.repo.missedProvider", { name: missedIn.label, provider: providerName(missedIn) });
+      if (repo.host === "github.com") return t("newService.repo.publicGithub", { path: repo.path });
+      return t("newService.repo.publicGit", { address: `${repo.host}/${repo.path}` });
     }
   }
 }
@@ -554,11 +772,18 @@ function noteText(text: string, decision: RepoDecision): string {
 export function BranchField({
   id,
   value,
+  placeholder,
+  invalid,
+  describedBy,
   onChange,
   suggestions,
 }: {
   id: string;
   value: string;
+  /** What an empty field stands for: the suggested branch. */
+  placeholder: string;
+  invalid: boolean;
+  describedBy?: string;
   onChange: (branch: string) => void;
   suggestions: BranchSuggestions;
 }) {
@@ -567,6 +792,7 @@ export function BranchField({
   const typed = value.trim().toLowerCase();
   const matching = typed && !all.includes(value.trim()) ? all.filter((b) => b.toLowerCase().includes(typed)) : all;
   const list = matching.length > 0 ? matching : all;
+  const current = value.trim() || placeholder;
   return (
     <Popover open={open && suggestions.available} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
@@ -575,6 +801,9 @@ export function BranchField({
             id={id}
             value={value}
             onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+            aria-invalid={invalid}
+            aria-describedby={describedBy}
             autoComplete="off"
             spellCheck={false}
             className={cn("font-mono", suggestions.available && "pr-9")}
@@ -592,8 +821,14 @@ export function BranchField({
           )}
         </div>
       </PopoverAnchor>
-      <PopoverContent align="end" className="w-[min(280px,calc(100vw-32px))] p-1.5">
-        <div role="listbox" aria-label={t("newService.branch")} aria-busy={suggestions.loading} className="max-h-64 overflow-y-auto">
+      <PopoverContent align="end" collisionPadding={16} className="w-[min(280px,calc(100vw-32px))] p-1.5">
+        <div
+          role="listbox"
+          aria-label={t("newService.branch")}
+          aria-busy={suggestions.loading}
+          onKeyDown={(e) => moveInList(e)}
+          className="max-h-[min(16rem,calc(var(--radix-popover-content-available-height)_-_12px))] overflow-y-auto"
+        >
           {suggestions.loading ? (
             <LoadingRegion label={t("newService.repo.branchesLoading")} className="flex flex-col">
               {[0, 1, 2].map((i) => (
@@ -603,7 +838,7 @@ export function BranchField({
               ))}
             </LoadingRegion>
           ) : suggestions.error ? (
-            <Line>{t("newService.repo.branchesFailed", { message: errorMessage(suggestions.error, t("common.unknownError")) })}</Line>
+            <Line>{t("newService.repo.branchesFailed", { message: message(suggestions.error) })}</Line>
           ) : list.length === 0 ? (
             <Line>{t("newService.repo.noBranches")}</Line>
           ) : (
@@ -612,14 +847,14 @@ export function BranchField({
                 key={branch}
                 type="button"
                 role="option"
-                aria-selected={branch === value.trim()}
+                aria-selected={branch === current}
                 onClick={() => {
                   onChange(branch);
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent px-2.5 py-2 text-left transition-interactive duration-200 hover:bg-accent",
-                  branch === value.trim() && "bg-accent",
+                  "flex w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent px-2.5 py-2 text-left transition-interactive duration-200 hover:bg-accent focus-visible:bg-accent",
+                  branch === current && "bg-accent",
                 )}
               >
                 <span className="min-w-0 truncate font-mono text-[12.5px] text-foreground">{branch}</span>
@@ -628,7 +863,7 @@ export function BranchField({
                     {t("newService.repo.defaultBranch")}
                   </Chip>
                 )}
-                {branch === value.trim() && <IconCheck size={15} stroke={2} className="ml-auto shrink-0 text-primary" aria-hidden="true" />}
+                {branch === current && <IconCheck size={15} stroke={2} className="ml-auto shrink-0 text-primary" aria-hidden="true" />}
               </button>
             ))
           )}

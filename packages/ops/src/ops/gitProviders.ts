@@ -197,7 +197,8 @@ export const branches = defineOp({
   id: "gitProviders.branches",
   kind: "query",
   summary: "List a provider repository's branches",
-  description: "Lists the branches of a repository through a connection, default branch first.",
+  description:
+    "Lists the branches of a repository through a connection, default branch first. Fails with NOT_FOUND (details.field repo) when the provider answers that the connection cannot read the repository or there is none.",
   input: Type.Object({
     projectId: Id,
     providerId: Id,
