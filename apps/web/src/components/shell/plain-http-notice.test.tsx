@@ -24,8 +24,8 @@ test("one calm line with a link to the panel domain and a closed tunnel section"
 test("More shows the SSH tunnel for this address and port", async () => {
   const markup = await renderStatic(() => <PlainHttpNoticeView page={page} canSetDomain onDismiss={() => {}} defaultOpen />);
   expect(markup).toContain('aria-expanded="true"');
-  expect(markup).toContain("ssh -L 3000:localhost:3000 203.0.113.5");
-  expect(markup).toContain(html(t("plainHttp.thenOpen", { url: "http://localhost:3000" })));
+  expect(markup).toContain("ssh -L 3000:127.0.0.1:3000 root@203.0.113.5");
+  expect(markup).toContain(html(t("plainHttp.thenOpen", { url: "http://127.0.0.1:3000" })));
   expect(markup).toContain(html(t("plainHttp.less")));
 });
 

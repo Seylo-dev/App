@@ -34,7 +34,9 @@ test/e2e-colima/          three-VM end-to-end harness and checklist (`make e2e`,
 test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/ci.yml  CI on GitHub's runners: check-gen, lint, test, build (publishes nothing)
 .github/workflows/security.yml  govulncheck, osv-scanner (triaged ignores in osv-scanner.toml) and zizmor on push, pull request and weekly
-.github/workflows/release.yml   tag releases: Build and test (read-only token, the only job that runs npm), Draft release (unsigned, from that build), Sign (the only job with the release key, environment `release`), Publish; scripts/check-release-workflow.ts keeps npm out of jobs with a write token or a secret
+.github/workflows/release.yml   tag releases: Build and test (read-only token, the only job that runs npm), Draft release (unsigned, from that build), Sign (the only job with the release key, environment `release`), Publish, then Start the install smoke test (actions: write, runs gh only); scripts/check-release-workflow.ts keeps npm out of jobs with a write token or a secret
+.github/workflows/install-smoke.yml  installs a published release with its install.sh on GitHub's amd64 and arm64 runners and runs test/install-smoke/smoke.sh (read-only token, no secret)
+test/install-smoke/       smoke.sh: owner, API key, a whoami service, its IP:port answers
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
 templates/                one-click template catalog (meta.yaml + index.ts per app; README.md has the format)
 ```
@@ -1988,7 +1990,6 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | The panel on a real tailnet (0.2.1): the agent's tailnet area ran against an httptest LocalAPI with recorded tailscaled 1.104.x answers, the panel's tailnet listener and ops in the panel's tests, the cards in Playwright. Not run yet: HTTPS Serve (the certificate, the first-load delay, the `__Host-` cookie, no HSTS on the ts.net name), a real login.tailscale.com sign-in link and tailnet name, key expiry and the Disable key expiry link, the grant snippet in the real policy editor, Serve with `--netfilter-mode=off`. Whether Docker older than 28 lets the local network reach ports published on 127.0.0.1 (route_localnet) is from Docker's docs, not tested | The owner's check on a real Tailscale account before the release; the card and the Docker Engine check warn below 28 |
 | Not in 0.2.1: nodes over the tailnet (a Serve TCP forward of the agents' port, "Connect over Tailscale" in Add node), apps on the tailnet, passkeys on the ts.net name, signing in with the Tailscale identity, an installer `--tailscale` flag, a node-side veto on builds (`no_builds`) | Nodes connect over the domain or the agents' port; passkeys need the panel domain; join commands made on the tailnet URL use the domain or the agents' port |
 | Lockouts the panel cannot see: a tailnet access rule that shuts out the owner's devices, or the owner's device removed from the tailnet, while the server stays Running | Only the SSH tunnel and `seylo panel ip-access on` / `seylo panel tailscale off` help; the docs warn against limiting SSH to `tailscale0` |
-| Hiding projects (`hiddenProjectIds`, see "Web app") is the owner's request for 0.2.1, written down before it is built | Nothing is hidden; remove this row when it lands and check the "Web app" entry against it |
 | Re-auth scope: demotions and grants that only take actions away are not gated, and API keys never are (admin keys may invite, widen grants, promote and create join tokens, since every key was made under a fresh sign-in). Passkey and GitHub re-auth ran in Playwright against a stubbed browser passkey prompt and mocked GitHub answers (the test panel has no domain or client id); the real passkey assertion is checked by the panel's own tests only | Behaviour as described |
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
@@ -3241,23 +3242,32 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the tunnel itself shows nothing, and a `*.ts.net` host, the tailnet URL
   in HTTP mode, counts too): one neutral line "HTTPS is off until the
   panel has a domain.", "Set a domain" to Settings > General for owners
-  and admins, "More" for the SSH tunnel command for this port, and a
+  and admins, "More" for the SSH tunnel command for this port
+  (`ssh -L <port>:127.0.0.1:<port> root@<host>`, then `http://127.0.0.1:<port>`:
+  127.0.0.1 because with IP access off Docker publishes the port on IPv4
+  loopback only, the same form as the panel's `recovery.sshTunnel`), and a
   dismiss button remembered per browser (localStorage
   `<slug>.plainHttpNoticeDismissed`, every access in try/catch).
 - Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
   a click anywhere on the field copies, the copy icon included
   (`copy.spec.ts`).
-- Hiding projects (owner request for 0.2.1, per person, not global): the
-  person's preferences (`auth.preferences` / `auth.updatePreferences`, the
-  free-form `Preferences` record) gain `hiddenProjectIds`, add-only: a
-  capped list of ids of projects the person can see; unknown, deleted or
-  no longer visible ids drop out on read. Hidden projects leave the
-  sidebar's Projects list and the home page grid; "Hide project" and
-  "Unhide" are in the project's menu in the sidebar and on its home card;
-  a quiet "Hidden (N)" row ends the sidebar list and "Show hidden" toggles
-  them on the home page, without unhiding. The command palette, direct
-  links, search and the Projects pages ignore it. Nothing is hidden by
-  default: the protected Panel project shows until the person hides it.
+- Hiding projects (0.2.1, per person, not global): the person's
+  preferences (`auth.preferences` / `auth.updatePreferences`, the
+  free-form `Preferences` record) gain `hiddenProjectIds` (`HiddenProjectIds`
+  in `packages/ops/src/ops/auth.ts`), add-only: at most 200 distinct ids,
+  `null` removes the key. The panel keeps only ids of projects that exist
+  and the caller can see, on every read and write; unknown, deleted or no
+  longer visible ids drop out silently (see "Services and deploys"). Hidden
+  projects leave the sidebar's Projects list and the home page grid;
+  "Hide project" and "Unhide project" are in the project's "..." menu
+  (`components/project-menu.tsx`) in the sidebar and on its home card,
+  and a hide toasts with Undo (`lib/use-hidden-projects.ts`). A folded
+  "Hidden (N)" row ends the sidebar list and "Show hidden (N)" brings the
+  cards back on the home page with a "Hidden" chip, without unhiding.
+  The sidebar waits for the preferences, so a hidden project never
+  flashes. The command palette, direct links and the project pages ignore
+  the list. Nothing is hidden by default: the protected Panel project
+  shows until the person hides it.
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the
@@ -3326,7 +3336,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   tailnet with the recovery commands saved) and `build-settings.spec.ts`
   (the build node picker says why a node is not offered: Can build off,
   docker buildx missing, offline; Save sends the build node only when it
-  changed), `env-save.spec.ts`
+  changed), `hide-projects.spec.ts` (Hide project from the sidebar and
+  the home card on the real panel: Undo, a reload, Hidden (N) and Show
+  hidden, the palette and the project page still open it, Unhide),
+  `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
   text unsaved) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all

@@ -11,7 +11,7 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-1
 - **Lock to Tailscale**: one checklist, opened on the tailnet address, that closes IP access and, if you like, removes the panel domain.
 - **Check now** for the panel domain, and panel domains behind Cloudflare's proxy.
 - `seylo panel status` shows how the panel's ports are published and its tailnet address. `seylo panel tailscale status|off|on` works without the panel.
-- **Hide project** in a project's menu takes it out of your own sidebar and home page, for example the Panel project. "Hidden (N)" shows them again.
+- **Hide project** in a project's "..." menu takes it out of your own sidebar and home page, for example the Panel project. Nobody else's view changes. "Hidden (N)" at the end of the sidebar and "Show hidden" on the home page still list them, and the command palette and links still open them.
 - A click anywhere on a copy field copies it.
 
 ## Changed

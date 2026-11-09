@@ -74,8 +74,9 @@ export function PlainHttpNoticeView({ page, canSetDomain, onDismiss, defaultOpen
       {open && (
         <div id={tunnelId} className="flex flex-col gap-2 pb-2 text-muted-foreground">
           <span>{t("plainHttp.tunnel")}</span>
-          <CodeBlock code={`ssh -L ${page.port}:localhost:${page.port} ${page.host}`} tone="dark" />
-          <span>{t("plainHttp.thenOpen", { url: `http://localhost:${page.port}` })}</span>
+          {/* 127.0.0.1, not localhost: with IP access off, Docker publishes the port on IPv4 loopback only. */}
+          <CodeBlock code={`ssh -L ${page.port}:127.0.0.1:${page.port} root@${page.host}`} tone="dark" />
+          <span>{t("plainHttp.thenOpen", { url: `http://127.0.0.1:${page.port}` })}</span>
         </div>
       )}
     </div>

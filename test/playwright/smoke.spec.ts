@@ -115,8 +115,8 @@ test.describe("signed in", () => {
     const more = notice.getByRole("button", { name: "More" });
     await more.click();
     await expect(notice.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
-    await expect(notice).toContainText(/ssh -L (\d+):localhost:\1 127\.0\.0\.1/);
-    await expect(notice).toContainText(/Then open http:\/\/localhost:\d+ in this browser\./);
+    await expect(notice).toContainText(/ssh -L (\d+):127\.0\.0\.1:\1 root@127\.0\.0\.1/);
+    await expect(notice).toContainText(/Then open http:\/\/127\.0\.0\.1:\d+ in this browser\./);
     await other.screenshot({ path: `${shots}/dashboard-plain-http-more.png`, fullPage: true });
     await notice.getByRole("button", { name: "Less" }).click();
     await expect(notice).not.toContainText("ssh -L");

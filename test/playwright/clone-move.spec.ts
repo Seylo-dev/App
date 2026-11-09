@@ -44,7 +44,7 @@ test.describe("clone and move", () => {
       },
     });
     await page.goto(apiPage);
-    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Clone" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Clone api" })).toBeVisible();
@@ -116,7 +116,7 @@ test.describe("clone and move", () => {
       },
     });
     await page.goto(apiPage);
-    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Move to project" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Move api to another project" })).toBeVisible();
@@ -142,7 +142,7 @@ test.describe("clone and move", () => {
     // A blocker keeps the button off.
     blocked = true;
     await page.goto(apiPage);
-    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Move to project" }).click();
     await expect(dialog.getByText("This move cannot run:")).toBeVisible();
     await expect(dialog.getByText("Rename one of them first")).toBeVisible();
@@ -179,7 +179,7 @@ test.describe("clone and move", () => {
       },
     });
     await page.goto(apiPage);
-    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Move to project" }).click();
     const dialog = page.getByRole("dialog");
     const picker = dialog.getByRole("combobox", { name: "New project" });

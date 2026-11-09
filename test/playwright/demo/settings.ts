@@ -27,7 +27,10 @@ export const fixtures: Record<string, unknown> = {
   "settings.general": {
     name: "Acme Cloud",
     domain: "panel.acme.dev",
-    domainStatus: { state: "active", message: "", checkedAt: ago(12), proxied: false },
+    // A getter, so "Checked 12 min ago" holds however long the run has been going.
+    get domainStatus() {
+      return { state: "active", message: "", checkedAt: new Date(Date.now() - 12 * 60_000).toISOString(), proxied: false };
+    },
     defaultNodeId: world.de,
     publicUrl: "https://panel.acme.dev",
     uptimeAllowInternalTargets: false,
