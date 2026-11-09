@@ -9,7 +9,7 @@ import type { PanelDb } from "../../db/client";
 import { cloudflareTunnels, users } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting } from "../../settings";
-import { getService, mainPort } from "../domains/lookup";
+import { appPort, getService } from "../domains/lookup";
 import "./settings";
 
 export type TunnelRow = typeof cloudflareTunnels.$inferSelect;
@@ -62,7 +62,7 @@ export function tunnelActive(deps: Pick<Deps, "db" | "secrets">, row: TunnelRow,
 export function tunnelView(deps: Pick<Deps, "db" | "secrets" | "agents">, serviceId: string, now = new Date()): Tunnel {
   const service = getService(deps.db, serviceId);
   const row = tunnelRow(deps.db, serviceId);
-  const port = row?.targetPort ?? mainPort(service) ?? 80;
+  const port = row?.targetPort ?? appPort(deps.db, service) ?? 80;
   if (!row) {
     return {
       serviceId,

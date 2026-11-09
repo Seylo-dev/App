@@ -96,7 +96,13 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
         <MaintenanceCard service={service} />
       </div>
       <DevAccessCard service={service} />
-      <AddDomainDialog service={service} open={adding} onOpenChange={setAdding} />
+      <AddDomainDialog
+        service={service}
+        open={adding}
+        onOpenChange={setAdding}
+        // The panel makes the first routed domain primary: the same rule the dialog shows.
+        becomesPrimary={list.data !== undefined && !list.data.domains.some((d) => d.primary)}
+      />
       {current && editing?.dialog === "routing" && (
         <RoutingDialog service={service} domain={current} onOpenChange={() => setEditing(null)} />
       )}

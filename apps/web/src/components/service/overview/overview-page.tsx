@@ -1,6 +1,6 @@
-// The Overview tab. Apps: where it runs, the live and latest deploy, the
-// console (with the same Console | Shell switch as the Console tab), its
-// domains, a usage graph and quick actions. Compose stacks: their members.
+// The Overview tab. Apps: the console on top (with the same Console | Shell
+// switch as the Console tab) and the latest deploy under it; on the right
+// where it runs, its domains, a usage graph and quick actions. Compose stacks: their members.
 // Cron services: the schedule and recent runs. Boxes: the editor's state.
 // Databases have no overview; their first tab is Connection.
 
@@ -36,8 +36,8 @@ import { TerminalNote } from "../terminal/terminal-panel";
 import { crashPolicyLabel } from "../usage-strip";
 import type { ServiceDetail } from "../use-service";
 
-/** The Overview console card's height: about 14 lines of output with the header and the stdin line. */
-export const consoleCardHeight = 360;
+/** The Overview console card's height: about 20 lines of output with the header and the stdin line. */
+export const consoleCardHeight = 480;
 
 export function OverviewPage({ service }: { service: ServiceDetail }) {
   if (isDatabaseKind(service.kind))
@@ -65,9 +65,8 @@ function AppOverview({ service }: { service: ServiceDetail }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
-        <LatestDeploy service={service} />
         <ConsoleCard service={service} />
-        <UsagePanel service={service} />
+        <LatestDeploy service={service} />
       </div>
       <div className="flex min-w-0 flex-col gap-4">
         <Panel title={t("serviceOverview.runsOn")}>
@@ -86,7 +85,10 @@ function AppOverview({ service }: { service: ServiceDetail }) {
               {
                 key: "ports",
                 label: t("serviceOverview.ports"),
-                value: service.ports.map((x) => `${x.containerPort}/${x.protocol}`).join(", ") || "-",
+                // A portless app built from a repository still listens somewhere: the PORT the panel gives it.
+                value:
+                  service.ports.map((x) => `${x.containerPort}/${x.protocol}`).join(", ") ||
+                  (service.appPort ? t("serviceOverview.portFromEnv", { port: service.appPort }) : "-"),
                 mono: true,
               },
               { key: "crash", label: t("service.usage.crashPolicy"), value: crashPolicyLabel(service) },
@@ -95,6 +97,7 @@ function AppOverview({ service }: { service: ServiceDetail }) {
           />
         </Panel>
         <DomainsPanel service={service} />
+        <UsagePanel service={service} />
         <Panel title={t("serviceOverview.quick")}>
           {/* No Console here: the console card on the left has it, with Open full to the tab. */}
           <div className="flex flex-wrap gap-2">
@@ -266,51 +269,56 @@ function UsagePanel({ service }: { service: ServiceDetail }) {
         </Link>
       }
     >
-      {data.isError ? (
-        <OpErrorNote error={data.error} compact />
-      ) : data.isPending ? (
-        <LoadingRegion label={t("common.loading")} className="grid gap-4 sm:grid-cols-2">
-          {[t("service.usage.cpu"), t("service.usage.memory")].map((label) => (
-            <div key={label} className="flex flex-col gap-1">
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                {label} · <SkeletonText className="w-10" />
+      {/* In the right column: the two graphs side by side only where the card is wide enough. */}
+      <div className="@container">
+        {data.isError ? (
+          <OpErrorNote error={data.error} compact />
+        ) : data.isPending ? (
+          <LoadingRegion label={t("common.loading")} className="grid gap-4 @md:grid-cols-2">
+            {[t("service.usage.cpu"), t("service.usage.memory")].map((label) => (
+              <div key={label} className="flex flex-col gap-1">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {label} · <SkeletonText className="w-10" />
+                </span>
+                <Skeleton className="h-[90px]" />
+              </div>
+            ))}
+          </LoadingRegion>
+        ) : points.length < 2 ? (
+          <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceMetrics.noData")}</p>
+        ) : (
+          <div className="grid gap-4 @md:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">
+                {t("service.usage.cpu")} · {formatPercent(service.cpuPercent)}
               </span>
-              <Skeleton className="h-[90px]" />
+              <SmoothChart
+                aria-label={t("service.usage.cpu")}
+                height={90}
+                min={0}
+                gridLines={2}
+                series={[{ id: "cpu", label: t("service.usage.cpu"), values: points.map((x) => x.cpuPercent) }]}
+                formatValue={(v) => formatPercent(v)}
+              />
             </div>
-          ))}
-        </LoadingRegion>
-      ) : points.length < 2 ? (
-        <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceMetrics.noData")}</p>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">
-              {t("service.usage.cpu")} · {formatPercent(service.cpuPercent)}
-            </span>
-            <SmoothChart
-              aria-label={t("service.usage.cpu")}
-              height={90}
-              min={0}
-              gridLines={2}
-              series={[{ id: "cpu", label: t("service.usage.cpu"), values: points.map((x) => x.cpuPercent) }]}
-              formatValue={(v) => formatPercent(v)}
-            />
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">
+                {t("service.usage.memory")} · {formatBytes(service.memoryBytes)}
+              </span>
+              <SmoothChart
+                aria-label={t("service.usage.memory")}
+                height={90}
+                min={0}
+                gridLines={2}
+                series={[
+                  { id: "mem", label: t("service.usage.memory"), values: points.map((x) => x.memoryBytes), color: "var(--chart-5)" },
+                ]}
+                formatValue={(v) => formatBytes(v)}
+              />
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">
-              {t("service.usage.memory")} · {formatBytes(service.memoryBytes)}
-            </span>
-            <SmoothChart
-              aria-label={t("service.usage.memory")}
-              height={90}
-              min={0}
-              gridLines={2}
-              series={[{ id: "mem", label: t("service.usage.memory"), values: points.map((x) => x.memoryBytes), color: "var(--chart-5)" }]}
-              formatValue={(v) => formatBytes(v)}
-            />
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </Panel>
   );
 }
@@ -481,11 +489,12 @@ function BoxOverview({ service }: { service: ServiceDetail }) {
   );
 }
 
-/** The app overview's two columns while the service loads: deploys, console and usage on the left, facts, domains and actions on the right. */
+/** The app overview's two columns while the service loads: console and deploys on the left, facts, domains and usage on the right. */
 export function OverviewSkeleton() {
   return (
     <LoadingRegion label={t("common.loading")} className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
+        <TerminalSkeleton height={consoleCardHeight} inRegion />
         <Card>
           <SkeletonText className="w-20 text-[15px]" />
           <div className="flex items-center gap-2">
@@ -498,14 +507,6 @@ export function OverviewSkeleton() {
               // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
               <Skeleton key={i} className={`h-[22px] rounded-chip ${width}`} />
             ))}
-          </div>
-        </Card>
-        <TerminalSkeleton height={consoleCardHeight} inRegion />
-        <Card>
-          <SkeletonText className="w-20 text-[15px]" />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Skeleton className="h-[106px]" />
-            <Skeleton className="h-[106px]" />
           </div>
         </Card>
       </div>
@@ -526,6 +527,15 @@ export function OverviewSkeleton() {
           {[0, 1, 2].map((i) => (
             <SkeletonText key={i} className="w-44 text-[12.5px]" />
           ))}
+        </Card>
+        <Card>
+          <SkeletonText className="w-20 text-[15px]" />
+          <div className="@container">
+            <div className="grid gap-4 @md:grid-cols-2">
+              <Skeleton className="h-[106px]" />
+              <Skeleton className="h-[106px]" />
+            </div>
+          </div>
         </Card>
       </div>
     </LoadingRegion>

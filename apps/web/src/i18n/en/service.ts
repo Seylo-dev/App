@@ -86,6 +86,8 @@ export default {
     start: "Start",
     started: "Starting.",
     deploy: "Deploy",
+    deployBusy: "Deploying",
+    deployBusyHint: "A deploy is in progress. Wait for it, or cancel it, to deploy again.",
     deployStarted: "Deploy started.",
     viewDeploy: "View",
     cancelDeploy: "Cancel deploy",

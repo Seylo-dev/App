@@ -20,6 +20,7 @@ import { t } from "../../../i18n/t";
 import { CheckLabel, Field, parseIntOrNull, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
+import { servicePort } from "../service-port";
 import type { ServiceDetail } from "../use-service";
 import { canRegenerate, LetsEncryptState } from "./certificate-state";
 import type { Domain } from "./domain-row";
@@ -80,16 +81,25 @@ function PortSelect({
   value,
   onChange,
   id,
+  placeholder,
 }: {
   service: ServiceDetail;
   value: number | null;
   onChange: (port: number) => void;
   id: string;
+  /** What an empty field means: the service's port in Add domain, the domain's current one in Routing. */
+  placeholder: number;
 }) {
   const ports = service.ports.filter((p) => p.protocol === "tcp").map((p) => p.containerPort);
   if (ports.length === 0)
     return (
-      <Input id={id} inputMode="numeric" value={value ?? ""} onChange={(e) => onChange(Number(e.target.value) || 0)} placeholder="3000" />
+      <Input
+        id={id}
+        inputMode="numeric"
+        value={value || ""}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        placeholder={String(placeholder)}
+      />
     );
   return (
     <Select value={String(value ?? ports[0])} onValueChange={(v) => onChange(Number(v))}>
@@ -130,10 +140,13 @@ export function AddDomainDialog({
   service,
   open,
   onOpenChange,
+  becomesPrimary = false,
 }: {
   service: ServiceDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** No domain of the service is primary yet: the panel makes this one primary, so the box is ticked and locked. */
+  becomesPrimary?: boolean;
 }) {
   const [host, setHost] = useState("");
   const [pathPrefix, setPath] = useState("/");
@@ -173,8 +186,9 @@ export function AddDomainDialog({
           pathPrefix,
           stripPrefix,
           https,
-          primary,
-          ...(port ? { targetPort: port } : {}),
+          primary: primary || becomesPrimary,
+          // Empty: the service's port (servicePort), which for a portless app built from a repository is its PORT.
+          targetPort: port || servicePort(service),
           ...(redirect && forwardUrl ? { forward: { url: forwardUrl, permanent: true, keepPath: true } } : {}),
         })
       }
@@ -210,7 +224,7 @@ export function AddDomainDialog({
             <Input id="d-path" className="font-mono" value={pathPrefix} onChange={(e) => setPath(e.target.value || "/")} />
           </Field>
           <Field label={t("serviceDomains.form.port")} htmlFor="d-port">
-            <PortSelect id="d-port" service={service} value={port} onChange={setPort} />
+            <PortSelect id="d-port" service={service} value={port} onChange={setPort} placeholder={servicePort(service)} />
           </Field>
           <Field label={t("serviceDomains.form.https")}>
             <HttpsSelect value={https} onChange={setHttps} />
@@ -224,7 +238,12 @@ export function AddDomainDialog({
             >
               {t("serviceDomains.form.strip")}
             </CheckLabel>
-            <CheckLabel className="flex items-center gap-2" checked={primary} onCheckedChange={(v) => setPrimary(v === true)}>
+            <CheckLabel
+              className="flex items-center gap-2"
+              checked={primary || becomesPrimary}
+              onCheckedChange={(v) => setPrimary(v === true)}
+              disabled={becomesPrimary}
+            >
               {t("serviceDomains.form.makePrimary")}
             </CheckLabel>
           </div>
@@ -307,7 +326,8 @@ export function RoutingDialog({
             <Input id="r-path" className="font-mono" value={pathPrefix} onChange={(e) => setPath(e.target.value || "/")} />
           </Field>
           <Field label={t("serviceDomains.form.port")} htmlFor="r-port">
-            <PortSelect id="r-port" service={service} value={port} onChange={setPort} />
+            {/* Empty keeps the domain's port, which the placeholder shows. */}
+            <PortSelect id="r-port" service={service} value={port} onChange={setPort} placeholder={domain.targetPort} />
           </Field>
           <Field label={t("serviceDomains.form.https")}>
             <HttpsSelect value={https} onChange={setHttps} />

@@ -9,6 +9,7 @@ import type { AgentHub } from "../../agent-hub/hub";
 import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
+import { appPort } from "../domains/lookup";
 import { latestCopy } from "./copies";
 import { displaySource } from "./git-url";
 import { readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
@@ -222,6 +223,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     build: spec.build,
     container: spec.container,
     ports: spec.ports,
+    appPort: appPort(db, row),
     healthCheck: spec.healthCheck,
     crashPolicy: spec.crashPolicy,
     restartDelaySeconds,

@@ -332,6 +332,13 @@ export const ServiceDetail = Type.Object({
   build: BuildSettings,
   container: ContainerSettings,
   ports: Type.Array(Port),
+  /**
+   * The port the service listens on as far as the panel can tell: its first
+   * TCP port; for an app built from a repository without one, the port its
+   * domains point at, else 80, which is also the PORT it gets. null for any
+   * other service without a port. What port fields start with.
+   */
+  appPort: Type.Optional(Type.Union([Type.Integer({ minimum: 1, maximum: 65535 }), Type.Null()])),
   healthCheck: Type.Union([HealthCheck, Type.Null()]),
   crashPolicy: CrashPolicy,
   /** Fixed, shown next to the crash policy. */

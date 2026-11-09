@@ -245,3 +245,13 @@ export function branchFromRef(ref: readonly string[] | null, branches: readonly 
   const first = ref[0] ?? "";
   return first !== "" && !commitLike.test(first) ? first : null;
 }
+
+/**
+ * The GitHub tab's (and the Source tab GitHub form's) reading of the text:
+ * owner/repo or a github.com address; any other host is not one.
+ */
+export function githubParse(text: string): RepoParse {
+  const parse = parseRepoInput(text);
+  if (parse.ok && parse.repo.host.replace(/:\d+$/, "") !== "github.com") return { ok: false, problem: "notGithub" };
+  return parse;
+}

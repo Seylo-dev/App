@@ -453,16 +453,21 @@ const run = (i: number, status: string) => ({
 
 export const handlers: Record<string, (input: Input) => unknown> = {
   "services.get": (input: Input) => servicesById[input.serviceId] ?? servicesById[ids.api],
-  "deployments.list": (input: Input) => ({
-    deployments:
+  "deployments.list": (input: Input) => {
+    const all: { status: string }[] =
       input.serviceId === ids.privateApi
         ? [privateApiDeploy]
         : input.serviceId === ids.worker
           ? deployments
-          : deployments.slice(1).map((d, i) => ({ ...d, serviceId: input.serviceId, status: i === 0 ? "live" : d.status })),
-    nextCursor: null,
-    keptImages: input.serviceId === ids.privateApi ? 0 : 5,
-  }),
+          : deployments.slice(1).map((d, i) => ({ ...d, serviceId: input.serviceId, status: i === 0 ? "live" : d.status }));
+    // active: as the panel answers it, only queued and running deploys, oldest first.
+    const active = input.active === true || input.active === "true";
+    return {
+      deployments: active ? all.filter((d) => ["queued", "building", "deploying"].includes(d.status)).reverse() : all,
+      nextCursor: null,
+      keptImages: input.serviceId === ids.privateApi ? 0 : 5,
+    };
+  },
   "deployments.get": (input: Input) => ({
     deployment: input.deploymentId === privateApiDeploy.id ? privateApiDeploy : (deployments.find((d) => d.id === input.deploymentId) ?? deployments[1]),
     logTopic: `deployment:${input.deploymentId}`,

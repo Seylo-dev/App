@@ -12,8 +12,8 @@ import type { Deps } from "../../deps";
 import { boxEnv } from "../boxes/desired";
 import { containerEnv } from "../databases/engines";
 import { findDatabase, loadDatabase } from "../databases/info";
-import { databaseKinds, getService } from "../domains/lookup";
-import { readSpec, type ServiceSpecJson } from "../services/spec";
+import { databaseKinds, domainPort, getService } from "../domains/lookup";
+import { builtAppPort, readSpec, type ServiceSpecJson } from "../services/spec";
 import { buildEnvGraph, type EnvGraph } from "./graph";
 
 type EnvVar = MessageInitShape<typeof EnvVarSchema>;
@@ -25,35 +25,37 @@ type EnvVar = MessageInitShape<typeof EnvVarSchema>;
  */
 export function sealDeploymentEnv(deps: Pick<Deps, "db" | "secrets">, serviceId: string): string {
   const service = getService(deps.db, serviceId);
-  const vars = withPortEnv(resolveServiceEnv(deps, serviceId), service, readSpec(service.spec)).map((v) => ({
-    name: v.name,
-    value: v.value,
-    secret: v.secret,
-  }));
+  const vars = withPortEnv(resolveServiceEnv(deps, serviceId), service, readSpec(service.spec), domainPort(deps.db, serviceId)).map(
+    (v) => ({
+      name: v.name,
+      value: v.value,
+      secret: v.secret,
+    }),
+  );
   return deps.secrets.seal(JSON.stringify(vars), "deployment.env");
 }
 
 /**
- * PORT=<the app's first port> for an app built from a repository (GitHub,
- * a git provider or a git URL; not a compose member, whose compose file
- * says what it needs), unless its env already has PORT (its own .env or the
- * project's shared variables): Railpack and Nixpacks start commands and
+ * PORT for an app built from a repository: its first port, else the port
+ * its domains point at (`domainPortFallback`), else 80 (builtAppPort), so an
+ * older portless app whose domain was added on 3000 keeps listening there;
+ * unless its env already has PORT (its own .env or the
+ * project's shared variables). Railpack and Nixpacks start commands and
  * most frameworks listen on $PORT, so the app listens where domains and
  * health checks look. Part of the env a deploy starts with, so it takes
- * effect on the next deploy, never as a restart of a running app. Only for
- * services created from 0.2.2 on (spec.portEnv): an app deployed before
- * may run an image whose own ENV PORT points elsewhere (a proxy in front of
- * the server), so its env stays as it was.
+ * effect on the next deploy, never as a restart of a running app. Every
+ * built app since 0.2.3, also those created before 0.2.2 (spec.portEnv is
+ * no longer read): leaving them out kept a Next.js app on 3000 behind a
+ * domain on 80.
  */
 export function withPortEnv(
   env: EnvVar[],
   service: { kind: string; parentId: string | null },
-  spec: Pick<ServiceSpecJson, "source" | "ports" | "portEnv">,
+  spec: Pick<ServiceSpecJson, "source" | "ports">,
+  domainPortFallback: number | null = null,
 ): EnvVar[] {
-  const port = spec.ports[0]?.containerPort;
-  const fromRepo = spec.source.type === "github" || spec.source.type === "provider" || spec.source.type === "git";
-  if (!spec.portEnv || service.kind !== "app" || service.parentId !== null || !fromRepo || !port) return env;
-  if (env.some((v) => v.name === "PORT")) return env;
+  const port = builtAppPort(service, spec, domainPortFallback);
+  if (port === null || env.some((v) => v.name === "PORT")) return env;
   return [...env, { name: "PORT", value: String(port), secret: false }];
 }
 

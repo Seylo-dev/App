@@ -11,7 +11,7 @@ import { implement } from "../../ops/implement";
 import { applyDomainLive } from "../exposures/logic";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
 import { checkHost, dnsLookups } from "./dns";
-import { getService, invalidateService, mainPort, type ServiceRow, serviceNodes } from "./lookup";
+import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
 import { type DomainRow, getDomain, primaryDomain, serviceDomains, toDomain } from "./rows";
 
@@ -28,8 +28,9 @@ export function requireDomain(db: PanelDb, serviceId: string, domainId: string):
   return row;
 }
 
-function targetPortFor(service: ServiceRow, requested: number | undefined): number {
-  const port = requested ?? mainPort(service);
+function targetPortFor(db: PanelDb, service: ServiceRow, requested: number | undefined): number {
+  // An app built from a repository with no port: the port its other domains use, else 80, which is its PORT too.
+  const port = requested ?? appPort(db, service);
   if (port === null) {
     throw new OpError("BAD_REQUEST", `${service.name} has no port yet. Pass targetPort or add a port to the service.`, {
       field: "targetPort",
@@ -79,7 +80,7 @@ export const addAuto = implement(domainOps.addAuto, (input, ctx) => {
       reason: "noWildcardDomain",
     });
   }
-  const targetPort = targetPortFor(service, input.targetPort);
+  const targetPort = targetPortFor(ctx.db, service, input.targetPort);
   const host = `${input.subdomain ?? service.name}.${node.wildcardDomain}`;
   const row = ctx.db.transaction((tx) => {
     const created = insertDomain(ctx, tx, {
@@ -109,7 +110,7 @@ export const add = implement(domainOps.add, async (input, ctx) => {
       field: "https",
     });
   }
-  const targetPort = targetPortFor(service, input.targetPort);
+  const targetPort = targetPortFor(ctx.db, service, input.targetPort);
   const nodes = serviceNodes(ctx.db, service.id);
   const dns = await checkHost(input.host, nodes, dnsLookups());
   const row = ctx.db.transaction((tx) => {

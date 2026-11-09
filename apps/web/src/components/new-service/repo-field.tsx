@@ -30,7 +30,7 @@ import { errorMessage } from "../../lib/api";
 import { useDebounced } from "../docker-hub/use-debounced";
 import { formatRelative } from "../service/format";
 import { retryOp } from "../service/op-state";
-import { parseRepoInput, type RepoParse } from "./repo-input";
+import { githubParse, type RepoParse } from "./repo-input";
 import {
   type Connection,
   connectionsOf,
@@ -204,12 +204,7 @@ export function useRepoSource({
   };
 }
 
-/** The GitHub tab's reading of the text: owner/repo or a github.com address; any other host is not one. */
-export function githubParse(text: string): RepoParse {
-  const parse = parseRepoInput(text);
-  if (parse.ok && parse.repo.host.replace(/:\d+$/, "") !== "github.com") return { ok: false, problem: "notGithub" };
-  return parse;
-}
+export { githubParse } from "./repo-input";
 
 export interface BranchSuggestions {
   /** Whether there is a repository to suggest branches for. */

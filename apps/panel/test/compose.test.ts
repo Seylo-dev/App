@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { compose, env as envOps, exposures, OpError, projects, services as serviceOps } from "@seylo/ops";
+import { compose, deployments as deploymentOps, env as envOps, exposures, OpError, projects, services as serviceOps } from "@seylo/ops";
 import { ServiceKind } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { deployments, services, users, volumes } from "../src/db/schema";
@@ -200,6 +200,32 @@ describe("compose stacks", () => {
 
     const detail = await callOp(panel, serviceOps.get, { serviceId: res.body.stack.id }, { cookie });
     expect(detail.body.members.map((m: { name: string }) => m.name)).toEqual(["stack-db", "stack-web"]);
+  });
+
+  test("a stack deploy while a member deploys is refused for all members, naming the member and its serviceId", async () => {
+    const res = await callOp(
+      panel,
+      compose.create,
+      { projectId, name: "stack", nodeId: nodeA, source: { type: "inline", yaml: file } },
+      { cookie },
+    );
+    const db = (res.body.members as { id: string; name: string }[])[0] as { id: string; name: string };
+    const before = panel.deps.db.select().from(deployments).all().length;
+    // The members' first deploys have not finished yet.
+    const again = await callOp(panel, deploymentOps.deploy, { serviceId: res.body.stack.id }, { cookie });
+    expect(again.status).toBe(409);
+    expect(again.body.error.message).toContain("A deploy of stack-db (generation");
+    expect(again.body.error.details).toMatchObject({ reason: "deployRunning", serviceId: db.id });
+    // The id it names is one deployments.get finds under that serviceId.
+    const named = await callOp(
+      panel,
+      deploymentOps.get,
+      { serviceId: db.id, deploymentId: again.body.error.details.deploymentId },
+      { cookie },
+    );
+    expect(named.status).toBe(200);
+    expect(panel.deps.db.select().from(deployments).all()).toHaveLength(before);
+    await fleet.settle();
   });
 
   test("the pasted file holds the members' env, so compose.get returns it only with env.view", async () => {

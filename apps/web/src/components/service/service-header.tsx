@@ -12,11 +12,12 @@ import { useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { isPanelService } from "../../lib/service-display";
+import { useActiveDeploy } from "./active-deploy";
 import { ServiceMenu } from "./copy/service-menu";
 import { useInvalidate } from "./invalidate";
 import { KindBadge } from "./kind-badge";
 import { isNotBuilt, retryOp } from "./op-state";
-import { isActiveDeployment, isDatabaseKind } from "./status";
+import { isDatabaseKind } from "./status";
 import { ServiceStatusChip } from "./status-chip";
 import type { ServiceDetail } from "./use-service";
 
@@ -79,8 +80,8 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
   // The panel's own service updates through Settings > Updates, never by a deploy or a stop.
   const panel = isPanelService(service);
   const deploys = (service.kind === "app" || service.kind === "cron") && !panel;
-  const recent = useOp(deployments.list, { serviceId: service.id, limit: 5 }, { enabled: deploys, retry: retryOp });
-  const active = recent.data?.deployments.find((d) => isActiveDeployment(d.status));
+  // The deploy in progress (the oldest queued or running one): Cancel deploy stops it, and Deploy waits for it.
+  const active = useActiveDeploy(service.id, deploys);
 
   const onDone = (message: string) => () => {
     toast.success(message);
@@ -156,8 +157,13 @@ function HeaderActions({ service }: { service: ServiceDetail }) {
         </>
       )}
       {deploys && (
-        <Button variant="primary" onClick={() => deploy.mutate({ serviceId: service.id })} disabled={deploy.isPending}>
-          {t("service.header.deploy")}
+        <Button
+          variant="primary"
+          onClick={() => deploy.mutate({ serviceId: service.id })}
+          disabled={deploy.isPending || active !== null}
+          title={active ? t("service.header.deployBusyHint") : undefined}
+        >
+          {t(active ? "service.header.deployBusy" : "service.header.deploy")}
         </Button>
       )}
       <ConfirmDialog

@@ -14284,6 +14284,18 @@
                             }
                           }
                         },
+                        "appPort": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "healthCheck": {
                           "anyOf": [
                             {
@@ -19712,7 +19724,7 @@
       "post": {
         "operationId": "deployments.deploy",
         "summary": "Deploy a service now",
-        "description": "Starts a deploy of the service's current settings: the branch head (or a given commit) for git sources, the image for image sources. Queued behind a running deploy of the same service. Returns the new deployment; follow it with deployments.get and deployments.log.",
+        "description": "Starts a deploy of the service's current settings: the branch head (or a given commit) for git sources, the image for image sources. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of the deploy in progress, a member's for a compose stack) while another deploy of the service is queued or running: wait for it or cancel it first. Pushes and trigger URLs still queue behind a running deploy. Returns the new deployment; follow it with deployments.get and deployments.log.",
         "tags": [
           "deployments"
         ],
@@ -20763,7 +20775,7 @@
       "get": {
         "operationId": "deployments.list",
         "summary": "List a service's deployments",
-        "description": "Lists a service's deploy history, newest first: status, who or what triggered it, commit, where it was built and shipped, image digest, step durations, and whether it can be rolled back to.",
+        "description": "Lists a service's deploy history, newest first: status, who or what triggered it, commit, where it was built and shipped, image digest, step durations, and whether it can be rolled back to. With active: only the deploys that are queued or running, oldest first, so the first one is the deploy in progress (the one deployments.deploy names when it refuses); no cursor.",
         "tags": [
           "deployments"
         ],
@@ -20805,6 +20817,14 @@
             "schema": {
               "maxLength": 100,
               "type": "string"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -21998,7 +22018,7 @@
       "post": {
         "operationId": "deployments.rollback",
         "summary": "Roll back to a deployment",
-        "description": "Deploys the image of an earlier successful deployment again, by digest, without building. Settings and environment are the current ones. Fails when the image is no longer kept.",
+        "description": "Deploys the image of an earlier successful deployment again, by digest, without building. Settings and environment are the current ones. Fails when the image is no longer kept, and (CONFLICT, reason deployRunning) while another deploy of the service is queued or running.",
         "tags": [
           "deployments"
         ],
@@ -23443,6 +23463,18 @@
                           }
                         }
                       }
+                    },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "healthCheck": {
                       "anyOf": [
@@ -34340,6 +34372,18 @@
                         }
                       }
                     },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "healthCheck": {
                       "anyOf": [
                         {
@@ -37172,6 +37216,18 @@
                           }
                         }
                       }
+                    },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "healthCheck": {
                       "anyOf": [
@@ -52999,6 +53055,18 @@
                             }
                           }
                         },
+                        "appPort": {
+                          "anyOf": [
+                            {
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "healthCheck": {
                           "anyOf": [
                             {
@@ -55235,6 +55303,18 @@
                         }
                       }
                     },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "healthCheck": {
                       "anyOf": [
                         {
@@ -56673,6 +56753,18 @@
                           }
                         }
                       }
+                    },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "healthCheck": {
                       "anyOf": [
@@ -60307,6 +60399,18 @@
                         }
                       }
                     },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "healthCheck": {
                       "anyOf": [
                         {
@@ -62174,6 +62278,18 @@
                           }
                         }
                       }
+                    },
+                    "appPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "healthCheck": {
                       "anyOf": [

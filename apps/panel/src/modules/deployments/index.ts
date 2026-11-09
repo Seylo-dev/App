@@ -4,7 +4,7 @@
 // deployments after a panel restart.
 
 import { deployments as deploymentOps, OpError } from "@seylo/ops";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { describePrincipal, userOf } from "../../auth/principal";
 import { deployments, services } from "../../db/schema";
 import { defineJob } from "../../jobs/queue";
@@ -21,7 +21,7 @@ import {
   unfinishedDeployments,
 } from "./engine";
 import { readLog } from "./logs";
-import { hasActiveDeploy, queueDeploy } from "./queue";
+import { assertNoActiveDeploy, hasActiveDeploy, queueDeploy } from "./queue";
 import { registryGcJob, registryGcSweepJob, registryGcSweepJobType } from "./registry-gc";
 import { activeStatuses, isFinal, keptImages, loadDeployment, toDeployment, toDeployments } from "./store";
 
@@ -43,6 +43,8 @@ const deploy = implement(deploymentOps.deploy, (input, ctx) => {
     // A stack deploys all of its members; the first member's deployment is returned.
     const members = ctx.db.select().from(services).where(eq(services.parentId, svc.id)).orderBy(services.nameKey).all();
     if (members.length === 0) throw new OpError("CONFLICT", "This stack has no members to deploy.");
+    // All or none: a member with a deploy running refuses the stack's deploy before any member queues one.
+    for (const m of members) assertNoActiveDeploy(ctx, m.id, m);
     const rows = members.map((m) =>
       queueDeploy(ctx, {
         serviceId: m.id,
@@ -53,6 +55,7 @@ const deploy = implement(deploymentOps.deploy, (input, ctx) => {
     );
     return toDeployment(ctx.db, rows[0] as (typeof rows)[number]);
   }
+  assertNoActiveDeploy(ctx, svc.id);
   const row = queueDeploy(ctx, {
     serviceId: svc.id,
     trigger: triggerOf(ctx.principal),
@@ -67,6 +70,17 @@ const deploy = implement(deploymentOps.deploy, (input, ctx) => {
 const list = implement(deploymentOps.list, (input, ctx) => {
   loadService(ctx.db, input.serviceId);
   const limit = input.limit ?? 20;
+  if (input.active) {
+    // The deploy in progress first (the engine runs the oldest), then those waiting behind it.
+    const active = ctx.db
+      .select()
+      .from(deployments)
+      .where(and(eq(deployments.serviceId, input.serviceId), inArray(deployments.status, [...activeStatuses])))
+      .orderBy(asc(deployments.createdAt), asc(deployments.id))
+      .limit(limit)
+      .all();
+    return { deployments: toDeployments(ctx.db, active), nextCursor: null, keptImages };
+  }
   let cursor: { at: number; id: string } | null = null;
   if (input.cursor) {
     const [at, id] = input.cursor.split(".");
@@ -131,6 +145,7 @@ const rollback = implement(deploymentOps.rollback, (input, ctx) => {
   const view = toDeployment(ctx.db, target);
   if (target.status === "live") throw new OpError("CONFLICT", "This deployment is already live.");
   if (!view.canRollback) throw new OpError("CONFLICT", `Only the last ${keptImages} successful deployments can be rolled back to.`);
+  assertNoActiveDeploy(ctx, target.serviceId);
   const row = queueDeploy(ctx, {
     serviceId: target.serviceId,
     trigger: "rollback",

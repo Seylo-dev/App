@@ -21,6 +21,7 @@ import { Field, SwitchLabel } from "../field";
 import { formatClock, formatDate } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
+import { servicePort } from "../service-port";
 import { useNow } from "../use-now";
 import type { ServiceDetail } from "../use-service";
 
@@ -352,7 +353,7 @@ function TimedRow({ service, x }: { service: ServiceDetail; x: Timed }) {
 }
 
 function OpenTimedForm({ service, onDone }: { service: ServiceDetail; onDone: () => void }) {
-  const [port, setPort] = useState(service.ports[0]?.containerPort ?? 3000);
+  const [port, setPort] = useState(servicePort(service));
   const [minutes, setMinutes] = useState(120);
   const [cidrs, setCidrs] = useState("");
   const invalidate = useInvalidate();

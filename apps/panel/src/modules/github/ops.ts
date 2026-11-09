@@ -248,7 +248,7 @@ const syncInstallations = implement(githubOps.syncInstallations, async (_input, 
 
 const repoCache = new WeakMap<object, Map<string, { at: number; repos: GithubRepo[] }>>();
 
-async function installationRepos(ctx: OpContext, installationRowId: string): Promise<GithubRepo[]> {
+async function installationRepos(ctx: Pick<OpContext, "db" | "secrets">, installationRowId: string): Promise<GithubRepo[]> {
   let cache = repoCache.get(ctx.db);
   if (!cache) {
     cache = new Map();
@@ -387,10 +387,17 @@ interface RepoInfoAnswer {
  * public repository, so a public one of someone else would otherwise
  * become a GitHub source that follows that person's pushes through the
  * account; a plain git URL fits it (the New app dialog makes one).
+ * Through the App, a public one has to be among the installation's
+ * repositories: any installation token reads any public repository, but
+ * the App's webhook only delivers pushes of the ones it includes.
  */
 async function accountOwns(ctx: Pick<OpContext, "db" | "secrets">, via: GithubVia, repo: string, info: RepoInfoAnswer): Promise<boolean> {
-  if (via.accountId === null) return true;
   if (info.private !== false) return true;
+  if (via.installationId !== null) {
+    const name = (info.full_name ?? repo).toLowerCase();
+    const included = await installationRepos(ctx, via.installationId);
+    return included.some((r) => r.full_name.toLowerCase() === name || r.full_name.toLowerCase() === repo.toLowerCase());
+  }
   const permissions = info.permissions ?? {};
   if (permissions.admin || permissions.maintain || permissions.push) return true;
   const name = (info.full_name ?? repo).toLowerCase();
@@ -412,7 +419,8 @@ function notOwnedError(who: string, repo: string): OpError {
  * does not exist): NOT_FOUND with field repo, so the New app dialog can tell
  * it from GitHub not answering or rate limiting (UNAVAILABLE), which says
  * nothing about the repository. Through the account, a public repository
- * that is not the account's (accountOwns) is NOT_FOUND too, reason notOwned.
+ * that is not the account's, or through the App not the installation's
+ * (accountOwns), is NOT_FOUND too, reason notOwned.
  */
 export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, viaOrInstallation: GithubVia | string, repo: string) {
   const via: GithubVia = typeof viaOrInstallation === "string" ? { installationId: viaOrInstallation, accountId: null } : viaOrInstallation;
@@ -465,10 +473,10 @@ const connectRepo = implement(githubOps.connectRepo, async (input, ctx) => {
   const { token, who, fix } = await tokenVia(ctx, via);
   try {
     const [info] = await Promise.all([
-      via.accountId !== null ? githubRequest<RepoInfoAnswer>(`/repos/${input.repo}`, { auth: token }) : null,
+      githubRequest<RepoInfoAnswer>(`/repos/${input.repo}`, { auth: token }),
       githubRequest(`/repos/${input.repo}/branches/${encodeURIComponent(input.branch)}`, { auth: token }),
     ]);
-    if (info && !(await accountOwns(ctx, via, input.repo, info.data))) {
+    if (!(await accountOwns(ctx, via, input.repo, info.data))) {
       const refused = notOwnedError(who, input.repo);
       throw new OpError("BAD_REQUEST", refused.message, refused.details);
     }

@@ -146,6 +146,95 @@ test("the Source tab with only a connected account: no 'Connect GitHub first', i
   expect(errors).toEqual([]);
 });
 
+test("the Source tab takes a GitHub link or owner/repo: looked up by name, offered on top, its tree/ branch picked", async ({ page }) => {
+  const errors = trackErrors(page);
+  const calls = watchOps(page);
+  await installDemo(page, {
+    overrides: {
+      "github.installations": () => ({ installations: [], installUrl: null, account: githubAccount, hidden: false }),
+      // The list does not show acme/legacy-api (an organization's, past the first page): only a lookup by name finds it.
+      "github.repos": (input: Input) => ({
+        repos: [{ fullName: "dana/notes", private: true, defaultBranch: "main", pushedAt: new Date().toISOString() }].filter(
+          (r) => !input.query || r.fullName.includes(String(input.query).toLowerCase()),
+        ),
+        hasMore: false,
+      }),
+    },
+  });
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}/source`);
+  await page.getByRole("radio", { name: /^GitHub/ }).click();
+  const search = page.getByRole("textbox", { name: "Search repositories" });
+  await expect(search).toHaveAttribute("placeholder", "Search, or paste a GitHub link or owner/repo");
+  const list = page.getByRole("listbox", { name: "Repository" });
+
+  // A page address with a branch: found through the account, offered on top, the branch from tree/.
+  await search.fill("https://github.com/acme/legacy-api/tree/v2");
+  const typed = list.getByRole("option", { name: /acme\/legacy-api.*Use this repository/ });
+  await expect(typed).toBeVisible();
+  await shot(page, "source-tab-typed-link");
+  await typed.click();
+  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("v2");
+  expect(calls("github.branches")).toContainEqual(expect.objectContaining({ accountId: githubAccount.id, repo: "acme/legacy-api" }));
+
+  // Enter picks the found one and never connects: owner/repo of a listed repository, its default branch.
+  await search.fill("dana/notes");
+  await expect(list.getByRole("option", { name: /dana\/notes.*Use this repository/ })).toBeVisible();
+  await search.press("Enter");
+  await expect(list.getByRole("option", { name: /dana\/notes/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main");
+  expect(calls("github.connectRepo")).toEqual([]);
+
+  // One the account cannot read: GitHub's answer under the field, nothing to pick.
+  await search.fill("acme/nope");
+  await expect(page.getByText("The connection cannot read acme/nope, or there is no such repository.")).toBeVisible();
+  await expect(list).toHaveCount(0);
+  // Another host: pointed at the Git source.
+  await search.fill("gitlab.com/acme/app");
+  await expect(page.getByText("Only github.com repositories come through GitHub. For another host, pick the Git source.")).toBeVisible();
+
+  await search.fill("https://github.com/acme/legacy-api");
+  await list.getByRole("option", { name: /acme\/legacy-api.*Use this repository/ }).click();
+  await page.getByRole("button", { name: "Connect repository" }).click();
+  await expect(page.getByText("Repository connected. The next deploy builds it.")).toBeVisible();
+  expect(calls("github.connectRepo")).toEqual([
+    { serviceId: svc.privateApi, accountId: githubAccount.id, repo: "acme/legacy-api", branch: "master", deployOnPush: true },
+  ]);
+  expect(errors).toEqual([]);
+});
+
+test("through an installation: another owner's repository points at its Account, and owner/partial is a quiet search", async ({ page }) => {
+  const errors = trackErrors(page);
+  const calls = watchOps(page);
+  // The demo world: installations on acme (picked first) and lee-park.
+  await installDemo(page);
+  await page.goto(`/p/${ids.acme}/s/${svc.privateApi}/source`);
+  await page.getByRole("radio", { name: /^GitHub/ }).click();
+  await expect(page.getByRole("combobox", { name: "Account" })).toContainText("acme");
+  const search = page.getByRole("textbox", { name: "Search repositories" });
+  const list = page.getByRole("listbox", { name: "Repository" });
+
+  // lee-park/blog is not read through acme's installation: no lookup, and the hint names the Account that reads it.
+  await search.fill("lee-park/blog");
+  await expect(page.getByText("lee-park's repositories are read through lee-park. Pick it as the Account above.")).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(calls("github.branches").filter((c) => c.repo === "lee-park/blog")).toEqual([]);
+
+  // "acme/shop" filters the list (shop-api, shop-worker): GitHub's NOT_FOUND for the name is no alert.
+  await search.fill("acme/shop");
+  await expect(list.getByRole("option", { name: /acme\/shop-api/ })).toBeVisible();
+  await expect(list.getByRole("option", { name: /acme\/shop-worker/ })).toBeVisible();
+  await expect.poll(() => calls("github.branches").some((c) => c.repo === "acme/shop")).toBe(true);
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  // One match left: Enter picks it.
+  await search.fill("acme/shop-w");
+  await expect(list.getByRole("option")).toHaveCount(1);
+  await page.waitForTimeout(400);
+  await search.press("Enter");
+  await expect(list.getByRole("option", { name: /acme\/shop-worker/ })).toHaveAttribute("aria-selected", "true");
+  expect(errors).toEqual([]);
+});
+
 test("nothing on GitHub connected: the Source tab still says 'Connect GitHub first'", async ({ page }) => {
   await installDemo(page, {
     overrides: { "github.installations": () => ({ installations: [], installUrl: null, account: null, hidden: false }) },

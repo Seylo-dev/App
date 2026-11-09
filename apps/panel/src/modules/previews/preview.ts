@@ -10,6 +10,7 @@ import { nodes, previews, servicePlacements, services, volumes } from "../../db/
 import type { Deps } from "../../deps";
 import { queueDeploy } from "../deployments/queue";
 import type { DeploymentRow } from "../deployments/store";
+import { appPort } from "../domains/lookup";
 import { addAuto, add as addDomain } from "../domains/ops";
 import { readServiceEnv, writeServiceEnv } from "../env/store";
 import { deleteServiceTree } from "../services/delete";
@@ -155,7 +156,8 @@ function createPreviewService(deps: Deps, parent: ServiceRow, pr: PullRequestInf
   // Same environment as the service: same database. The setting's acknowledgement covers this.
   const env = readServiceEnv(deps.db, deps.secrets, parent.id);
   if (env.text) writeServiceEnv(deps.db, deps.secrets, id, env.text, null);
-  void addPreviewDomain(deps, parent, id, name, spec.previews.domainPattern, pr.number, spec.ports[0]?.containerPort);
+  // The preview's own port rule (appPort): its first port, else 80 like its PORT, since it has no domain yet.
+  void addPreviewDomain(deps, parent, id, name, spec.previews.domainPattern, pr.number, appPort(deps.db, loadService(deps.db, id)));
   return id;
 }
 
@@ -166,7 +168,7 @@ async function addPreviewDomain(
   name: string,
   pattern: string,
   prNumber: number,
-  port: number | undefined,
+  port: number | null,
 ) {
   if (!port) return;
   const ctx = systemContext(deps);

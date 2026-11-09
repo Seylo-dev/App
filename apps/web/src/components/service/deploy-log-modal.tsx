@@ -34,7 +34,7 @@ export function DeployLogModal({
 }) {
   return (
     <Dialog open={deployment !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="top-[84px] flex max-h-[calc(100dvh-108px)] max-w-[780px] flex-col overflow-hidden p-0">
+      <DialogContent className="top-[84px] flex max-h-[calc(100dvh-108px)] max-w-[960px] flex-col overflow-hidden p-0">
         {deployment && <ModalBody serviceId={serviceId} source={source} initial={deployment} />}
       </DialogContent>
     </Dialog>

@@ -4,6 +4,7 @@ import { DeployStage, ServiceKind } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { alerts, deployments, nodes, services } from "../src/db/schema";
 import { compileMemo } from "../src/desired/contributors";
+import { queuePushDeploy } from "../src/modules/deployments/queue";
 import { registryGcSweepJob, registryGcSweepJobType, servicesWithPrunableImages } from "../src/modules/deployments/registry-gc";
 import { networkingContributor } from "../src/modules/domains/contributor";
 import { writeServiceEnv } from "../src/modules/env/store";
@@ -260,20 +261,37 @@ describe("deploys", () => {
     expect(listed.keptImages).toBe(5);
   });
 
-  test("deploys of one service queue behind each other, and a queued one can be cancelled", async () => {
+  test("one deploy at a time: a second Deploy is refused while one runs; a push queues behind it and can be cancelled", async () => {
     const id = await createApp("api", inline);
     setDockerfile(id);
     fleet.buildScript = () => ({ result: "hang" });
     const first = await deploy(id);
-    const second = await deploy(id);
+    // Before: a second Deploy queued behind the first, so repeated clicks piled deploys up.
+    const again = await callOp(panel, deploymentOps.deploy, { serviceId: id }, { cookie });
+    expect(again.status).toBe(409);
+    expect(again.body.error.details).toEqual({ reason: "deployRunning", deploymentId: first, serviceId: id });
+    expect(again.body.error.message).toContain("is running");
+    const noCache = await callOp(panel, deploymentOps.deploy, { serviceId: id, noCache: true }, { cookie });
+    expect(noCache.status).toBe(409);
+    expect((await callOp(panel, deploymentOps.list, { serviceId: id }, { cookie })).body.deployments).toHaveLength(1);
+    // A push is never dropped: it waits behind the running deploy.
+    const push = queuePushDeploy(panel.deps, { serviceId: id, actor: "lee", branch: "main", commitSha: "abc1234" });
+    expect(push.kind).toBe("queued");
+    const second = push.deployment.id;
     expect((await getDeployment(id, first)).status).toBe("building");
     expect((await getDeployment(id, second)).status).toBe("queued");
+    // active: what the web asks for the deploy in progress, oldest first, however many newer ones exist.
+    const active = await callOp(panel, deploymentOps.list, { serviceId: id, active: true }, { cookie });
+    expect(active.body.deployments.map((d: { id: string }) => d.id)).toEqual([first, second]);
 
     const cancelled = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId: second }, { cookie });
     expect(cancelled.body.status).toBe("cancelled");
     const stopBuild = await callOp(panel, deploymentOps.cancel, { serviceId: id, deploymentId: first }, { cookie });
     expect(stopBuild.body.status).toBe("cancelled");
     expect(fleet.calls.some((c) => c.method === "cancelBuild")).toBe(true);
+    await fleet.settle();
+    // With nothing running, Deploy works again.
+    expect((await callOp(panel, deploymentOps.deploy, { serviceId: id }, { cookie })).status).toBe(200);
     await fleet.settle();
   });
 

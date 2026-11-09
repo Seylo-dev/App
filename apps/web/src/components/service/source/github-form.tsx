@@ -1,5 +1,7 @@
 // Pick a GitHub repository and branch through the panel's GitHub App or its
 // connected GitHub account (Settings > GitHub, a device login or a token).
+// The repository field searches the list, or takes a GitHub link or
+// owner/repo, which is looked up by name and offered on top of the list.
 
 import { github, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -14,8 +16,11 @@ import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconCheck, IconLock, IconSearch } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { useDeferredValue, useState } from "react";
+import { type KeyboardEvent, useDeferredValue, useMemo, useState } from "react";
 import { t } from "../../../i18n/t";
+import { useDebounced } from "../../docker-hub/use-debounced";
+import { branchFromRef, githubParse } from "../../new-service/repo-input";
+import { lookupStateOf } from "../../new-service/repo-source";
 import { Field, ToggleRow } from "../field";
 import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
@@ -30,6 +35,8 @@ interface Choice {
   key: string;
   via: GithubVia;
   label: string;
+  /** An installation's GitHub login: the only owner whose repositories it reads. */
+  owner?: string;
 }
 
 export function GithubForm({ service }: { service: ServiceDetail }) {
@@ -78,7 +85,7 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
   const choices: Choice[] = [
     ...installs.data.installations
       .filter((i) => !i.suspended)
-      .map((i) => ({ key: `i:${i.id}`, via: { installationId: i.id }, label: i.accountLogin })),
+      .map((i) => ({ key: `i:${i.id}`, via: { installationId: i.id }, label: i.accountLogin, owner: i.accountLogin })),
     ...(account
       ? [
           {
@@ -166,10 +173,15 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
           key={chosen.key}
           projectId={service.projectId}
           via={via}
+          owner={chosen.owner ?? null}
+          // Where a typed repository of another owner is read: the installation on that owner, else the connected account.
+          accountFor={(o) =>
+            choices.find((c) => c.owner?.toLowerCase() === o.toLowerCase())?.label ?? choices.find((c) => c.via.accountId)?.label ?? null
+          }
           value={repo}
-          onChange={(r, defaultBranch) => {
+          onChange={(r, nextBranch) => {
             setRepo(r);
-            setBranch(defaultBranch);
+            setBranch(nextBranch);
           }}
         />
       )}
@@ -222,17 +234,63 @@ function ReadOnlyGithub({ repo, branch }: { repo: string | null; branch: string 
 function RepoPicker({
   projectId,
   via,
+  owner,
+  accountFor,
   value,
   onChange,
 }: {
   projectId: string;
   via: GithubVia;
+  /** The picked installation's GitHub login (it reads only that owner's repositories); null for the connected account. */
+  owner: string | null;
+  /** The Account choice that reads another owner's repositories, if any. */
+  accountFor: (owner: string) => string | null;
   value: string | null;
-  onChange: (repo: string, defaultBranch: string) => void;
+  /** The repository and its branch: a link's tree/<branch>, else the default one (null when it has none yet). */
+  onChange: (repo: string, branch: string | null) => void;
 }) {
   const [query, setQuery] = useState("");
-  const deferred = useDeferredValue(query.trim());
-  const repos = useOp(github.repos, { projectId, ...via, query: deferred || undefined }, { retry: retryOp });
+  const text = query.trim();
+  const typed = useMemo(() => githubParse(text), [text]);
+  const named = typed.ok ? typed.repo : null;
+  // A link or owner/repo searches for that repository; anything else searches as typed.
+  const search = useDeferredValue(named ? named.path : text);
+  const repos = useOp(github.repos, { projectId, ...via, query: search || undefined }, { retry: retryOp });
+  // The typed repository is read by name through the picked account or App once the text rests:
+  // it may be one the list does not show (an organization's, a collaborator's, past the first page).
+  const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+  // An installation reads one owner's repositories: another owner's is not looked up through it (a public
+  // one would read fine, but the App's webhook would never deliver its pushes); the hint names where it is.
+  const typedOwner = named?.path.split("/")[0] ?? null;
+  const elsewhere = owner !== null && typedOwner !== null && !same(typedOwner, owner) ? typedOwner : null;
+  const looked = named && !elsewhere ? named.path : null;
+  const settled = useDebounced(looked, 300);
+  const lookup = useOp(github.branches, { projectId, ...via, repo: settled ?? "" }, { enabled: settled !== null, retry: false });
+  const listed = named ? repos.data?.repos.find((r) => same(r.fullName, named.path)) : undefined;
+  const typedName = listed?.fullName ?? named?.path ?? null;
+  // Checking: the text has not rested, or the first answer (or a retry of a failure) is on its way. A refetch
+  // of an answer it has (when the branch list mounts, or the socket reconnects) keeps the found row.
+  const checking = looked !== null && (settled !== looked || lookup.isPending || (lookup.isFetching && lookup.isError));
+  const found = looked !== null && settled === looked && lookup.data ? lookup.data : null;
+  const failed = looked !== null && !checking && !found && lookup.isError ? lookup.error : null;
+  const pickTyped = () => {
+    if (!named || !found || !typedName) return;
+    onChange(typedName, branchFromRef(named.ref, found.branches) ?? found.defaultBranch ?? found.branches[0] ?? null);
+  };
+  // The typed repository moves to the top once it is found; until then (or if reading it fails) a listed one stays in the list.
+  const rest = (repos.data?.repos ?? []).filter((r) => !found || !same(r.fullName, typedName));
+  // Nothing to show under a typed repository that is still being read or cannot be: no empty gray box.
+  const emptyUnderTyped = named !== null && !found && repos.isSuccess && rest.length === 0;
+  // "acme/shop" typed to filter the list (acme/shop-api, acme/shop-worker) is a search, not a missing repository.
+  const missingButListed = failed !== null && lookupStateOf(failed) === "missing" && rest.length > 0;
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // Enter in the search box picks, it never connects: the typed repository once found, or the only match.
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (found) pickTyped();
+    else if ((!named || failed || elsewhere) && rest.length === 1 && rest[0]) onChange(rest[0].fullName, rest[0].defaultBranch);
+  };
+  const problem = !typed.ok && ["notGithub", "credentials", "insecure"].includes(typed.problem) ? typed.problem : null;
   return (
     <Field label={t("serviceSource.github.repository")}>
       <div className="relative">
@@ -241,53 +299,127 @@ function RepoPicker({
           className="pl-9"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("serviceSource.github.searchRepos")}
+          onKeyDown={onKeyDown}
+          placeholder={t("serviceSource.github.searchPlaceholder")}
           aria-label={t("serviceSource.github.searchRepos")}
+          aria-describedby={problem ? "gh-repo-problem" : undefined}
         />
       </div>
-      <div
-        role="listbox"
-        aria-label={t("serviceSource.github.repository")}
-        className="flex max-h-64 flex-col overflow-y-auto rounded-control bg-raised p-1"
-      >
-        {repos.isPending ? (
-          <RepoRowsSkeleton bare />
-        ) : repos.isError ? (
-          <OpErrorNote error={repos.error} compact />
-        ) : repos.data.repos.length === 0 ? (
-          <p className="m-0 p-3 text-[12.5px] text-muted-foreground">
-            {t(via.accountId ? "serviceSource.github.noReposAccount" : "serviceSource.github.noRepos")}
-          </p>
-        ) : (
-          repos.data.repos.map((r) => (
-            <button
-              key={r.fullName}
-              type="button"
-              role="option"
-              aria-selected={value === r.fullName}
-              onClick={() => onChange(r.fullName, r.defaultBranch)}
-              // The chosen one: the accent fill and a check, as in the New app picker (a card fill on the gray list vanishes in dark presets).
-              className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200",
-                value === r.fullName ? "bg-accent" : "hover:bg-card",
-              )}
-            >
-              <span className="truncate font-mono text-[12.5px]">{r.fullName}</span>
-              {r.private && (
-                <Chip tone="gray" className="py-0">
-                  <IconLock size={11} />
-                  {t("serviceSource.github.private")}
-                </Chip>
-              )}
-              <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                {r.pushedAt && <span className="text-xs whitespace-nowrap text-muted-foreground">{formatRelative(r.pushedAt)}</span>}
-                {value === r.fullName && <IconCheck size={15} stroke={2} className="text-primary" aria-hidden="true" />}
-              </span>
-            </button>
-          ))
-        )}
-      </div>
+      {problem && (
+        <p id="gh-repo-problem" className="m-0 text-[12.5px] leading-normal text-muted-foreground">
+          {t(
+            problem === "notGithub"
+              ? "serviceSource.github.typedNotGithub"
+              : problem === "credentials"
+                ? "serviceSource.github.typedCredentials"
+                : "serviceSource.github.typedInsecure",
+          )}
+        </p>
+      )}
+      {/* The typed repository while it is read, or why it cannot be: status, not a choice in the list. */}
+      {checking && typedName && (
+        <p role="status" className="m-0 flex items-center gap-2 text-[12.5px] text-muted-foreground">
+          <span className="font-mono">{typedName}</span>
+          <span className="sr-only">{t("serviceSource.github.typedChecking", { repo: typedName })}</span>
+          <SkeletonText className="w-24 text-xs" />
+        </p>
+      )}
+      {failed && !missingButListed ? <OpErrorNote error={failed} compact /> : null}
+      {elsewhere && (
+        <p className="m-0 text-[12.5px] leading-normal text-muted-foreground">
+          {accountFor(elsewhere)
+            ? t("serviceSource.github.typedOtherAccount", { owner: elsewhere, account: accountFor(elsewhere) ?? "" })
+            : t("serviceSource.github.typedNotInstalled", { owner: elsewhere, login: owner ?? "" })}
+        </p>
+      )}
+      {!emptyUnderTyped && (
+        <div
+          role="listbox"
+          aria-label={t("serviceSource.github.repository")}
+          className="flex max-h-64 flex-col overflow-y-auto rounded-control bg-raised p-1"
+        >
+          {found && typedName && (
+            <RepoOption
+              name={typedName}
+              isPrivate={listed?.private ?? false}
+              selected={same(value, typedName)}
+              onPick={pickTyped}
+              trailing={t("serviceSource.github.typedUse")}
+            />
+          )}
+          {repos.isPending ? (
+            <RepoRowsSkeleton bare />
+          ) : repos.isError ? (
+            <OpErrorNote error={repos.error} compact />
+          ) : rest.length === 0 ? (
+            // A typed repository has its own row: "No repositories match" under it would read as "not found".
+            named ? null : (
+              <p className="m-0 p-3 text-[12.5px] text-muted-foreground">
+                {t(via.accountId ? "serviceSource.github.noReposAccount" : "serviceSource.github.noRepos")}
+              </p>
+            )
+          ) : (
+            rest.map((r) => (
+              <RepoOption
+                key={r.fullName}
+                name={r.fullName}
+                isPrivate={r.private}
+                pushedAt={r.pushedAt}
+                selected={value === r.fullName}
+                onPick={() => onChange(r.fullName, r.defaultBranch)}
+              />
+            ))
+          )}
+        </div>
+      )}
     </Field>
+  );
+}
+
+/**
+ * One repository of the list. The chosen one: the accent fill and a check,
+ * as in the New app picker (a card fill on the gray list vanishes in dark presets).
+ */
+function RepoOption({
+  name,
+  isPrivate,
+  pushedAt,
+  selected,
+  onPick,
+  trailing,
+}: {
+  name: string;
+  isPrivate: boolean;
+  pushedAt?: string | null;
+  selected: boolean;
+  onPick: () => void;
+  /** Shown where the push time goes, for the typed repository's "Use this repository". */
+  trailing?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={onPick}
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200",
+        selected ? "bg-accent" : "hover:bg-card",
+      )}
+    >
+      <span className="truncate font-mono text-[12.5px]">{name}</span>
+      {isPrivate && (
+        <Chip tone="gray" className="py-0">
+          <IconLock size={11} />
+          {t("serviceSource.github.private")}
+        </Chip>
+      )}
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        {trailing && !selected && <span className="text-xs whitespace-nowrap text-muted-foreground">{trailing}</span>}
+        {pushedAt && <span className="text-xs whitespace-nowrap text-muted-foreground">{formatRelative(pushedAt)}</span>}
+        {selected && <IconCheck size={15} stroke={2} className="text-primary" aria-hidden="true" />}
+      </span>
+    </button>
   );
 }
 

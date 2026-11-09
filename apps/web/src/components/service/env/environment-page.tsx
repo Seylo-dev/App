@@ -16,6 +16,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { useActiveDeploy } from "../active-deploy";
 import type { EnvEditorHandle } from "../editor/env-editor";
 import { EnvEditor } from "../editor/env-editor";
 import { fixTitle, problemSummary } from "../editor/env-model";
@@ -82,6 +83,8 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
     },
     onError: fail,
   });
+  // One deploy at a time: the Deploy below waits for one in progress.
+  const deploying = useActiveDeploy(service.id) !== null;
   const deploy = useOpMutation(deployments.deploy, {
     onSuccess: () => {
       setRestartNeeded(false);
@@ -157,8 +160,14 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
               <Button size="sm" onClick={() => restart.mutate({ serviceId: service.id })} disabled={restart.isPending}>
                 {t("service.header.restart")}
               </Button>
-              <Button size="sm" variant="primary" onClick={() => deploy.mutate({ serviceId: service.id })} disabled={deploy.isPending}>
-                {t("service.header.deploy")}
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => deploy.mutate({ serviceId: service.id })}
+                disabled={deploy.isPending || deploying}
+                title={deploying ? t("service.header.deployBusyHint") : undefined}
+              >
+                {t(deploying ? "service.header.deployBusy" : "service.header.deploy")}
               </Button>
             </>
           }

@@ -5,6 +5,7 @@ export default {
   runsOn: "Runs on",
   replicas: { one: "{count} replica", other: "{count} replicas" },
   ports: "Ports",
+  portFromEnv: "{port}/tcp, as PORT",
   generation: "Generation",
   quick: "Quick actions",
   deploys: "Deploys",

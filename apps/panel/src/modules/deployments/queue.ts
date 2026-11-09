@@ -3,7 +3,7 @@
 // queueDeploy, which writes a queued deployment and kicks the runner.
 
 import { OpError } from "@seylo/ops";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { type DeploymentTrigger, deployments, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { panelServiceId } from "../nodes/panel-service";
@@ -90,14 +90,42 @@ export function queueDeploy(deps: Deps, input: QueueDeployInput): DeploymentRow 
   return row;
 }
 
+/** The service's oldest deploy that is queued or running (the one ahead of the rest), if any. */
+export function activeDeploy(deps: Pick<Deps, "db">, serviceId: string): DeploymentRow | undefined {
+  return deps.db
+    .select()
+    .from(deployments)
+    .where(and(eq(deployments.serviceId, serviceId), inArray(deployments.status, ["queued", "building", "deploying"])))
+    .orderBy(asc(deployments.createdAt), asc(deployments.id))
+    .get();
+}
+
 /** Whether a deploy of the service is queued or running. */
 export function hasActiveDeploy(deps: Pick<Deps, "db">, serviceId: string): boolean {
-  return (
-    deps.db
-      .select({ id: deployments.id })
-      .from(deployments)
-      .where(and(eq(deployments.serviceId, serviceId), inArray(deployments.status, ["queued", "building", "deploying"])))
-      .get() !== undefined
+  return activeDeploy(deps, serviceId) !== undefined;
+}
+
+/**
+ * One deploy of a service at a time for the ones a person starts (Deploy,
+ * Redeploy, Roll back, the API, the CLI, MCP): while one is queued or
+ * running, another is refused instead of queued behind it, so repeated
+ * clicks never pile deploys up. Pushes and trigger URLs still queue behind
+ * the running one (queuePushDeploy), so no push is lost.
+ */
+export function assertNoActiveDeploy(deps: Pick<Deps, "db">, serviceId: string, member?: { name: string }): void {
+  const active = activeDeploy(deps, serviceId);
+  if (!active) return;
+  const what = active.status === "queued" ? "is waiting to start" : "is running";
+  // A stack's deploy names the member, whose serviceId (not the stack's) deployments.get and cancel take.
+  const whose = member ? member.name : "this service";
+  throw new OpError(
+    "CONFLICT",
+    `A deploy of ${whose} (generation ${active.generation}) ${what}. Wait for it to finish, or cancel it, then deploy again.`,
+    {
+      reason: "deployRunning",
+      deploymentId: active.id,
+      serviceId,
+    },
   );
 }
 

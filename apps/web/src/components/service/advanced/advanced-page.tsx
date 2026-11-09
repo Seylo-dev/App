@@ -24,6 +24,7 @@ import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
 import { volumesOf } from "../files/volumes";
 import { useInvalidate } from "../invalidate";
 import { MutationError, retryOp } from "../op-state";
+import { servicePort } from "../service-port";
 import type { ServiceDetail } from "../use-service";
 import { joinArgs, splitArgs } from "./args";
 
@@ -57,7 +58,7 @@ export function AdvancedPage({ service }: { service: ServiceDetail }) {
 
 function HealthCard({ service }: { service: ServiceDetail }) {
   const hc = service.healthCheck;
-  const firstPort = service.ports[0]?.containerPort ?? 3000;
+  const firstPort = servicePort(service);
   const [type, setType] = useState<ProbeType>(hc?.probe.type ?? "default");
   const [port, setPort] = useState(String(hc && hc.probe.type !== "command" ? hc.probe.port : firstPort));
   const [path, setPath] = useState(hc?.probe.type === "http" ? hc.probe.path : "/health");

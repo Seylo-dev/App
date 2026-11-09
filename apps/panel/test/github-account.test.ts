@@ -582,26 +582,28 @@ describe("PORT for apps built from a repository", () => {
   const git = { type: "git" as const, url: "https://github.com/acme/shop.git", branch: "main", credentialId: null, deployOnPush: false };
   const ports = [{ containerPort: 80, protocol: "tcp" as const }];
   const plain = { kind: "app", parentId: null };
-  const portEnv = true;
 
   test("gets its first port as PORT", () => {
-    expect(withPortEnv([{ name: "A", value: "1", secret: false }], plain, { source: git, ports, portEnv })).toEqual([
+    expect(withPortEnv([{ name: "A", value: "1", secret: false }], plain, { source: git, ports })).toEqual([
       { name: "A", value: "1", secret: false },
       { name: "PORT", value: "80", secret: false },
     ]);
     const github = { type: "github" as const, installationId: null, accountId: "a", repo: "acme/shop", branch: "main", deployOnPush: true };
-    expect(withPortEnv([], plain, { source: github, ports: [{ containerPort: 3000, protocol: "tcp" }], portEnv })).toEqual([
+    expect(withPortEnv([], plain, { source: github, ports: [{ containerPort: 3000, protocol: "tcp" }] })).toEqual([
       { name: "PORT", value: "3000", secret: false },
     ]);
   });
 
-  test("keeps a PORT the service sets, and leaves images, members, crons and portless apps alone", () => {
+  test("80 when the app names no port, which is where a new domain points too", () => {
+    expect(withPortEnv([], plain, { source: git, ports: [] })).toEqual([{ name: "PORT", value: "80", secret: false }]);
+  });
+
+  test("keeps a PORT the service sets, and leaves images, members and crons alone", () => {
     const own = [{ name: "PORT", value: "5000", secret: false }];
-    expect(withPortEnv(own, plain, { source: git, ports, portEnv })).toEqual(own);
-    expect(withPortEnv([], plain, { source: { type: "image", image: "nginx:1.27", registryId: null }, ports, portEnv })).toEqual([]);
-    expect(withPortEnv([], { kind: "app", parentId: "stack" }, { source: git, ports, portEnv })).toEqual([]);
-    expect(withPortEnv([], { kind: "cron", parentId: null }, { source: git, ports, portEnv })).toEqual([]);
-    expect(withPortEnv([], plain, { source: git, ports: [], portEnv })).toEqual([]);
+    expect(withPortEnv(own, plain, { source: git, ports })).toEqual(own);
+    expect(withPortEnv([], plain, { source: { type: "image", image: "nginx:1.27", registryId: null }, ports })).toEqual([]);
+    expect(withPortEnv([], { kind: "app", parentId: "stack" }, { source: git, ports })).toEqual([]);
+    expect(withPortEnv([], { kind: "cron", parentId: null }, { source: git, ports })).toEqual([]);
   });
 
   test("is part of the env a deploy starts with", async () => {
@@ -620,16 +622,20 @@ describe("PORT for apps built from a repository", () => {
     expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, image))?.some((v) => v.name === "PORT")).toBe(false);
   });
 
-  test("an app created before 0.2.2 keeps the env it had: no PORT on its next deploy", async () => {
+  test("an app created before 0.2.2 gets PORT on its next deploy too, 80 when it has no port", async () => {
+    // Before (0.2.2): no PORT for it, so a Next.js app kept listening on 3000 behind a domain on 80.
     const { body: account } = await connect();
-    const id = await app("old", [{ containerPort: 80, protocol: "tcp" }]);
+    const id = await app("old");
     await connectRepo(id, account.id);
     // A row an older panel wrote has no portEnv key.
     const { portEnv: _, ...older } = readSpec(loadService(panel.deps.db, id).spec);
-    panel.deps.db.update(services).set({ spec: older }).where(eq(services.id, id)).run();
+    panel.deps.db
+      .update(services)
+      .set({ spec: { ...older, ports: [] } })
+      .where(eq(services.id, id))
+      .run();
     expect(readSpec(loadService(panel.deps.db, id).spec).portEnv).toBe(false);
-    expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, id))?.some((v) => v.name === "PORT")).toBe(false);
-    expect(withPortEnv([], plain, { source: git, ports, portEnv: false })).toEqual([]);
+    expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, id))).toContainEqual({ name: "PORT", value: "80", secret: false });
   });
 });
 

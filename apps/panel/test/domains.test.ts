@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { domains as domainOps, exposures as exposureOps } from "@seylo/ops";
+import { domains as domainOps, exposures as exposureOps, services as serviceOps } from "@seylo/ops";
 import { HttpsMode, PublicPortMode, RouteState } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { alerts } from "../src/db/schema";
+import { alerts, services } from "../src/db/schema";
 import { serviceNetworking } from "../src/modules/domains/desired";
 import { classifyRecords, type DnsLookups, isCloudflareIp, relativeName, setDnsLookups } from "../src/modules/domains/dns";
+import { deploymentEnv, sealDeploymentEnv } from "../src/modules/env/desired";
 import { openFirstRun } from "../src/modules/exposures/logic";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, seedService } from "./seed-helpers";
@@ -74,6 +75,48 @@ describe("domains ops", () => {
       https: HttpsMode.ACME,
       redirectToHttps: true,
     });
+  });
+
+  test("a repository-built app with no port gets its domain on 80, its PORT; an image app with none is asked for one", async () => {
+    // Before: "has no port yet" for both, and the dialog suggested 3000 while the app got PORT=80.
+    const { project, node } = setup();
+    const built = seedService(panel, { projectId: project.id, name: "site", ports: [], nodeIds: [node.id] });
+    const spec = {
+      ...(built.spec as object),
+      source: { type: "git", url: "https://github.com/acme/site.git", branch: "main", credentialId: null, deployOnPush: false },
+    };
+    panel.deps.db.update(services).set({ spec }).where(eq(services.id, built.id)).run();
+    setDnsLookups(fakeDns({ a: { "site.acme.dev": ["203.0.113.10"] } }));
+    const added = await callOp(panel, domainOps.add, { serviceId: built.id, host: "site.acme.dev" }, { cookie });
+    expect(added.status).toBe(200);
+    expect(added.body.domain).toMatchObject({ targetPort: 80, primary: true });
+    const image = seedService(panel, { projectId: project.id, name: "img", ports: [], nodeIds: [node.id] });
+    const refused = await callOp(panel, domainOps.add, { serviceId: image.id, host: "img.acme.dev" }, { cookie });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.details).toEqual({ field: "targetPort" });
+  });
+
+  test("a portless built app whose domain points at 3000 keeps 3000: PORT, its next domain and appPort follow that domain", async () => {
+    // An app added on 0.2.2 or before, when the dialog suggested 3000: PORT=80 would take it down on its next deploy.
+    const { project, node } = setup();
+    const app = seedService(panel, { projectId: project.id, name: "next", ports: [], nodeIds: [node.id] });
+    const spec = {
+      ...(app.spec as object),
+      source: { type: "git", url: "https://github.com/acme/next.git", branch: "main", credentialId: null, deployOnPush: false },
+    };
+    panel.deps.db.update(services).set({ spec }).where(eq(services.id, app.id)).run();
+    setDnsLookups(fakeDns({ a: { "next.acme.dev": ["203.0.113.10"], "www.next.acme.dev": ["203.0.113.10"] } }));
+    const first = await callOp(panel, domainOps.add, { serviceId: app.id, host: "next.acme.dev", targetPort: 3000 }, { cookie });
+    expect(first.body.domain).toMatchObject({ targetPort: 3000, primary: true });
+    expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, app.id))).toContainEqual({ name: "PORT", value: "3000", secret: false });
+    const second = await callOp(panel, domainOps.add, { serviceId: app.id, host: "www.next.acme.dev" }, { cookie });
+    expect(second.body.domain.targetPort).toBe(3000);
+    expect((await callOp(panel, serviceOps.get, { serviceId: app.id }, { cookie })).body.appPort).toBe(3000);
+    // With no domain left, it is 80 again; an image app with no port has none.
+    for (const d of [first, second]) await callOp(panel, domainOps.remove, { serviceId: app.id, domainId: d.body.domain.id }, { cookie });
+    expect((await callOp(panel, serviceOps.get, { serviceId: app.id }, { cookie })).body.appPort).toBe(80);
+    const image = seedService(panel, { projectId: project.id, name: "img2", ports: [], nodeIds: [node.id] });
+    expect((await callOp(panel, serviceOps.get, { serviceId: image.id }, { cookie })).body.appPort).toBeNull();
   });
 
   test("custom domains get a DNS check with records to create and the Cloudflare link", async () => {

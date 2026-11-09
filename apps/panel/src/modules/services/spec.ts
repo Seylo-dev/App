@@ -84,13 +84,35 @@ export const ServiceSpecJson = Type.Object({
   /** Glob patterns a push must touch to deploy (@seylo/ops watch-paths); empty = every push deploys. */
   watchPaths: services.WatchPaths,
   /**
-   * Whether a repository build gets PORT=<first port> (env/desired.ts
-   * withPortEnv). Services created from 0.2.2 on store true (insertService);
-   * older rows read false, so a panel update never changes their env.
+   * 0.2.2 gave PORT only to services created from 0.2.2 on (true here),
+   * which left older apps on their framework's default (3000 for Next.js)
+   * while their domains pointed at 80. Since 0.2.3 every repository build
+   * gets PORT (env/desired.ts withPortEnv) and nothing reads this; it stays
+   * so stored specs keep validating.
    */
   portEnv: Type.Boolean(),
 });
 export type ServiceSpecJson = Static<typeof ServiceSpecJson>;
+
+/** What an app built from a repository listens on when it names no port: PORT says 80, and so does a new domain. */
+export const defaultAppPort = 80;
+
+/**
+ * The port an app built from a repository (GitHub, a git provider or a git
+ * URL; not a compose member, whose compose file says what it needs) listens
+ * on: its first TCP port, else `fallback` (the port its domains point at,
+ * domains/lookup.ts appPort), else defaultAppPort. null for any other
+ * service, whose image or kind decides.
+ */
+export function builtAppPort(
+  service: { kind: string; parentId: string | null },
+  spec: Pick<ServiceSpecJson, "source" | "ports">,
+  fallback: number | null = null,
+): number | null {
+  const fromRepo = spec.source.type === "github" || spec.source.type === "provider" || spec.source.type === "git";
+  if (service.kind !== "app" || service.parentId !== null || !fromRepo) return null;
+  return spec.ports.find((p) => p.protocol !== "udp")?.containerPort ?? fallback ?? defaultAppPort;
+}
 
 /** What a deploy snapshots: the settings agents run until the next deploy. */
 export interface RunSettings {

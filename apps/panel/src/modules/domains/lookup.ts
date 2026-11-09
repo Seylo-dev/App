@@ -4,11 +4,12 @@
 // and maintenance read services the same way.
 
 import { databases as dbOps, OpError } from "@seylo/ops";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
-import { nodes, servicePlacements, services } from "../../db/schema";
+import { domains, nodes, servicePlacements, services } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { builtAppPort, readSpec } from "../services/spec";
 
 export type ServiceRow = typeof services.$inferSelect;
 export type NodeRow = typeof nodes.$inferSelect;
@@ -112,6 +113,29 @@ export function specPorts(service: Pick<ServiceRow, "spec">): number[] {
 /** The service's main (first TCP) port, or null when it has none. */
 export function mainPort(service: Pick<ServiceRow, "spec">): number | null {
   return specPorts(service)[0] ?? null;
+}
+
+/** The port the service's domains send traffic to: its primary domain's, else its oldest routed one's; null without one. */
+export function domainPort(db: PanelDb, serviceId: string): number | null {
+  const routed = db
+    .select({ port: domains.targetPort, primary: domains.isPrimary })
+    .from(domains)
+    .where(and(eq(domains.serviceId, serviceId), isNull(domains.forward)))
+    .orderBy(asc(domains.createdAt), asc(domains.id))
+    .all();
+  return (routed.find((d) => d.primary) ?? routed[0])?.port ?? null;
+}
+
+/**
+ * The port a service listens on as far as the panel can tell: its first TCP
+ * port; for an app built from a repository without one, the port its
+ * domains point at, else 80 (builtAppPort), which is also the PORT that app
+ * gets. null for any other service without a port. Domains, tunnels,
+ * previews, clones and the web's port fields default to it, so they agree
+ * with PORT.
+ */
+export function appPort(db: PanelDb, service: Pick<ServiceRow, "id" | "kind" | "parentId" | "spec">): number | null {
+  return mainPort(service) ?? builtAppPort(service, readSpec(service.spec), domainPort(db, service.id));
 }
 
 /** Tells open screens of a service that these queries changed. */

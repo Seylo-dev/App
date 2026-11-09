@@ -42,6 +42,9 @@ const openSockets = (from = 0) =>
 const sectionTabs = (page: Page) => page.getByRole("navigation", { name: "Service sections" });
 const modeSwitch = (page: Page) => page.getByRole("radiogroup", { name: "Console or shell" });
 const lastHour = (page: Page) => page.getByRole("heading", { name: "Last hour" });
+const deploysHeading = (page: Page) => page.getByRole("heading", { name: "Deploys", exact: true });
+/** The Overview console card's fixed height (consoleCardHeight in overview-page.tsx). */
+const cardHeight = 480;
 
 async function box(locator: Locator) {
   const b = await locator.boundingBox();
@@ -196,13 +199,22 @@ test.describe("console and shell", () => {
     await page.goto(api);
     const card = page.getByRole("region", { name: "Console" });
     await expect(card.getByText(consoleLine)).toBeVisible();
-    // Under Deploys in the left column, at its fixed height.
-    const deploys = page.getByRole("heading", { name: "Deploys", exact: true });
+    // On top of the left column, above Deploys, at its fixed height; Last hour sits on the right, under Domains.
+    const deploys = deploysHeading(page);
+    const sectionOf = (heading: Locator) => box(heading.locator("xpath=ancestor::section[1]"));
     const [deploysBox, cardBox, usageBox] = await Promise.all([box(deploys), box(card), box(lastHour(page))]);
-    expect(cardBox.y).toBeGreaterThan(deploysBox.y);
-    expect(cardBox.y).toBeLessThan(usageBox.y);
-    expect(Math.abs(cardBox.x - (await box(deploys.locator("xpath=ancestor::section[1]"))).x)).toBeLessThan(1);
-    expect(cardBox.height).toBe(360);
+    const [deploysCard, domainsCard, usageCard] = await Promise.all([
+      sectionOf(deploys),
+      sectionOf(page.getByRole("heading", { name: "Domains", exact: true })),
+      sectionOf(lastHour(page)),
+    ]);
+    expect(cardBox.y).toBeLessThan(deploysBox.y);
+    expect(Math.abs(cardBox.y + cardBox.height + 16 - deploysCard.y)).toBeLessThan(1);
+    expect(Math.abs(cardBox.x - deploysCard.x)).toBeLessThan(1);
+    expect(cardBox.height).toBe(cardHeight);
+    expect(usageCard.x).toBeGreaterThan(cardBox.x + cardBox.width);
+    expect(Math.abs(usageCard.x - domainsCard.x)).toBeLessThan(1);
+    expect(Math.abs(usageCard.y - (domainsCard.y + domainsCard.height + 16))).toBeLessThan(1);
     // Nothing took the focus or scrolled the page.
     expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
@@ -227,6 +239,7 @@ test.describe("console and shell", () => {
     await expect.poll(() => openSockets()).toEqual(["shell"]);
     expect(terminalSockets.slice(opened).map((s) => s.kind)).toEqual(["shell"]);
     expect(await box(shell)).toEqual(cardBox);
+    expect((await box(deploys)).y).toBe(deploysBox.y);
     expect((await box(lastHour(page))).y).toBe(usageBox.y);
     await page.screenshot({ path: `${shots}/overview-console-card-shell.png` });
 
@@ -265,7 +278,7 @@ test.describe("console and shell", () => {
     expect(tickets).toEqual(["terminals.watchConsole", "terminals.console"]);
     await expect.poll(() => terminalSockets.slice(0, watched).every((s) => s.closed)).toBe(true);
     await expect.poll(() => openSockets()).toEqual(["console"]);
-    expect((await box(card)).height).toBe(360);
+    expect((await box(card)).height).toBe(cardHeight);
     // Further lines go straight to it.
     await card.getByPlaceholder(stdinPlaceholder).fill("keys");
     await card.getByRole("button", { name: "Send" }).click();
@@ -288,7 +301,7 @@ test.describe("console and shell", () => {
     expect((await box(headerOf(shell))).height).toBe(connecting.height);
     const [switchBox, openFull] = await Promise.all([box(modeSwitch(page)), box(shell.getByRole("link", { name: "Open full" }))]);
     expect(Math.abs(switchBox.y + switchBox.height / 2 - (openFull.y + openFull.height / 2))).toBeLessThan(2);
-    expect((await box(shell)).height).toBe(360);
+    expect((await box(shell)).height).toBe(cardHeight);
   });
 
   test("the Overview card keeps its height and its session through a restart and a crash", async ({ page }) => {
@@ -308,7 +321,7 @@ test.describe("console and shell", () => {
     await page.goto(api);
     const card = page.getByRole("region", { name: "Console" });
     await expect(card.getByText(consoleLine)).toBeVisible();
-    const [cardBox, usageBox] = await Promise.all([box(card), box(lastHour(page))]);
+    const [cardBox, deploysBox] = await Promise.all([box(card), box(deploysHeading(page))]);
     const header = page.locator("main header").first();
     for (const label of ["Starting", "Crashed", "Running"]) {
       const refetched = page.waitForResponse((r) => r.url().includes("/api/v1/services.get"));
@@ -318,7 +331,7 @@ test.describe("console and shell", () => {
       // The terminal and its output stay; the column does not move.
       await expect(card.getByText(consoleLine)).toBeVisible();
       expect(await box(card), label).toEqual(cardBox);
-      expect((await box(lastHour(page))).y, label).toBe(usageBox.y);
+      expect((await box(deploysHeading(page))).y, label).toBe(deploysBox.y);
       if (label === "Crashed") await page.screenshot({ path: `${shots}/overview-console-card-crashed.png` });
     }
     // One session the whole time: no new ticket for each flip of the status (a watch: output only, not audited).
@@ -333,7 +346,7 @@ test.describe("console and shell", () => {
     const card = page.getByRole("region", { name: "Console" });
     await expect(card.getByText("The console opens once the app runs.")).toBeVisible();
     // The card's own size and shape, so the page does not jump once the app runs.
-    expect((await box(card)).height).toBe(360);
+    expect((await box(card)).height).toBe(cardHeight);
     await expect(modeSwitch(page)).toBeVisible();
     await expect(card.getByRole("button", { name: "Search output" })).toHaveCount(0);
     await page.screenshot({ path: `${shots}/overview-not-running.png` });
@@ -350,14 +363,14 @@ test.describe("console and shell", () => {
     await page.goto(api);
     const skeleton = page.locator('[data-slot="terminal-skeleton"]');
     await expect(skeleton).toBeVisible();
-    expect((await box(skeleton)).height).toBe(360);
+    expect((await box(skeleton)).height).toBe(cardHeight);
     // Only its small bars shimmer, never a light sweep over the whole dark block.
     await expect(skeleton).not.toHaveAttribute("data-slot", "skeleton");
     await expect(skeleton.locator('[data-slot="skeleton"]').first()).toBeVisible();
     await page.screenshot({ path: `${shots}/overview-loading.png` });
     const card = page.getByRole("region", { name: "Console" });
     await expect(card.getByText(consoleLine)).toBeVisible();
-    expect((await box(card)).height).toBe(360);
+    expect((await box(card)).height).toBe(cardHeight);
   });
 
   test("a clone that failed before a commit: the title names the branch, and a hint points private repos at the Source tab", async ({ page }) => {
@@ -406,7 +419,7 @@ test.describe("console and shell", () => {
     const shell = page.getByRole("region", { name: "Shell" });
     const open = shell.getByRole("button", { name: "Open shell" });
     await expect(open).toBeVisible();
-    expect((await box(shell)).height).toBe(360);
+    expect((await box(shell)).height).toBe(cardHeight);
     await page.waitForTimeout(800);
     expect(shellTickets).toEqual([]);
     expect(terminalSockets.length).toBe(from);
@@ -437,7 +450,7 @@ test.describe("console and shell", () => {
     await installDemo(page);
     await page.goto(api);
     const card = page.getByRole("region", { name: "Console" });
-    // Below the fold on a phone; xterm draws its rows once it is on screen.
+    // Under the page header on a phone, partly below the fold; xterm draws its rows once it is on screen.
     await card.scrollIntoViewIfNeeded();
     await expect(card.getByText(consoleLine)).toBeVisible();
     const cardBox = await box(card);

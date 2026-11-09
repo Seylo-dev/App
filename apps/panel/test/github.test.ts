@@ -57,6 +57,12 @@ function fakeGithub() {
       );
     }
     if (/^\/repos\/acme\/shop\/branches\//.test(url.pathname)) return ok({ name: "main" });
+    // connectRepo reads the repository through the App too: a private one, and a public one the installation does not include.
+    if (url.pathname === "/repos/acme/shop") return ok({ full_name: "acme/shop", private: true, default_branch: "main" });
+    if (url.pathname === "/repos/vercel/next.js") return ok({ full_name: "vercel/next.js", private: false, default_branch: "canary" });
+    if (/^\/repos\/vercel\/next\.js\/branches\//.test(url.pathname)) return ok({ name: "canary" });
+    if (url.pathname === "/installation/repositories")
+      return ok({ total_count: 1, repositories: [{ full_name: "acme/shop", private: true, default_branch: "main" }] });
     if (/^\/repos\/acme\/shop\/compare\//.test(url.pathname)) return ok({ files: compareFiles.map((filename) => ({ filename })) });
     return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
   }) as typeof fetch;
@@ -166,6 +172,21 @@ describe("GitHub webhooks", () => {
     expect(await built()).toMatchObject({ case: "git", value: { url: "https://github.com/acme/shop.git", allowInternalHost: false } });
     panel.deps.db.insert(gitInternalHosts).values({ projectId, host: "github.com", approvedBy: null }).run();
     expect(await built()).toMatchObject({ case: "git", value: { url: "https://github.com/acme/shop.git", allowInternalHost: true } });
+  });
+
+  test("a public repository the installation does not include is refused through the App: its webhook would never deliver", async () => {
+    // Before: any installation token reads any public repository, so vercel/next.js connected and never deployed on push.
+    const id = (await callOp(panel, serviceOps.create, { projectId, name: "outside", kind: "app", nodeId: nodeA, ports: [] }, { cookie }))
+      .body.id;
+    const res = await callOp(
+      panel,
+      github.connectRepo,
+      { serviceId: id, installationId: installationRowId, repo: "vercel/next.js", branch: "canary", deployOnPush: true },
+      { cookie },
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toMatchObject({ reason: "notOwned" });
+    expect(res.body.error.message).toContain("vercel/next.js is public and not a repository of the App");
   });
 
   test("a signed push to the followed branch deploys that commit; other branches are ignored", async () => {

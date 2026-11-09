@@ -31,6 +31,7 @@ import { errorMessage } from "../../lib/api";
 import { useLiveUp } from "../../lib/live";
 import { deploysOnPush } from "../../lib/service-display";
 import { DeployHostAction } from "../git/internal-hosts";
+import { useActiveDeploy } from "./active-deploy";
 import { buildNodeText } from "./build-node";
 import { useDeploymentLog } from "./deploy-log";
 import { DeployLogModal } from "./deploy-log-modal";
@@ -215,6 +216,8 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
   });
   const cancel = useOpMutation(deployments.cancel, { onSuccess: done, onError: fail });
   const running = isActiveDeployment(d.status);
+  // One deploy at a time: while one is in progress, Roll back and the Redeploy items wait for it.
+  const busy = useActiveDeploy(service.id) !== null;
   const failed = d.status === "failed";
   const version = deploymentVersion(d);
 
@@ -262,7 +265,12 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
           {t("serviceDeploys.logs")}
         </RowButton>
         {d.canRollback && (
-          <RowButton icon={IconArrowBackUp} onClick={() => setConfirmRollback(true)} disabled={rollback.isPending}>
+          <RowButton
+            icon={IconArrowBackUp}
+            onClick={() => setConfirmRollback(true)}
+            disabled={rollback.isPending || busy}
+            title={busy ? t("service.header.deployBusyHint") : undefined}
+          >
             {t("serviceDeploys.rollback")}
           </RowButton>
         )}
@@ -274,12 +282,12 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {d.commit && (
-              <DropdownMenuItem onSelect={() => redeploy.mutate({ serviceId: service.id, commitSha: d.commit?.sha })}>
+              <DropdownMenuItem disabled={busy} onSelect={() => redeploy.mutate({ serviceId: service.id, commitSha: d.commit?.sha })}>
                 <IconRefresh size={15} />
                 {t("serviceDeploys.redeployCommit")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={() => redeploy.mutate({ serviceId: service.id, noCache: true })}>
+            <DropdownMenuItem disabled={busy} onSelect={() => redeploy.mutate({ serviceId: service.id, noCache: true })}>
               <IconRefresh size={15} />
               {t("serviceDeploys.redeployNoCache")}
             </DropdownMenuItem>
@@ -309,12 +317,15 @@ function RowButton({
   onClick,
   disabled,
   haspopup,
+  title,
 }: {
   icon: Icon;
   children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
   haspopup?: boolean;
+  /** Why it is disabled, when it is. */
+  title?: string;
 }) {
   return (
     <Button
@@ -322,6 +333,7 @@ function RowButton({
       className="h-8 bg-muted px-[11px] shadow-none hover:bg-track"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       aria-haspopup={haspopup ? "dialog" : undefined}
     >
       <Icon size={13} stroke={2} />

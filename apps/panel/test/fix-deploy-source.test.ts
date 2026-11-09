@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { deployments as deploymentOps, projects, services as serviceOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { services, sourceUploads } from "../src/db/schema";
+import { queueDeploy } from "../src/modules/deployments/queue";
 import { deploymentSource } from "../src/modules/deployments/store";
 import { setTargetResolver } from "../src/modules/uptime/targets";
 import { FakeFleet } from "./fake-fleet";
@@ -92,8 +93,9 @@ test("each upload deploy names its own archive, not the newest one", async () =>
   };
   const first = upload("app-v1.zip");
   const one = await deploy(id);
-  upload("app-v2.zip");
-  const two = await deploy(id);
+  // A new archive deploys as the upload route does: it queues behind the running deploy (a Deploy click would be refused).
+  const second = upload("app-v2.zip");
+  const two = queueDeploy(panel.deps, { serviceId: id, trigger: "manual", actor: null, uploadId: second }).id;
 
   expect((await list(id)).map((d) => [d.id, d.source])).toEqual([
     [two, "app-v2.zip"],

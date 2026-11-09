@@ -48,7 +48,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { assertEngineRunsOn } from "../databases/capability";
 import { generatePassword } from "../databases/engines";
 import { findDatabase, writeSecret } from "../databases/info";
-import { mainPort } from "../domains/lookup";
+import { appPort } from "../domains/lookup";
 import { insertDomain } from "../domains/ops";
 import { primaryDomain } from "../domains/rows";
 import { buildEnvGraph } from "../env/graph";
@@ -180,7 +180,8 @@ function planClone(ctx: OpContext, svc: ServiceRow, input: { projectId?: string;
   const host = node?.wildcard ? `${name}.${node.wildcard}` : null;
   let autoDomainBlock: AutoDomainBlock | null = null;
   if (!host) autoDomainBlock = "noWildcardDomain";
-  else if (mainPort(svc) === null || isDatabase) autoDomainBlock = "noPort";
+  // A portless app built from a repository listens on its domains' port or 80 (its PORT): it gets one too.
+  else if (appPort(ctx.db, svc) === null || isDatabase) autoDomainBlock = "noPort";
   else if (!can("domains.edit", "project", projectId)) autoDomainBlock = "permission";
   else if (ctx.db.select({ id: domains.id }).from(domains).where(eq(domains.host, host)).get()) autoDomainBlock = "taken";
   const primary = can("domains.view", "service", svc.id) ? primaryDomain(ctx.db, svc.id) : undefined;
@@ -411,7 +412,7 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
         serviceId: id,
         host: plan.autoDomain,
         pathPrefix: "/",
-        targetPort: mainPort({ spec }) ?? 80,
+        targetPort: appPort(ctx.db, svc) ?? 80,
         https: "acme",
         auto: true,
         dnsStatus: "ok",

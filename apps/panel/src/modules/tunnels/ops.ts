@@ -8,7 +8,7 @@ import { userOf } from "../../auth/principal";
 import { cloudflareTunnels, settings } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { getSetting, setSetting } from "../../settings";
-import { getService, invalidateService, mainPort } from "../domains/lookup";
+import { appPort, getService, invalidateService } from "../domains/lookup";
 import { effectiveToken, quickTunnelMinutes, tunnelRow, tunnelView } from "./logic";
 
 function settingsView(ctx: OpContext) {
@@ -22,7 +22,7 @@ export const set = implement(tunnelOps.set, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
   const current = tunnelRow(ctx.db, service.id);
   const mode = input.mode ?? current?.mode ?? "quick";
-  const targetPort = input.targetPort ?? current?.targetPort ?? mainPort(service);
+  const targetPort = input.targetPort ?? current?.targetPort ?? appPort(ctx.db, service);
   if (targetPort === null) {
     throw new OpError("BAD_REQUEST", `${service.name} has no port yet. Pass targetPort.`, { field: "targetPort" });
   }

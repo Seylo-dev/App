@@ -130,7 +130,7 @@ export const deploy = defineOp({
   kind: "mutation",
   summary: "Deploy a service now",
   description:
-    "Starts a deploy of the service's current settings: the branch head (or a given commit) for git sources, the image for image sources. Queued behind a running deploy of the same service. Returns the new deployment; follow it with deployments.get and deployments.log.",
+    "Starts a deploy of the service's current settings: the branch head (or a given commit) for git sources, the image for image sources. Refused (CONFLICT, reason deployRunning, with the deploymentId and serviceId of the deploy in progress, a member's for a compose stack) while another deploy of the service is queued or running: wait for it or cancel it first. Pushes and trigger URLs still queue behind a running deploy. Returns the new deployment; follow it with deployments.get and deployments.log.",
   input: Type.Object({
     serviceId: Id,
     /** Build this commit instead of the branch head. */
@@ -149,12 +149,14 @@ export const list = defineOp({
   kind: "query",
   summary: "List a service's deployments",
   description:
-    "Lists a service's deploy history, newest first: status, who or what triggered it, commit, where it was built and shipped, image digest, step durations, and whether it can be rolled back to.",
+    "Lists a service's deploy history, newest first: status, who or what triggered it, commit, where it was built and shipped, image digest, step durations, and whether it can be rolled back to. With active: only the deploys that are queued or running, oldest first, so the first one is the deploy in progress (the one deployments.deploy names when it refuses); no cursor.",
   input: Type.Object({
     serviceId: Id,
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 })),
     /** nextCursor from the previous page. */
     cursor: Type.Optional(Type.String({ maxLength: 100 })),
+    /** Only queued and running deploys, oldest first: the first is the one in progress. */
+    active: Type.Optional(Type.Boolean()),
   }),
   output: Type.Object({
     deployments: Type.Array(Deployment),
@@ -219,7 +221,7 @@ export const rollback = defineOp({
   kind: "mutation",
   summary: "Roll back to a deployment",
   description:
-    "Deploys the image of an earlier successful deployment again, by digest, without building. Settings and environment are the current ones. Fails when the image is no longer kept.",
+    "Deploys the image of an earlier successful deployment again, by digest, without building. Settings and environment are the current ones. Fails when the image is no longer kept, and (CONFLICT, reason deployRunning) while another deploy of the service is queued or running.",
   input: Type.Object(DeploymentRef),
   output: Deployment,
   permission: permission.service("services.deploy", serviceScope),

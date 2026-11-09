@@ -8,7 +8,7 @@ import { domains, servicePlacements, services, volumes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
-import { queueDeploy } from "../deployments/queue";
+import { assertNoActiveDeploy, queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { dropRepoHooks } from "../github/repo-hooks";
@@ -351,6 +351,7 @@ const start = implement(serviceOps.start, (input, ctx) => {
         action: "services.deploy",
       });
     }
+    assertNoActiveDeploy(ctx, row.id);
     queueDeploy(ctx, { serviceId: row.id, trigger: "manual", actor: actorOf(ctx), triggeredBy: userOf(ctx.principal)?.id ?? null });
     publishService(ctx, row);
     return {};
