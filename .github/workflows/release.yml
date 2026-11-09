@@ -26,7 +26,7 @@ name: Release
 # Then Start the install smoke test starts install-smoke.yml for the tag: a
 # release published with GITHUB_TOKEN starts no "release: published"
 # workflow, but workflow_dispatch works with that token. It holds only
-# actions: write and runs gh.
+# actions: write and contents: read, and runs gh only.
 #
 # scripts/check-release-workflow.ts (make test-release) fails when a job
 # that holds a write token or a secret runs bun, npm or node, or when

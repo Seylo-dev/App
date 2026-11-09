@@ -34,7 +34,7 @@ test/e2e-colima/          three-VM end-to-end harness and checklist (`make e2e`,
 test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/ci.yml  CI on GitHub's runners: check-gen, lint, test, build (publishes nothing)
 .github/workflows/security.yml  govulncheck, osv-scanner (triaged ignores in osv-scanner.toml) and zizmor on push, pull request and weekly
-.github/workflows/release.yml   tag releases: Build and test (read-only token, the only job that runs npm), Draft release (unsigned, from that build), Sign (the only job with the release key, environment `release`), Publish, then Start the install smoke test (actions: write, runs gh only); scripts/check-release-workflow.ts keeps npm out of jobs with a write token or a secret
+.github/workflows/release.yml   tag releases: Build and test (read-only token, the only job that runs npm), Draft release (unsigned, from that build), Sign (the only job with the release key, environment `release`), Publish, then Start the install smoke test (actions: write and contents: read, runs gh only); scripts/check-release-workflow.ts keeps npm out of jobs with a write token or a secret
 .github/workflows/install-smoke.yml  installs a published release with its install.sh on GitHub's amd64 and arm64 runners and runs test/install-smoke/smoke.sh (read-only token, no secret)
 test/install-smoke/       smoke.sh: owner, API key, a whoami service, its IP:port answers
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
