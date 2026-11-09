@@ -3,7 +3,8 @@
 // Order: per-test overrides, then the panel world (fixtures.ts), picking a
 // repository (repos.ts: GitHub App and GitLab repositories, branches,
 // creating and connecting an app), the service screens (service.ts), the
-// settings screens (settings.ts) and Docker Hub (dockerhub.ts). Ops
+// settings screens (settings.ts), git credentials (git.ts) and Docker Hub
+// (dockerhub.ts). Ops
 // without demo data go to the real panel the run started (signed in).
 // Sockets: the live socket accepts every subscription and streams a few
 // deployment log lines; log follow and the terminals answer like an agent.
@@ -11,6 +12,7 @@
 import type { Page, Route } from "@playwright/test";
 import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
+import { handlers as gitHandlers, resetGitDemo } from "./git";
 import { DemoRefusal } from "./refusal";
 import { handlers as repoHandlers } from "./repos";
 import { handlers as serviceHandlers, logEntries } from "./service";
@@ -187,11 +189,12 @@ let tailscaleStatus: Record<string, any> = runningTailscale();
 /** Every terminal socket a page opened since installDemo, in order: its kind and whether the page closed it. */
 export const terminalSockets: { kind: "console" | "shell"; closed: boolean }[] = [];
 
-/** Puts the panel access and Tailscale demo state back (installDemo runs it for every page). */
+/** Puts the panel access, Tailscale and git credential demo state back (installDemo runs it for every page). */
 function resetDemoState() {
   panelAccess = openPanelAccess();
   tailscaleStatus = runningTailscale();
   terminalSockets.length = 0;
+  resetGitDemo();
 }
 
 const settingsHandlers: Record<string, Handler> = Object.fromEntries(
@@ -261,6 +264,7 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     repoHandlers as Record<string, Handler>,
     serviceHandlers as Record<string, Handler>,
     settingsHandlers,
+    gitHandlers as Record<string, Handler>,
     dockerHubHandlers as Record<string, Handler>,
   ];
   await page.route(/\/api\/v1\/[a-zA-Z]+\.[a-zA-Z]+/, async (route: Route) => {

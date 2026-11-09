@@ -39,6 +39,8 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["service-overview", service(svc.api)],
   ["service-deployments", service(svc.worker, "deployments")],
   ["service-source", service(svc.api, "source")],
+  // A git URL source: the credential picker with Add credential (git-credentials.spec.ts covers the dialog).
+  ["service-source-git", service(svc.privateApi, "source")],
   ["service-environment", service(svc.worker, "environment")],
   ["service-domains", service(svc.web, "domains")],
   // One Console tab with two modes; /shell redirects to the second (console.spec.ts).
@@ -73,6 +75,7 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
       "people",
       "api-keys",
       "github",
+      "git-providers",
       "cloudflare",
       "notifications",
       "backups",
