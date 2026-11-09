@@ -3257,6 +3257,30 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   loopback only, the same form as the panel's `recovery.sshTunnel`), and a
   dismiss button remembered per browser (localStorage
   `<slug>.plainHttpNoticeDismissed`, every access in try/catch).
+- New app, Git repository tab (`components/new-service/`): one Repository
+  field takes a full git URL (https://, ssh://, git@host:path), `owner/repo`
+  (GitHub) or a host and path without a scheme (`gitlab.com/group/sub/app`),
+  with or without `.git` (`repo-input.ts` `parseRepoInput`; page addresses
+  of github.com, gitlab.com, bitbucket.org and codeberg.org give the
+  repository and the branch of `tree/<branch>`). Browse (`repo-field.tsx`)
+  lists, by connection and with private or public, the repositories of the
+  GitHub App installations that are not suspended (`github.repos`) and of
+  every git provider connection (`gitProviders.repos`), searched and paged;
+  a hidden installation or provider list gives none, a connection whose list
+  the panel refuses (FORBIDDEN) drops out, and with none it links to
+  Settings > GitHub and Git providers (owners and admins). What the field
+  becomes (`repo-source.ts` `decideSource`, `sourceFor`): a repository
+  picked from a connection, or typed and listed by one, is a `github` or
+  `provider` source with `deployOnPush` on, as on the Source tab; anything
+  else a `git` source (owner/repo as `https://github.com/<owner>/<repo>.git`,
+  no credential, `deployOnPush` off). A line under the field says which.
+  `services.create` refuses GitHub and provider sources, so the dialog
+  creates the app without a source, then calls `github.connectRepo` or
+  `gitProviders.connectRepo` (which creates the webhook), then
+  `deployments.deploy` when "Deploy right away" is ticked; a failed connect
+  opens the service's Source tab with the error. Branch suggests the
+  repository's branches (`github.branches`, `gitProviders.branches`, or
+  `git.branches` for an https URL) and follows its default until edited.
 - Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
   a click anywhere on the field copies, the copy icon included
   (`copy.spec.ts`).
@@ -3350,7 +3374,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   hidden, the palette and the project page still open it, Unhide),
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
-  text unsaved) and
+  text unsaved), `repo-picker.spec.ts` (the New app dialog's Repository
+  field with `demo/repos.ts`: Browse and pick, owner/repo an installation
+  lists or not, pasted URLs, branch suggestions, the empty, loading and
+  refused states, and what gets created and connected) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar and the
   accent check;

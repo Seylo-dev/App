@@ -125,13 +125,7 @@ export const fixtures: Record<string, unknown> = {
     deviceFlowAvailable: true,
     deviceAccount: null,
   },
-  "github.installations": {
-    installations: [
-      { id: "inst000000000001", installationId: 55501, accountLogin: "acme", accountType: "Organization", repositorySelection: "selected", suspended: false, manageUrl: "https://github.com/organizations/acme/settings/installations/55501", createdAt: ago(60 * 24 * 59) },
-      { id: "inst000000000002", installationId: 55502, accountLogin: "lee-park", accountType: "User", repositorySelection: "all", suspended: false, manageUrl: "https://github.com/settings/installations/55502", createdAt: ago(60 * 24 * 20) },
-    ],
-    installUrl: "https://github.com/apps/acme-seylo/installations/new",
-  },
+  // github.installations: repos.ts (the service screens connect through the same installations).
   "tunnels.getSettings": { tokenSet: true, updatedAt: ago(60 * 24 * 4) },
   "notifications.channels": {
     channels: [

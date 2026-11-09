@@ -129,6 +129,21 @@ test.describe("screens", () => {
           await page.screenshot({ path: `${shots}/${preset}/new-service-menu.png` });
           await page.keyboard.press("Escape");
 
+          // New app > Git repository with the Browse list open (repo-picker.spec.ts covers the flows).
+          await page.getByRole("button", { name: "New service" }).click();
+          await page.getByRole("menuitem").filter({ hasText: "GitHub, Git, Docker image" }).click();
+          const newApp = page.getByRole("dialog", { name: "New app" });
+          await newApp.getByRole("radio", { name: "Git repository" }).click();
+          await newApp.getByRole("button", { name: "Browse" }).click();
+          await expect(page.locator('[data-slot="popover"]').getByRole("option").first()).toBeVisible();
+          await page.waitForTimeout(400);
+          await page.screenshot({ path: `${shots}/${preset}/new-app-repo-browse.png` });
+          // One Escape per layer: the list first (once its fade is over), then the dialog.
+          await page.keyboard.press("Escape");
+          await expect(page.locator('[data-slot="popover"]')).toHaveCount(0);
+          await page.keyboard.press("Escape");
+          await expect(newApp).toHaveCount(0);
+
           await page.goto(`/templates?project=${ids.acme}`);
           await page.getByRole("button", { name: /n8n/ }).first().click();
           await expect(page.getByRole("dialog")).toBeVisible();

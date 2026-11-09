@@ -1,15 +1,22 @@
 // The create form behind each "New service" choice. Every kind asks for a
 // project (unless the screen already has one), a name and a node; the rest
 // depends on the kind:
-//   app       a Docker image or a git URL now, or nothing (set the source later)
+//   app       a Docker image or a repository now (a URL, owner/repo or one
+//             picked from the GitHub App and git provider connections,
+//             repo-field.tsx), or nothing (set the source later)
 //   cron      an image, a schedule and a command
 //   database  the engine, its version (and pgvector for Postgres)
 //   compose   a pasted compose file, previewed before it is created
 //   box       an optional repository to clone
-// After creating, the service page opens.
+// After creating, the service page opens. A GitHub or provider repository
+// is connected right after the service is made (services.create takes no
+// such source: github.connectRepo and gitProviders.connectRepo check the
+// connection can read it, and the provider one creates the webhook), then
+// deployed when "Deploy right away" is ticked; if connecting fails, the
+// service's Source tab opens instead.
 
-import { boxes, compose, databases, OpError, services } from "@seylo/ops";
-import { useOp, useOpMutation } from "@seylo/ops/react";
+import { boxes, compose, databases, deployments, github, gitProviders, OpError, type OpInput, type OpOutput, services } from "@seylo/ops";
+import { useOp, useOpClient, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
@@ -20,14 +27,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FieldSkeleton, LoadingRegion } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
+import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { ComposePreview } from "../../lib/types";
+import { InternalHostNote, useCanManageGit } from "../git/internal-hosts";
 import { NodePicker, ProjectPicker } from "../pickers";
 import { QueryError } from "../query-error";
 import { type CatalogKind, KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
+import { BranchField, RepoField, RepoNote, useBranchSuggestions, useRepoSource } from "./repo-field";
+import { type FoundRepo, sourceFor, textFor } from "./repo-source";
 import { shortImage } from "./short-image";
 
 type FormKind = Exclude<NewServiceKind, CatalogKind>;
@@ -51,6 +62,23 @@ const engines: readonly { engine: Engine; label: MessageKey; tag: string; note?:
 const pgvector = "pgvector";
 
 const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const branchPattern = new RegExp(services.GitBranch.pattern as string);
+
+type Source = (typeof services.Source)["static"];
+type ConnectedSource = Extract<Source, { type: "github" | "provider" }>;
+
+/** services.create, then connecting the repository through its connection, then (optionally) the first deploy. */
+interface ConnectPlan {
+  create: OpInput<typeof services.create>;
+  source: ConnectedSource;
+  deployNow: boolean;
+}
+
+interface ConnectResult {
+  created: OpOutput<typeof services.create>;
+  /** The step that failed after the service was made, if one did. */
+  failed: { step: "connect" | "deploy"; error: unknown } | null;
+}
 
 export function NewServiceDialog({
   kind,
@@ -78,8 +106,12 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   const [name, setName] = useState("");
   const [appSource, setAppSource] = useState<AppSource>("image");
   const [image, setImage] = useState("");
-  const [gitUrl, setGitUrl] = useState("");
+  const [repoText, setRepoText] = useState("");
+  // A repository picked from Browse, while the field still shows what picking it wrote.
+  const [picked, setPicked] = useState<{ text: string; found: FoundRepo } | null>(null);
   const [branch, setBranch] = useState("main");
+  // Until someone edits the branch, it follows the repository's default.
+  const [branchEdited, setBranchEdited] = useState(false);
   const [port, setPort] = useState("");
   const [deployNow, setDeployNow] = useState(true);
   const [schedule, setSchedule] = useState("0 * * * *");
@@ -104,14 +136,80 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   const createStack = useOpMutation(compose.create, { onSuccess: (r) => opened(r.stack.id, r.stack.projectId), onError });
   const createBox = useOpMutation(boxes.create, { onSuccess: (b) => opened(b.serviceId, b.projectId), onError });
   const preview = useOpMutation(compose.preview);
-  const pending = createService.isPending || createDatabase.isPending || createStack.isPending || createBox.isPending;
+  const client = useOpClient();
+  const createAndConnect = useMutation<ConnectResult, unknown, ConnectPlan>({
+    mutationFn: async ({ create, source, deployNow: deploy }) => {
+      const created = await client.call(services.create, create);
+      const { branch: sourceBranch, deployOnPush, repo } = source;
+      try {
+        if (source.type === "github") {
+          await client.call(github.connectRepo, {
+            serviceId: created.id,
+            installationId: source.installationId,
+            repo,
+            branch: sourceBranch,
+            deployOnPush,
+          });
+        } else {
+          await client.call(gitProviders.connectRepo, {
+            serviceId: created.id,
+            providerId: source.providerId,
+            repo,
+            branch: sourceBranch,
+            deployOnPush,
+          });
+        }
+      } catch (cause) {
+        return { created, failed: { step: "connect", error: cause } };
+      }
+      if (deploy) {
+        try {
+          await client.call(deployments.deploy, { serviceId: created.id });
+        } catch (cause) {
+          return { created, failed: { step: "deploy", error: cause } };
+        }
+      }
+      return { created, failed: null };
+    },
+    onSuccess: ({ created, failed }, plan) => {
+      if (!failed) return opened(created.id, created.projectId);
+      const description = errorMessage(failed.error, t("common.unknownError"));
+      onClose();
+      if (failed.step === "connect") {
+        toast.error(t("newService.connectFailed", { name: created.name, repo: plan.source.repo }), { description });
+        void navigate({ to: "/p/$projectId/s/$serviceId/source", params: { projectId: created.projectId, serviceId: created.id } });
+      } else {
+        toast.error(t("newService.deployFailed", { name: created.name }), { description });
+        void navigate({ to: "/p/$projectId/s/$serviceId", params: { projectId: created.projectId, serviceId: created.id } });
+      }
+    },
+    onError,
+  });
+  const pending =
+    createService.isPending || createDatabase.isPending || createStack.isPending || createBox.isPending || createAndConnect.isPending;
+
+  const gitTab = kind === "app" && appSource === "git";
+  const canManageGit = useCanManageGit();
+  const repoSource = useRepoSource({
+    projectId,
+    text: repoText,
+    picked: picked && picked.text === repoText ? picked.found : null,
+    enabled: gitTab,
+  });
+  const branches = useBranchSuggestions(projectId, repoSource.decision, gitTab);
+  // A branch the address names (".../tree/dev") wins over the repository's default.
+  const suggestedBranch = (repoSource.parse.ok ? repoSource.parse.repo.branch : null) ?? branches.defaultBranch;
+  useEffect(() => {
+    if (gitTab && !branchEdited && suggestedBranch) setBranch(suggestedBranch);
+  }, [gitTab, branchEdited, suggestedBranch]);
+  const repoSourceToCreate = gitTab && branchPattern.test(branch.trim()) ? sourceFor(repoSource.decision, branch.trim()) : null;
 
   const nameValid = namePattern.test(name);
   const ready =
     nameValid &&
     projectId !== "" &&
     nodeId !== "" &&
-    (kind !== "app" || appSource === "none" || (appSource === "image" ? image.trim() !== "" : gitUrl.trim() !== "")) &&
+    (kind !== "app" || appSource === "none" || (appSource === "image" ? image.trim() !== "" : repoSourceToCreate !== null)) &&
     (kind !== "cron" || (image.trim() !== "" && command.trim() !== "" && schedule.trim().split(/\s+/).length === 5)) &&
     (kind !== "compose" || yaml.trim() !== "");
 
@@ -145,18 +243,18 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
       });
     } else {
       const containerPort = Number(port);
-      createService.mutate({
-        ...base,
-        kind: "app",
-        source:
-          appSource === "image"
-            ? { type: "image", image: image.trim(), registryId: null }
-            : appSource === "git"
-              ? { type: "git", url: gitUrl.trim(), branch: branch.trim() || "main", credentialId: null, deployOnPush: false }
-              : undefined,
-        ports: Number.isInteger(containerPort) && containerPort > 0 ? [{ containerPort, protocol: "tcp" }] : undefined,
-        deployNow: appSource !== "none" && deployNow,
-      });
+      const ports = Number.isInteger(containerPort) && containerPort > 0 ? [{ containerPort, protocol: "tcp" as const }] : undefined;
+      const source: Source | undefined =
+        appSource === "image"
+          ? { type: "image", image: image.trim(), registryId: null }
+          : appSource === "git"
+            ? (repoSourceToCreate ?? undefined)
+            : undefined;
+      if (source?.type === "github" || source?.type === "provider") {
+        createAndConnect.mutate({ create: { ...base, kind: "app", ports, deployNow: false }, source, deployNow });
+        return;
+      }
+      createService.mutate({ ...base, kind: "app", source, ports, deployNow: appSource !== "none" && deployNow });
     }
   };
 
@@ -214,17 +312,36 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
           )}
           {appSource === "git" && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_160px]">
-              <Field id="ns-git" label="newService.gitUrl">
-                <Input
+              <Field
+                id="ns-git"
+                label="newService.gitRepo"
+                note={<RepoNote id="ns-git-note" text={repoText} decision={repoSource.decision} />}
+              >
+                <RepoField
                   id="ns-git"
-                  value={gitUrl}
-                  onChange={(e) => setGitUrl(e.target.value)}
-                  placeholder="https://github.com/acme/app.git"
-                  className="font-mono"
+                  noteId="ns-git-note"
+                  value={repoText}
+                  onChange={setRepoText}
+                  onPick={(found) => {
+                    const text = textFor(found);
+                    setPicked({ text, found });
+                    setRepoText(text);
+                  }}
+                  projectId={projectId}
+                  source={repoSource}
+                  canManage={canManageGit}
                 />
               </Field>
               <Field id="ns-branch" label="newService.branch">
-                <Input id="ns-branch" value={branch} onChange={(e) => setBranch(e.target.value)} className="font-mono" />
+                <BranchField
+                  id="ns-branch"
+                  value={branch}
+                  onChange={(next) => {
+                    setBranch(next);
+                    setBranchEdited(true);
+                  }}
+                  suggestions={branches}
+                />
               </Field>
             </div>
           )}
@@ -366,6 +483,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             : errorMessage(error, t("common.unknownError"))}
         </p>
       )}
+      {error !== null && gitTab && <InternalHostNote error={error} projectId={projectId} />}
 
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
@@ -466,12 +584,26 @@ function ComposePreviewList({ preview }: { preview: ComposePreview }) {
   );
 }
 
-function Field({ id, label, hint, children }: { id: string; label: MessageKey; hint?: MessageKey; children: ReactNode }) {
+/** hint: a fixed line under the control; note: one the caller renders (it changes with the value). */
+function Field({
+  id,
+  label,
+  hint,
+  note,
+  children,
+}: {
+  id: string;
+  label: MessageKey;
+  hint?: MessageKey;
+  note?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Label htmlFor={id}>{t(label)}</Label>
       {children}
       {hint && <span className="text-xs text-muted-foreground">{t(hint)}</span>}
+      {note}
     </div>
   );
 }

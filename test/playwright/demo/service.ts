@@ -420,21 +420,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "env.get": () => ({ text: envText, variables: [], sharedCount: 3, updatedAt: ago(day) }),
   "env.references": () => refs,
   "env.getShared": () => ({ text: "SMTP_HOST=smtp.example.com\nSMTP_USER=mailer\nSMTP_PASS=hunter2hunter2\n", variables: [], updatedAt: ago(day) }),
-  "github.installations": () => ({
-    installations: [
-      { id: "i000000000000001", installationId: 1, accountLogin: "acme", accountType: "Organization", repositorySelection: "all", suspended: false, manageUrl: "https://github.com", createdAt: ago(day) },
-    ],
-    installUrl: "https://github.com/apps/x/installations/new",
-  }),
-  "github.repos": () => ({
-    repos: [
-      { fullName: "acme/shop-api", private: true, defaultBranch: "main", pushedAt: ago(2 * hour) },
-      { fullName: "acme/shop-worker", private: true, defaultBranch: "main", pushedAt: ago(day) },
-      { fullName: "acme/docs", private: false, defaultBranch: "main", pushedAt: ago(9 * day) },
-    ],
-    hasMore: false,
-  }),
-  "github.branches": () => ({ branches: ["main", "dev", "feat/queue"], defaultBranch: "main" }),
+  // github.installations, github.repos and github.branches: repos.ts.
   "webhooks.getTrigger": () => ({ configured: true, hint: "x9Qa", lastUsedAt: ago(3 * hour), createdAt: ago(10 * day) }),
   "webhooks.listDeliveries": () => ({
     deliveries: [
