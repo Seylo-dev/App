@@ -245,6 +245,7 @@ run_installer() {
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     FAKE_STATUS="${FAKE_STATUS:-}" FAKE_STATUS_EXIT="${FAKE_STATUS_EXIT:-}" INSTALLER_TEST_JOIN_WAIT="${INSTALLER_TEST_JOIN_WAIT:-}" \
     INSTALLER_TEST_COLOR="${TEST_COLOR:-}" NO_COLOR="${TEST_NO_COLOR:-}" TERM="${TEST_TERM:-}" COLORTERM="${TEST_COLORTERM:-}" \
+    DO_NOT_TRACK="${TEST_DO_NOT_TRACK:-}" SEYLO_TELEMETRY="${TEST_TELEMETRY:-}" \
     "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
   RC=$?
   set -e
@@ -587,6 +588,22 @@ rm -rf "$seed/var/lib/$SLUG/panel"
 FAKE_GETENT_passwd=olduser PRESEED=$seed EXTRA_PATH=$with_getent run_installer minisign "$INSTALLER" --version "$V"
 expect_ok "re-running the installer on a node without a panel" "Already installed"
 has "the panel's user" && flunk "a node without a panel got a panel uid warning" "$OUT" || pass "a node without a panel gets no panel uid warning"
+
+# ---- telemetry: on by default; --no-telemetry, SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 reach the panel's bootstrap
+run_installer minisign "$INSTALLER" --version "$V"
+if [ "$RC" -eq 0 ] && has "panel bootstrap --image $PANEL_REF" && ! has "--no-telemetry"; then
+  pass "a plain install leaves telemetry to the setup page (no --no-telemetry)"
+else
+  flunk "a plain install passed --no-telemetry or failed" "$OUT"
+fi
+run_installer minisign "$INSTALLER" --version "$V" --no-telemetry
+expect_ok "--no-telemetry reaches the panel's bootstrap" "--agent-tls-port 3443 --no-telemetry"
+TEST_DO_NOT_TRACK=1 run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "DO_NOT_TRACK=1 is --no-telemetry" "--agent-tls-port 3443 --no-telemetry"
+TEST_TELEMETRY=off run_installer minisign "$INSTALLER" --version "$V"
+expect_ok "SEYLO_TELEMETRY=off is --no-telemetry" "--agent-tls-port 3443 --no-telemetry"
+TEST_DO_NOT_TRACK=0 run_installer minisign "$INSTALLER" --version "$V"
+if [ "$RC" -eq 0 ] && ! has "--no-telemetry"; then pass "DO_NOT_TRACK=0 changes nothing"; else flunk "DO_NOT_TRACK=0 turned telemetry off" "$OUT"; fi
 
 # ---- the agents' TLS port and plain-HTTP joins
 FAKE_UFW=1 run_installer minisign "$INSTALLER" --version "$V"

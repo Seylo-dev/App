@@ -24,6 +24,8 @@ export interface StoredTelemetry {
   enabled: boolean;
   installId: string;
   lastSentAt: number | null;
+  /** The installer ran with --no-telemetry: the setup page starts with reports off. Cleared once the owner chose. */
+  offAtInstall?: boolean;
 }
 
 declare module "../../settings" {

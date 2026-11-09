@@ -70,6 +70,7 @@ PURGE=
 FORCE=
 ALLOW_UNSIGNED=
 DOWNGRADE=
+NO_TELEMETRY=
 DATA_DIR=$BRAND_DATA_DIR
 # Set by fetch_release from the signed release manifest.
 AGENT_SHA256=
@@ -78,6 +79,10 @@ WORK=
 # Release download base (a mirror of GitHub's /<org>/<repo>/releases layout);
 # --release-url or <PREFIX>_RELEASE_URL override it.
 eval "RELEASE_URL=\${${ENV_PREFIX}_RELEASE_URL:-}"
+# --no-telemetry, also from <SLUG>_TELEMETRY=off or the DO_NOT_TRACK=1 convention.
+eval "TELEMETRY_ENV=\${${ENV_PREFIX}_TELEMETRY:-}"
+case $(printf '%s' "$TELEMETRY_ENV" | tr '[:upper:]' '[:lower:]') in off | 0 | false | no) NO_TELEMETRY=1 ;; esac
+case $(printf '%s' "${DO_NOT_TRACK:-}" | tr '[:upper:]' '[:lower:]') in 1 | true | yes) NO_TELEMETRY=1 ;; esac
 
 # ---- output
 # Plain text unless stdout is a terminal, so logs, pipes and CI read as they
@@ -276,6 +281,10 @@ Flags:
                        but does not start (without it the installer stops there,
                        before it installs anything)
   --yes                same as --install-docker (the installer asks nothing)
+  --no-telemetry       start the panel's setup page with anonymous usage reports off
+                       (also ${ENV_PREFIX}_TELEMETRY=off or DO_NOT_TRACK=1). They are on by
+                       default for a new panel, and the setup page shows the switch
+                       before any report is sent
   --data-dir <dir>     data folder (default: $BRAND_DATA_DIR)
   --root <dir>         write files under <dir> instead of / and run no system commands (testing)
   --dry-run            print what would be done and change nothing
@@ -346,6 +355,7 @@ parse_args() {
 		--force) FORCE=1 ;;
 		--allow-unsigned) ALLOW_UNSIGNED=1 ;;
 		--downgrade) DOWNGRADE=1 ;;
+		--no-telemetry) NO_TELEMETRY=1 ;;
 		-h | --help) usage; exit 0 ;;
 		*) die "unknown argument: $1 (see --help)" ;;
 		esac
@@ -1107,7 +1117,7 @@ install_panel() {
 	work_dir
 	LINK_FILE=$WORK/setup-link
 	if [ -n "$DRY_RUN" ] || [ -n "$ROOT" ]; then
-		trace "$SLUG panel bootstrap --image $image --port $PORT --agent-tls-port $AGENT_TLS_PORT"
+		trace "$SLUG panel bootstrap --image $image --port $PORT --agent-tls-port $AGENT_TLS_PORT${NO_TELEMETRY:+ --no-telemetry}"
 		# --root (tests): a stand-in for the link bootstrap writes.
 		[ -n "$DRY_RUN" ] ||
 			printf 'http://<server-ip>:%s/setup?t=<setup token>\n%s\n' "$PORT" \
@@ -1118,6 +1128,15 @@ install_panel() {
 		# block; an older agent (--version, --binary) prints it itself.
 		if seylo panel bootstrap --help 2>/dev/null | grep -q -- --link-file; then
 			set -- "$@" --link-file "$LINK_FILE"
+		fi
+		# Since 0.2.4. An older agent (--binary, --version) cannot pass it on, while the panel image may be
+		# newer and start with reports on: say so instead of dropping it.
+		if [ -n "$NO_TELEMETRY" ]; then
+			if seylo panel bootstrap --help 2>/dev/null | grep -q -- --no-telemetry; then
+				set -- "$@" --no-telemetry
+			else
+				warn "this $SLUG binary does not take --no-telemetry: if the setup page shows \"Send anonymous usage reports\" on, switch it off there before creating the owner"
+			fi
 		fi
 		# The panel takes the token when it starts, after this, and keeps it
 		# for an hour from then. date -d @<seconds> works in GNU and BusyBox.

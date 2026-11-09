@@ -34,6 +34,10 @@ test.describe("signed out", () => {
     await page.goto(`/setup?t=${encodeURIComponent(token)}`);
     await expect(page.getByRole("heading", { level: 1, name: "Create the owner account" })).toBeVisible();
     await expect(page.getByRole("list", { name: "Setup steps" })).toBeVisible();
+    // 0.2.4: usage reports are on by default for a new panel, and the owner sees the switch before any is sent.
+    const reports = page.getByRole("switch", { name: "Send anonymous usage reports" });
+    await expect(reports).toBeChecked();
+    await expect(page.getByText("the first one goes out a day from now", { exact: false })).toBeVisible();
     await page.screenshot({ path: `${shots}/setup-owner.png`, fullPage: true });
     await page.getByLabel("Email").fill(credentials.email);
     await page.getByLabel("Password").fill(credentials.password);
@@ -60,6 +64,13 @@ test.describe("signed out", () => {
     if (await openDashboard.isVisible()) await openDashboard.click();
     await expect(dashboard).toBeVisible();
     await page.context().storageState({ path: stateFile });
+    // The choice was stored with the owner: on, and the first report is scheduled a day out.
+    await page.goto("/settings/telemetry");
+    await expect(page.getByRole("switch", { name: "Send anonymous usage reports" })).toBeChecked();
+    // Wait for the preview card (its own query) before reading its Next report row.
+    await expect(page.getByText("Sent to", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not scheduled (off)")).toHaveCount(0);
+    await page.screenshot({ path: `${shots}/settings-telemetry-on.png`, fullPage: true });
     expect(errors).toEqual([]);
   });
 

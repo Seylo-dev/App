@@ -336,6 +336,10 @@ func TestPanelBootstrap(t *testing.T) {
 	if err != nil || cfg.PanelURL != "http://127.0.0.1:3000" || !strings.HasPrefix(cfg.JoinToken, "seylo_join_") || strings.Contains(runCmd, "seylo_join_") {
 		t.Fatalf("config = %+v, %v (tokens must not be in the container env)", cfg, err)
 	}
+	// Without --no-telemetry there is no telemetry-off file: the setup page starts with reports on.
+	if _, err := os.Stat(filepath.Join(h.dataDir, "panel", "telemetry-off")); !os.IsNotExist(err) {
+		t.Fatalf("telemetry-off exists without --no-telemetry (%v)", err)
+	}
 	joinFile, _ := os.ReadFile(filepath.Join(h.dataDir, "panel", "join-token"))
 	setupFile, _ := os.ReadFile(filepath.Join(h.dataDir, "panel", "setup-token"))
 	if strings.TrimSpace(string(joinFile)) != cfg.JoinToken || !strings.Contains(out.String(), ":3000/setup?t="+strings.TrimSpace(string(setupFile))) {
@@ -400,15 +404,22 @@ func TestPanelBootstrapLinkFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !strings.Contains(out.String(), "--link-file") {
-		t.Fatalf("panel bootstrap --help does not list --link-file:\n%s", out.String())
+	// The installer looks for both in --help before it passes them, so an older agent never sees them.
+	for _, flag := range []string{"--link-file", "--no-telemetry"} {
+		if !strings.Contains(out.String(), flag) {
+			t.Fatalf("panel bootstrap --help does not list %s:\n%s", flag, out.String())
+		}
 	}
 	out.Reset()
 	linkFile := filepath.Join(t.TempDir(), "setup-link")
 	if err := bootstrapPanel(context.Background(), d, bootstrapOptions{
-		Image: "img", Port: 3000, AgentTLSPort: 3443, LinkFile: linkFile, healthBase: health.URL,
+		Image: "img", Port: 3000, AgentTLSPort: 3443, LinkFile: linkFile, NoTelemetry: true, healthBase: health.URL,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	// --no-telemetry: the file the panel reads on its first start, next to the setup token.
+	if info, err := os.Stat(filepath.Join(h.dataDir, "panel", "telemetry-off")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("telemetry-off = %v (%v), want a 0600 file", info, err)
 	}
 	data, err := os.ReadFile(linkFile)
 	if err != nil {

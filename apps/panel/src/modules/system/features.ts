@@ -29,7 +29,16 @@ export const features = implement(system.features, (_input, ctx) => {
       : ai.enabled
         ? on
         : off("The AI assistant is turned off."),
-    telemetry: getSetting(ctx.db, "telemetry")?.enabled ? on : off("Telemetry is off until you opt in."),
+    // The same rule as the send job: the setting, unless a variable on the container turns reports off.
+    // Read without readTelemetry, which would write an install id from a query.
+    telemetry:
+      getSetting(ctx.db, "telemetry")?.enabled === true && !ctx.config.telemetryOffBy
+        ? on
+        : off(
+            ctx.config.telemetryOffBy
+              ? `${ctx.config.telemetryOffBy} on the panel's container turns reports off.`
+              : "Telemetry is turned off. Turn it on in Settings > Telemetry.",
+          ),
     notifications: channel ? on : off("Add a notification channel in Settings > Notifications."),
   };
 });

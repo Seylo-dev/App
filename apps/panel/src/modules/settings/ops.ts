@@ -18,7 +18,7 @@ import { deleteSetting, getSetting, setSetting } from "../../settings";
 import { readAuditRetentionDays, writeAuditRetentionDays } from "../audit/retention";
 import { assertHostUnclaimed } from "../domains/ownership";
 import { syncWebhookConfig } from "../github/app";
-import { readTelemetry, syncTelemetrySchedule } from "../telemetry";
+import { readTelemetry, syncTelemetrySchedule, telemetryOffBy, telemetryOn } from "../telemetry";
 import { checkDomainNow, domainCheckJobType, nodeExists, readDomainStatus } from "./domain";
 import { brandingDir } from "./http";
 import { applyPanelIpAccess, readIpAccessApplied, readPanelAccessWanted } from "./ip-access";
@@ -76,10 +76,11 @@ function branding(deps: Pick<Deps, "db">) {
   };
 }
 
-function telemetryView(deps: Pick<Deps, "db">) {
+function telemetryView(deps: Pick<Deps, "db" | "config">) {
   const stored = readTelemetry(deps);
   return {
-    enabled: stored.enabled,
+    enabled: telemetryOn(deps),
+    offBy: telemetryOffBy(deps),
     installId: stored.installId,
     lastSentAt: stored.lastSentAt ? new Date(stored.lastSentAt).toISOString() : null,
   };
@@ -273,7 +274,13 @@ export const updateAppearance = implement(settings.updateAppearance, (input, ctx
 export const telemetryOp = implement(settings.telemetry, (_input, ctx) => telemetryView(ctx));
 
 export const updateTelemetry = implement(settings.updateTelemetry, (input, ctx) => {
-  const current = readTelemetry(ctx);
+  const offBy = telemetryOffBy(ctx);
+  if (input.enabled && offBy) {
+    throw new OpError("CONFLICT", `${offBy} on the panel's container turns telemetry off. Remove it there to turn reports on.`, {
+      reason: "telemetryOffByEnv",
+    });
+  }
+  const { offAtInstall: _, ...current } = readTelemetry(ctx);
   setSetting(ctx.db, "telemetry", { ...current, enabled: input.enabled });
   syncTelemetrySchedule(ctx);
   ctx.live.publish("panel", { type: "invalidate", ops: ["settings.telemetry", "telemetry.preview", "system.features"] });

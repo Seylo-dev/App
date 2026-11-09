@@ -1,6 +1,8 @@
-// Settings > Telemetry: the opt-in switch for anonymous usage reports and
+// Settings > Telemetry: the switch for anonymous usage reports (on by
+// default for panels set up from 0.2.4 on, chosen on the setup page) and
 // the exact JSON the next report would send, so people can read what
-// leaves their panel before they switch it on.
+// leaves their panel. SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 on the server
+// lock it off.
 
 import { settings, telemetry } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -52,11 +54,11 @@ function TelemetryPage() {
             <>
               <SettingRow
                 title={t("settings.telemetry.switch")}
-                description={t("settings.telemetry.switchHint")}
+                description={data.offBy ? t("settings.telemetry.offBy", { name: data.offBy }) : t("settings.telemetry.switchHint")}
                 control={
                   <Switch
                     checked={data.enabled}
-                    disabled={update.isPending}
+                    disabled={update.isPending || !!data.offBy}
                     aria-label={t("settings.telemetry.switch")}
                     onCheckedChange={(enabled) => update.mutate({ enabled })}
                   />

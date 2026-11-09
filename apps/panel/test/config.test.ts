@@ -51,6 +51,15 @@ test("an own GitHub OAuth App replaces the brand's client id", () => {
   expect(githubEndpoints({ db: {} as never, config }).clientId).toBe("Iv1.own0000");
 });
 
+test("SEYLO_TELEMETRY=off and DO_NOT_TRACK=1 turn telemetry off on the container", () => {
+  expect(loadConfig({}, "/x").telemetryOffBy).toBeNull();
+  expect(loadConfig(env("TELEMETRY", "off"), "/x").telemetryOffBy).toBe(`${envPrefix}TELEMETRY`);
+  expect(loadConfig(env("TELEMETRY", "0"), "/x").telemetryOffBy).toBe(`${envPrefix}TELEMETRY`);
+  expect(loadConfig(env("TELEMETRY", "on"), "/x").telemetryOffBy).toBeNull();
+  expect(loadConfig({ DO_NOT_TRACK: "1" }, "/x").telemetryOffBy).toBe("DO_NOT_TRACK");
+  expect(loadConfig({ DO_NOT_TRACK: "0" }, "/x").telemetryOffBy).toBeNull();
+});
+
 function env(name: string, value: string) {
   return { [envPrefix + name]: value };
 }

@@ -64015,6 +64015,16 @@
                     "enabled": {
                       "type": "boolean"
                     },
+                    "offBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "installId": {
                       "type": "string"
                     },
@@ -64997,7 +65007,7 @@
       "post": {
         "operationId": "settings.updateTelemetry",
         "summary": "Turn telemetry on or off",
-        "description": "Opts in or out of anonymous usage reports. telemetry.preview shows exactly what would be sent.",
+        "description": "Turns anonymous usage reports on or off. telemetry.preview shows exactly what would be sent. CONFLICT (reason telemetryOffByEnv) when turning them on while SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 turns them off on the panel's container.",
         "tags": [
           "settings"
         ],
@@ -65043,6 +65053,16 @@
                   "properties": {
                     "enabled": {
                       "type": "boolean"
+                    },
+                    "offBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "installId": {
                       "type": "string"
@@ -65206,7 +65226,7 @@
       "post": {
         "operationId": "setup.createOwner",
         "summary": "Create the owner account",
-        "description": "Uses up the setup token, creates the owner with email and password and signs them in (HttpOnly cookie). CONFLICT when an owner already exists.",
+        "description": "Uses up the setup token, creates the owner with email and password and signs them in (HttpOnly cookie), and stores the telemetry choice: telemetry when given; when omitted, setup.status telemetry.on (on, unless the installer ran with --no-telemetry). Always off while SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 is set on the panel. CONFLICT when an owner already exists.",
         "tags": [
           "setup"
         ],
@@ -65243,6 +65263,9 @@
                     "maxLength": 1024,
                     "description": "At least 10 characters.",
                     "type": "string"
+                  },
+                  "telemetry": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -65423,6 +65446,9 @@
                     "minLength": 1,
                     "maxLength": 200,
                     "type": "string"
+                  },
+                  "telemetry": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -65704,6 +65730,32 @@
                             "type": "string"
                           }
                         ]
+                      }
+                    },
+                    "telemetry": {
+                      "type": "object",
+                      "required": [
+                        "on",
+                        "offBy",
+                        "offAtInstall"
+                      ],
+                      "properties": {
+                        "on": {
+                          "type": "boolean"
+                        },
+                        "offBy": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "offAtInstall": {
+                          "type": "boolean"
+                        }
                       }
                     }
                   }
@@ -67058,6 +67110,16 @@
                   "properties": {
                     "enabled": {
                       "type": "boolean"
+                    },
+                    "offBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "endpoint": {
                       "type": "string"

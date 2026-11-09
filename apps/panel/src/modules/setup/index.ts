@@ -9,6 +9,7 @@ import { ownerExists, prepareSetupLink, validSetupToken } from "../../auth/setup
 import { implement } from "../../ops/implement";
 import { getSetting, setSetting } from "../../settings";
 import { defineModule } from "../module";
+import { setupTelemetry } from "../telemetry";
 import { createOwner, githubPoll, requireUsableLink } from "./owner";
 
 // Settings this module owns.
@@ -34,6 +35,7 @@ const status = implement(setup.status, (input, ctx) => {
     link,
     githubAvailable: githubAvailable(ctx),
     steps: [...steps],
+    telemetry: setupTelemetry(ctx),
   };
 });
 

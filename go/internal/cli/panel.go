@@ -120,6 +120,9 @@ type bootstrapOptions struct {
 	// it (see writeSetupLinkFile) instead of the output: the installer
 	// shows them in the block that ends its run.
 	LinkFile string
+	// NoTelemetry leaves telemetryOffFile next to the setup token: the
+	// panel's setup page then starts with usage reports off.
+	NoTelemetry bool
 	// healthBase replaces http://127.0.0.1:<port> in tests.
 	healthBase string
 	http       *http.Client
@@ -143,6 +146,8 @@ func newPanelBootstrapCommand(d *deps) *cobra.Command {
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 3*time.Minute, "how long to wait for the panel to answer")
 	cmd.Flags().StringVar(&opts.LinkFile, "link-file", "",
 		"write the setup link and its notes to this file (mode 0600) instead of printing them; the installer shows them")
+	cmd.Flags().BoolVar(&opts.NoTelemetry, "no-telemetry", false,
+		"start the panel's setup page with anonymous usage reports off (the owner may still turn them on)")
 	return cmd
 }
 
@@ -173,6 +178,10 @@ func (d *deps) output(ctx context.Context, name string, args ...string) (string,
 const (
 	setupTokenFile = "setup-token"
 	joinTokenFile  = "join-token"
+	// telemetryOffFile is --no-telemetry: the panel reads it on its first
+	// start (apps/panel/src/modules/telemetry importInstallChoice) and
+	// deletes it.
+	telemetryOffFile = "telemetry-off"
 )
 
 // panelRunArgs builds `docker run` for the first panel container. Labels
@@ -281,6 +290,11 @@ func bootstrapPanel(ctx context.Context, d *deps, opts bootstrapOptions) error {
 	for name, token := range map[string]string{setupTokenFile: setupToken, joinTokenFile: joinToken} {
 		// The folder may be left from an earlier panel: never follow what it holds.
 		if err := writePanelFile(panelDir, name, []byte(token+"\n")); err != nil {
+			return err
+		}
+	}
+	if opts.NoTelemetry {
+		if err := writePanelFile(panelDir, telemetryOffFile, []byte("\n")); err != nil {
 			return err
 		}
 	}

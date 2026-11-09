@@ -508,8 +508,10 @@ export const boot = defineOp({
 // ---------------------------------------------------------------- telemetry
 
 export const TelemetrySettings = Type.Object({
-  /** Off until the owner opts in. */
+  /** Whether reports go out. On by default for panels set up from 0.2.4 on (the setup page's switch); off for older ones until turned on. */
   enabled: Type.Boolean(),
+  /** SEYLO_TELEMETRY or DO_NOT_TRACK when one turns telemetry off on this panel's container, whatever the setting says; else null. */
+  offBy: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   /** Random id sent with reports; not derived from the panel id. */
   installId: Type.String(),
   lastSentAt: Type.Union([Timestamp, Type.Null()]),
@@ -531,7 +533,8 @@ export const updateTelemetry = defineOp({
   id: "settings.updateTelemetry",
   kind: "mutation",
   summary: "Turn telemetry on or off",
-  description: "Opts in or out of anonymous usage reports. telemetry.preview shows exactly what would be sent.",
+  description:
+    "Turns anonymous usage reports on or off. telemetry.preview shows exactly what would be sent. CONFLICT (reason telemetryOffByEnv) when turning them on while SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 turns them off on the panel's container.",
   input: Type.Object({ enabled: Type.Boolean() }),
   output: TelemetrySettings,
   permission: permission.global("settings.manage"),

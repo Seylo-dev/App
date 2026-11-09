@@ -12,6 +12,7 @@ import { users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { hashPassword } from "../../security/password";
 import { rememberSetupHost } from "../nodes/address";
+import { applySetupChoice } from "../telemetry";
 
 /** Throws unless the link can still create the owner; returns the token row. */
 export function requireUsableLink(db: PanelDb, token: string) {
@@ -57,6 +58,7 @@ export const createOwner = implement(setup.createOwner, async (input, ctx) => {
     name: input.name?.trim() ?? "",
     passwordHash,
   });
+  applySetupChoice(ctx, input.telemetry);
   startSession(ctx, owner.id);
   return { viewer: toViewer(owner) };
 });
@@ -77,6 +79,7 @@ export const githubPoll = implement(setup.githubPoll, async (input, ctx) => {
   }
   const owner = insertOwner(ctx, input.token, { email, name: (github.name ?? github.login).slice(0, 80), passwordHash: null });
   saveGithubAccount(ctx.db, ctx.secrets, owner.id, github, poll.accessToken, poll.scopes);
+  applySetupChoice(ctx, input.telemetry);
   startSession(ctx, owner.id);
   return { status: "done" as const, intervalSeconds: poll.intervalSeconds, viewer: toViewer(owner) };
 });

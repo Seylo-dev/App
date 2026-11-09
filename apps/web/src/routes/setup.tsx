@@ -17,10 +17,11 @@ import { CopyField } from "@seylo/ui/components/copy-field";
 import { Input, Label } from "@seylo/ui/components/input";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Skeleton } from "@seylo/ui/components/skeleton";
+import { Switch } from "@seylo/ui/components/switch";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconCheck } from "@tabler/icons-react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { AuthFrame } from "../components/auth/auth-frame";
 import { DeviceCodeCard, type DeviceCodeView, GitHubMark, useDevicePolling } from "../components/auth/device-code";
 import { DnsRecordLine, WildcardInput } from "../components/nodes/node-settings";
@@ -94,6 +95,7 @@ function SetupPage() {
         token={token ?? ""}
         expiresAt={status.data.link?.expiresAt ?? null}
         githubAvailable={status.data.githubAvailable}
+        telemetry={status.data.telemetry ?? { on: true, offBy: null, offAtInstall: false }}
         onDone={() => next("owner")}
       />
     );
@@ -174,13 +176,21 @@ function OwnerStep({
   token,
   expiresAt,
   githubAvailable,
+  telemetry,
   onDone,
 }: {
   token: string;
   expiresAt: string | null;
   githubAvailable: boolean;
+  /** setup.status telemetry: what the reports switch starts with, and what locks it off. */
+  telemetry: { on: boolean; offBy: string | null; offAtInstall: boolean };
   onDone: () => void;
 }) {
+  // Anonymous usage reports, chosen with the owner (both ways of creating it). The GitHub poll reads the
+  // latest value through the ref, so turning the switch after starting the device flow still counts.
+  const [reports, setReports] = useState(telemetry.on);
+  const reportsRef = useRef(reports);
+  reportsRef.current = reports;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [repoAccess, setRepoAccess] = useState(false);
@@ -202,7 +212,7 @@ function OwnerStep({
   });
   useDevicePolling(
     device,
-    (ticket) => opClient.call(setup.githubPoll, { token, ticket }),
+    (ticket) => opClient.call(setup.githubPoll, { token, ticket, telemetry: reportsRef.current }),
     (result) => {
       if (result.status === "done" && result.viewer) {
         signedInAs(result.viewer);
@@ -219,7 +229,7 @@ function OwnerStep({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    create.mutate({ token, email: email.trim(), password });
+    create.mutate({ token, email: email.trim(), password, telemetry: reports });
   };
 
   return (
@@ -282,6 +292,23 @@ function OwnerStep({
           </Button>
         </form>
         <p className="m-0 text-xs text-muted-foreground">{t("setup.twoFactorLater")}</p>
+        <div className="flex items-start gap-3 border-t border-divider pt-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span id="setup-telemetry" className="text-[13px] font-medium">
+              {t("setup.telemetry.title")}
+            </span>
+            <span className="text-xs leading-normal text-muted-foreground">
+              {telemetry.offBy ? t("setup.telemetry.offBy", { name: telemetry.offBy }) : t("setup.telemetry.hint")}
+            </span>
+          </div>
+          <Switch
+            className="mt-0.5 shrink-0"
+            checked={reports && !telemetry.offBy}
+            onCheckedChange={setReports}
+            disabled={telemetry.offBy !== null}
+            aria-labelledby="setup-telemetry"
+          />
+        </div>
       </Panel>
 
       {githubAvailable && (

@@ -41,8 +41,14 @@ export interface Config {
    * falls back to the panel node's public IP and the port.
    */
   publicUrl: string | null;
-  /** Where opt-in telemetry reports go; derived from the brand's site. */
+  /** Where telemetry reports go; derived from the brand's site. */
   telemetryUrl: string;
+  /**
+   * What turns telemetry off on this container whatever the setting says:
+   * "SEYLO_TELEMETRY" (set to off, 0, false or no) or "DO_NOT_TRACK" (set to
+   * 1, true or yes). Unset or null: the setting decides.
+   */
+  telemetryOffBy?: string | null;
   /**
    * Client id of an own GitHub OAuth App for device-flow sign-in; unset uses
    * the brand's app (auth/github-device.ts).
@@ -99,11 +105,19 @@ export function loadConfig(env: Record<string, string | undefined>, packageRoot:
     secureCookies: parseBool("SECURE_COOKIES", read("SECURE_COOKIES") ?? "true"),
     publicUrl: parseUrl("PUBLIC_URL", read("PUBLIC_URL")),
     telemetryUrl: parseUrl("TELEMETRY_URL", read("TELEMETRY_URL")) ?? defaultTelemetryUrl(),
+    telemetryOffBy: telemetryOffBy(read("TELEMETRY"), env.DO_NOT_TRACK),
     ...githubClientId(read("GITHUB_CLIENT_ID")),
     image: parseImage(read("IMAGE")),
     hostPort: read("HOST_PORT") === undefined ? null : parsePort(read("HOST_PORT") as string, "HOST_PORT"),
     agentTlsPort: read("AGENT_TLS_PORT") === undefined ? null : parsePort(read("AGENT_TLS_PORT") as string, "AGENT_TLS_PORT"),
   };
+}
+
+/** SEYLO_TELEMETRY=off (0, false, no) or the DO_NOT_TRACK=1 convention: the variable that turns telemetry off, else null. */
+function telemetryOffBy(value: string | undefined, doNotTrack: string | undefined): string | null {
+  if (value !== undefined && ["off", "0", "false", "no"].includes(value.toLowerCase())) return `${envPrefix}TELEMETRY`;
+  if (doNotTrack !== undefined && ["1", "true", "yes"].includes(doNotTrack.trim().toLowerCase())) return "DO_NOT_TRACK";
+  return null;
 }
 
 function githubClientId(value: string | undefined): { githubClientId?: string } {

@@ -236,9 +236,12 @@ export default {
 
   telemetry: {
     title: "Telemetry",
-    subtitle: "Anonymous usage reports help us see which features are used. Off until you turn it on.",
+    subtitle:
+      "Anonymous usage reports tell us how many panels run which version, and how big they are. On by default for panels set up from 0.2.4 on; off for older ones until you turn it on.",
+    offBy: "Off: {name} is set on this panel's server, which turns reports off whatever this switch says.",
     switch: "Send anonymous usage reports",
-    switchHint: "Counts and versions only: no names, hostnames, IP addresses, emails or ids of your things.",
+    switchHint:
+      "Once a day: the version, how many nodes and services, and the install id below. No names, hostnames, IP addresses, emails or ids of your things.",
     turnedOn: "Telemetry on",
     turnedOff: "Telemetry off",
     installId: "Install id",

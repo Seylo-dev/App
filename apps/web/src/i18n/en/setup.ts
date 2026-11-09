@@ -15,6 +15,11 @@ export default {
   passwordHint: "At least 10 characters",
   createAccount: "Create account",
   twoFactorLater: "You can add 2FA and passkeys right after this step.",
+  telemetry: {
+    title: "Send anonymous usage reports",
+    hint: "Once a day: the version, how many nodes and services, and a random id. Nothing else, and the first one goes out a day from now. Change it any time in Settings > Telemetry.",
+    offBy: "Off: {name} is set on this panel's server.",
+  },
   afterGithub: "After Continue with GitHub",
   githubTitle: "Enter this code on GitHub",
   githubHint: "Like gh auth login. Works even while the panel has no domain yet.",

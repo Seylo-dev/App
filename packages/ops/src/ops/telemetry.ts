@@ -33,6 +33,8 @@ export const preview = defineOp({
   input: Empty,
   output: Type.Object({
     enabled: Type.Boolean(),
+    /** SEYLO_TELEMETRY or DO_NOT_TRACK when one turns telemetry off on this panel; else null. */
+    offBy: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     /** Collector URL, from the brand's site. */
     endpoint: Type.String(),
     intervalHours: Type.Integer({ minimum: 1 }),

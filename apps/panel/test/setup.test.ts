@@ -1,15 +1,16 @@
 // First run: the installer's setup token file, owner creation with a
 // password or with GitHub, and burning the link.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auth, setup } from "@seylo/ops";
+import { auth, settings, setup, system, telemetry } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { issueSetupToken, prepareSetupLink, setupTokenPath } from "../src/auth/setup-token";
 import { githubAccounts, users } from "../src/db/schema";
 import { silentLogger } from "../src/logger";
+import { importInstallChoice, telemetryOffFileName } from "../src/modules/telemetry";
 import { getSetting } from "../src/settings";
 import { createUser, type TestPanel, testPanel } from "./helpers";
 import { call, cookieFrom, mockGithub, noLimits, ok, waitForPoll } from "./people-helpers";
@@ -155,4 +156,58 @@ test("GitHub sign-in is offered once the panel has a real client id", async () =
   useGithubClientId("Ov23liExampleClient1");
   const { token } = issueSetupToken(panel.deps.db);
   expect((await ok(panel, setup.status, { token })).body.githubAvailable).toBe(true);
+});
+
+// 0.2.4: telemetry is on by default for panels set up from now on. The setup page's switch (setup.status
+// telemetry) starts on unless the installer ran with --no-telemetry; the choice is stored with the owner;
+// SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 turn it off whatever the setting says. Panels set up before keep theirs.
+describe("telemetry chosen at setup", () => {
+  async function owner(extra: Record<string, unknown> = {}) {
+    const { token } = issueSetupToken(panel.deps.db);
+    const created = await ok(panel, setup.createOwner, { token, email: "o@example.com", password: "a long enough password", ...extra });
+    return cookieFrom(created.headers) as string;
+  }
+
+  test("on unless the owner turns it off; the first report goes a day later", async () => {
+    expect((await ok(panel, setup.status, {})).body.telemetry).toEqual({ on: true, offBy: null, offAtInstall: false });
+    const cookie = await owner();
+    expect((await ok(panel, settings.telemetry, {}, { cookie })).body).toMatchObject({ enabled: true, offBy: null });
+    const schedule = panel.deps.schedules.get("telemetry.send");
+    expect(schedule?.nextRunAt.getTime()).toBeGreaterThan(Date.now() + 23 * 3600_000);
+  });
+
+  test("off when the owner turns the switch off: no schedule, nothing sent", async () => {
+    const cookie = await owner({ telemetry: false });
+    expect((await ok(panel, settings.telemetry, {}, { cookie })).body.enabled).toBe(false);
+    expect(panel.deps.schedules.get("telemetry.send")).toBeNull();
+  });
+
+  test("--no-telemetry at install starts the switch off; the owner may still turn it on", async () => {
+    writeFileSync(join(dataDir, telemetryOffFileName), "\n");
+    importInstallChoice(panel.deps);
+    expect(existsSync(join(dataDir, telemetryOffFileName))).toBe(false);
+    expect((await ok(panel, setup.status, {})).body.telemetry).toEqual({ on: false, offBy: null, offAtInstall: true });
+    const cookie = await owner();
+    expect((await ok(panel, settings.telemetry, {}, { cookie })).body.enabled).toBe(false);
+    // The file on a panel that has its owner changes nothing.
+    await ok(panel, settings.updateTelemetry, { enabled: true }, { cookie });
+    writeFileSync(join(dataDir, telemetryOffFileName), "\n");
+    importInstallChoice(panel.deps);
+    expect((await ok(panel, settings.telemetry, {}, { cookie })).body.enabled).toBe(true);
+  });
+
+  test("DO_NOT_TRACK or SEYLO_TELEMETRY=off: off and locked, at setup and in settings", async () => {
+    (panel.deps.config as { telemetryOffBy?: string | null }).telemetryOffBy = "DO_NOT_TRACK";
+    expect((await ok(panel, setup.status, {})).body.telemetry).toEqual({ on: false, offBy: "DO_NOT_TRACK", offAtInstall: false });
+    const cookie = await owner({ telemetry: true });
+    expect((await ok(panel, settings.telemetry, {}, { cookie })).body).toMatchObject({ enabled: false, offBy: "DO_NOT_TRACK" });
+    expect(panel.deps.schedules.get("telemetry.send")).toBeNull();
+    const refused = await call(panel, settings.updateTelemetry, { enabled: true }, { cookie });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.details?.reason).toBe("telemetryOffByEnv");
+    expect((await ok(panel, telemetry.preview, {}, { cookie })).body).toMatchObject({ enabled: false, offBy: "DO_NOT_TRACK" });
+    // system.features (MCP, the assistant) says the same, and why.
+    const features = (await ok(panel, system.features, {}, { cookie })).body;
+    expect(features.telemetry).toEqual({ enabled: false, reason: "DO_NOT_TRACK on the panel's container turns reports off." });
+  });
 });

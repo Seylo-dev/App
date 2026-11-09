@@ -43,6 +43,17 @@ export const status = defineOp({
     /** False while the GitHub OAuth client id is still a placeholder: hide "Continue with GitHub". */
     githubAvailable: Type.Boolean(),
     steps: Type.Array(SetupStep, { description: "The wizard's steps in order." }),
+    /** The owner step's "Send anonymous usage reports" switch. */
+    telemetry: Type.Optional(
+      Type.Object({
+        /** What the switch starts with: on, unless the installer ran with --no-telemetry or a variable turns it off. */
+        on: Type.Boolean(),
+        /** SEYLO_TELEMETRY or DO_NOT_TRACK when one turns telemetry off on this panel (the switch is then off and locked); else null. */
+        offBy: Type.Union([Type.String(), Type.Null()]),
+        /** The installer ran with --no-telemetry. */
+        offAtInstall: Type.Boolean(),
+      }),
+    ),
   }),
   permission: permission.public(),
   sensitive: { input: ["token"] },
@@ -56,12 +67,14 @@ export const createOwner = defineOp({
   kind: "mutation",
   summary: "Create the owner account",
   description:
-    "Uses up the setup token, creates the owner with email and password and signs them in (HttpOnly cookie). CONFLICT when an owner already exists.",
+    "Uses up the setup token, creates the owner with email and password and signs them in (HttpOnly cookie), and stores the telemetry choice: telemetry when given; when omitted, setup.status telemetry.on (on, unless the installer ran with --no-telemetry). Always off while SEYLO_TELEMETRY=off or DO_NOT_TRACK=1 is set on the panel. CONFLICT when an owner already exists.",
   input: Type.Object({
     token: SetupToken,
     email: Email,
     name: Type.Optional(PersonName),
     password: NewPassword,
+    /** Anonymous usage reports. Omitted: setup.status telemetry.on (on, unless the installer ran with --no-telemetry). Ignored while a variable turns them off. */
+    telemetry: Type.Optional(Type.Boolean()),
   }),
   output: Type.Object({ viewer: Viewer }),
   permission: permission.public(),
@@ -92,7 +105,12 @@ export const githubPoll = defineOp({
   summary: "Check the GitHub owner sign-up",
   description:
     "Polls the device flow. With status done it uses up the setup token, creates the owner from the GitHub account (primary verified email) and signs them in.",
-  input: Type.Object({ token: SetupToken, ticket: Type.String({ minLength: 1, maxLength: 200 }) }),
+  input: Type.Object({
+    token: SetupToken,
+    ticket: Type.String({ minLength: 1, maxLength: 200 }),
+    /** Anonymous usage reports. Omitted: setup.status telemetry.on (on, unless the installer ran with --no-telemetry). Ignored while a variable turns them off. */
+    telemetry: Type.Optional(Type.Boolean()),
+  }),
   output: Type.Object({
     status: DevicePollStatus,
     intervalSeconds: Type.Integer({ minimum: 1 }),
