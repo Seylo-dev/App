@@ -188,5 +188,6 @@ export function useLiveTopics(topics: readonly LiveTopic[]): void {
 
 /** Whether the live socket is open; screens poll faster while it is not. */
 export function useLiveUp(): boolean {
-  return useSyncExternalStore(live.onUpChange, live.isUp);
+  // The third argument serves static renders (the tests' renderStatic), which throw without it.
+  return useSyncExternalStore(live.onUpChange, live.isUp, live.isUp);
 }
