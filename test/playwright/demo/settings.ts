@@ -123,7 +123,7 @@ export const fixtures: Record<string, unknown> = {
     app: { id: "ghapp00000000001", appId: 1234567, slug: "acme-seylo", name: "acme-seylo", ownerLogin: "acme", htmlUrl: "https://github.com/apps/acme-seylo", installUrl: "https://github.com/apps/acme-seylo/installations/new", createdAt: ago(60 * 24 * 60) },
     webhookUrl: "https://panel.acme.dev/api/hooks/github",
     deviceFlowAvailable: true,
-    deviceAccount: null,
+    account: null,
   },
   // github.installations: repos.ts (the service screens connect through the same installations).
   "tunnels.getSettings": { tokenSet: true, updatedAt: ago(60 * 24 * 4) },

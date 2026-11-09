@@ -1,7 +1,8 @@
 // Settings > GitHub: this panel's own GitHub App (created with the manifest
 // flow; GitHub sends the browser back here with ?code&state), where it is
-// installed, the webhook URL, and the opt-in GitHub account whose token
-// clones private repos without the App.
+// installed, the webhook URL, and the opt-in connected GitHub account (a
+// device login or a pasted token) whose token lists, clones and watches
+// private repos the App does not reach, with what organizations need.
 
 import { github, type OpOutput } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -17,9 +18,10 @@ import { KeyValue } from "@seylo/ui/components/key-value";
 import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { ButtonSkeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
-import { IconBrandGithub, IconExternalLink, IconRefresh } from "@tabler/icons-react";
+import { IconBrandGithub, IconExternalLink, IconKey, IconRefresh } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { NumberedSteps } from "../../../components/numbered-steps";
 import { DeviceCodePanel } from "../../../components/settings/device-code";
 import { formatDate } from "../../../components/settings/format";
 import { invalidateOps, useSettingsMutation } from "../../../components/settings/mutation";
@@ -27,6 +29,7 @@ import { OpErrorCallout, QueryView, toastError } from "../../../components/setti
 import { Field, SettingsPage } from "../../../components/settings/page";
 import { FieldSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
+import { errorMessage } from "../../../lib/api";
 
 interface GithubSearch {
   code?: string;
@@ -53,7 +56,7 @@ function GithubPage() {
         {(data) => (
           <>
             {data.app ? <AppSection data={data} /> : <CreateApp webhookUrl={data.webhookUrl} />}
-            <DeviceAccount data={data} />
+            <AccountSection data={data} />
           </>
         )}
       </QueryView>
@@ -270,8 +273,14 @@ function AppSection({ data }: { data: Status }) {
   );
 }
 
-function DeviceAccount({ data }: { data: Status }) {
+/**
+ * "Private repositories without the App": the panel's connected GitHub
+ * account, from a device login or a pasted token, the same card either way
+ * once connected, and what organizations need.
+ */
+function AccountSection({ data }: { data: Status }) {
   const [flow, setFlow] = useState<OpOutput<typeof github.deviceStart> | null>(null);
+  const [tokenOpen, setTokenOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const start = useSettingsMutation(github.deviceStart, { onSuccess: setFlow });
   const poll = useSettingsMutation(github.devicePoll, { failure: false });
@@ -279,7 +288,7 @@ function DeviceAccount({ data }: { data: Status }) {
     invalidates: refresh,
     success: t("settingsGithub.device.disconnected"),
   });
-  const account = data.deviceAccount;
+  const account = data.account;
 
   return (
     <SectionCard
@@ -287,13 +296,14 @@ function DeviceAccount({ data }: { data: Status }) {
       description={t("settingsGithub.device.description")}
       actions={account && <Chip tone="green">@{account.login}</Chip>}
     >
-      {!data.deviceFlowAvailable && !account && <Alert tone="neutral">{t("settingsGithub.device.unavailable")}</Alert>}
       {account && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div data-testid="github-account" className="flex flex-wrap items-center gap-3">
           <span className="text-[13px]">
             {t("settingsGithub.device.connected", { login: account.login, date: formatDate(account.connectedAt) })}
           </span>
           <span className="flex flex-wrap gap-1">
+            <Chip tone="gray">{t(account.method === "token" ? "settingsGithub.device.viaToken" : "settingsGithub.device.viaDevice")}</Chip>
+            {account.tokenKind === "fineGrained" && <Chip tone="gray">{t("settingsGithub.device.fineGrained")}</Chip>}
             {account.scopes.map((scope) => (
               <Chip key={scope} tone="gray" mono>
                 {scope}
@@ -305,17 +315,25 @@ function DeviceAccount({ data }: { data: Status }) {
           </Button>
         </div>
       )}
-      {data.deviceFlowAvailable && !account && !flow && (
+      {!account && !flow && !tokenOpen && (
         <div className="flex flex-col gap-3">
           <Alert tone="info">{t("settingsGithub.device.recommendApp")}</Alert>
-          <div>
-            <Button disabled={start.isPending} onClick={() => start.mutate({})}>
-              <IconBrandGithub size={16} stroke={1.8} />
-              {t("settingsGithub.device.connect")}
+          {!data.deviceFlowAvailable && <Alert tone="neutral">{t("settingsGithub.device.unavailable")}</Alert>}
+          <div className="flex flex-wrap gap-2">
+            {data.deviceFlowAvailable && (
+              <Button disabled={start.isPending} onClick={() => start.mutate({})}>
+                <IconBrandGithub size={16} stroke={1.8} />
+                {t("settingsGithub.device.connect")}
+              </Button>
+            )}
+            <Button onClick={() => setTokenOpen(true)}>
+              <IconKey size={16} stroke={1.8} />
+              {t("settingsGithub.device.useToken")}
             </Button>
           </div>
         </div>
       )}
+      {!account && tokenOpen && <TokenForm onDone={() => setTokenOpen(false)} onCancel={() => setTokenOpen(false)} />}
       {flow && (
         <DeviceCodePanel
           code={flow}
@@ -331,6 +349,7 @@ function DeviceAccount({ data }: { data: Status }) {
           }}
         />
       )}
+      <OrgAccess />
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -341,5 +360,94 @@ function DeviceAccount({ data }: { data: Status }) {
         onConfirm={() => disconnect.mutateAsync({}).then(() => undefined)}
       />
     </SectionCard>
+  );
+}
+
+const tokensPage = "https://github.com/settings/tokens";
+
+/** "Use a token": the steps, a link to GitHub's token page and the field; the panel checks the token before it saves it. */
+function TokenForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [token, setToken] = useState("");
+  const save = useSettingsMutation(github.tokenConnect, {
+    invalidates: refresh,
+    failure: false,
+    success: (account) => t("settingsGithub.token.saved", { login: account.login }),
+    onSuccess: onDone,
+  });
+  const [before, after] = t("settingsGithub.token.step1").split("{link}");
+  const trimmed = token.trim();
+  return (
+    <form
+      data-testid="github-token-form"
+      className="flex flex-col gap-4 rounded-control bg-raised p-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (trimmed.length >= 20) save.mutate({ token: trimmed });
+      }}
+    >
+      <span className="text-[13.5px] font-medium text-foreground">{t("settingsGithub.token.title")}</span>
+      <NumberedSteps
+        steps={[
+          <>
+            {before}
+            <a href={tokensPage} target="_blank" rel="noreferrer" className="font-medium text-link hover:text-link-hover">
+              {t("settingsGithub.token.link")}
+              <IconExternalLink size={12} stroke={1.8} className="ml-0.5 inline align-[-1px]" aria-hidden="true" />
+            </a>
+            {after}
+          </>,
+          t("settingsGithub.token.step2"),
+          t("settingsGithub.token.step3"),
+          t("settingsGithub.token.step4"),
+        ]}
+      />
+      <Field label={t("settingsGithub.token.label")} htmlFor="gh-token">
+        <Input
+          id="gh-token"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={token}
+          onChange={(e) => {
+            setToken(e.target.value);
+            save.reset();
+          }}
+          placeholder={t("settingsGithub.token.placeholder")}
+          aria-invalid={save.isError}
+          aria-describedby={save.isError ? "gh-token-error" : undefined}
+          className="font-mono sm:max-w-md"
+        />
+        {save.isError && (
+          <span id="gh-token-error" role="alert" className="text-[12.5px] leading-normal text-destructive">
+            {errorMessage(save.error, t("common.unknownError"))}
+          </span>
+        )}
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" disabled={trimmed.length < 20 || save.isPending}>
+          {save.isPending ? t("settingsGithub.token.checking") : t("settingsGithub.token.save")}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          {t("common.cancel")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Why an organization's private repositories may not show for a connected account, and how the App avoids it. */
+function OrgAccess() {
+  const [before, after] = t("settingsGithub.orgs.body").split("{url}");
+  return (
+    <div className="flex flex-col gap-1 pt-1">
+      <span className="text-[13px] font-medium text-ink-strong">{t("settingsGithub.orgs.title")}</span>
+      <p className="m-0 text-[12.5px] leading-relaxed text-muted-foreground">
+        {before}
+        <code className="rounded-chip bg-muted px-1 py-px font-mono text-[11.5px] break-all text-ink-strong">
+          {t("settingsGithub.orgs.url")}
+        </code>
+        {after}
+      </p>
+    </div>
   );
 }

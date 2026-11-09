@@ -132,11 +132,11 @@ test.describe("screens", () => {
           await page.screenshot({ path: `${shots}/${preset}/new-service-menu.png` });
           await page.keyboard.press("Escape");
 
-          // New app > Git repository with the Browse list open (repo-picker.spec.ts covers the flows).
+          // New app > GitHub with the Browse list open (repo-picker.spec.ts covers the flows).
           await page.getByRole("button", { name: "New service", exact: true }).click();
           await page.getByRole("menuitem").filter({ hasText: "GitHub, Git, Docker image" }).click();
           const newApp = page.getByRole("dialog", { name: "New app" });
-          await newApp.getByRole("radio", { name: "Git repository" }).click();
+          await newApp.getByRole("radio", { name: "GitHub", exact: true }).click();
           await newApp.getByRole("button", { name: "Browse" }).click();
           await expect(page.locator('[data-slot="popover"]').getByRole("option").first()).toBeVisible();
           await page.waitForTimeout(400);

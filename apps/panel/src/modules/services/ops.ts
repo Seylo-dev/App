@@ -11,6 +11,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
+import { dropRepoHooks } from "../github/repo-hooks";
 import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
 import { assertNoActiveCopy, assertNoMoveCopy } from "./copies";
@@ -45,12 +46,22 @@ export function updateSpec(
   writeSpec(ctx.db, serviceId, spec);
   // A repository webhook belongs to the repository the service deployed: another source drops it.
   if (before.source.type === "provider" && !sameProviderRepo(before.source, spec.source)) dropHook(ctx, serviceId);
+  if (viaAccount(before.source) && !sameAccountRepo(before.source, spec.source)) dropRepoHooks(ctx, [serviceId]);
   publishService(ctx, row);
   return loadService(ctx.db, serviceId);
 }
 
 function sameProviderRepo(a: ServiceSpecJson["source"], b: ServiceSpecJson["source"]): boolean {
   return a.type === "provider" && b.type === "provider" && a.providerId === b.providerId && a.repo.toLowerCase() === b.repo.toLowerCase();
+}
+
+/** A GitHub source read through the connected account (its webhook is the service's own, github/repo-hooks.ts). */
+function viaAccount(source: ServiceSpecJson["source"]): boolean {
+  return source.type === "github" && source.installationId === null;
+}
+
+function sameAccountRepo(a: ServiceSpecJson["source"], b: ServiceSpecJson["source"]): boolean {
+  return a.type === "github" && b.type === "github" && viaAccount(a) && viaAccount(b) && a.repo.toLowerCase() === b.repo.toLowerCase();
 }
 
 function forbidMemberEdit(row: ServiceRow, what: string): void {

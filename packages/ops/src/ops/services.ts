@@ -84,16 +84,24 @@ export const WatchPaths = Type.Array(Type.String({ minLength: 1, maxLength: 300,
 
 /**
  * Where the code or image comes from. GitHub sources go through the
- * panel's GitHub App (github.connectRepo); GitLab, Gitea/Forgejo and
- * Bitbucket through a stored connection (gitProviders.connectRepo);
- * generic git uses a stored credential (git.ts) for private repos; images
- * may use a registry login (registries.ts).
+ * panel's GitHub App or its connected GitHub account (github.connectRepo);
+ * GitLab, Gitea/Forgejo and Bitbucket through a stored connection
+ * (gitProviders.connectRepo); generic git uses a stored credential (git.ts)
+ * for private repos; images may use a registry login (registries.ts).
  */
 export const Source = Type.Union([
   Type.Object({
     type: Type.Literal("github"),
-    /** github_installations.id of the App installation that can read the repo. */
-    installationId: Id,
+    /** github_installations.id of the App installation that can read the repo; null when the connected GitHub account reads it (accountId). */
+    installationId: Type.Union([Id, Type.Null()]),
+    /**
+     * git_credentials.id of the panel's connected GitHub account (Settings >
+     * GitHub: a device login or a pasted token) when it reads the repo instead
+     * of an App installation. Its token lists, clones and creates the repository
+     * webhook; when the account was connected again under a new id, the current
+     * one is used.
+     */
+    accountId: Type.Optional(Type.Union([Id, Type.Null()])),
     /** "owner/name". */
     repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
     branch: GitBranch,

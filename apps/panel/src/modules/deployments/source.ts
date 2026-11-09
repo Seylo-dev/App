@@ -12,7 +12,8 @@ import { resolveServiceEnv } from "../env/desired";
 import { openCredential } from "../git/credentials";
 import { listRemoteRefs, targetUrl } from "../git/remote";
 import { assertGitTarget, gitHostRecorded, providerGitVerdict } from "../git/targets";
-import { githubCommit, tokenForInstallation } from "../github/app";
+import { githubSourceAuth } from "../github/account";
+import { githubCommit } from "../github/app";
 import { type CommitInfo, clientFor } from "../gitProviders/client";
 import { loadProvider, openToken } from "../gitProviders/rows";
 import type { ServiceRow } from "../services/rows";
@@ -96,7 +97,8 @@ export async function resolveBuild(
 
   switch (source.type) {
     case "github": {
-      const token = await tokenForInstallation(deps.db, deps.secrets, source.installationId);
+      // The App installation's token, or the connected account's (its login as the git user): only for this clone.
+      const { token, username } = await githubSourceAuth(deps, source);
       const commit = await githubCommit(token, source.repo, input.commitSha ?? source.branch);
       // github.com is public: internal answers at the node only when an admin recorded it for the project
       // (git.allowInternalHost), for example on a node behind a proxy that cannot resolve it itself.
@@ -107,7 +109,14 @@ export async function resolveBuild(
           source: {
             source: {
               case: "git",
-              value: { url: `https://github.com/${source.repo}.git`, ref: source.branch, commit: commit.sha, token, allowInternalHost },
+              value: {
+                url: `https://github.com/${source.repo}.git`,
+                ref: source.branch,
+                commit: commit.sha,
+                token,
+                username: gitUser(username),
+                allowInternalHost,
+              },
             },
           },
         }),

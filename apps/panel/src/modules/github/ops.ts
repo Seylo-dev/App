@@ -1,6 +1,7 @@
 // GitHub ops: the App (manifest flow), installations, repo and branch
-// pickers, connecting a repo, and the opt-in device-flow token for
-// private repos.
+// pickers, connecting a repo, and the opt-in connected GitHub account (a
+// device login or a pasted token, account.ts) for private repos the App
+// does not reach.
 
 import { createHash, randomBytes } from "node:crypto";
 import { isPlaceholder, oauthClientId } from "@seylo/brand";
@@ -15,7 +16,19 @@ import { implement, type OpContext } from "../../ops/implement";
 import { publishService, updateSpec } from "../services/ops";
 import { loadService, toDetail } from "../services/rows";
 import { assertMayUseSomewhere, assertSourceAllowed } from "../services/source-guard";
+import { readSpec } from "../services/spec";
 import { readPanelName } from "../settings/keys";
+import {
+  accountById,
+  accountRepos,
+  accountToken,
+  checkGithubToken,
+  connectedAccount,
+  forgetAccountRepos,
+  type GithubRepo,
+  saveAccount,
+  toAccount,
+} from "./account";
 import { GithubApiError, githubPages, githubRequest } from "./api";
 import {
   appJwt,
@@ -30,6 +43,7 @@ import {
   tokenForInstallation,
   webhookUrl,
 } from "./app";
+import { ensureRepoHook, removeAccountHooks, repoHookOf } from "./repo-hooks";
 
 type GithubApp = Static<typeof githubOps.GithubApp>;
 type Installation = Static<typeof githubOps.Installation>;
@@ -89,10 +103,6 @@ export function upsertInstallation(db: PanelDb, appRowId: string, inst: GithubIn
     .run();
 }
 
-function deviceCredential(db: PanelDb) {
-  return db.select().from(gitCredentials).where(eq(gitCredentials.origin, "device")).get();
-}
-
 /**
  * Whether the caller may see the App and where it is installed (account
  * and organisation logins): people who manage it, or who may set a source
@@ -104,26 +114,20 @@ function maySeeApp(ctx: OpContext): boolean {
 
 const status = implement(githubOps.status, (_input, ctx) => {
   const row = maySeeApp(ctx) ? appRow(ctx.db) : undefined;
-  const device = deviceCredential(ctx.db);
+  const account = connectedAccount(ctx.db);
   return {
     app: row ? toApp(row) : null,
     webhookUrl: webhookUrl(ctx.db),
     deviceFlowAvailable: !isPlaceholder(oauthClientId),
-    // The owner's device-flow account is theirs to see, not every member's.
-    deviceAccount:
-      device && ctx.access.can("github.manage")
-        ? {
-            login: device.githubLogin ?? "",
-            scopes: (device.scopes ?? "")
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean),
-            gitCredentialId: device.id,
-            connectedAt: device.createdAt.toISOString(),
-          }
-        : null,
+    // The owner's connected account (its scopes, how it was connected) is theirs to see, not every member's.
+    account: account && ctx.access.can("github.manage") ? toAccount(account) : null,
   };
 });
+
+/** Invalidates what shows the connected account: Settings > GitHub, the pickers and the credential list. */
+function publishAccount(ctx: Pick<OpContext, "live">): void {
+  ctx.live.publish("panel", { type: "invalidate", ops: [githubOps.status.id, githubOps.installations.id, "git.listCredentials"] });
+}
 
 const startManifest = implement(githubOps.startManifest, (input, ctx) => {
   if (appRow(ctx.db)) throw new OpError("CONFLICT", "This panel already has a GitHub App. Forget it first to create another.");
@@ -206,10 +210,16 @@ const deleteApp = implement(githubOps.deleteApp, (_input, ctx) => {
 });
 
 const installations = implement(githubOps.installations, (_input, ctx) => {
-  if (!maySeeApp(ctx)) return { installations: [], installUrl: null, hidden: true };
+  if (!maySeeApp(ctx)) return { installations: [], installUrl: null, account: null, hidden: true };
   const row = appRow(ctx.db);
   const rows = ctx.db.select().from(githubInstallations).orderBy(githubInstallations.accountLogin).all();
-  return { installations: rows.map(toInstallation), installUrl: row ? installUrl(row) : null, hidden: false };
+  const account = connectedAccount(ctx.db);
+  return {
+    installations: rows.map(toInstallation),
+    installUrl: row ? installUrl(row) : null,
+    account: account ? { id: account.id, login: toAccount(account).login } : null,
+    hidden: false,
+  };
 });
 
 /** Reads the App's installations from GitHub and makes the table match. */
@@ -234,13 +244,6 @@ const syncInstallations = implement(githubOps.syncInstallations, async (_input, 
   return { installations: ctx.db.select().from(githubInstallations).orderBy(githubInstallations.accountLogin).all().map(toInstallation) };
 });
 
-interface GithubRepo {
-  full_name: string;
-  private: boolean;
-  default_branch: string;
-  pushed_at: string | null;
-}
-
 const repoCache = new WeakMap<object, Map<string, { at: number; repos: GithubRepo[] }>>();
 
 async function installationRepos(ctx: OpContext, installationRowId: string): Promise<GithubRepo[]> {
@@ -264,10 +267,49 @@ async function installationRepos(ctx: OpContext, installationRowId: string): Pro
 
 const pageSize = 30;
 
+/** Which of installationId and accountId an op got: exactly one. */
+export type GithubVia = { installationId: string; accountId: null } | { installationId: null; accountId: string };
+
+export function viaOf(input: { installationId?: string; accountId?: string }): GithubVia {
+  if (input.installationId && input.accountId)
+    throw new OpError("BAD_REQUEST", "Pass installationId or accountId, not both.", { field: "accountId" });
+  if (input.installationId) return { installationId: input.installationId, accountId: null };
+  if (input.accountId) return { installationId: null, accountId: input.accountId };
+  throw new OpError("BAD_REQUEST", "Pass installationId (the GitHub App) or accountId (the connected GitHub account).", {
+    field: "installationId",
+  });
+}
+
+/** The repositories the App installation or the connected account reads. */
+async function reposVia(ctx: OpContext, via: GithubVia): Promise<GithubRepo[]> {
+  if (via.installationId !== null) return installationRepos(ctx, via.installationId);
+  return accountRepos(ctx, accountById(ctx.db, via.accountId));
+}
+
+/** FORBIDDEN unless the caller may use it in the project; the repositories it is shared for there (null: any). */
+function sharedVia(ctx: OpContext, projectId: string, via: GithubVia): Set<string> | null {
+  return via.installationId !== null
+    ? assertMayUseSomewhere(ctx, projectId, "github", via.installationId, "installationId")
+    : assertMayUseSomewhere(ctx, projectId, "githubAccount", accountById(ctx.db, via.accountId).id, "accountId");
+}
+
 const repos = implement(githubOps.repos, async (input, ctx) => {
-  // People who do not manage GitHub see only the repositories the installation is shared for in this project.
-  const shared = assertMayUseSomewhere(ctx, input.projectId, "github", input.installationId, "installationId");
-  const all = await installationRepos(ctx, input.installationId);
+  const via = viaOf(input);
+  // People who do not manage GitHub see only the repositories the installation or account is shared for in this project.
+  const shared = sharedVia(ctx, input.projectId, via);
+  let all: GithubRepo[];
+  try {
+    all = await reposVia(ctx, via);
+  } catch (error) {
+    if (error instanceof GithubApiError && via.accountId !== null)
+      throw new OpError(
+        error.status === 401 ? "CONFLICT" : "UNAVAILABLE",
+        error.status === 401
+          ? "GitHub no longer accepts the connected account's token. Connect the account again in Settings > GitHub."
+          : error.message,
+      );
+    throw error;
+  }
   const q = input.query?.toLowerCase().trim() ?? "";
   const filtered = all
     .filter((r) => shared === null || shared.has(r.full_name.toLowerCase()))
@@ -285,14 +327,33 @@ const repos = implement(githubOps.repos, async (input, ctx) => {
   };
 });
 
+/** The token of the App installation or the connected account, and how errors name it. */
+async function tokenVia(ctx: Pick<OpContext, "db" | "secrets">, via: GithubVia): Promise<{ token: string; who: string; fix: string }> {
+  if (via.installationId !== null) {
+    return {
+      token: await tokenForInstallation(ctx.db, ctx.secrets, via.installationId),
+      who: "The App",
+      fix: "Give the App access to it on GitHub.",
+    };
+  }
+  const account = accountById(ctx.db, via.accountId);
+  return {
+    token: accountToken(ctx.secrets, account),
+    who: `The connected GitHub account (@${toAccount(account).login})`,
+    fix: "Check the account can open it on GitHub (an organization may need to approve the panel first).",
+  };
+}
+
 /**
- * Branches of a repo through the App, default branch first. GitHub answers
- * 404 for a repository the installation cannot read (or that does not
- * exist): NOT_FOUND with field repo, so the New app dialog can tell it from
- * GitHub not answering (UNAVAILABLE), which says nothing about the repository.
+ * Branches of a repo through the App or the connected account, default
+ * branch first. GitHub answers 404 for a repository it cannot read (or that
+ * does not exist): NOT_FOUND with field repo, so the New app dialog can tell
+ * it from GitHub not answering (UNAVAILABLE), which says nothing about the
+ * repository.
  */
-export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, installationRowId: string, repo: string) {
-  const token = await tokenForInstallation(ctx.db, ctx.secrets, installationRowId);
+export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, viaOrInstallation: GithubVia | string, repo: string) {
+  const via: GithubVia = typeof viaOrInstallation === "string" ? { installationId: viaOrInstallation, accountId: null } : viaOrInstallation;
+  const { token, who, fix } = await tokenVia(ctx, via);
   try {
     const [info, names] = await Promise.all([
       githubRequest<{ default_branch: string }>(`/repos/${repo}`, { auth: token }),
@@ -302,8 +363,9 @@ export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, insta
     return { defaultBranch, branches: [defaultBranch, ...names.filter((b) => b !== defaultBranch).sort()] };
   } catch (error) {
     if (!(error instanceof GithubApiError)) throw error;
-    if (error.status === 404) {
-      throw new OpError("NOT_FOUND", `The App cannot read ${repo}, or there is no such repository. Give the App access to it on GitHub.`, {
+    // 403 too: a fine-grained token without access to this repository, or an organization that has not approved the panel.
+    if (error.status === 404 || (error.status === 403 && via.accountId !== null)) {
+      throw new OpError("NOT_FOUND", `${who} cannot read ${repo}, or there is no such repository. ${fix}`, {
         field: "repo",
       });
     }
@@ -311,9 +373,17 @@ export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, insta
   }
 }
 
+/** The source fields of a GitHub source read through the App or the account. */
+function sourceVia(ctx: OpContext, via: GithubVia): { installationId: string | null; accountId: string | null } {
+  return via.installationId !== null
+    ? { installationId: via.installationId, accountId: null }
+    : { installationId: null, accountId: accountById(ctx.db, via.accountId).id };
+}
+
 const branches = implement(githubOps.branches, async (input, ctx) => {
-  assertSourceAllowed(ctx, input.projectId, { type: "github", installationId: input.installationId, repo: input.repo }, "");
-  const { defaultBranch, branches: all } = await repoBranches(ctx, input.installationId, input.repo);
+  const via = viaOf(input);
+  assertSourceAllowed(ctx, input.projectId, { type: "github", ...sourceVia(ctx, via), repo: input.repo }, "");
+  const { defaultBranch, branches: all } = await repoBranches(ctx, via, input.repo);
   const q = input.query?.toLowerCase().trim() ?? "";
   return { defaultBranch, branches: all.filter((b) => !q || b.toLowerCase().includes(q)).slice(0, 500) };
 });
@@ -322,25 +392,23 @@ const connectRepo = implement(githubOps.connectRepo, async (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (row.kind !== "app" && row.kind !== "cron") throw new OpError("CONFLICT", `A ${row.kind} service cannot build from a repository.`);
   if (row.parentId) throw new OpError("CONFLICT", "Compose members build from their stack's repository.");
-  installationById(ctx.db, input.installationId);
-  assertSourceAllowed(ctx, row.projectId, { type: "github", installationId: input.installationId, repo: input.repo }, "");
-  const token = await tokenForInstallation(ctx.db, ctx.secrets, input.installationId);
+  const via = viaOf(input);
+  if (via.installationId !== null) installationById(ctx.db, via.installationId);
+  const fields = sourceVia(ctx, via);
+  assertSourceAllowed(ctx, row.projectId, { type: "github", ...fields, repo: input.repo }, "");
+  const { token, who, fix } = await tokenVia(ctx, via);
   try {
     await githubRequest(`/repos/${input.repo}/branches/${encodeURIComponent(input.branch)}`, { auth: token });
   } catch {
-    throw new OpError(
-      "BAD_REQUEST",
-      `The App cannot read ${input.repo} at ${input.branch}. Check the branch, or give the App access to the repository on GitHub.`,
-      {
-        field: "repo",
-      },
-    );
+    throw new OpError("BAD_REQUEST", `${who} cannot read ${input.repo} at ${input.branch}. Check the branch. ${fix}`, {
+      field: "repo",
+    });
   }
   const next = updateSpec(ctx, row.id, (spec) => ({
     ...spec,
     source: {
       type: "github",
-      installationId: input.installationId,
+      ...fields,
       repo: input.repo,
       branch: input.branch,
       deployOnPush: input.deployOnPush,
@@ -348,8 +416,35 @@ const connectRepo = implement(githubOps.connectRepo, async (input, ctx) => {
     build: { ...spec.build, contextPath: input.rootDir ?? spec.build.contextPath, builder: spec.build.builder },
   }));
   ctx.db.delete(sourcePolls).where(eq(sourcePolls.serviceId, row.id)).run();
+  // The App's webhook covers its repositories; one read through the account gets its own (pushes and pull requests).
+  if (fields.accountId) {
+    await ensureRepoHook(ctx, { serviceId: row.id, account: accountById(ctx.db, fields.accountId), repo: input.repo });
+    ctx.live.publish(`service:${row.id}`, { type: "invalidate", ops: [githubOps.repoWebhook.id] });
+  }
   publishService(ctx, row);
   return toDetail(ctx.db, ctx.agents, next);
+});
+
+const repoWebhook = implement(githubOps.repoWebhook, (input, ctx) => {
+  const source = readSpec(loadService(ctx.db, input.serviceId).spec).source;
+  const configured = source.type === "github" && source.installationId === null;
+  const row = repoHookOf(ctx, input.serviceId);
+  return {
+    configured,
+    repo: configured ? source.repo : null,
+    url: row?.url ?? null,
+    created: Boolean(row?.remoteId),
+    error: row ? row.error : null,
+    lastDeliveryAt: row?.lastDeliveryAt?.toISOString() ?? null,
+  };
+});
+
+const tokenConnect = implement(githubOps.tokenConnect, async (input, ctx) => {
+  const token = input.token.trim();
+  const checked = await checkGithubToken(token);
+  const row = saveAccount(ctx, { token, login: checked.login, scopes: checked.scopes, origin: "github_token" });
+  publishAccount(ctx);
+  return toAccount(row);
 });
 
 // Device flow (like `gh auth login`) for a token that clones private repos.
@@ -433,32 +528,25 @@ const devicePoll = implement(githubOps.devicePoll, async (input, ctx) => {
   }
   if (!data?.access_token) throw new OpError("UNAVAILABLE", "GitHub did not answer the device flow. Try again.");
   const user = await githubRequest<{ login: string }>("/user", { auth: data.access_token });
-  const scopes = data.scope ?? user.scopes ?? "";
-  const existing = deviceCredential(ctx.db);
-  const values = {
-    name: `GitHub (${user.data.login})`,
-    kind: "token" as const,
-    host: "github.com",
-    username: user.data.login,
-    secretSealed: ctx.secrets.seal(data.access_token, "git.credential"),
-    origin: "device" as const,
-    githubLogin: user.data.login,
-    scopes,
-    createdBy: userOf(ctx.principal)?.id ?? null,
-  };
-  const credential = existing
-    ? ctx.db.update(gitCredentials).set(values).where(eq(gitCredentials.id, existing.id)).returning().get()
-    : ctx.db.insert(gitCredentials).values(values).returning().get();
+  const scopes = (data.scope ?? user.scopes ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Replaces a pasted token too, in place: services that read through the account keep it.
+  const credential = saveAccount(ctx, { token: data.access_token, login: user.data.login, scopes, origin: "device" });
   ctx.db.delete(githubDeviceFlows).where(eq(githubDeviceFlows.id, flow.id)).run();
-  ctx.live.publish("panel", { type: "invalidate", ops: [githubOps.status.id, "git.listCredentials"] });
+  publishAccount(ctx);
   return { status: "done" as const, login: user.data.login, gitCredentialId: credential.id };
 });
 
-const deviceDisconnect = implement(githubOps.deviceDisconnect, (_input, ctx) => {
-  const existing = deviceCredential(ctx.db);
+const deviceDisconnect = implement(githubOps.deviceDisconnect, async (_input, ctx) => {
+  const existing = connectedAccount(ctx.db);
   if (!existing) throw new OpError("NOT_FOUND", "No GitHub account is connected.");
+  // The webhooks it made go first: without the token nothing could remove them later.
+  await removeAccountHooks(ctx, existing);
   ctx.db.delete(gitCredentials).where(eq(gitCredentials.id, existing.id)).run();
-  ctx.live.publish("panel", { type: "invalidate", ops: [githubOps.status.id, "git.listCredentials"] });
+  forgetAccountRepos(ctx.db);
+  publishAccount(ctx);
   return {};
 });
 
@@ -472,6 +560,8 @@ export const githubHandlers = [
   repos,
   branches,
   connectRepo,
+  repoWebhook,
+  tokenConnect,
   deviceStart,
   devicePoll,
   deviceDisconnect,

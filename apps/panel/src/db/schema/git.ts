@@ -65,7 +65,8 @@ export const githubDeviceFlows = sqliteTable("github_device_flows", {
 });
 
 export type GitCredentialKind = "token" | "ssh_key";
-export type GitCredentialOrigin = "manual" | "generated" | "device";
+/** "device": the panel's GitHub account from the device flow; "github_token": the same account from a pasted token. */
+export type GitCredentialOrigin = "manual" | "generated" | "device" | "github_token";
 
 /**
  * Credentials for git hosts other than the GitHub App: a personal access
@@ -88,7 +89,7 @@ export const gitCredentials = sqliteTable("git_credentials", {
   publicKey: text("public_key"),
   fingerprint: text("fingerprint"),
   origin: text("origin").$type<GitCredentialOrigin>().notNull().default("manual"),
-  /** For origin "device": the GitHub login and granted scopes (comma separated). */
+  /** For origin "device" and "github_token": the GitHub login and granted scopes (comma separated; empty for a fine-grained token). */
   githubLogin: text("github_login"),
   scopes: text("scopes"),
   createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -170,6 +171,37 @@ export const gitProviderWebhooks = sqliteTable(
     uniqueIndex("git_provider_webhooks_service_unique").on(t.serviceId),
     index("git_provider_webhooks_provider_idx").on(t.providerId),
   ],
+);
+
+/**
+ * The GitHub repository webhook the panel created with its connected
+ * GitHub account's token, for one service whose GitHub source the account
+ * reads (no App installation, so the App's webhook never covers it). Its
+ * id is in the webhook URL (POST /api/hooks/github-repo/<id>); the secret
+ * is per hook.
+ */
+export const githubRepoWebhooks = sqliteTable(
+  "github_repo_webhooks",
+  {
+    id: id(),
+    serviceId: text("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    /** The account (git_credentials row) whose token created it; null once that account is gone. */
+    credentialId: text("credential_id").references(() => gitCredentials.id, { onDelete: "set null" }),
+    /** "owner/name". */
+    repo: text("repo").notNull(),
+    secretSealed: sealed("secret_sealed").notNull(),
+    /** GitHub's id of the hook; null while it could not be created. */
+    remoteId: text("remote_id"),
+    /** The URL GitHub posts to. */
+    url: text("url"),
+    /** Why creating the hook failed (pushes are polled meanwhile), for the Source tab. */
+    error: text("error"),
+    lastDeliveryAt: timestamp("last_delivery_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("github_repo_webhooks_service_unique").on(t.serviceId)],
 );
 
 export type WebhookSource = "github" | "trigger" | GitProviderKind;

@@ -1,22 +1,38 @@
 // Polling fallback for push-to-deploy: when GitHub cannot reach the panel
-// (no public domain, or a missed webhook), the panel asks GitHub for the
-// head of each followed branch once a minute. Conditional requests keep
-// unchanged branches free of rate limit.
+// (no public domain, a missed webhook, or a repository read through the
+// connected account whose webhook GitHub refused), the panel asks GitHub
+// for the head of each followed branch. How often depends on how the
+// service's pushes arrive: every minute while nothing delivers them (no
+// App webhook URL, or an account source without a working repository
+// webhook), every 5 minutes as a safety net otherwise. Conditional
+// requests keep unchanged branches free of rate limit. The same schedule
+// creates account repository webhooks again (repo-hooks.ts).
 
 import { eq, sql } from "drizzle-orm";
 import { services, sourcePolls } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import { readSpec } from "../services/spec";
+import { githubSourceAuth } from "./account";
 import { githubRequest } from "./api";
-import { appRow, tokenForInstallation, webhookUrl } from "./app";
+import { appRow, webhookUrl } from "./app";
 import { handlePush } from "./push";
+import { repairRepoHooks, repoHookWorks } from "./repo-hooks";
 
 export const pollJobType = "github.poll";
 const everyMs = 60_000;
+/** With a webhook that delivers, polling is only a safety net. */
+const safetyNetMs = 5 * everyMs;
 
-export async function pollBranches(deps: Deps): Promise<number> {
-  if (!appRow(deps.db)) return 0;
+/**
+ * Reads the followed branches. `safetyNet`: also the ones whose pushes a
+ * webhook delivers (every 5 minutes); otherwise only those nothing
+ * delivers. Returns how many deploys it started.
+ */
+export async function pollBranches(deps: Deps, options: { safetyNet?: boolean } = {}): Promise<number> {
+  const safetyNet = options.safetyNet ?? true;
+  const hasApp = appRow(deps.db) !== undefined;
+  const appHook = webhookUrl(deps.db) !== null;
   const followed = deps.db
     .select()
     .from(services)
@@ -26,10 +42,14 @@ export async function pollBranches(deps: Deps): Promise<number> {
   for (const svc of followed) {
     const spec = readSpec(svc.spec);
     if (spec.source.type !== "github" || spec.preview) continue;
+    const viaApp = spec.source.installationId !== null;
+    if (viaApp && !hasApp) continue;
+    const delivered = viaApp ? appHook : repoHookWorks(deps, svc.id);
+    if (delivered && !safetyNet) continue;
     const poll = deps.db.select().from(sourcePolls).where(eq(sourcePolls.serviceId, svc.id)).get();
     const sameBranch = poll?.branch === spec.source.branch;
     try {
-      const token = await tokenForInstallation(deps.db, deps.secrets, spec.source.installationId);
+      const { token } = await githubSourceAuth(deps, spec.source);
       const res = await githubRequest<{
         sha: string;
         commit: { message: string; author: { name: string } | null };
@@ -77,20 +97,21 @@ export async function pollBranches(deps: Deps): Promise<number> {
   return deployed;
 }
 
-const lastPoll = new WeakMap<object, number>();
+const lastSafetyNet = new WeakMap<object, number>();
 
 /**
- * Runs every minute from a schedule (github/index.ts). Polling matters most
- * without webhooks; with them it is a slower safety net, every 5 minutes.
+ * Runs every minute from a schedule (github/index.ts): the branches no
+ * webhook delivers every time, the rest every 5 minutes.
  */
 export const pollJob = defineJob<Record<string, never>>({
   type: pollJobType,
   maxAttempts: 1,
   async run(_payload, deps) {
-    const last = lastPoll.get(deps.db) ?? 0;
-    if (webhookUrl(deps.db) && Date.now() - last < everyMs * 5 - 5_000) return;
-    lastPoll.set(deps.db, Date.now());
-    await pollBranches(deps);
+    const last = lastSafetyNet.get(deps.db) ?? 0;
+    const safetyNet = Date.now() - last >= safetyNetMs - 5_000;
+    if (safetyNet) lastSafetyNet.set(deps.db, Date.now());
+    await pollBranches(deps, { safetyNet });
+    await repairRepoHooks(deps);
   },
 });
 

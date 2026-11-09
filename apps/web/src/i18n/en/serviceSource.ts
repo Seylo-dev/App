@@ -10,7 +10,7 @@ export default {
   deployOnPush: "Deploy on push",
   deployOnPushHint: "Every push to this branch deploys the service.",
   types: {
-    github: { name: "GitHub", hint: "A repository through the panel's GitHub App" },
+    github: { name: "GitHub", hint: "A repository through the GitHub App or a connected account" },
     gitlab: { name: "GitLab", hint: "gitlab.com or your own GitLab, through a connection" },
     gitea: { name: "Gitea", hint: "Gitea or Forgejo, through a connection" },
     bitbucket: { name: "Bitbucket", hint: "A Bitbucket Cloud workspace, through a connection" },
@@ -27,13 +27,17 @@ export default {
   github: {
     noAppTitle: "Connect GitHub first",
     noAppBody:
-      "The panel reads repositories through its own GitHub App. Install it on the account or organization that owns the repository.",
+      "The panel reads repositories through its own GitHub App, or a GitHub account or token connected in Settings > GitHub. Install the App on the account or organization that owns the repository, or connect an account.",
     install: "Install the GitHub App",
     setUp: "Set up GitHub",
     account: "Account",
+    accountOption: "@{login} (connected account)",
     repository: "Repository",
     searchRepos: "Search repositories",
     noRepos: "No repositories match. The App may not have access to the one you want.",
+    noReposAccount: "No repositories match. An organization may need to approve the panel before its private repositories show.",
+    hookOk: "Pushes reach the panel through a webhook on the repository.",
+    hookPolling: "Pushes are picked up by polling the branch every minute.",
     private: "private",
     branch: "Branch",
     pickBranch: "Pick a branch",

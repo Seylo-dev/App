@@ -13740,9 +13740,28 @@
                                   "type": "string"
                                 },
                                 "installationId": {
-                                  "pattern": "^[a-z0-9]{16}$",
-                                  "description": "Panel-issued id.",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "accountId": {
+                                  "anyOf": [
+                                    {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "repo": {
                                   "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -22881,9 +22900,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -32298,6 +32336,10 @@
                         {
                           "const": "device",
                           "type": "string"
+                        },
+                        {
+                          "const": "github_token",
+                          "type": "string"
                         }
                       ]
                     },
@@ -32532,6 +32574,10 @@
                         {
                           "const": "device",
                           "type": "string"
+                        },
+                        {
+                          "const": "github_token",
+                          "type": "string"
                         }
                       ]
                     },
@@ -32684,6 +32730,10 @@
                               },
                               {
                                 "const": "device",
+                                "type": "string"
+                              },
+                              {
+                                "const": "github_token",
                                 "type": "string"
                               }
                             ]
@@ -33122,6 +33172,10 @@
                         {
                           "const": "device",
                           "type": "string"
+                        },
+                        {
+                          "const": "github_token",
+                          "type": "string"
                         }
                       ]
                     },
@@ -33155,7 +33209,7 @@
       "get": {
         "operationId": "github.branches",
         "summary": "List a repository's branches",
-        "description": "Lists the branches of a repository through the App, default branch first. Fails with NOT_FOUND (details.field repo) when the installation cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
+        "description": "Lists the branches of a repository through the App (installationId) or the connected GitHub account (accountId), default branch first. Pass one of the two. Fails with NOT_FOUND (details.field repo) when it cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
         "tags": [
           "github"
         ],
@@ -33182,7 +33236,17 @@
           {
             "name": "installationId",
             "in": "query",
-            "required": true,
+            "required": false,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
             "schema": {
               "pattern": "^[a-z0-9]{16}$",
               "description": "Panel-issued id.",
@@ -33247,7 +33311,7 @@
       "post": {
         "operationId": "github.connectRepo",
         "summary": "Connect a GitHub repository to a service",
-        "description": "Sets a service's source to a GitHub repository and branch read through the App, after checking the installation can read it. With deployOnPush, pushes to the branch deploy the service. rootDir is the folder to build.",
+        "description": "Sets a service's source to a GitHub repository and branch read through the App (installationId) or the connected GitHub account (accountId), after checking it can read it. Pass one of the two. With deployOnPush, pushes to the branch deploy the service: through the App's webhook, or for the account through a repository webhook the panel creates with its token when the token may and the panel has a domain, else by polling the branch every minute. rootDir is the folder to build.",
         "tags": [
           "github"
         ],
@@ -33268,7 +33332,6 @@
                 "type": "object",
                 "required": [
                   "serviceId",
-                  "installationId",
                   "repo",
                   "branch",
                   "deployOnPush"
@@ -33280,6 +33343,11 @@
                     "type": "string"
                   },
                   "installationId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "accountId": {
                     "pattern": "^[a-z0-9]{16}$",
                     "description": "Panel-issued id.",
                     "type": "string"
@@ -33728,9 +33796,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -34696,7 +34783,7 @@
       "post": {
         "operationId": "github.deviceDisconnect",
         "summary": "Disconnect the GitHub account",
-        "description": "Deletes the device-flow token used for private repos. Services that clone with it fail to deploy until they get another credential. Revoke it on github.com too.",
+        "description": "Deletes the connected GitHub account's token (device login or pasted token) and removes the repository webhooks it created. Services that read their repository through it fail to deploy until an account is connected again or they get another source. Revoke the token on github.com too.",
         "tags": [
           "github"
         ],
@@ -34745,7 +34832,7 @@
       "post": {
         "operationId": "github.devicePoll",
         "summary": "Check the GitHub device flow",
-        "description": "Checks whether the person entered the code on GitHub. Once done, the token is stored sealed as a git credential for github.com and the login is returned. A mutation because finishing it stores the credential.",
+        "description": "Checks whether the person entered the code on GitHub. Once done, the token is stored sealed as the panel's connected GitHub account (a git credential for github.com, replacing a pasted token; services that use the account keep it) and the login is returned. A mutation because finishing it stores the credential.",
         "tags": [
           "github"
         ],
@@ -35029,7 +35116,7 @@
       "get": {
         "operationId": "github.installations",
         "summary": "List GitHub App installations",
-        "description": "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one. Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
+        "description": "Lists the accounts and organizations the panel's GitHub App is installed on, the link to install it on another one, and the panel's connected GitHub account (its repositories are listed with accountId instead of installationId). Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
         "tags": [
           "github"
         ],
@@ -35053,6 +35140,7 @@
                   "required": [
                     "installations",
                     "installUrl",
+                    "account",
                     "hidden"
                   ],
                   "properties": {
@@ -35129,6 +35217,30 @@
                         }
                       ]
                     },
+                    "account": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "login"
+                          ],
+                          "properties": {
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "login": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "hidden": {
                       "description": "True when the caller may not see the App or its installations: the list is then empty whatever is installed, and says nothing about whether there is an App.",
                       "type": "boolean"
@@ -35151,7 +35263,7 @@
       "get": {
         "operationId": "github.repos",
         "summary": "List repositories",
-        "description": "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation is already used for in that project.",
+        "description": "Lists the repositories an installation lets the App read (installationId), or the connected GitHub account can read (accountId: its own, ones it collaborates on and its organizations', GET /user/repos), most recently pushed first, optionally filtered by name. Pass one of installationId and accountId. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation or account is already used for in that project.",
         "tags": [
           "github"
         ],
@@ -35178,7 +35290,17 @@
           {
             "name": "installationId",
             "in": "query",
-            "required": true,
+            "required": false,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
             "schema": {
               "pattern": "^[a-z0-9]{16}$",
               "description": "Panel-issued id.",
@@ -35269,6 +35391,112 @@
         "x-mcp": true
       }
     },
+    "/api/v1/github.repoWebhook": {
+      "get": {
+        "operationId": "github.repoWebhook",
+        "summary": "Get a service's GitHub repository webhook",
+        "description": "For a service whose GitHub repository is read through the connected account: whether the repository webhook the panel created exists, where it points and when it last delivered. Without one, pushes are picked up by polling the branch every minute.",
+        "tags": [
+          "github"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "repo",
+                    "url",
+                    "created",
+                    "error",
+                    "lastDeliveryAt"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "repo": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "url": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastDeliveryAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:services.view",
+        "x-mcp": true
+      }
+    },
     "/api/v1/github.startManifest": {
       "post": {
         "operationId": "github.startManifest",
@@ -35349,7 +35577,7 @@
       "get": {
         "operationId": "github.status",
         "summary": "Get the GitHub connection",
-        "description": "Returns the panel's GitHub App (null before it is created, and for people who neither manage it nor may create or update a service anywhere), the webhook URL GitHub calls, and the device-flow GitHub account used to clone private repos, if one is connected.",
+        "description": "Returns the panel's GitHub App (null before it is created, and for people who neither manage it nor may create or update a service anywhere), the webhook URL GitHub calls, and the connected GitHub account (a device login or a pasted token) used for private repos the App does not reach, if one is connected (only for people with github.manage).",
         "tags": [
           "github"
         ],
@@ -35374,7 +35602,7 @@
                     "app",
                     "webhookUrl",
                     "deviceFlowAvailable",
-                    "deviceAccount"
+                    "account"
                   ],
                   "properties": {
                     "app": {
@@ -35439,19 +35667,38 @@
                     "deviceFlowAvailable": {
                       "type": "boolean"
                     },
-                    "deviceAccount": {
+                    "account": {
                       "anyOf": [
                         {
                           "type": "object",
                           "required": [
+                            "id",
                             "login",
+                            "method",
                             "scopes",
-                            "gitCredentialId",
+                            "tokenKind",
                             "connectedAt"
                           ],
                           "properties": {
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
                             "login": {
                               "type": "string"
+                            },
+                            "method": {
+                              "anyOf": [
+                                {
+                                  "const": "device",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "token",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "scopes": {
                               "type": "array",
@@ -35459,10 +35706,17 @@
                                 "type": "string"
                               }
                             },
-                            "gitCredentialId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                            "tokenKind": {
+                              "anyOf": [
+                                {
+                                  "const": "classic",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "fineGrained",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "connectedAt": {
                               "format": "date-time",
@@ -35603,6 +35857,116 @@
         "x-op-kind": "mutation",
         "x-permission": "github.manage",
         "x-mcp": true
+      }
+    },
+    "/api/v1/github.tokenConnect": {
+      "post": {
+        "operationId": "github.tokenConnect",
+        "summary": "Connect a GitHub account with a token",
+        "description": "Connects the panel's GitHub account with a pasted personal access token instead of the device flow: fine-grained with Contents: Read and Metadata: Read on the chosen repositories, or classic with the repo scope. The token is checked against api.github.com/user (and its scopes, or the repositories a fine-grained one reaches) before it is stored sealed; it replaces a connected account, and services that use the account keep it. The App stays the recommended way.",
+        "tags": [
+          "github"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "minLength": 20,
+                    "maxLength": 255,
+                    "pattern": "^\\S+$",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "login",
+                    "method",
+                    "scopes",
+                    "tokenKind",
+                    "connectedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "login": {
+                      "type": "string"
+                    },
+                    "method": {
+                      "anyOf": [
+                        {
+                          "const": "device",
+                          "type": "string"
+                        },
+                        {
+                          "const": "token",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tokenKind": {
+                      "anyOf": [
+                        {
+                          "const": "classic",
+                          "type": "string"
+                        },
+                        {
+                          "const": "fineGrained",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "connectedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "github.manage",
+        "x-mcp": false
       }
     },
     "/api/v1/gitProviders.branches": {
@@ -36265,9 +36629,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -52072,9 +52455,28 @@
                                   "type": "string"
                                 },
                                 "installationId": {
-                                  "pattern": "^[a-z0-9]{16}$",
-                                  "description": "Panel-issued id.",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "accountId": {
+                                  "anyOf": [
+                                    {
+                                      "pattern": "^[a-z0-9]{16}$",
+                                      "description": "Panel-issued id.",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "repo": {
                                   "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -53490,9 +53892,28 @@
                             "type": "string"
                           },
                           "installationId": {
-                            "pattern": "^[a-z0-9]{16}$",
-                            "description": "Panel-issued id.",
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "accountId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "repo": {
                             "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -54270,9 +54691,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -55690,9 +56130,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -58660,9 +59119,28 @@
                             "type": "string"
                           },
                           "installationId": {
-                            "pattern": "^[a-z0-9]{16}$",
-                            "description": "Panel-issued id.",
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "accountId": {
+                            "anyOf": [
+                              {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "repo": {
                             "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -59285,9 +59763,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
@@ -61134,9 +61631,28 @@
                               "type": "string"
                             },
                             "installationId": {
-                              "pattern": "^[a-z0-9]{16}$",
-                              "description": "Panel-issued id.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "accountId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "repo": {
                               "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",

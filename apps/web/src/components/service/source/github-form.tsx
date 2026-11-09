@@ -1,4 +1,5 @@
-// Pick a GitHub repository and branch through the panel's GitHub App.
+// Pick a GitHub repository and branch through the panel's GitHub App or its
+// connected GitHub account (Settings > GitHub, a device login or a token).
 
 import { github, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -21,10 +22,20 @@ import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
 
+/** What github.repos, github.branches and github.connectRepo take to read through the App or the account. */
+export type GithubVia = { installationId: string; accountId?: undefined } | { accountId: string; installationId?: undefined };
+
+/** An entry of the Account picker: an App installation, or the connected account. */
+interface Choice {
+  key: string;
+  via: GithubVia;
+  label: string;
+}
+
 export function GithubForm({ service }: { service: ServiceDetail }) {
   const installs = useOp(github.installations, {}, { retry: retryOp });
   const src = service.sourceConfig.type === "github" ? service.sourceConfig : null;
-  const [installationId, setInstallationId] = useState<string | null>(src?.installationId ?? null);
+  const [choiceKey, setChoiceKey] = useState<string | null>(null);
   const [repo, setRepo] = useState<string | null>(src?.repo ?? null);
   const [branch, setBranch] = useState<string | null>(src?.branch ?? null);
   const [rootDir, setRootDir] = useState(service.build.contextPath);
@@ -33,6 +44,7 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
   const connect = useOpMutation(github.connectRepo, {
     onSuccess: () => {
       invalidate(services.get);
+      invalidate(github.repoWebhook);
       toast.success(t("serviceSource.github.connected"));
     },
   });
@@ -63,47 +75,69 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
   if (installs.isError) return <OpErrorNote error={installs.error} />;
   // Someone who may not see the App gets no installations: that does not mean there is no App.
   if (installs.data.hidden) return <ReadOnlyGithub repo={src?.repo ?? null} branch={src?.branch ?? null} />;
-  const list = installs.data.installations.filter((i) => !i.suspended);
-  if (list.length === 0) {
+  const account = installs.data.account;
+  const choices: Choice[] = [
+    ...installs.data.installations
+      .filter((i) => !i.suspended)
+      .map((i) => ({ key: `i:${i.id}`, via: { installationId: i.id }, label: i.accountLogin })),
+    ...(account
+      ? [
+          {
+            key: `a:${account.id}`,
+            via: { accountId: account.id },
+            label: t("serviceSource.github.accountOption", { login: account.login }),
+          },
+        ]
+      : []),
+  ];
+  if (choices.length === 0) {
     return (
       <Callout
         tone="info"
         title={t("serviceSource.github.noAppTitle")}
         action={
-          installs.data.installUrl ? (
-            <Button asChild size="sm" variant="primary">
-              <a href={installs.data.installUrl} target="_blank" rel="noreferrer">
-                {t("serviceSource.github.install")}
-              </a>
-            </Button>
-          ) : (
+          <>
+            {installs.data.installUrl && (
+              <Button asChild size="sm" variant="primary">
+                <a href={installs.data.installUrl} target="_blank" rel="noreferrer">
+                  {t("serviceSource.github.install")}
+                </a>
+              </Button>
+            )}
             <Button asChild size="sm">
               <Link to="/settings/github">{t("serviceSource.github.setUp")}</Link>
             </Button>
-          )
+          </>
         }
       >
         {t("serviceSource.github.noAppBody")}
       </Callout>
     );
   }
-  const install = installationId ?? list[0]?.id ?? null;
+  // The saved source's installation or account, else the first choice; a picked one wins.
+  const saved = src
+    ? (choices.find((c) => (src.installationId ? c.key === `i:${src.installationId}` : c.key.startsWith("a:")))?.key ?? null)
+    : null;
+  const chosen = choices.find((c) => c.key === (choiceKey ?? saved)) ?? choices[0] ?? null;
+  const via = chosen?.via ?? null;
+  // The repository webhook (or polling) only exists for a source read through the account.
+  const viaAccountNow = src !== null && src.installationId === null && chosen?.via.accountId !== undefined && repo === src.repo;
 
   return (
     <form
       className="flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!install || !repo || !branch) return;
-        connect.mutate({ serviceId: service.id, installationId: install, repo, branch, rootDir, deployOnPush });
+        if (!via || !repo || !branch) return;
+        connect.mutate({ serviceId: service.id, ...via, repo, branch, rootDir, deployOnPush });
       }}
     >
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t("serviceSource.github.account")}>
           <Select
-            value={install ?? undefined}
+            value={chosen?.key}
             onValueChange={(v) => {
-              setInstallationId(v);
+              setChoiceKey(v);
               setRepo(null);
               setBranch(null);
             }}
@@ -112,26 +146,27 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {list.map((i) => (
-                <SelectItem key={i.id} value={i.id}>
-                  {i.accountLogin}
+              {choices.map((c) => (
+                <SelectItem key={c.key} value={c.key}>
+                  {c.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </Field>
         <Field label={t("serviceSource.github.branch")}>
-          {install && repo ? (
-            <BranchSelect projectId={service.projectId} installationId={install} repo={repo} value={branch} onChange={setBranch} />
+          {via && repo ? (
+            <BranchSelect projectId={service.projectId} {...via} repo={repo} value={branch} onChange={setBranch} />
           ) : (
             <Input disabled placeholder={t("serviceSource.github.pickRepoFirst")} aria-label={t("serviceSource.github.branch")} />
           )}
         </Field>
       </div>
-      {install && (
+      {via && chosen && (
         <RepoPicker
+          key={chosen.key}
           projectId={service.projectId}
-          installationId={install}
+          via={via}
           value={repo}
           onChange={(r, defaultBranch) => {
             setRepo(r);
@@ -147,13 +182,25 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
         description={t("serviceSource.deployOnPushHint")}
         control={<Switch checked={deployOnPush} onCheckedChange={setDeployOnPush} aria-label={t("serviceSource.deployOnPush")} />}
       />
+      {viaAccountNow && <RepoHookNote serviceId={service.id} />}
       <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={!install || !repo || !branch || connect.isPending}>
+        <Button type="submit" variant="primary" disabled={!via || !repo || !branch || connect.isPending}>
           {t("serviceSource.github.connect")}
         </Button>
         <MutationError error={connect.error} />
       </div>
     </form>
+  );
+}
+
+/** How a repository read through the connected account reaches the panel on push: its webhook, or polling and why. */
+function RepoHookNote({ serviceId }: { serviceId: string }) {
+  const hook = useOp(github.repoWebhook, { serviceId }, { retry: retryOp });
+  if (!hook.data?.configured) return null;
+  return (
+    <p data-testid="repo-hook-note" className="m-0 text-[12.5px] leading-normal text-muted-foreground">
+      {hook.data.created ? t("serviceSource.github.hookOk") : (hook.data.error ?? t("serviceSource.github.hookPolling"))}
+    </p>
   );
 }
 
@@ -178,18 +225,18 @@ function ReadOnlyGithub({ repo, branch }: { repo: string | null; branch: string 
 
 function RepoPicker({
   projectId,
-  installationId,
+  via,
   value,
   onChange,
 }: {
   projectId: string;
-  installationId: string;
+  via: GithubVia;
   value: string | null;
   onChange: (repo: string, defaultBranch: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query.trim());
-  const repos = useOp(github.repos, { projectId, installationId, query: deferred || undefined }, { retry: retryOp });
+  const repos = useOp(github.repos, { projectId, ...via, query: deferred || undefined }, { retry: retryOp });
   return (
     <Field label={t("serviceSource.github.repository")}>
       <div className="relative">
@@ -212,7 +259,9 @@ function RepoPicker({
         ) : repos.isError ? (
           <OpErrorNote error={repos.error} compact />
         ) : repos.data.repos.length === 0 ? (
-          <p className="m-0 p-3 text-[12.5px] text-muted-foreground">{t("serviceSource.github.noRepos")}</p>
+          <p className="m-0 p-3 text-[12.5px] text-muted-foreground">
+            {t(via.accountId ? "serviceSource.github.noReposAccount" : "serviceSource.github.noRepos")}
+          </p>
         ) : (
           repos.data.repos.map((r) => (
             <button
@@ -222,7 +271,7 @@ function RepoPicker({
               aria-selected={value === r.fullName}
               onClick={() => onChange(r.fullName, r.defaultBranch)}
               className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] hover:bg-card",
+                "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200 hover:bg-card",
                 value === r.fullName && "bg-card shadow-control",
               )}
             >
@@ -243,24 +292,28 @@ function RepoPicker({
 }
 
 /**
- * The branches of the picked repository. When the list fails (the App lost
- * access, a rate limit, a repository that is gone) the error shows under the
- * field: the saved or default branch alone in the list would hide it otherwise.
+ * The branches of the picked repository. When the list fails (the App or
+ * the account lost access, a rate limit, a repository that is gone) the
+ * error shows under the field: the saved or default branch alone in the
+ * list would hide it otherwise.
  */
 export function BranchSelect({
   projectId,
   installationId,
+  accountId,
   repo,
   value,
   onChange,
 }: {
   projectId: string;
-  installationId: string;
+  installationId?: string;
+  accountId?: string;
   repo: string;
   value: string | null;
   onChange: (branch: string) => void;
 }) {
-  const branches = useOp(github.branches, { projectId, installationId, repo }, { retry: retryOp });
+  const via = accountId ? { accountId } : { installationId: installationId ?? "" };
+  const branches = useOp(github.branches, { projectId, ...via, repo }, { retry: retryOp });
   const list = branches.data?.branches ?? (value ? [value] : []);
   // While the list loads the trigger shows a skeleton (loading), never a "Loading" placeholder.
   const placeholder = branches.isError

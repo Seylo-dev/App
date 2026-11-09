@@ -11,6 +11,7 @@ import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
 import { registryGcJobType } from "../deployments/registry-gc";
 import { registryRelay } from "../deployments/source";
+import { dropRepoHooks } from "../github/repo-hooks";
 import { dropHooks } from "../gitProviders/hooks";
 import { metricsFor } from "../metrics/ingest";
 import { copyRunning } from "./copies";
@@ -72,6 +73,7 @@ export async function deleteServiceTree(deps: Deps, root: ServiceRow): Promise<v
     .all();
   // Repository webhooks go from the providers too (in the background; the rows go with the services).
   dropHooks(deps, ids);
+  dropRepoHooks(deps, ids);
   const restarted: string[] = [];
   deps.db.transaction((tx) => {
     tx.delete(grants)

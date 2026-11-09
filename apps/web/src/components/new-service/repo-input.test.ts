@@ -28,6 +28,16 @@ test("owner/repo is a GitHub repository, with or without .git", () => {
   expect(problem("acme")).toBe("invalid");
 });
 
+test("the Git repository tab takes full addresses only: owner/repo is the GitHub tab's", () => {
+  const full = (text: string) => parseRepoInput(text, [], { shorthand: false });
+  expect(full("acme/app")).toEqual({ ok: false, problem: "shorthand" });
+  expect(full("github.com/acme/app")).toMatchObject({ ok: true, repo: { url: "https://github.com/acme/app.git" } });
+  expect(full("https://git.example.com/team/app.git")).toMatchObject({ ok: true, repo: { host: "git.example.com" } });
+  expect(full("git@git.example.com:team/app.git")).toMatchObject({ ok: true, repo: { ssh: true } });
+  expect(full("ssh://git@git.example.com:2222/team/app.git")).toMatchObject({ ok: true, repo: { ssh: true } });
+  expect(full("gitlab.com/group/sub/app")).toMatchObject({ ok: true, repo: { path: "group/sub/app" } });
+});
+
 test("a host and path without a scheme is an https repository", () => {
   expect(ok("github.com/acme/app")).toEqual(ok("acme/app"));
   expect(ok("github.com/acme/app.git/")).toEqual(ok("acme/app"));

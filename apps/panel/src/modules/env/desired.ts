@@ -13,14 +13,45 @@ import { boxEnv } from "../boxes/desired";
 import { containerEnv } from "../databases/engines";
 import { findDatabase, loadDatabase } from "../databases/info";
 import { databaseKinds, getService } from "../domains/lookup";
+import { readSpec, type ServiceSpecJson } from "../services/spec";
 import { buildEnvGraph, type EnvGraph } from "./graph";
 
 type EnvVar = MessageInitShape<typeof EnvVarSchema>;
 
-/** The resolved env sealed for a deployment row (deployments.envSealed). */
+/**
+ * The resolved env sealed for a deployment row (deployments.envSealed),
+ * which the desired-state compile hands the deployment's containers, with
+ * PORT for apps built from a repository (withPortEnv).
+ */
 export function sealDeploymentEnv(deps: Pick<Deps, "db" | "secrets">, serviceId: string): string {
-  const vars = resolveServiceEnv(deps, serviceId).map((v) => ({ name: v.name, value: v.value, secret: v.secret }));
+  const service = getService(deps.db, serviceId);
+  const vars = withPortEnv(resolveServiceEnv(deps, serviceId), service, readSpec(service.spec)).map((v) => ({
+    name: v.name,
+    value: v.value,
+    secret: v.secret,
+  }));
   return deps.secrets.seal(JSON.stringify(vars), "deployment.env");
+}
+
+/**
+ * PORT=<the app's first port> for an app built from a repository (GitHub,
+ * a git provider or a git URL; not a compose member, whose compose file
+ * says what it needs), unless its env already has PORT (its own .env or the
+ * project's shared variables): Railpack and Nixpacks start commands and
+ * most frameworks listen on $PORT, so the app listens where domains and
+ * health checks look. Part of the env a deploy starts with, so it takes
+ * effect on the next deploy, never as a restart of a running app.
+ */
+export function withPortEnv(
+  env: EnvVar[],
+  service: { kind: string; parentId: string | null },
+  spec: Pick<ServiceSpecJson, "source" | "ports">,
+): EnvVar[] {
+  const port = spec.ports[0]?.containerPort;
+  const fromRepo = spec.source.type === "github" || spec.source.type === "provider" || spec.source.type === "git";
+  if (service.kind !== "app" || service.parentId !== null || !fromRepo || !port) return env;
+  if (env.some((v) => v.name === "PORT")) return env;
+  return [...env, { name: "PORT", value: String(port), secret: false }];
 }
 
 /** A deployment's env snapshot, or null when it has none (older rows, own-runtime kinds). */

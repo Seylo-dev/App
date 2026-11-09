@@ -1,6 +1,7 @@
-// What the New app dialog's Repository field accepts, read without asking
+// What the New app dialog's repository fields accept, read without asking
 // the panel: a full git URL (https://, ssh://, git@host:path), "owner/repo"
-// for GitHub, or a host and path without a scheme ("github.com/acme/app",
+// for GitHub (the GitHub tab only; the Git repository tab wants the host),
+// or a host and path without a scheme ("github.com/acme/app",
 // "gitlab.com/group/sub/app", "git.example.com:3000/team/app"), each with or
 // without .git. A page address of a host whose kind is known (github.com,
 // gitlab.com, bitbucket.org, codeberg.org, and the servers of the person's
@@ -42,9 +43,11 @@ export interface RepoRef {
 /**
  * Why the text is no repository: nothing typed, a token or password in it,
  * plain http (the panel clones over https or ssh only), a path of more than
- * owner/repo without a host, or anything else.
+ * owner/repo without a host, owner/repo where only a full address is taken
+ * (the Git repository tab), a repository on another host than github.com
+ * (the GitHub tab), or anything else.
  */
-export type RepoProblem = "empty" | "credentials" | "insecure" | "needsHost" | "invalid";
+export type RepoProblem = "empty" | "credentials" | "insecure" | "needsHost" | "shorthand" | "notGithub" | "invalid";
 
 export type RepoParse = { ok: true; repo: RepoRef } | { ok: false; problem: RepoProblem };
 
@@ -159,9 +162,11 @@ function finish(repo: RepoRef): RepoParse {
 /**
  * Reads the field's text. `known`: servers besides the well-known hosts
  * whose page addresses to read by kind (the person's GitLab and Gitea
- * connections), from knownHostsOf in repo-source.ts.
+ * connections), from knownHostsOf in repo-source.ts. `shorthand: false`
+ * (the Git repository tab) takes full addresses only: owner/repo is then
+ * the "shorthand" problem, since GitHub repositories have their own tab.
  */
-export function parseRepoInput(input: string, known: readonly KnownHost[] = []): RepoParse {
+export function parseRepoInput(input: string, known: readonly KnownHost[] = [], options: { shorthand?: boolean } = {}): RepoParse {
   const text = input.trim();
   if (text === "") return fail("empty");
   if (/\s/.test(text)) return fail("invalid");
@@ -214,6 +219,7 @@ export function parseRepoInput(input: string, known: readonly KnownHost[] = []):
   if (rest.length === 1) {
     const name = (rest[0] ?? "").replace(/\.git$/i, "");
     if (!githubOwner.test(first) || !githubName.test(name) || name === "." || name === "..") return fail("invalid");
+    if (options.shorthand === false) return fail("shorthand");
     const path = `${first}/${name}`;
     return finish({ url: `https://github.com/${path}.git`, host: "github.com", path, ssh: false, ref: null });
   }

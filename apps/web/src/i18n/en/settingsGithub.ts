@@ -45,16 +45,42 @@ export default {
   },
   device: {
     title: "Private repositories without the App",
-    description: "Connect a GitHub account whose token clones private repos, like `gh auth login`. Opt-in.",
-    unavailable: "This panel has no GitHub OAuth client set up, so an account cannot be connected.",
+    description:
+      "Connect a GitHub account, or paste a token, to list, clone and deploy repositories the App cannot reach. New apps and the Source tab offer its repositories. Opt-in.",
+    unavailable: "This panel has no GitHub OAuth client set up, so signing in with GitHub here is off. A token works.",
     recommendApp: "The GitHub App gives narrower access and is the better choice. Use this only for repos the App cannot reach.",
     connect: "Connect a GitHub account",
+    useToken: "Use a token",
     connected: "@{login}, connected on {date}.",
+    viaDevice: "Device login",
+    viaToken: "Personal access token",
+    fineGrained: "Fine-grained",
     connectedToast: "GitHub account connected",
     disconnect: "Disconnect",
     disconnected: "GitHub account disconnected",
     disconnectTitle: "Disconnect the GitHub account?",
     disconnectDescription:
-      "Services that clone with it fail to deploy until they get another credential. Revoke the token on github.com too.",
+      "Services that read their repository through it fail to deploy until an account is connected again, and the webhooks it made are removed. Revoke the token on github.com too.",
+  },
+  // "Use a token": paste a personal access token instead of the device login.
+  token: {
+    title: "Use a personal access token",
+    step1: "Open {link} on GitHub.",
+    link: "github.com/settings/tokens",
+    step2:
+      "Create a fine-grained token with Contents: Read and Metadata: Read on the repositories you deploy, or a classic token with the repo scope.",
+    step3: "For push-to-deploy add Webhooks: Read and write to a fine-grained token. Without it the panel polls the branch every minute.",
+    step4: "Paste it here. The panel checks it with GitHub and stores it encrypted.",
+    label: "Token",
+    placeholder: "github_pat_... or ghp_...",
+    save: "Check and save",
+    checking: "Checking with GitHub",
+    saved: "Token saved for @{login}",
+  },
+  // Organizations that restrict OAuth app access, and how the App avoids it.
+  orgs: {
+    title: "Organization repositories",
+    body: "An organization that restricts OAuth app access hides its private repositories from a device login until an organization owner approves this panel's app at {url}. Organizations can also require approval for fine-grained tokens. The GitHub App installed on the organization needs neither.",
+    url: "github.com/organizations/<org>/settings/oauth_application_policy",
   },
 } as const;

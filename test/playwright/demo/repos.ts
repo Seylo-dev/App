@@ -1,9 +1,9 @@
-// Demo answers for picking a repository: the acme GitHub App installation
-// and a GitLab connection with their repositories (filtered by the query
-// and paged like the panel), branches per repository (NOT_FOUND for one the
-// connection does not hold), git.branches for a plain URL, and creating and
-// connecting a new app. Same world as service.ts; loosely typed like the
-// rest of demo/.
+// Demo answers for picking a repository: the acme GitHub App installation,
+// the connected GitHub account (withAccount) and a GitLab connection with
+// their repositories (filtered by the query and paged like the panel),
+// branches per repository (NOT_FOUND for one the connection does not
+// hold), git.branches for a plain URL, and creating and connecting a new
+// app. Same world as service.ts; loosely typed like the rest of demo/.
 
 import { DemoRefusal } from "./refusal";
 import { handlers as serviceHandlers, ids } from "./service";
@@ -54,6 +54,19 @@ export const gitlabConnection = {
   updatedAt: ago(20 * day),
 };
 
+/**
+ * The panel's connected GitHub account (Settings > GitHub, a device login
+ * or a token). Not connected in the default world: the specs that need it
+ * answer github.installations with withAccount.
+ */
+export const githubAccount = { id: "cred00000000000a", login: "dana" };
+
+/** What the account reads: its own repositories and one of acme's the App was not given. */
+export const accountRepos = [
+  { fullName: "dana/notes", private: true, defaultBranch: "main", pushedAt: ago(4 * hour) },
+  { fullName: "acme/legacy-api", private: true, defaultBranch: "master", pushedAt: ago(12 * day) },
+];
+
 /** github.repos per installation id. */
 export const githubRepos: Record<string, { fullName: string; private: boolean; defaultBranch: string; pushedAt: string }[]> = {
   [installation.id]: [
@@ -78,6 +91,8 @@ const branchesOf: Record<string, string[]> = {
   "lee-park/blog": ["main", "drafts"],
   "acme/platform/shop": ["main", "feat/checkout"],
   "acme/site": ["trunk", "next"],
+  "dana/notes": ["main", "drafts"],
+  "acme/legacy-api": ["master", "v2"],
 };
 
 /** Page size of github.repos and gitProviders.repos in the panel. */
@@ -113,14 +128,24 @@ const publicBranches: Record<string, { branches: string[]; defaultBranch: string
 
 const createdService = (input: Input) => ({ ...(serviceHandlers["services.get"]?.({ serviceId: ids.api }) as object), name: input.name });
 
+/** What a GitHub op reads through: the account (accountId) or an installation. */
+const heldBy = (input: Input) => (input.accountId === githubAccount.id ? accountRepos : (githubRepos[String(input.installationId)] ?? []));
+
+const installations = (account: typeof githubAccount | null) => ({
+  installations: [installation, personal],
+  installUrl: "https://github.com/apps/acme-seylo/installations/new",
+  account,
+  hidden: false,
+});
+
+/** github.installations with the connected account, for the specs that use it. */
+export const withAccount = { "github.installations": () => installations(githubAccount) };
+
 export const handlers: Record<string, (input: Input) => unknown> = {
-  "github.installations": () => ({
-    installations: [installation, personal],
-    installUrl: "https://github.com/apps/acme-seylo/installations/new",
-    hidden: false,
-  }),
-  "github.repos": (input) => page(githubRepos[String(input.installationId)] ?? [], input),
-  "github.branches": (input) => branches(githubRepos[String(input.installationId)] ?? [], input),
+  "github.installations": () => installations(null),
+  "github.repos": (input) => page(heldBy(input), input),
+  "github.branches": (input) => branches(heldBy(input), input),
+  "github.repoWebhook": () => ({ configured: false, repo: null, url: null, created: false, error: null, lastDeliveryAt: null }),
   "gitProviders.list": () => ({ items: [gitlabConnection], hidden: false }),
   "gitProviders.repos": (input) => page(gitlabRepos, input),
   "gitProviders.branches": (input) => branches(gitlabRepos, input),

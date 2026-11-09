@@ -1582,6 +1582,68 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   deployments page); a commit shown as queued whose deploy a newer push
   took over is posted as cancelled "Superseded by a newer push";
   Bitbucket only with a public panel address (it requires a link).
+- The connected GitHub account (0.2.2, `modules/github/account.ts`,
+  Settings > GitHub "Private repositories without the App"): one per
+  panel, a `git_credentials` row for github.com with origin `device` (the
+  device flow, `github.deviceStart`/`devicePoll`, repo scope) or
+  `github_token` (`github.tokenConnect`: a pasted personal access token,
+  fine-grained with Contents: Read and Metadata: Read, or classic with the
+  repo scope). A pasted token is checked before it is saved: GitHub must
+  accept it (`GET /user`), a classic one must list `repo` in
+  `X-OAuth-Scopes`, a fine-grained one (no such header) must reach a
+  repository (`/user/repos`) and read its commits (409 for an empty one
+  counts); refusals are BAD_REQUEST with `details.field` `token` and
+  `reason` `rejected`, `scope`, `noRepos` or `contents`. The token is
+  sealed with master.key (purpose `git.credential`) and never returned;
+  the input is `sensitive`, so the audit log never holds it. Connecting
+  again (either way) replaces the row in place, so its id stays. Whose
+  token a service uses: the panel-wide connected account, named on the
+  GitHub source as `accountId` (git_credentials.id) with `installationId:
+  null`; `github.connectRepo`, `github.repos` and `github.branches` take
+  `installationId` or `accountId` (exactly one, else BAD_REQUEST), and an
+  `accountId` must be the connected account's (NOT_FOUND otherwise). A
+  stored source whose account row is gone uses the account connected now
+  (`accountForSource`), else deploys fail CONFLICT `reason`
+  `noGithubAccount`. `github.installations` names the account
+  (`account: { id, login }`) to everyone who sees the installations;
+  `github.status.account` (method, scopes, `tokenKind`) is for
+  `github.manage` only. Repositories: `GET /user/repos` with
+  `affiliation=owner,collaborator,organization_member&sort=pushed`, every
+  page of 100 (at most 10) read once a minute at most and again when the
+  token changes, then filtered and paged by 30 like an installation's.
+  Organizations that restrict OAuth app access hide their private
+  repositories from a device login until an owner approves the panel's
+  OAuth app (github.com/organizations/<org>/settings/oauth_application_policy);
+  the App installed on the organization needs no approval (the settings
+  page says so). Sharing with members works like an installation's
+  (`source-guard.ts` kind `githubAccount`, action `github.manage`, shared
+  per repository; any source read through the account counts, as there is
+  only one). Clones: the build request carries the account's token and its
+  login as the git user for that clone only, like other git credentials;
+  nothing is stored on the node. Push-to-deploy: `connectRepo` creates a
+  repository webhook with the token (`github_repo_webhooks`, one per
+  service, secret per hook sealed with purpose `git.webhook`, events push
+  and pull_request) at `POST /api/hooks/github-repo/<hook id>` on the
+  panel domain, when there is one and the token may (a classic token or
+  device login needs `repo`, `admin:repo_hook` or `write:repo_hook`; a
+  fine-grained token is tried and needs Webhooks: Read and write, and the
+  account must administer the repository). Otherwise the row keeps the
+  reason (`github.repoWebhook`, shown on the Source tab) and the GitHub
+  poll schedule reads the branch every minute; with a working hook it
+  reads it every 5 minutes as a safety net, like App sources with a
+  webhook URL. The poll schedule creates missing or moved hooks again
+  once an hour per service (`repairRepoHooks`); `updateSpec` drops the hook
+  (row now, GitHub's in the `github.removeRepoHook` job) when the source
+  leaves that repository, deleting the service drops it, and
+  `github.deviceDisconnect` removes every hook the account made from
+  GitHub first (its token is about to go), then the row. Deliveries are
+  checked against the hook's own secret (X-Hub-Signature-256) before
+  anything is parsed, need X-GitHub-Delivery, are deduped per service,
+  replays of a signed body are refused per hook, at most 120 checked
+  deliveries then 1 a second per hook are handled (the rest are left to
+  polling), and a delivery deploys or previews the hook's own service only.
+  Not built: compose stacks through the account (`compose.ComposeSource`
+  stays App only).
 - Watch paths (`@seylo/ops` `watch-paths.ts`, `services.setWatchPaths`,
   `spec.watchPaths`): ordered globs (`*` not across `/`, `**` across
   folders and `**/` also none, `?`, `!` excludes; anchored at the root; a
@@ -1959,6 +2021,17 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   sealed JSON): an app's desired spec uses its target deployment's env, so a
   saved but undeployed env change, or a failed deploy, never reaches the
   running version. Databases and Boxes (no deployment) get the current env.
+- PORT (0.2.2, `env/desired.ts` `withPortEnv`): an app built from a
+  repository (a `github`, `provider` or `git` source; not a compose member,
+  not a cron service) with a port gets `PORT=<its first port>` in the env
+  its deploy starts with, which the desired-state compile hands its
+  containers, unless that env already has `PORT` (the service's own `.env`
+  or the project's shared variables win). Railpack and Nixpacks start
+  commands and most frameworks listen on `$PORT`, so the app listens where
+  domains and health checks look. It is part of the deployment's env
+  snapshot (like every env change, it applies on the next deploy), so a
+  panel update never recreates a running app for it. Images, inline
+  Dockerfiles and uploads get none.
 - Agent versions: the hello and `NodeFacts.agent_version` carry the bare
   version ("0.1.1"); `parseVersion` also accepts the older
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by
@@ -1992,7 +2065,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Runtime gaps: resource changes roll a new container instead of `docker update`; the portgate's `Resolve` may still pick an unhealthy replica (routes skip it); a brand slug with a dash would nest `<slug>.slice` under the systemd cgroup driver (`seylo` has none). The systemd driver path ran in a VM with `native.cgroupdriver=systemd` (docker, reconcile, wings incl. games-first CPU through systemctl, proxy, agent, jobrun, metrics, nodecheck packages) | Behaviour as described |
 | Observe Docker access goes through `console/dockerapi`, not `d.Docker`: kept on purpose. It needs raw multiplexed log frames with `until` (partial lines, the restart cursor), separate stdout/stderr for non-TTY exec, exec inspect for the process sweep, destroy events and one-shot stats, none of which `docker.Engine` exposes; moving it would mean five new Engine methods and re-verifying logs capture, console, shell and metrics for no user-visible change. It only reads, attaches and execs | Two Docker clients in the agent (both scoped to our containers) |
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificate revocation holds only on agents with `lb.tls.peers.v1`, only once they got their settings (a node cut off from the panel keeps its last list), and only for new connections (Traefik keeps a TLS connection it already accepted across reloads); while the panel lists a `legacy` peer (a node holding a certificate from before 0.2 that has not connected since, at most 30 days) every certificate of the LB CA is accepted; an older agent is reached by the shared name, which any node's certificate carries; a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
-| GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
+| GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling, and the connected account (the token check, its repository list, repository webhooks and polling, 0.2.2) are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
@@ -3032,6 +3105,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `sharedVariablesLost`, `plantedReferences`, `renameSelf` on plain project shapes
   (`projectEnvOf(buildEnvGraph(...))`), and `moveImpact` for an op caller.
 - HTTP: `POST /api/hooks/github` (signature checked, GUID deduped),
+  `POST /api/hooks/github-repo/<webhook id>` (repository webhooks of the
+  connected GitHub account, see "The connected GitHub account"),
   `POST /api/hooks/{gitlab,gitea,bitbucket}/<webhook id>` (git provider
   webhooks, see "Git providers"),
   `POST /api/hooks/deploy/<token>` (deploy trigger URLs),
@@ -3325,52 +3400,81 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   git URL on github.com, gitlab.com or bitbucket.org with no credential
   gets one hint under the error (`private-repo-hint.tsx`): connect it
   through that provider on the Source tab, or pick a git credential there.
-- New app, Git repository tab (`components/new-service/`): one Repository
-  field takes a full git URL (https://, ssh://, git@host:path), `owner/repo`
-  (GitHub) or a host and path without a scheme (`gitlab.com/group/sub/app`),
-  with or without `.git` (`repo-input.ts` `parseRepoInput`). Page addresses
-  of github.com, gitlab.com (with or without `/-/`), bitbucket.org,
-  codeberg.org and the servers of the person's GitLab and Gitea connections
-  (`knownHostsOf`, read by the connection's kind and under its path) give
-  the repository and what follows `tree/` or `src/`: the branch is its
-  longest start that is one of the repository's branches
-  (`branchFromRef`; `tree/main/apps/web` gives `main`), its first segment
-  when the branches cannot be read, never a commit id, and the default
-  branch otherwise. Browse (`repo-field.tsx`) lists, by connection and with
-  private or public, the repositories of the GitHub App installations that
-  are not suspended (`github.repos`) and of every git provider connection
-  (`gitProviders.repos`), searched and paged; a hidden installation or
-  provider list gives none, a connection whose list the panel refuses
-  (FORBIDDEN) drops out, one list failing says so beside the other's
-  repositories, and with none it links to Settings > GitHub and Git
-  providers (owners and admins). It is the field's width on phones, at
-  least 420px from `sm`, 16px from the window's edges, and no taller than
-  the space Radix leaves; arrow keys, Home and End move through it (and
-  the branch list), and Show more keeps the focus. What the field becomes
-  (`repo-source.ts` `decideSource`, `sourceFor`): a repository picked from
-  a connection (in that project: a new project looks the text up again),
-  or typed and read by one by its exact name (`github.branches` /
-  `gitProviders.branches`, which answer NOT_FOUND with `details.field`
-  `repo` when the connection cannot read it), is a `github` or `provider`
-  source with `deployOnPush` on, as on the Source tab; a typed repository
-  no connection reads (NOT_FOUND) or may use here (FORBIDDEN) is a `git`
+- New app source tabs (0.2.2, `components/new-service/`): Docker image |
+  GitHub | Git repository | Set up later, under a visible Source label (the
+  track hugs its items and scrolls sideways on a phone, `scroll-row`).
+  GitHub tab (`repo-field.tsx`): one Repository field takes `owner/repo` or
+  a github.com address (https://, ssh://, git@github.com:, or
+  `github.com/owner/repo` without a scheme), with or without `.git`
+  (`repo-input.ts` `parseRepoInput`, `githubParse`); another host says to
+  use the Git repository tab. Page addresses give the repository and what
+  follows `tree/`: the branch is its longest start that is one of the
+  repository's branches (`branchFromRef`; `tree/main/apps/web` gives
+  `main`), its first segment when the branches cannot be read, never a
+  commit id, and the default branch otherwise. Browse lists, by connection
+  and with private or public, the repositories of the GitHub App
+  installations that are not suspended and of the connected GitHub account
+  ("Connected account · @login", `github.repos` with `accountId`), searched
+  and paged; a hidden installation list gives none, a connection whose list
+  the panel refuses (FORBIDDEN) drops out, and a failed list says so. While
+  nothing on GitHub is connected (no installation and no account, or a list
+  hidden from the person) the tab shows three short steps (open Settings >
+  GitHub; create the App and install it on the account or organization, or
+  connect an account or paste a token; come back and pick) with a button to
+  Settings > GitHub that closes the dialog (owners and admins), or whom to
+  ask (members); then there is no Port and nothing to create from the tab.
+  Browse is the field's width on phones, at least 420px from `sm`, 16px
+  from the window's edges, and no taller than the space Radix leaves; arrow
+  keys, Home and End move through it (and the branch list), and Show more
+  keeps the focus. What the field becomes (`repo-source.ts` `decideSource`,
+  `sourceFor`): a repository picked from a connection (in that project: a
+  new project looks the text up again), or typed and read by one by its
+  exact name (`github.branches`, NOT_FOUND with `details.field` `repo` when
+  it cannot read it; installations are asked first, then the account), is a
+  `github` source with `deployOnPush` on, through the installation
+  (`installationId`, `accountId: null`) or the account (`installationId:
+  null`, `accountId`), as on the Source tab; a typed repository no
+  connection reads (NOT_FOUND) or may use here (FORBIDDEN) is a `git`
   source (owner/repo as `https://github.com/<owner>/<repo>.git`, no
   credential, `deployOnPush` off). Any other failure of a lookup or of the
-  installation or provider list leaves it unchecked with Try again, and
-  nothing is created. A line under the field says which. `services.create`
-  refuses GitHub and provider sources, so the dialog creates the app
-  without a source, then calls `github.connectRepo` or
-  `gitProviders.connectRepo` (which creates the webhook), then
-  `deployments.deploy` when "Deploy right away" is ticked; a failed connect
-  opens the service's Source tab with the error. connectRepo needs
-  `services.update`, so for a member without it in the project (`grants.mine`)
-  Browse says so and typing gives `git` sources only. An SSH URL creates
-  without the first deploy (no deploy key yet). Branch suggests the
-  repository's branches (`github.branches`, `gitProviders.branches`, or
-  `git.branches` for an https URL) and follows the repository until edited
-  for it; a branch chosen for one repository is dropped when the repository
-  changes (`repoKeyOf`), an empty field is the suggested branch, and one
-  git refuses (`GitBranch`) is marked with a note.
+  installation list leaves it unchecked with Try again, and nothing is
+  created. A quiet line under the field says which. `services.create`
+  refuses GitHub sources, so the dialog creates the app without a source,
+  then calls `github.connectRepo` (which creates the account's repository
+  webhook), then `deployments.deploy` when "Deploy right away" is ticked; a
+  failed connect opens the service's Source tab with the error. connectRepo
+  needs `services.update`, so for a member without it in the project
+  (`grants.mine`) Browse says so and typing gives `git` sources only. Git
+  repository tab: a plain URL field (https://, ssh://, git@host:path, or a
+  host and path without a scheme), with no picker, no `owner/repo`
+  shorthand (it says to type the host or use the GitHub tab) and no
+  lookups in the App, the account or git providers; it is always a `git`
+  source with no credential and `deployOnPush` off (a github.com URL says
+  "Private? Use the GitHub tab"). GitLab, Gitea and Bitbucket repositories
+  are picked on the service's Source tab, not in the dialog. On both tabs an
+  SSH URL creates without the first deploy (no deploy key yet), and Branch
+  suggests the repository's branches (`github.branches`, or `git.branches`
+  for an https URL) and follows the repository until edited for it; a
+  branch chosen for one repository is dropped when the repository changes
+  (`repoKeyOf`), an empty field is the suggested branch, and one git
+  refuses (`GitBranch`) is marked with a note. Port: 80, filled in, unless
+  edited; on the Docker image tab the port a Docker Hub image exposes
+  (`dockerHub.inspect` once the name rests, `image-port.ts`
+  `dockerHubRef`, `portChoices`; another registry or a digest keeps 80), an
+  edit sticks across images and tabs, and the hint says where the number
+  came from (built apps: they get it as `PORT`). The dialog's subtitle is
+  its own (`newService.dialogHints`), the footer (Cancel, Create) stays at
+  the bottom while a tall form scrolls on a phone, the database engine
+  tiles have a visible Engine label and centre their badge, the cron
+  schedule hint runs under both fields, the compose Preview sits in the
+  docker-compose.yml label row (with why it is off), and the pgvector
+  statement shows as code.
+- Source tab, GitHub (`service/source/github-form.tsx`): the Account picker
+  lists the App installations and the connected account ("@login
+  (connected account)"); "Connect GitHub first" shows only when there is
+  neither. For a repository read through the account, a line says whether
+  its webhook takes the pushes or why the branch is polled
+  (`github.repoWebhook`).
 - Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
   a click anywhere on the field copies, the copy icon included
   (`copy.spec.ts`).

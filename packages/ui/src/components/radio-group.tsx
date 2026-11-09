@@ -22,8 +22,9 @@ export function RadioGroupItem({ className, ...props }: React.ComponentProps<typ
 }
 
 /**
- * A bigger choice: a card-like option with a title and description, raised
- * and outlined in primary when selected (builder pickers, plan choices).
+ * A bigger choice: a card-like option with a title and description, filled
+ * with the selected tint (the sidebar's) when picked, never outlined
+ * (builder pickers, plan choices, database engines).
  */
 export function RadioCard({
   className,
@@ -39,16 +40,18 @@ export function RadioCard({
   return (
     <RadioPrimitive.Item
       className={cn(
-        "flex cursor-pointer items-start gap-3 rounded-control border-0 bg-raised p-3 text-left shadow-none outline-none transition-interactive",
+        "group flex cursor-pointer items-start gap-3 rounded-control border-0 bg-raised p-3 text-left shadow-none outline-none transition-interactive duration-200 hover:bg-muted",
         "focus-visible:ring-3 focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50",
-        "data-[state=checked]:bg-card data-[state=checked]:shadow-[inset_0_0_0_1.5px_var(--primary),var(--shadow-control)]",
+        "data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent",
         className,
       )}
       {...props}
     >
-      {icon && <span className="mt-px flex text-ink-faint">{icon}</span>}
+      {icon && <span className="mt-px flex text-ink-faint group-data-[state=checked]:text-accent-foreground">{icon}</span>}
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-[13.5px] font-medium text-foreground">{title}</span>
+        <span className="text-[13.5px] font-medium text-foreground transition-colors duration-200 group-data-[state=checked]:text-accent-foreground">
+          {title}
+        </span>
         {description && <span className="text-[12.5px] text-muted-foreground">{description}</span>}
       </span>
     </RadioPrimitive.Item>

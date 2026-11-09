@@ -1,9 +1,12 @@
 // The per-panel GitHub App (created with the manifest flow, so every panel
 // has its own App, keys and webhook secret), its installations, picking a
 // repo and branch, and connecting a repo to a service. Also the opt-in
-// device-flow token that lets the panel clone private repos with a
-// person's GitHub account instead of the App. GitHub's webhook endpoint is
-// an HTTP route of this module (POST /api/hooks/github), not an op.
+// connected GitHub account (a device login like gh auth login, or a pasted
+// personal access token) whose token lists, clones and watches private
+// repos the App does not reach. GitHub's webhook endpoints are HTTP routes
+// of this module (POST /api/hooks/github for the App, POST
+// /api/hooks/github-repo/<id> for repository webhooks the account
+// created), not ops.
 
 import { Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
@@ -48,6 +51,40 @@ export const Repo = Type.Object({
   pushedAt: Type.Union([Timestamp, Type.Null()]),
 });
 
+/**
+ * The panel's connected GitHub account (one per panel, Settings > GitHub):
+ * its token reads repositories the App does not reach.
+ */
+export const GithubAccount = Type.Object({
+  /** git_credentials.id of the account's token; services name it in their source (accountId). */
+  id: Id,
+  login: Type.String(),
+  /** "device": connected with the device flow; "token": a pasted personal access token. */
+  method: Type.Union([Type.Literal("device"), Type.Literal("token")]),
+  /** Scopes of a classic token or a device login; empty for a fine-grained token (its repositories and permissions are set on GitHub). */
+  scopes: Type.Array(Type.String()),
+  /** "classic": a device login or a classic token (ghp_); "fineGrained": a fine-grained token (github_pat_). */
+  tokenKind: Type.Union([Type.Literal("classic"), Type.Literal("fineGrained")]),
+  connectedAt: Timestamp,
+});
+
+/** The connected account as people who may pick a source see it: who it is, nothing about its token. */
+export const AccountRef = Type.Object({ id: Id, login: Type.String() });
+
+/** A repository's GitHub webhook created with the connected account (push-to-deploy without the App). */
+export const RepoWebhook = Type.Object({
+  /** Whether the service's source is a GitHub repository read through the connected account. */
+  configured: Type.Boolean(),
+  repo: Type.Union([Type.String(), Type.Null()]),
+  /** The URL GitHub posts to; null when no hook exists. */
+  url: Type.Union([Type.String(), Type.Null()]),
+  /** Whether the hook exists on GitHub. */
+  created: Type.Boolean(),
+  /** Why it was not created (no panel domain, a token that may not create webhooks); pushes are then polled every minute. */
+  error: Type.Union([Type.String(), Type.Null()]),
+  lastDeliveryAt: Type.Union([Timestamp, Type.Null()]),
+});
+
 export const DeviceFlowStatus = Type.Union([
   Type.Literal("pending"),
   Type.Literal("done"),
@@ -62,7 +99,7 @@ export const status = defineOp({
   kind: "query",
   summary: "Get the GitHub connection",
   description:
-    "Returns the panel's GitHub App (null before it is created, and for people who neither manage it nor may create or update a service anywhere), the webhook URL GitHub calls, and the device-flow GitHub account used to clone private repos, if one is connected.",
+    "Returns the panel's GitHub App (null before it is created, and for people who neither manage it nor may create or update a service anywhere), the webhook URL GitHub calls, and the connected GitHub account (a device login or a pasted token) used for private repos the App does not reach, if one is connected (only for people with github.manage).",
   input: Type.Object({}),
   output: Type.Object({
     app: Type.Union([GithubApp, Type.Null()]),
@@ -70,10 +107,7 @@ export const status = defineOp({
     webhookUrl: Type.Union([Type.String(), Type.Null()]),
     /** The device flow needs the OAuth App client id in the brand file; false while it is a placeholder. */
     deviceFlowAvailable: Type.Boolean(),
-    deviceAccount: Type.Union([
-      Type.Object({ login: Type.String(), scopes: Type.Array(Type.String()), gitCredentialId: Id, connectedAt: Timestamp }),
-      Type.Null(),
-    ]),
+    account: Type.Union([GithubAccount, Type.Null()]),
   }),
   permission: permission.signedIn(),
   mcp: true,
@@ -140,11 +174,13 @@ export const installations = defineOp({
   kind: "query",
   summary: "List GitHub App installations",
   description:
-    "Lists the accounts and organizations the panel's GitHub App is installed on, and the link to install it on another one. Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
+    "Lists the accounts and organizations the panel's GitHub App is installed on, the link to install it on another one, and the panel's connected GitHub account (its repositories are listed with accountId instead of installationId). Empty, with hidden true, for people who neither manage the App nor may create or update a service anywhere.",
   input: Type.Object({}),
   output: Type.Object({
     installations: Type.Array(Installation),
     installUrl: Type.Union([Type.String(), Type.Null()]),
+    /** The connected GitHub account (Settings > GitHub); null when there is none or the list is hidden. */
+    account: Type.Union([AccountRef, Type.Null()]),
     hidden: Type.Boolean({
       description:
         "True when the caller may not see the App or its installations: the list is then empty whatever is installed, and says nothing about whether there is an App.",
@@ -172,10 +208,12 @@ export const repos = defineOp({
   kind: "query",
   summary: "List repositories",
   description:
-    "Lists the repositories an installation lets the App read, most recently pushed first, optionally filtered by name. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation is already used for in that project.",
+    "Lists the repositories an installation lets the App read (installationId), or the connected GitHub account can read (accountId: its own, ones it collaborates on and its organizations', GET /user/repos), most recently pushed first, optionally filtered by name. Pass one of installationId and accountId. Needs the right to create services in the project the repo is picked for; people without github.manage see only the repositories the installation or account is already used for in that project.",
   input: Type.Object({
     projectId: Id,
-    installationId: Id,
+    installationId: Type.Optional(Id),
+    /** github.installations account.id: the connected account's repositories instead of an installation's. */
+    accountId: Type.Optional(Id),
     query: Type.Optional(Type.String({ maxLength: 100 })),
     page: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 1 })),
   }),
@@ -190,10 +228,11 @@ export const branches = defineOp({
   kind: "query",
   summary: "List a repository's branches",
   description:
-    "Lists the branches of a repository through the App, default branch first. Fails with NOT_FOUND (details.field repo) when the installation cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
+    "Lists the branches of a repository through the App (installationId) or the connected GitHub account (accountId), default branch first. Pass one of the two. Fails with NOT_FOUND (details.field repo) when it cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
   input: Type.Object({
     projectId: Id,
-    installationId: Id,
+    installationId: Type.Optional(Id),
+    accountId: Type.Optional(Id),
     repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
     query: Type.Optional(Type.String({ maxLength: 100 })),
   }),
@@ -208,10 +247,11 @@ export const connectRepo = defineOp({
   kind: "mutation",
   summary: "Connect a GitHub repository to a service",
   description:
-    "Sets a service's source to a GitHub repository and branch read through the App, after checking the installation can read it. With deployOnPush, pushes to the branch deploy the service. rootDir is the folder to build.",
+    "Sets a service's source to a GitHub repository and branch read through the App (installationId) or the connected GitHub account (accountId), after checking it can read it. Pass one of the two. With deployOnPush, pushes to the branch deploy the service: through the App's webhook, or for the account through a repository webhook the panel creates with its token when the token may and the panel has a domain, else by polling the branch every minute. rootDir is the folder to build.",
   input: Type.Object({
     serviceId: Id,
-    installationId: Id,
+    installationId: Type.Optional(Id),
+    accountId: Type.Optional(Id),
     repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
     branch: GitBranch,
     rootDir: Type.Optional(RepoPath),
@@ -220,6 +260,33 @@ export const connectRepo = defineOp({
   output: ServiceDetail,
   permission: permission.service("services.update", (input: { serviceId: string }) => input.serviceId),
   mcp: true,
+  audit: true,
+});
+
+export const repoWebhook = defineOp({
+  id: "github.repoWebhook",
+  kind: "query",
+  summary: "Get a service's GitHub repository webhook",
+  description:
+    "For a service whose GitHub repository is read through the connected account: whether the repository webhook the panel created exists, where it points and when it last delivered. Without one, pushes are picked up by polling the branch every minute.",
+  input: Type.Object({ serviceId: Id }),
+  output: RepoWebhook,
+  permission: permission.service("services.view", (input: { serviceId: string }) => input.serviceId),
+  mcp: true,
+  audit: false,
+});
+
+export const tokenConnect = defineOp({
+  id: "github.tokenConnect",
+  kind: "mutation",
+  summary: "Connect a GitHub account with a token",
+  description:
+    "Connects the panel's GitHub account with a pasted personal access token instead of the device flow: fine-grained with Contents: Read and Metadata: Read on the chosen repositories, or classic with the repo scope. The token is checked against api.github.com/user (and its scopes, or the repositories a fine-grained one reaches) before it is stored sealed; it replaces a connected account, and services that use the account keep it. The App stays the recommended way.",
+  input: Type.Object({ token: Type.String({ minLength: 20, maxLength: 255, pattern: "^\\S+$" }) }),
+  output: GithubAccount,
+  permission: permission.global("github.manage"),
+  sensitive: { input: ["token"] },
+  mcp: false,
   audit: true,
 });
 
@@ -247,7 +314,7 @@ export const devicePoll = defineOp({
   kind: "mutation",
   summary: "Check the GitHub device flow",
   description:
-    "Checks whether the person entered the code on GitHub. Once done, the token is stored sealed as a git credential for github.com and the login is returned. A mutation because finishing it stores the credential.",
+    "Checks whether the person entered the code on GitHub. Once done, the token is stored sealed as the panel's connected GitHub account (a git credential for github.com, replacing a pasted token; services that use the account keep it) and the login is returned. A mutation because finishing it stores the credential.",
   input: Type.Object({ flowId: Id }),
   output: Type.Object({
     status: DeviceFlowStatus,
@@ -264,7 +331,7 @@ export const deviceDisconnect = defineOp({
   kind: "destructive",
   summary: "Disconnect the GitHub account",
   description:
-    "Deletes the device-flow token used for private repos. Services that clone with it fail to deploy until they get another credential. Revoke it on github.com too.",
+    "Deletes the connected GitHub account's token (device login or pasted token) and removes the repository webhooks it created. Services that read their repository through it fail to deploy until an account is connected again or they get another source. Revoke the token on github.com too.",
   input: Type.Object({}),
   output: Empty,
   permission: permission.global("github.manage"),
