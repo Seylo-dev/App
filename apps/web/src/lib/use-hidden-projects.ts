@@ -30,6 +30,19 @@ export function withHidden(current: readonly string[], projectId: string, hide: 
   return hide ? [...rest, projectId] : rest;
 }
 
+/**
+ * What hiding or unhiding a project saves: the new list, "limit" when the
+ * list is full, or "unread" when the saved list never loaded (its read
+ * failed): a save then would replace it with this one project and unhide
+ * the others, so it is read again instead.
+ */
+export function hiddenChange(cached: Preferences | undefined, projectId: string, hide: boolean): string[] | "limit" | "unread" {
+  if (!cached) return "unread";
+  const list = cached.preferences.hiddenProjectIds ?? [];
+  if (hide && !list.includes(projectId) && list.length >= maxHiddenProjects) return "limit";
+  return withHidden(list, projectId, hide);
+}
+
 export function useHiddenProjects() {
   const queryClient = useQueryClient();
   const preferences = useOp(auth.preferences, {});
@@ -43,16 +56,20 @@ export function useHiddenProjects() {
   const hidden = useMemo<ReadonlySet<string>>(() => new Set(ids ?? []), [ids]);
 
   function setHidden(project: { id: string; name: string }, hide: boolean): void {
-    const current = queryClient.getQueryData<Preferences>(preferencesKey)?.preferences ?? {};
-    const list = current.hiddenProjectIds ?? [];
-    if (hide && !list.includes(project.id) && list.length >= maxHiddenProjects) {
+    const cached = queryClient.getQueryData<Preferences>(preferencesKey);
+    const next = hiddenChange(cached, project.id, hide);
+    if (next === "unread") {
+      toast.error(t("sidebar.hideFailed"), { description: errorMessage(preferences.error, t("common.unknownError")) });
+      void preferences.refetch();
+      return;
+    }
+    if (next === "limit") {
       toast.error(t("sidebar.hideLimit", { count: maxHiddenProjects }));
       return;
     }
-    const next = withHidden(list, project.id, hide);
     // A read still on its way would put the old list back.
     void queryClient.cancelQueries({ queryKey: preferencesKey });
-    queryClient.setQueryData<Preferences>(preferencesKey, { preferences: { ...current, hiddenProjectIds: next } });
+    queryClient.setQueryData<Preferences>(preferencesKey, { preferences: { ...cached?.preferences, hiddenProjectIds: next } });
     save.mutate({ preferences: { hiddenProjectIds: next.length > 0 ? next : null } });
     if (hide) {
       toast(t("sidebar.hiddenToast", { name: project.name }), {

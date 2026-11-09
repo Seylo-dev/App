@@ -3,7 +3,7 @@ import { auth, projects } from "@seylo/ops";
 import { t } from "../../i18n/t";
 import type { Project } from "../../lib/types";
 import type { ServicesByProject } from "../../lib/use-all-services";
-import { splitHidden, withHidden } from "../../lib/use-hidden-projects";
+import { hiddenChange, maxHiddenProjects, splitHidden, withHidden } from "../../lib/use-hidden-projects";
 import { type Answer, renderStatic } from "../../test/render";
 import { ProjectCards } from "../dashboard/project-cards";
 import { ProjectsTree } from "./projects-tree";
@@ -52,6 +52,18 @@ test("splitHidden keeps list order on both sides; withHidden adds at the end and
   expect(withHidden(["p2", "p1"], "p2", true)).toEqual(["p1", "p2"]);
   expect(withHidden(["p1", "p2"], "p1", false)).toEqual(["p2"]);
   expect(withHidden([], "p1", false)).toEqual([]);
+});
+
+test("hiddenChange saves the new list, refuses past the cap, and saves nothing when the list never loaded", () => {
+  expect(hiddenChange({ preferences: { hiddenProjectIds: ["p1"] } }, "p2", true)).toEqual(["p1", "p2"]);
+  expect(hiddenChange({ preferences: {} }, "p1", true)).toEqual(["p1"]);
+  expect(hiddenChange({ preferences: { hiddenProjectIds: ["p1", "p2"] } }, "p1", false)).toEqual(["p2"]);
+  const full = Array.from({ length: maxHiddenProjects }, (_, i) => `id${i}`);
+  expect(hiddenChange({ preferences: { hiddenProjectIds: full } }, "p1", true)).toBe("limit");
+  expect(hiddenChange({ preferences: { hiddenProjectIds: full } }, "id0", false)).toHaveLength(maxHiddenProjects - 1);
+  // A failed read leaves no list: saving [p1] would unhide every other hidden project.
+  expect(hiddenChange(undefined, "p1", true)).toBe("unread");
+  expect(hiddenChange(undefined, "p1", false)).toBe("unread");
 });
 
 test("the sidebar leaves hidden projects out and folds them under Hidden (N) at the end", async () => {
