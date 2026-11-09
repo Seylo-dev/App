@@ -64,7 +64,7 @@ function AppearanceSkeleton() {
       <Card className="gap-4 px-[22px] py-5">
         <div className="flex flex-wrap items-center gap-2.5">
           <h2 className="m-0 text-[15px] font-semibold">{t("settingsAppearance.theme")}</h2>
-          <Skeleton className="ml-auto h-[35px] w-[184px]" />
+          <Skeleton className="ml-auto h-8 w-[184px]" />
         </div>
         <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
@@ -259,7 +259,8 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
               if (hex) setAccent(hex);
               else if (e.target.value.trim() === "") setAccent(null);
             }}
-            className="ml-1 h-9 w-[104px] font-mono text-[12.5px]"
+            // The panel's 38px field height; on a phone it takes its own line under the swatches.
+            className="w-[104px] font-mono text-[12.5px] max-sm:w-full sm:ml-1"
           />
         </div>
       </Card>

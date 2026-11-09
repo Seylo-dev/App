@@ -70,7 +70,12 @@ export function FormGrid({ className, children }: { className?: string; children
   return <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", className)}>{children}</div>;
 }
 
-/** A row with a title and description on the left and a control (switch, button) on the right. */
+/**
+ * A row with a title and description on the left and a control (switch,
+ * button) on the right. The text keeps at least 220px: a wide control (a
+ * select, a segmented track) moves under it on a phone instead of
+ * squeezing the description into a narrow column; a switch stays beside it.
+ */
 export function SettingRow({
   title,
   description,
@@ -83,8 +88,10 @@ export function SettingRow({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-4 border-t border-divider py-3 first:border-t-0 first:pt-0", className)}>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+    <div
+      className={cn("flex flex-wrap items-center gap-x-4 gap-y-2.5 border-t border-divider py-3 first:border-t-0 first:pt-0", className)}
+    >
+      <div className="flex min-w-0 flex-[1_1_220px] flex-col gap-0.5">
         <span className="text-[13.5px] font-medium">{title}</span>
         {description && <span className="text-[12.5px] text-muted-foreground">{description}</span>}
       </div>

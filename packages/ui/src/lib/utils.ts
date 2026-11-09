@@ -7,7 +7,7 @@ import { extendTailwindMerge } from "tailwind-merge";
  * `shadow-none`, and the stylesheet's order picks the winner.
  */
 const merge = extendTailwindMerge({
-  extend: { theme: { shadow: ["card", "control", "primary", "segment", "popover", "sidebar"] } },
+  extend: { theme: { shadow: ["card", "control", "primary", "segment", "popover", "sidebar", "button"] } },
 });
 
 /** Joins class names and lets later Tailwind classes override earlier ones. */

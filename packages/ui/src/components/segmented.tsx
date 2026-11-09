@@ -1,5 +1,6 @@
 import { ToggleGroup } from "radix-ui";
 import * as React from "react";
+import { useScrollFadeRef } from "../lib/scroll-fade";
 import { cn } from "../lib/utils";
 import { ActiveIndicator } from "./motion";
 
@@ -14,7 +15,7 @@ export interface SegmentedProps {
   tone?: SegmentedTone;
   className?: string;
   children: React.ReactNode;
-  /** The track element, for example scrollFadeRef on a track that scrolls. */
+  /** The track element. The track already scrolls with faded edges when it does not fit (scrollFadeRef). */
   ref?: React.Ref<HTMLDivElement>;
 }
 
@@ -32,15 +33,18 @@ const itemTone: Record<SegmentedTone, string> = {
 /**
  * A segmented control: a quiet track with the selected option raised as a
  * small white pill that slides to the option you pick. Single choice; use
- * for ranges and view switches.
+ * for ranges and view switches. 32px tall, the height of a small button,
+ * so it lines up with the buttons and chips next to it. Options never wrap;
+ * a track wider than its row scrolls (scroll-row with scrollFadeRef).
  */
 export function Segmented({ value, onValueChange, tone = "muted", className, children, ref, ...rest }: SegmentedProps) {
   // Each control slides its own pill, never one from another control.
   const layoutId = `segmented-${React.useId()}`;
+  const trackRef = useScrollFadeRef(ref);
   return (
     <SegmentedContext.Provider value={{ value, layoutId, tone }}>
       <ToggleGroup.Root
-        ref={ref}
+        ref={trackRef}
         data-slot="segmented"
         type="single"
         value={value}
@@ -48,7 +52,7 @@ export function Segmented({ value, onValueChange, tone = "muted", className, chi
         // control always keeps one option selected.
         onValueChange={(next) => next && onValueChange(next)}
         aria-label={rest["aria-label"]}
-        className={cn("inline-flex gap-0.5 rounded-control p-[3px]", trackTone[tone], className)}
+        className={cn("scroll-row inline-flex max-w-full gap-0.5 rounded-control p-[3px]", trackTone[tone], className)}
       >
         {children}
       </ToggleGroup.Root>
@@ -63,7 +67,7 @@ export function SegmentedItem({ className, children, ...props }: React.Component
     <ToggleGroup.Item
       data-slot="segmented-item"
       className={cn(
-        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px] transition-colors",
+        "relative isolate inline-flex h-[26px] shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-chip border-0 bg-transparent px-[11px] py-0 text-[12.5px] transition-colors focus-visible:-outline-offset-2",
         itemTone[tone],
         className,
       )}
@@ -84,5 +88,5 @@ export function SegmentedItem({ className, children, ...props }: React.Component
  * isolate`, with one `layoutId` per track.
  */
 export function SegmentPill({ layoutId, className }: { layoutId: string; className?: string }) {
-  return <ActiveIndicator layoutId={layoutId} className={cn("rounded-chip bg-card shadow-segment", className)} />;
+  return <ActiveIndicator layoutId={layoutId} className={cn("rounded-chip bg-pill shadow-segment", className)} />;
 }

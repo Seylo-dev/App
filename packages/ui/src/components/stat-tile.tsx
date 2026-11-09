@@ -45,7 +45,12 @@ export function StatTile({ label, value, unit, hint, delta, icon, spark, sparkCo
         {unit && <span className="text-[13px] text-muted-foreground">{unit}</span>}
       </div>
       {hint && <span className="text-[12px] text-muted-foreground">{hint}</span>}
-      {spark && <Sparkline values={spark} color={sparkColor} height={28} className="mt-1" />}
+      {/* Pinned to the bottom, so sparks line up across a row whether or not a tile has a hint. */}
+      {spark && (
+        <div className="mt-auto pt-1">
+          <Sparkline values={spark} color={sparkColor} height={28} />
+        </div>
+      )}
     </div>
   );
 }

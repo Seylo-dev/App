@@ -36,17 +36,31 @@ export interface AlertProps extends Omit<React.ComponentProps<"div">, "title">, 
  * A tinted callout inside a page or card: warnings ("same env = same DB"),
  * results, hints. role="alert" only for danger, so screen readers are not
  * interrupted by hints.
+ *
+ * The action sits on the right, centered on the text: with no title the
+ * icon, the message and the button share one center line. On a phone the
+ * action moves under the message, so a long button never squeezes the text
+ * into a narrow column.
  */
 export function Alert({ className, tone, title, icon, action, children, ...props }: AlertProps) {
   const Icon = defaultIcons[tone ?? "info"];
+  // A message with a button and no title: center the row on the button from sm up.
+  const centered = Boolean(action) && !title;
   return (
-    <div data-slot="alert" role={tone === "danger" ? "alert" : "note"} className={cn(alertVariants({ tone }), className)} {...props}>
-      {icon !== null && <span className="mt-px flex shrink-0">{icon ?? <Icon size={17} stroke={1.9} />}</span>}
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {title && <span className="font-semibold">{title}</span>}
-        {children && <div className="leading-relaxed [&_a]:font-medium [&_a]:text-current [&_a]:underline">{children}</div>}
+    <div
+      data-slot="alert"
+      role={tone === "danger" ? "alert" : "note"}
+      className={cn(alertVariants({ tone }), centered && "sm:items-center", className)}
+      {...props}
+    >
+      {icon !== null && <span className={cn("mt-px flex shrink-0", centered && "sm:mt-0")}>{icon ?? <Icon size={17} stroke={1.9} />}</span>}
+      <div className={cn("flex min-w-0 flex-1 flex-col", action && "gap-2.5 sm:flex-row sm:items-center sm:gap-4")}>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {title && <span className="font-semibold">{title}</span>}
+          {children && <div className="leading-relaxed [&_a]:font-medium [&_a]:text-current [&_a]:underline">{children}</div>}
+        </div>
+        {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
       </div>
-      {action && <div className="ml-2 flex shrink-0 items-center gap-2 self-center">{action}</div>}
     </div>
   );
 }

@@ -254,8 +254,9 @@ export function ChartLegend({
             title={labels.showOrHide}
             onClick={() => onToggle(s.id)}
             className={cn(
-              "flex cursor-pointer items-center gap-[7px] rounded-[7px] border-0 px-[11px] py-1.5 text-[12.5px] transition-colors",
-              on ? "bg-muted text-foreground" : "bg-card text-ink-faint shadow-[inset_0_0_0_1px_var(--divider)]",
+              // 32px, the height of the segmented range picker and small buttons beside it. Off: no fill, never an outline.
+              "flex h-8 cursor-pointer items-center gap-[7px] rounded-[7px] border-0 px-[11px] text-[12.5px] transition-colors",
+              on ? "bg-muted text-foreground" : "bg-transparent text-ink-faint hover:bg-muted/60 hover:text-muted-foreground",
             )}
           >
             <span

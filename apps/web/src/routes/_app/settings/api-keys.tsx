@@ -138,8 +138,9 @@ function McpSkeleton() {
       </div>
       <SkeletonText className="w-72 text-[12.5px]" />
       <div className="flex flex-col gap-2">
-        <Skeleton className="h-[35px] w-64" />
-        <Skeleton className="h-[86px] bg-terminal" />
+        <Skeleton className="h-8 w-64" />
+        {/* The setup snippet: one 12.5px line at 1.7 beside the floating Copy button, 12px above and below. */}
+        <Skeleton className="h-[49px] bg-terminal" />
       </div>
     </>
   );

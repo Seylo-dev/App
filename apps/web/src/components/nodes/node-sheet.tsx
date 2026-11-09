@@ -20,7 +20,6 @@ import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
-import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { IconFileText, IconPower, IconRefresh, IconSparkles } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -52,11 +51,22 @@ export function NodeSheet({
 }) {
   return (
     <Sheet open={nodeId !== null} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="max-w-[640px]">
+      {/*
+        Opening the sheet focuses the sheet itself, not its first view option: Radix's default put
+        the 2px keyboard ring on "Overview" whenever the sheet opened from a link. Tab still reaches
+        the views first.
+      */}
+      <SheetContent className="max-w-[640px]" onOpenAutoFocus={focusSheet}>
         {nodeId && <NodeSheetBody nodeId={nodeId} view={view} onViewChange={onViewChange} onClose={onClose} />}
       </SheetContent>
     </Sheet>
   );
+}
+
+/** Sends the opening focus to the sheet's own box (Radix makes it focusable) instead of its first control. */
+function focusSheet(e: Event) {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.focus({ preventScroll: true });
 }
 
 function NodeSheetBody({
@@ -96,9 +106,9 @@ function NodeSheetBody({
           aria-label={t("nodes.sheet.views")}
           value={view}
           onValueChange={(v) => onViewChange(v as NodeView)}
-          // Five views: on a phone the track scrolls inside the header instead of widening the sheet.
-          ref={scrollFadeRef}
-          className="scroll-row mt-2 max-w-full self-start"
+          // Five views: the track may run under the close button (the header keeps room for it beside
+          // the title only), and on a phone it scrolls inside the header with the current view in sight.
+          className="mt-2 -mr-9 max-w-[calc(100%+36px)] self-start"
         >
           <SegmentedItem value="overview">{t("nodes.sheet.overview")}</SegmentedItem>
           <SegmentedItem value="health">{t("nodes.health")}</SegmentedItem>
@@ -309,7 +319,7 @@ function OverviewSkeleton() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <h3 className="m-0 text-sm font-semibold">{t("nodes.sheet.usage")}</h3>
-          <Skeleton className="ml-auto h-[30px] w-[220px]" />
+          <Skeleton className="ml-auto h-8 w-[220px]" />
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {[t("dashboard.cpu"), t("dashboard.memory"), t("nodes.disk"), t("dashboard.network")].map((title) => (

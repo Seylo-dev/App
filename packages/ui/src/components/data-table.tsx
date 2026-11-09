@@ -112,7 +112,9 @@ export function DataTable<T>({
     <div data-slot="data-table" className={cn("relative min-w-0 overflow-x-auto", !bare && "rounded-card bg-card shadow-card", className)}>
       <table
         className="w-full border-collapse text-[13px]"
-        style={minWidth ? { minWidth } : undefined}
+        // No minimum width while the empty state shows: it centers on the table, and a table wider
+        // than a phone put it off center with its description cut off at the card's edge.
+        style={minWidth && (loading || rows.length > 0) ? { minWidth } : undefined}
         aria-label={rest["aria-label"]}
         aria-busy={loading}
       >

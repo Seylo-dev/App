@@ -16,7 +16,6 @@ import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { CodeBlock } from "@seylo/ui/components/code-block";
 import { Input, Label } from "@seylo/ui/components/input";
 import { EnterOnChange } from "@seylo/ui/components/motion";
-import { SegmentPill } from "@seylo/ui/components/segmented";
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconCheck } from "@tabler/icons-react";
@@ -105,29 +104,36 @@ function SetupPage() {
   const current = finishing ? steps.length : step ? steps.indexOf(step) : 0;
   return (
     <AuthFrame>
-      <ol
-        aria-label={t("setup.steps")}
-        className="m-0 flex list-none flex-wrap justify-center gap-0.5 rounded-control bg-track p-[3px] text-[12.5px]"
-      >
+      {/*
+        A progress line, not tabs: numbered dots joined by a thin line, the current step's name in
+        full color. The steps are not links (they looked like a segmented control you could click).
+        On a phone only the current step's name shows.
+      */}
+      <ol aria-label={t("setup.steps")} className="m-0 flex list-none items-center justify-center gap-2 p-0 text-[12.5px]">
         {steps.map((item, index) => (
-          <li
-            key={item}
-            aria-current={index === current ? "step" : undefined}
-            className={cn(
-              "relative isolate flex items-center gap-2 rounded-chip py-1.5 pr-3 pl-[7px] text-ink-strong transition-colors",
-              index === current && "text-foreground",
+          <li key={item} aria-current={index === current ? "step" : undefined} className="flex items-center gap-2">
+            {index > 0 && (
+              <span
+                aria-hidden="true"
+                className={cn("h-px w-5 transition-colors duration-200 sm:w-8", index <= current ? "bg-primary" : "bg-control-off")}
+              />
             )}
-          >
-            {index === current && <SegmentPill layoutId="setup-steps" />}
             <span
               className={cn(
-                "flex size-5 items-center justify-center rounded-full font-mono text-[11px] font-medium",
-                index <= current ? "bg-primary text-primary-foreground" : "bg-card text-ink-strong",
+                "flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-medium transition-colors duration-200",
+                index <= current ? "bg-primary text-primary-foreground" : "bg-track text-ink-strong",
               )}
             >
               {index < current ? <IconCheck size={12} stroke={3} aria-label={t("setup.stepDone")} /> : index + 1}
             </span>
-            {t(stepLabels[item])}
+            <span
+              className={cn(
+                "whitespace-nowrap transition-colors duration-200",
+                index === current ? "text-foreground" : "text-muted-foreground max-md:sr-only",
+              )}
+            >
+              {t(stepLabels[item])}
+            </span>
           </li>
         ))}
       </ol>

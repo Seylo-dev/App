@@ -223,44 +223,84 @@ test.describe("screens", () => {
     }
   });
 
-  test("the service tabs all show on a desktop and fade where they hide on a phone", async ({ page }) => {
+  test("the service tabs stay one row, fade where they hide tabs and keep the current tab in view", async ({ page }) => {
     await installDemo(page);
     const bar = page.getByRole("navigation", { name: "Service sections" });
     const measure = () =>
       bar.evaluate((el) => {
         const box = el.getBoundingClientRect();
-        const last = el.lastElementChild?.getBoundingClientRect();
         return {
+          // Distinct tops of the tabs: 1 means one row.
+          rows: new Set([...el.children].map((child) => Math.round(child.getBoundingClientRect().top))).size,
           hidden: el.scrollWidth - el.clientWidth,
-          lastRight: last?.right ?? 0,
-          right: box.right,
+          height: box.height,
           fadeStart: el.hasAttribute("data-fade-start"),
           fadeEnd: el.hasAttribute("data-fade-end"),
         };
       });
 
-    // 1440 wide: an app's 16 tabs wrap instead of running past the content box with no scrollbar.
+    // 1440 wide: an app's 17 tabs used to wrap into two rows with the underline under the second only.
+    // Now they stay on one row that scrolls sideways, and the end fades while tabs hide past it.
     await page.goto(service(svc.api));
     await settle(page);
-    await expect(bar.getByRole("link", { name: "Settings" })).toBeInViewport();
     const desktop = await measure();
-    expect(desktop.hidden, "the tab bar hides tabs").toBeLessThanOrEqual(0);
-    expect(desktop.lastRight).toBeLessThanOrEqual(desktop.right + 0.5);
-    expect(desktop.fadeEnd).toBe(false);
+    expect(desktop.rows, "the tab bar wraps").toBe(1);
+    expect(desktop.fadeEnd).toBe(desktop.hidden > 0);
+    expect(desktop.fadeStart).toBe(false);
     mkdirSync(shots, { recursive: true });
     await page.screenshot({ path: `${shots}/service-tabs-desktop.png` });
+
+    // Opening a later tab scrolls the row (not the page) so the current tab shows whole.
+    await page.goto(service(svc.api, "settings"));
+    await settle(page);
+    await expect(bar.getByRole("link", { name: "Settings" })).toBeInViewport({ ratio: 1 });
+    expect(await page.evaluate(() => window.scrollX)).toBe(0);
 
     // A phone keeps one swipe row: the end fades while tabs hide past it, the start once scrolled.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(service(svc.api));
     await settle(page);
     const phone = await measure();
+    expect(phone.rows).toBe(1);
     expect(phone.hidden).toBeGreaterThan(0);
     expect({ start: phone.fadeStart, end: phone.fadeEnd }).toEqual({ start: false, end: true });
     await page.screenshot({ path: `${shots}/service-tabs-phone.png` });
     await bar.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
     await expect(bar).toHaveAttribute("data-fade-start", "");
     await expect(bar).not.toHaveAttribute("data-fade-end", "");
+
+    // Arriving on a later tab on a phone: before, the row always started at Overview and no tab looked selected.
+    await page.goto(service(svc.api, "alerts"));
+    await settle(page);
+    await expect(bar.getByRole("link", { name: "Alerts" })).toBeInViewport({ ratio: 1 });
+    await expect(bar).toHaveAttribute("data-fade-start", "");
+  });
+
+  test("the project tabs, the settings sections and the node sheet views stay one row on a phone with the current one in view", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installDemo(page);
+
+    // The project tabs wrapped onto two rows under one underline.
+    await page.goto(`/p/${ids.acme}?tab=settings`);
+    await settle(page);
+    const tabs = page.getByRole("tablist", { name: "Project sections" });
+    const rows = await tabs.evaluate((el) => new Set([...el.children].map((c) => Math.round(c.getBoundingClientRect().top))).size);
+    expect(rows, "the project tabs wrap").toBe(1);
+    await expect(tabs.getByRole("tab", { name: "Settings" })).toBeInViewport({ ratio: 1 });
+
+    // The settings strip showed General to API keys whatever section was open.
+    await page.goto("/settings/telemetry");
+    await settle(page);
+    const strip = page.getByRole("navigation", { name: "Settings" });
+    await expect(strip.getByRole("link", { name: "Telemetry" })).toBeInViewport({ ratio: 1 });
+
+    // The node sheet's Settings view sat behind the faded edge.
+    await page.goto(`/nodes?node=${ids.de}&view=settings`);
+    await settle(page, "dialog");
+    const views = page.getByRole("radiogroup", { name: "Node views" });
+    await expect(views.getByRole("radio", { name: "Settings" })).toBeInViewport({ ratio: 1 });
   });
 
   test("phone width has no sideways scroll", async ({ page }) => {

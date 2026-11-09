@@ -233,8 +233,8 @@ function MetricsSkeleton() {
             </div>
             <Skeleton style={{ height }} />
             <div className="flex gap-1.5">
-              <Skeleton className="h-[31px] w-[86px] rounded-[7px]" />
-              <Skeleton className="h-[31px] w-[66px] rounded-[7px]" />
+              <Skeleton className="h-8 w-[86px] rounded-[7px]" />
+              <Skeleton className="h-8 w-[66px] rounded-[7px]" />
             </div>
           </Card>
         ))}

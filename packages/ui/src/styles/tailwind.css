@@ -45,6 +45,11 @@
   --color-muted: var(--muted);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
+  --color-button: var(--button);
+  --color-button-hover: var(--button-hover);
+  --color-pill: var(--pill);
+  --color-button-dark: var(--button-dark);
+  --color-button-dark-foreground: var(--button-dark-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-field: var(--field);
@@ -55,6 +60,9 @@
   --color-grid-line: var(--grid-line);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-control-off: var(--control-off);
+  --color-switch-thumb: var(--switch-thumb);
+  --color-scrim: var(--scrim);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-terminal: var(--terminal);
@@ -105,6 +113,37 @@
   --shadow-segment: var(--shadow-segment);
   --shadow-popover: var(--shadow-popover);
   --shadow-sidebar: var(--sidebar-shadow);
+  --shadow-button: var(--button-shadow);
+}
+
+/*
+ * The secondary button's fill follows the surface it sits on (theme.css,
+ * --secondary-*): on the page ground and on gray strips it is white with
+ * the control shadow; on a white card, dialog, sheet or menu it takes the
+ * quiet on-card fill without a shadow, so it never vanishes into the card.
+ * The nearest surface wins, so a gray footer strip or a tinted callout
+ * inside a card goes back to the white button.
+ */
+@layer base {
+  :root,
+  .bg-background,
+  .bg-raised,
+  .bg-muted,
+  .bg-field,
+  .bg-track,
+  [data-slot="alert"] {
+    --button: var(--secondary);
+    --button-hover: var(--secondary-hover);
+    --button-shadow: var(--shadow-control);
+  }
+
+  .bg-card,
+  .bg-popover,
+  .bg-sidebar {
+    --button: var(--secondary-on-card);
+    --button-hover: var(--secondary-on-card-hover);
+    --button-shadow: 0 0 #0000;
+  }
 }
 
 /*

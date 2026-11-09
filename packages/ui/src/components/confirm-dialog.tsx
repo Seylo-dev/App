@@ -76,9 +76,16 @@ export function ConfirmDialog({
   return (
     <AlertDialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className={cn("fixed inset-0 z-50 bg-foreground/20", overlayMotion)} />
+        <AlertDialog.Overlay className={cn("fixed inset-0 z-50 bg-scrim", overlayMotion)} />
         <AlertDialog.Content
           data-slot="confirm-dialog"
+          // Open with focus on the dialog itself, not on Cancel: opened from a row's "..." menu the
+          // browser treated that as keyboard focus and drew the 2px ring around Cancel. Tab reaches
+          // Cancel first, Escape still cancels, and a type-to-confirm field takes focus on its own.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).focus({ preventScroll: true });
+          }}
           className={cn(
             "fixed top-[18%] left-1/2 z-50 w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-card bg-popover p-5 text-popover-foreground shadow-popover outline-none",
             dialogMotion,

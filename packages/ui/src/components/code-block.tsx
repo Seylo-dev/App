@@ -22,11 +22,33 @@ export interface CodeBlockProps {
   maxHeight?: number;
 }
 
-/** Monospace code or config with a copy button. No syntax colors; use Monaco for editing. */
+/**
+ * Monospace code or config with a copy button. No syntax colors; use Monaco
+ * for editing. With a title the copy button sits in the title bar; without
+ * one it floats at the top right of the code, so a one-line command is not
+ * a half-empty bar over a line of text. Titles are labels in the sans font
+ * and wrap, never cut off ("SSH tunnel, then open http://127.0.0.1:3000").
+ */
 export function CodeBlock({ code, title, tone = "light", noCopy = false, noWrap = false, className, maxHeight }: CodeBlockProps) {
   const labels = useUiLabels();
   const [copied, copy] = useCopy();
   const dark = tone === "dark";
+  const copyButton = (
+    <button
+      type="button"
+      onClick={() => void copy(code)}
+      className={cn(
+        "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-chip border-0 px-2 font-sans text-[12px] leading-none transition-interactive",
+        dark
+          ? "bg-transparent text-terminal-muted hover:bg-terminal-bar"
+          : "bg-transparent text-ink-faint hover:bg-muted hover:text-foreground",
+        title ? "ml-auto" : "float-right -mt-[3px] -mr-2 ml-2",
+      )}
+    >
+      {copied ? <IconCheck size={14} stroke={2.2} /> : <IconCopy size={14} />}
+      {copied ? labels.copied : labels.copy}
+    </button>
+  );
   return (
     <div
       data-slot="code-block"
@@ -36,38 +58,26 @@ export function CodeBlock({ code, title, tone = "light", noCopy = false, noWrap 
         className,
       )}
     >
-      {(title || !noCopy) && (
+      {title && (
         <div
           className={cn(
             "flex min-h-9 items-center gap-2 pr-1.5 pl-3.5 text-[12px]",
-            dark ? "bg-terminal-bar text-terminal-muted" : "text-muted-foreground",
-            title && !dark && "border-b border-divider",
+            dark ? "bg-terminal-bar text-terminal-muted" : "border-b border-divider text-muted-foreground",
           )}
         >
-          {title && <span className="truncate font-mono">{title}</span>}
-          {!noCopy && (
-            <button
-              type="button"
-              onClick={() => void copy(code)}
-              className={cn(
-                "ml-auto flex h-7 cursor-pointer items-center gap-1.5 rounded-chip border-0 bg-transparent px-2 text-[12px] transition-interactive",
-                dark ? "text-terminal-muted hover:bg-terminal" : "text-ink-faint hover:bg-muted hover:text-foreground",
-              )}
-            >
-              {copied ? <IconCheck size={14} stroke={2.2} /> : <IconCopy size={14} />}
-              {copied ? labels.copied : labels.copy}
-            </button>
-          )}
+          <span className="min-w-0 py-2 leading-snug [overflow-wrap:anywhere]">{title}</span>
+          {!noCopy && copyButton}
         </div>
       )}
       <pre
         className={cn(
           "m-0 overflow-auto px-3.5 pb-3 font-mono text-[12.5px] leading-[1.7]",
-          !title && noCopy && "pt-3",
+          !title && "pt-3",
           noWrap ? "whitespace-pre" : "whitespace-pre-wrap [overflow-wrap:anywhere]",
         )}
         style={maxHeight ? { maxHeight } : undefined}
       >
+        {!title && !noCopy && copyButton}
         <code>{code}</code>
       </pre>
     </div>

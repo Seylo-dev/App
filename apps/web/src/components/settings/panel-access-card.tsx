@@ -326,6 +326,8 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
         title={t("settings.general.domainCard.confirmCloseTitle")}
         description={t("settings.general.domainCard.confirmCloseDescription", { url: ipUrl })}
         confirmLabel={t("settings.general.domainCard.confirmClose")}
+        // API keys, the CLI and scripts on the IP address stop working: the same weight as a revoke.
+        destructive
         onConfirm={() => turnOff({ serveOnIp: false })}
       >
         <Alert tone="warning">{t("settings.general.domainCard.confirmCloseWarning", { url: ipUrl, domain: domainUrl })}</Alert>
@@ -341,6 +343,7 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
         title={t("settings.general.domainCard.confirmAgentTitle")}
         description={t("settings.general.domainCard.confirmAgentDescription", { domain: domainUrl })}
         confirmLabel={t("settings.general.domainCard.confirmAgent")}
+        destructive
         onConfirm={() => turnOff({ agentPortOpen: false })}
       />
     </>
