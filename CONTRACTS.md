@@ -1410,7 +1410,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   on for, so an install that never used it sends what 0.2.0 sent. Proxy trust and HTTPS (`src/http/proxy-trust.ts`, `https.ts`,
   `domain-redirect.ts`): X-Forwarded-For/-Proto/-Host count only from the
   addresses of `SEYLO_TRUSTED_PROXIES` (default `<slug>-traefik`, resolved
-  through Docker DNS every 30 s), never from the published IP:port (the
+  through Docker DNS every 30 s, and since 0.2.1 also before a request is
+  handled when a new address on one of the panel's own networks connects,
+  at most once per address per 30 s, waiting up to 1 s: Traefik joins the
+  panel's network only when the domain is set and gets a new address when
+  recreated, and an agent session opened through it untrusted would keep
+  `http://<domain>` as its address), never from the published IP:port (the
   cross-site check `isSameOrigin(request, trusted)` too: an untrusted
   client's X-Forwarded-Host is ignored and the Host header compared).
   `clientIp` (`src/http/client-ip.ts`) normalises addresses and, behind

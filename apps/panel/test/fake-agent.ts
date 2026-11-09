@@ -74,6 +74,8 @@ export interface FakeAgentOptions {
   name?: string;
   /** Default handlers for state sync (snapshot, SyncDesired, ApplyService, RemoveService). Default true. */
   stateSync?: boolean;
+  /** Extra headers on the WebSocket upgrade (what a proxy in front of the panel adds). */
+  headers?: Record<string, string>;
 }
 
 export function agentKey() {
@@ -112,7 +114,10 @@ export class FakeAgent {
 
   /** Connects and finishes the handshake. Resolves even when rejected (see `rejected`). */
   async connect(): Promise<this> {
-    this.ws = new WebSocket(`${this.options.url.replace(/^http/, "ws")}${agentConnectPath}`, [agentSubprotocol]);
+    const address = `${this.options.url.replace(/^http/, "ws")}${agentConnectPath}`;
+    this.ws = this.options.headers
+      ? new WebSocket(address, { protocols: [agentSubprotocol], headers: this.options.headers } as never)
+      : new WebSocket(address, [agentSubprotocol]);
     this.ws.binaryType = "arraybuffer";
     let helloDone: (() => void) | undefined;
     const handshake = new Promise<void>((resolve) => {

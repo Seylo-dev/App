@@ -11,7 +11,9 @@ import { auth } from "@seylo/ops";
 import { clientIp } from "../src/http/client-ip";
 import { createProxyTrust } from "../src/http/proxy-trust";
 import { setSetting } from "../src/settings";
+import type { FakeAgent } from "./fake-agent";
 import { createUser, type TestPanel, testPanel } from "./helpers";
+import { joinAgent, listen } from "./hub-helpers";
 import { call, noLimits } from "./people-helpers";
 
 const panels: TestPanel[] = [];
@@ -50,11 +52,118 @@ describe("proxy trust", () => {
     expect(failing.trusts("172.18.0.3")).toBe(false);
   });
 
+  test("a new address on the panel's networks is looked up again before it is answered, once", async () => {
+    let attached = false;
+    let lookups = 0;
+    let clock = 1_000_000;
+    const trust = createProxyTrust({
+      always: false,
+      proxies: ["seylo-traefik"],
+      resolve: async () => {
+        lookups++;
+        return attached ? ["172.18.0.3"] : [];
+      },
+      onOwnNetwork: (ip) => ip.startsWith("172.18."),
+      now: () => clock,
+    });
+    await trust.refresh();
+    expect(lookups).toBe(1);
+    // A visitor on the published port from outside the panel's networks: no lookup.
+    expect(await trust.check("203.0.113.9")).toBe(false);
+    expect(await trust.check(null)).toBe(false);
+    expect(lookups).toBe(1);
+    // The network's gateway (docker-proxy): one lookup, then remembered.
+    expect(await trust.check("172.18.0.1")).toBe(false);
+    expect(await trust.check("172.18.0.1")).toBe(false);
+    expect(lookups).toBe(2);
+    // Traefik joins the panel's network (the panel domain was set): its first request counts.
+    attached = true;
+    expect(trust.trusts("172.18.0.3")).toBe(false);
+    expect(await trust.check("::ffff:172.18.0.3")).toBe(true);
+    expect(trust.trusts("172.18.0.3")).toBe(true);
+    expect(await trust.check("172.18.0.3")).toBe(true);
+    expect(lookups).toBe(3);
+    // A remembered address is looked up again after the refresh interval.
+    clock += 30_001;
+    expect(await trust.check("172.18.0.1")).toBe(false);
+    expect(lookups).toBe(4);
+  });
+
+  test("a check during a lookup waits for the next one, and an older answer never wins", async () => {
+    let attached = false;
+    let release: (() => void) | undefined;
+    const trust = createProxyTrust({
+      always: false,
+      proxies: ["seylo-traefik"],
+      resolve: async () => {
+        if (attached) return ["172.18.0.3"];
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return [];
+      },
+      onOwnNetwork: () => true,
+    });
+    const first = trust.refresh();
+    attached = true;
+    const checking = trust.check("172.18.0.3");
+    release?.();
+    expect(await checking).toBe(true);
+    await first;
+    expect(trust.trusts("172.18.0.3")).toBe(true);
+
+    const stuck = createProxyTrust({
+      always: false,
+      proxies: ["seylo-traefik"],
+      resolve: () => new Promise<string[]>(() => {}),
+      onOwnNetwork: () => true,
+      checkWaitMs: 20,
+    });
+    const started = Date.now();
+    expect(await stuck.check("172.18.0.9")).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
   test("X-Forwarded-For counts only from a trusted peer", () => {
     const request = new Request("http://panel/", { headers: { "x-forwarded-for": "198.51.100.7" } });
     expect(clientIp(request, "172.18.0.3", true)).toBe("198.51.100.7");
     expect(clientIp(request, "203.0.113.9", false)).toBe("203.0.113.9");
   });
+});
+
+// The e2e case: the panel domain is set, Traefik joins the panel's network
+// right after, and browsers and agents come through it within the 30 s
+// before the next timed lookup.
+test("a proxy that just joined counts from its first request and agent connect", async () => {
+  let attached = false;
+  const proxy = createProxyTrust({
+    always: false,
+    proxies: ["seylo-traefik"],
+    resolve: async () => (attached ? ["127.0.0.1"] : []),
+    onOwnNetwork: () => true,
+  });
+  const panel = testPanel({ rateLimiter: noLimits, proxy });
+  const agents: FakeAgent[] = [];
+  try {
+    const url = listen(panel);
+    await proxy.refresh();
+    attached = true;
+    const forwarded = { "x-forwarded-proto": "https", "x-forwarded-host": "panel.example.com", "x-forwarded-for": "192.168.64.1" };
+    const health = await fetch(`${url}/api/health`, { headers: forwarded });
+    expect(health.headers.get("strict-transport-security")).toBe("max-age=31536000");
+
+    attached = false;
+    await proxy.refresh();
+    attached = true;
+    const agent = await joinAgent(panel, url, { headers: forwarded });
+    agents.push(agent);
+    expect(agent.nodeId).not.toBe("");
+    expect(panel.deps.agents.dialedAddress(agent.nodeId)).toBe("https://panel.example.com");
+  } finally {
+    for (const agent of agents) await agent.close();
+    await panel.app.stop(true);
+    panel.close();
+  }
 });
 
 describe("cookies and headers", () => {

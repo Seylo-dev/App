@@ -123,6 +123,7 @@ export function createPanel(options: PanelOptions): Panel {
 /** Only tailscaled (root) and the panel reach the socket, and Serve sets the forwarded headers itself. */
 const trustEveryPeer: ProxyTrust = {
   trusts: () => true,
+  check: async () => true,
   refresh: async () => {},
   start() {},
   stop() {},
@@ -153,9 +154,14 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
         return Response.json({ error: { code: "INTERNAL", message: "Something went wrong on the panel. Try again." } }, { status: 500 });
       })
       .onRequest(({ request }) => pinHost?.({ request }))
-      .onRequest(({ request, set, server }) => {
+      .onRequest(async ({ request, set, server }) => {
+        const peer = server?.requestIP(request)?.address ?? null;
+        // A proxy that just joined the panel's network (the panel domain was
+        // set, Traefik was recreated) counts from its first request, agent
+        // connects included; everything after this reads deps.proxy.trusts().
+        await deps.proxy.check(peer);
         // A Response's own headers win, so pages with stricter rules keep them.
-        const https = servedOverHttps(deps, request, server?.requestIP(request)?.address ?? null);
+        const https = servedOverHttps(deps, request, peer);
         // Never HSTS on the tailnet name: when the tailnet turns HTTPS certificates
         // off, the agent moves the panel to plain HTTP there, and HSTS would keep
         // every browser that visited on a dead https:// for a year while the path
