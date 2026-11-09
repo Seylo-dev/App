@@ -48,18 +48,21 @@ export function isPanelImage(reference: string): boolean {
   return /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?\//i.test(reference);
 }
 
-/** What the service builds from, for a deploy that has no commit: its branch and its source line. */
+/** The service's source as it is now (services.get), for the one source whose label is the same on every deploy. */
 export interface TitleSource {
+  type: string;
   label: string;
-  branch: string | null;
 }
 
 /**
  * Bold title of a row: the commit message (its short sha shows next to it),
- * else a sentence for rollbacks, moves and image deploys, else the branch
- * ("Deploy from main"), else the source. Never the panel's internal image
- * address: a build that failed before it had a commit used to show
- * "Deploy 127.0.0.1:5755/<id>:1".
+ * else a sentence for rollbacks, moves and image deploys, else what this
+ * deploy built from ("Deploy from main", "Deploy from app-v1.zip"), else
+ * the generation. Only the deploy's own data names it: the service's source
+ * as it is now would put the newest archive or branch on every older row.
+ * The one exception is an inline Dockerfile, the same on every deploy.
+ * Never the panel's internal image address: a build that failed before it
+ * had a commit used to show "Deploy 127.0.0.1:5755/<id>:1".
  */
 export function deploymentTitle(d: Deployment, source?: TitleSource | null): string {
   if (d.commit?.message) return d.commit.message.split("\n")[0] ?? "";
@@ -68,9 +71,10 @@ export function deploymentTitle(d: Deployment, source?: TitleSource | null): str
   // Built images (a builder ran) are always the panel's own; only a pulled image's address means something.
   if (d.image && d.builder === null && !isPanelImage(d.image.reference))
     return t("serviceDeploys.title.image", { image: d.image.reference });
-  const branch = d.commit?.branch || source?.branch;
+  const branch = d.commit?.branch;
   if (branch) return t("serviceDeploys.title.branch", { branch });
-  if (source?.label) return t("serviceDeploys.title.source", { source: source.label });
+  if (d.source) return t("serviceDeploys.title.source", { source: d.source });
+  if (source?.type === "inline" && source.label) return t("serviceDeploys.title.source", { source: source.label });
   return t("serviceDeploys.title.generation", { generation: d.generation });
 }
 

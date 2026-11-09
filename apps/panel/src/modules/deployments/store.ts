@@ -5,7 +5,7 @@ import { builds as buildOps, deployments as deploymentOps, projects as projectOp
 import type { Static } from "@sinclair/typebox";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { builds, type DeployStep, type DeployStepKey, type DeployStepStatus, deployments, services } from "../../db/schema";
+import { builds, type DeployStep, type DeployStepKey, type DeployStepStatus, deployments, services, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { nodeNames } from "../services/rows";
 
@@ -117,6 +117,17 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       .all()
       .map((b) => [b.deploymentId, b.builder]),
   );
+  const uploadIds = [...new Set(rows.flatMap((r) => (r.uploadId ? [r.uploadId] : [])))];
+  const archives = new Map(
+    uploadIds.length === 0
+      ? []
+      : db
+          .select({ id: sourceUploads.id, fileName: sourceUploads.fileName })
+          .from(sourceUploads)
+          .where(inArray(sourceUploads.id, uploadIds))
+          .all()
+          .map((u) => [u.id, u.fileName]),
+  );
 
   return rows.map((r) => {
     let keep = kept.get(r.serviceId);
@@ -133,6 +144,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       trigger: r.trigger,
       actor: r.actor,
       commit: r.commitSha ? { sha: r.commitSha, message: r.commitMessage ?? "", branch: r.branch, author: r.commitAuthor } : null,
+      source: deploymentSource(r, archives),
       builder: builders.get(r.id) ?? null,
       builtOn: ref(r.builtOnNodeId),
       shippedTo: r.targetNodeIds.map((id) => ref(id) as { id: string; name: string }),
@@ -159,6 +171,23 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       finishedAt: r.finishedAt?.toISOString() ?? null,
     };
   });
+}
+
+/**
+ * What a deploy built from, from its own row: the branch, else the archive's
+ * name (the upload's row, which goes once newer uploads replace it; then the
+ * clone step's detail, which holds the name once the archive was unpacked).
+ * Never the service's source as it is now: that names the latest upload or
+ * branch on every older row.
+ */
+export function deploymentSource(
+  r: Pick<DeploymentRow, "branch" | "uploadId" | "steps">,
+  archives: ReadonlyMap<string, string>,
+): string | null {
+  if (r.branch) return r.branch;
+  if (!r.uploadId) return null;
+  const clone = r.steps.find((s) => s.key === "clone");
+  return archives.get(r.uploadId) ?? (clone?.status === "ok" && clone.detail ? clone.detail : null);
 }
 
 export function toDeployment(db: PanelDb, row: DeploymentRow): Deployment {

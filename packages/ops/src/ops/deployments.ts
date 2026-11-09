@@ -77,6 +77,13 @@ export const Deployment = Type.Object({
     }),
     Type.Null(),
   ]),
+  /**
+   * What this deploy built from, for its title when there is no commit
+   * message: the branch (also when no commit was found, for example a clone
+   * that failed) or the uploaded archive's file name. null for image deploys,
+   * rollbacks, moves, inline Dockerfiles, and when it was not recorded.
+   */
+  source: Type.Union([Type.String(), Type.Null()]),
   builder: Type.Union([Builder, Type.Null()]),
   /** null for image sources and rollbacks (nothing was built). */
   builtOn: Type.Union([NodeRef, Type.Null()]),

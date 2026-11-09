@@ -52,6 +52,11 @@ function buildEnv(deps: Deps, serviceId: string) {
   }
 }
 
+/** The branch a repository source builds (GitHub, a provider connection, a plain clone URL); null for the others. */
+export function sourceBranch(source: ServiceSpecJson["source"]): string | null {
+  return source.type === "github" || source.type === "provider" || source.type === "git" ? source.branch : null;
+}
+
 export async function resolveBuild(
   deps: Deps,
   input: {

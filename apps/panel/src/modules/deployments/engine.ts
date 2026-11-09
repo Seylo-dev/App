@@ -44,7 +44,7 @@ import { assertImageAllowed } from "../services/source-guard";
 import { needsBuild, readSpec, runSettingsOf } from "../services/spec";
 import { appendLog, LineSplitter } from "./logs";
 import { registryGcJobType } from "./registry-gc";
-import { pickBuildNode, resolveBuild } from "./source";
+import { pickBuildNode, resolveBuild, sourceBranch } from "./source";
 import { closeSteps, type DeploymentRow, initialSteps, isFinal, publishDeploymentChange, setStep } from "./store";
 
 /** A build that has not finished after this long failed. */
@@ -235,9 +235,12 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
     })
     .returning()
     .get();
+  // Recorded before the source is fetched, so a deploy whose clone fails still says which branch it tried.
+  const branch = d.branch ?? sourceBranch(spec.source);
   let current = save(s, d.id, {
     status: "building",
     builtOnNodeId: buildNode.id,
+    branch,
     steps: setStep(setStep(base.steps, "clone", "running", { nodeId: buildNode.id, detail: "Fetching source" }), "build", "pending", {
       nodeId: buildNode.id,
     }),
@@ -268,7 +271,7 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
     commitSha: resolved.commit?.sha ?? d.commitSha,
     commitMessage: d.commitMessage ?? resolved.commit?.message ?? null,
     commitAuthor: d.commitAuthor ?? resolved.commit?.author ?? null,
-    branch: d.branch ?? resolved.commit?.branch ?? null,
+    branch: d.branch ?? resolved.commit?.branch ?? branch,
     steps: setStep(load(s, d.id)?.steps ?? current.steps, "clone", "running", { detail: resolved.cloneDetail }),
   });
   log(s, current, "clone", `Source: ${resolved.cloneDetail}. Builder: ${resolved.builderLabel}.`);

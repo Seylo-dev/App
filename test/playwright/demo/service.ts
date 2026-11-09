@@ -91,7 +91,7 @@ const baseService = (over: Input) => ({
   ...over,
 });
 
-const servicesById = {
+export const servicesById = {
   [ids.api]: baseService({ id: ids.api, name: "api", kind: "app", address: "api.de1.example.com" }),
   [ids.worker]: baseService({
     id: ids.worker,
@@ -171,6 +171,7 @@ const deployments = [
     trigger: "push",
     actor: "octo-dev",
     commit: { sha: "9c41e07aa", message: "Retry failed webhooks", branch: "main", author: "octo-dev" },
+    source: "main",
     builder: "railpack",
     builtOn: de,
     shippedTo: [us],
@@ -205,6 +206,7 @@ const deployments = [
     trigger,
     actor,
     commit: { sha: `${sha}00`, message, branch: "main", author: actor },
+    source: "main",
     builder: "railpack",
     builtOn: de,
     shippedTo: [us],
@@ -228,8 +230,9 @@ const deployments = [
 
 /**
  * private-api's only deploy: git could not fetch the private repository
- * (exit 128) before there was a commit, so the panel knows only the image
- * it was going to push, an address in its own registry relay.
+ * (exit 128) before there was a commit, so the panel knows only the branch
+ * it tried and the image it was going to push, an address in its own
+ * registry relay.
  */
 const cloneFailed = "fetching the source failed: could not fetch main - check the address, the branch and the credentials (exit status 128)";
 export const privateApiDeploy = {
@@ -241,6 +244,7 @@ export const privateApiDeploy = {
   trigger: "manual",
   actor: "you@example.com",
   commit: null,
+  source: "main",
   builder: "railpack",
   builtOn: de,
   shippedTo: [],

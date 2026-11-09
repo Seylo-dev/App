@@ -26,6 +26,8 @@ test("Console | Shell switches in place: one radio group, the current item holds
     // The terminal's own colors, not the light track's white pill.
     expect(on).toContain("bg-terminal-field");
     expect(on).not.toContain("bg-card");
+    // And no light shadow: shadow-segment is a 1px ring in the dark presets.
+    expect(on).not.toContain("shadow-segment");
     expect(off).toContain('aria-checked="false"');
     expect(off).not.toContain('data-slot="active-indicator"');
   }

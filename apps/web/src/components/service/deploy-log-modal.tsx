@@ -27,7 +27,7 @@ export function DeployLogModal({
   onClose,
 }: {
   serviceId: string;
-  /** The service's branch and source line, for the title of a deploy without a commit. */
+  /** The service's source, for the title of a deploy without a commit (deploymentTitle: only an inline Dockerfile's label names one). */
   source?: TitleSource;
   deployment: Deployment | null;
   onClose: () => void;

@@ -68,6 +68,14 @@ export function ModeSwitch({
   );
 }
 
+/** The Console tab's least height: on a short window the stdin line still shows without much scrolling. */
+export const consoleMinHeight = 440;
+
+/** The Console tab while the service or the person's modes load: the terminal's shape at the tab's size. */
+export function ConsoleSkeleton() {
+  return <TerminalSkeleton minHeight={consoleMinHeight} />;
+}
+
 /** One service's terminal in console or shell mode, with the switch; a new mode is a new session in the same card. */
 export function ServiceTerminal({
   service,
@@ -75,6 +83,8 @@ export function ServiceTerminal({
   modes,
   onModeChange,
   height,
+  fill = false,
+  start,
   actions,
   subtitle = true,
 }: {
@@ -82,7 +92,12 @@ export function ServiceTerminal({
   mode: TerminalMode;
   modes: readonly TerminalMode[];
   onModeChange: (mode: TerminalMode) => void;
+  /** A fixed height (the Overview card); else see `fill`. */
   height?: number;
+  /** Fills the rest of the page (the Console tab), the same height in both modes. */
+  fill?: boolean;
+  /** Waits for a click on a button with this label before it opens a session. */
+  start?: string;
   actions?: ReactNode;
   /** The one-line description next to the switch. */
   subtitle?: boolean;
@@ -115,6 +130,9 @@ export function ServiceTerminal({
       keyboard={shell}
       fileName={`${service.name}-${mode}.log`}
       height={height}
+      fill={fill}
+      minHeight={consoleMinHeight}
+      start={start}
       actions={actions}
     />
   );
@@ -134,7 +152,7 @@ export function ConsolePage({ service }: { service: ServiceDetail }) {
   const search = useSearch({ from: "/_app/p/$projectId/s/$serviceId/console" });
   const navigate = useNavigate({ from: "/p/$projectId/s/$serviceId/console" });
   const modes = useTerminalModes(service);
-  if (!modes) return <TerminalSkeleton />;
+  if (!modes) return <ConsoleSkeleton />;
   const mode = pickMode(search.mode ?? "console", modes);
   if (!mode) return <TerminalNoAccess />;
   return (
@@ -143,6 +161,7 @@ export function ConsolePage({ service }: { service: ServiceDetail }) {
       service={service}
       mode={mode}
       modes={modes}
+      fill
       // The mode lives in the URL, so links and reloads keep it; switching replaces the entry, like a filter.
       onModeChange={(next) =>
         void navigate({ search: (prev) => ({ ...prev, mode: next === "shell" ? "shell" : undefined }), replace: true })

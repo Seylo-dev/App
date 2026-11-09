@@ -15,7 +15,7 @@ import { KeyValue } from "@seylo/ui/components/key-value";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { toast } from "@seylo/ui/components/toast";
-import { IconArrowUpRight, IconLock, IconTerminal2, IconWorld } from "@tabler/icons-react";
+import { IconArrowUpRight, IconLock, IconWorld } from "@tabler/icons-react";
 import { Link, Navigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
@@ -29,10 +29,12 @@ import { formatBytes, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
 import { PrivateRepoHint } from "../private-repo-hint";
+import { TerminalSkeleton } from "../service-skeletons";
 import { hasRunningInstance, isActiveDeployment, isDatabaseKind } from "../status";
 import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
 import { pickMode, type TerminalMode, useTerminalModes } from "../terminal/access";
-import { ServiceTerminal } from "../terminal/console-pages";
+import { ModeSwitch, ServiceTerminal } from "../terminal/console-pages";
+import { TerminalNote } from "../terminal/terminal-panel";
 import { crashPolicyLabel } from "../usage-strip";
 import type { ServiceDetail } from "../use-service";
 
@@ -96,13 +98,8 @@ function AppOverview({ service }: { service: ServiceDetail }) {
         </Panel>
         <DomainsPanel service={service} />
         <Panel title={t("serviceOverview.quick")}>
+          {/* No Console here: the console card on the left has it, with Open full to the tab. */}
           <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm">
-              <Link to="/p/$projectId/s/$serviceId/console" params={p}>
-                <IconTerminal2 size={14} />
-                {t("service.tabs.console")}
-              </Link>
-            </Button>
             <Button asChild size="sm">
               <Link to="/p/$projectId/s/$serviceId/logs" params={p}>
                 {t("service.tabs.logs")}
@@ -189,45 +186,60 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
 
 /**
  * The console on the Overview: the Console tab's terminal at a fixed
- * height, with the same Console | Shell switch. It opens a session only
- * while a container runs (the session closes when the page is left or the
- * app stops), never takes focus until clicked, and offers only the modes the
- * person may open: none at all hides it.
+ * height, with the same Console | Shell switch. It is that height in every
+ * state (loading, nothing running yet, connected, exited), so the column
+ * never moves when the status changes. The first session waits for a
+ * running container; after that the terminal stays until the page is left,
+ * so a crash or a restart keeps the last output, the exit note and
+ * Reconnect, and opens no new ticket. It opens the console by itself and a
+ * shell only when asked (the switch, or Open shell for a person who may
+ * open only the shell), never takes focus until clicked, and offers only
+ * the modes the person may open: none at all hides it.
  */
 function ConsoleCard({ service }: { service: ServiceDetail }) {
   const modes = useTerminalModes(service);
   const [wanted, setWanted] = useState<TerminalMode>("console");
-  if (modes === null)
-    return (
-      <LoadingRegion label={t("common.loading")}>
-        <Skeleton className="rounded-card bg-terminal" style={{ height: consoleCardHeight }} />
-      </LoadingRegion>
-    );
-  const mode = pickMode(wanted, modes);
+  // The person used the switch: the mode they picked opens at once, a shell too.
+  const [picked, setPicked] = useState(false);
+  const [shown, setShown] = useState(false);
+  const running = hasRunningInstance(service);
+  const mode = modes ? pickMode(wanted, modes) : null;
+  if (mode && running && !shown) setShown(true);
+  if (modes === null) return <TerminalSkeleton height={consoleCardHeight} />;
   if (!mode) return null;
-  if (!hasRunningInstance(service))
+  const choose = (next: TerminalMode) => {
+    setWanted(next);
+    setPicked(true);
+  };
+  if (!shown && !running)
     return (
-      <Panel title={t("serviceTerminal.modes.console")}>
-        <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceTerminal.notRunning")}</p>
-      </Panel>
+      <TerminalNote
+        label={t(`serviceTerminal.modes.${mode}`)}
+        switcher={<ModeSwitch mode={mode} modes={modes} onChange={choose} />}
+        height={consoleCardHeight}
+      >
+        {t(mode === "shell" ? "serviceTerminal.notRunningShell" : "serviceTerminal.notRunning")}
+      </TerminalNote>
     );
   return (
     <ServiceTerminal
       service={service}
       mode={mode}
       modes={modes}
-      onModeChange={setWanted}
+      onModeChange={choose}
       height={consoleCardHeight}
+      start={mode === "shell" && !picked ? t("serviceTerminal.openShell") : undefined}
       subtitle={false}
       actions={
         <Link
           to="/p/$projectId/s/$serviceId/console"
           params={{ projectId: service.projectId, serviceId: service.id }}
           search={{ mode: mode === "shell" ? "shell" : undefined }}
-          className="ml-1 inline-flex items-center gap-1 rounded-chip px-2 py-[5px] text-[12.5px] font-medium text-terminal-muted hover:text-terminal-foreground"
+          className="ml-1 inline-flex cursor-pointer items-center gap-1 rounded-chip px-2 py-[5px] text-[12.5px] font-medium text-terminal-muted hover:text-terminal-foreground max-sm:ml-0 max-sm:p-[7px]"
         >
           <IconArrowUpRight size={14} stroke={1.9} aria-hidden="true" />
-          {t("serviceTerminal.openFull")}
+          {/* Just the arrow on a phone, so the switch and the buttons share one row. */}
+          <span className="max-sm:sr-only">{t("serviceTerminal.openFull")}</span>
         </Link>
       }
     />
@@ -497,7 +509,7 @@ export function OverviewSkeleton() {
             ))}
           </div>
         </Card>
-        <Skeleton className="rounded-card bg-terminal" style={{ height: consoleCardHeight }} />
+        <TerminalSkeleton height={consoleCardHeight} inRegion />
         <Card>
           <SkeletonText className="w-20 text-[15px]" />
           <div className="grid gap-4 sm:grid-cols-2">

@@ -8,6 +8,9 @@ export default {
   shellSubtitle: "A new shell inside the running container.",
   openFull: "Open full",
   notRunning: "The console opens once the app runs.",
+  notRunningShell: "A shell opens once the app runs.",
+  /** On the Overview, for a person who may open only the shell: a shell opens when asked, never by itself. */
+  openShell: "Open shell",
   noAccess: "You cannot open the console or a shell of this service. An owner or admin can give you access.",
   connected: "Connected to {name} (generation {generation})",
   connectedAs: "as {user}",

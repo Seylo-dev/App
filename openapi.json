@@ -19058,6 +19058,7 @@
                     "trigger",
                     "actor",
                     "commit",
+                    "source",
                     "builder",
                     "builtOn",
                     "shippedTo",
@@ -19206,6 +19207,16 @@
                               ]
                             }
                           }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -19569,6 +19580,7 @@
                     "trigger",
                     "actor",
                     "commit",
+                    "source",
                     "builder",
                     "builtOn",
                     "shippedTo",
@@ -19717,6 +19729,16 @@
                               ]
                             }
                           }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -20082,6 +20104,7 @@
                         "trigger",
                         "actor",
                         "commit",
+                        "source",
                         "builder",
                         "builtOn",
                         "shippedTo",
@@ -20230,6 +20253,16 @@
                                   ]
                                 }
                               }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "string"
                             },
                             {
                               "type": "null"
@@ -20613,6 +20646,7 @@
                           "trigger",
                           "actor",
                           "commit",
+                          "source",
                           "builder",
                           "builtOn",
                           "shippedTo",
@@ -20761,6 +20795,16 @@
                                     ]
                                   }
                                 }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "string"
                               },
                               {
                                 "type": "null"
@@ -21287,6 +21331,7 @@
                           "trigger",
                           "actor",
                           "commit",
+                          "source",
                           "builder",
                           "builtOn",
                           "shippedTo",
@@ -21437,6 +21482,16 @@
                                     ]
                                   }
                                 }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "string"
                               },
                               {
                                 "type": "null"
@@ -21810,6 +21865,7 @@
                     "trigger",
                     "actor",
                     "commit",
+                    "source",
                     "builder",
                     "builtOn",
                     "shippedTo",
@@ -21958,6 +22014,16 @@
                               ]
                             }
                           }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "string"
                         },
                         {
                           "type": "null"

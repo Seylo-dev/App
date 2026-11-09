@@ -1263,7 +1263,12 @@ Web:
   file, `src/i18n/en/<section>.ts` (default export); add keys to the
   screen's own section and create a new section file for a new screen.
 - Styling only through tokens (`packages/ui/src/styles/theme.css`) and the
-  utilities mapped from them; theme presets override variables.
+  utilities mapped from them; theme presets override variables. `cn`
+  (`packages/ui/src/lib/utils.ts`) knows the theme's shadows
+  (`shadow-card`, `-control`, `-primary`, `-segment`, `-popover`,
+  `-sidebar`), so a later shadow class replaces them; a new shadow token
+  goes there too, or plain tailwind-merge keeps both and the stylesheet's
+  order picks one.
 - Server data only through `useOp` / `useOpMutation`; no hand-written
   fetches.
 - An op the panel answers with NOT_IMPLEMENTED renders "Not built yet" in
@@ -3269,20 +3274,43 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `TerminalPanel`'s `sessionKey` closes the open session and opens the
   other in a fresh xterm while the header stays mounted, so focus and the
   sliding background stay; a ticket that arrives after its session was
-  closed opens no socket. The Overview shows the same terminal as a card
-  under Deploys (360 px, "Open full" to the Console tab in the same mode):
-  it opens a session only while a container runs (`hasRunningInstance`:
-  running, partial, unhealthy, or a deploy on top of a live version;
-  otherwise "The console opens once the app runs."), never takes focus
-  until clicked, and closes its socket when the page is left. Both offer
-  only the modes the person may open (`useTerminalModes`: owners and
-  admins every mode, members what `grants.mine` allows on the service or
-  its project); with none the card is hidden and the tab says so. The
-  database shell and the node's host shell use the same `TerminalPanel`.
+  closed opens no socket. On the Console tab the card fills the rest of
+  the page (at least 440 px, `fill`), one height in both modes: the stdin
+  line takes its room from the terminal, which is laid out absolutely and
+  fits what is left, so it never sets the card's height. The header is one
+  row: the subtitle (hidden on a phone) and the user:folder chip share
+  what the switch and the buttons leave and truncate, so the chip arriving
+  with a shell's ready message never wraps the buttons. The Overview shows
+  the same terminal as a card under Deploys (360 px in every state:
+  loading, nothing running, connected, exited; "Open full" to the Console
+  tab in the same mode, just its arrow on a phone; no Console quick
+  action next to it). Its first session waits for a running container
+  (`hasRunningInstance`: running, partial, unhealthy, or a deploy on top of
+  a live version; before that a dark card with the switch and "The
+  console opens once the app runs."); once shown the terminal stays until
+  the page is left, so a crash or a restart keeps the output, the exit
+  note and Reconnect and opens no new ticket. It opens the console by
+  itself but a shell only when asked: the switch, or "Open shell"
+  (`TerminalPanel`'s `start`) for a person who may open only the shell.
+  It never takes focus until clicked and closes its socket when the page
+  is left. Both offer only the modes the person may open
+  (`useTerminalModes`: owners and admins every mode, members what
+  `grants.mine` allows on the service or its project); with none the card
+  is hidden and the tab says so. The database shell and the node's host
+  shell use the same `TerminalPanel`.
 - Deploy titles (`deploymentTitle(d, service.source)`): the commit
   message, else Rollback, Move, or "Deploy <image>" for a pulled image,
-  else "Deploy from <branch>", else "Deploy from <source>", else the
-  generation. The panel registry's own address (`127.0.0.1:5755/...`, any
+  else "Deploy from <branch>" (the commit's), else "Deploy from <what it
+  built>" (`Deployment.source`), else for an inline Dockerfile the
+  service's source label, else the generation. `Deployment.source` comes
+  from the deploy's own row (`deploymentSource` in
+  `apps/panel/src/modules/deployments/store.ts`): its branch, which the
+  engine records before the source is fetched so a failed clone keeps the
+  branch it tried, else the uploaded archive's name (its `source_uploads`
+  row, else the clone step's detail once older uploads are deleted). The
+  service's source as it is now never names an older deploy: it would put
+  the newest archive or the fixed branch on every row. The panel
+  registry's own address (`127.0.0.1:5755/...`, any
   loopback registry, or any image a builder made) is never shown. A deploy
   whose clone failed with git's exit 128 ("could not fetch") for a plain
   git URL on github.com, gitlab.com or bitbucket.org with no credential
@@ -3382,10 +3410,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
   text unsaved), `console.spec.ts` (the Console | Shell switch in place
-  with `?mode=shell` and the old session closed, `/shell` redirecting, the
-  Overview console card: no socket while nothing runs, no focus taken,
-  Open full, closed when left, a member's modes, phone width; a failed
-  clone's title and private repo hint) and
+  with `?mode=shell` and the old session closed, one card height for both
+  modes at four window sizes with a one-row header, no ring on the
+  switch in a dark preset, `/shell` redirecting, the Overview console
+  card: 360 px while loading, while nothing runs and through a restart and
+  a crash with its session kept, no socket while nothing runs, no focus
+  taken, the header one row when a shell connects at 1024 px, Open full,
+  closed when left, a member's modes and Open shell for shell-only, phone
+  width; a failed clone's title and private repo hint) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar and the
   accent check;

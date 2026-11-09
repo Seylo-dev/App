@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { TerminalSkeleton } from "../../../../../../components/service/service-skeletons";
-import { ConsolePage } from "../../../../../../components/service/terminal/console-pages";
+import { ConsolePage, ConsoleSkeleton } from "../../../../../../components/service/terminal/console-pages";
 import { withService } from "../../../../../../components/service/with-service";
 
 interface ConsoleSearch {
@@ -10,5 +9,5 @@ interface ConsoleSearch {
 
 export const Route = createFileRoute("/_app/p/$projectId/s/$serviceId/console")({
   validateSearch: (search: Record<string, unknown>): ConsoleSearch => ({ mode: search.mode === "shell" ? "shell" : undefined }),
-  component: withService(ConsolePage, TerminalSkeleton),
+  component: withService(ConsolePage, ConsoleSkeleton),
 });
