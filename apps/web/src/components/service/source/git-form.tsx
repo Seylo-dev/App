@@ -2,7 +2,8 @@
 // stored credential for private repos. "Check access" lists the branches
 // the way git ls-remote would, before anything is saved. People who manage
 // git credentials (git.manage) can add one next to the picker, and the new
-// one is picked.
+// one is picked. A picked credential that was deleted meanwhile is named as
+// such, and Check access and Save wait for another pick.
 
 import { GitUrl, git, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -52,9 +53,15 @@ export function GitForm({ service }: { service: ServiceDetail }) {
   });
   const validUrl = urlPattern.test(url.trim());
   const hasCredentials = !validUrl && anyGitUrl.test(url.trim());
+  // The picked credential was deleted (on Settings or in another tab): the panel would refuse its id,
+  // so Check access and Save wait until another one, or none, is picked.
+  const credentialGone =
+    credentialId !== null && credentials.data !== undefined && !credentials.data.items.some((c) => c.id === credentialId);
 
-  const submit = () =>
+  const submit = () => {
+    if (credentialGone) return;
     save.mutate({ serviceId: service.id, source: { type: "git", url: url.trim(), branch: branch.trim(), credentialId, deployOnPush } });
+  };
   // A shown "Check access" answer was for the credential picked then; it says nothing about another one.
   const pickCredential = (id: string | null) => {
     setCredentialId(id);
@@ -89,7 +96,7 @@ export function GitForm({ service }: { service: ServiceDetail }) {
             placeholder="https://git.example.com/team/app.git"
             aria-invalid={url !== "" && !validUrl}
           />
-          <Button onClick={() => setCheck({ url: url.trim(), credentialId })} disabled={!validUrl}>
+          <Button onClick={() => setCheck({ url: url.trim(), credentialId })} disabled={!validUrl || credentialGone}>
             {t("serviceSource.git.check")}
           </Button>
         </div>
@@ -141,11 +148,22 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         >
           <div className="flex min-w-0 gap-2">
             <Select value={credentialId ?? publicRepo} onValueChange={(v) => pickCredential(v === publicRepo ? null : v)}>
-              <SelectTrigger aria-label={t("serviceSource.git.credential")} className="min-w-0 flex-1">
+              <SelectTrigger
+                aria-label={t("serviceSource.git.credential")}
+                aria-invalid={credentialGone || undefined}
+                aria-describedby={credentialGone ? "git-credential-gone" : undefined}
+                className="min-w-0 flex-1"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={publicRepo}>{t("serviceSource.git.public")}</SelectItem>
+                {/* Keeps the trigger from going blank; it cannot be picked again. */}
+                {credentialGone && credentialId && (
+                  <SelectItem value={credentialId} disabled>
+                    {t("gitCredentials.picker.deleted")}
+                  </SelectItem>
+                )}
                 {(credentials.data?.items ?? []).map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.name} · {c.host}
@@ -160,6 +178,11 @@ export function GitForm({ service }: { service: ServiceDetail }) {
               </Button>
             )}
           </div>
+          {credentialGone && (
+            <p id="git-credential-gone" className="m-0 text-[12.5px] text-chip-red-fg">
+              {t("gitCredentials.picker.deletedNote")}
+            </p>
+          )}
         </Field>
       </div>
       <ToggleRow
@@ -168,7 +191,7 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         control={<Switch checked={deployOnPush} onCheckedChange={setDeployOnPush} aria-label={t("serviceSource.deployOnPush")} />}
       />
       <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={!validUrl || !branch.trim() || save.isPending}>
+        <Button type="submit" variant="primary" disabled={!validUrl || !branch.trim() || save.isPending || credentialGone}>
           {t("service.save")}
         </Button>
         <MutationError error={save.error} />

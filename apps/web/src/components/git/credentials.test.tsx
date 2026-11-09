@@ -7,18 +7,21 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { t } from "../../i18n/t";
-import type { GitCredential } from "./add-credential-dialog";
+import { type GitCredential, HostKeys, type HostKeysState } from "./add-credential-dialog";
 import {
   credentialHost,
   isSshUrl,
+  keyscanCommand,
   kindForUrl,
+  knownHostsCover,
+  knownHostsName,
   looksLikePrivateKey,
   needsKnownHosts,
   providerOf,
   repoLabel,
   validHost,
 } from "./credential-host";
-import { GitCredentialsCard } from "./credentials-card";
+import { GitCredentialsCard, missingHostKeys } from "./credentials-card";
 
 test("the credential host is the URL's host as the panel records it (urlHost)", () => {
   expect(credentialHost("https://GitLab.com/acme/shop.git")).toBe("gitlab.com");
@@ -69,6 +72,62 @@ test("hosts: what the ops take, whose wording the hints use, and which need host
   expect(looksLikePrivateKey("ssh-ed25519 AAAA")).toBe(false);
 });
 
+test("known_hosts names a host with a port as [name]:port, the way ssh-keyscan writes it and the panel matches it", () => {
+  expect(knownHostsName("gitea.lan:2222")).toBe("[gitea.lan]:2222");
+  expect(knownHostsName("gitea.lan")).toBe("gitea.lan");
+  expect(knownHostsName("gitea.lan:22")).toBe("gitea.lan");
+  expect(keyscanCommand("gitea.lan:2222")).toBe("ssh-keyscan -p 2222 gitea.lan");
+  expect(keyscanCommand("gitlab.com")).toBe("ssh-keyscan gitlab.com");
+  expect(keyscanCommand("gitlab.com:22")).toBe("ssh-keyscan gitlab.com");
+});
+
+test("pasted known_hosts lines count only when one names the host as the panel matches it", () => {
+  const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample";
+  expect(knownHostsCover(`[gitea.lan]:2222 ${key}`, "gitea.lan:2222")).toBe(true);
+  // The form the old placeholder showed: the panel never matches it.
+  expect(knownHostsCover(`gitea.lan:2222 ${key}`, "gitea.lan:2222")).toBe(false);
+  // Port 22 is the plain name, never brackets.
+  expect(knownHostsCover(`gitea.lan ${key}`, "gitea.lan:2222")).toBe(false);
+  expect(knownHostsCover(`gitea.lan ${key}`, "gitea.lan")).toBe(true);
+  expect(knownHostsCover(`[gitea.lan]:22 ${key}`, "gitea.lan")).toBe(false);
+  // Several names on one line, and comments and blank lines around it.
+  expect(knownHostsCover(`# office\n\n  10.0.0.5,[gitea.lan]:2222 ${key}  \n`, "gitea.lan:2222")).toBe(true);
+  expect(knownHostsCover(`# [gitea.lan]:2222 ${key}`, "gitea.lan:2222")).toBe(false);
+  // Hashed lines from ~/.ssh/known_hosts name no host.
+  expect(knownHostsCover(`|1|F1E1KeoE/eEWhi10WpGv4OdiO6Y=|3988QV0VE8wmZL7suNrYQLITLCg= ${key}`, "gitea.lan")).toBe(false);
+  // A name with no key allows nothing.
+  expect(knownHostsCover("[gitea.lan]:2222 ssh-ed25519", "gitea.lan:2222")).toBe(false);
+  expect(knownHostsCover("", "gitea.lan")).toBe(false);
+});
+
+/** HostKeys with the paste box open on `knownHosts`; nothing runs. */
+const pasted = (knownHosts: string): HostKeysState => ({
+  knownHosts,
+  fingerprints: [],
+  paste: true,
+  scanning: false,
+  scanError: null,
+  scan: () => {},
+  edit: () => {},
+  openPaste: () => {},
+  clear: () => {},
+});
+
+test("the known_hosts box shows the [name]:port form and the command that prints it, and says when no line is for the host", () => {
+  const empty = renderToStaticMarkup(<HostKeys host="gitea.lan:2222" keys={pasted("")} />);
+  expect(empty).toContain('placeholder="[gitea.lan]:2222 ssh-ed25519 AAAA…"');
+  expect(empty).toContain(t("gitCredentials.add.keyscanHint", { command: "ssh-keyscan -p 2222 gitea.lan" }));
+  expect(empty).not.toContain(t("gitCredentials.add.knownHostsNoMatch", { name: "[gitea.lan]:2222" }));
+
+  const wrong = renderToStaticMarkup(<HostKeys host="gitea.lan:2222" keys={pasted("gitea.lan:2222 ssh-ed25519 AAAAC3Nz")} />);
+  expect(wrong).toContain(t("gitCredentials.add.knownHostsNoMatch", { name: "[gitea.lan]:2222" }));
+  expect(wrong).toContain('aria-invalid="true"');
+
+  const right = renderToStaticMarkup(<HostKeys host="gitea.lan:2222" keys={pasted("[gitea.lan]:2222 ssh-ed25519 AAAAC3Nz")} />);
+  expect(right).not.toContain(t("gitCredentials.add.knownHostsNoMatch", { name: "[gitea.lan]:2222" }));
+  expect(right).toContain('aria-invalid="false"');
+});
+
 const at = "2026-11-01T10:00:00.000Z";
 const credential = (over: Partial<GitCredential>): GitCredential => ({
   id: "cred000000000001",
@@ -99,6 +158,25 @@ const items = [
     origin: "generated",
   }),
   credential({ id: "cred000000000003", name: "GitHub (acme-ops)", host: "github.com", username: "acme-ops", origin: "device", usedBy: 1 }),
+  credential({
+    id: "cred000000000004",
+    name: "office gitea key",
+    kind: "ssh_key",
+    host: "gitea.lan:2222",
+    username: null,
+    publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample office gitea key",
+    fingerprint: "SHA256:def",
+    knownHosts: "[gitea.lan]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKey",
+  }),
+  // GitHub's host keys are built into the panel: none are needed.
+  credential({
+    id: "cred000000000005",
+    name: "github deploy key",
+    kind: "ssh_key",
+    host: "github.com",
+    username: null,
+    origin: "generated",
+  }),
 ];
 
 /** Renders inside a router (rows link to Settings > GitHub) with whoami and git.listCredentials in the cache. */
@@ -128,7 +206,7 @@ async function render(role: "owner" | "admin" | "member", node: ReactNode) {
 /** How many buttons say exactly `label`. */
 const buttons = (out: string, label: string) => out.split(`>${label}</button>`).length - 1;
 
-test("owners and admins list git credentials with their kind, user name and use, and can rename and delete them", async () => {
+test("owners and admins list git credentials with their kind, user name and use, and can edit and delete them", async () => {
   for (const role of ["owner", "admin"] as const) {
     const out = await render(role, <GitCredentialsCard />);
     expect(out).toContain('id="git-credentials"');
@@ -139,10 +217,21 @@ test("owners and admins list git credentials with their kind, user name and use,
     expect(out).toContain("gitea.lan:2222");
     expect(out).toContain(t("gitCredentials.list.usedBy", { count: 2 }));
     expect(out).toContain(t("gitCredentials.list.unused"));
-    // Rename and Delete on the token and the deploy key; the GitHub account has neither (next test).
-    expect(buttons(out, t("gitCredentials.list.rename"))).toBe(2);
-    expect(buttons(out, t("gitCredentials.list.delete"))).toBe(2);
+    // Edit and Delete on the token and the three SSH keys; the GitHub account has neither (next test).
+    expect(buttons(out, t("gitCredentials.list.edit"))).toBe(4);
+    expect(buttons(out, t("gitCredentials.list.delete"))).toBe(4);
   }
+});
+
+test("an SSH key with no host keys for its host is marked, so it can be fixed with Edit", async () => {
+  // Only the gitea deploy key: the office key has its line, GitHub needs none, tokens have no host keys.
+  expect(items.filter(missingHostKeys).map((c) => c.name)).toEqual(["gitea deploy key"]);
+  // Lines that name the host the wrong way are as good as none.
+  expect(missingHostKeys(credential({ kind: "ssh_key", host: "gitea.lan:2222", knownHosts: "gitea.lan:2222 ssh-ed25519 AAAA" }))).toBe(
+    true,
+  );
+  const out = await render("owner", <GitCredentialsCard />);
+  expect(out.split(`>${t("gitCredentials.list.hostKeysMissing")}</span>`).length - 1).toBe(1);
 });
 
 test("the GitHub account from the device flow is managed on Settings > GitHub, not renamed or deleted here", async () => {

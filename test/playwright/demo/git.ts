@@ -1,8 +1,9 @@
 // Demo answers for git credentials (git.listCredentials and the ops that
 // add, change and delete them, generate a deploy key and read a host's SSH
 // keys), in the world of fixtures.ts: a GitLab token two services clone
-// with, the deploy key of acme/private-api, and an SSH key for the office
-// Gitea on port 2222. They keep state, so a spec can add, rename and delete;
+// with, the deploy key of acme/private-api, an SSH key for the office Gitea
+// on port 2222, and a deploy key for the build mirror saved without host
+// keys. They keep state, so a spec can add, edit and delete;
 // installDemo puts the list back for every page. Shaped like the op
 // contracts (packages/ops/src/ops/git.ts) and loosely typed.
 
@@ -57,15 +58,27 @@ const initial = (): Input[] => [
     knownHosts: `[gitea.lan]:2222 ssh-ed25519 ${fakeKey("gitea.lan host")}`,
     createdAt: ago(3),
   }),
+  // Made with git.generateSshKey over MCP without knownHosts: it cannot connect until its host keys are set.
+  credential({
+    id: "cred000000000004",
+    name: "Build mirror",
+    kind: "ssh_key",
+    host: "git.acme.dev",
+    publicKey: `ssh-ed25519 ${fakeKey("build-mirror")} Build mirror`,
+    fingerprint: fingerprintOf("build-mirror"),
+    origin: "generated",
+    createdAt: ago(1),
+  }),
 ];
 
+const firstNewId = 5;
 let credentials = initial();
-let nextId = 4;
+let nextId = firstNewId;
 
 /** The demo's starting credentials (installDemo runs it for every page). */
 export function resetGitDemo(): void {
   credentials = initial();
-  nextId = 4;
+  nextId = firstNewId;
 }
 
 const byName = (a: Input, b: Input) => String(a.name).localeCompare(String(b.name));
@@ -107,9 +120,16 @@ export const handlers: Record<string, (input: Input) => unknown> = {
       origin: "generated",
     });
   },
+  // Omitted fields keep their value; a new token changes nothing that shows.
   "git.updateCredential": (input) => {
     const row = find(input.credentialId);
-    const changed = { ...row, ...(input.name !== undefined ? { name: String(input.name).trim() } : {}), updatedAt: new Date().toISOString() };
+    const changed = {
+      ...row,
+      ...(input.name !== undefined ? { name: String(input.name).trim() } : {}),
+      ...(input.username !== undefined ? { username: input.username?.trim() || null } : {}),
+      ...(input.knownHosts !== undefined ? { knownHosts: String(input.knownHosts).trim() } : {}),
+      updatedAt: new Date().toISOString(),
+    };
     credentials = credentials.map((c) => (c.id === row.id ? changed : c));
     return changed;
   },

@@ -2,9 +2,11 @@
 // generates (git.generateSshKey: the next step shows its public key to add
 // as a read-only deploy key) or one pasted in. SSH hosts other than GitHub
 // need their host keys: "Read host keys" asks git.scanHostKeys and shows the
-// fingerprints to compare, and known_hosts lines can be pasted instead. The
-// new credential goes straight into the git.listCredentials cache, so the
-// form that opened the dialog can select it at once.
+// fingerprints to compare, and known_hosts lines can be pasted instead (they
+// must name the host the way the panel matches it). The new credential goes
+// straight into the git.listCredentials cache, so the form that opened the
+// dialog can select it at once. HostKeys and useHostKeys also serve the Edit
+// dialog on Settings > Git providers.
 
 import { git, type OpOutput } from "@seylo/ops";
 import { opQueryKey, useOpClient, useOpMutation } from "@seylo/ops/react";
@@ -17,7 +19,8 @@ import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { Field } from "../service/field";
@@ -26,7 +29,10 @@ import {
   type CredentialKind,
   credentialHost,
   isSshUrl,
+  keyscanCommand,
   kindForUrl,
+  knownHostsCover,
+  knownHostsName,
   looksLikePrivateKey,
   needsKnownHosts,
   providerOf,
@@ -84,13 +90,10 @@ function AddCredentialForm({ url, onClose, onCreated }: { url: string; onClose: 
   const [token, setToken] = useState("");
   const [keySource, setKeySource] = useState<KeySource>("generate");
   const [privateKey, setPrivateKey] = useState("");
-  const [knownHosts, setKnownHosts] = useState("");
-  const [fingerprints, setFingerprints] = useState<string[]>([]);
-  const [pasteHostKeys, setPasteHostKeys] = useState(false);
+  const hostKeys = useHostKeys();
   // The generated key, shown in the second step.
   const [generated, setGenerated] = useState<GitCredential | null>(null);
 
-  const client = useOpClient();
   const addToList = useAddToList();
   const added = (credential: GitCredential) => {
     addToList(credential);
@@ -109,14 +112,6 @@ function AddCredentialForm({ url, onClose, onCreated }: { url: string; onClose: 
       setGenerated(credential);
     },
   });
-  const scan = useMutation({
-    mutationFn: (forHost: string) => client.call(git.scanHostKeys, { host: forHost }),
-    onSuccess: (keys) => {
-      setKnownHosts(keys.lines.join("\n"));
-      setFingerprints(keys.fingerprints);
-    },
-  });
-
   if (generated) return <DeployKeyStep credential={generated} onDone={onClose} />;
 
   const cleanHost = host.trim().toLowerCase();
@@ -130,15 +125,13 @@ function AddCredentialForm({ url, onClose, onCreated }: { url: string; onClose: 
     name.trim() !== "" &&
     hostOk &&
     (ssh
-      ? (!keysNeeded || knownHosts.trim() !== "") && (keySource === "generate" || looksLikePrivateKey(privateKey))
+      ? (!keysNeeded || knownHostsCover(hostKeys.knownHosts, cleanHost)) && (keySource === "generate" || looksLikePrivateKey(privateKey))
       : token.trim() !== "");
 
   const changeHost = (next: string) => {
     setHost(next);
     // Keys read for another host do not vouch for this one.
-    setKnownHosts("");
-    setFingerprints([]);
-    scan.reset();
+    hostKeys.clear();
   };
 
   const submit = (event: FormEvent) => {
@@ -147,7 +140,7 @@ function AddCredentialForm({ url, onClose, onCreated }: { url: string; onClose: 
     event.stopPropagation();
     if (!ready || busy) return;
     const base = { name: name.trim(), host: cleanHost };
-    const lines = keysNeeded ? knownHosts.trim() : undefined;
+    const lines = keysNeeded ? hostKeys.knownHosts.trim() : undefined;
     if (!ssh) create.mutate({ ...base, kind: "token", username: username.trim() || undefined, token: token.trim() });
     else if (keySource === "paste") create.mutate({ ...base, kind: "ssh_key", privateKey: privateKey.trim(), knownHosts: lines });
     else generate.mutate({ ...base, knownHosts: lines });
@@ -253,22 +246,7 @@ function AddCredentialForm({ url, onClose, onCreated }: { url: string; onClose: 
             </Field>
           )}
           {hostOk && !keysNeeded && <p className="m-0 text-[12.5px] text-muted-foreground">{t("gitCredentials.add.githubHostKeys")}</p>}
-          {keysNeeded && (
-            <HostKeys
-              host={cleanHost}
-              fingerprints={fingerprints}
-              scanning={scan.isPending}
-              scanError={scan.error}
-              onScan={() => scan.mutate(cleanHost)}
-              paste={pasteHostKeys}
-              onPaste={() => setPasteHostKeys(true)}
-              knownHosts={knownHosts}
-              onKnownHostsChange={(v) => {
-                setKnownHosts(v);
-                setFingerprints([]);
-              }}
-            />
-          )}
+          {keysNeeded && <HostKeys host={cleanHost} keys={hostKeys} />}
         </>
       )}
 
@@ -289,39 +267,70 @@ function AddCredentialForm({ url, onClose, onCreated }: { url: string; onClose: 
   );
 }
 
+/** Host keys being set on an SSH credential: the known_hosts lines, the fingerprints of the last scan and the paste box. */
+export type HostKeysState = ReturnType<typeof useHostKeys>;
+
+/** State for HostKeys. `initial` is a saved credential's known_hosts; the paste box opens with them. */
+export function useHostKeys(initial = "") {
+  const client = useOpClient();
+  const [knownHosts, setKnownHosts] = useState(initial);
+  const [fingerprints, setFingerprints] = useState<string[]>([]);
+  const [paste, setPaste] = useState(initial.trim() !== "");
+  const scan = useMutation({ mutationFn: (host: string) => client.call(git.scanHostKeys, { host }) });
+  return {
+    knownHosts,
+    fingerprints,
+    paste,
+    scanning: scan.isPending,
+    scanError: scan.error,
+    scan: (host: string) =>
+      // The keys go in from this call's own callback, not one on useMutation: clear() detaches
+      // the observer, so a scan of a host that changed since never fills in its keys.
+      scan.mutate(host, {
+        onSuccess: (keys) => {
+          setKnownHosts(keys.lines.join("\n"));
+          setFingerprints(keys.fingerprints);
+        },
+      }),
+    edit: (value: string) => {
+      setKnownHosts(value);
+      setFingerprints([]);
+    },
+    openPaste: () => setPaste(true),
+    /** Forgets the lines and any scan still running, for another host. */
+    clear: () => {
+      setKnownHosts("");
+      setFingerprints([]);
+      scan.reset();
+    },
+  };
+}
+
 /** Known hosts for an SSH host the panel does not know: read them (git.scanHostKeys) or paste them. */
-function HostKeys({
-  host,
-  fingerprints,
-  scanning,
-  scanError,
-  onScan,
-  paste,
-  onPaste,
-  knownHosts,
-  onKnownHostsChange,
-}: {
-  host: string;
-  fingerprints: string[];
-  scanning: boolean;
-  scanError: unknown;
-  onScan: () => void;
-  paste: boolean;
-  onPaste: () => void;
-  knownHosts: string;
-  onKnownHostsChange: (value: string) => void;
-}) {
+export function HostKeys({ host, keys }: { host: string; keys: HostKeysState }) {
+  const box = useRef<HTMLTextAreaElement>(null);
+  const noteId = useId();
+  const name = knownHostsName(host);
+  const mismatch = keys.knownHosts.trim() !== "" && !knownHostsCover(keys.knownHosts, host);
+  const openPaste = () => {
+    // This button goes away with the click: focus moves to the box it opens, not back to the dialog.
+    flushSync(keys.openPaste);
+    box.current?.focus();
+  };
+  const hint =
+    keys.fingerprints.length > 0
+      ? t("gitCredentials.add.hostKeysHint", { host })
+      : keys.paste
+        ? t("gitCredentials.add.keyscanHint", { command: keyscanCommand(host) })
+        : t("gitCredentials.add.hostKeysNeeded", { host });
   return (
-    <Field
-      label={t("gitCredentials.add.hostKeys")}
-      hint={fingerprints.length > 0 ? t("gitCredentials.add.hostKeysHint", { host }) : t("gitCredentials.add.hostKeysNeeded", { host })}
-    >
-      {fingerprints.length > 0 && (
+    <Field label={t("gitCredentials.add.hostKeys")} hint={hint}>
+      {keys.fingerprints.length > 0 && (
         <ul
           aria-label={t("gitCredentials.add.hostKeys")}
           className="m-0 flex list-none flex-col gap-1 rounded-control bg-muted px-3 py-2.5"
         >
-          {fingerprints.map((f) => (
+          {keys.fingerprints.map((f) => (
             <li key={f} className="font-mono text-[12px] break-all">
               {f}
             </li>
@@ -329,30 +338,38 @@ function HostKeys({
         </ul>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={onScan} disabled={scanning}>
-          {scanning ? t("gitCredentials.add.scanning") : t("gitCredentials.add.scan")}
+        <Button size="sm" onClick={() => keys.scan(host)} disabled={keys.scanning}>
+          {keys.scanning ? t("gitCredentials.add.scanning") : t("gitCredentials.add.scan")}
         </Button>
-        {!paste && (
-          <Button size="sm" variant="ghost" onClick={onPaste}>
+        {!keys.paste && (
+          <Button size="sm" variant="ghost" onClick={openPaste}>
             {t("gitCredentials.add.pasteHostKeys")}
           </Button>
         )}
       </div>
-      {scanError ? (
+      {keys.scanError ? (
         <p role="alert" className="m-0 text-[12.5px] text-chip-red-fg">
-          {errorMessage(scanError, t("common.unknownError"))}
+          {errorMessage(keys.scanError, t("common.unknownError"))}
         </p>
       ) : null}
-      {paste && (
+      {keys.paste && (
         <Textarea
+          ref={box}
           aria-label={t("gitCredentials.add.knownHosts")}
+          aria-invalid={mismatch}
+          aria-describedby={mismatch ? noteId : undefined}
           mono
           rows={3}
-          value={knownHosts}
+          value={keys.knownHosts}
           spellCheck={false}
-          placeholder={`${host} ssh-ed25519 AAAA…`}
-          onChange={(e) => onKnownHostsChange(e.target.value)}
+          placeholder={`${name} ssh-ed25519 AAAA…`}
+          onChange={(e) => keys.edit(e.target.value)}
         />
+      )}
+      {keys.paste && mismatch && (
+        <p id={noteId} className="m-0 text-[12.5px] text-chip-red-fg">
+          {t("gitCredentials.add.knownHostsNoMatch", { name })}
+        </p>
       )}
     </Field>
   );

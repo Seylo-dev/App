@@ -1,10 +1,11 @@
 // Settings > Git providers > Git credentials: the tokens and SSH keys that
 // git URL sources clone with (git.listCredentials), for people who manage
-// them (git.manage: owners and admins). Add one, rename one (an SSH key's
-// public key shows there too, to add it to another repository) or delete
-// one; the panel refuses to delete a credential a service still clones
-// with, so the dialog says how many do instead of offering a delete that
-// fails. The GitHub account connected on Settings > GitHub is managed there.
+// them (git.manage: owners and admins). Add one, edit one (rename it, replace
+// a token and its user name, or set an SSH key's host keys; its public key
+// shows there too, to add it to another repository) or delete one; the panel
+// refuses to delete a credential a service still clones with, so the dialog
+// says how many do instead of offering a delete that fails. The GitHub
+// account connected on Settings > GitHub is managed there.
 
 import { git } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -26,7 +27,8 @@ import { MutationError } from "../service/op-state";
 import { formatDate } from "../settings/format";
 import { useSettingsMutation } from "../settings/mutation";
 import { OpErrorCallout } from "../settings/op-state";
-import { AddCredentialDialog, type GitCredential } from "./add-credential-dialog";
+import { AddCredentialDialog, type GitCredential, HostKeys, useHostKeys } from "./add-credential-dialog";
+import { knownHostsCover, needsKnownHosts } from "./credential-host";
 import { useCanManageGit } from "./internal-hosts";
 
 /** The card's id, for links that scroll to it (/settings/git-providers#git-credentials). */
@@ -45,8 +47,10 @@ function CredentialsList() {
   const list = useOp(git.listCredentials, {});
   const [adding, setAdding] = useState(false);
   // What a dialog is about stays set while it closes, so its text does not blank out mid-animation.
-  const [renaming, setRenaming] = useState<GitCredential | null>(null);
-  const [renameOpen, setRenameOpen] = useState(false);
+  const [editing, setEditing] = useState<GitCredential | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  // A new form for every opening: a typed replacement token never survives a close.
+  const [editKey, setEditKey] = useState(0);
   const [removing, setRemoving] = useState<GitCredential | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const remove = useSettingsMutation(git.deleteCredential, {
@@ -96,6 +100,7 @@ function CredentialsList() {
                   <span className="font-medium">{c.name}</span>
                   <Chip tone="gray">{t(`gitCredentials.kinds.${c.kind}`)}</Chip>
                   {c.origin === "device" && <Chip tone="sky">{t("gitCredentials.list.githubAccount")}</Chip>}
+                  {missingHostKeys(c) && <Chip tone="amber">{t("gitCredentials.list.hostKeysMissing")}</Chip>}
                 </span>
               ),
             },
@@ -141,11 +146,12 @@ function CredentialsList() {
                       size="sm"
                       variant="ghost"
                       onClick={() => {
-                        setRenaming(c);
-                        setRenameOpen(true);
+                        setEditing(c);
+                        setEditKey((k) => k + 1);
+                        setEditOpen(true);
                       }}
                     >
-                      {t("gitCredentials.list.rename")}
+                      {t("gitCredentials.list.edit")}
                     </Button>
                     <Button
                       size="sm"
@@ -164,7 +170,7 @@ function CredentialsList() {
         />
       )}
       <AddCredentialDialog open={adding} onOpenChange={setAdding} />
-      <RenameDialog credential={renaming} open={renameOpen} onOpenChange={setRenameOpen} />
+      <EditDialog credential={editing} formKey={editKey} open={editOpen} onOpenChange={setEditOpen} />
       {removing && removing.usedBy > 0 ? (
         <InUseDialog credential={removing} open={removeOpen} onOpenChange={setRemoveOpen} />
       ) : (
@@ -184,61 +190,113 @@ function CredentialsList() {
   );
 }
 
-/** Renames a credential (git.updateCredential); an SSH key's public key shows here to copy again. */
-function RenameDialog({
+/** An SSH key for a host whose keys the panel does not know, with no saved line for that host: it cannot connect. */
+export function missingHostKeys(credential: GitCredential): boolean {
+  return credential.kind === "ssh_key" && needsKnownHosts(credential.host) && !knownHostsCover(credential.knownHosts, credential.host);
+}
+
+/**
+ * Changes a credential (git.updateCredential): its name, a token and its user
+ * name, or an SSH key's host keys. An SSH key's public key shows here to copy again.
+ */
+function EditDialog({
   credential,
+  formKey,
   open,
   onOpenChange,
 }: {
   credential: GitCredential | null;
+  formKey: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[460px]">
-        {credential && <RenameForm key={credential.id} credential={credential} onClose={() => onOpenChange(false)} />}
+      <DialogContent className="max-h-[84dvh] max-w-[500px] overflow-y-auto">
+        {credential && <EditForm key={`${credential.id}:${formKey}`} credential={credential} onClose={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function RenameForm({ credential, onClose }: { credential: GitCredential; onClose: () => void }) {
+function EditForm({ credential, onClose }: { credential: GitCredential; onClose: () => void }) {
+  const isToken = credential.kind === "token";
+  const keysNeeded = credential.kind === "ssh_key" && needsKnownHosts(credential.host);
   const [name, setName] = useState(credential.name);
+  const [username, setUsername] = useState(credential.username ?? "");
+  const [token, setToken] = useState("");
+  const hostKeys = useHostKeys(credential.knownHosts);
   const update = useSettingsMutation(git.updateCredential, {
     invalidates: refresh,
-    success: t("gitCredentials.rename.saved"),
+    success: t("gitCredentials.edit.saved"),
     failure: false,
     onSuccess: onClose,
   });
+
   const trimmed = name.trim();
+  const lines = hostKeys.knownHosts.trim();
+  // Only what changed goes to the panel: an empty token field keeps the stored token.
+  const changes = {
+    ...(trimmed !== credential.name ? { name: trimmed } : {}),
+    ...(isToken && username.trim() !== (credential.username ?? "") ? { username: username.trim() || null } : {}),
+    ...(isToken && token.trim() !== "" ? { token: token.trim() } : {}),
+    ...(keysNeeded && lines !== credential.knownHosts.trim() ? { knownHosts: lines } : {}),
+  };
+  const ready = trimmed !== "" && (changes.knownHosts === undefined || knownHostsCover(lines, credential.host));
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!trimmed || update.isPending) return;
-    if (trimmed === credential.name) onClose();
-    else update.mutate({ credentialId: credential.id, name: trimmed });
+    if (!ready || update.isPending) return;
+    if (Object.keys(changes).length === 0) onClose();
+    else update.mutate({ credentialId: credential.id, ...changes });
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <DialogTitle>{t("gitCredentials.rename.title", { name: credential.name })}</DialogTitle>
+        <DialogTitle>{t("gitCredentials.edit.title", { name: credential.name })}</DialogTitle>
         <DialogDescription className="font-mono text-[12.5px]">
           {t(`gitCredentials.kinds.${credential.kind}`)} · {credential.host}
         </DialogDescription>
       </div>
-      <Field label={t("gitCredentials.rename.name")} htmlFor="credential-rename">
-        <Input id="credential-rename" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} autoFocus />
+      <Field label={t("gitCredentials.edit.name")} htmlFor="credential-edit-name">
+        <Input id="credential-edit-name" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} autoFocus />
       </Field>
+      {isToken && (
+        <>
+          <Field label={t("gitCredentials.add.username")} htmlFor="credential-edit-username" hint={t("gitCredentials.add.usernameHint")}>
+            <Input
+              id="credential-edit-username"
+              className="font-mono"
+              value={username}
+              maxLength={100}
+              autoComplete="off"
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </Field>
+          <Field label={t("gitCredentials.edit.token")} htmlFor="credential-edit-token" hint={t("gitCredentials.edit.tokenHint")}>
+            <Input
+              id="credential-edit-token"
+              type="password"
+              className="font-mono"
+              value={token}
+              maxLength={1000}
+              autoComplete="new-password"
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </Field>
+        </>
+      )}
       {credential.kind === "ssh_key" && credential.publicKey && (
         <Field label={t("gitCredentials.add.publicKey")} hint={credential.fingerprint ?? undefined}>
           <CopyField value={credential.publicKey} aria-label={t("gitCredentials.add.publicKey")} />
         </Field>
       )}
+      {keysNeeded && <HostKeys host={credential.host} keys={hostKeys} />}
       <MutationError error={update.error} />
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
-        <Button type="submit" variant="primary" disabled={!trimmed || update.isPending}>
-          {t("gitCredentials.rename.save")}
+        <Button type="submit" variant="primary" disabled={!ready || update.isPending}>
+          {t("gitCredentials.edit.save")}
         </Button>
       </div>
     </form>

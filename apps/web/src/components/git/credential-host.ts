@@ -84,6 +84,41 @@ export function needsKnownHosts(host: string): boolean {
   return host !== "github.com";
 }
 
+const hostAndPort = /^(.+):(\d+)$/;
+
+/**
+ * How known_hosts names a host: "[gitea.lan]:2222" for a port other than 22,
+ * the plain name otherwise. ssh-keyscan and OpenSSH write it so, and the panel
+ * only trusts lines named that way (knownLinesFor in apps/panel/src/modules/git/remote.ts).
+ */
+export function knownHostsName(host: string): string {
+  const match = hostAndPort.exec(host);
+  if (!match) return host;
+  return Number(match[2]) === 22 ? (match[1] as string) : `[${match[1]}]:${match[2]}`;
+}
+
+/**
+ * Whether known_hosts text has a key line for this host, matched the way the
+ * panel matches it: the first field, split on ",", holds knownHostsName(host).
+ * Hashed lines ("|1|...") never match.
+ */
+export function knownHostsCover(text: string, host: string): boolean {
+  const name = knownHostsName(host);
+  return text.split("\n").some((raw) => {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) return false;
+    const fields = line.split(/\s+/);
+    return fields.length >= 3 && (fields[0] ?? "").split(",").includes(name);
+  });
+}
+
+/** What to run to print a host's known_hosts lines. */
+export function keyscanCommand(host: string): string {
+  const match = hostAndPort.exec(host);
+  if (!match || Number(match[2]) === 22) return `ssh-keyscan ${match ? match[1] : host}`;
+  return `ssh-keyscan -p ${match[2]} ${match[1]}`;
+}
+
 /** An OpenSSH or PEM private key, as git.createCredential takes it. */
 export function looksLikePrivateKey(text: string): boolean {
   return /^-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text.trim());
