@@ -124,6 +124,47 @@ describe("proxy trust", () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
+  test("with DNS slower than the wait, an address waits once per interval, and the slow answer still counts", async () => {
+    let lookups = 0;
+    let answer: ((addresses: string[]) => void) | undefined;
+    let clock = 1_000_000;
+    const trust = createProxyTrust({
+      always: false,
+      proxies: ["seylo-traefik"],
+      resolve: () => {
+        lookups++;
+        return new Promise<string[]>((resolve) => {
+          answer = resolve;
+        });
+      },
+      onOwnNetwork: () => true,
+      checkWaitMs: 20,
+      now: () => clock,
+    });
+    // The gateway (an SSH tunnel) waits for the slow lookup once...
+    expect(await trust.check("172.18.0.1")).toBe(false);
+    expect(lookups).toBe(1);
+    // ...and its next requests neither wait nor queue more lookups.
+    const started = Date.now();
+    for (let i = 0; i < 5; i++) expect(await trust.check("172.18.0.1")).toBe(false);
+    expect(Date.now() - started).toBeLessThan(15);
+    expect(lookups).toBe(1);
+    // Traefik's address waited on the same slow lookup, which finds it in the end.
+    expect(await trust.check("172.18.0.3")).toBe(false);
+    answer?.(["172.18.0.3"]);
+    await Bun.sleep(0);
+    expect(trust.trusts("172.18.0.3")).toBe(true);
+    expect(await trust.check("172.18.0.3")).toBe(true);
+    // Its wait queued one lookup behind the slow one, which runs now; let it end too.
+    expect(lookups).toBe(2);
+    answer?.(["172.18.0.3"]);
+    await Bun.sleep(0);
+    // After the interval the gateway is looked up again.
+    clock += 30_001;
+    void trust.check("172.18.0.1");
+    expect(lookups).toBe(3);
+  });
+
   test("X-Forwarded-For counts only from a trusted peer", () => {
     const request = new Request("http://panel/", { headers: { "x-forwarded-for": "198.51.100.7" } });
     expect(clientIp(request, "172.18.0.3", true)).toBe("198.51.100.7");

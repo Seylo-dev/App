@@ -26,9 +26,10 @@ export interface ProxyTrust {
   trusts(socketIp: string | null): boolean;
   /**
    * trusts(), after resolving the proxy names again when the address is on
-   * one of the panel's networks and no resolve since it connected left it
-   * out (a proxy that just joined, or was recreated). Run before a request
-   * is handled; afterwards trusts() gives the same answer.
+   * one of the panel's networks and is not trusted (a proxy that just
+   * joined, or was recreated): at most once per address per refresh
+   * interval, waiting up to checkWaitMs. Run before a request is handled;
+   * afterwards trusts() gives the same answer.
    */
   check(socketIp: string | null): Promise<boolean>;
   /** Re-resolves the proxy names now (also runs on a timer while started). */
@@ -75,7 +76,7 @@ export function createProxyTrust(options: {
   const names = () => [...new Set([...staticNames, ...safely(options.moreProxies)])];
   let resolved = new Set<string>();
   let timer: ReturnType<typeof setInterval> | undefined;
-  /** Untrusted peers on the panel's networks, with when a resolve that started after they connected left them out. */
+  /** Untrusted peers on the panel's networks, with when they last waited for a resolve that started after they connected. */
   const checked = new Map<string, number>();
 
   const resolveNames = async () => {
@@ -125,15 +126,17 @@ export function createProxyTrust(options: {
       if (at !== undefined && now() - at < refreshMs) return false;
       if (!onOwnNetwork(ip)) return false;
       const started = now();
-      const settled = await within(refresh(), checkWaitMs);
+      await within(refresh(), checkWaitMs);
       if (resolved.has(ip)) {
         checked.delete(ip);
         return true;
       }
-      if (settled) {
-        if (checked.size >= maxChecked) checked.clear();
-        checked.set(ip, started);
-      }
+      // Remembered also when the wait ran out: that resolve started after this
+      // peer connected and still lands in trusts() when it ends. Otherwise, with
+      // DNS slower than the wait, every request from the address (the network's
+      // gateway, which an SSH tunnel comes from) waited the full wait.
+      if (checked.size >= maxChecked) checked.clear();
+      checked.set(ip, started);
       return false;
     },
     refresh,
