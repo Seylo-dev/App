@@ -6,7 +6,6 @@
 import { backups, databases, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
-import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
@@ -16,6 +15,7 @@ import { Input } from "@seylo/ui/components/input";
 import { SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { Switch } from "@seylo/ui/components/switch";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
@@ -95,9 +95,9 @@ function ConnectionSkeleton() {
         <SectionCardSkeleton titleWidth="w-36" description={false} actions={<ButtonSkeleton size="sm" className="w-28" />}>
           <SkeletonText className="w-24 text-[12.5px]" />
           <Skeleton className="-mt-1.5 h-[38px]" />
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-2.5">
+          <div className="flex flex-wrap gap-2.5">
             {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex min-w-0 flex-col gap-[5px]">
+              <div key={i} className="flex min-w-[104px] flex-1 flex-col gap-[5px]">
                 <SkeletonText className="w-12 text-xs" />
                 <Skeleton className="h-[35.5px]" />
               </div>
@@ -128,10 +128,14 @@ function ConnectionSkeleton() {
   );
 }
 
-/** A label over a value. Long values (a generated user name, a host) wrap instead of ending in an ellipsis. */
+/**
+ * A label over a value. A tile starts as wide as its value and the row's
+ * tiles share what is left, so a generated user name stays on one line;
+ * a value wider than the card still wraps instead of ending in an ellipsis.
+ */
 function Tile({ label, value, secret = false }: { label: string; value: string; secret?: boolean }) {
   return (
-    <div className="flex min-w-0 flex-col gap-[5px]">
+    <div className="flex min-w-[104px] max-w-full flex-[1_1_auto] flex-col gap-[5px]">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="flex-1 rounded-control bg-field px-[11px] py-2 font-mono text-[13px] [overflow-wrap:anywhere]">
         {secret ? "••••••••" : value || "-"}
@@ -148,7 +152,7 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
       title={t("serviceDatabase.internal")}
       badge={<span className="text-[12.5px] text-muted-foreground">{t("serviceDatabase.internalFor", { node: db.nodeName })}</span>}
       actions={
-        <Button size="sm" variant="ghost" onClick={() => setReset(true)}>
+        <Button size="sm" onClick={() => setReset(true)}>
           {t("serviceDatabase.reset.button")}
         </Button>
       }
@@ -185,7 +189,7 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
           )}
         </>
       )}
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(104px,1fr))] gap-2.5">
+      <div className="flex flex-wrap gap-2.5">
         <Tile label={t("serviceDatabase.host")} value={db.internal.host} />
         <Tile label={t("serviceDatabase.port")} value={String(db.internal.port)} />
         {db.internal.httpPort != null && <Tile label={t("serviceDatabase.httpPort")} value={String(db.internal.httpPort)} />}
@@ -225,20 +229,22 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
         )
       }
       actions={
-        <label htmlFor="db-exposed" className="flex items-center gap-2 text-[13px]">
-          <Checkbox
+        <span className="flex items-center gap-2.5 text-[13px]">
+          <Switch
             id="db-exposed"
             checked={e.enabled}
             disabled={set.isPending}
-            onCheckedChange={(v) =>
+            onCheckedChange={(on) =>
               // An engine that may only be exposed to listed addresses asks for them first.
-              v === true && e.needsAllowedCidrs && e.allowedCidrs.length === 0
+              on && e.needsAllowedCidrs && e.allowedCidrs.length === 0
                 ? setEditing(true)
-                : set.mutate({ serviceId: service.id, enabled: v === true })
+                : set.mutate({ serviceId: service.id, enabled: on })
             }
           />
-          {t("serviceDatabase.exposedToggle")}
-        </label>
+          <label htmlFor="db-exposed" className="cursor-pointer">
+            {t("serviceDatabase.exposedToggle")}
+          </label>
+        </span>
       }
     >
       {!e.enabled ? (
@@ -283,14 +289,11 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
               {e.certificateIssuer ? ` · ${t("serviceDatabase.certIssuer", { issuer: e.certificateIssuer })}` : ""}
               {e.certificateExpiresAt ? ` · ${t("serviceDatabase.certExpires", { date: formatDateTime(e.certificateExpiresAt) })}` : ""}
             </span>
-            <button
-              type="button"
-              className="cursor-pointer border-0 bg-transparent p-0 text-[12.5px] font-medium text-link"
-              onClick={() => setReset(true)}
-            >
-              {t("serviceDatabase.reset.exposedButton")}
-            </button>
           </div>
+          {/* The same kind of button as the internal card's Reset password (muted, as buttons inside a card are). */}
+          <Button size="sm" className="self-start bg-muted shadow-none" onClick={() => setReset(true)}>
+            {t("serviceDatabase.reset.exposedButton")}
+          </Button>
         </>
       )}
       {editing && <ExposureDialog service={service} db={db} onClose={() => setEditing(false)} />}

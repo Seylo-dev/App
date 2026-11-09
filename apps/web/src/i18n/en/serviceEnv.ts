@@ -4,7 +4,6 @@
 export default {
   title: "Environment",
   editorLabel: "Environment variables (.env)",
-  sharedCount: { one: "+ {count} shared variable from the project", other: "+ {count} shared variables from the project" },
   sharedEdit: "Shared variables",
   problems: { one: "{count} problem", other: "{count} problems" },
   showValues: "Show values",

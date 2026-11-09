@@ -31,7 +31,7 @@ export default {
   resultLabel: "Result",
   took: "Took",
   exitCode: "Exit code",
-  manual: "manual",
+  manual: "Manual",
   runTitle: "Run of {when}",
   exit: "exit code {code}",
   truncated: "Older lines were cut; only the end of the output is kept.",

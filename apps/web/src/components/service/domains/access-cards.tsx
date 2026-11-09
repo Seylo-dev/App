@@ -17,7 +17,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
-import { CheckLabel, Field } from "../field";
+import { Field, SwitchLabel } from "../field";
 import { formatClock, formatDate } from "../format";
 import { useInvalidate } from "../invalidate";
 import { isNotBuilt, MutationError, OpErrorNote, retryOp } from "../op-state";
@@ -93,20 +93,18 @@ export function FirstRunCard({ service }: { service: ServiceDetail }) {
             {first.address && first.firewallHint && status === "open" && (
               <FirewallHint label={t("serviceDomains.firstRun.firewall")} command={first.firewallHint} />
             )}
-            <CheckLabel
-              className="flex items-center gap-2.5 text-[13px]"
+            <SwitchLabel
               checked={first.closeWhenDomainLive}
-              onCheckedChange={(v) => set.mutate({ serviceId: service.id, closeWhenDomainLive: v === true })}
+              onCheckedChange={(v) => set.mutate({ serviceId: service.id, closeWhenDomainLive: v })}
             >
               {t("serviceDomains.firstRun.closeWhenLive")}
-            </CheckLabel>
-            <CheckLabel
-              className="flex items-center gap-2.5 text-[13px]"
+            </SwitchLabel>
+            <SwitchLabel
               checked={first.redirectToPrimary}
-              onCheckedChange={(v) => set.mutate({ serviceId: service.id, redirectToPrimary: v === true })}
+              onCheckedChange={(v) => set.mutate({ serviceId: service.id, redirectToPrimary: v })}
             >
               {t("serviceDomains.firstRun.redirect")}
-            </CheckLabel>
+            </SwitchLabel>
             {status !== "none" && (
               <Button
                 size="sm"
@@ -167,18 +165,18 @@ export function MaintenanceCard({ service }: { service: ServiceDetail }) {
               {t("serviceDomains.maintenance.useGlobal")}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={!data}>
-            {t("serviceDomains.maintenance.message")}
+          <Button size="sm" className="h-[34px] bg-muted shadow-none" onClick={() => setEditing(true)} disabled={!data}>
+            {t("serviceDomains.maintenance.editMessage")}
           </Button>
           <input ref={file} type="file" accept=".html,text/html" className="hidden" onChange={(e) => void upload(e)} />
-          <CheckLabel
-            className="ml-auto flex items-center gap-2 text-[13px]"
+          <SwitchLabel
+            className="ml-auto"
             checked={data?.enabled ?? false}
             disabled={!data}
-            onCheckedChange={(v) => set.mutate({ serviceId: service.id, enabled: v === true })}
+            onCheckedChange={(v) => set.mutate({ serviceId: service.id, enabled: v })}
           >
             {t("serviceDomains.maintenance.mode")}
-          </CheckLabel>
+          </SwitchLabel>
         </div>
       )}
       {data?.globalEnabled && <span className="text-xs text-chip-amber-fg">{t("serviceDomains.maintenance.globalOn")}</span>}
@@ -435,16 +433,15 @@ function TunnelCard({ service }: { service: ServiceDetail }) {
     <div className="flex flex-col gap-2.5 rounded-card bg-raised px-4 py-3.5">
       <div className="flex items-center gap-2">
         <b className="text-[13.5px] font-semibold">{t("serviceDomains.dev.tunnel")}</b>
-        <span className="ml-auto flex items-center gap-2 text-[12.5px] text-ink-strong">
-          <Switch
-            size="sm"
-            checked={data?.enabled ?? false}
-            disabled={!data || set.isPending}
-            onCheckedChange={(on) => set.mutate({ serviceId: service.id, enabled: on, mode: currentMode })}
-            aria-label={t("serviceDomains.dev.tunnel")}
-          />
-          {t("service.on")}
-        </span>
+        {/* The switch says on or off by itself; the state chip below says what the tunnel is doing. */}
+        <Switch
+          size="sm"
+          className="ml-auto"
+          checked={data?.enabled ?? false}
+          disabled={!data || set.isPending}
+          onCheckedChange={(on) => set.mutate({ serviceId: service.id, enabled: on, mode: currentMode })}
+          aria-label={t("serviceDomains.dev.tunnel")}
+        />
       </div>
       {tunnel.isError ? (
         <OpErrorNote error={tunnel.error} compact />

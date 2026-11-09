@@ -27,7 +27,6 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
   const [installationId, setInstallationId] = useState<string | null>(src?.installationId ?? null);
   const [repo, setRepo] = useState<string | null>(src?.repo ?? null);
   const [branch, setBranch] = useState<string | null>(src?.branch ?? null);
-  const [rootDir, setRootDir] = useState(service.build.contextPath);
   const [deployOnPush, setDeployOnPush] = useState(src?.deployOnPush ?? true);
   const invalidate = useInvalidate();
   const connect = useOpMutation(github.connectRepo, {
@@ -95,7 +94,7 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
       onSubmit={(e) => {
         e.preventDefault();
         if (!install || !repo || !branch) return;
-        connect.mutate({ serviceId: service.id, installationId: install, repo, branch, rootDir, deployOnPush });
+        connect.mutate({ serviceId: service.id, installationId: install, repo, branch, deployOnPush });
       }}
     >
       <div className="grid gap-4 md:grid-cols-2">
@@ -139,9 +138,6 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
           }}
         />
       )}
-      <Field label={t("serviceSource.rootDir")} htmlFor="gh-root" hint={t("serviceSource.rootDirHint")}>
-        <Input id="gh-root" className="font-mono" value={rootDir} onChange={(e) => setRootDir(e.target.value)} placeholder="apps/web" />
-      </Field>
       <ToggleRow
         title={t("serviceSource.deployOnPush")}
         description={t("serviceSource.deployOnPushHint")}

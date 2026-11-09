@@ -22,7 +22,7 @@ export function ServiceMenu({ service }: { service: ServiceDetail }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="icon" variant="ghost" aria-label={t("serviceCopy.menu.label")}>
+          <Button size="icon" variant="ghost" className="size-[38px] rounded-control" aria-label={t("serviceCopy.menu.label")}>
             <IconDots size={16} stroke={2} />
           </Button>
         </DropdownMenuTrigger>

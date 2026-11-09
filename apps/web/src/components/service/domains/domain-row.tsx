@@ -105,67 +105,74 @@ export function DomainRow({
       data-domain={d.host}
       className={cn("flex flex-col gap-3 border-t border-divider px-5 py-3", waiting && "bg-chip-amber-bg/40 pb-4")}
     >
-      <div className="flex flex-wrap items-center gap-3">
+      {/* The icon stands apart, so every wrapped line starts at the address's left edge. */}
+      <div className="flex items-start gap-3">
         <span aria-hidden="true" className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", tileTone[tone])}>
           <Icon size={14} stroke={2.2} />
         </span>
-        {d.forward || waiting ? (
-          <span className="font-mono text-[13px] font-medium">{d.url}</span>
-        ) : (
-          <a href={d.url} target="_blank" rel="noreferrer" className="font-mono text-[13px] font-medium">
-            {d.url}
-          </a>
-        )}
-        {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
-        {d.auto && <Chip tone="gray">{t("serviceDomains.auto")}</Chip>}
-        <span className="flex items-center gap-3">
-          <IconArrowRight size={14} stroke={2} className="text-ink-ghost" aria-hidden="true" />
-          {d.forward ? (
-            <span className="text-[12.5px] text-ink-strong">
-              {t("serviceDomains.forwardTo", { code: d.forward.permanent ? "308" : "307", url: d.forward.url.replace(/^https?:\/\//, "") })}
-            </span>
+        <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+          {d.forward || waiting ? (
+            <span className="font-mono text-[13px] font-medium">{d.url}</span>
           ) : (
-            <span className="font-mono text-[12.5px] text-ink-strong">
-              {serviceName}:{d.targetPort}
-              {d.pathPrefix !== "/" ? d.pathPrefix : ""}
-            </span>
+            <a href={d.url} target="_blank" rel="noreferrer" className="font-mono text-[13px] font-medium">
+              {d.url}
+            </a>
           )}
-        </span>
-        {mw.basicAuth && <Chip tone="gray">{t("serviceDomains.chips.basicAuth")}</Chip>}
-        {mw.ipAllowList.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.allowlist", { count: mw.ipAllowList.length })}</Chip>}
-        {mw.rateLimit && <Chip tone="gray">{t("serviceDomains.chips.rateLimit", { average: mw.rateLimit.average })}</Chip>}
-        {mw.redirects.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.redirects", { count: mw.redirects.length })}</Chip>}
-        <span className="ml-auto flex items-center gap-2">
-          <RowStatus d={d} waiting={waiting} generating={generating} onRegenerate={runRegenerate} busy={regenerate.isPending} />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label={t("serviceDomains.actions", { host: d.host })}>
-                <IconDots size={15} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => onEdit("routing")}>{t("serviceDomains.menu.routing")}</DropdownMenuItem>
-              {!d.forward && <DropdownMenuItem onSelect={() => onEdit("access")}>{t("serviceDomains.menu.access")}</DropdownMenuItem>}
-              {!d.auto && (
-                <DropdownMenuItem onSelect={() => onEdit("certificate")}>{t("serviceDomains.menu.certificate")}</DropdownMenuItem>
-              )}
-              {canRegenerate(d) && (
-                <DropdownMenuItem disabled={regenerate.isPending} onSelect={runRegenerate}>
-                  {t("serviceDomains.regenerate")}
+          {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
+          {d.auto && <Chip tone="gray">{t("serviceDomains.auto")}</Chip>}
+          <span className="flex items-center gap-3">
+            <IconArrowRight size={14} stroke={2} className="text-ink-ghost" aria-hidden="true" />
+            {d.forward ? (
+              <span className="text-[12.5px] text-ink-strong">
+                {t("serviceDomains.forwardTo", {
+                  code: d.forward.permanent ? "308" : "307",
+                  url: d.forward.url.replace(/^https?:\/\//, ""),
+                })}
+              </span>
+            ) : (
+              <span className="font-mono text-[12.5px] text-ink-strong">
+                {serviceName}:{d.targetPort}
+                {d.pathPrefix !== "/" ? d.pathPrefix : ""}
+              </span>
+            )}
+          </span>
+          {mw.basicAuth && <Chip tone="gray">{t("serviceDomains.chips.basicAuth")}</Chip>}
+          {mw.ipAllowList.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.allowlist", { count: mw.ipAllowList.length })}</Chip>}
+          {mw.rateLimit && <Chip tone="gray">{t("serviceDomains.chips.rateLimit", { average: mw.rateLimit.average })}</Chip>}
+          {mw.redirects.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.redirects", { count: mw.redirects.length })}</Chip>}
+          {/* On a phone the status takes its own line from the left edge, with the menu at the right. */}
+          <span className="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full">
+            <RowStatus d={d} waiting={waiting} generating={generating} onRegenerate={runRegenerate} busy={regenerate.isPending} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="ghost" className="ml-auto" aria-label={t("serviceDomains.actions", { host: d.host })}>
+                  <IconDots size={15} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => onEdit("routing")}>{t("serviceDomains.menu.routing")}</DropdownMenuItem>
+                {!d.forward && <DropdownMenuItem onSelect={() => onEdit("access")}>{t("serviceDomains.menu.access")}</DropdownMenuItem>}
+                {!d.auto && (
+                  <DropdownMenuItem onSelect={() => onEdit("certificate")}>{t("serviceDomains.menu.certificate")}</DropdownMenuItem>
+                )}
+                {canRegenerate(d) && (
+                  <DropdownMenuItem disabled={regenerate.isPending} onSelect={runRegenerate}>
+                    {t("serviceDomains.regenerate")}
+                  </DropdownMenuItem>
+                )}
+                {!d.primary && !d.forward && (
+                  <DropdownMenuItem onSelect={() => primary.mutate({ serviceId, domainId: d.id })}>
+                    {t("serviceDomains.menu.primary")}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
+                  {t("service.remove")}
                 </DropdownMenuItem>
-              )}
-              {!d.primary && !d.forward && (
-                <DropdownMenuItem onSelect={() => primary.mutate({ serviceId, domainId: d.id })}>
-                  {t("serviceDomains.menu.primary")}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-                {t("service.remove")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
+        </div>
       </div>
       {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} />}
       {rateLimited && <RateLimitNote />}

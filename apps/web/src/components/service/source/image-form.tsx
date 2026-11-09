@@ -11,6 +11,7 @@ import { t } from "../../../i18n/t";
 import { Field } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, retryOp } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import type { ServiceDetail } from "../use-service";
 
 const publicImage = "__public__";
@@ -63,12 +64,12 @@ export function ImageForm({ service }: { service: ServiceDetail }) {
           </Select>
         </Field>
       </div>
-      <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={!valid || save.isPending}>
+      <CardSaveBar>
+        <Button type="submit" size="sm" variant="primary" disabled={!valid || save.isPending}>
           {t("service.save")}
         </Button>
         <MutationError error={save.error} />
-      </div>
+      </CardSaveBar>
     </form>
   );
 }

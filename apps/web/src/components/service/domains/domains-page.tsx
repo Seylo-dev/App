@@ -40,8 +40,8 @@ export function DomainsPage({ service }: { service: ServiceDetail }) {
         <div className="flex flex-wrap items-center gap-2.5 px-5 pt-4 pb-3.5">
           <h2 className="m-0 text-[15px] font-semibold">{t("serviceDomains.title")}</h2>
           <span className="text-[12.5px] text-muted-foreground">{t("serviceDomains.subtitle")}</span>
-          <Button variant="primary" className="ml-auto h-9 text-[13px]" onClick={() => setAdding(true)}>
-            <IconPlus size={14} stroke={2.2} />
+          <Button size="sm" variant="primary" className="ml-auto" onClick={() => setAdding(true)}>
+            <IconPlus size={14} />
             {t("serviceDomains.add")}
           </Button>
         </div>

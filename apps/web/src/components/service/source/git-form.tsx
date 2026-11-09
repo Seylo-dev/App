@@ -16,6 +16,7 @@ import { InternalHostNote } from "../../git/internal-hosts";
 import { Field, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import type { ServiceDetail } from "../use-service";
 
 const publicRepo = "__public__";
@@ -145,13 +146,13 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         description={t("serviceSource.git.pushHint")}
         control={<Switch checked={deployOnPush} onCheckedChange={setDeployOnPush} aria-label={t("serviceSource.deployOnPush")} />}
       />
-      <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={!validUrl || !branch.trim() || save.isPending}>
+      <InternalHostNote error={save.error} projectId={service.projectId} />
+      <CardSaveBar>
+        <Button type="submit" size="sm" variant="primary" disabled={!validUrl || !branch.trim() || save.isPending}>
           {t("service.save")}
         </Button>
         <MutationError error={save.error} />
-      </div>
-      <InternalHostNote error={save.error} projectId={service.projectId} />
+      </CardSaveBar>
     </form>
   );
 }

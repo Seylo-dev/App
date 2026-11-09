@@ -12,6 +12,7 @@ import { t } from "../../../i18n/t";
 import { CodeEditor } from "../editor/code-editor";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
+import { CardSaveBar } from "../save-bar";
 import type { ServiceDetail } from "../use-service";
 
 const starter = "FROM nginx:1.27-alpine\nCOPY <<EOF /usr/share/nginx/html/index.html\nHello\nEOF\n";
@@ -23,7 +24,9 @@ export function InlineForm({ service }: { service: ServiceDetail }) {
       <LoadingRegion label={t("common.loading")} className="flex flex-col gap-3">
         <Skeleton className="h-[360px]" />
         <SkeletonText className="w-80 text-xs" />
-        <ButtonSkeleton className="w-24" />
+        <CardSaveBar>
+          <ButtonSkeleton size="sm" className="w-[52px]" />
+        </CardSaveBar>
       </LoadingRegion>
     );
   if (settings.isError) return <OpErrorNote error={settings.error} />;
@@ -66,12 +69,12 @@ function InlineEditor({ service, initial }: { service: ServiceDetail; initial: s
         />
       </div>
       <p className="m-0 text-xs text-muted-foreground">{t("serviceSource.inline.hint")}</p>
-      <div className="flex items-center gap-3">
-        <Button variant="primary" onClick={() => void save()} disabled={saving || !text.trim()}>
+      <CardSaveBar>
+        <Button size="sm" variant="primary" onClick={() => void save()} disabled={saving || !text.trim()}>
           {saving ? t("service.saving") : t("service.save")}
         </Button>
         <MutationError error={error} />
-      </div>
+      </CardSaveBar>
     </div>
   );
 }

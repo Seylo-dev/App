@@ -122,25 +122,28 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
     <div className="flex flex-col gap-4">
       <SectionCard title={t("serviceSettings.name.title")} description={t("serviceSettings.name.description")}>
         <form
-          className="flex flex-wrap items-end gap-2"
+          className="flex flex-col gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (valid && name !== service.name) rename.mutate({ serviceId: service.id, name });
           }}
         >
-          <Field label={t("serviceSettings.name.label")} htmlFor="s-name" hint={t("serviceSettings.name.hint")} className="w-80">
-            <Input
-              id="s-name"
-              className="font-mono"
-              value={name}
-              onChange={(e) => setName(e.target.value.toLowerCase())}
-              aria-invalid={!valid}
-              disabled={member}
-            />
+          {/* The hint goes under the input and the button, so the button sits on the input's row. */}
+          <Field label={t("serviceSettings.name.label")} htmlFor="s-name" hint={t("serviceSettings.name.hint")} className="max-w-[440px]">
+            <div className="flex items-center gap-2">
+              <Input
+                id="s-name"
+                className="min-w-0 flex-1 font-mono"
+                value={name}
+                onChange={(e) => setName(e.target.value.toLowerCase())}
+                aria-invalid={!valid}
+                disabled={member}
+              />
+              <Button type="submit" variant="primary" disabled={!valid || name === service.name || rename.isPending || member}>
+                {t("serviceSettings.name.rename")}
+              </Button>
+            </div>
           </Field>
-          <Button type="submit" variant="primary" disabled={!valid || name === service.name || rename.isPending || member}>
-            {t("serviceSettings.name.rename")}
-          </Button>
           <MutationError error={rename.error} />
         </form>
         {member && <Callout tone="neutral">{t("serviceSettings.member")}</Callout>}

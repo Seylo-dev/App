@@ -46,7 +46,7 @@ export function StoragePage({ service }: { service: ServiceDetail }) {
           <h2 className="m-0 text-[15px] font-semibold">{t("serviceStorage.title")}</h2>
           <span className="text-[12.5px] text-muted-foreground">{t("serviceStorage.subtitle")}</span>
           {editable && !adding && (
-            <Button size="sm" className="ml-auto" onClick={() => setAdding(true)} disabled={multiNode}>
+            <Button size="sm" variant="primary" className="ml-auto" onClick={() => setAdding(true)} disabled={multiNode}>
               <IconPlus size={14} />
               {t("serviceStorage.add.button")}
             </Button>

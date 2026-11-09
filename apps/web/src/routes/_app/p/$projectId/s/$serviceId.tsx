@@ -79,8 +79,17 @@ function ServiceLayout() {
       {service.data && <DataCopyNote service={service.data} />}
       {service.isPending && usageStripTabs.has(tabPath) && <UsageStripSkeleton />}
       {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
-      {/* One swipe row on a phone (the hidden edge fades); from md up the tabs wrap, so every tab shows. */}
-      <TabList ref={tabRowRef} aria-label={t("service.sections")} className="scroll-row flex-nowrap md:flex-wrap md:overflow-visible">
+      {/*
+        One swipe row on a phone (the hidden edge fades). From md up every tab shows: a little closer
+        together, an app's 16 tabs fit one row at 1440px; on a narrower screen they wrap, and each row
+        gets its own track line (every tab is 40px tall and overlaps the next row by its -1px margin, so
+        rows start every 39px), so the current tab's underline sits on a line in any row.
+      */}
+      <TabList
+        ref={tabRowRef}
+        aria-label={t("service.sections")}
+        className="scroll-row flex-nowrap md:flex-wrap md:gap-0 md:overflow-visible md:border-b-0 md:bg-[repeating-linear-gradient(to_bottom,transparent_0_38px,var(--color-border)_38px_39px)]"
+      >
         {tabs.map((tab) => (
           <Link
             key={tab.path}
@@ -88,7 +97,7 @@ function ServiceLayout() {
             params={{ projectId, serviceId }}
             // A tab's own search (the Console tab's ?mode=shell) keeps the tab current.
             activeOptions={{ exact: true, includeSearch: false }}
-            className={`${tabClassName} shrink-0 whitespace-nowrap`}
+            className={`${tabClassName} h-10 shrink-0 leading-5 whitespace-nowrap md:px-2`}
           >
             {({ isActive }) => (
               <>

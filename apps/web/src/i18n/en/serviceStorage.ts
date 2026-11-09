@@ -32,8 +32,8 @@ export default {
   empty: "No volumes",
   emptyHint: "This service keeps nothing on disk between deploys.",
   perNode: "Each node this service runs on keeps its own copy of every volume. Files shows the first node unless you pick another.",
-  readOnly: "read only",
-  sharedWith: "shared with {names}",
+  readOnly: "Read only",
+  sharedWith: "Shared with {names}",
   kind: { volume: "Folder", file: "File mount" },
   files: {
     button: "Files",

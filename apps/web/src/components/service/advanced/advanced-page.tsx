@@ -20,7 +20,7 @@ import { t } from "../../../i18n/t";
 import { isPanelService } from "../../../lib/service-display";
 import { describeCron } from "../cron-text";
 import { MaintenanceCard } from "../domains/access-cards";
-import { Field, parseIntOrNull, ToggleRow } from "../field";
+import { Field, FieldGrid, parseIntOrNull, ToggleRow } from "../field";
 import { volumesOf } from "../files/volumes";
 import { useInvalidate } from "../invalidate";
 import { MutationError, retryOp } from "../op-state";
@@ -163,7 +163,7 @@ function HealthCard({ service }: { service: ServiceDetail }) {
       </div>
       {type === "default" && <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceAdvanced.health.defaultHint")}</p>}
       {type !== "default" && (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <FieldGrid className="grid-cols-2 md:grid-cols-4">
           <Field label={t("serviceAdvanced.health.interval")} htmlFor="h-int">
             <Input id="h-int" inputMode="numeric" value={interval} onChange={(e) => setIntervalSeconds(e.target.value)} />
           </Field>
@@ -176,7 +176,7 @@ function HealthCard({ service }: { service: ServiceDetail }) {
           <Field label={t("serviceAdvanced.health.failures")} htmlFor="h-fail">
             <Input id="h-fail" inputMode="numeric" value={failures} onChange={(e) => setFailures(e.target.value)} />
           </Field>
-        </div>
+        </FieldGrid>
       )}
       <div className="grid gap-4 border-t border-divider pt-4 md:grid-cols-2">
         <Field label={t("serviceAdvanced.deploy.mode")} hint={t(`serviceAdvanced.deploy.${mode}Hint`)}>
@@ -452,7 +452,7 @@ function ResourcesCard({ service }: { service: ServiceDetail }) {
         </>
       }
     >
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <FieldGrid className="grid-cols-2 md:grid-cols-4">
         <Field label={t("serviceAdvanced.resources.memory")} htmlFor="r-mem" hint={t("serviceAdvanced.resources.emptyOff")}>
           <Input id="r-mem" inputMode="numeric" value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="MB" />
         </Field>
@@ -465,7 +465,7 @@ function ResourcesCard({ service }: { service: ServiceDetail }) {
         <Field label={t("serviceAdvanced.resources.pids")} htmlFor="r-pids" hint={t("serviceAdvanced.resources.emptyOff")}>
           <Input id="r-pids" inputMode="numeric" value={pids} onChange={(e) => setPids(e.target.value)} />
         </Field>
-      </div>
+      </FieldGrid>
     </SectionCard>
   );
 }
