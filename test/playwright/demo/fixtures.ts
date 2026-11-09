@@ -303,6 +303,7 @@ function recent(
     trigger: version.sha ? "push" : "manual",
     actor: null,
     commit: version.sha ? { sha: version.sha.padEnd(40, "0"), message: "", branch: "main", author: null } : null,
+    source: version.sha ? "main" : null,
     builder: null,
     builtOn: version.sha ? node : null,
     shippedTo: [node],

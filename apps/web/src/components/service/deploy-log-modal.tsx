@@ -13,7 +13,7 @@ import { t } from "../../i18n/t";
 import { useLiveUp } from "../../lib/live";
 import { bufferText, downloadText, useDeploymentLog } from "./deploy-log";
 import { type Deployment, StepCards } from "./deploy-steps";
-import { deploymentDurationMs, deploymentTitle, deploymentVersion, healthFailed, triggerLabel } from "./deployment-meta";
+import { deploymentDurationMs, deploymentTitle, deploymentVersion, healthFailed, type TitleSource, triggerLabel } from "./deployment-meta";
 import { formatDuration, formatRelative, formatTimeOfDay } from "./format";
 import { OpErrorNote, retryOp } from "./op-state";
 import { isActiveDeployment } from "./status";
@@ -22,23 +22,26 @@ import { useNow } from "./use-now";
 
 export function DeployLogModal({
   serviceId,
+  source,
   deployment,
   onClose,
 }: {
   serviceId: string;
+  /** The service's source, for the title of a deploy without a commit (deploymentTitle: only an inline Dockerfile's label names one). */
+  source?: TitleSource;
   deployment: Deployment | null;
   onClose: () => void;
 }) {
   return (
     <Dialog open={deployment !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="top-[84px] flex max-h-[calc(100dvh-108px)] max-w-[780px] flex-col overflow-hidden p-0">
-        {deployment && <ModalBody serviceId={serviceId} initial={deployment} />}
+        {deployment && <ModalBody serviceId={serviceId} source={source} initial={deployment} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ModalBody({ serviceId, initial }: { serviceId: string; initial: Deployment }) {
+function ModalBody({ serviceId, source, initial }: { serviceId: string; source?: TitleSource; initial: Deployment }) {
   const now = useNow(isActiveDeployment(initial.status) ? 1000 : 0);
   // deployment:<id> and service:<id> invalidate this while it runs; poll fast only while the socket is down.
   const liveUp = useLiveUp();
@@ -84,7 +87,7 @@ function ModalBody({ serviceId, initial }: { serviceId: string; initial: Deploym
                 {t("serviceDeploys.modal.deploy")} <span className="font-mono text-[14.5px] font-medium">{version}</span> ·{" "}
               </>
             ) : null}
-            {deploymentTitle(d)}
+            {deploymentTitle(d, source)}
           </DialogTitle>
           <DialogDescription asChild>
             <div className="flex flex-wrap items-center gap-2 text-[12.5px]">

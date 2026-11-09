@@ -42,6 +42,26 @@ export const deploymentStatusLook: Record<DeploymentStatus, StatusLook> = {
   cancelled: { tone: "gray", dot: "off", pulse: false, label: "serviceDeploys.status.cancelled" },
 };
 
+/**
+ * Whether a container of the service runs now, so a console can attach:
+ * running, partly running or failing its health check, or a deploy going on
+ * while the live version still runs. Not while it starts, crashes, stops or
+ * was never deployed.
+ */
+export function hasRunningInstance(service: { status: ServiceStatus; stopped: boolean; liveDeployment: unknown }): boolean {
+  switch (service.status) {
+    case "running":
+    case "partial":
+    case "unhealthy":
+      return true;
+    case "building":
+    case "deploying":
+      return !service.stopped && service.liveDeployment !== null;
+    default:
+      return false;
+  }
+}
+
 /** A deployment that is still moving: the header offers Cancel deploy, the page polls. */
 export function isActiveDeployment(status: DeploymentStatus): boolean {
   return status === "queued" || status === "building" || status === "deploying";

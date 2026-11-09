@@ -131,7 +131,7 @@ type engineCase struct {
 
 const pw = "pw-With:odd\"chars"
 
-// clientExec runs the pre-logged-in client (the Shell tab's command) with
+// clientExec runs the pre-logged-in client (the Connection tab's database shell) with
 // extra arguments inside the database container.
 func clientExec(e *itest.Env, spec *agentv1.ServiceSpec, container string, extra ...string) (string, int) {
 	argv, env, err := dbtools.ClientCommand(spec.GetDatabase())
@@ -449,7 +449,7 @@ func newEngines() map[string]newEngine {
 }
 
 // Each new engine starts as the panel runs it, answers its pre-logged-in
-// client (the Shell tab's command), and survives a backup to MinIO and a
+// client (the Connection tab's database shell), and survives a backup to MinIO and a
 // restore; Redis-like engines also keep the restored data across another
 // restart (their append-only files are rebuilt from it).
 func TestNewEnginesDumpRestoreRoundTrip(t *testing.T) {

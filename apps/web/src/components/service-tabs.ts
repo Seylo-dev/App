@@ -13,7 +13,6 @@ export type TabPath =
   | "environment"
   | "domains"
   | "console"
-  | "shell"
   | "logs"
   | "metrics"
   | "storage"
@@ -40,8 +39,8 @@ export const appTabs: readonly ServiceTab[] = [
   tab("source", "service.tabs.source"),
   tab("environment", "service.tabs.environment"),
   tab("domains", "service.tabs.domains"),
+  // Console and shell are two modes of this one tab (?mode=shell); /shell redirects here.
   tab("console", "service.tabs.console"),
-  tab("shell", "service.tabs.shell"),
   tab("logs", "service.tabs.logs"),
   tab("metrics", "service.tabs.metrics"),
   tab("storage", "service.tabs.storage"),
@@ -121,4 +120,4 @@ export function tabsFor(kind: ServiceKind | undefined): readonly ServiceTab[] {
 }
 
 /** Tabs that show the live usage strip under the header (Service.dc.html shows it with the console). */
-export const usageStripTabs: ReadonlySet<TabPath> = new Set<TabPath>(["", "console", "shell", "logs", "metrics"]);
+export const usageStripTabs: ReadonlySet<TabPath> = new Set<TabPath>(["", "console", "logs", "metrics"]);

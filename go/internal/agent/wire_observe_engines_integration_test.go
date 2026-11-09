@@ -13,7 +13,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/console/dockerapi"
 )
 
-// The Shell tab's database client for the engines added in 0.2, through the
+// The Connection tab's database shell for the engines added in 0.2, through the
 // real Shell RPC with a PTY: valkey-cli, keydb-cli, Dragonfly's redis-cli
 // and clickhouse-client start signed in, run a command, and the password
 // shows in no process listing. The containers run as the panel starts them

@@ -39,6 +39,7 @@ import { DeploymentChips, deploymentDurationMs, deploymentTitle, deploymentVersi
 import { formatClock, formatRelative, formatTimeOfDay } from "./format";
 import { useInvalidate } from "./invalidate";
 import { isNotBuilt, OpErrorNote, retryOp } from "./op-state";
+import { PrivateRepoHint } from "./private-repo-hint";
 import { isActiveDeployment } from "./status";
 import { DeploymentStatusChip } from "./status-chip";
 import { useNow } from "./use-now";
@@ -110,7 +111,7 @@ export function DeploymentsPage({ service }: { service: ServiceDetail }) {
         {side && <SideLog service={service} d={side} />}
         {first.isPending && <Skeleton className="min-w-0 flex-[1_1_420px] self-stretch rounded-card bg-terminal" />}
       </div>
-      <DeployLogModal serviceId={service.id} deployment={open} onClose={() => setOpen(null)} />
+      <DeployLogModal serviceId={service.id} source={service.source} deployment={open} onClose={() => setOpen(null)} />
     </>
   );
 }
@@ -236,7 +237,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
       </span>
       <div className="flex min-w-0 flex-[1_1_200px] flex-col gap-[7px]">
         <div className="flex min-h-[22px] flex-wrap items-center gap-2">
-          <b className="text-[13.5px] font-semibold">{deploymentTitle(d)}</b>
+          <b className="text-[13.5px] font-semibold">{deploymentTitle(d, service.source)}</b>
           {version && <span className="font-mono text-xs text-muted-foreground">{version}</span>}
           {d.live ? (
             <DeploymentStatusChip status="live" />
@@ -252,6 +253,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
           </span>
         </div>
         {d.error && <span className="text-[12.5px] leading-[1.45] text-ink-strong">{d.error}</span>}
+        <PrivateRepoHint service={service} d={d} />
         {failed && <DeployHostAction service={service} error={d.error} />}
         {running ? <StepChips steps={d.steps} /> : <DeploymentChips d={d} now={now} />}
       </div>
@@ -292,7 +294,7 @@ function DeploymentRow({ service, d, onLogs }: { service: ServiceDetail; d: Depl
       <ConfirmDialog
         open={confirmRollback}
         onOpenChange={setConfirmRollback}
-        title={t("serviceDeploys.rollbackTitle", { version: version || deploymentTitle(d) })}
+        title={t("serviceDeploys.rollbackTitle", { version: version || deploymentTitle(d, service.source) })}
         description={t("serviceDeploys.rollbackBody")}
         confirmLabel={t("serviceDeploys.rollback")}
         onConfirm={() => rollback.mutateAsync({ serviceId: service.id, deploymentId: d.id }).then(() => undefined)}

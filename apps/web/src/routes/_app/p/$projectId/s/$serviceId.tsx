@@ -10,6 +10,7 @@ import { SkeletonText } from "@seylo/ui/components/skeleton";
 import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
 import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { createFileRoute, Link, Outlet, useChildMatches, useRouterState } from "@tanstack/react-router";
+import { useCallback, useEffect, useRef } from "react";
 import { DataCopyNote } from "../../../../../components/service/copy/data-copy-note";
 import { OpErrorNote } from "../../../../../components/service/op-state";
 import { ParentCrumb } from "../../../../../components/service/parent-crumb";
@@ -37,6 +38,25 @@ function ServiceLayout() {
   const tabMatch = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   const parent = service.data?.parentId;
 
+  // On a phone the tabs are one swipe row: bring the current tab into it
+  // (arriving on Console from the Overview's "Open full" left it off screen).
+  // Only the row scrolls, never the page.
+  const tabRow = useRef<HTMLElement | null>(null);
+  const tabRowRef = useCallback((el: HTMLElement | null) => {
+    tabRow.current = el;
+    return scrollFadeRef(el);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the current tab or the tab set changes.
+  useEffect(() => {
+    const row = tabRow.current;
+    const current = row?.querySelector<HTMLElement>('[data-status="active"]');
+    if (!row || !current || row.scrollWidth <= row.clientWidth) return;
+    const box = row.getBoundingClientRect();
+    const item = current.getBoundingClientRect();
+    if (item.left < box.left) row.scrollLeft -= box.left - item.left + 24;
+    else if (item.right > box.right) row.scrollLeft += item.right - box.right + 24;
+  }, [tabPath, tabs]);
+
   return (
     <>
       <nav aria-label={t("nav.breadcrumb")} className="flex flex-wrap gap-1.5 text-[13px] text-muted-foreground">
@@ -60,13 +80,14 @@ function ServiceLayout() {
       {service.isPending && usageStripTabs.has(tabPath) && <UsageStripSkeleton />}
       {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
       {/* One swipe row on a phone (the hidden edge fades); from md up the tabs wrap, so every tab shows. */}
-      <TabList ref={scrollFadeRef} aria-label={t("service.sections")} className="scroll-row flex-nowrap md:flex-wrap md:overflow-visible">
+      <TabList ref={tabRowRef} aria-label={t("service.sections")} className="scroll-row flex-nowrap md:flex-wrap md:overflow-visible">
         {tabs.map((tab) => (
           <Link
             key={tab.path}
             to={`/p/$projectId/s/$serviceId${tab.path ? `/${tab.path}` : ""}` as "/p/$projectId/s/$serviceId"}
             params={{ projectId, serviceId }}
-            activeOptions={{ exact: true }}
+            // A tab's own search (the Console tab's ?mode=shell) keeps the tab current.
+            activeOptions={{ exact: true, includeSearch: false }}
             className={`${tabClassName} shrink-0 whitespace-nowrap`}
           >
             {({ isActive }) => (

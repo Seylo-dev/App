@@ -1,5 +1,5 @@
 // Package shell starts processes inside service containers with docker
-// exec: interactive shells with a PTY (the Shell tab), bash or sh by
+// exec: interactive shells with a PTY (the Console tab in shell mode), bash or sh by
 // default or the database engine's client already logged in for
 // SERVICE_KIND_DATABASE (the command comes from package dbtools through
 // Options.DatabaseClient), and short one-shot commands (the Exec RPC).

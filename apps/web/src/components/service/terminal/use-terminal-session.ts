@@ -1,6 +1,6 @@
 // One terminal session over a ticketed WebSocket: binary frames are
 // terminal bytes, text frames are JSON control messages (terminals.ts in
-// @seylo/ops). Used by the Console, the Shell and database shells.
+// @seylo/ops). Used by the Console tab in both modes, the Overview's console card, database and host shells.
 
 import type { terminals } from "@seylo/ops";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,8 +34,12 @@ export function useTerminalSession(
   const term = useRef<XtermHandle | null>(null);
   const latest = useRef({ source, describe });
   latest.current = { source, describe };
+  // Bumped by every close: a ticket that arrives after the session was closed
+  // (the page was left, the mode switched, a newer connect started) opens no socket.
+  const attempt = useRef(0);
 
   const close = useCallback(() => {
+    attempt.current++;
     const ws = socket.current;
     socket.current = null;
     ws?.close();
@@ -48,15 +52,17 @@ export function useTerminalSession(
 
   const connect = useCallback(async () => {
     close();
+    const mine = attempt.current;
     setState({ status: "connecting" });
     const size = term.current?.size() ?? { columns: 120, rows: 32 };
     let target: { url: string; ticket: string };
     try {
       target = await latest.current.source.open(size);
     } catch (error) {
-      setState({ status: "error", error });
+      if (attempt.current === mine) setState({ status: "error", error });
       return;
     }
+    if (attempt.current !== mine) return;
     const ws = openSocket(withTicket(target.url, target.ticket));
     socket.current = ws;
     ws.onmessage = (event) => {
@@ -97,12 +103,19 @@ export function useTerminalSession(
     if (ws?.readyState === WebSocket.OPEN) ws.send(encoder.encode(data));
   }, []);
 
+  /** Closes the session and forgets its state, for a new session in the same panel (Console to Shell). */
+  const reset = useCallback(() => {
+    close();
+    setState({ status: "idle" });
+  }, [close]);
+
   useEffect(() => close, [close]);
 
   return {
     state,
     connect,
     close,
+    reset,
     input,
     resize: (size: { columns: number; rows: number }) => send({ type: "resize", ...size }),
     attach: (handle: XtermHandle) => {

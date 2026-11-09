@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import { formatAgo, formatClock } from "../../lib/format";
 import { QueryError } from "../query-error";
+import { isPanelImage } from "../service/deployment-meta";
 
 type Tone = "ok" | "run" | "bad" | "info";
 
@@ -61,10 +62,10 @@ export function RecentDeploys() {
   );
 }
 
-/** A short version: the commit, the image tag, else the generation. */
+/** A short version: the commit, a pulled image's tag, else the generation (never the panel registry's tag, which is the generation). */
 function versionLabel(d: Recent): string {
   if (d.commit) return d.commit.sha.slice(0, 7);
-  const ref = d.image?.reference ?? "";
+  const ref = d.image && !isPanelImage(d.image.reference) ? d.image.reference : "";
   const tag = ref.includes("@") ? "" : ref.slice(ref.lastIndexOf(":") + 1);
   return tag && !tag.includes("/") ? tag : `#${d.generation}`;
 }

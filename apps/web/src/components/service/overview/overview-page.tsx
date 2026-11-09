@@ -1,4 +1,5 @@
-// The Overview tab. Apps: where it runs, the live and latest deploy, its
+// The Overview tab. Apps: where it runs, the live and latest deploy, the
+// console (with the same Console | Shell switch as the Console tab), its
 // domains, a usage graph and quick actions. Compose stacks: their members.
 // Cron services: the schedule and recent runs. Boxes: the editor's state.
 // Databases have no overview; their first tab is Connection.
@@ -14,9 +15,9 @@ import { KeyValue } from "@seylo/ui/components/key-value";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { toast } from "@seylo/ui/components/toast";
-import { IconLock, IconTerminal2, IconWorld } from "@tabler/icons-react";
+import { IconArrowUpRight, IconLock, IconWorld } from "@tabler/icons-react";
 import { Link, Navigate } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { useLiveUp } from "../../../lib/live";
@@ -27,10 +28,18 @@ import { deploymentTitle, deploymentVersion } from "../deployment-meta";
 import { formatBytes, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
-import { isActiveDeployment, isDatabaseKind } from "../status";
+import { PrivateRepoHint } from "../private-repo-hint";
+import { TerminalSkeleton } from "../service-skeletons";
+import { hasRunningInstance, isActiveDeployment, isDatabaseKind } from "../status";
 import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
+import { pickMode, type TerminalMode, useTerminalModes } from "../terminal/access";
+import { ModeSwitch, ServiceTerminal } from "../terminal/console-pages";
+import { TerminalNote } from "../terminal/terminal-panel";
 import { crashPolicyLabel } from "../usage-strip";
 import type { ServiceDetail } from "../use-service";
+
+/** The Overview console card's height: about 14 lines of output with the header and the stdin line. */
+export const consoleCardHeight = 360;
 
 export function OverviewPage({ service }: { service: ServiceDetail }) {
   if (isDatabaseKind(service.kind))
@@ -59,6 +68,7 @@ function AppOverview({ service }: { service: ServiceDetail }) {
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
         <LatestDeploy service={service} />
+        <ConsoleCard service={service} />
         <UsagePanel service={service} />
       </div>
       <div className="flex min-w-0 flex-col gap-4">
@@ -88,13 +98,8 @@ function AppOverview({ service }: { service: ServiceDetail }) {
         </Panel>
         <DomainsPanel service={service} />
         <Panel title={t("serviceOverview.quick")}>
+          {/* No Console here: the console card on the left has it, with Open full to the tab. */}
           <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm">
-              <Link to="/p/$projectId/s/$serviceId/console" params={p}>
-                <IconTerminal2 size={14} />
-                {t("service.tabs.console")}
-              </Link>
-            </Button>
             <Button asChild size="sm">
               <Link to="/p/$projectId/s/$serviceId/logs" params={p}>
                 {t("service.tabs.logs")}
@@ -157,17 +162,18 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
       ) : (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <b className="text-[13.5px] font-semibold">{deploymentTitle(latest)}</b>
+            <b className="text-[13.5px] font-semibold">{deploymentTitle(latest, service.source)}</b>
             <span className="font-mono text-xs text-muted-foreground">{deploymentVersion(latest)}</span>
             <DeploymentStatusChip status={latest.status} />
             <span className="ml-auto text-xs text-muted-foreground">{formatRelative(latest.createdAt)}</span>
           </div>
           <StepChips steps={latest.steps} />
           {latest.error && <span className="text-[12.5px] text-chip-red-fg">{latest.error}</span>}
+          <PrivateRepoHint service={service} d={latest} />
           {live && live.id !== latest.id && (
             <span className="text-[12.5px] text-muted-foreground">
               {t("serviceOverview.liveIs", {
-                version: deploymentVersion(live) || deploymentTitle(live),
+                version: deploymentVersion(live) || deploymentTitle(live, service.source),
                 when: formatRelative(live.createdAt),
               })}
             </span>
@@ -175,6 +181,68 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+/**
+ * The console on the Overview: the Console tab's terminal at a fixed
+ * height, with the same Console | Shell switch. It is that height in every
+ * state (loading, nothing running yet, connected, exited), so the column
+ * never moves when the status changes. The first session waits for a
+ * running container; after that the terminal stays until the page is left,
+ * so a crash or a restart keeps the last output, the exit note and
+ * Reconnect, and opens no new ticket. It opens the console by itself and a
+ * shell only when asked (the switch, or Open shell for a person who may
+ * open only the shell), never takes focus until clicked, and offers only
+ * the modes the person may open: none at all hides it.
+ */
+function ConsoleCard({ service }: { service: ServiceDetail }) {
+  const modes = useTerminalModes(service);
+  const [wanted, setWanted] = useState<TerminalMode>("console");
+  // The person used the switch: the mode they picked opens at once, a shell too.
+  const [picked, setPicked] = useState(false);
+  const [shown, setShown] = useState(false);
+  const running = hasRunningInstance(service);
+  const mode = modes ? pickMode(wanted, modes) : null;
+  if (mode && running && !shown) setShown(true);
+  if (modes === null) return <TerminalSkeleton height={consoleCardHeight} />;
+  if (!mode) return null;
+  const choose = (next: TerminalMode) => {
+    setWanted(next);
+    setPicked(true);
+  };
+  if (!shown && !running)
+    return (
+      <TerminalNote
+        label={t(`serviceTerminal.modes.${mode}`)}
+        switcher={<ModeSwitch mode={mode} modes={modes} onChange={choose} />}
+        height={consoleCardHeight}
+      >
+        {t(mode === "shell" ? "serviceTerminal.notRunningShell" : "serviceTerminal.notRunning")}
+      </TerminalNote>
+    );
+  return (
+    <ServiceTerminal
+      service={service}
+      mode={mode}
+      modes={modes}
+      onModeChange={choose}
+      height={consoleCardHeight}
+      start={mode === "shell" && !picked ? t("serviceTerminal.openShell") : undefined}
+      subtitle={false}
+      actions={
+        <Link
+          to="/p/$projectId/s/$serviceId/console"
+          params={{ projectId: service.projectId, serviceId: service.id }}
+          search={{ mode: mode === "shell" ? "shell" : undefined }}
+          className="ml-1 inline-flex cursor-pointer items-center gap-1 rounded-chip px-2 py-[5px] text-[12.5px] font-medium text-terminal-muted hover:text-terminal-foreground max-sm:ml-0 max-sm:p-[7px]"
+        >
+          <IconArrowUpRight size={14} stroke={1.9} aria-hidden="true" />
+          {/* Just the arrow on a phone, so the switch and the buttons share one row. */}
+          <span className="max-sm:sr-only">{t("serviceTerminal.openFull")}</span>
+        </Link>
+      }
+    />
   );
 }
 
@@ -422,7 +490,7 @@ function BoxOverview({ service }: { service: ServiceDetail }) {
   );
 }
 
-/** The app overview's two columns while the service loads: deploys and usage on the left, facts, domains and actions on the right. */
+/** The app overview's two columns while the service loads: deploys, console and usage on the left, facts, domains and actions on the right. */
 export function OverviewSkeleton() {
   return (
     <LoadingRegion label={t("common.loading")} className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
@@ -441,6 +509,7 @@ export function OverviewSkeleton() {
             ))}
           </div>
         </Card>
+        <TerminalSkeleton height={consoleCardHeight} inRegion />
         <Card>
           <SkeletonText className="w-20 text-[15px]" />
           <div className="grid gap-4 sm:grid-cols-2">

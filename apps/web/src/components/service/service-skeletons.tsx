@@ -94,22 +94,50 @@ export function TabSkeleton() {
   );
 }
 
-/** The dark terminal surface of the console, shell and logs tabs while they load. */
-export function TerminalSkeleton() {
-  return (
-    <LoadingRegion
-      label={t("common.loading")}
-      className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-card bg-terminal shadow-card"
-    >
+/**
+ * The dark terminal surface of the console and logs tabs while they load:
+ * the header bar with the switch, and a few short lines. It fills the page
+ * (at least `minHeight`), or takes a fixed `height` (the Overview's console
+ * card). Only the small bars shimmer, with a faint light: a bright sweep
+ * over the dark block looks like a smear.
+ */
+export function TerminalSkeleton({
+  height,
+  minHeight = 520,
+  inRegion = false,
+}: {
+  height?: number;
+  minHeight?: number;
+  /** Inside a placeholder that is a LoadingRegion already (the Overview's): a plain block. */
+  inRegion?: boolean;
+}) {
+  const className = cn(
+    "flex flex-col overflow-hidden rounded-card bg-terminal shadow-card [--skeleton-shine:rgb(255_255_255/0.06)]",
+    height === undefined && "flex-1",
+  );
+  const style = height === undefined ? { minHeight } : { height };
+  const shape = (
+    <>
       <div className="flex h-12 shrink-0 items-center gap-2 bg-terminal-bar px-3.5">
         <Skeleton className="h-6 w-20 rounded-chip bg-terminal-field" />
-        <SkeletonText className="w-64 text-[12.5px] opacity-30" />
+        <SkeletonText className="w-64 max-w-[40%] text-[12.5px] opacity-30" />
       </div>
       <div className="flex flex-col gap-2 p-4">
         {["w-72", "w-56", "w-80", "w-48", "w-64"].map((width) => (
-          <Skeleton key={width} className={`h-3 rounded-chip bg-terminal-field ${width}`} />
+          <Skeleton key={width} className={`h-3 max-w-full rounded-chip bg-terminal-field ${width}`} />
         ))}
       </div>
+    </>
+  );
+  if (inRegion)
+    return (
+      <div data-slot="terminal-skeleton" aria-hidden="true" className={className} style={style}>
+        {shape}
+      </div>
+    );
+  return (
+    <LoadingRegion data-slot="terminal-skeleton" label={t("common.loading")} className={className} style={style}>
+      {shape}
     </LoadingRegion>
   );
 }

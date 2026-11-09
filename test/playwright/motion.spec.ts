@@ -233,40 +233,42 @@ test.describe("motion", () => {
     await slide(page.getByRole("radiogroup", { name: "Provider" }), "Bitbucket");
   });
 
-  test("the Console | Shell switch slides one background and keeps the font weight", async ({ page }) => {
+  test("the Console | Shell switch slides one background in place and keeps the font weight", async ({ page }) => {
     await installDemo(page);
     await page.goto(`/p/${ids.acme}/s/${svc.api}/console`);
-    const group = page.getByRole("navigation", { name: "Console or shell" });
+    const group = page.getByRole("radiogroup", { name: "Console or shell" });
     const pill = group.locator('[data-slot="active-indicator"]');
-    const consoleLink = group.getByRole("link", { name: "Console" });
-    await expect(consoleLink).toHaveAttribute("aria-current", "page");
-    // One indicator, inside the current item (before: a background painted on the link itself).
+    const consoleItem = group.getByRole("radio", { name: "Console" });
+    await expect(consoleItem).toHaveAttribute("aria-checked", "true");
+    // One indicator, inside the current item (before: a background painted on the item itself).
     await expect(pill).toHaveCount(1);
-    await expect.poll(async () => Math.abs(((await pill.boundingBox())?.x ?? 0) - ((await consoleLink.boundingBox())?.x ?? 0))).toBeLessThan(1);
+    await expect.poll(async () => Math.abs(((await pill.boundingBox())?.x ?? 0) - ((await consoleItem.boundingBox())?.x ?? 0))).toBeLessThan(1);
     const from = (await pill.boundingBox())?.x ?? Number.NaN;
-    // The whole terminal is a new screen after the click, so look the indicator up again on every frame.
+    // The indicator is a new element in the clicked item, so look it up again on every frame.
     await page.evaluate(() => {
       const w = window as unknown as { __xs: number[] };
       w.__xs = [];
       const start = performance.now();
       const sample = () => {
-        const el = document.querySelector('nav[aria-label="Console or shell"] [data-slot="active-indicator"]');
+        const el = document.querySelector('[role="radiogroup"][aria-label="Console or shell"] [data-slot="active-indicator"]');
         if (el) w.__xs.push(el.getBoundingClientRect().left);
         if (performance.now() - start < 500) requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
     });
-    const shellLink = group.getByRole("link", { name: "Shell" });
-    await shellLink.click();
+    const shellItem = group.getByRole("radio", { name: "Shell" });
+    await shellItem.click();
     await page.waitForTimeout(650);
-    await expect(shellLink).toHaveAttribute("aria-current", "page");
+    await expect(shellItem).toHaveAttribute("aria-checked", "true");
+    // In place: the same page, the mode in the URL.
+    await expect(page).toHaveURL(/\/console\?mode=shell$/);
     await expect(pill).toHaveCount(1);
-    const to = (await shellLink.boundingBox())?.x ?? Number.NaN;
+    const to = (await shellItem.boundingBox())?.x ?? Number.NaN;
     expect(Math.abs(((await pill.boundingBox())?.x ?? Number.NaN) - to)).toBeLessThan(1);
     const xs = await page.evaluate(() => (window as unknown as { __xs: number[] }).__xs);
     const between = xs.filter((x) => x > Math.min(from, to) + 1 && x < Math.max(from, to) - 1);
     expect(between.length, `frames between ${from} and ${to}: ${xs.join(", ")}`).toBeGreaterThan(0);
-    const weights = await group.getByRole("link").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontWeight));
+    const weights = await group.getByRole("radio").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontWeight));
     expect(new Set(weights).size, weights.join(", ")).toBe(1);
   });
 

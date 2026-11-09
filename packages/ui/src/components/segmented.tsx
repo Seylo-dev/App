@@ -3,20 +3,31 @@ import * as React from "react";
 import { cn } from "../lib/utils";
 import { ActiveIndicator } from "./motion";
 
+export type SegmentedTone = "muted" | "track" | "terminal";
+
 export interface SegmentedProps {
   value: string;
   onValueChange: (value: string) => void;
   /** Accessible name of the group, for example "Time range". */
   "aria-label": string;
-  /** "muted" for tracks on a card, "track" for tracks on the page ground. */
-  tone?: "muted" | "track";
+  /** "muted" for tracks on a card, "track" for tracks on the page ground, "terminal" in a terminal's dark header. */
+  tone?: SegmentedTone;
   className?: string;
   children: React.ReactNode;
   /** The track element, for example scrollFadeRef on a track that scrolls. */
   ref?: React.Ref<HTMLDivElement>;
 }
 
-const SegmentedContext = React.createContext<{ value: string; layoutId: string } | null>(null);
+const SegmentedContext = React.createContext<{ value: string; layoutId: string; tone: SegmentedTone } | null>(null);
+
+const trackTone: Record<SegmentedTone, string> = { muted: "bg-muted", track: "bg-track", terminal: "bg-terminal" };
+
+const lightItem = "text-muted-foreground hover:text-foreground data-[state=on]:text-foreground";
+const itemTone: Record<SegmentedTone, string> = {
+  muted: lightItem,
+  track: lightItem,
+  terminal: "text-terminal-muted hover:text-terminal-foreground data-[state=on]:text-terminal-foreground",
+};
 
 /**
  * A segmented control: a quiet track with the selected option raised as a
@@ -27,7 +38,7 @@ export function Segmented({ value, onValueChange, tone = "muted", className, chi
   // Each control slides its own pill, never one from another control.
   const layoutId = `segmented-${React.useId()}`;
   return (
-    <SegmentedContext.Provider value={{ value, layoutId }}>
+    <SegmentedContext.Provider value={{ value, layoutId, tone }}>
       <ToggleGroup.Root
         ref={ref}
         data-slot="segmented"
@@ -37,7 +48,7 @@ export function Segmented({ value, onValueChange, tone = "muted", className, chi
         // control always keeps one option selected.
         onValueChange={(next) => next && onValueChange(next)}
         aria-label={rest["aria-label"]}
-        className={cn("inline-flex gap-0.5 rounded-control p-[3px]", tone === "muted" ? "bg-muted" : "bg-track", className)}
+        className={cn("inline-flex gap-0.5 rounded-control p-[3px]", trackTone[tone], className)}
       >
         {children}
       </ToggleGroup.Root>
@@ -47,17 +58,20 @@ export function Segmented({ value, onValueChange, tone = "muted", className, chi
 
 export function SegmentedItem({ className, children, ...props }: React.ComponentProps<typeof ToggleGroup.Item>) {
   const group = React.useContext(SegmentedContext);
+  const tone = group?.tone ?? "muted";
   return (
     <ToggleGroup.Item
       data-slot="segmented-item"
       className={cn(
-        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px] text-muted-foreground transition-colors",
-        "hover:text-foreground data-[state=on]:text-foreground",
+        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px] transition-colors",
+        itemTone[tone],
         className,
       )}
       {...props}
     >
-      {group?.value === props.value && <SegmentPill layoutId={group.layoutId} />}
+      {group?.value === props.value && (
+        <SegmentPill layoutId={group.layoutId} className={tone === "terminal" ? "bg-terminal-field shadow-none" : undefined} />
+      )}
       {children}
     </ToggleGroup.Item>
   );
