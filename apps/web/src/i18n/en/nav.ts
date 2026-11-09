@@ -15,5 +15,6 @@ export default {
   yourAccount: "Your sign-in methods and sessions",
   breadcrumb: "Breadcrumb",
   openMenu: "Open menu",
+  home: "{name} home",
   closeMenu: "Close menu",
 } as const;

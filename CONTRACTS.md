@@ -3244,6 +3244,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
+- Sidebar (0.2.2, `components/shell/`): the mark and the panel name are
+  one link to the dashboard (`/`, active only there). Each project row
+  but the protected Panel project has a + next to its "..." menu (shown
+  on hover or keyboard focus, always on touch screens) that opens the New
+  service menu with that project chosen. Approvals is in the main
+  navigation (sidebar and command palette, `use-main-nav.ts`) only while
+  something can ask for one (`system.features`: MCP or the assistant on),
+  something waits for the viewer, or the page is open
+  (`nav-items.ts` `showApprovals`).
 - Session key: the op client's fetch (`lib/session-key.ts` `sessionFetch`)
   sends the key from localStorage on every call and keeps the one an
   answer hands out (an empty one clears it); the live socket and the
@@ -3471,7 +3480,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   empty, loading, refused and unchecked states, a project change, a member
   without `services.update`, the list at a short window and a phone,
   arrow keys and Show more, and what gets created and connected; a demo
-  handler answers an error by throwing `demo/refusal.ts` `DemoRefusal`) and
+  handler answers an error by throwing `demo/refusal.ts` `DemoRefusal`),
+  `sidebar-new-service.spec.ts` (the + on a project row and the form with
+  that project, none on the Panel project, the logo link home, Approvals
+  hidden until MCP or the assistant is on) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar and the
   accent check;

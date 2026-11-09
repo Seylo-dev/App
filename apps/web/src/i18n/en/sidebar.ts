@@ -15,6 +15,7 @@ export default {
   expand: "Expand {name}",
   collapse: "Collapse {name}",
   projectMenu: "More actions for {name}",
+  newServiceIn: "New service in {name}",
   hideProject: "Hide project",
   unhideProject: "Unhide project",
   hidden: "Hidden ({count})",

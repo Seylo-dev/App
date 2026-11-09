@@ -20,6 +20,7 @@ import { isBusy, statusDisplay } from "../../lib/service-display";
 import type { Project } from "../../lib/types";
 import { splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
 import { useProjectPrefs } from "../../lib/use-project-prefs";
+import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { useShell } from "./shell-context";
@@ -182,12 +183,25 @@ function ProjectRow({
             </>
           )}
         </Link>
-        <ProjectMenu
-          name={project.name}
-          hidden={hidden}
-          onHiddenChange={(hide) => onHiddenChange(project, hide)}
-          className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100"
-        />
+        {/* New service (+) and More (...): shown on hover or keyboard focus, always on touch screens. */}
+        <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 pointer-coarse:static pointer-coarse:mr-1.5 pointer-coarse:translate-y-0 pointer-coarse:opacity-100">
+          {!project.protected && (
+            <NewServiceMenu
+              projectId={project.id}
+              trigger={
+                <button
+                  type="button"
+                  data-project-menu=""
+                  aria-label={t("sidebar.newServiceIn", { name: project.name })}
+                  className="flex cursor-pointer rounded-chip border-0 bg-transparent p-1 text-ink-faint transition-interactive hover:text-foreground"
+                >
+                  <IconPlus size={15} stroke={2} aria-hidden="true" />
+                </button>
+              }
+            />
+          )}
+          <ProjectMenu name={project.name} hidden={hidden} onHiddenChange={(hide) => onHiddenChange(project, hide)} />
+        </div>
       </div>
       {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} />}
     </>

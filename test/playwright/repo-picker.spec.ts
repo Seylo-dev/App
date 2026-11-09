@@ -53,7 +53,7 @@ async function refuse(page: Page, op: string, status: number, code: string, mess
 async function openGitTab(page: Page): Promise<Locator> {
   mkdirSync(shots, { recursive: true });
   await page.goto(`/p/${ids.acme}`);
-  await page.getByRole("button", { name: "New service" }).click();
+  await page.getByRole("button", { name: "New service", exact: true }).click();
   await page.getByRole("menuitem").filter({ hasText: "GitHub, Git, Docker image" }).click();
   const dialog = page.getByRole("dialog", { name: "New app" });
   await expect(dialog).toBeVisible();
@@ -524,7 +524,7 @@ test("a repository picked in one project is looked up again when the project cha
     url.searchParams.get("projectId") === ids.personal,
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "New service" }).first().click();
+  await page.getByRole("button", { name: "New service", exact: true }).first().click();
   await page.getByRole("menuitem").filter({ hasText: "GitHub, Git, Docker image" }).click();
   const dialog = page.getByRole("dialog", { name: "New app" });
   await dialog.getByLabel("Name", { exact: true }).fill("web");
