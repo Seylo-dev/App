@@ -1,6 +1,8 @@
 // A generic git URL (GitLab, Gitea, a server of your own) with an optional
 // stored credential for private repos. "Check access" lists the branches
-// the way git ls-remote would, before anything is saved.
+// the way git ls-remote would, before anything is saved. People who manage
+// git credentials (git.manage) can add one next to the picker, and the new
+// one is picked.
 
 import { GitUrl, git, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -9,10 +11,13 @@ import { Input } from "@seylo/ui/components/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
+import { IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../../i18n/t";
-import { InternalHostNote } from "../../git/internal-hosts";
+import { AddCredentialDialog } from "../../git/add-credential-dialog";
+import { gitCredentialsAnchor } from "../../git/credentials-card";
+import { InternalHostNote, useCanManageGit } from "../../git/internal-hosts";
 import { Field, ToggleRow } from "../field";
 import { useInvalidate } from "../invalidate";
 import { MutationError, OpErrorNote, retryOp } from "../op-state";
@@ -30,6 +35,8 @@ export function GitForm({ service }: { service: ServiceDetail }) {
   const [credentialId, setCredentialId] = useState<string | null>(src?.credentialId ?? null);
   const [deployOnPush, setDeployOnPush] = useState(src?.deployOnPush ?? false);
   const [check, setCheck] = useState<{ url: string; credentialId: string | null } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const canManageGit = useCanManageGit();
   const credentials = useOp(git.listCredentials, {}, { retry: retryOp });
   const branches = useOp(
     git.branches,
@@ -48,6 +55,11 @@ export function GitForm({ service }: { service: ServiceDetail }) {
 
   const submit = () =>
     save.mutate({ serviceId: service.id, source: { type: "git", url: url.trim(), branch: branch.trim(), credentialId, deployOnPush } });
+  // A shown "Check access" answer was for the credential picked then; it says nothing about another one.
+  const pickCredential = (id: string | null) => {
+    setCredentialId(id);
+    setCheck(null);
+  };
 
   return (
     <form
@@ -120,24 +132,34 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         <Field
           label={t("serviceSource.git.credential")}
           hint={
-            <Link to="/settings/github" className="font-medium">
-              {t("serviceSource.git.manageCredentials")}
-            </Link>
+            canManageGit && (
+              <Link to="/settings/git-providers" hash={gitCredentialsAnchor} className="font-medium">
+                {t("serviceSource.git.manageCredentials")}
+              </Link>
+            )
           }
         >
-          <Select value={credentialId ?? publicRepo} onValueChange={(v) => setCredentialId(v === publicRepo ? null : v)}>
-            <SelectTrigger aria-label={t("serviceSource.git.credential")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={publicRepo}>{t("serviceSource.git.public")}</SelectItem>
-              {(credentials.data?.items ?? []).map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name} · {c.host}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex min-w-0 gap-2">
+            <Select value={credentialId ?? publicRepo} onValueChange={(v) => pickCredential(v === publicRepo ? null : v)}>
+              <SelectTrigger aria-label={t("serviceSource.git.credential")} className="min-w-0 flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={publicRepo}>{t("serviceSource.git.public")}</SelectItem>
+                {(credentials.data?.items ?? []).map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name} · {c.host}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {canManageGit && (
+              <Button onClick={() => setAdding(true)}>
+                <IconPlus size={15} stroke={1.8} />
+                {t("gitCredentials.add.open")}
+              </Button>
+            )}
+          </div>
         </Field>
       </div>
       <ToggleRow
@@ -152,6 +174,10 @@ export function GitForm({ service }: { service: ServiceDetail }) {
         <MutationError error={save.error} />
       </div>
       <InternalHostNote error={save.error} projectId={service.projectId} />
+      {/* The dialog's own form stops its submit, which React would otherwise bubble out of the portal into this form. */}
+      {canManageGit && (
+        <AddCredentialDialog open={adding} onOpenChange={setAdding} url={url.trim()} onCreated={(c) => pickCredential(c.id)} />
+      )}
     </form>
   );
 }

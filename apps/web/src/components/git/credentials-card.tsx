@@ -1,0 +1,277 @@
+// Settings > Git providers > Git credentials: the tokens and SSH keys that
+// git URL sources clone with (git.listCredentials), for people who manage
+// them (git.manage: owners and admins). Add one, rename one (an SSH key's
+// public key shows there too, to add it to another repository) or delete
+// one; the panel refuses to delete a credential a service still clones
+// with, so the dialog says how many do instead of offering a delete that
+// fails. The GitHub account connected on Settings > GitHub is managed there.
+
+import { git } from "@seylo/ops";
+import { useOp } from "@seylo/ops/react";
+import { Button } from "@seylo/ui/components/button";
+import { Chip } from "@seylo/ui/components/chip";
+import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
+import { CopyField } from "@seylo/ui/components/copy-field";
+import { DataTable } from "@seylo/ui/components/data-table";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
+import { EmptyState } from "@seylo/ui/components/empty-state";
+import { Input } from "@seylo/ui/components/input";
+import { SectionCard } from "@seylo/ui/components/section-card";
+import { IconKey, IconPlus } from "@tabler/icons-react";
+import { Link } from "@tanstack/react-router";
+import { type FormEvent, useState } from "react";
+import { t } from "../../i18n/t";
+import { Field } from "../service/field";
+import { MutationError } from "../service/op-state";
+import { formatDate } from "../settings/format";
+import { useSettingsMutation } from "../settings/mutation";
+import { OpErrorCallout } from "../settings/op-state";
+import { AddCredentialDialog, type GitCredential } from "./add-credential-dialog";
+import { useCanManageGit } from "./internal-hosts";
+
+/** The card's id, for links that scroll to it (/settings/git-providers#git-credentials). */
+export const gitCredentialsAnchor = "git-credentials";
+
+const refresh = [git.listCredentials];
+
+/** The card, or nothing for people who cannot manage git credentials. */
+export function GitCredentialsCard() {
+  const canManage = useCanManageGit();
+  if (!canManage) return null;
+  return <CredentialsList />;
+}
+
+function CredentialsList() {
+  const list = useOp(git.listCredentials, {});
+  const [adding, setAdding] = useState(false);
+  // What a dialog is about stays set while it closes, so its text does not blank out mid-animation.
+  const [renaming, setRenaming] = useState<GitCredential | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [removing, setRemoving] = useState<GitCredential | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const remove = useSettingsMutation(git.deleteCredential, {
+    invalidates: refresh,
+    success: t("gitCredentials.remove.done"),
+    failure: false,
+  });
+
+  return (
+    <SectionCard
+      id={gitCredentialsAnchor}
+      className="scroll-mt-6"
+      title={t("gitCredentials.list.title")}
+      description={t("gitCredentials.list.description")}
+      flush
+      actions={
+        <Button size="sm" onClick={() => setAdding(true)}>
+          <IconPlus size={15} stroke={1.8} />
+          {t("gitCredentials.list.add")}
+        </Button>
+      }
+    >
+      {list.error ? (
+        <OpErrorCallout error={list.error} onRetry={() => void list.refetch()} className="mx-5 mb-5" />
+      ) : (
+        <DataTable<GitCredential>
+          bare
+          aria-label={t("gitCredentials.list.title")}
+          loading={list.isPending}
+          rows={list.data?.items ?? []}
+          getRowId={(c) => c.id}
+          empty={
+            <EmptyState
+              compact
+              icon={<IconKey />}
+              title={t("gitCredentials.list.empty")}
+              description={t("gitCredentials.list.emptyHint")}
+            />
+          }
+          columns={[
+            {
+              id: "name",
+              header: t("gitCredentials.list.name"),
+              skeletonWidth: "30%",
+              cell: (c) => (
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{c.name}</span>
+                  <Chip tone="gray">{t(`gitCredentials.kinds.${c.kind}`)}</Chip>
+                  {c.origin === "device" && <Chip tone="sky">{t("gitCredentials.list.githubAccount")}</Chip>}
+                </span>
+              ),
+            },
+            {
+              id: "host",
+              header: t("gitCredentials.list.host"),
+              skeletonWidth: "16%",
+              cell: (c) => <span className="font-mono text-[12.5px] break-all">{c.host}</span>,
+            },
+            {
+              id: "username",
+              header: t("gitCredentials.list.username"),
+              skeletonWidth: "12%",
+              hideOnMobile: true,
+              cell: (c) => <span className="font-mono text-[12.5px]">{c.kind === "token" ? (c.username ?? "-") : "-"}</span>,
+            },
+            {
+              id: "added",
+              header: t("gitCredentials.list.added"),
+              skeletonWidth: "14%",
+              skeletonLines: 2,
+              cell: (c) => (
+                <span className="flex flex-col">
+                  <span>{formatDate(c.createdAt)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {c.usedBy > 0 ? t("gitCredentials.list.usedBy", { count: c.usedBy }) : t("gitCredentials.list.unused")}
+                  </span>
+                </span>
+              ),
+            },
+            {
+              id: "actions",
+              header: "",
+              align: "right",
+              cell: (c) =>
+                c.origin === "device" ? (
+                  <Button asChild size="sm" variant="ghost">
+                    <Link to="/settings/github">{t("gitCredentials.list.onGithubPage")}</Link>
+                  </Button>
+                ) : (
+                  <span className="flex justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setRenaming(c);
+                        setRenameOpen(true);
+                      }}
+                    >
+                      {t("gitCredentials.list.rename")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setRemoving(c);
+                        setRemoveOpen(true);
+                      }}
+                    >
+                      {t("gitCredentials.list.delete")}
+                    </Button>
+                  </span>
+                ),
+            },
+          ]}
+        />
+      )}
+      <AddCredentialDialog open={adding} onOpenChange={setAdding} />
+      <RenameDialog credential={renaming} open={renameOpen} onOpenChange={setRenameOpen} />
+      {removing && removing.usedBy > 0 ? (
+        <InUseDialog credential={removing} open={removeOpen} onOpenChange={setRemoveOpen} />
+      ) : (
+        <ConfirmDialog
+          open={removeOpen}
+          onOpenChange={setRemoveOpen}
+          destructive
+          title={t("gitCredentials.remove.title", { name: removing?.name ?? "" })}
+          description={t("gitCredentials.remove.body")}
+          confirmLabel={t("gitCredentials.list.delete")}
+          onConfirm={async () => {
+            if (removing) await remove.mutateAsync({ credentialId: removing.id });
+          }}
+        />
+      )}
+    </SectionCard>
+  );
+}
+
+/** Renames a credential (git.updateCredential); an SSH key's public key shows here to copy again. */
+function RenameDialog({
+  credential,
+  open,
+  onOpenChange,
+}: {
+  credential: GitCredential | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[460px]">
+        {credential && <RenameForm key={credential.id} credential={credential} onClose={() => onOpenChange(false)} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RenameForm({ credential, onClose }: { credential: GitCredential; onClose: () => void }) {
+  const [name, setName] = useState(credential.name);
+  const update = useSettingsMutation(git.updateCredential, {
+    invalidates: refresh,
+    success: t("gitCredentials.rename.saved"),
+    failure: false,
+    onSuccess: onClose,
+  });
+  const trimmed = name.trim();
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!trimmed || update.isPending) return;
+    if (trimmed === credential.name) onClose();
+    else update.mutate({ credentialId: credential.id, name: trimmed });
+  };
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <DialogTitle>{t("gitCredentials.rename.title", { name: credential.name })}</DialogTitle>
+        <DialogDescription className="font-mono text-[12.5px]">
+          {t(`gitCredentials.kinds.${credential.kind}`)} · {credential.host}
+        </DialogDescription>
+      </div>
+      <Field label={t("gitCredentials.rename.name")} htmlFor="credential-rename">
+        <Input id="credential-rename" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} autoFocus />
+      </Field>
+      {credential.kind === "ssh_key" && credential.publicKey && (
+        <Field label={t("gitCredentials.add.publicKey")} hint={credential.fingerprint ?? undefined}>
+          <CopyField value={credential.publicKey} aria-label={t("gitCredentials.add.publicKey")} />
+        </Field>
+      )}
+      <MutationError error={update.error} />
+      <div className="flex justify-end gap-2">
+        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button type="submit" variant="primary" disabled={!trimmed || update.isPending}>
+          {t("gitCredentials.rename.save")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** A credential services still clone with: the panel refuses to delete it, so say how many use it. */
+function InUseDialog({
+  credential,
+  open,
+  onOpenChange,
+}: {
+  credential: GitCredential;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <DialogTitle>{t("gitCredentials.remove.usedTitle", { name: credential.name })}</DialogTitle>
+            <DialogDescription className="leading-relaxed">
+              {t("gitCredentials.remove.usedBody", { count: credential.usedBy })}
+            </DialogDescription>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => onOpenChange(false)} autoFocus>
+              {t("gitCredentials.remove.close")}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

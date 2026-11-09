@@ -1,6 +1,7 @@
 // Settings > Git providers: the panel's GitLab, Gitea/Forgejo and Bitbucket
 // connections (one sealed access token each) and the card to add one. The
-// token is checked with the provider before it is saved.
+// token is checked with the provider before it is saved. Below them, the git
+// credentials (tokens and SSH keys) that git URL sources clone with.
 
 import { gitProviders, type OpOutput } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -17,6 +18,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { IconBrandBitbucket, IconBrandGitlab, IconCup, IconGitBranch } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { GitCredentialsCard } from "../../../components/git/credentials-card";
 import { invalidateOps, useSettingsMutation } from "../../../components/settings/mutation";
 import { errorText, OpErrorCallout } from "../../../components/settings/op-state";
 import { Field, FormGrid, SettingRow, SettingsPage } from "../../../components/settings/page";
@@ -37,6 +39,7 @@ function GitProvidersPage() {
     <SettingsPage title={t("settingsGitProviders.title")} subtitle={t("settingsGitProviders.subtitle")}>
       <Connections />
       <AddConnection />
+      <GitCredentialsCard />
     </SettingsPage>
   );
 }
