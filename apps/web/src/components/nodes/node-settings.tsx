@@ -7,6 +7,7 @@ import { nodes } from "@seylo/ops";
 import { opQueryKey, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
+import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { Switch } from "@seylo/ui/components/switch";
@@ -114,28 +115,9 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
           <Input id="node-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="eu, games" />
         </Field>
         <Field id="node-wildcard" label="nodes.form.wildcard" hint="nodes.form.wildcardHint">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[13px] text-muted-foreground">*.</span>
-            <Input
-              id="node-wildcard"
-              value={wildcard}
-              onChange={(e) => setWildcard(e.target.value)}
-              placeholder="de1.example.com"
-              className="font-mono"
-            />
-          </div>
+          <WildcardInput id="node-wildcard" value={wildcard} onChange={setWildcard} />
         </Field>
-        {wildcard.trim() && dnsIp && (
-          <p className="m-0 text-[12.5px] leading-relaxed text-ink-strong">
-            {t("nodes.addCard.dnsBefore")}{" "}
-            <span className="rounded-chip bg-muted px-[7px] py-0.5 font-mono text-xs text-foreground">
-              *.{wildcard.trim().replace(/^\*\./, "")} A {dnsIp}
-            </span>{" "}
-            <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="font-medium">
-              {t("nodes.addCard.cloudflare")}
-            </a>
-          </p>
-        )}
+        {wildcard.trim() && dnsIp && <DnsRecordLine record={`*.${wildcard.trim().replace(/^\*\./, "")} A ${dnsIp}`} />}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field id="node-parallel" label="nodes.form.parallelBuilds">
             <Input id="node-parallel" type="number" min={1} max={16} value={parallel} onChange={(e) => setParallel(e.target.value)} />
@@ -196,7 +178,8 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
         onOpenChange={setRemoveOpen}
         destructive
         title={t("nodes.form.removeTitle", { name: node.name })}
-        description={t("nodes.form.removeHint")}
+        // The button only works once the node runs nothing, so the dialog leaves out the hint's "Move its services away first".
+        description={t("nodes.form.removeConfirmHint")}
         confirmText={node.name}
         confirmLabel={t("nodes.form.remove")}
         onConfirm={async () => {
@@ -207,6 +190,54 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
         }}
       />
     </div>
+  );
+}
+
+/**
+ * A domain field with "*." inside it, in front of what you type (the
+ * record is a wildcard), so the field keeps the form's left edge and width.
+ * The setup wizard's wildcard step uses it too.
+ */
+export function WildcardInput({
+  id,
+  value,
+  onChange,
+  invalid = false,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  invalid?: boolean;
+}) {
+  return (
+    <div className="relative">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 font-mono text-[13.5px] text-muted-foreground"
+      >
+        *.
+      </span>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="de1.example.com"
+        aria-invalid={invalid}
+        className="pl-7 font-mono"
+      />
+    </div>
+  );
+}
+
+/** "Add [*.domain A ip] at your DNS provider. Open Cloudflare DNS", with the record copyable: it goes into the provider as is. */
+export function DnsRecordLine({ record }: { record: string }) {
+  return (
+    <p className="m-0 text-[12.5px] leading-[1.7] text-ink-strong">
+      {t("nodes.addCard.dnsBefore")} <CopyCode code={record} aria-label={t("nodes.dnsRecord")} /> {t("nodes.dnsAtProvider")}{" "}
+      <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="font-medium whitespace-nowrap">
+        {t("nodes.addCard.cloudflare")}
+      </a>
+    </p>
   );
 }
 

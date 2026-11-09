@@ -23,7 +23,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { IconFileText, IconPower, IconRefresh, IconSparkles } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { formatAgo, formatBytes } from "../../lib/format";
@@ -52,7 +52,15 @@ export function NodeSheet({
 }) {
   return (
     <Sheet open={nodeId !== null} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="max-w-[640px]">
+      <SheetContent
+        className="max-w-[640px]"
+        // Focus the sheet itself, not its first control: the views track would open with a focus ring around the
+        // current view. The first Tab still lands on the views.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)?.focus();
+        }}
+      >
         {nodeId && <NodeSheetBody nodeId={nodeId} view={view} onViewChange={onViewChange} onClose={onClose} />}
       </SheetContent>
     </Sheet>
@@ -73,10 +81,29 @@ function NodeSheetBody({
   const node = useOp(nodes.get, { nodeId });
   useLiveTopic(`node:${nodeId}`);
 
+  // On a phone the five views scroll inside the header: bring the current one into view
+  // (Settings from the table's Settings button, or a ?view= link, opened with it off screen).
+  const track = useRef<HTMLDivElement | null>(null);
+  const trackRef = useCallback((el: HTMLDivElement | null) => {
+    track.current = el;
+    return scrollFadeRef(el);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the current view changes.
+  useEffect(() => {
+    const row = track.current;
+    const current = row?.querySelector<HTMLElement>('[data-state="on"]');
+    if (!row || !current || row.scrollWidth <= row.clientWidth) return;
+    const box = row.getBoundingClientRect();
+    const item = current.getBoundingClientRect();
+    if (item.left < box.left) row.scrollLeft -= box.left - item.left + 24;
+    else if (item.right > box.right) row.scrollLeft += item.right - box.right + 24;
+  }, [view]);
+
   return (
     <>
-      <SheetHeader>
-        <SheetTitle className="flex items-center gap-2">
+      {/* pr-5, not the header's pr-14: the views track may run under the close button; the title and description keep clear of it. */}
+      <SheetHeader className="pr-5">
+        <SheetTitle className="flex items-center gap-2 pr-9">
           {node.data && <StatusDot status={node.data.status === "online" ? "ok" : node.data.status === "offline" ? "error" : "off"} />}
           {node.data?.name ?? (
             <>
@@ -85,7 +112,7 @@ function NodeSheetBody({
             </>
           )}
         </SheetTitle>
-        <SheetDescription>
+        <SheetDescription className="pr-9">
           {node.data ? (
             [t(`nodes.status.${node.data.status}`), node.data.location].filter(Boolean).join(t("format.separator"))
           ) : (
@@ -96,15 +123,26 @@ function NodeSheetBody({
           aria-label={t("nodes.sheet.views")}
           value={view}
           onValueChange={(v) => onViewChange(v as NodeView)}
-          // Five views: on a phone the track scrolls inside the header instead of widening the sheet.
-          ref={scrollFadeRef}
+          // Five views: on a phone the track scrolls inside the header instead of widening the sheet,
+          // with slimmer items so at 390px all five fit.
+          ref={trackRef}
           className="scroll-row mt-2 max-w-full self-start"
         >
-          <SegmentedItem value="overview">{t("nodes.sheet.overview")}</SegmentedItem>
-          <SegmentedItem value="health">{t("nodes.health")}</SegmentedItem>
-          <SegmentedItem value="cleanup">{t("nodeCleanup.tab")}</SegmentedItem>
-          <SegmentedItem value="shell">{t("nodeShell.tab")}</SegmentedItem>
-          <SegmentedItem value="settings">{t("nodes.settings")}</SegmentedItem>
+          <SegmentedItem value="overview" className="shrink-0 max-sm:px-2">
+            {t("nodes.sheet.overview")}
+          </SegmentedItem>
+          <SegmentedItem value="health" className="shrink-0 max-sm:px-2">
+            {t("nodes.health")}
+          </SegmentedItem>
+          <SegmentedItem value="cleanup" className="shrink-0 max-sm:px-2">
+            {t("nodeCleanup.tab")}
+          </SegmentedItem>
+          <SegmentedItem value="shell" className="shrink-0 max-sm:px-2">
+            {t("nodeShell.tab")}
+          </SegmentedItem>
+          <SegmentedItem value="settings" className="shrink-0 max-sm:px-2">
+            {t("nodes.settings")}
+          </SegmentedItem>
         </Segmented>
       </SheetHeader>
       <SheetBody className="pb-6">
@@ -203,14 +241,14 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
               },
               { label: t("nodes.facts.docker"), value: facts.dockerVersion, mono: true },
               { label: t("nodes.facts.cgroup"), value: `v${facts.cgroupVersion}` },
-              { label: t("nodes.facts.agent"), value: node.agentVersion ?? "-", mono: true },
+              // "v0.9.4", as the node list and the sidebar write it.
+              { label: t("nodes.facts.agent"), value: node.agentVersion ? `v${node.agentVersion.replace(/^v/, "")}` : "-", mono: true },
               ...(panelAddress ? [{ label: t("nodes.facts.panelAddress"), value: panelAddress, mono: true }] : []),
               { label: t("nodes.facts.booted"), value: facts.bootTime ? formatAgo(facts.bootTime) : "-" },
               { label: t("nodes.facts.lastSeen"), value: node.lastSeenAt ? formatAgo(node.lastSeenAt) : "-" },
               {
                 label: t("nodes.facts.revision"),
                 value: t("nodes.facts.revisionValue", { applied: node.appliedRevision ?? "-", desired: node.desiredRevision }),
-                mono: true,
               },
             ]}
           />

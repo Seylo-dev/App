@@ -34,31 +34,36 @@ export function UpdatesBanner() {
   const run = data?.activeRun ?? null;
 
   return (
+    // Two columns: the switch with its hint on the left, the status and buttons on the right, centered.
+    // Narrow, the right side wraps under the left one, from the left edge.
     <section
       aria-label={t("nodes.updates.title")}
-      className="flex flex-wrap items-center gap-3.5 rounded-card px-[18px] py-4"
+      className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card px-[18px] py-4"
       style={{ background: "var(--highlight)" }}
     >
-      <label htmlFor="auto-update" className="flex items-center gap-2.5 text-[13.5px] font-semibold">
-        <Checkbox
-          id="auto-update"
-          checked={data?.autoUpdate ?? false}
-          disabled={!data || setAuto.isPending}
-          onCheckedChange={(value) => setAuto.mutate({ enabled: value === true })}
-        />
-        {t("nodes.updates.autoUpdate")}
-      </label>
-      <span className="text-[12.5px] text-ink-strong">{t("nodes.updates.hint")}</span>
+      <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-1">
+        <label htmlFor="auto-update" className="flex cursor-pointer items-center gap-2.5 text-[13.5px] font-semibold">
+          <Checkbox
+            id="auto-update"
+            checked={data?.autoUpdate ?? false}
+            disabled={!data || setAuto.isPending}
+            onCheckedChange={(value) => setAuto.mutate({ enabled: value === true })}
+          />
+          {t("nodes.updates.autoUpdate")}
+        </label>
+        {/* Under the checkbox's label, its width capped so the strip is as tall loading as loaded. */}
+        <span className="max-w-[600px] pl-[26px] text-[12.5px] text-pretty text-ink-strong">{t("nodes.updates.hint")}</span>
+      </div>
       {status.isPending ? (
         // The status chip and the buttons while the status loads, at their loaded size, so the strip
         // wraps the same way and the node table under it stays put.
-        <LoadingRegion label={t("common.loading")} className="ml-auto flex flex-wrap items-center gap-2.5">
+        <LoadingRegion label={t("common.loading")} className="flex flex-wrap items-center gap-2.5">
           <Skeleton className="h-[22px] w-40 rounded-chip" />
           <ButtonSkeleton size="sm" className="w-[84px]" />
           <ButtonSkeleton size="sm" className="w-[86px]" />
         </LoadingRegion>
       ) : (
-        <span className="ml-auto flex flex-wrap items-center gap-2.5 text-[12.5px]">
+        <span className="flex flex-wrap items-center gap-2.5 text-[12.5px]">
           {status.isError && (
             <span className="text-muted-foreground">
               {isNotBuilt(status.error) ? t("nodes.updates.notBuilt") : errorMessage(status.error, t("common.unknownError"))}

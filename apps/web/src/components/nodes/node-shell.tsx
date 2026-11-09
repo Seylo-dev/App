@@ -157,14 +157,15 @@ export function NodeShell({ node }: { node: NodeDetail }) {
             </Button>
           )}
         </div>
-        <p className="m-0 text-[12.5px] text-muted-foreground">{t("nodeShell.limits", { max: s.maxSessions, minutes })}</p>
+        {/* Who has the open shells, right under the "open now" chip they explain; the limits after. */}
         {s.sessions.length > 0 && (
-          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-[12.5px] text-ink-strong">
+          <ul aria-label={t("nodeShell.openList")} className="m-0 flex list-none flex-col gap-0.5 p-0 text-[12.5px] text-ink-strong">
             {s.sessions.map((session) => (
               <li key={session.id}>{t("nodeShell.openedBy", { name: session.openedBy, when: formatAgo(session.openedAt) })}</li>
             ))}
           </ul>
         )}
+        <p className="m-0 text-[12.5px] text-muted-foreground">{t("nodeShell.limits", { max: s.maxSessions, minutes })}</p>
         {setEnabled.error && !isReauthCancelled(setEnabled.error) && (
           <Alert tone="danger">{errorMessage(setEnabled.error, t("common.unknownError"))}</Alert>
         )}

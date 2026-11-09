@@ -5,7 +5,7 @@ import { metrics } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { LoadingRegion, Skeleton } from "@seylo/ui/components/skeleton";
-import { SmoothChart } from "@seylo/ui/components/smooth-chart";
+import { SmoothChart, seriesColor } from "@seylo/ui/components/smooth-chart";
 import { useState } from "react";
 import { t } from "../../i18n/t";
 import { formatBytes, formatPercent, formatPointTime, formatRate } from "../../lib/format";
@@ -69,6 +69,8 @@ export function NodeGraphs({ nodeId }: { nodeId: string }) {
           <Graph
             title={t("nodes.disk")}
             labels={labels}
+            // The disk's size, like Memory: without it a steady half-full disk drew as a full one.
+            max={usage.data?.series.latest?.diskTotalBytes}
             format={formatBytes}
             series={[{ id: "disk", label: t("nodes.disk"), values: points.map((p) => p.diskUsedBytes) }]}
           />
@@ -102,7 +104,20 @@ function Graph({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5 rounded-control bg-raised p-3">
-      <span className="text-xs font-medium text-ink-strong">{title}</span>
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-medium text-ink-strong">{title}</span>
+        {/* Two lines (In and Out): which is which, next to the title, so the tile stays as tall as the others. */}
+        {series.length > 1 && (
+          <span className="ml-auto flex items-center gap-2.5 text-[11.5px] text-muted-foreground">
+            {series.map((item, index) => (
+              <span key={item.id} className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="h-[3px] w-3 rounded-full" style={{ background: seriesColor(item, index) }} />
+                {item.label}
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
       <SmoothChart series={series} labels={labels} aria-label={title} height={80} min={0} max={max} formatValue={format} gridLines={2} />
     </div>
   );
