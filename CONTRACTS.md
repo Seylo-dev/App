@@ -3374,6 +3374,21 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
   a click anywhere on the field copies, the copy icon included
   (`copy.spec.ts`).
+- Narrow screens (0.2.2): a table never cuts text or hides columns off
+  screen without a hint. The audit log is one table on the Activity page
+  and a project's Activity tab (`components/activity/activity-log.tsx`:
+  action sentences, error codes in words, `formatRelative` times, "Load
+  more" centered, the same detail sheet); on a phone it keeps What and
+  Result and repeats who and when under the action. Tables that hide
+  columns on a phone (`hideOnMobile`) repeat those facts as one line in a
+  kept cell (project People, internal git hosts). The node list renders
+  its table only when the list is at least 1000 px wide
+  (`node-table.tsx` `useAtLeast`), else one stacked row per node with the
+  column names as labels. Rows that scroll sideways on a phone (project
+  tabs, service tabs, the node sheet's views, template categories) use
+  `scroll-row` with `scrollFadeRef`; the tab rows and the node views
+  scroll the current item into view. Unknown paths go to `routes/_app/$.tsx` (the 404 next to the
+  sidebar); the root's not-found and error screens sit in `AuthFrame`.
 - Hiding projects (0.2.1, per person, not global): the person's
   preferences (`auth.preferences` / `auth.updatePreferences`, the
   free-form `Preferences` record) gain `hiddenProjectIds` (`HiddenProjectIds`

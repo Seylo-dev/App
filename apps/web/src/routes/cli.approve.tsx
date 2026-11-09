@@ -15,7 +15,6 @@ import { Input, Label } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
 import { Skeleton } from "@seylo/ui/components/skeleton";
-import { IconTerminal2 } from "@tabler/icons-react";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { AuthFrame } from "../components/auth/auth-frame";
@@ -61,17 +60,10 @@ function CliApprovePage() {
   return (
     <AuthFrame>
       <section aria-label={t("cliLogin.title")} className="flex w-full max-w-[560px] flex-col gap-5 rounded-card bg-card p-7 shadow-card">
-        <div className="flex items-start gap-3">
-          <span
-            aria-hidden="true"
-            className="flex size-10 shrink-0 items-center justify-center rounded-control bg-chip-blue-bg text-chip-blue-fg"
-          >
-            <IconTerminal2 size={20} stroke={1.8} />
-          </span>
-          <div className="flex flex-col gap-1.5">
-            <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em]">{t("cliLogin.title")}</h1>
-            <p className="m-0 text-[13.5px] leading-normal text-muted-foreground">{t("cliLogin.hint")}</p>
-          </div>
+        {/* Title and hint run the card's full width, like the other sign-in cards (no icon tile). */}
+        <div className="flex flex-col gap-1.5">
+          <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em]">{t("cliLogin.title")}</h1>
+          <p className="m-0 text-[13.5px] leading-normal text-muted-foreground">{t("cliLogin.hint")}</p>
         </div>
         {code ? (
           <RequestView code={code} onOtherCode={() => setCode(null)} />
