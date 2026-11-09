@@ -30,6 +30,7 @@ import { chmodSync, lstatSync, rmSync } from "node:fs";
 import type { AnyElysia } from "elysia";
 import type { Logger } from "../logger";
 import { healthPath } from "./health";
+import { forwardedScheme } from "./request-origin";
 import { panelWebsocket } from "./ws-guard";
 
 /** The socket's file name in the panel's data dir; the agent points Serve at <host data dir>/panel/<this>. */
@@ -73,7 +74,7 @@ export function pinTailnetHost(request: Request, identity: TailnetIdentity): Tai
   if (!dnsName) return { kind: "unknown" };
   const host = request.headers.get("x-forwarded-host")?.trim() ?? "";
   const hostname = hostnameOf(host);
-  const https = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() === "https";
+  const https = forwardedScheme(request.headers.get("x-forwarded-proto")) === "https";
   if (hostname === dnsName) {
     // The scheme's own port is left out, as browsers do in Origin.
     const port = /:(\d+)$/.exec(host)?.[1];

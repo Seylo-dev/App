@@ -3510,6 +3510,8 @@ p39_access_run() {
   ev "settings.panelAccess on the domain: $(printf '%s' "$out" | jq -c '{serveOnIp, agentPortOpen, onFailure, panelPort, agentPort, actual, privatePaths, blocked: [.blocked[]?.code], agentPortBlocked: [.agentPortBlocked[]?.code], recovery}')"
   expect "the domain is a working private path and this session is on it" \
     jq_ok "$out" '[.privatePaths[]? | select(.kind == "domain" and .working and .usingNow)] | length == 1'
+  ev "what refuses closing IP access: $(printf '%s' "$out" | jq -c '[.blocked[]? | {code, message}]')"
+  ev "addresses the panel sees the nodes dial: $(for id in $(api nodes.list '{}' | jq -r '(.nodes // .)[].id'); do api nodes.get "{\"nodeId\":\"$id\"}" | jq -c '{name: (.node.name // .name), panelAddress: (.node.panelAddress // .panelAddress)}'; done | tr '\n' ' ')"
   expect "nothing refuses closing IP access for the owner on the domain" jq_ok "$out" '(.blocked | length) == 0'
   expect "the recovery SSH tunnel goes to 127.0.0.1:$port ($(printf '%s' "$out" | jq -r '.recovery.sshTunnel // empty'))" \
     jq_ok "$out" --arg p "ssh -L 3000:127.0.0.1:$port " '.recovery.sshTunnel | startswith($p)'
