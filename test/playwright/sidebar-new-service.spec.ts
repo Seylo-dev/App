@@ -1,6 +1,7 @@
 // Every project row in the sidebar has a "+" that starts a new service in
 // that project (owner request): the New service menu, then the form with the
-// project already chosen. The protected Panel project gets none. Demo data.
+// project already chosen. The protected Panel project gets none. The logo and
+// panel name at the top go to the dashboard. Demo data.
 
 import { installDemo } from "./demo/routes";
 import { expect, stateFile, test } from "./helpers";
@@ -24,6 +25,14 @@ test.describe("sidebar new service", () => {
     await expect(dialog).toBeVisible();
     // Started from a project, the form has no Project picker: the project is already chosen.
     await expect(dialog.getByText("Project", { exact: true })).toHaveCount(0);
+  });
+
+  test("the logo and panel name go to the dashboard", async ({ page }) => {
+    await installDemo(page);
+    await page.goto("/nodes");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: / home$/ }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   });
 
   test("the protected Panel project has no +", async ({ page }) => {

@@ -52,8 +52,15 @@ export function Sidebar() {
       className="box-border flex w-full flex-col gap-3.5 bg-sidebar px-3.5 pt-[18px] pb-3.5 text-sidebar-foreground shadow-sidebar md:sticky md:top-0 md:h-dvh md:w-[248px] md:shrink-0 md:overflow-y-auto"
     >
       <div className="flex items-center gap-2.5 px-1.5 py-0.5">
-        <BrandMark />
-        <span className="text-base font-semibold tracking-[-0.015em]">{info.data?.name ?? displayName}</span>
+        {/* The mark and name go home (the dashboard), as in most apps. */}
+        <Link
+          to="/"
+          aria-label={t("nav.home", { name: info.data?.name ?? displayName })}
+          className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-control text-inherit no-underline"
+        >
+          <BrandMark />
+          <span className="truncate text-base font-semibold tracking-[-0.015em]">{info.data?.name ?? displayName}</span>
+        </Link>
         {info.data ? (
           <Chip tone="blue" mono className="ml-auto px-[7px] py-0.5 text-[11px]">
             {info.data.version === "dev" ? "dev" : `v${info.data.version}`}
