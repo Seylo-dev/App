@@ -12,7 +12,7 @@ import { defineModule } from "../module";
 import { assertSourceAllowed } from "../services/source-guard";
 import { blockedMessage, blockedTarget } from "../uptime/targets";
 import { credentialUsage, loadCredential, openCredential, toCredential } from "./credentials";
-import { generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, urlHost } from "./remote";
+import { checkKnownHostsFor, generateDeployKey, listRemoteRefs, publicKeyOf, scanHostKeys, urlHost } from "./remote";
 import {
   allowInternalGitHost,
   gitReadTarget,
@@ -40,6 +40,7 @@ const listCredentials = implement(gitOps.listCredentials, (_input, ctx) => {
 });
 
 const createCredential = implement(gitOps.createCredential, (input, ctx) => {
+  checkKnownHostsFor(input.host, input.knownHosts);
   let secret: string;
   let publicKey: string | null = null;
   let fingerprint: string | null = null;
@@ -77,6 +78,7 @@ const createCredential = implement(gitOps.createCredential, (input, ctx) => {
 });
 
 const generateSshKey = implement(gitOps.generateSshKey, (input, ctx) => {
+  checkKnownHostsFor(input.host, input.knownHosts);
   const key = generateDeployKey(input.name);
   const row = ctx.db
     .insert(gitCredentials)
@@ -100,7 +102,10 @@ const updateCredential = implement(gitOps.updateCredential, (input, ctx) => {
   const row = loadCredential(ctx.db, input.credentialId);
   const changes: Partial<typeof gitCredentials.$inferInsert> = {};
   if (input.name !== undefined) changes.name = input.name.trim();
-  if (input.knownHosts !== undefined) changes.knownHosts = input.knownHosts.trim() || null;
+  if (input.knownHosts !== undefined) {
+    checkKnownHostsFor(row.host, input.knownHosts);
+    changes.knownHosts = input.knownHosts.trim() || null;
+  }
   if (input.username !== undefined) {
     if (row.kind !== "token") throw new OpError("BAD_REQUEST", "Only token credentials have a user name.", { field: "username" });
     changes.username = input.username?.trim() || null;

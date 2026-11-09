@@ -166,6 +166,43 @@ function knownLinesFor(target: { host: string; port: number }, knownHosts: strin
   return own.length > 0 ? own : (builtinKnownHosts[target.host] ?? []);
 }
 
+/**
+ * Checks known_hosts lines a person or a tool hands in for a credential's
+ * host ("git.example.com" or "git.example.com:2222"): empty is fine (the
+ * built-in keys of well-known hosts), hashed lines ("|1|...") cannot be
+ * matched, and at least one line must name the host the way clones look it
+ * up ("[host]:port" off port 22). Otherwise the credential would save and
+ * every clone would fail with "No known host key".
+ */
+export function checkKnownHostsFor(credentialHost: string, knownHosts: string | null | undefined): void {
+  const lines = (knownHosts ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+  if (lines.length === 0) return;
+  const [host = "", portText] = credentialHost.toLowerCase().split(":");
+  const port = portText ? Number(portText) : 22;
+  const name = port === 22 ? host : `[${host}]:${port}`;
+  if (lines.some((l) => l.startsWith("|"))) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `Hashed known_hosts lines cannot be matched. Use lines that start with ${name}, for example from: ssh-keyscan${port === 22 ? "" : ` -p ${port}`} ${host}`,
+      {
+        field: "knownHosts",
+      },
+    );
+  }
+  if (!lines.some((l) => (l.split(/\s+/)[0] ?? "").toLowerCase().split(",").includes(name))) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `None of these lines are for ${name}. Each line starts with the host it is for, for example: ${name} ssh-ed25519 AAAA...`,
+      {
+        field: "knownHosts",
+      },
+    );
+  }
+}
+
 /** Base64 key blobs the known_hosts lines allow. */
 export function allowedKeys(target: { host: string; port: number }, knownHosts: string | null | undefined): Set<string> {
   return new Set(knownLinesFor(target, knownHosts).map((l) => l.split(/\s+/)[2] ?? ""));
