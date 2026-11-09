@@ -63,7 +63,8 @@ test.describe("git providers", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Git providers" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Git providers" })).toBeVisible();
     await expect(page.getByText("Company GitLab")).toBeVisible();
-    await expect(page.getByText("deploy-bot")).toBeVisible();
+    // Exact: on a phone each row also repeats its details in one line (host · user · services).
+    await expect(page.getByText("deploy-bot", { exact: true })).toBeVisible();
 
     await page.getByRole("radio", { name: "Gitea or Forgejo" }).click();
     const save = page.getByRole("button", { name: "Check and save" });

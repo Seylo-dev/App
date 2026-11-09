@@ -167,7 +167,8 @@ test.describe("updates", () => {
     await installDemo(page, { overrides: { "updates.status": () => ({ ...updateStatus, activeRun: null }), "updates.history": () => history } });
     await page.goto("/settings/updates");
     const table = page.getByRole("table", { name: "History" });
-    await expect(table.getByText("Node came back")).toHaveCount(2);
+    // Visible ones only: each row also carries a phone summary line that is hidden on a desktop.
+    await expect(table.getByText("Node came back").filter({ visible: true })).toHaveCount(2);
     const retried = table.getByLabel(/^us-ash-1: Skipped\./);
     await retried.hover();
     await expect(page.getByRole("tooltip", { name: /It came back and got a run of its own .*"Node came back" run/ })).toBeVisible();
