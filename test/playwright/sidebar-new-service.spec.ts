@@ -35,6 +35,34 @@ test.describe("sidebar new service", () => {
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   });
 
+  // Only MCP tools and the AI assistant ask for approvals, so the link waits
+  // until one of them is on (or something waits for the viewer).
+  test("Approvals shows only once MCP or the assistant is on, or something waits", async ({ page }) => {
+    const feature = (enabled: boolean) => ({ enabled, reason: enabled ? "" : "off" });
+    const features = (mcp: boolean) => ({
+      githubSignIn: feature(false),
+      passkeys: feature(false),
+      mcp: feature(mcp),
+      ai: feature(false),
+      telemetry: feature(false),
+      notifications: feature(false),
+    });
+    const none = { approvals: [], nextCursor: null, pendingCount: 0 };
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+
+    await installDemo(page, { overrides: { "system.features": () => features(false), "approvals.list": () => none } });
+    await page.goto("/");
+    await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: /^Approvals/ })).toHaveCount(0);
+    // A bookmark still opens it, and the link shows while you are there.
+    await page.goto("/approvals");
+    await expect(sidebar.getByRole("link", { name: /^Approvals/ })).toBeVisible();
+
+    await installDemo(page, { overrides: { "system.features": () => features(true), "approvals.list": () => none } });
+    await page.goto("/");
+    await expect(sidebar.getByRole("link", { name: /^Approvals/ })).toBeVisible();
+  });
+
   test("the protected Panel project has no +", async ({ page }) => {
     await installDemo(page);
     await page.goto("/");

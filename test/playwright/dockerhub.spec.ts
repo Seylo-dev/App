@@ -206,7 +206,7 @@ test("a popular image opens the same form with its preset port", async ({ page }
 test("the New service menu opens the Docker Hub tab", async ({ page }) => {
   await installDemo(page);
   await page.goto(`/p/${ids.acme}`);
-  await page.getByRole("button", { name: "New service" }).click();
+  await page.getByRole("button", { name: "New service", exact: true }).click();
   await page.getByRole("menuitem", { name: /From Docker Hub/ }).click();
   await expect(page).toHaveURL(new RegExp(`/templates\\?.*tab=docker-hub`));
   await expect(page).toHaveURL(new RegExp(`project=${ids.acme}`));

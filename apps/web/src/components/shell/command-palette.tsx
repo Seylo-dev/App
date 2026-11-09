@@ -12,13 +12,14 @@ import { t } from "../../i18n/t";
 import { kindTag, statusDisplay } from "../../lib/service-display";
 import { useAllServices } from "../../lib/use-all-services";
 import { useStartNewService } from "../new-service/new-service-menu";
-import { mainNav } from "./nav-items";
 import { useShell } from "./shell-context";
+import { useMainNav } from "./use-main-nav";
 
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate();
   const shell = useShell();
   const startNewService = useStartNewService();
+  const { items: navItems } = useMainNav();
   const nodeList = useOp(nodes.list, {}, { enabled: open, retry: false });
   const everything = useAllServices(open);
   const projectRows = everything.projects;
@@ -64,7 +65,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           </CommandItem>
         </CommandGroup>
         <CommandGroup heading={t("palette.go")}>
-          {mainNav.map((item) => (
+          {navItems.map((item) => (
             <CommandItem key={item.to} value={`go ${t(item.label)}`} onSelect={() => run(() => void navigate({ to: item.to }))}>
               <item.icon size={16} aria-hidden="true" />
               {t(item.label)}

@@ -19,7 +19,7 @@ const connection = (serviceId: string) => `/p/${ids.acme}/s/${serviceId}/connect
 
 async function openNewDatabase(page: Page) {
   await page.goto(`/p/${ids.acme}`);
-  await page.getByRole("button", { name: "New service" }).click();
+  await page.getByRole("button", { name: "New service", exact: true }).click();
   await page.getByRole("menuitem", { name: /Database/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "New database" })).toBeVisible();

@@ -7,7 +7,7 @@
 // tree) that slides to the item you click.
 
 import { displayName } from "@seylo/brand";
-import { approvals, system } from "@seylo/ops";
+import { system } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Chip } from "@seylo/ui/components/chip";
 import { Kbd } from "@seylo/ui/components/kbd";
@@ -19,12 +19,11 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { m } from "motion/react";
 import { useEffect, useState } from "react";
 import { t } from "../../i18n/t";
-import { useLiveUp } from "../../lib/live";
 import { BrandMark } from "../brand-mark";
-import { mainNav } from "./nav-items";
 import { NodesCard } from "./nodes-card";
 import { ProjectsTree } from "./projects-tree";
 import { useShell } from "./shell-context";
+import { useMainNav } from "./use-main-nav";
 import { UserRow } from "./user-row";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -32,11 +31,8 @@ const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigat
 export function Sidebar() {
   const shell = useShell();
   const info = useOp(system.info, {});
-  // The panel filters approvals per person, so this is what waits for the viewer.
-  // The panel topic refreshes it the moment a request arrives or is decided; poll only while the socket is down.
-  const liveUp = useLiveUp();
-  const pending = useOp(approvals.list, { status: "pending", limit: 1 }, { retry: false, refetchInterval: liveUp ? false : 30_000 });
-  const pendingCount = pending.data?.pendingCount ?? 0;
+  // Approvals shows only while MCP or the assistant can ask for one, or one waits (use-main-nav.ts).
+  const { items: navItems, pendingCount } = useMainNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const path = useRouterState({ select: (state) => state.location.pathname });
 
@@ -55,6 +51,8 @@ export function Sidebar() {
         {/* The mark and name go home (the dashboard), as in most apps. */}
         <Link
           to="/"
+          // "/" matches every page; only the dashboard itself counts as this link's page.
+          activeOptions={{ exact: true }}
           aria-label={t("nav.home", { name: info.data?.name ?? displayName })}
           className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-control text-inherit no-underline"
         >
@@ -96,7 +94,7 @@ export function Sidebar() {
         </button>
 
         <div className="flex flex-col gap-0.5">
-          {mainNav.map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.to}
               to={item.to}

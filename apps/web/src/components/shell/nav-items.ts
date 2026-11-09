@@ -11,3 +11,20 @@ export const mainNav = [
   { to: "/approvals", label: "nav.approvals", icon: IconShieldCheck, exact: false },
   { to: "/settings", label: "nav.settings", icon: IconAdjustmentsHorizontal, exact: false },
 ] as const satisfies readonly { to: string; label: MessageKey; icon: unknown; exact: boolean }[];
+
+export type MainNavItem = (typeof mainNav)[number];
+
+/**
+ * Whether Approvals belongs in the navigation. Only MCP tools and the AI
+ * assistant ask for approvals, so the page shows once either is on, and
+ * always while something waits for the viewer or the page is open (a link
+ * or a bookmark), so a request never sits out of sight.
+ */
+export function showApprovals(state: {
+  mcpEnabled: boolean | undefined;
+  aiEnabled: boolean | undefined;
+  pendingCount: number;
+  onApprovals: boolean;
+}): boolean {
+  return state.mcpEnabled === true || state.aiEnabled === true || state.pendingCount > 0 || state.onApprovals;
+}

@@ -124,7 +124,7 @@ test.describe("screens", () => {
           await page.goto(`/p/${ids.acme}`);
           // The sidebar counts what waits in Approvals (two in the demo data).
           await expect(page.getByRole("link", { name: /Approvals\s*2/ })).toBeVisible();
-          await page.getByRole("button", { name: "New service" }).click();
+          await page.getByRole("button", { name: "New service", exact: true }).click();
           await page.waitForTimeout(400);
           await page.screenshot({ path: `${shots}/${preset}/new-service-menu.png` });
           await page.keyboard.press("Escape");
@@ -186,7 +186,8 @@ test.describe("screens", () => {
           const [r, g, b] = canvas.getImageData(0, 0, 1, 1).data;
           return `rgb(${r}, ${g}, ${b})`;
         };
-        const current = document.querySelector('nav [data-status="active"]');
+        // The selected nav item, not the logo link home (which has an aria-label and no text of its own).
+        const current = [...document.querySelectorAll('nav [data-status="active"]')].find((el) => !el.getAttribute("aria-label"));
         const button = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("New service"));
         return {
           primary: css.getPropertyValue("--primary").trim(),
