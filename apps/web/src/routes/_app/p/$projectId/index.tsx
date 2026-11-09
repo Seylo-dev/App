@@ -10,15 +10,16 @@ import { EnterOnChange } from "@seylo/ui/components/motion";
 import { SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { TabIndicator, tabClassName } from "@seylo/ui/components/tabs";
+import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NewServiceMenu } from "../../../../components/new-service/new-service-menu";
 import { PageHeader } from "../../../../components/page-header";
 import { ProjectActivity } from "../../../../components/project/project-activity";
 import { ProjectPeople, ShareDialog } from "../../../../components/project/project-people";
 import { ProjectSettings } from "../../../../components/project/project-settings";
 import { ServicesGrid, ServicesGridSkeleton } from "../../../../components/project/services-grid";
-import { SharedEnv, SharedEnvSkeleton } from "../../../../components/project/shared-env";
+import { SharedEnv } from "../../../../components/project/shared-env";
 import { QueryError } from "../../../../components/query-error";
 import { type MessageKey, t } from "../../../../i18n/t";
 import { useLiveTopic } from "../../../../lib/live";
@@ -47,6 +48,24 @@ function ProjectPage() {
   const project = useOp(projects.get, { projectId });
   const [shareOpen, setShareOpen] = useState(false);
   useLiveTopic(`project:${projectId}`);
+
+  // On a phone the tabs are one swipe row (like the service tabs): bring the
+  // current tab into it, so ?tab=settings never opens with Settings off screen.
+  const tabRow = useRef<HTMLElement | null>(null);
+  const tabRowRef = useCallback((el: HTMLElement | null) => {
+    tabRow.current = el;
+    return scrollFadeRef(el);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the current tab changes.
+  useEffect(() => {
+    const row = tabRow.current;
+    const current = row?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!row || !current || row.scrollWidth <= row.clientWidth) return;
+    const box = row.getBoundingClientRect();
+    const item = current.getBoundingClientRect();
+    if (item.left < box.left) row.scrollLeft -= box.left - item.left + 24;
+    else if (item.right > box.right) row.scrollLeft += item.right - box.right + 24;
+  }, [tab]);
 
   if (project.isError) return <QueryError error={project.error} onRetry={() => void project.refetch()} />;
   const { data } = project;
@@ -89,7 +108,13 @@ function ProjectPage() {
         />
       )}
 
-      <div role="tablist" aria-label={t("project.sections")} className="flex flex-wrap gap-1 border-b border-border">
+      {/* One swipe row on a phone (the hidden edge fades); from md up the tabs wrap, so every tab shows. */}
+      <div
+        ref={tabRowRef}
+        role="tablist"
+        aria-label={t("project.sections")}
+        className="scroll-row flex flex-nowrap gap-1 border-b border-border md:flex-wrap md:overflow-visible"
+      >
         {tabs.map((item) => (
           <button
             key={item}
@@ -98,7 +123,7 @@ function ProjectPage() {
             aria-selected={tab === item}
             aria-current={tab === item ? "page" : undefined}
             onClick={() => goTo(item)}
-            className={`cursor-pointer border-x-0 border-t-0 bg-transparent ${tabClassName}`}
+            className={`shrink-0 cursor-pointer border-x-0 border-t-0 bg-transparent whitespace-nowrap ${tabClassName}`}
           >
             {tab === item && <TabIndicator layoutId="project-tabs" />}
             {t(tabLabels[item])}
@@ -106,18 +131,13 @@ function ProjectPage() {
         ))}
       </div>
 
+      {/* The shared environment, people and activity need only the id, so they load next to the project; services and settings wait for it. */}
       <EnterOnChange motionKey={tab} subtle role="tabpanel" aria-label={t(tabLabels[tab])}>
-        {!data ? (
-          <TabSkeleton tab={tab} />
-        ) : (
-          <>
-            {tab === "services" && <ServicesGrid projectId={data.id} canCreate={!data.protected} />}
-            {tab === "env" && <SharedEnv projectId={data.id} />}
-            {tab === "people" && <ProjectPeople projectId={data.id} onShare={() => setShareOpen(true)} />}
-            {tab === "activity" && <ProjectActivity projectId={data.id} />}
-            {tab === "settings" && <ProjectSettings key={data.updatedAt} project={data} />}
-          </>
-        )}
+        {tab === "services" && (data ? <ServicesGrid projectId={data.id} canCreate={!data.protected} /> : <ServicesGridSkeleton />)}
+        {tab === "env" && <SharedEnv projectId={projectId} />}
+        {tab === "people" && <ProjectPeople projectId={projectId} onShare={() => setShareOpen(true)} />}
+        {tab === "activity" && <ProjectActivity projectId={projectId} />}
+        {tab === "settings" && (data ? <ProjectSettings key={data.updatedAt} project={data} /> : <SettingsSkeleton />)}
       </EnterOnChange>
       {data && <ShareDialog projectId={data.id} open={shareOpen} onOpenChange={setShareOpen} />}
     </>
@@ -152,15 +172,15 @@ function ProjectHeaderSkeleton() {
   );
 }
 
-/** The open tab's content while the project loads. */
-function TabSkeleton({ tab }: { tab: Tab }) {
-  if (tab === "services") return <ServicesGridSkeleton />;
-  if (tab === "env") return <SharedEnvSkeleton />;
+/** The settings tab while the project loads: the General card with its two fields and save bar. */
+function SettingsSkeleton() {
   return (
     <LoadingRegion label={t("common.loading")} className="max-w-[760px]">
-      <SectionCardSkeleton titleWidth="w-28" description={false}>
-        <FieldSkeleton />
-        <FieldSkeleton />
+      <SectionCardSkeleton titleWidth="w-16" description={false} footer={<ButtonSkeleton className="ml-auto w-[62px]" />}>
+        <div className="flex flex-col gap-4">
+          <FieldSkeleton />
+          <FieldSkeleton />
+        </div>
       </SectionCardSkeleton>
     </LoadingRegion>
   );

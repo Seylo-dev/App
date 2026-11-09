@@ -157,6 +157,9 @@ export function DeployHostAction({ service, error }: { service: ServiceDetail; e
 
 type Host = OpOutput<typeof git.listInternalHosts>["items"][number];
 
+const allowedBy = (h: Host) => (h.approvedBy ? h.approvedBy.name : t("gitHosts.list.recorded"));
+const usedBy = (h: Host) => (h.usedBy > 0 ? t("gitHosts.list.usedBy", { count: h.usedBy }) : t("gitHosts.list.unused"));
+
 /** Project settings: the project's internal git hosts, for admins (nothing for anyone else). */
 export function InternalGitHosts({ projectId, projectName }: { projectId: string; projectName: string }) {
   const admin = useCanManageGit();
@@ -197,16 +200,26 @@ export function InternalGitHosts({ projectId, projectName }: { projectId: string
               id: "host",
               header: t("gitHosts.list.host"),
               skeletonWidth: "30%",
-              cell: (h) => <span className="font-mono text-[12.5px] break-all">{h.host}</span>,
+              // A host breaks only where it must (a very long name), never mid-word in a squeezed column.
+              cell: (h) => (
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-mono text-[12.5px] [overflow-wrap:anywhere]">{h.host}</span>
+                  {/* On a phone Allowed by and Sources are hidden: the same facts as one line under the host. */}
+                  <span className="text-xs text-muted-foreground md:hidden">
+                    {[allowedBy(h), formatRelative(h.createdAt), usedBy(h)].join(t("format.separator"))}
+                  </span>
+                </span>
+              ),
             },
             {
               id: "allowedBy",
               header: t("gitHosts.list.allowedBy"),
               skeletonWidth: "28%",
               skeletonLines: 2,
+              hideOnMobile: true,
               cell: (h) => (
                 <span className="flex flex-col">
-                  <span>{h.approvedBy ? h.approvedBy.name : t("gitHosts.list.recorded")}</span>
+                  <span>{allowedBy(h)}</span>
                   <span className="text-xs text-muted-foreground">{formatRelative(h.createdAt)}</span>
                 </span>
               ),
@@ -215,11 +228,8 @@ export function InternalGitHosts({ projectId, projectName }: { projectId: string
               id: "usedBy",
               header: t("gitHosts.list.sources"),
               skeletonWidth: "16%",
-              cell: (h) => (
-                <span className="text-muted-foreground">
-                  {h.usedBy > 0 ? t("gitHosts.list.usedBy", { count: h.usedBy }) : t("gitHosts.list.unused")}
-                </span>
-              ),
+              hideOnMobile: true,
+              cell: (h) => <span className="whitespace-nowrap text-muted-foreground">{usedBy(h)}</span>,
             },
             {
               id: "actions",

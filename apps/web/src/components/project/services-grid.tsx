@@ -7,6 +7,7 @@ import { nodes, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { cn } from "@seylo/ui/lib/utils";
 import { IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
@@ -116,7 +117,7 @@ function ServiceCard({ service, memoryTotal }: { service: ServiceSummary; memory
       </div>
       <div className="flex flex-col gap-1 text-[12.5px] text-ink-strong">
         <span className="truncate">{sourceLine(service)}</span>
-        <span className="truncate font-mono text-xs text-link">{service.address ?? t("project.noAddress")}</span>
+        <CardAddress service={service} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <UsageBar label={t("dashboard.cpu")} value={cpu === null ? "-" : formatPercent(cpu)} percent={cpu ?? 0} />
@@ -134,6 +135,25 @@ function ServiceCard({ service, memoryTotal }: { service: ServiceSummary; memory
       </div>
     </Link>
   );
+}
+
+/**
+ * The card's address line, as the service header shows it: a public domain
+ * in link blue, an internal name:port in muted mono, and plain muted words
+ * when the service has no port. The whole card is one link, so none of
+ * these is a link of its own.
+ */
+function CardAddress({ service }: { service: ServiceSummary }) {
+  const { address } = service;
+  if (address === null)
+    return (
+      <span className="truncate text-xs text-muted-foreground">
+        {t(service.kind === "app" || service.kind === "cron" ? "service.header.noPorts" : "project.noAddress")}
+      </span>
+    );
+  // The panel writes "<name>:<port>" when the service has a port but no domain.
+  const internal = address.startsWith(`${service.name}:`) && /^\d+$/.test(address.slice(service.name.length + 1));
+  return <span className={cn("truncate font-mono text-xs", internal ? "text-muted-foreground" : "text-link")}>{address}</span>;
 }
 
 function UsageBar({ label, value, percent }: { label: string; value: string; percent: number }) {

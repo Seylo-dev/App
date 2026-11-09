@@ -36,38 +36,45 @@ export function ProjectSettings({ project }: { project: Project }) {
 
   return (
     <div className="flex max-w-[760px] flex-col gap-4">
-      <SectionCard title={t("project.settings.general")}>
-        <form onSubmit={submit} className="flex flex-col gap-4 pb-5">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="project-name">{t("project.name")}</Label>
-            <Input
-              id="project-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={40}
-              disabled={project.protected}
-              required
-            />
-            {project.protected && <span className="text-xs text-muted-foreground">{t("project.settings.protectedName")}</span>}
+      {/* Save sits on the card's footer strip, on the right, like the shared environment's. */}
+      <form onSubmit={submit}>
+        <SectionCard
+          title={t("project.settings.general")}
+          footer={
+            <>
+              {update.error && <span className="text-[13px] text-destructive">{errorMessage(update.error, t("common.unknownError"))}</span>}
+              <Button type="submit" variant="primary" className="ml-auto" disabled={!dirty || update.isPending}>
+                {t("common.save")}
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="project-name">{t("project.name")}</Label>
+              <Input
+                id="project-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={40}
+                disabled={project.protected}
+                required
+              />
+              {project.protected && <span className="text-xs text-muted-foreground">{t("project.settings.protectedName")}</span>}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="project-description">{t("project.description")}</Label>
+              <Input id="project-description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="project-description">{t("project.description")}</Label>
-            <Input id="project-description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
-          </div>
-          <div className="flex items-center gap-2">
-            {update.error && <span className="text-[13px] text-destructive">{errorMessage(update.error, t("common.unknownError"))}</span>}
-            <Button type="submit" variant="primary" className="ml-auto" disabled={!dirty || update.isPending}>
-              {t("common.save")}
-            </Button>
-          </div>
-        </form>
-      </SectionCard>
+        </SectionCard>
+      </form>
 
       <InternalGitHosts projectId={project.id} projectName={project.name} />
 
       {!project.protected && (
         <SectionCard danger title={t("project.dangerZone")} description={t("project.deleteHint")}>
-          <div className="pb-5">
+          <div>
             <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={project.serviceCount > 0}>
               {t("project.deleteProject")}
             </Button>

@@ -62,14 +62,29 @@ export const fixtures: Record<string, unknown> = {
     ],
     hasMore: false,
   },
-  "users.list": {
-    users: [
+  // The People page lists everyone; the Share dialog asks for active people only, like the real panel.
+  "users.list": (input: Input) => {
+    const users = [
       { id: "user000000000001", email: "owner@example.com", name: "Owner", role: "owner", status: "active", twoFactor: true, passkeyCount: 2, githubLogin: "acme-ops", grantCount: 0, lastLoginAt: ago(3), createdAt: ago(60 * 24 * 90) },
       { id: "user000000000002", email: "lee@acme.dev", name: "Lee Park", role: "admin", status: "active", twoFactor: true, passkeyCount: 0, githubLogin: null, grantCount: 0, lastLoginAt: ago(60 * 5), createdAt: ago(60 * 24 * 40) },
       { id: "user000000000003", email: "contractor@studio.io", name: "", role: "member", status: "active", twoFactor: false, passkeyCount: 0, githubLogin: null, grantCount: 2, lastLoginAt: ago(60 * 24 * 2), createdAt: ago(60 * 24 * 10) },
       { id: "user000000000004", email: "old@acme.dev", name: "Former intern", role: "member", status: "disabled", twoFactor: false, passkeyCount: 0, githubLogin: null, grantCount: 1, lastLoginAt: null, createdAt: ago(60 * 24 * 200) },
-    ],
+    ];
+    return { users: input.status ? users.filter((user) => user.status === input.status) : users };
   },
+  // A project's People tab: the contractor on the whole project, the former intern on one service.
+  "grants.listByProject": (input: Input) => ({
+    grants: [
+      {
+        grant: { id: "grant00000000001", userId: "user000000000003", scopeType: "project", scopeId: input.projectId, scopeName: "acme-shop", projectId: null, actions: ["projects.view", "services.view", "services.deploy", "logs.view"], createdBy: "user000000000001", createdAt: ago(60 * 24 * 9), updatedAt: ago(60 * 24 * 2) },
+        user: { id: "user000000000003", email: "contractor@studio.io", name: "" },
+      },
+      {
+        grant: { id: "grant00000000002", userId: "user000000000004", scopeType: "service", scopeId: world.web, scopeName: "web", projectId: input.projectId, actions: ["*"], createdBy: "user000000000001", createdAt: ago(60 * 24 * 120), updatedAt: ago(60 * 24 * 60) },
+        user: { id: "user000000000004", email: "old@acme.dev", name: "Former intern" },
+      },
+    ],
+  }),
   "invites.list": {
     invites: [
       {
@@ -209,9 +224,9 @@ export const fixtures: Record<string, unknown> = {
   },
   "audit.list": {
     entries: [
-      { id: "1042", at: ago(2), actor: { type: "user", id: "user000000000001", label: "owner@example.com", credentialId: "sess000000000001" }, opId: "services.deploy", target: { type: "service", id: "svc0000000000001", label: "web" }, input: { serviceId: "svc0000000000001" }, outcome: "ok", errorCode: null, durationMs: 42, ip: "203.0.113.7", userAgent: "Mozilla/5.0 (Macintosh) Chrome/130.0", approvalId: null },
+      { id: "1042", at: ago(2), actor: { type: "user", id: "user000000000001", label: "owner@example.com", credentialId: "sess000000000001" }, opId: "deployments.deploy", target: { type: "service", id: "svc0000000000001", label: "web" }, input: { serviceId: "svc0000000000001" }, outcome: "ok", errorCode: null, durationMs: 42, ip: "203.0.113.7", userAgent: "Mozilla/5.0 (Macintosh) Chrome/130.0", approvalId: null },
       { id: "1041", at: ago(15), actor: { type: "mcp", id: "user000000000001", label: "owner@example.com via Claude Code on laptop", credentialId: "key0000000000003" }, opId: "projects.delete", target: { type: "project", id: world.personal, label: "docs" }, input: { projectId: world.personal }, outcome: "error", errorCode: "APPROVAL_REQUIRED", durationMs: 3, ip: "203.0.113.7", userAgent: null, approvalId: null },
-      { id: "1040", at: ago(60), actor: { type: "apiKey", id: "user000000000001", label: "owner@example.com via key github-actions", credentialId: "key0000000000001" }, opId: "services.deploy", target: { type: "service", id: "svc0000000000002", label: "api" }, input: { serviceId: "svc0000000000002" }, outcome: "ok", errorCode: null, durationMs: 51, ip: "140.82.112.4", userAgent: "curl/8.4.0", approvalId: null },
+      { id: "1040", at: ago(60), actor: { type: "apiKey", id: "user000000000001", label: "owner@example.com via key github-actions", credentialId: "key0000000000001" }, opId: "deployments.deploy", target: { type: "service", id: "svc0000000000002", label: "api" }, input: { serviceId: "svc0000000000002" }, outcome: "ok", errorCode: null, durationMs: 51, ip: "140.82.112.4", userAgent: "curl/8.4.0", approvalId: null },
       { id: "1039", at: ago(60 * 3), actor: { type: "user", id: "user000000000002", label: "lee@acme.dev", credentialId: "sess0000000000x2" }, opId: "notifications.createChannel", target: null, input: { name: "#alerts", config: { kind: "discord", webhookUrl: "[redacted]" } }, outcome: "ok", errorCode: null, durationMs: 220, ip: "198.51.100.23", userAgent: "Mozilla/5.0 Firefox/132.0", approvalId: null },
       { id: "1038", at: ago(60 * 26), actor: { type: "anonymous", id: null, label: "anonymous", credentialId: null }, opId: "auth.login", target: null, input: { email: "admin@acme.dev", password: "[redacted]" }, outcome: "error", errorCode: "UNAUTHENTICATED", durationMs: 310, ip: "45.33.12.9", userAgent: "python-requests/2.32", approvalId: null },
     ],

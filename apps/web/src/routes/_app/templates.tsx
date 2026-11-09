@@ -8,9 +8,11 @@
 import { templates } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EmptyState } from "@seylo/ui/components/empty-state";
+import { Input } from "@seylo/ui/components/input";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Segmented, SegmentedItem, SegmentPill } from "@seylo/ui/components/segmented";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -66,9 +68,15 @@ function TemplatesPage() {
         title={t("nav.templates")}
         subtitle={t("templates.subtitle")}
         actions={
-          <label className="flex h-[38px] w-full items-center gap-2 rounded-control bg-card px-3 shadow-control sm:w-[300px]">
-            <IconSearch size={15} stroke={1.8} className="shrink-0 text-muted-foreground" aria-hidden="true" />
-            <input
+          // The kit's Input with a leading icon, like every other search box in the panel.
+          <div className="relative w-full sm:w-[300px]">
+            <IconSearch
+              size={15}
+              stroke={1.8}
+              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
               type="search"
               value={text}
               onChange={(e) => {
@@ -83,9 +91,9 @@ function TemplatesPage() {
                     : t("templates.search")
               }
               aria-label={hub ? t("dockerHub.search") : t("templates.search")}
-              className="min-w-0 flex-1 border-0 bg-transparent text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
+              className="pl-9"
             />
-          </label>
+          </div>
         }
       />
 
@@ -107,16 +115,18 @@ function TemplatesPage() {
         {hub && <HubResults query={hubQuery} onPick={setImage} />}
 
         {!hub && all.isPending && (
-          <div aria-hidden="true" className="flex max-w-full gap-0.5 self-start rounded-control bg-track p-[3px]">
+          <div aria-hidden="true" className="scroll-row flex max-w-full gap-0.5 self-start rounded-control bg-track p-[3px]">
             {["w-9", "w-[86px]", "w-[74px]", "w-[82px]", "w-16", "w-12", "w-[104px]"].map((width) => (
               <Skeleton key={width} className={`h-7 rounded-chip bg-card/70 ${width}`} />
             ))}
           </div>
         )}
         {!hub && categories.length > 0 && (
+          // One row like the Segmented above it: on a phone it scrolls sideways (the hidden edge fades) instead of wrapping into a box.
           <fieldset
+            ref={scrollFadeRef}
             aria-label={t("templates.categories")}
-            className="m-0 flex max-w-full min-w-0 border-0 flex-wrap gap-0.5 self-start rounded-control bg-track p-[3px]"
+            className="scroll-row m-0 flex max-w-full min-w-0 gap-0.5 self-start rounded-control border-0 bg-track p-[3px]"
           >
             <CategoryButton pressed={!search.category} onClick={() => pickCategory(undefined)}>
               {t("templates.all")}
@@ -202,7 +212,7 @@ function CategoryButton({ pressed, onClick, children }: { pressed: boolean; onCl
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "relative isolate h-7 cursor-pointer rounded-chip border-0 bg-transparent px-3 text-[12.5px]",
+        "relative isolate h-7 shrink-0 cursor-pointer rounded-chip border-0 bg-transparent px-3 text-[12.5px] whitespace-nowrap transition-colors duration-200",
         pressed ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >

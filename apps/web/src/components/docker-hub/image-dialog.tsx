@@ -57,7 +57,7 @@ const dockerHubServers = new Set(["docker.io", "index.docker.io", "registry.hub.
 export function ImageDialog({ target, projectId, onClose }: { target: HubTarget | null; projectId?: string; onClose: () => void }) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="top-[5%] max-h-[90dvh] max-w-[880px] overflow-y-auto p-0">
+      <DialogContent className="top-[5%] flex max-h-[90dvh] max-w-[880px] flex-col overflow-hidden p-0">
         {target && <ImageForm key={target.repository} target={target} fixedProjectId={projectId} onClose={onClose} />}
       </DialogContent>
     </Dialog>
@@ -158,8 +158,9 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col">
-      <div className="flex items-center gap-3 border-b border-divider px-[22px] py-[18px]">
+    // Only the middle scrolls: the title and the Create button stay in view on a short screen.
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-3 border-b border-divider px-[22px] py-[18px]">
         <TemplateLogo slug={target.repository} name={defaultServiceName(target.repository)} logoUrl={null} size={38} />
         <span className="flex min-w-0 flex-col gap-px">
           <DialogTitle className="text-base">{t("dockerHub.dialogTitle", { name: target.repository })}</DialogTitle>
@@ -172,189 +173,191 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
         </DialogClose>
       </div>
 
-      <div className="grid grid-cols-1 gap-[22px] px-[22px] py-5 md:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="flex min-w-0 flex-col gap-[13px]">
-          {!fixedProjectId && (
-            <Labeled id="hub-project" label={t("newService.project")}>
-              <ProjectPicker id="hub-project" value={projectId} onChange={setProjectId} />
-            </Labeled>
-          )}
-          <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
-            <Labeled
-              id="hub-name"
-              label={t("templates.serviceName")}
-              hint={name !== "" && !nameValid ? t("newService.nameInvalid") : undefined}
-            >
-              <Input
-                id="hub-name"
-                value={name}
-                onChange={(e) => setName(e.target.value.toLowerCase())}
-                maxLength={40}
-                required
-                aria-invalid={name !== "" && !nameValid}
-                className="font-mono"
-              />
-            </Labeled>
-            <Labeled id="hub-node" label={t("newService.node")}>
-              <NodePicker id="hub-node" value={nodeId} onChange={setNodeId} />
-            </Labeled>
-          </div>
-          <Labeled id="hub-tag" label={t("dockerHub.tag")}>
-            {tags.isError ? (
-              <QueryError error={tags.error} onRetry={() => void tags.refetch()} />
-            ) : (
-              <TagPicker
-                id="hub-tag"
-                repository={target.repository}
-                value={chosenTag}
-                suggested={tags.data?.suggested ?? null}
-                firstPage={tags.data?.tags}
-                onChange={setTag}
-              />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="grid grid-cols-1 gap-[22px] px-[22px] py-5 md:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="flex min-w-0 flex-col gap-[13px]">
+            {!fixedProjectId && (
+              <Labeled id="hub-project" label={t("newService.project")}>
+                <ProjectPicker id="hub-project" value={projectId} onChange={setProjectId} />
+              </Labeled>
             )}
-          </Labeled>
-
-          {chosenTag !== null && inspect.isError && <QueryError error={inspect.error} onRetry={() => void inspect.refetch()} />}
-          {(tags.isPending || (chosenTag !== null && inspect.isPending) || (config && !state)) && !inspect.isError && (
-            <LoadingRegion label={t("dockerHub.reading")} className="flex flex-col gap-[13px]">
-              <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
-                <FieldSkeleton labelWidth="w-10" hint />
-              </div>
-              <div className="flex items-start gap-2.5">
-                <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
-                <span className="flex flex-col gap-0.5">
-                  <SkeletonText className="w-40 text-[13px]" />
-                  <SkeletonText className="w-64 text-xs" />
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                <SkeletonText className="mb-1.5 w-16 text-[13px]" />
-                <div className="flex items-center gap-2.5">
-                  <Skeleton className="size-4 shrink-0 rounded-[4px]" />
-                  <SkeletonText className="w-28 text-[12.5px]" />
-                </div>
-              </div>
-              <FieldSkeleton labelWidth="w-20" hint />
-            </LoadingRegion>
-          )}
-          {config && state && (
-            <>
-              <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
-                <Labeled id="hub-port" label={t("dockerHub.port")} hint={ports.length > 0 ? t("dockerHub.portHint") : undefined}>
-                  {ports.length > 0 ? (
-                    <Select
-                      value={state.port === "" ? "none" : state.port}
-                      onValueChange={(value) => {
-                        const port = value === "none" ? "" : value;
-                        setState({ ...state, port, public: port === "" ? false : publicByDefault(Number(port)) });
-                      }}
-                    >
-                      <SelectTrigger id="hub-port">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ports.map((port) => (
-                          <SelectItem key={port} value={String(port)}>
-                            <span className="font-mono">{port}</span>
-                          </SelectItem>
-                        ))}
-                        <SelectItem value="none">{t("dockerHub.portNone")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      id="hub-port"
-                      inputMode="numeric"
-                      value={state.port}
-                      onChange={(e) => setState({ ...state, port: e.target.value.replace(/\D/g, "").slice(0, 5) })}
-                      placeholder={t("dockerHub.portCustom")}
-                    />
-                  )}
-                </Labeled>
-                {logins.length > 0 && (
-                  <Labeled id="hub-login" label={t("dockerHub.pullWith")}>
-                    <Select
-                      value={registryId ?? "anonymous"}
-                      onValueChange={(value) => setRegistryChoice(value === "anonymous" ? null : value)}
-                    >
-                      <SelectTrigger id="hub-login">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="anonymous">{t("dockerHub.pullAnonymous")}</SelectItem>
-                        {logins.map((login) => (
-                          <SelectItem key={login.id} value={login.id}>
-                            {login.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Labeled>
-                )}
-              </div>
-              {state.port !== "" && (
-                <label htmlFor="hub-public" className="flex cursor-pointer items-start gap-2.5 text-[13px]">
-                  <Switch
-                    id="hub-public"
-                    checked={state.public}
-                    onCheckedChange={(on) => setState({ ...state, public: on })}
-                    className="mt-0.5"
-                  />
-                  <span className="flex flex-col gap-0.5">
-                    <span className="font-medium text-foreground">{t("dockerHub.public")}</span>
-                    <span className="text-xs text-muted-foreground">{t("dockerHub.publicHint")}</span>
-                  </span>
-                </label>
-              )}
-              <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-                <legend className="mb-1.5 p-0 text-[13px] font-medium text-foreground">{t("dockerHub.volumes")}</legend>
-                {Object.keys(state.volumes).length === 0 ? (
-                  <span className="text-xs text-muted-foreground">{t("dockerHub.volumesNone")}</span>
-                ) : (
-                  <>
-                    {Object.keys(state.volumes).map((path) => (
-                      <label key={path} htmlFor={`hub-vol-${path}`} className="flex cursor-pointer items-center gap-2.5 text-[13px]">
-                        <Checkbox
-                          id={`hub-vol-${path}`}
-                          checked={state.volumes[path] === true}
-                          onCheckedChange={(on) => setState({ ...state, volumes: { ...state.volumes, [path]: on === true } })}
-                        />
-                        <span className="font-mono text-[12.5px] text-foreground">{path}</span>
-                      </label>
-                    ))}
-                    <span className="text-xs text-muted-foreground">{t("dockerHub.volumesHint")}</span>
-                  </>
-                )}
-              </fieldset>
+            <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
               <Labeled
-                id="hub-command"
-                label={t("dockerHub.command")}
-                hint={t("dockerHub.commandHint", { command: commandLine(config) || "-" })}
+                id="hub-name"
+                label={t("templates.serviceName")}
+                hint={name !== "" && !nameValid ? t("newService.nameInvalid") : undefined}
               >
                 <Input
-                  id="hub-command"
-                  value={state.command}
-                  onChange={(e) => setState({ ...state, command: e.target.value })}
-                  placeholder={config.cmd.join(" ")}
+                  id="hub-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value.toLowerCase())}
+                  maxLength={40}
+                  required
+                  aria-invalid={name !== "" && !nameValid}
                   className="font-mono"
                 />
               </Labeled>
-            </>
-          )}
+              <Labeled id="hub-node" label={t("newService.node")}>
+                <NodePicker id="hub-node" value={nodeId} onChange={setNodeId} />
+              </Labeled>
+            </div>
+            <Labeled id="hub-tag" label={t("dockerHub.tag")}>
+              {tags.isError ? (
+                <QueryError error={tags.error} onRetry={() => void tags.refetch()} />
+              ) : (
+                <TagPicker
+                  id="hub-tag"
+                  repository={target.repository}
+                  value={chosenTag}
+                  suggested={tags.data?.suggested ?? null}
+                  firstPage={tags.data?.tags}
+                  onChange={setTag}
+                />
+              )}
+            </Labeled>
+
+            {chosenTag !== null && inspect.isError && <QueryError error={inspect.error} onRetry={() => void inspect.refetch()} />}
+            {(tags.isPending || (chosenTag !== null && inspect.isPending) || (config && !state)) && !inspect.isError && (
+              <LoadingRegion label={t("dockerHub.reading")} className="flex flex-col gap-[13px]">
+                <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
+                  <FieldSkeleton labelWidth="w-10" hint />
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
+                  <span className="flex flex-col gap-0.5">
+                    <SkeletonText className="w-40 text-[13px]" />
+                    <SkeletonText className="w-64 text-xs" />
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <SkeletonText className="mb-1.5 w-16 text-[13px]" />
+                  <div className="flex items-center gap-2.5">
+                    <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+                    <SkeletonText className="w-28 text-[12.5px]" />
+                  </div>
+                </div>
+                <FieldSkeleton labelWidth="w-20" hint />
+              </LoadingRegion>
+            )}
+            {config && state && (
+              <>
+                <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2">
+                  <Labeled id="hub-port" label={t("dockerHub.port")} hint={ports.length > 0 ? t("dockerHub.portHint") : undefined}>
+                    {ports.length > 0 ? (
+                      <Select
+                        value={state.port === "" ? "none" : state.port}
+                        onValueChange={(value) => {
+                          const port = value === "none" ? "" : value;
+                          setState({ ...state, port, public: port === "" ? false : publicByDefault(Number(port)) });
+                        }}
+                      >
+                        <SelectTrigger id="hub-port">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ports.map((port) => (
+                            <SelectItem key={port} value={String(port)}>
+                              <span className="font-mono">{port}</span>
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="none">{t("dockerHub.portNone")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        id="hub-port"
+                        inputMode="numeric"
+                        value={state.port}
+                        onChange={(e) => setState({ ...state, port: e.target.value.replace(/\D/g, "").slice(0, 5) })}
+                        placeholder={t("dockerHub.portCustom")}
+                      />
+                    )}
+                  </Labeled>
+                  {logins.length > 0 && (
+                    <Labeled id="hub-login" label={t("dockerHub.pullWith")}>
+                      <Select
+                        value={registryId ?? "anonymous"}
+                        onValueChange={(value) => setRegistryChoice(value === "anonymous" ? null : value)}
+                      >
+                        <SelectTrigger id="hub-login">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="anonymous">{t("dockerHub.pullAnonymous")}</SelectItem>
+                          {logins.map((login) => (
+                            <SelectItem key={login.id} value={login.id}>
+                              {login.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Labeled>
+                  )}
+                </div>
+                {state.port !== "" && (
+                  <label htmlFor="hub-public" className="flex cursor-pointer items-start gap-2.5 text-[13px]">
+                    <Switch
+                      id="hub-public"
+                      checked={state.public}
+                      onCheckedChange={(on) => setState({ ...state, public: on })}
+                      className="mt-0.5"
+                    />
+                    <span className="flex flex-col gap-0.5">
+                      <span className="font-medium text-foreground">{t("dockerHub.public")}</span>
+                      <span className="text-xs text-muted-foreground">{t("dockerHub.publicHint")}</span>
+                    </span>
+                  </label>
+                )}
+                <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+                  <legend className="mb-1.5 p-0 text-[13px] font-medium text-foreground">{t("dockerHub.volumes")}</legend>
+                  {Object.keys(state.volumes).length === 0 ? (
+                    <span className="text-xs text-muted-foreground">{t("dockerHub.volumesNone")}</span>
+                  ) : (
+                    <>
+                      {Object.keys(state.volumes).map((path) => (
+                        <label key={path} htmlFor={`hub-vol-${path}`} className="flex cursor-pointer items-center gap-2.5 text-[13px]">
+                          <Checkbox
+                            id={`hub-vol-${path}`}
+                            checked={state.volumes[path] === true}
+                            onCheckedChange={(on) => setState({ ...state, volumes: { ...state.volumes, [path]: on === true } })}
+                          />
+                          <span className="font-mono text-[12.5px] text-foreground">{path}</span>
+                        </label>
+                      ))}
+                      <span className="text-xs text-muted-foreground">{t("dockerHub.volumesHint")}</span>
+                    </>
+                  )}
+                </fieldset>
+                <Labeled
+                  id="hub-command"
+                  label={t("dockerHub.command")}
+                  hint={t("dockerHub.commandHint", { command: commandLine(config) || "-" })}
+                >
+                  <Input
+                    id="hub-command"
+                    value={state.command}
+                    onChange={(e) => setState({ ...state, command: e.target.value })}
+                    placeholder={config.cmd.join(" ")}
+                    className="font-mono"
+                  />
+                </Labeled>
+              </>
+            )}
+          </div>
+
+          <ImageFacts config={config} wrongArch={wrongArch ? nodeArch : null} />
         </div>
 
-        <ImageFacts config={config} wrongArch={wrongArch ? nodeArch : null} />
+        {config && state && (
+          <div className="flex flex-col gap-1.5 px-[22px] pb-5">
+            <span className="text-[13px] font-medium text-foreground">{t("dockerHub.env")}</span>
+            <EnvSection key={state.from} name={name} text={state.env} onChange={(env) => setState({ ...state, env })} />
+            <span className="text-xs text-muted-foreground">{t("dockerHub.envHint")}</span>
+          </div>
+        )}
       </div>
 
-      {config && state && (
-        <div className="flex flex-col gap-1.5 px-[22px] pb-5">
-          <span className="text-[13px] font-medium text-foreground">{t("dockerHub.env")}</span>
-          <EnvSection key={state.from} name={name} text={state.env} onChange={(env) => setState({ ...state, env })} />
-          <span className="text-xs text-muted-foreground">{t("dockerHub.envHint")}</span>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2.5 rounded-b-card border-t border-divider bg-raised px-[22px] py-3.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-2.5 rounded-b-card border-t border-divider bg-raised px-[22px] py-3.5">
         <label htmlFor="hub-deploy" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
           <Checkbox id="hub-deploy" checked={deployNow} onCheckedChange={(on) => setDeployNow(on === true)} />
           {t("newService.deployNow")}
@@ -379,7 +382,8 @@ function EnvSection({ name, text, onChange }: { name: string; text: string; onCh
   const context = useMemo(() => ({ self: { serviceId: null, name, nodes: [] }, targets: [] }), [name]);
   const analysis = useMemo(() => analyzeEnv(text, context), [text, context]);
   return (
-    <div className="overflow-hidden rounded-control shadow-control">
+    // A border, not the inset shadow-control ring: the editor paints its own background over an inset ring, so in dark it had no edge.
+    <div className="overflow-hidden rounded-control border border-input">
       <EnvEditor
         text={text}
         onChange={onChange}

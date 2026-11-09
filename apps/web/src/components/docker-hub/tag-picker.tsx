@@ -51,10 +51,11 @@ export function TagPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
+        {/* Drawn like the kit's SelectTrigger (the Node and Main port fields next to it), focus ring included. */}
         <button
           id={id}
           type="button"
-          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-card px-3 text-left text-[13.5px] text-foreground shadow-control hover:bg-raised"
+          className="flex h-[38px] w-full min-w-0 cursor-pointer items-center gap-2 rounded-control border border-input bg-card px-3 text-left text-[13.5px] text-foreground outline-none transition-interactive focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
         >
           <span className="truncate font-mono">{value ?? "-"}</span>
           {value !== null && value === suggested && (
@@ -62,7 +63,7 @@ export function TagPicker({
               {t("dockerHub.tagSuggested")}
             </Chip>
           )}
-          <IconChevronDown size={14} stroke={2} className="ml-auto shrink-0 text-muted-foreground" aria-hidden="true" />
+          <IconChevronDown size={15} className="ml-auto shrink-0 text-ink-faint" aria-hidden="true" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(420px,calc(100vw-32px))] p-0">

@@ -5,12 +5,14 @@
 import { alerts, deployments } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { Tip } from "@seylo/ui/components/tooltip";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
-import { formatAgo, formatClock } from "../../lib/format";
+import { formatAgo } from "../../lib/format";
 import { QueryError } from "../query-error";
 import { isPanelImage } from "../service/deployment-meta";
+import { formatDateTime } from "../settings/format";
 
 type Tone = "ok" | "run" | "bad" | "info";
 
@@ -54,6 +56,7 @@ export function RecentDeploys() {
               }
               text={text}
               when={active ? t("format.justNow") : formatAgo(d.finishedAt ?? d.createdAt)}
+              exact={formatDateTime(d.finishedAt ?? d.createdAt)}
             />
           );
         })
@@ -108,7 +111,9 @@ export function AlertsCard() {
             tone={severityTone[alert.severity] ?? "info"}
             title={alert.title}
             text={alert.message}
-            when={formatClock(alert.createdAt)}
+            // Relative like the deploys next to it; the exact time on hover.
+            when={formatAgo(alert.createdAt)}
+            exact={formatDateTime(alert.createdAt)}
           />
         ))
       )}
@@ -128,7 +133,7 @@ function FeedCard({ title, link, children }: { title: string; link: ReactNode; c
   );
 }
 
-function FeedRow({ tone, title, text, when }: { tone: Tone; title: ReactNode; text: string; when: string }) {
+function FeedRow({ tone, title, text, when, exact }: { tone: Tone; title: ReactNode; text: string; when: string; exact?: string }) {
   const classes = toneClasses[tone];
   return (
     <div className="flex items-center gap-3 border-t border-divider py-2.5">
@@ -139,7 +144,13 @@ function FeedRow({ tone, title, text, when }: { tone: Tone; title: ReactNode; te
         <b className="text-[13.5px] font-semibold">{title}</b>
         <span className="truncate text-[12.5px] text-muted-foreground">{text}</span>
       </span>
-      <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{when}</span>
+      {exact ? (
+        <Tip content={exact}>
+          <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{when}</span>
+        </Tip>
+      ) : (
+        <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{when}</span>
+      )}
     </div>
   );
 }
