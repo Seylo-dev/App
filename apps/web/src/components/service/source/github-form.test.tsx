@@ -54,6 +54,15 @@ test("someone who may see the App but has no installation still gets the install
   expect(html).not.toContain(t("serviceSource.github.readOnly"));
 });
 
+test("a connected GitHub account is a source too: no 'Connect GitHub first', and its repositories to pick", async () => {
+  const account = { id: "cred000000000001", login: "lee" };
+  const html = await render({ installations: [], installUrl: null, account, hidden: false });
+  expect(html).not.toContain(t("serviceSource.github.noAppTitle"));
+  // The account is picked (the Select's own text renders in the browser only): its repository list and Connect show.
+  expect(html).toContain(t("serviceSource.github.searchRepos"));
+  expect(html).toContain(t("serviceSource.github.connect"));
+});
+
 const branchInput = { projectId: "prj1prj1prj1prj1", installationId: "ghi1ghi1ghi1ghi1", repo: "acme/shop" };
 
 /** The form's BranchSelect with github.branches already answered (or failed) in the cache. */

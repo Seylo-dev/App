@@ -109,6 +109,7 @@ test("an account with no grants gets empty pickers", async () => {
   expect((await callOp(panel, github.installations, {}, { cookie: nobody.cookie })).body).toEqual({
     installations: [],
     installUrl: null,
+    account: null,
     hidden: true,
   });
 });

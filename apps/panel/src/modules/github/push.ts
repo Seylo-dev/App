@@ -16,7 +16,8 @@ import { readSpec, type ServiceSpecJson } from "../services/spec";
 import type { PushChanges } from "../webhooks/changes";
 import { recordDelivery } from "../webhooks/deliveries";
 import { type ChangedFileList, type CompareFiles, pushGate } from "../webhooks/gate";
-import { githubCompare, tokenForInstallation } from "./app";
+import { type GithubSourceRef, githubSourceAuth } from "./account";
+import { githubCompare } from "./app";
 
 export interface PushInfo {
   repo: string;
@@ -61,26 +62,34 @@ export function setStackRefresher(fn: StackRefresher): void {
   refreshStack = fn;
 }
 
-export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: string; event: string; source: "github" }): Promise<number> {
+/** onlyServiceId: a repository webhook of one service (repo-hooks.ts) deploys that service only. */
+export interface PushScope {
+  onlyServiceId?: string;
+}
+
+export async function handlePush(
+  deps: Deps,
+  push: PushInfo,
+  delivery: { id: string; event: string; source: "github" },
+  scope: PushScope = {},
+): Promise<number> {
   let deployed = 0;
-  // One compare per installation for every service of the repo that has watch paths.
+  // One compare per installation (or the connected account) for every service of the repo that has watch paths.
   const compares = new Map<string, Promise<ChangedFileList>>();
   const compareFor =
-    (installationId: string): CompareFiles =>
+    (source: GithubSourceRef): CompareFiles =>
     (before, after) => {
-      const key = `${installationId}:${before}...${after}`;
+      const key = `${source.installationId ?? "account"}:${before}...${after}`;
       let pending = compares.get(key);
       if (!pending) {
-        pending = tokenForInstallation(deps.db, deps.secrets, installationId).then((token) =>
-          githubCompare(token, push.repo, before, after),
-        );
+        pending = githubSourceAuth(deps, source).then(({ token }) => githubCompare(token, push.repo, before, after));
         compares.set(key, pending);
       }
       return pending;
     };
-  const gateFor = (spec: ServiceSpecJson, installationId: string) =>
-    pushGate({ watchPaths: spec.watchPaths, changes: changesOf(push), compare: compareFor(installationId), providerLabel: "GitHub" });
-  const matches = servicesForRepo(deps.db, push.repo);
+  const gateFor = (spec: ServiceSpecJson, source: GithubSourceRef) =>
+    pushGate({ watchPaths: spec.watchPaths, changes: changesOf(push), compare: compareFor(source), providerLabel: "GitHub" });
+  const matches = servicesForRepo(deps.db, push.repo).filter((s) => !scope.onlyServiceId || s.id === scope.onlyServiceId);
   if (matches.length === 0) {
     recordDelivery(deps.db, {
       ...delivery,
@@ -115,7 +124,7 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
           record("ignored", "Deploy on push is off.");
           continue;
         }
-        const stackGate = await gateFor(spec, source.installationId);
+        const stackGate = await gateFor(spec, source);
         if (!stackGate.deploy) {
           record("ignored", stackGate.detail);
           continue;
@@ -138,7 +147,7 @@ export async function handlePush(deps: Deps, push: PushInfo, delivery: { id: str
         record("ignored", "Deploy on push is off.");
         continue;
       }
-      const gate = await gateFor(spec, spec.source.installationId);
+      const gate = await gateFor(spec, spec.source);
       if (!gate.deploy) {
         record("ignored", gate.detail);
         continue;
@@ -181,8 +190,11 @@ export async function handlePullRequest(
   pr: PullRequestInfo,
   sender: string | null,
   delivery: { id: string; event: string },
+  scope: PushScope = {},
 ): Promise<void> {
-  const matches = servicesForRepo(deps.db, baseRepo).filter((s) => s.kind === "app");
+  const matches = servicesForRepo(deps.db, baseRepo).filter(
+    (s) => s.kind === "app" && (!scope.onlyServiceId || s.id === scope.onlyServiceId),
+  );
   for (const svc of matches) {
     const spec = readSpec(svc.spec);
     if (spec.source.type !== "github" || spec.preview) continue;

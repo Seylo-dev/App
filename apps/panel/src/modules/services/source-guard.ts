@@ -81,8 +81,26 @@ const attachKinds = {
     normalize: (v: string) => v.toLowerCase().replace(/\/+$/, ""),
     what: "git provider connection",
   },
+  // The panel's connected GitHub account (github/account.ts), managed with the App.
+  githubAccount: {
+    action: "github.manage",
+    path: "accountId",
+    target: "repo",
+    normalize: (v: string) => v.toLowerCase(),
+    what: "GitHub account",
+  },
 } as const;
 export type AttachKind = keyof typeof attachKinds;
+
+/**
+ * Whether a stored source uses the credential. The connected GitHub
+ * account is one per panel and a source keeps working when it is connected
+ * again under a new id, so any GitHub source read through an account counts.
+ */
+function usesCredential(kind: AttachKind, source: Record<string, unknown>, id: string): boolean {
+  if (kind === "githubAccount") return source.type === "github" && !source.installationId && typeof source.accountId === "string";
+  return source[attachKinds[kind].path] === id;
+}
 
 /** "https://Git.Example.com/a/b.git/" and "https://git.example.com/a/b" are the same repository. */
 export function normalizeGitUrl(url: string): string {
@@ -119,7 +137,7 @@ export function sharedTargets(caller: Caller, projectId: string, kind: AttachKin
     const record = spec as { source?: Record<string, unknown>; stack?: { source?: Record<string, unknown> } | null } | null;
     for (const source of [record?.source, record?.stack?.source]) {
       const target = source?.[rule.target];
-      if (source?.[rule.path] === id && typeof target === "string") out.add(rule.normalize(target));
+      if (source && usesCredential(kind, source, id) && typeof target === "string") out.add(rule.normalize(target));
     }
   }
   return out;
@@ -185,7 +203,7 @@ export function registryMatches(server: string, image: string): boolean {
 export type GuardedSource =
   | { type: "git"; url: string; credentialId?: string | null }
   | { type: "image"; image: string; registryId?: string | null }
-  | { type: "github"; installationId: string; repo: string }
+  | { type: "github"; installationId: string | null; accountId?: string | null; repo: string }
   | { type: "provider"; providerId: string; repo: string }
   | { type: string };
 
@@ -207,6 +225,13 @@ export function assertSourceAllowed(caller: Caller, projectId: string, source: G
     assertMayAttach(caller, projectId, "provider", source.providerId, "repo" in source ? source.repo : "", at("providerId"));
   }
   if (source.type === "github" && "installationId" in source) {
-    assertMayAttach(caller, projectId, "github", source.installationId, "repo" in source ? source.repo : "", at("installationId"));
+    const repo = "repo" in source ? source.repo : "";
+    if (source.installationId) assertMayAttach(caller, projectId, "github", source.installationId, repo, at("installationId"));
+    else if ("accountId" in source && source.accountId)
+      assertMayAttach(caller, projectId, "githubAccount", source.accountId, repo, at("accountId"));
+    else
+      throw new OpError("BAD_REQUEST", "A GitHub source needs an App installation or the connected GitHub account.", {
+        field: at("installationId"),
+      });
   }
 }

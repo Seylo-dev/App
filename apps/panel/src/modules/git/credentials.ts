@@ -12,22 +12,23 @@ import type { RemoteAuth } from "./remote";
 export type GitCredentialRow = typeof gitCredentials.$inferSelect;
 export type GitCredential = Static<typeof gitOps.GitCredential>;
 
-/** Services whose source (or compose source) uses each credential. */
+/** Services whose source (or compose source) uses each credential, the connected GitHub account (accountId) included. */
 export function credentialUsage(db: PanelDb, credentialId?: string): Map<string, number> {
   const source = sql<string | null>`json_extract(${services.spec}, '$.source.credentialId')`;
+  const account = sql<string | null>`json_extract(${services.spec}, '$.source.accountId')`;
   const stack = sql<string | null>`json_extract(${services.spec}, '$.stack.source.credentialId')`;
   const rows = db
-    .select({ source, stack })
+    .select({ source, account, stack })
     .from(services)
     .where(
       credentialId
-        ? or(sql`${source} = ${credentialId}`, sql`${stack} = ${credentialId}`)
-        : or(sql`${source} is not null`, sql`${stack} is not null`),
+        ? or(sql`${source} = ${credentialId}`, sql`${account} = ${credentialId}`, sql`${stack} = ${credentialId}`)
+        : or(sql`${source} is not null`, sql`${account} is not null`, sql`${stack} is not null`),
     )
     .all();
   const out = new Map<string, number>();
   for (const r of rows) {
-    for (const id of new Set([r.source, r.stack])) if (id) out.set(id, (out.get(id) ?? 0) + 1);
+    for (const id of new Set([r.source, r.account, r.stack])) if (id) out.set(id, (out.get(id) ?? 0) + 1);
   }
   return out;
 }

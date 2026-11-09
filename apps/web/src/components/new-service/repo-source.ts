@@ -1,10 +1,12 @@
-// Which source the New app dialog creates for its Repository field. A
-// repository read through one of the panel's connections (a GitHub App
-// installation, a GitLab, Gitea/Forgejo or Bitbucket connection) becomes a
-// GitHub or provider source, which deploys on push like the Source tab's
-// forms; anything else becomes a plain git URL (owner/repo expanded to
-// https://github.com/owner/repo.git), public, deploying only through the
-// deploy trigger. A typed repository counts as one of a connection's when
+// Which source the New app dialog's GitHub tab creates for its Repository
+// field. A repository read through one of the panel's GitHub connections
+// (an App installation, then the connected GitHub account of Settings >
+// GitHub) becomes a GitHub source, which deploys on push like the Source
+// tab's form; one none of them reads becomes a plain git URL (owner/repo
+// expanded to https://github.com/owner/repo.git), public, deploying only
+// through the deploy trigger. The rules below also hold for GitLab,
+// Gitea/Forgejo and Bitbucket connections, whose repositories are picked
+// on the service's Source tab. A typed repository counts as one of a connection's when
 // that connection reads it by its exact name (github.branches /
 // gitProviders.branches, the same check connectRepo makes): the account
 // alone says nothing about which repositories an installation may read.
@@ -28,6 +30,8 @@ export interface Connection {
   baseUrl: string;
   /** The one account or workspace it holds repositories of: a GitHub installation's login, a Bitbucket workspace. */
   owner: string | null;
+  /** The panel's connected GitHub account (a device login or a token): id is its accountId, label its login. */
+  account?: boolean;
 }
 
 export interface RepoInfo {
@@ -80,26 +84,35 @@ export type RepoDecision =
 
 type Installation = { id: string; accountLogin: string; suspended: boolean };
 type Provider = { id: string; kind: Exclude<ConnectionKind, "github">; name: string; url: string; workspace: string | null };
+type GithubLists = { installations: Installation[]; account?: { id: string; login: string } | null; hidden?: boolean };
 
 /**
  * The connections a person can pick from: installations that are not
- * suspended (the Source tab's rule) and every git provider connection.
- * A hidden list (github.installations / gitProviders.list for someone who
- * may not see them) gives none.
+ * suspended (the Source tab's rule), then the connected GitHub account
+ * (it reaches repositories of any owner, so a typed one is asked of it
+ * only when no installation reads it), then every git provider
+ * connection. A hidden list (github.installations / gitProviders.list for
+ * someone who may not see them) gives none.
  */
-export function connectionsOf(
-  installations: { installations: Installation[]; hidden?: boolean } | undefined,
-  providers: { items: Provider[]; hidden?: boolean } | undefined,
-): Connection[] {
+export function connectionsOf(installations: GithubLists | undefined, providers?: { items: Provider[]; hidden?: boolean }): Connection[] {
   const github: Connection[] = installations?.hidden
     ? []
     : (installations?.installations ?? [])
         .filter((i) => !i.suspended)
         .map((i) => ({ kind: "github", id: i.id, label: i.accountLogin, baseUrl: "https://github.com", owner: i.accountLogin }));
+  const account = installations?.hidden ? null : (installations?.account ?? null);
+  const viaAccount: Connection[] = account
+    ? [{ kind: "github", id: account.id, label: account.login, baseUrl: "https://github.com", owner: null, account: true }]
+    : [];
   const others: Connection[] = providers?.hidden
     ? []
     : (providers?.items ?? []).map((p) => ({ kind: p.kind, id: p.id, label: p.name, baseUrl: p.url, owner: p.workspace }));
-  return [...github, ...others];
+  return [...github, ...viaAccount, ...others];
+}
+
+/** The input github.repos, github.branches and github.connectRepo take for a GitHub connection. */
+export function githubVia(connection: Connection): { installationId: string } | { accountId: string } {
+  return connection.account ? { accountId: connection.id } : { installationId: connection.id };
 }
 
 /** "https://Git.Example.com/gitlab/" -> { host: "git.example.com", prefix: "gitlab" }. */
@@ -210,8 +223,11 @@ type Source = (typeof services.Source)["static"];
 export function sourceFor(decision: RepoDecision, branch: string): Source | null {
   if (decision.type === "connected") {
     const { connection, repo } = decision.found;
+    if (connection.kind === "github" && connection.account) {
+      return { type: "github", installationId: null, accountId: connection.id, repo: repo.fullName, branch, deployOnPush: true };
+    }
     if (connection.kind === "github") {
-      return { type: "github", installationId: connection.id, repo: repo.fullName, branch, deployOnPush: true };
+      return { type: "github", installationId: connection.id, accountId: null, repo: repo.fullName, branch, deployOnPush: true };
     }
     return { type: "provider", providerId: connection.id, provider: connection.kind, repo: repo.fullName, branch, deployOnPush: true };
   }

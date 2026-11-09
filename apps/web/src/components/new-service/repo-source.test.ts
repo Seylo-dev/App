@@ -6,6 +6,7 @@ import {
   connectionsOf,
   decideSource,
   type FoundRepo,
+  githubVia,
   knownHostsOf,
   listFor,
   lookupStateOf,
@@ -19,6 +20,7 @@ import {
 } from "./repo-source";
 
 const acme: Connection = { kind: "github", id: "inst000000000001", label: "acme", baseUrl: "https://github.com", owner: "acme" };
+const lee: Connection = { kind: "github", id: "cred000000000001", label: "lee", baseUrl: "https://github.com", owner: null, account: true };
 const gitlab: Connection = { kind: "gitlab", id: "gp00000000000001", label: "Company GitLab", baseUrl: "https://gitlab.com", owner: null };
 const gitea: Connection = {
   kind: "gitea",
@@ -72,6 +74,17 @@ test("connections: installations that are not suspended and every provider, none
   expect(connectionsOf(installations, providers)).toEqual([acme, gitlab]);
   expect(connectionsOf({ ...installations, hidden: true }, { items: [], hidden: true })).toEqual([]);
   expect(connectionsOf(undefined, undefined)).toEqual([]);
+  // The connected GitHub account comes after the installations, so a typed repository is asked of the App first.
+  expect(connectionsOf({ ...installations, account: { id: lee.id, login: "lee" } })).toEqual([acme, lee]);
+  expect(connectionsOf({ ...installations, account: { id: lee.id, login: "lee" }, hidden: true })).toEqual([]);
+});
+
+test("the connected account can hold any owner's repository on github.com, and is read with accountId", () => {
+  expect(pathIn(lee, parsed("lee/notes"))).toBe("lee/notes");
+  expect(pathIn(lee, parsed("acme/shop-api"))).toBe("acme/shop-api");
+  expect(pathIn(lee, parsed("gitlab.com/lee/notes"))).toBeNull();
+  expect(githubVia(lee)).toEqual({ accountId: lee.id });
+  expect(githubVia(acme)).toEqual({ installationId: acme.id });
 });
 
 test("a typed repository can be in a connection of its host, and a GitHub one only in its owner's installation", () => {
@@ -111,7 +124,18 @@ test("picked from Browse: the connection's source with deploy on push, like the 
   expect(sourceFor(decision, "main")).toEqual({
     type: "github",
     installationId: acme.id,
+    accountId: null,
     repo: "acme/shop-api",
+    branch: "main",
+    deployOnPush: true,
+  });
+  // Through the connected account: no installation, the account's id.
+  const viaAccount = decideSource(parseRepoInput("lee/notes"), { connection: lee, repo: repo("lee/notes") }, []);
+  expect(sourceFor(viaAccount, "main")).toEqual({
+    type: "github",
+    installationId: null,
+    accountId: lee.id,
+    repo: "lee/notes",
     branch: "main",
     deployOnPush: true,
   });
@@ -258,6 +282,7 @@ test("pasted URLs stay as written, and nothing typed creates nothing", () => {
 test("every source it makes is one the services.Source contract accepts", () => {
   const sources = [
     sourceFor(decideSource(parseRepoInput("acme/shop-api"), { connection: acme, repo: repo("acme/shop-api") }, []), "main"),
+    sourceFor(decideSource(parseRepoInput("lee/notes"), { connection: lee, repo: repo("lee/notes") }, []), "main"),
     sourceFor(decideSource(parseRepoInput("x"), { connection: gitlab, repo: repo("acme/platform/shop") }, []), "feat/a"),
     sourceFor(decideSource(parseRepoInput("acme/app"), null, []), "main"),
     sourceFor(decideSource(parseRepoInput("git@git.example.com:team/app.git"), null, []), "main"),

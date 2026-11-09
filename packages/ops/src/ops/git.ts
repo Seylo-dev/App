@@ -31,8 +31,11 @@ export const GitCredential = Type.Object({
   /** SHA256 fingerprint of the SSH key. */
   fingerprint: Type.Union([Type.String(), Type.Null()]),
   knownHosts: Type.String(),
-  /** "device" = the GitHub account connected with the device flow (github.deviceStart). */
-  origin: Type.Union([Type.Literal("manual"), Type.Literal("generated"), Type.Literal("device")]),
+  /**
+   * "device" = the GitHub account connected with the device flow (github.deviceStart);
+   * "github_token" = the GitHub account connected with a pasted token (github.tokenConnect).
+   */
+  origin: Type.Union([Type.Literal("manual"), Type.Literal("generated"), Type.Literal("device"), Type.Literal("github_token")]),
   /** Services whose source uses it. */
   usedBy: Type.Integer({ minimum: 0 }),
   createdAt: Timestamp,

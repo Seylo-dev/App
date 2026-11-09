@@ -42,14 +42,14 @@ export function RadioCard({
       className={cn(
         "group flex cursor-pointer items-center gap-3 rounded-control border-0 bg-raised p-3 text-left shadow-none outline-none transition-interactive hover-enabled:bg-muted",
         "focus-visible:ring-3 focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50",
-        "data-[state=checked]:bg-accent",
+        "data-[state=checked]:bg-accent data-[state=checked]:hover-enabled:bg-accent",
         className,
       )}
       {...props}
     >
       {icon && <span className="flex text-ink-faint group-data-[state=checked]:text-accent-foreground">{icon}</span>}
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-[13.5px] font-medium text-foreground group-data-[state=checked]:text-accent-foreground">{title}</span>
+        <span className="text-[13.5px] font-medium text-foreground transition-colors group-data-[state=checked]:text-accent-foreground">{title}</span>
         {description && <span className="text-[12.5px] text-muted-foreground">{description}</span>}
       </span>
     </RadioPrimitive.Item>
