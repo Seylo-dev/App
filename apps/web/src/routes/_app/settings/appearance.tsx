@@ -73,11 +73,13 @@ function AppearanceSkeleton() {
         </div>
         <div className="flex flex-wrap items-center gap-2.5 border-t border-divider pt-3.5 text-[13px]">
           <span className="mr-0.5 font-medium text-ink-strong">{t("settingsAppearance.accent")}</span>
-          <Skeleton className="h-[30px] w-[88px] rounded-full" />
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="size-6 rounded-full" />
-          ))}
-          <Skeleton className="ml-1 h-9 w-[104px]" />
+          <span className="flex flex-nowrap items-center gap-2">
+            <Skeleton className="h-6 w-[88px] rounded-full" />
+            {accentChoices.map((color) => (
+              <Skeleton key={color} className="size-6 rounded-full" />
+            ))}
+          </span>
+          <Skeleton className="ml-1 h-[38px] w-[104px] max-sm:ml-0" />
         </div>
       </Card>
       <div className="flex flex-wrap items-start gap-4">
@@ -220,34 +222,43 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
         )}
         <div className="flex flex-wrap items-center gap-2.5 border-t border-divider pt-3.5 text-[13px]">
           <span className="mr-0.5 font-medium text-ink-strong">{t("settingsAppearance.accent")}</span>
-          <button
-            type="button"
-            onClick={() => {
-              setAccent(null);
-              setAccentText("");
-            }}
-            className={cn(
-              "h-6 cursor-pointer rounded-full border-0 bg-muted px-2.5 text-xs text-ink-strong",
-              accent === null && "shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--primary)]",
-            )}
-          >
-            {t("settingsAppearance.presetAccent")}
-          </button>
-          {accentChoices.map((color) => (
+          <span className="flex flex-nowrap items-center gap-2">
             <button
-              key={color}
               type="button"
-              aria-label={color}
-              aria-pressed={accent === color}
               onClick={() => {
-                setAccent(color);
-                setAccentText(color);
+                setAccent(null);
+                setAccentText("");
               }}
-              // The swatch shows the color it picks, so it is painted with that value.
-              style={{ background: color, boxShadow: accent === color ? `0 0 0 2px var(--card), 0 0 0 4px ${color}` : undefined }}
-              className="size-6 cursor-pointer rounded-full border-0 p-0"
-            />
-          ))}
+              className={cn(
+                "h-6 cursor-pointer rounded-full border-0 bg-muted px-2.5 text-xs text-ink-strong transition-shadow duration-200",
+                accent === null && "shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--primary)]",
+              )}
+            >
+              {t("settingsAppearance.presetAccent")}
+            </button>
+            {accentChoices.map((color) => (
+              <button
+                key={color}
+                type="button"
+                aria-label={color}
+                aria-pressed={accent === color}
+                onClick={() => {
+                  setAccent(color);
+                  setAccentText(color);
+                }}
+                // The swatch shows the color it picks, so it is painted with that value. A faint inner edge
+                // keeps a swatch as dark (or as light) as the card from disappearing into it.
+                style={{
+                  background: color,
+                  boxShadow:
+                    accent === color
+                      ? `inset 0 0 0 1px var(--swatch-edge), 0 0 0 2px var(--card), 0 0 0 4px ${color}`
+                      : "inset 0 0 0 1px var(--swatch-edge)",
+                }}
+                className="size-6 cursor-pointer rounded-full border-0 p-0 transition-shadow duration-200 [--swatch-edge:rgb(15_23_42/0.12)] dark:[--swatch-edge:rgb(255_255_255/0.18)]"
+              />
+            ))}
+          </span>
           <Input
             aria-label={t("settingsAppearance.customAccent")}
             aria-invalid={accentInvalid || undefined}
@@ -259,7 +270,7 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
               if (hex) setAccent(hex);
               else if (e.target.value.trim() === "") setAccent(null);
             }}
-            className="ml-1 h-9 w-[104px] font-mono text-[12.5px]"
+            className="ml-1 w-[104px] font-mono text-[12.5px] max-sm:ml-0"
           />
         </div>
       </Card>
@@ -321,9 +332,7 @@ function PresetTile({ preset, selected, onSelect }: { preset: settings.ThemePres
       onClick={onSelect}
       className={cn(
         "cursor-pointer overflow-hidden rounded-card border-0 bg-card p-0 text-left",
-        selected
-          ? "shadow-[0_0_0_2px_var(--primary),0_4px_14px_rgb(37_99_235/0.14)]"
-          : "shadow-[0_0_0_1px_var(--track),var(--shadow-control)]",
+        selected ? "shadow-[0_0_0_2px_var(--primary),0_4px_14px_rgb(37_99_235/0.14)]" : "shadow-control",
       )}
     >
       {/* The preview paints the preset's own colors, not the page's tokens. */}

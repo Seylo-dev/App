@@ -76,21 +76,23 @@ function CloudflarePage() {
                 error={tooShort ? t("settings.cloudflare.tooShort") : null}
                 htmlFor="cf-token"
               >
-                <Input
-                  id="cf-token"
-                  type="password"
-                  autoComplete="off"
-                  value={token}
-                  className="font-mono text-[12.5px]"
-                  onChange={(e) => setToken(e.target.value)}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="cf-token"
+                    type="password"
+                    autoComplete="off"
+                    value={token}
+                    className="font-mono text-[12.5px]"
+                    onChange={(e) => setToken(e.target.value)}
+                  />
+                  {data.tokenSet && (
+                    <Button className="bg-muted shadow-none" disabled={save.isPending} onClick={() => save.mutate({ token: null })}>
+                      {t("settings.remove")}
+                    </Button>
+                  )}
+                </div>
               </Field>
               <FormActions>
-                {data.tokenSet && (
-                  <Button variant="ghost" disabled={save.isPending} onClick={() => save.mutate({ token: null })}>
-                    {t("settings.remove")}
-                  </Button>
-                )}
                 <Button type="submit" variant="primary" disabled={token.trim().length < 20 || save.isPending}>
                   {t("settings.save")}
                 </Button>

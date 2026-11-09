@@ -73,7 +73,7 @@ export default {
     openAccessControls: "Open access controls",
   },
   serve: {
-    title: "Serve the panel on my tailnet",
+    title: "Tailscale Serve",
     description: "Adds one Tailscale Serve entry that sends the server's tailnet name to the panel. Nothing restarts and nothing closes.",
     toggle: "Serve the panel on my tailnet",
     toggleHint: "https://<machine>.<tailnet>.ts.net opens the panel on devices in your tailnet.",

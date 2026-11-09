@@ -166,13 +166,14 @@ function AuditRetention({ days }: { days: number | null }) {
       <SettingRow
         title={t("settings.general.auditRetention")}
         description={t("settings.general.auditRetentionHint")}
+        stack
         control={
           <Select
             value={value}
             disabled={save.isPending}
             onValueChange={(next) => save.mutate({ auditRetentionDays: next === keepForever ? null : Number(next) })}
           >
-            <SelectTrigger className="w-[160px]" aria-label={t("settings.general.auditRetention")}>
+            <SelectTrigger className="w-full sm:w-[160px]" aria-label={t("settings.general.auditRetention")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

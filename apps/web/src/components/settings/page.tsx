@@ -75,15 +75,24 @@ export function SettingRow({
   title,
   description,
   control,
+  stack,
   className,
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   control: React.ReactNode;
+  /** Put the control under the text on a phone (a select or another wide control, not a switch). */
+  stack?: boolean;
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-4 border-t border-divider py-3 first:border-t-0 first:pt-0", className)}>
+    <div
+      className={cn(
+        "flex items-center gap-4 border-t border-divider py-3 first:border-t-0 first:pt-0",
+        stack && "max-sm:flex-col max-sm:items-stretch max-sm:gap-2.5",
+        className,
+      )}
+    >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[13.5px] font-medium">{title}</span>
         {description && <span className="text-[12.5px] text-muted-foreground">{description}</span>}

@@ -1,11 +1,10 @@
 // The "Default alerts" card of the Notifications board: one row per event
-// with a checkbox, a hint, and which channels it goes to (a menu of
+// with a switch, a hint, and which channels it goes to (a menu of
 // channel checkboxes). Every change saves the whole rule list at once.
 
 import { alerts, notifications } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Card } from "@seylo/ui/components/card";
-import { Checkbox } from "@seylo/ui/components/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -14,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@seylo/ui/components/dropdown-menu";
 import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { Switch } from "@seylo/ui/components/switch";
 import { IconChevronDown } from "@tabler/icons-react";
 import { t } from "../../../i18n/t";
 import { useSettingsMutation } from "../mutation";
@@ -41,7 +41,7 @@ function RuleRowsSkeleton() {
     <div className="flex flex-col">
       {alerts.alertRuleEvents.map((event) => (
         <div key={event} className="flex items-center gap-3 border-t border-divider py-2.5">
-          <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+          <Skeleton className="h-4 w-7 shrink-0 rounded-full" />
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="text-[13px] font-medium">{t(`settingsNotifications.events.${event}.name`)}</span>
             <span className="text-xs text-muted-foreground">{t(`settingsNotifications.events.${event}.hint`)}</span>
@@ -73,11 +73,12 @@ function RuleRows({ rules, channels, canEdit }: { rules: Rule[]; channels: notif
         const to = rule.channelIds.map((cid) => names.get(cid)).filter(Boolean);
         return (
           <div key={event} className="flex items-center gap-3 border-t border-divider py-2.5">
-            <Checkbox
+            <Switch
               id={id}
+              size="sm"
               checked={rule.enabled}
               disabled={!canEdit || save.isPending}
-              onCheckedChange={(on) => change(event, { enabled: on === true })}
+              onCheckedChange={(on) => change(event, { enabled: on })}
             />
             <label htmlFor={id} className="flex min-w-0 cursor-pointer flex-col gap-0.5">
               <span className="text-[13px] font-medium">{t(`settingsNotifications.events.${event}.name`)}</span>

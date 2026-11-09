@@ -68,7 +68,8 @@ function BackupsPage() {
             rows={list.data?.destinations ?? []}
             getRowId={(d) => d.id}
             onRowClick={(d) => setEditing(d)}
-            minWidth={560}
+            // From md up the table scrolls below 560px; a phone hides columns instead, so nothing runs off the card.
+            className="md:[&>table]:min-w-[560px]"
             empty={
               <EmptyState
                 compact
@@ -98,7 +99,7 @@ function BackupsPage() {
                 header: t("settingsBackups.fields.name"),
                 sortValue: (d) => d.name,
                 cell: (d) => (
-                  <span className="flex items-center gap-2">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Chip tone="sky">{t(`settingsBackups.providers.${d.provider}`)}</Chip>
                     <span className="font-medium">{d.name}</span>
                   </span>

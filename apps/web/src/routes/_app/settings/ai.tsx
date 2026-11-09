@@ -39,7 +39,7 @@ function AiPage() {
   return (
     <SettingsPage title={t("settingsAi.title")} subtitle={t("settingsAi.subtitle")}>
       <QueryView query={query} skeleton={<AiSkeleton />} className="flex flex-col gap-4">
-        {(data) => <AiSettingsForm key={JSON.stringify(data)} saved={data} />}
+        {(data) => <AiSettingsForm saved={data} />}
       </QueryView>
       <Usage />
     </SettingsPage>
@@ -55,6 +55,7 @@ function AiSkeleton() {
       </SectionCardSkeleton>
       <SectionCardSkeleton titleWidth="w-36" description="w-96">
         <FieldSkeleton span hint />
+        <FormActionsSkeleton />
       </SectionCardSkeleton>
       <SectionCardSkeleton titleWidth="w-24" description="w-[min(480px,100%)]">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -91,42 +92,36 @@ function UsageSkeleton() {
   );
 }
 
+/**
+ * Switches and the model choice apply right away, as everywhere in settings;
+ * the key and the budget are typed, so each card saves its own field.
+ */
 function AiSettingsForm({ saved }: { saved: Settings }) {
-  const [enabled, setEnabled] = useState(saved.enabled);
   const [key, setKey] = useState("");
-  const [mode, setMode] = useState(saved.routing.mode);
-  const [model, setModel] = useState<Tier>(saved.routing.model);
-  const [allowOpus, setAllowOpus] = useState(saved.routing.allowOpus);
   const [budget, setBudget] = useState(saved.monthlyBudgetUsd === null ? "" : String(saved.monthlyBudgetUsd));
-  const [allowMembers, setAllowMembers] = useState(saved.allowMembers);
   const refresh = [ai.settings, ai.usage];
-  const save = useSettingsMutation(ai.updateSettings, { invalidates: refresh, success: t("settings.saved"), onSuccess: () => setKey("") });
+  const toggle = useSettingsMutation(ai.updateSettings, { invalidates: refresh, success: t("settings.saved") });
+  const route = useSettingsMutation(ai.updateSettings, { invalidates: refresh, success: t("settings.saved") });
+  const saveKey = useSettingsMutation(ai.updateSettings, {
+    invalidates: refresh,
+    success: t("settings.saved"),
+    onSuccess: () => setKey(""),
+  });
+  const saveBudget = useSettingsMutation(ai.updateSettings, { invalidates: refresh, success: t("settings.saved") });
+
+  // A switch shows what it is being set to while that saves.
+  const pending = toggle.isPending ? toggle.variables : undefined;
+  const enabled = pending?.enabled ?? saved.enabled;
+  const allowMembers = pending?.allowMembers ?? saved.allowMembers;
+  const routing = (route.isPending ? route.variables?.routing : undefined) ?? saved.routing;
+  const setRouting = (patch: Partial<Settings["routing"]>) => route.mutate({ routing: { ...routing, ...patch } });
 
   const budgetValue = budget.trim() === "" ? null : Number(budget);
   const budgetInvalid = budgetValue !== null && (!Number.isFinite(budgetValue) || budgetValue < 0 || budgetValue > 100_000);
   const keyInvalid = key.trim() !== "" && key.trim().length < 20;
-  const routingChanged = mode !== saved.routing.mode || model !== saved.routing.model || allowOpus !== saved.routing.allowOpus;
-  const dirty =
-    enabled !== saved.enabled ||
-    key.trim() !== "" ||
-    routingChanged ||
-    budgetValue !== saved.monthlyBudgetUsd ||
-    allowMembers !== saved.allowMembers;
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (budgetInvalid || keyInvalid) return;
-    save.mutate({
-      ...(enabled !== saved.enabled ? { enabled } : {}),
-      ...(key.trim() ? { anthropicApiKey: key.trim() } : {}),
-      ...(routingChanged ? { routing: { mode, model, allowOpus } } : {}),
-      ...(budgetValue !== saved.monthlyBudgetUsd ? { monthlyBudgetUsd: budgetValue } : {}),
-      ...(allowMembers !== saved.allowMembers ? { allowMembers } : {}),
-    });
-  }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
+    <>
       <SectionCard>
         <SettingRow
           title={t("settingsAi.enabled")}
@@ -134,8 +129,8 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
           control={
             <Switch
               checked={enabled}
-              disabled={!saved.keySet && !key.trim()}
-              onCheckedChange={setEnabled}
+              disabled={!saved.keySet || toggle.isPending}
+              onCheckedChange={(on) => toggle.mutate({ enabled: on })}
               aria-label={t("settingsAi.enabled")}
             />
           }
@@ -143,48 +138,73 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
         <SettingRow
           title={t("settingsAi.allowMembers")}
           description={t("settingsAi.allowMembersHint")}
-          control={<Switch checked={allowMembers} onCheckedChange={setAllowMembers} aria-label={t("settingsAi.allowMembers")} />}
+          control={
+            <Switch
+              checked={allowMembers}
+              disabled={toggle.isPending}
+              onCheckedChange={(on) => toggle.mutate({ allowMembers: on })}
+              aria-label={t("settingsAi.allowMembers")}
+            />
+          }
         />
       </SectionCard>
 
       <SectionCard title={t("settingsAi.keyTitle")} description={t("settingsAi.keyDescription")}>
-        <Field
-          label={saved.keySet ? t("settingsAi.replaceKey") : t("settingsAi.key")}
-          hint={saved.keySet ? t("settingsAi.keyStored", { hint: saved.keyHint }) : t("settingsAi.keyHint")}
-          error={keyInvalid ? t("settingsAi.keyInvalid") : null}
-          htmlFor="ai-key"
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (key.trim() && !keyInvalid) saveKey.mutate({ anthropicApiKey: key.trim() });
+          }}
         >
-          <div className="flex gap-2">
-            <Input
-              id="ai-key"
-              type="password"
-              autoComplete="off"
-              value={key}
-              placeholder={saved.keySet ? `sk-ant-...${saved.keyHint}` : "sk-ant-..."}
-              className="font-mono text-[12.5px]"
-              onChange={(e) => setKey(e.target.value)}
-            />
-            {saved.keySet && (
-              <Button variant="ghost" disabled={save.isPending} onClick={() => save.mutate({ anthropicApiKey: null, enabled: false })}>
-                {t("settings.remove")}
-              </Button>
-            )}
-          </div>
-        </Field>
+          <Field
+            label={saved.keySet ? t("settingsAi.replaceKey") : t("settingsAi.key")}
+            hint={saved.keySet ? t("settingsAi.keyStored", { hint: saved.keyHint }) : t("settingsAi.keyHint")}
+            error={keyInvalid ? t("settingsAi.keyInvalid") : null}
+            htmlFor="ai-key"
+          >
+            <div className="flex gap-2">
+              <Input
+                id="ai-key"
+                type="password"
+                autoComplete="off"
+                value={key}
+                placeholder={saved.keySet ? `sk-ant-...${saved.keyHint}` : "sk-ant-..."}
+                className="font-mono text-[12.5px]"
+                onChange={(e) => setKey(e.target.value)}
+              />
+              {saved.keySet && (
+                <Button
+                  className="bg-muted shadow-none"
+                  disabled={saveKey.isPending}
+                  onClick={() => saveKey.mutate({ anthropicApiKey: null, enabled: false })}
+                >
+                  {t("settings.remove")}
+                </Button>
+              )}
+            </div>
+          </Field>
+          <FormActions>
+            <Button type="submit" variant="primary" disabled={!key.trim() || keyInvalid || saveKey.isPending}>
+              {saveKey.isPending ? t("settings.saving") : t("settings.save")}
+            </Button>
+          </FormActions>
+        </form>
       </SectionCard>
 
       <SectionCard title={t("settingsAi.routingTitle")} description={t("settingsAi.routingDescription")}>
         <RadioGroup
-          value={mode}
-          onValueChange={(v) => setMode(v as Settings["routing"]["mode"])}
+          value={routing.mode}
+          onValueChange={(v) => setRouting({ mode: v as Settings["routing"]["mode"] })}
+          disabled={route.isPending}
           className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           <RadioCard value="auto" title={t("settingsAi.auto")} description={t("settingsAi.autoHint")} />
           <RadioCard value="fixed" title={t("settingsAi.fixed")} description={t("settingsAi.fixedHint")} />
         </RadioGroup>
-        {mode === "fixed" ? (
+        {routing.mode === "fixed" ? (
           <Field label={t("settingsAi.model")} htmlFor="ai-model">
-            <Select value={model} onValueChange={(v) => setModel(v as Tier)}>
+            <Select value={routing.model} onValueChange={(v) => setRouting({ model: v as Tier })} disabled={route.isPending}>
               <SelectTrigger id="ai-model" className="sm:w-64">
                 <SelectValue />
               </SelectTrigger>
@@ -202,37 +222,56 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
             className="border-t-0"
             title={t("settingsAi.allowOpus")}
             description={t("settingsAi.allowOpusHint")}
-            control={<Switch checked={allowOpus} onCheckedChange={setAllowOpus} aria-label={t("settingsAi.allowOpus")} />}
+            control={
+              <Switch
+                checked={routing.allowOpus}
+                disabled={route.isPending}
+                onCheckedChange={(allowOpus) => setRouting({ allowOpus })}
+                aria-label={t("settingsAi.allowOpus")}
+              />
+            }
           />
         )}
       </SectionCard>
 
       <SectionCard title={t("settingsAi.budgetTitle")} description={t("settingsAi.budgetDescription")}>
-        <Field
-          label={t("settingsAi.budget")}
-          hint={t("settingsAi.budgetHint")}
-          error={budgetInvalid ? t("settingsAi.budgetInvalid") : null}
-          htmlFor="ai-budget"
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!budgetInvalid) saveBudget.mutate({ monthlyBudgetUsd: budgetValue });
+          }}
         >
-          <div className="relative sm:w-48">
-            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[13.5px] text-muted-foreground">$</span>
-            <Input
-              id="ai-budget"
-              inputMode="decimal"
-              value={budget}
-              placeholder={t("settingsAi.noLimit")}
-              className="pl-6"
-              onChange={(e) => setBudget(e.target.value)}
-            />
-          </div>
-        </Field>
-        <FormActions>
-          <Button type="submit" variant="primary" disabled={!dirty || save.isPending || budgetInvalid || keyInvalid}>
-            {save.isPending ? t("settings.saving") : t("settings.save")}
-          </Button>
-        </FormActions>
+          <Field
+            label={t("settingsAi.budget")}
+            hint={t("settingsAi.budgetHint")}
+            error={budgetInvalid ? t("settingsAi.budgetInvalid") : null}
+            htmlFor="ai-budget"
+          >
+            <div className="relative sm:w-48">
+              <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[13.5px] text-muted-foreground">$</span>
+              <Input
+                id="ai-budget"
+                inputMode="decimal"
+                value={budget}
+                placeholder={t("settingsAi.noLimit")}
+                className="pl-6"
+                onChange={(e) => setBudget(e.target.value)}
+              />
+            </div>
+          </Field>
+          <FormActions>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={budgetValue === saved.monthlyBudgetUsd || budgetInvalid || saveBudget.isPending}
+            >
+              {saveBudget.isPending ? t("settings.saving") : t("settings.save")}
+            </Button>
+          </FormActions>
+        </form>
       </SectionCard>
-    </form>
+    </>
   );
 }
 

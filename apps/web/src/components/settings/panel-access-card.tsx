@@ -22,6 +22,7 @@ import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
+import { IconRefresh } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { t } from "../../i18n/t";
@@ -209,6 +210,7 @@ function DomainState({ general, dirty }: { general: General; dirty: boolean }) {
           disabled={check.isPending || dirty}
           onClick={() => check.mutate({})}
         >
+          <IconRefresh size={15} stroke={1.8} />
           {check.isPending ? t("settings.general.domainCard.checking") : t("settings.general.domainCard.checkNow")}
         </Button>
       )}
@@ -326,6 +328,7 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
         title={t("settings.general.domainCard.confirmCloseTitle")}
         description={t("settings.general.domainCard.confirmCloseDescription", { url: ipUrl })}
         confirmLabel={t("settings.general.domainCard.confirmClose")}
+        destructive
         onConfirm={() => turnOff({ serveOnIp: false })}
       >
         <Alert tone="warning">{t("settings.general.domainCard.confirmCloseWarning", { url: ipUrl, domain: domainUrl })}</Alert>
@@ -341,6 +344,7 @@ function AccessControls({ access, domain }: { access: PanelAccess; domain: strin
         title={t("settings.general.domainCard.confirmAgentTitle")}
         description={t("settings.general.domainCard.confirmAgentDescription", { domain: domainUrl })}
         confirmLabel={t("settings.general.domainCard.confirmAgent")}
+        destructive
         onConfirm={() => turnOff({ agentPortOpen: false })}
       />
     </>

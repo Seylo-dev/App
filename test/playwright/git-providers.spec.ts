@@ -84,8 +84,14 @@ test.describe("git providers", () => {
     await page.getByRole("radio", { name: "App password" }).click();
     await expect(page.getByLabel("Bitbucket user name")).toBeVisible();
 
-    await page.getByRole("row", { name: /Company GitLab/ }).getByRole("button", { name: "Check" }).click();
+    // Check and Delete sit in the row's menu, like every other settings table.
+    await page.getByRole("row", { name: /Company GitLab/ }).getByRole("button", { name: "Row actions" }).click();
+    await page.getByRole("menuitem", { name: "Check" }).click();
     await expect(page.getByText("The token works", { exact: true })).toBeVisible();
+    await page.getByRole("row", { name: /Company GitLab/ }).getByRole("button", { name: "Row actions" }).click();
+    await page.getByRole("menuitem", { name: "Delete" }).click();
+    await expect(page.getByRole("alertdialog", { name: "Delete the connection Company GitLab?" })).toBeVisible();
+    await page.keyboard.press("Escape");
     expect(errors).toEqual([]);
   });
 

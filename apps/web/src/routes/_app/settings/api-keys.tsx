@@ -212,7 +212,7 @@ function McpTokens({ isAdmin }: { isAdmin: boolean }) {
       description={t("settingsKeys.mcp.tokensDescription")}
       flush
       actions={
-        <Button size="sm" onClick={() => setCreating(true)}>
+        <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
           <IconPlus size={15} stroke={1.8} />
           {t("settingsKeys.mcp.createToken")}
         </Button>
@@ -253,13 +253,20 @@ function McpClients() {
               header: t("settingsKeys.create.name"),
               skeletonLines: 2,
               cell: (c) => (
-                <span className="flex min-w-0 flex-col">
-                  <span className="font-medium">{c.name}</span>
+                // On a phone the address is cut short, so the last-used time and the menu stay on the card.
+                <span className="flex min-w-0 flex-col max-md:max-w-[170px]">
+                  <span className="truncate font-medium">{c.name}</span>
                   <span className="truncate font-mono text-xs text-muted-foreground">{c.redirectUris[0] ?? ""}</span>
                 </span>
               ),
             },
-            { id: "tokens", header: t("settingsKeys.mcp.activeTokens"), skeletonWidth: "17%", cell: (c) => c.activeTokens },
+            {
+              id: "tokens",
+              header: t("settingsKeys.mcp.activeTokens"),
+              hideOnMobile: true,
+              skeletonWidth: "17%",
+              cell: (c) => c.activeTokens,
+            },
             {
               id: "used",
               header: t("settingsKeys.lastUsed"),

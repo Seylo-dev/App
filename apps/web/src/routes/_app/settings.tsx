@@ -8,6 +8,7 @@ import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { cn } from "@seylo/ui/lib/utils";
 import { createFileRoute, Link, Outlet, useChildMatches } from "@tanstack/react-router";
 import type * as React from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { accountNav, type SettingsNavItem, settingsNav } from "../../components/settings-nav";
 import { t } from "../../i18n/t";
 
@@ -17,10 +18,29 @@ export const Route = createFileRoute("/_app/settings")({
 
 function SettingsLayout() {
   const section = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
+
+  // On a phone the sections are one swipe row: bring the current one into it (a link
+  // straight to Security or Backups left it off screen). Only the row scrolls, never the page.
+  const row = useRef<HTMLElement | null>(null);
+  const rowRef = useCallback((el: HTMLElement | null) => {
+    row.current = el;
+    return scrollFadeRef(el);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the current section changes.
+  useEffect(() => {
+    const el = row.current;
+    const current = el?.querySelector<HTMLElement>('[data-status="active"]');
+    if (!el || !current || el.scrollWidth <= el.clientWidth) return;
+    const box = el.getBoundingClientRect();
+    const item = current.getBoundingClientRect();
+    if (item.left < box.left) el.scrollLeft -= box.left - item.left + 24;
+    else if (item.right > box.right) el.scrollLeft += item.right - box.right + 24;
+  }, [section]);
+
   return (
     <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:gap-7">
       <nav
-        ref={scrollFadeRef}
+        ref={rowRef}
         aria-label={t("settings.title")}
         className="scroll-row -mx-4 flex shrink-0 gap-0.5 px-4 pb-1 text-[13.5px] md:mx-0 md:w-[190px] md:flex-col md:overflow-visible md:px-0 md:pb-0"
       >

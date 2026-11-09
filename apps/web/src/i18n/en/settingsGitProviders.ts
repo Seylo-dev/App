@@ -18,6 +18,7 @@ export default {
     statusNotes: "Statuses",
     check: "Check",
     checking: "Checking",
+    checkingToken: "Checking the token of {name}",
     checkOk: "The token works",
     checkFailed: "The token does not work",
     remove: "Delete",
