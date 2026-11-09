@@ -49,7 +49,9 @@ export function RadioCard({
     >
       {icon && <span className="flex text-ink-faint group-data-[state=checked]:text-accent-foreground">{icon}</span>}
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-[13.5px] font-medium text-foreground transition-colors group-data-[state=checked]:text-accent-foreground">{title}</span>
+        <span className="text-[13.5px] font-medium text-foreground transition-colors group-data-[state=checked]:text-accent-foreground">
+          {title}
+        </span>
         {description && <span className="text-[12.5px] text-muted-foreground">{description}</span>}
       </span>
     </RadioPrimitive.Item>

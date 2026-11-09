@@ -31,7 +31,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FieldSkeleton, LoadingRegion } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
 import { toast } from "@seylo/ui/components/toast";
-import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { cn } from "@seylo/ui/lib/utils";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -371,22 +370,14 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
               aria-label={t("newService.source")}
               value={appSource}
               onValueChange={(v) => setAppSource(v as AppSource)}
-              // Four choices: on a phone the track scrolls sideways instead of widening the dialog.
-              ref={scrollFadeRef}
-              className="scroll-row max-w-full self-start"
+              // Four choices: the track hugs them, and on a phone it scrolls sideways (Segmented does
+              // that itself) instead of widening the dialog.
+              className="self-start"
             >
-              <SegmentedItem value="image" className="whitespace-nowrap">
-                {t("newService.sourceImage")}
-              </SegmentedItem>
-              <SegmentedItem value="github" className="whitespace-nowrap">
-                {t("newService.sourceGithub")}
-              </SegmentedItem>
-              <SegmentedItem value="git" className="whitespace-nowrap">
-                {t("newService.sourceGit")}
-              </SegmentedItem>
-              <SegmentedItem value="none" className="whitespace-nowrap">
-                {t("newService.sourceLater")}
-              </SegmentedItem>
+              <SegmentedItem value="image">{t("newService.sourceImage")}</SegmentedItem>
+              <SegmentedItem value="github">{t("newService.sourceGithub")}</SegmentedItem>
+              <SegmentedItem value="git">{t("newService.sourceGit")}</SegmentedItem>
+              <SegmentedItem value="none">{t("newService.sourceLater")}</SegmentedItem>
             </Segmented>
           </div>
           {appSource === "image" && (

@@ -3409,7 +3409,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   through that provider on the Source tab, or pick a git credential there.
 - New app source tabs (0.2.2, `components/new-service/`): Docker image |
   GitHub | Git repository | Set up later, under a visible Source label (the
-  track hugs its items and scrolls sideways on a phone, `scroll-row`).
+  track hugs its items and scrolls sideways on a phone, as every kit
+  `Segmented` does).
   GitHub tab (`repo-field.tsx`): one Repository field takes `owner/repo` or
   a github.com address (https://, ssh://, git@github.com:, or
   `github.com/owner/repo` without a scheme), with or without `.git`
@@ -3496,10 +3497,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   its table only when the list is at least 1000 px wide
   (`node-table.tsx` `useAtLeast`), else one stacked row per node with the
   column names as labels. Rows that scroll sideways on a phone (project
-  tabs, service tabs, the node sheet's views, template categories) use
-  `scroll-row` with `scrollFadeRef`; the tab rows and the node views
-  scroll the current item into view. Unknown paths go to `routes/_app/$.tsx` (the 404 next to the
-  sidebar); the root's not-found and error screens sit in `AuthFrame`.
+  tabs, service tabs, the settings sections, the node sheet's views,
+  template categories) use `scroll-row` with `scrollFadeRef`, which the
+  kit's `TabList` and `Segmented` carry themselves, and scroll the current
+  item into view. Unknown paths go to `routes/_app/$.tsx` (the 404 next to
+  the sidebar); the root's not-found and error screens sit in `AuthFrame`.
 - Hiding projects (0.2.1, per person, not global): the person's
   preferences (`auth.preferences` / `auth.updatePreferences`, the
   free-form `Preferences` record) gain `hiddenProjectIds` (`HiddenProjectIds`

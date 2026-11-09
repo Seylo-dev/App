@@ -140,7 +140,7 @@ test("the Source tab with only a connected account: no 'Connect GitHub first', i
   await expect(page.getByText("Repository connected. The next deploy builds it.")).toBeVisible();
   expect(calls("github.repos")[0]).toMatchObject({ projectId: ids.acme, accountId: githubAccount.id });
   expect(calls("github.connectRepo")).toEqual([
-    { serviceId: svc.privateApi, accountId: githubAccount.id, repo: "acme/legacy-api", branch: "master", rootDir: "", deployOnPush: true },
+    { serviceId: svc.privateApi, accountId: githubAccount.id, repo: "acme/legacy-api", branch: "master", deployOnPush: true },
   ]);
   expect(errors).toEqual([]);
 });
