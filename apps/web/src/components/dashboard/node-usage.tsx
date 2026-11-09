@@ -66,7 +66,7 @@ export function NodeUsage() {
                 onClick={() => setHidden(toggleHidden(hidden, node.nodeId))}
                 className={cn(
                   // The kit's ChartLegend chip: 32px like the range picker next to it.
-                  "flex h-8 cursor-pointer items-center gap-[7px] rounded-[7px] border-0 px-[11px] text-[12.5px] transition-colors",
+                  "flex h-8 cursor-pointer items-center gap-[7px] rounded-[7px] border-0 px-[11px] text-[12.5px] transition-colors duration-200",
                   off ? "bg-transparent text-ink-faint hover:bg-muted/60 hover:text-muted-foreground" : "bg-muted text-foreground",
                 )}
               >

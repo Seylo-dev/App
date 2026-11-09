@@ -85,8 +85,9 @@ function NodeSheetBody({
 
   return (
     <>
-      <SheetHeader>
-        <SheetTitle className="flex items-center gap-2">
+      {/* pr-5, not the header's pr-14: the views track may run under the close button; the title and description keep clear of it. */}
+      <SheetHeader className="pr-5">
+        <SheetTitle className="flex items-center gap-2 pr-9">
           {node.data && <StatusDot status={node.data.status === "online" ? "ok" : node.data.status === "offline" ? "error" : "off"} />}
           {node.data?.name ?? (
             <>
@@ -95,7 +96,7 @@ function NodeSheetBody({
             </>
           )}
         </SheetTitle>
-        <SheetDescription>
+        <SheetDescription className="pr-9">
           {node.data ? (
             [t(`nodes.status.${node.data.status}`), node.data.location].filter(Boolean).join(t("format.separator"))
           ) : (
@@ -107,14 +108,25 @@ function NodeSheetBody({
           value={view}
           onValueChange={(v) => onViewChange(v as NodeView)}
           // Five views: the track may run under the close button (the header keeps room for it beside
-          // the title only), and on a phone it scrolls inside the header with the current view in sight.
-          className="mt-2 -mr-9 max-w-[calc(100%+36px)] self-start"
+          // the title only). On a phone it scrolls inside the header with the current view in sight
+          // (Segmented does both), with slimmer items so at 390px all five fit.
+          className="mt-2 max-w-full self-start"
         >
-          <SegmentedItem value="overview">{t("nodes.sheet.overview")}</SegmentedItem>
-          <SegmentedItem value="health">{t("nodes.health")}</SegmentedItem>
-          <SegmentedItem value="cleanup">{t("nodeCleanup.tab")}</SegmentedItem>
-          <SegmentedItem value="shell">{t("nodeShell.tab")}</SegmentedItem>
-          <SegmentedItem value="settings">{t("nodes.settings")}</SegmentedItem>
+          <SegmentedItem value="overview" className="shrink-0 max-sm:px-2">
+            {t("nodes.sheet.overview")}
+          </SegmentedItem>
+          <SegmentedItem value="health" className="shrink-0 max-sm:px-2">
+            {t("nodes.health")}
+          </SegmentedItem>
+          <SegmentedItem value="cleanup" className="shrink-0 max-sm:px-2">
+            {t("nodeCleanup.tab")}
+          </SegmentedItem>
+          <SegmentedItem value="shell" className="shrink-0 max-sm:px-2">
+            {t("nodeShell.tab")}
+          </SegmentedItem>
+          <SegmentedItem value="settings" className="shrink-0 max-sm:px-2">
+            {t("nodes.settings")}
+          </SegmentedItem>
         </Segmented>
       </SheetHeader>
       <SheetBody className="pb-6">
@@ -213,14 +225,14 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
               },
               { label: t("nodes.facts.docker"), value: facts.dockerVersion, mono: true },
               { label: t("nodes.facts.cgroup"), value: `v${facts.cgroupVersion}` },
-              { label: t("nodes.facts.agent"), value: node.agentVersion ?? "-", mono: true },
+              // "v0.9.4", as the node list and the sidebar write it.
+              { label: t("nodes.facts.agent"), value: node.agentVersion ? `v${node.agentVersion.replace(/^v/, "")}` : "-", mono: true },
               ...(panelAddress ? [{ label: t("nodes.facts.panelAddress"), value: panelAddress, mono: true }] : []),
               { label: t("nodes.facts.booted"), value: facts.bootTime ? formatAgo(facts.bootTime) : "-" },
               { label: t("nodes.facts.lastSeen"), value: node.lastSeenAt ? formatAgo(node.lastSeenAt) : "-" },
               {
                 label: t("nodes.facts.revision"),
                 value: t("nodes.facts.revisionValue", { applied: node.appliedRevision ?? "-", desired: node.desiredRevision }),
-                mono: true,
               },
             ]}
           />

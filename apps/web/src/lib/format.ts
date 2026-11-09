@@ -54,15 +54,6 @@ export function formatExpiresIn(iso: string, now = Date.now()): string {
   return t("format.inDays", { count: Math.round(seconds / 86_400) });
 }
 
-/** Time of day for today's events ("14:02"), the date for older ones. */
-export function formatClock(iso: string, now = Date.now()): string {
-  const date = new Date(iso);
-  const sameDay = new Date(now).toDateString() === date.toDateString();
-  return sameDay
-    ? date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 /** Chart tooltip labels: time for short ranges, day and time for long ones. */
 export function formatPointTime(ms: number, longRange: boolean): string {
   const date = new Date(ms);

@@ -48,6 +48,11 @@ function actionsFor(preset: Preset): string[] {
   return presetActions[preset].filter((action) => known.has(action));
 }
 
+/** "Everything" or "4 permissions". */
+function accessLabel(actions: readonly string[]): string {
+  return actions.includes("*") ? t("project.people.everything") : t("project.people.actionCount", { count: actions.length });
+}
+
 export function ProjectPeople({ projectId, onShare }: { projectId: string; onShare: () => void }) {
   const list = useOp(grants.listByProject, { projectId });
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
@@ -77,9 +82,13 @@ export function ProjectPeople({ projectId, onShare }: { projectId: string; onSha
           cell: (row) => (
             <span className="flex items-center gap-2.5">
               <Avatar name={row.user.name || row.user.email} size="sm" />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate font-medium">{row.user.name || row.user.email}</span>
-                {row.user.name && <span className="truncate text-xs text-muted-foreground">{row.user.email}</span>}
+              <span className="flex min-w-0 flex-col [overflow-wrap:anywhere]">
+                <span className="font-medium">{row.user.name || row.user.email}</span>
+                {row.user.name && <span className="text-xs text-muted-foreground">{row.user.email}</span>}
+                {/* On a phone the Access and Changed columns are hidden: the same facts as one line here. */}
+                <span className="text-xs text-muted-foreground md:hidden">
+                  {`${accessLabel(row.grant.actions)}${t("format.separator")}${formatAgo(row.grant.updatedAt)}`}
+                </span>
               </span>
             </span>
           ),
@@ -98,10 +107,8 @@ export function ProjectPeople({ projectId, onShare }: { projectId: string; onSha
         {
           id: "actions",
           header: t("project.people.access"),
-          cell: (row) =>
-            row.grant.actions.includes("*")
-              ? t("project.people.everything")
-              : t("project.people.actionCount", { count: row.grant.actions.length }),
+          hideOnMobile: true,
+          cell: (row) => <span className="whitespace-nowrap">{accessLabel(row.grant.actions)}</span>,
         },
         {
           id: "updated",
@@ -156,7 +163,7 @@ export function ShareDialog({
               <Label htmlFor="share-user">{t("project.people.person")}</Label>
               <Select value={userId} onValueChange={setUserId} disabled={members.length === 0}>
                 <SelectTrigger id="share-user" loading={people.isPending}>
-                  <SelectValue placeholder={t("project.people.noMembers")} />
+                  <SelectValue placeholder={members.length > 0 ? t("project.people.choosePerson") : t("project.people.noMembers")} />
                 </SelectTrigger>
                 <SelectContent>
                   {members.map((user) => (

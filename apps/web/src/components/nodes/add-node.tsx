@@ -134,7 +134,7 @@ export const AddNodeCard = forwardRef<AddNodeHandle>(function AddNodeCard(_props
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="dark" disabled={create.isPending} onClick={createCommand}>
+              <Button variant="primary" disabled={create.isPending} onClick={createCommand}>
                 <IconPlus size={15} stroke={2.2} aria-hidden="true" />
                 {expired ? t("nodes.addCard.newCommand") : t("nodes.addCard.createCommand")}
               </Button>

@@ -143,14 +143,17 @@ function ApprovalCard({ approval }: { approval: Approval }) {
 
   return (
     <Card className="gap-3 px-5 py-4" aria-label={approval.opSummary}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip tone={approval.via === "ai" ? "violet" : "sky"}>
-          <IconRobot size={13} stroke={1.8} aria-hidden="true" />
-          {t(`approvals.via.${approval.via}`)}
-        </Chip>
-        <b className="text-[14.5px] font-semibold">{approval.opSummary}</b>
-        {destructive && <Chip tone="red">{t("approvals.destructive")}</Chip>}
-        <Chip tone={statusTones[approval.status]} className="ml-auto">
+      {/* The status stays top right on every card: only the title side wraps. */}
+      <div className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <Chip tone={approval.via === "ai" ? "violet" : "sky"}>
+            <IconRobot size={13} stroke={1.8} aria-hidden="true" />
+            {t(`approvals.via.${approval.via}`)}
+          </Chip>
+          <b className="text-[14.5px] font-semibold">{approval.opSummary}</b>
+          {destructive && <Chip tone="red">{t("approvals.destructive")}</Chip>}
+        </div>
+        <Chip tone={statusTones[approval.status]} className="shrink-0">
           {t(`approvals.statuses.${approval.status}`)}
         </Chip>
       </div>
@@ -232,7 +235,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
             <Button variant="ghost" onClick={() => setDenying(false)}>
               {t("common.cancel")}
             </Button>
-            <Button type="submit" variant="dark" disabled={deny.isPending}>
+            <Button type="submit" variant="primary" disabled={deny.isPending}>
               {t("approvals.deny")}
             </Button>
           </div>

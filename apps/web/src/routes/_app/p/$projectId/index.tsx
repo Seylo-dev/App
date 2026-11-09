@@ -18,7 +18,7 @@ import { ProjectActivity } from "../../../../components/project/project-activity
 import { ProjectPeople, ShareDialog } from "../../../../components/project/project-people";
 import { ProjectSettings } from "../../../../components/project/project-settings";
 import { ServicesGrid, ServicesGridSkeleton } from "../../../../components/project/services-grid";
-import { SharedEnv, SharedEnvSkeleton } from "../../../../components/project/shared-env";
+import { SharedEnv } from "../../../../components/project/shared-env";
 import { QueryError } from "../../../../components/query-error";
 import { type MessageKey, t } from "../../../../i18n/t";
 import { useLiveTopic } from "../../../../lib/live";
@@ -99,7 +99,7 @@ function ProjectPage() {
             aria-selected={tab === item}
             aria-current={tab === item ? "page" : undefined}
             onClick={() => goTo(item)}
-            className={`cursor-pointer border-x-0 border-t-0 bg-transparent ${tabClassName}`}
+            className={`shrink-0 cursor-pointer border-x-0 border-t-0 bg-transparent whitespace-nowrap ${tabClassName}`}
           >
             {tab === item && <TabIndicator layoutId="project-tabs" />}
             {t(tabLabels[item])}
@@ -107,18 +107,13 @@ function ProjectPage() {
         ))}
       </TabList>
 
+      {/* The shared environment, people and activity need only the id, so they load next to the project; services and settings wait for it. */}
       <EnterOnChange motionKey={tab} subtle role="tabpanel" aria-label={t(tabLabels[tab])}>
-        {!data ? (
-          <TabSkeleton tab={tab} />
-        ) : (
-          <>
-            {tab === "services" && <ServicesGrid projectId={data.id} canCreate={!data.protected} />}
-            {tab === "env" && <SharedEnv projectId={data.id} />}
-            {tab === "people" && <ProjectPeople projectId={data.id} onShare={() => setShareOpen(true)} />}
-            {tab === "activity" && <ProjectActivity projectId={data.id} />}
-            {tab === "settings" && <ProjectSettings key={data.updatedAt} project={data} />}
-          </>
-        )}
+        {tab === "services" && (data ? <ServicesGrid projectId={data.id} canCreate={!data.protected} /> : <ServicesGridSkeleton />)}
+        {tab === "env" && <SharedEnv projectId={projectId} />}
+        {tab === "people" && <ProjectPeople projectId={projectId} onShare={() => setShareOpen(true)} />}
+        {tab === "activity" && <ProjectActivity projectId={projectId} />}
+        {tab === "settings" && (data ? <ProjectSettings key={data.updatedAt} project={data} /> : <SettingsSkeleton />)}
       </EnterOnChange>
       {data && <ShareDialog projectId={data.id} open={shareOpen} onOpenChange={setShareOpen} />}
     </>
@@ -153,15 +148,15 @@ function ProjectHeaderSkeleton() {
   );
 }
 
-/** The open tab's content while the project loads. */
-function TabSkeleton({ tab }: { tab: Tab }) {
-  if (tab === "services") return <ServicesGridSkeleton />;
-  if (tab === "env") return <SharedEnvSkeleton />;
+/** The settings tab while the project loads: the General card with its two fields and save bar. */
+function SettingsSkeleton() {
   return (
     <LoadingRegion label={t("common.loading")} className="max-w-[760px]">
-      <SectionCardSkeleton titleWidth="w-28" description={false}>
-        <FieldSkeleton />
-        <FieldSkeleton />
+      <SectionCardSkeleton titleWidth="w-16" description={false} footer={<ButtonSkeleton className="ml-auto w-[62px]" />}>
+        <div className="flex flex-col gap-4">
+          <FieldSkeleton />
+          <FieldSkeleton />
+        </div>
       </SectionCardSkeleton>
     </LoadingRegion>
   );

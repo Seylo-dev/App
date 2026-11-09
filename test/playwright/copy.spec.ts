@@ -118,12 +118,13 @@ test.describe("copy", () => {
     });
     await page.goto("/setup?t=used-token");
     const panel = page.getByRole("region", { name: "This setup link does not work" });
-    const block = panel.locator('[data-slot="code-block"]');
-    await expect(block).toContainText(/^.*\S+ panel setup-link$/);
-    const command = (await block.locator("code").textContent()) ?? "";
-    await block.getByRole("button", { name: "Copy" }).click();
+    // One command, so a copy field (with a "$" prompt), not a code block with a bar over one line.
+    const value = panel.getByRole("button", { name: "Copy: Setup link command" });
+    await expect(value).toHaveText(/^\S+ panel setup-link$/);
+    const command = (await value.textContent()) ?? "";
+    await value.click();
     expect(await clipboard(page)).toBe(command);
-    expect(command).toMatch(/^\S+ panel setup-link$/);
+    await expect(panel.getByText("Copied")).toBeVisible();
   });
 
   test("the pgvector SQL and cron commands copy with one click", async ({ page }) => {

@@ -31,6 +31,19 @@ export default {
     anonymous: "Anonymous",
   },
   outcomes: { ok: "Done", error: "Failed" },
+  // Why an entry did not go through, by the op error code (the detail sheet also shows the code).
+  errorCodes: {
+    BAD_REQUEST: "Invalid input",
+    UNAUTHENTICATED: "Not signed in",
+    FORBIDDEN: "Not allowed",
+    APPROVAL_REQUIRED: "Needs approval",
+    NOT_FOUND: "Not found",
+    CONFLICT: "Conflict",
+    RATE_LIMITED: "Too many tries",
+    INTERNAL: "Panel error",
+    NOT_IMPLEMENTED: "Not supported",
+    UNAVAILABLE: "Unavailable",
+  },
   events: {
     mcpRegisterClient: "Register an MCP client",
     mcpAuthorizeClient: "Allow or deny an MCP client",

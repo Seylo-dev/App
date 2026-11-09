@@ -41,8 +41,9 @@ export function SharedEnv({ projectId }: { projectId: string }) {
     <SectionCard
       title={t("project.env.title")}
       description={t("project.env.description")}
+      // A fragment, so the buttons are items of the footer strip itself and ml-auto puts them on the right.
       footer={
-        <div className="flex flex-wrap items-center gap-2">
+        <>
           {save.error && <span className="text-[13px] text-destructive">{errorMessage(save.error, t("common.unknownError"))}</span>}
           <Button className="ml-auto" disabled={!dirty} onClick={() => setText(null)}>
             {t("common.discard")}
@@ -54,7 +55,7 @@ export function SharedEnv({ projectId }: { projectId: string }) {
           >
             {t("common.save")}
           </Button>
-        </div>
+        </>
       }
     >
       <Textarea

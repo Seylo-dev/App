@@ -37,7 +37,7 @@ export function InstallDialog({
 }) {
   return (
     <Dialog open={template !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="top-[6%] max-h-[88dvh] max-w-[760px] overflow-y-auto p-0">
+      <DialogContent className="top-[6%] flex max-h-[88dvh] max-w-[760px] flex-col overflow-hidden p-0">
         {template && <InstallForm key={template.slug} summary={template} fixedProjectId={projectId} onClose={onClose} />}
       </DialogContent>
     </Dialog>
@@ -96,8 +96,9 @@ function InstallForm({ summary, fixedProjectId, onClose }: { summary: TemplateSu
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col">
-      <div className="flex items-center gap-3 border-b border-divider px-[22px] py-[18px]">
+    // Only the middle scrolls: the title and the Install button stay in view on a short screen.
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-3 border-b border-divider px-[22px] py-[18px]">
         <TemplateLogo slug={summary.slug} name={summary.name} logoUrl={summary.logoUrl} size={38} />
         <span className="flex min-w-0 flex-col gap-px">
           <DialogTitle className="text-base">{t("templates.install", { name: summary.name })}</DialogTitle>
@@ -110,7 +111,7 @@ function InstallForm({ summary, fixedProjectId, onClose }: { summary: TemplateSu
         </DialogClose>
       </div>
 
-      <div className="grid grid-cols-1 gap-[22px] px-[22px] py-5 md:grid-cols-2">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-[22px] overflow-y-auto px-[22px] py-5 md:grid-cols-2">
         <div className="flex flex-col gap-[13px]">
           {!fixedProjectId && (
             <Labeled id="tpl-project" label={t("newService.project")}>
@@ -167,8 +168,8 @@ function InstallForm({ summary, fixedProjectId, onClose }: { summary: TemplateSu
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5 rounded-b-card border-t border-divider bg-raised px-[22px] py-3.5">
-        <span className="flex items-center gap-[7px] text-xs text-muted-foreground">
+      <div className="flex shrink-0 flex-wrap items-center gap-2.5 rounded-b-card border-t border-divider bg-raised px-[22px] py-3.5">
+        <span className="flex items-center gap-[7px] text-xs text-muted-foreground max-sm:basis-full">
           <IconShieldCheck size={14} stroke={2} className="text-chip-green-fg" aria-hidden="true" />
           {t("templates.sandboxed")}
         </span>
@@ -198,24 +199,33 @@ function Preview({
       {!preview.data && !preview.isError && (
         <LoadingRegion label={detail ? t("templates.previewPending") : t("common.loading")} className="flex flex-col gap-[9px]">
           {[0, 1].map((i) => (
-            <span key={i} className="flex items-center gap-[9px]">
-              <Skeleton className="h-[22px] w-[34px] rounded-chip bg-card" />
-              <SkeletonText ground className="w-60" />
+            <span key={i} className="flex items-start gap-[9px]">
+              <Skeleton className="h-[22px] w-[34px] shrink-0 rounded-chip bg-card" />
+              <span className="flex min-w-0 flex-col">
+                <SkeletonText ground className="w-48 leading-[22px]" />
+                <SkeletonText ground className="w-32 text-xs" />
+              </span>
             </span>
           ))}
         </LoadingRegion>
       )}
       {preview.data?.services.map((service) => {
         const tag = kindTag({ kind: service.kind, templateSlug: null, protected: false });
-        const parts = [service.name, service.image];
-        if (service.ports[0]) parts.push(t("templates.port", { port: service.ports[0] }));
-        if (service.internalOnly) parts.push(t("project.internalOnly"));
-        else if (service.domains[0]) parts.push(service.domains[0]);
+        // Name and image on the first line; port and domain (the part people look for) on a second one, wrapped, never cut off.
+        const details: string[] = [];
+        if (service.ports[0]) details.push(t("templates.port", { port: service.ports[0] }));
+        if (service.internalOnly) details.push(t("project.internalOnly"));
+        else if (service.domains[0]) details.push(service.domains[0]);
         return (
-          <span key={service.name} className="flex items-center gap-[9px] text-foreground">
-            <KindBadge tag={tag.label} tone={tag.tone} className="h-[22px] w-[34px] bg-card" />
-            <span className="min-w-0 truncate">{parts.join(t("format.separator"))}</span>
-            {service.conflict && <span className="ml-auto shrink-0 text-xs font-medium text-destructive">{t("templates.conflict")}</span>}
+          <span key={service.name} className="flex items-start gap-[9px] text-foreground">
+            <KindBadge tag={tag.label} tone={tag.tone} className="h-[22px] w-[34px] shrink-0 bg-card" />
+            <span className="flex min-w-0 flex-col [overflow-wrap:anywhere]">
+              <span className="leading-[22px]">{[service.name, service.image].join(t("format.separator"))}</span>
+              {details.length > 0 && <span className="text-xs text-muted-foreground">{details.join(t("format.separator"))}</span>}
+            </span>
+            {service.conflict && (
+              <span className="ml-auto shrink-0 text-xs leading-[22px] font-medium text-destructive">{t("templates.conflict")}</span>
+            )}
           </span>
         );
       })}

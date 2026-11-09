@@ -13,7 +13,7 @@ import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Checkbox } from "@seylo/ui/components/checkbox";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
-import { CodeBlock } from "@seylo/ui/components/code-block";
+import { CopyField } from "@seylo/ui/components/copy-field";
 import { Input, Label } from "@seylo/ui/components/input";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Skeleton } from "@seylo/ui/components/skeleton";
@@ -23,6 +23,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { AuthFrame } from "../components/auth/auth-frame";
 import { DeviceCodeCard, type DeviceCodeView, GitHubMark, useDevicePolling } from "../components/auth/device-code";
+import { DnsRecordLine, WildcardInput } from "../components/nodes/node-settings";
 import { QueryError } from "../components/query-error";
 import { loadProgress, saveProgress } from "../components/setup/progress";
 import { type MessageKey, t } from "../i18n/t";
@@ -383,8 +384,16 @@ function PanelStep({ onDone }: { onDone: (skipped: boolean) => void }) {
                 ? t("setup.panelDomainDns", { ip: aRecordIp(panelNode) as string })
                 : t("setup.panelDomainHint")}
             </span>
+            {/* Where the saved settings answer now (not a preview of what is typed above). */}
+            {general.data && (
+              <span className="text-xs leading-normal text-muted-foreground">
+                {t("setup.reachableNow")}{" "}
+                <a href={general.data.publicUrl} target="_blank" rel="noreferrer" className="font-mono [overflow-wrap:anywhere]">
+                  {general.data.publicUrl}
+                </a>
+              </span>
+            )}
           </div>
-          {general.data && <span className="text-xs text-muted-foreground">{t("setup.reachableAt", { url: general.data.publicUrl })}</span>}
           {update.error && <Alert tone="danger">{errorMessage(update.error, t("common.unknownError"))}</Alert>}
           <StepButtons pending={update.isPending} disabled={!domainValid || general.isPending} onSkip={() => onDone(true)} />
         </form>
@@ -437,30 +446,9 @@ function WildcardStep({ onDone }: { onDone: (skipped: boolean) => void }) {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="wildcard">{t("nodes.form.wildcard")}</Label>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[13px] text-muted-foreground">*.</span>
-              <Input
-                id="wildcard"
-                value={wildcard ?? node.wildcardDomain ?? ""}
-                onChange={(e) => setWildcard(e.target.value)}
-                placeholder="de1.example.com"
-                aria-invalid={!valid}
-                className="font-mono"
-              />
-            </div>
+            <WildcardInput id="wildcard" value={wildcard ?? node.wildcardDomain ?? ""} onChange={setWildcard} invalid={!valid} />
           </div>
-          {value && valid && (
-            <p className="m-0 text-[12.5px] leading-[1.7] text-ink-strong">
-              {t("nodes.addCard.dnsBefore")}{" "}
-              <span className="rounded-chip bg-muted px-[7px] py-0.5 font-mono text-xs text-foreground">
-                *.{value} A {aRecordIp(node) ?? t("setup.nodeIp")}
-              </span>{" "}
-              {t("nodes.addCard.dnsAfter")}{" "}
-              <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="font-medium">
-                {t("nodes.addCard.cloudflare")}
-              </a>
-            </p>
-          )}
+          {value && valid && <DnsRecordLine record={`*.${value} A ${aRecordIp(node) ?? t("setup.nodeIp")}`} />}
           {update.error && <Alert tone="danger">{errorMessage(update.error, t("common.unknownError"))}</Alert>}
           <StepButtons pending={update.isPending} disabled={!valid} onSkip={() => onDone(true)} />
         </form>
@@ -529,7 +517,8 @@ function StepButtons({
 }) {
   return (
     <div className="flex items-center gap-2 pt-1">
-      <Button variant="ghost" onClick={onSkip}>
+      {/* -ml: the ghost button's own padding, so "Skip for now" starts at the fields' left edge. */}
+      <Button variant="ghost" className="-ml-[15px]" onClick={onSkip}>
         {t("setup.skipStep")}
       </Button>
       <Button type="submit" variant="primary" className="ml-auto" disabled={pending || disabled}>
@@ -541,7 +530,7 @@ function StepButtons({
 
 function SkipOnly({ onSkip }: { onSkip: () => void }) {
   return (
-    <Button variant="ghost" className="self-start" onClick={onSkip}>
+    <Button variant="ghost" className="-ml-[15px] self-start" onClick={onSkip}>
       {t("setup.skipStep")}
     </Button>
   );
@@ -551,7 +540,7 @@ function BadLink() {
   return (
     <Panel label={t("setup.badLinkTitle")} className="w-full max-w-[560px] flex-none">
       <Heading title={t("setup.badLinkTitle")} hint={t("setup.badLinkHint")} />
-      <CodeBlock code={`${slug} panel setup-link`} tone="dark" />
+      <CopyField value={`${slug} panel setup-link`} tone="terminal" prefix="$" aria-label={t("setup.badLinkCommand")} />
     </Panel>
   );
 }

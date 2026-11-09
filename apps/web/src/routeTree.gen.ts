@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from "./routes/login"
 import { Route as ReauthRouteImport } from "./routes/reauth"
 import { Route as SetupRouteImport } from "./routes/setup"
 import { Route as AppIndexRouteImport } from "./routes/_app/index"
+import { Route as AppSplatRouteImport } from "./routes/_app/$"
 import { Route as AppActivityRouteImport } from "./routes/_app/activity"
 import { Route as AppApprovalsRouteImport } from "./routes/_app/approvals"
 import { Route as AppNodesRouteImport } from "./routes/_app/nodes"
@@ -87,6 +88,11 @@ const SetupRoute = SetupRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: "/",
   path: "/",
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSplatRoute = AppSplatRouteImport.update({
+  id: "/$",
+  path: "/$",
   getParentRoute: () => AppRoute,
 } as any)
 const AppActivityRoute = AppActivityRouteImport.update({
@@ -335,6 +341,7 @@ export interface FileRoutesByFullPath {
   "/login": typeof LoginRoute
   "/reauth": typeof ReauthRoute
   "/setup": typeof SetupRoute
+  "/$": typeof AppSplatRoute
   "/activity": typeof AppActivityRoute
   "/approvals": typeof AppApprovalsRoute
   "/nodes": typeof AppNodesRoute
@@ -385,6 +392,7 @@ export interface FileRoutesByTo {
   "/login": typeof LoginRoute
   "/reauth": typeof ReauthRoute
   "/setup": typeof SetupRoute
+  "/$": typeof AppSplatRoute
   "/activity": typeof AppActivityRoute
   "/approvals": typeof AppApprovalsRoute
   "/nodes": typeof AppNodesRoute
@@ -436,6 +444,7 @@ export interface FileRoutesById {
   "/login": typeof LoginRoute
   "/reauth": typeof ReauthRoute
   "/setup": typeof SetupRoute
+  "/_app/$": typeof AppSplatRoute
   "/_app/activity": typeof AppActivityRoute
   "/_app/approvals": typeof AppApprovalsRoute
   "/_app/nodes": typeof AppNodesRoute
@@ -490,6 +499,7 @@ export interface FileRouteTypes {
     | "/login"
     | "/reauth"
     | "/setup"
+    | "/$"
     | "/activity"
     | "/approvals"
     | "/nodes"
@@ -540,6 +550,7 @@ export interface FileRouteTypes {
     | "/login"
     | "/reauth"
     | "/setup"
+    | "/$"
     | "/activity"
     | "/approvals"
     | "/nodes"
@@ -590,6 +601,7 @@ export interface FileRouteTypes {
     | "/login"
     | "/reauth"
     | "/setup"
+    | "/_app/$"
     | "/_app/activity"
     | "/_app/approvals"
     | "/_app/nodes"
@@ -689,6 +701,13 @@ declare module "@tanstack/react-router" {
       path: "/"
       fullPath: "/"
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    "/_app/$": {
+      id: "/_app/$"
+      path: "/$"
+      fullPath: "/$"
+      preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
     }
     "/_app/activity": {
@@ -1098,6 +1117,7 @@ const AppPProjectIdSServiceIdRouteWithChildren =
   )
 
 interface AppRouteChildren {
+  AppSplatRoute: typeof AppSplatRoute
   AppActivityRoute: typeof AppActivityRoute
   AppApprovalsRoute: typeof AppApprovalsRoute
   AppNodesRoute: typeof AppNodesRoute
@@ -1109,6 +1129,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppSplatRoute: AppSplatRoute,
   AppActivityRoute: AppActivityRoute,
   AppApprovalsRoute: AppApprovalsRoute,
   AppNodesRoute: AppNodesRoute,
