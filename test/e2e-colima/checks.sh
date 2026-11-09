@@ -3556,7 +3556,10 @@ p39_access_run() {
   expect "a security_change alert says IP access closed" security_alert "IP access closed" "$since"
 
   # The agents' port closes only once no node needs it (B and C on the domain).
-  st=$(panel_access)
+  # Asked from the domain session: with the API key the answer also lists
+  # "only from a browser on a private path", which says nothing about the nodes.
+  st=$(sess_get "$jar" "$dom" settings.panelAccess --cacert "$P31_ROOT") || st='{}'
+  ev "agents' port from the domain session: $(printf '%s' "$st" | jq -c '[.agentPortBlocked[]? | {code, message}]')"
   if jq_ok "$st" '(.agentPortBlocked | length) == 0'; then
     if sess "$jar" "$dom" settings.updatePanelAccess '{"agentPortOpen":false}' --cacert "$P31_ROOT" >/dev/null; then
       good "the agents' port turned off over the domain (every node connects over the domain)"
