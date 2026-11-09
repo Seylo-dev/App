@@ -1,8 +1,9 @@
 // Answers the browser's op requests and sockets from the demo data, so every
 // screen renders with the boards' data without a fleet behind the panel.
-// Order: per-test overrides, then the panel world (fixtures.ts), the
-// service screens (service.ts), the settings screens (settings.ts) and
-// Docker Hub (dockerhub.ts). Ops
+// Order: per-test overrides, then the panel world (fixtures.ts), picking a
+// repository (repos.ts: GitHub App and GitLab repositories, branches,
+// creating and connecting an app), the service screens (service.ts), the
+// settings screens (settings.ts) and Docker Hub (dockerhub.ts). Ops
 // without demo data go to the real panel the run started (signed in).
 // Sockets: the live socket accepts every subscription and streams a few
 // deployment log lines; log follow and the terminals answer like an agent.
@@ -10,6 +11,8 @@
 import type { Page, Route } from "@playwright/test";
 import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
+import { DemoRefusal } from "./refusal";
+import { handlers as repoHandlers } from "./repos";
 import { handlers as serviceHandlers, logEntries } from "./service";
 import { fixtures as settingsFixtures } from "./settings";
 
@@ -255,6 +258,7 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
         }
       : {},
     worldHandlers,
+    repoHandlers as Record<string, Handler>,
     serviceHandlers as Record<string, Handler>,
     settingsHandlers,
     dockerHubHandlers as Record<string, Handler>,
@@ -265,7 +269,15 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     if (!handler) return route.continue();
     const wait = typeof options.delay === "function" ? options.delay(opId) : (options.delay ?? 0);
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(handler(inputOf(route))) });
+    let answer: unknown;
+    try {
+      answer = handler(inputOf(route));
+    } catch (error) {
+      if (!(error instanceof DemoRefusal)) throw error;
+      const body = { error: { code: error.code, message: error.message, details: error.details } };
+      return route.fulfill({ status: error.status, contentType: "application/json", body: JSON.stringify(body) });
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(answer) });
   });
   await installSockets(page);
 }

@@ -3316,6 +3316,52 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   git URL on github.com, gitlab.com or bitbucket.org with no credential
   gets one hint under the error (`private-repo-hint.tsx`): connect it
   through that provider on the Source tab, or pick a git credential there.
+- New app, Git repository tab (`components/new-service/`): one Repository
+  field takes a full git URL (https://, ssh://, git@host:path), `owner/repo`
+  (GitHub) or a host and path without a scheme (`gitlab.com/group/sub/app`),
+  with or without `.git` (`repo-input.ts` `parseRepoInput`). Page addresses
+  of github.com, gitlab.com (with or without `/-/`), bitbucket.org,
+  codeberg.org and the servers of the person's GitLab and Gitea connections
+  (`knownHostsOf`, read by the connection's kind and under its path) give
+  the repository and what follows `tree/` or `src/`: the branch is its
+  longest start that is one of the repository's branches
+  (`branchFromRef`; `tree/main/apps/web` gives `main`), its first segment
+  when the branches cannot be read, never a commit id, and the default
+  branch otherwise. Browse (`repo-field.tsx`) lists, by connection and with
+  private or public, the repositories of the GitHub App installations that
+  are not suspended (`github.repos`) and of every git provider connection
+  (`gitProviders.repos`), searched and paged; a hidden installation or
+  provider list gives none, a connection whose list the panel refuses
+  (FORBIDDEN) drops out, one list failing says so beside the other's
+  repositories, and with none it links to Settings > GitHub and Git
+  providers (owners and admins). It is the field's width on phones, at
+  least 420px from `sm`, 16px from the window's edges, and no taller than
+  the space Radix leaves; arrow keys, Home and End move through it (and
+  the branch list), and Show more keeps the focus. What the field becomes
+  (`repo-source.ts` `decideSource`, `sourceFor`): a repository picked from
+  a connection (in that project: a new project looks the text up again),
+  or typed and read by one by its exact name (`github.branches` /
+  `gitProviders.branches`, which answer NOT_FOUND with `details.field`
+  `repo` when the connection cannot read it), is a `github` or `provider`
+  source with `deployOnPush` on, as on the Source tab; a typed repository
+  no connection reads (NOT_FOUND) or may use here (FORBIDDEN) is a `git`
+  source (owner/repo as `https://github.com/<owner>/<repo>.git`, no
+  credential, `deployOnPush` off). Any other failure of a lookup or of the
+  installation or provider list leaves it unchecked with Try again, and
+  nothing is created. A line under the field says which. `services.create`
+  refuses GitHub and provider sources, so the dialog creates the app
+  without a source, then calls `github.connectRepo` or
+  `gitProviders.connectRepo` (which creates the webhook), then
+  `deployments.deploy` when "Deploy right away" is ticked; a failed connect
+  opens the service's Source tab with the error. connectRepo needs
+  `services.update`, so for a member without it in the project (`grants.mine`)
+  Browse says so and typing gives `git` sources only. An SSH URL creates
+  without the first deploy (no deploy key yet). Branch suggests the
+  repository's branches (`github.branches`, `gitProviders.branches`, or
+  `git.branches` for an https URL) and follows the repository until edited
+  for it; a branch chosen for one repository is dropped when the repository
+  changes (`repoKeyOf`), an empty field is the suggested branch, and one
+  git refuses (`GitBranch`) is marked with a note.
 - Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
   a click anywhere on the field copies, the copy icon included
   (`copy.spec.ts`).
@@ -3417,7 +3463,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   a crash with its session kept, no socket while nothing runs, no focus
   taken, the header one row when a shell connects at 1024 px, Open full,
   closed when left, a member's modes and Open shell for shell-only, phone
-  width; a failed clone's title and private repo hint) and
+  width; a failed clone's title and private repo hint),
+  `repo-picker.spec.ts` (the New app dialog's Repository
+  field with `demo/repos.ts`: Browse and pick, owner/repo an installation
+  reads or not, pasted URLs and page addresses (a self-managed GitLab's
+  too), branch suggestions and the branch following the repository, the
+  empty, loading, refused and unchecked states, a project change, a member
+  without `services.update`, the list at a short window and a phone,
+  arrow keys and Show more, and what gets created and connected; a demo
+  handler answers an error by throwing `demo/refusal.ts` `DemoRefusal`) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar and the
   accent check;
