@@ -5,7 +5,10 @@
 // a node join command, a git provider token) must open "Confirm it's you"
 // and go through by itself once confirmed.
 // Passkeys need a panel domain, so that test stands in for the browser's
-// passkey prompt and the begin op, and checks what the dialog sends.
+// passkey prompt and the begin op, and checks what the dialog sends. The
+// panel has no GitHub client id either, so the GitHub test stands in for a
+// GitHub-only account and GitHub's answers (the panel's own tests check the
+// GitHub login itself).
 
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -274,6 +277,123 @@ test("linking GitHub asks first, then shows the device code", async ({ page }) =
   expect((await confirmWithPassword(page)).ok()).toBe(true);
   await expect(page.getByText("WDJB-MJHT")).toBeVisible();
   expect(starts).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test("an account that signs in with GitHub confirms with GitHub, then the change goes through", async ({ page }) => {
+  const errors = trackErrors(page);
+  // run.sh gives this panel no GitHub client id: stand in for a GitHub-only account and for GitHub's answers.
+  await page.route("**/api/v1/auth.security*", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        passwordSet: false,
+        github: { login: "octo", repoAccess: false, linkedAt: new Date().toISOString() },
+        githubAvailable: true,
+      },
+    });
+  });
+  const tickets: string[] = [];
+  await page.route("**/api/v1/auth.reauthGithubStart", (route) => {
+    tickets.push(`pw-github-${tickets.length + 1}`);
+    return route.fulfill({
+      json: {
+        ticket: tickets.at(-1),
+        userCode: tickets.length === 1 ? "WDJB-MJHT" : "BKQX-RTLN",
+        verificationUri: "https://github.com/login/device",
+        expiresAt: new Date(Date.now() + 900_000).toISOString(),
+        intervalSeconds: 1,
+      },
+    });
+  });
+  const polled: string[] = [];
+  // The first code waits until the screenshots are taken, then GitHub approves it as someone else.
+  let approveFirst = false;
+  await page.route("**/api/v1/auth.reauthGithubPoll", async (route) => {
+    const { ticket } = route.request().postDataJSON() as { ticket: string };
+    polled.push(ticket);
+    if (ticket === "pw-github-1") {
+      if (!approveFirst) return route.fulfill({ json: { status: "pending", intervalSeconds: 1 } });
+      return route.fulfill({
+        status: 400,
+        json: {
+          error: {
+            code: "BAD_REQUEST",
+            message: "GitHub approved this as someone-else, but this account is linked to octo. Switch to octo on GitHub and try again.",
+            details: { field: "github" },
+          },
+        },
+      });
+    }
+    // The second one: approved as octo. The real panel checks the GitHub login; the password makes this session fresh for real.
+    const reauth = {
+      url: new URL("/api/v1/auth.reauth", route.request().url()).href,
+      postData: JSON.stringify({ password: credentials.password }),
+    };
+    let answer = await route.fetch(reauth);
+    for (let attempt = 0; answer.status() === 429 && attempt < 5; attempt++) {
+      await waitOut(answer, page);
+      answer = await route.fetch(reauth);
+    }
+    expect(answer.ok(), await answer.text()).toBe(true);
+    const { freshUntil } = (await answer.json()) as { freshUntil: string };
+    await route.fulfill({ json: { status: "done", intervalSeconds: 1, freshUntil } });
+  });
+
+  await page.goto("/settings/api-keys");
+  await page.getByRole("button", { name: "Create API key" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("pw-reauth-github");
+  const create = page.getByRole("button", { name: "Create key" });
+  expect((await clickPastRateLimit(page, create, "apiKeys.create")).status()).toBe(403);
+  await expect(dialog(page)).toBeVisible();
+  // GitHub is this account's only way in: no method switch and no "sign in again".
+  await expect(dialog(page).getByRole("radiogroup", { name: "Confirm with" })).toHaveCount(0);
+  await expect(dialog(page).getByRole("button", { name: "Sign in again" })).toHaveCount(0);
+  await expect(dialog(page).getByText("GitHub shows a code to approve as @octo")).toBeVisible();
+  await page.screenshot({ path: `${shots}/dialog-github-start.png`, fullPage: true, animations: "disabled" });
+
+  const confirm = dialog(page).getByRole("button", { name: "Confirm with GitHub" });
+  await confirm.click();
+  await expect(dialog(page).getByText("WDJB-MJHT")).toBeVisible();
+  await expect(dialog(page).getByText("Enter this code on GitHub as @octo")).toBeVisible();
+  const open = dialog(page).getByRole("link", { name: "Open github.com/login/device" });
+  await expect(open).toHaveAttribute("href", "https://github.com/login/device");
+  await expect(open).toHaveAttribute("target", "_blank");
+  await expect(confirm).toHaveCount(0);
+  await page.screenshot({ path: `${shots}/dialog-github.png`, fullPage: true, animations: "disabled" });
+  // At phone width in the dark theme too.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "seylo-night");
+  await expect(dialog(page)).toHaveCSS("background-color", "rgb(21, 28, 48)");
+  await expect(dialog(page).getByText("WDJB-MJHT")).toBeVisible();
+  await page.screenshot({ path: `${shots}/dialog-github-phone-dark.png`, animations: "disabled" });
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  approveFirst = true;
+
+  // It polls by itself; the other GitHub login is refused and the code goes away.
+  await expect(dialog(page).getByRole("alert")).toHaveText(/approved this as someone-else/);
+  await expect(dialog(page).getByText("WDJB-MJHT")).toHaveCount(0);
+  await expect(page.getByText("API key created")).toHaveCount(0);
+
+  // A new code; approved as the linked login, the dialog closes and the refused create runs again.
+  await confirmThenRetried(page, "apiKeys.create", create, async () => {
+    await confirm.click();
+    await expect(dialog(page).getByText("BKQX-RTLN")).toBeVisible();
+  });
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.getByText("API key created")).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
+  expect(tickets).toEqual(["pw-github-1", "pw-github-2"]);
+  // The first code until GitHub answered, then the second once.
+  expect(polled.slice(0, -1).every((ticket) => ticket === "pw-github-1")).toBe(true);
+  expect(polled.filter((ticket) => ticket === "pw-github-2")).toEqual(["pw-github-2"]);
+  expect(polled.at(-1)).toBe("pw-github-2");
+  const keys = (await (await api(page).get("/api/v1/apiKeys.list?kind=api")).json()) as { keys: { name: string }[] };
+  expect(keys.keys.filter((k) => k.name === "pw-reauth-github")).toHaveLength(1);
   expect(errors).toEqual([]);
 });
 

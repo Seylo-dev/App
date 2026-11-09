@@ -6337,7 +6337,7 @@
       "post": {
         "operationId": "auth.reauth",
         "summary": "Confirm it's you",
-        "description": "Confirms the signed-in person with exactly one of: the password, a code (6-digit authenticator code or an unused recovery code, which is used up), or a passkey assertion for the ticket from auth.reauthPasskeyBegin. The session then counts as freshly signed in for 15 minutes. A wrong answer is BAD_REQUEST with details.field \"password\", \"code\" or \"passkey\". Browser sessions only.",
+        "description": "Confirms the signed-in person with exactly one of: the password, a code (6-digit authenticator code or an unused recovery code, which is used up), or a passkey assertion for the ticket from auth.reauthPasskeyBegin. The session then counts as freshly signed in for 15 minutes. A wrong answer is BAD_REQUEST with details.field \"password\", \"code\" or \"passkey\". A linked GitHub login confirms through auth.reauthGithubStart instead. Browser sessions only.",
         "tags": [
           "auth"
         ],
@@ -6407,6 +6407,175 @@
                     "freshUntil": {
                       "format": "date-time",
                       "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/auth.reauthGithubPoll": {
+      "post": {
+        "operationId": "auth.reauthGithubPoll",
+        "summary": "Check a GitHub confirmation",
+        "description": "Polls the device flow started by auth.reauthGithubStart. With status done GitHub approved it as the login linked to this account, and the session counts as freshly signed in for 15 minutes (freshUntil), as after auth.reauth. Approving as another GitHub login is BAD_REQUEST with details.field \"github\" and counts toward the per-address lock; an unknown, used or expired ticket is BAD_REQUEST. Browser sessions only.",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket"
+                ],
+                "properties": {
+                  "ticket": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "intervalSeconds"
+                  ],
+                  "properties": {
+                    "status": {
+                      "anyOf": [
+                        {
+                          "const": "pending",
+                          "type": "string"
+                        },
+                        {
+                          "const": "slowDown",
+                          "type": "string"
+                        },
+                        {
+                          "const": "expired",
+                          "type": "string"
+                        },
+                        {
+                          "const": "denied",
+                          "type": "string"
+                        },
+                        {
+                          "const": "done",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "intervalSeconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "freshUntil": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/auth.reauthGithubStart": {
+      "post": {
+        "operationId": "auth.reauthGithubStart",
+        "summary": "Start confirming it's you with GitHub",
+        "description": "Starts the GitHub device flow to confirm the signed-in person with the GitHub login linked to their account, for accounts that sign in with GitHub. Show userCode, open verificationUri, then call auth.reauthGithubPoll every intervalSeconds. CONFLICT when the account has no linked GitHub login, UNAVAILABLE while the OAuth client id is a placeholder. Browser sessions only.",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ticket",
+                    "userCode",
+                    "verificationUri",
+                    "expiresAt",
+                    "intervalSeconds"
+                  ],
+                  "properties": {
+                    "ticket": {
+                      "type": "string"
+                    },
+                    "userCode": {
+                      "type": "string"
+                    },
+                    "verificationUri": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "intervalSeconds": {
+                      "minimum": 1,
+                      "type": "integer"
                     }
                   }
                 }

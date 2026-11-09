@@ -9,7 +9,7 @@ import { login, verifySecondFactor } from "./login";
 import { logout } from "./logout";
 import { passkeyLoginBegin, passkeyLoginFinish, passkeyRegisterBegin, passkeyRegisterFinish, passkeyRemove } from "./passkeys";
 import { preferences, updatePreferences, updateProfile } from "./profile";
-import { reauth, reauthPasskeyBegin } from "./reauth";
+import { reauth, reauthGithubPoll, reauthGithubStart, reauthPasskeyBegin } from "./reauth";
 import { changePassword, regenerateRecoveryCodes, security, totpConfirm, totpDisable, totpEnroll } from "./security";
 import { listSessions, revokeOtherSessions, revokeSession } from "./sessions";
 import { whoami } from "./whoami";
@@ -35,6 +35,8 @@ export default defineModule({
     regenerateRecoveryCodes,
     reauth,
     reauthPasskeyBegin,
+    reauthGithubStart,
+    reauthGithubPoll,
     passkeyRegisterBegin,
     passkeyRegisterFinish,
     passkeyRemove,

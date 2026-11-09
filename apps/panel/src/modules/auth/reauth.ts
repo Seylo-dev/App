@@ -1,18 +1,21 @@
 // Re-auth ("confirm it's you"): the signed-in person proves they are at the
-// keyboard with their password, an authenticator or recovery code, or a
-// passkey, and the session counts as freshly signed in for 15 minutes
-// (auth/fresh.ts). Ops that add a way in check that window.
+// keyboard with their password, an authenticator or recovery code, a
+// passkey, or the GitHub login linked to their account (device flow), and
+// the session counts as freshly signed in for 15 minutes (auth/fresh.ts).
+// Ops that add a way in check that window.
 
 import { auth, OpError } from "@seylo/ops";
 import { type AuthenticationResponseJSON, generateAuthenticationOptions } from "@simplewebauthn/server";
 import { eq } from "drizzle-orm";
-import { createChallenge, findChallenge } from "../../auth/challenges";
+import { createChallenge, deleteChallenge, findChallenge } from "../../auth/challenges";
 import { markReauthenticated } from "../../auth/fresh";
+import { saveGithubAccount } from "../../auth/github-accounts";
+import { githubUser, pollDeviceFlow, startDeviceFlow } from "../../auth/github-device";
 import { assertNotLocked, clearFailures, recordFailure, userKey } from "../../auth/lockout";
 import { passkeyCeremonyTtlMs } from "../../auth/passkeys";
 import { checkAnySecondFactor, confirmedTotp } from "../../auth/second-factor";
 import { requireSession } from "../../auth/sign-in";
-import { passkeys, users } from "../../db/schema";
+import { githubAccounts, passkeys, users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { verifyPassword } from "../../security/password";
 import { checkSecondFactorCode, codeMethod } from "./code-check";
@@ -38,7 +41,7 @@ export const reauthPasskeyBegin = implement(auth.reauthPasskeyBegin, async (_inp
 });
 
 /** A wrong answer: counts toward the account's per-address lock and marks the field. */
-function wrong(ctx: OpContext, userId: string, field: "password" | "code" | "passkey", message: string): OpError {
+function wrong(ctx: OpContext, userId: string, field: "password" | "code" | "passkey" | "github", message: string): OpError {
   recordFailure(ctx.db, userKey(userId, ctx.ip));
   return new OpError("BAD_REQUEST", message, { field });
 }
@@ -75,4 +78,56 @@ export const reauth = implement(auth.reauth, async (input, ctx) => {
 
   clearFailures(ctx.db, key);
   return { freshUntil: markReauthenticated(ctx.db, sessionId).toISOString() };
+});
+
+// GitHub: for people who sign in with GitHub and have no password, code or
+// passkey to confirm with. The same device flow as GitHub sign-in, but only
+// the GitHub login linked to this account counts.
+
+function linkedGithub(ctx: OpContext, userId: string) {
+  return ctx.db.select().from(githubAccounts).where(eq(githubAccounts.userId, userId)).get();
+}
+
+export const reauthGithubStart = implement(auth.reauthGithubStart, (_input, ctx) => {
+  const { userId } = requireSession(ctx);
+  assertNotLocked(ctx.db, userKey(userId, ctx.ip));
+  if (!linkedGithub(ctx, userId)) {
+    throw new OpError("CONFLICT", "This account has no linked GitHub login. Use your password, a code or a passkey.");
+  }
+  return startDeviceFlow(ctx, "githubReauth", { userId, repoAccess: false });
+});
+
+export const reauthGithubPoll = implement(auth.reauthGithubPoll, async (input, ctx) => {
+  const { userId, sessionId } = requireSession(ctx);
+  const challenge = findChallenge(ctx.db, input.ticket, "githubReauth");
+  if (!challenge || challenge.userId !== userId) {
+    throw new OpError("BAD_REQUEST", "This GitHub check expired. Start again.", { field: "github" });
+  }
+  const key = userKey(userId, ctx.ip);
+  assertNotLocked(ctx.db, key);
+  const poll = await pollDeviceFlow(ctx, challenge);
+  if (poll.status !== "done") return { status: poll.status, intervalSeconds: poll.intervalSeconds };
+
+  deleteChallenge(ctx.db, challenge.id);
+  const github = await githubUser(ctx, poll.accessToken);
+  ctx.auditDetails?.({ githubLogin: github.login });
+  const linked = linkedGithub(ctx, userId);
+  if (!linked) throw new OpError("CONFLICT", "This account has no linked GitHub login anymore. Use your password, a code or a passkey.");
+  if (linked.githubUserId !== github.id) {
+    throw wrong(
+      ctx,
+      userId,
+      "github",
+      `GitHub approved this as ${github.login}, but this account is linked to ${linked.login}. Switch to ${linked.login} on GitHub and try again.`,
+    );
+  }
+  // As after a GitHub sign-in: the new token replaces the stored one unless that one has more
+  // scopes, so GitHub's cap on tokens per scope never revokes the token the panel keeps.
+  saveGithubAccount(ctx.db, ctx.secrets, userId, github, poll.accessToken, poll.scopes, { keepBroaderToken: true });
+  clearFailures(ctx.db, key);
+  return {
+    status: "done" as const,
+    intervalSeconds: poll.intervalSeconds,
+    freshUntil: markReauthenticated(ctx.db, sessionId).toISOString(),
+  };
 });

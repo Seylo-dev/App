@@ -71,8 +71,10 @@ describe("withReauth", () => {
     const query = fakeClient(1);
     await expect(withReauth(query.client).call(auth.security, {})).rejects.toThrow("Confirm it is you first.");
     // The dialog's own ops answer for themselves.
-    const own = fakeClient(1);
-    await expect(withReauth(own.client).call(auth.reauthPasskeyBegin, {})).rejects.toThrow("Confirm it is you first.");
+    for (const op of [auth.reauthPasskeyBegin, auth.reauthGithubStart, auth.reauthGithubPoll]) {
+      const own = fakeClient(1);
+      await expect(withReauth(own.client).call(op, { ticket: "t" } as never)).rejects.toThrow("Confirm it is you first.");
+    }
     const other = fakeClient(1, () => new OpError("BAD_REQUEST", "Name is taken."));
     await expect(withReauth(other.client).call(auth.totpEnroll, {})).rejects.toThrow("Name is taken.");
     unregister();
