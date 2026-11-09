@@ -83,7 +83,7 @@ export default {
     fromAccount: "From the connected GitHub account (@{login}) - deploys on push",
     publicGithub: "Public GitHub repository github.com/{path}",
     missedGithub: "Not in your GitHub App ({account}) - cloned as public. Private? Give the App access first.",
-    missedAccount: "The connected GitHub account (@{login}) cannot read it - cloned as public.",
+    missedAccount: "Not a repository of the connected GitHub account (@{login}) - cloned as public.",
     publicGit: "Public git repository {address}",
     uncheckedGithub: "Could not check your GitHub App ({account}). {message}",
     uncheckedAccount: "Could not check the connected GitHub account (@{login}). {message}",

@@ -228,7 +228,7 @@ export const branches = defineOp({
   kind: "query",
   summary: "List a repository's branches",
   description:
-    "Lists the branches of a repository through the App (installationId) or the connected GitHub account (accountId), default branch first. Pass one of the two. Fails with NOT_FOUND (details.field repo) when it cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
+    "Lists the branches of a repository through the App (installationId) or the connected GitHub account (accountId), default branch first. Pass one of the two. Fails with NOT_FOUND (details.field repo) when it cannot read the repository or there is none, or, through the account, when it is a public repository that is not the account's (not private, no push or admin access, not in its list: details.reason notOwned; use its git URL instead), and UNAVAILABLE when GitHub does not answer or rate limits the token (details.reason rateLimited).",
   input: Type.Object({
     projectId: Id,
     installationId: Type.Optional(Id),
@@ -247,7 +247,7 @@ export const connectRepo = defineOp({
   kind: "mutation",
   summary: "Connect a GitHub repository to a service",
   description:
-    "Sets a service's source to a GitHub repository and branch read through the App (installationId) or the connected GitHub account (accountId), after checking it can read it. Pass one of the two. With deployOnPush, pushes to the branch deploy the service: through the App's webhook, or for the account through a repository webhook the panel creates with its token when the token may and the panel has a domain, else by polling the branch every minute. rootDir is the folder to build.",
+    "Sets a service's source to a GitHub repository and branch read through the App (installationId) or the connected GitHub account (accountId), after checking it can read it (through the account: one of the account's, the github.branches rule; UNAVAILABLE while GitHub rate limits the token). Pass one of the two. With deployOnPush, pushes to the branch deploy the service: through the App's webhook, or for the account through a repository webhook the panel creates with its token when the token may and the panel has a domain, else by polling the branch every minute. rootDir is the folder to build.",
   input: Type.Object({
     serviceId: Id,
     installationId: Type.Optional(Id),

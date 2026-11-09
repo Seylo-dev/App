@@ -33378,7 +33378,7 @@
       "get": {
         "operationId": "github.branches",
         "summary": "List a repository's branches",
-        "description": "Lists the branches of a repository through the App (installationId) or the connected GitHub account (accountId), default branch first. Pass one of the two. Fails with NOT_FOUND (details.field repo) when it cannot read the repository or there is none, and UNAVAILABLE when GitHub does not answer.",
+        "description": "Lists the branches of a repository through the App (installationId) or the connected GitHub account (accountId), default branch first. Pass one of the two. Fails with NOT_FOUND (details.field repo) when it cannot read the repository or there is none, or, through the account, when it is a public repository that is not the account's (not private, no push or admin access, not in its list: details.reason notOwned; use its git URL instead), and UNAVAILABLE when GitHub does not answer or rate limits the token (details.reason rateLimited).",
         "tags": [
           "github"
         ],
@@ -33480,7 +33480,7 @@
       "post": {
         "operationId": "github.connectRepo",
         "summary": "Connect a GitHub repository to a service",
-        "description": "Sets a service's source to a GitHub repository and branch read through the App (installationId) or the connected GitHub account (accountId), after checking it can read it. Pass one of the two. With deployOnPush, pushes to the branch deploy the service: through the App's webhook, or for the account through a repository webhook the panel creates with its token when the token may and the panel has a domain, else by polling the branch every minute. rootDir is the folder to build.",
+        "description": "Sets a service's source to a GitHub repository and branch read through the App (installationId) or the connected GitHub account (accountId), after checking it can read it (through the account: one of the account's, the github.branches rule; UNAVAILABLE while GitHub rate limits the token). Pass one of the two. With deployOnPush, pushes to the branch deploy the service: through the App's webhook, or for the account through a repository webhook the panel creates with its token when the token may and the panel has a domain, else by polling the branch every minute. rootDir is the folder to build.",
         "tags": [
           "github"
         ],
@@ -68743,6 +68743,149 @@
         },
         "x-op-kind": "mutation",
         "x-permission": "service:terminals.shell",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/terminals.watchConsole": {
+      "get": {
+        "operationId": "terminals.watchConsole",
+        "summary": "Watch the console of a service",
+        "description": "Returns a one-minute ticket for a WebSocket with the console's output only, like terminals.console without stdin: recent output first, then live output; what is sent on it is dropped. Like reading logs it is not written to the audit log; the Overview's console card watches and opens terminals.console once someone types.",
+        "tags": [
+          "terminals"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "nodeId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "containerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "name": "tail",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "maximum": 5000,
+              "default": 100,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "url",
+                    "ticket",
+                    "expiresAt",
+                    "target",
+                    "idleTimeoutSeconds"
+                  ],
+                  "properties": {
+                    "url": {
+                      "description": "WebSocket path on the panel with the ticket as `?t=`; open it within a minute.",
+                      "type": "string"
+                    },
+                    "ticket": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "object",
+                      "required": [
+                        "nodeId",
+                        "nodeName",
+                        "containerId",
+                        "generation"
+                      ],
+                      "properties": {
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "containerId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generation": {
+                          "anyOf": [
+                            {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "idleTimeoutSeconds": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:terminals.console",
         "x-mcp": false
       }
     },

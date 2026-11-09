@@ -12,7 +12,7 @@ import { ButtonSkeleton, FieldSkeleton, LoadingRegion, Skeleton, SkeletonText } 
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconLock, IconSearch } from "@tabler/icons-react";
+import { IconCheck, IconLock, IconSearch } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useDeferredValue, useState } from "react";
 import { t } from "../../../i18n/t";
@@ -266,9 +266,10 @@ function RepoPicker({
               role="option"
               aria-selected={value === r.fullName}
               onClick={() => onChange(r.fullName, r.defaultBranch)}
+              // The chosen one: the accent fill and a check, as in the New app picker (a card fill on the gray list vanishes in dark presets).
               className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200 hover:bg-card",
-                value === r.fullName && "bg-card shadow-control",
+                "flex cursor-pointer items-center gap-2 rounded-chip border-0 bg-transparent px-2.5 py-2 text-left text-[13px] transition-interactive duration-200",
+                value === r.fullName ? "bg-accent" : "hover:bg-card",
               )}
             >
               <span className="truncate font-mono text-[12.5px]">{r.fullName}</span>
@@ -278,7 +279,10 @@ function RepoPicker({
                   {t("serviceSource.github.private")}
                 </Chip>
               )}
-              {r.pushedAt && <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{formatRelative(r.pushedAt)}</span>}
+              <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                {r.pushedAt && <span className="text-xs whitespace-nowrap text-muted-foreground">{formatRelative(r.pushedAt)}</span>}
+                {value === r.fullName && <IconCheck size={15} stroke={2} className="text-primary" aria-hidden="true" />}
+              </span>
             </button>
           ))
         )}

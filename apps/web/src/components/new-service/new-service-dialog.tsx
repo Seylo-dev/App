@@ -261,6 +261,8 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   });
   const imagePort = appSource === "image" && hubRef && hub.data ? portChoices(hub.data).main : null;
   const port = portEdit ?? (imagePort ? String(imagePort) : defaultPort);
+  // Set up later shows no Port field, so it sends none: the app gets a port (and first-run access) once it has a source.
+  const portShown = kind === "app" && appSource !== "none" && !(appSource === "github" && githubEmpty);
   const portHint: { key: MessageKey; params?: Record<string, string> } =
     portEdit === null && imagePort && hubRef
       ? { key: "newService.portFromImage", params: { image: hubRef.repository } }
@@ -308,7 +310,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
     } else {
       const containerPort = Number(port);
       const ports =
-        Number.isInteger(containerPort) && containerPort > 0 && containerPort <= 65535
+        portShown && Number.isInteger(containerPort) && containerPort > 0 && containerPort <= 65535
           ? [{ containerPort, protocol: "tcp" as const }]
           : undefined;
       const source: Source | undefined =
@@ -465,7 +467,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             </div>
           )}
           {appSource === "none" && <p className="m-0 text-[13px] text-muted-foreground">{t("newService.sourceLaterHint")}</p>}
-          {appSource !== "none" && !(appSource === "github" && githubEmpty) && (
+          {portShown && (
             <Field id="ns-port" label="newService.port" hintText={t(portHint.key, portHint.params)}>
               <Input
                 id="ns-port"
@@ -612,7 +614,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
         </Field>
       )}
 
-      {(kind === "compose" || (kind === "app" && appSource !== "none" && !(appSource === "github" && githubEmpty))) && (
+      {(kind === "compose" || portShown) && (
         <label
           htmlFor="ns-deploy"
           // The checkbox fades itself when disabled; the words go quiet beside it.

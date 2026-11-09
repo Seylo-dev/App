@@ -101,10 +101,16 @@ function Connections() {
               cell: (p) => {
                 const Icon = icons[p.kind];
                 return (
-                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <Icon size={16} stroke={1.8} className="shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <span className="font-medium">{p.name}</span>
-                    <Chip tone="gray">{t(`settingsGitProviders.add.kinds.${p.kind}`)}</Chip>
+                  <span className="flex flex-col gap-1">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <Icon size={16} stroke={1.8} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span className="font-medium">{p.name}</span>
+                      <Chip tone="gray">{t(`settingsGitProviders.add.kinds.${p.kind}`)}</Chip>
+                    </span>
+                    {/* On a phone Host and Account are hidden: the same facts as one line here, so two connections never look alike. */}
+                    <span className="text-xs text-muted-foreground [overflow-wrap:anywhere] md:hidden">
+                      {[hostOf(p), p.account ?? "-", usedByText(p)].join(t("format.separator"))}
+                    </span>
                   </span>
                 );
               },
@@ -114,7 +120,7 @@ function Connections() {
               header: t("settingsGitProviders.list.host"),
               hideOnMobile: true,
               skeletonWidth: "19.4%",
-              cell: (p) => <span className="font-mono text-[12.5px]">{p.workspace ? `${p.host}/${p.workspace}` : p.host}</span>,
+              cell: (p) => <span className="font-mono text-[12.5px]">{hostOf(p)}</span>,
             },
             {
               id: "account",
@@ -125,9 +131,7 @@ function Connections() {
               cell: (p) => (
                 <span className="flex flex-col">
                   <span>{p.account ?? "-"}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {p.usedBy > 0 ? t("settingsGitProviders.list.usedBy", { count: p.usedBy }) : t("settingsGitProviders.list.unused")}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{usedByText(p)}</span>
                 </span>
               ),
             },
@@ -320,4 +324,13 @@ function AddConnection() {
       </form>
     </SectionCard>
   );
+}
+
+/** The server (and workspace) a connection reads. */
+function hostOf(p: { host: string; workspace: string | null }): string {
+  return p.workspace ? `${p.host}/${p.workspace}` : p.host;
+}
+
+function usedByText(p: { usedBy: number }): string {
+  return p.usedBy > 0 ? t("settingsGitProviders.list.usedBy", { count: p.usedBy }) : t("settingsGitProviders.list.unused");
 }

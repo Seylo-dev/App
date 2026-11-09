@@ -17,7 +17,7 @@ import { gitCredentials, githubRepoWebhooks } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
 import type { GitCredentialRow } from "../git/credentials";
-import { accountToken, mayCreateHooks } from "./account";
+import { accountLogin, accountToken, mayCreateHooks, sameLogin } from "./account";
 import { describeGithubError, GithubApiError, githubRequest } from "./api";
 import { panelBaseUrl } from "./app";
 
@@ -68,7 +68,11 @@ export async function ensureRepoHook(
 ): Promise<RepoHookRow> {
   const existing = repoHookOf(deps, input.serviceId);
   const base = panelBaseUrl(deps.db);
-  const same = existing && existing.credentialId === input.account.id && existing.repo.toLowerCase() === input.repo.toLowerCase();
+  const same =
+    existing &&
+    existing.credentialId === input.account.id &&
+    sameLogin(existing.createdLogin, accountLogin(input.account)) &&
+    existing.repo.toLowerCase() === input.repo.toLowerCase();
   if (same && existing.remoteId && !input.force && base && existing.url === `${base}${repoHookPath(existing.id)}`) return existing;
   if (existing) dropRepoHooks(deps, [input.serviceId]);
 
@@ -78,6 +82,7 @@ export async function ensureRepoHook(
     .values({
       serviceId: input.serviceId,
       credentialId: input.account.id,
+      createdLogin: accountLogin(input.account),
       repo: input.repo,
       secretSealed: deps.secrets.seal(secret, "git.webhook"),
     })
@@ -126,18 +131,35 @@ export function dropRepoHooks(deps: Pick<Deps, "db" | "jobs">, serviceIds: reado
     if (row.remoteId && row.credentialId)
       deps.jobs.enqueue(
         removeRepoHookJobType,
-        { credentialId: row.credentialId, repo: row.repo, remoteId: row.remoteId },
+        { credentialId: row.credentialId, repo: row.repo, remoteId: row.remoteId, login: row.createdLogin },
         { dedupeKey: `${removeRepoHookJobType}:${row.repo}:${row.remoteId}` },
       );
     deps.db.delete(githubRepoWebhooks).where(eq(githubRepoWebhooks.id, row.id)).run();
   }
 }
 
+/** Why a webhook stays on GitHub, or null when the account's token may remove it (the login that created it). */
+function cannotRemove(row: Pick<RepoHookRow, "createdLogin" | "repo">, account: GitCredentialRow): string | null {
+  if (!row.createdLogin || sameLogin(row.createdLogin, accountLogin(account))) return null;
+  return `@${row.createdLogin} created it and the connected account is now @${accountLogin(account)}`;
+}
+
+/** The webhook could not be removed from GitHub: it keeps posting there until someone removes it by hand. */
+function warnLeftOnGithub(deps: Pick<Deps, "logger">, row: Pick<RepoHookRow, "repo" | "remoteId">, reason: string): void {
+  deps.logger.warn(
+    { repo: row.repo, hookId: row.remoteId, reason },
+    "a GitHub repository webhook could not be removed; remove it under the repository's Settings > Webhooks on GitHub",
+  );
+}
+
 /**
- * Removes every webhook the account created, now: its token is about to be
- * deleted, so a job could not do it later. Best effort, a few seconds at most.
+ * Removes the account's webhooks from GitHub with its token, now (a few
+ * seconds at most): only the login that created a hook may remove it, and
+ * GitHub answers another login's token 404 for a repository it does not
+ * administer, so a 404 counts as gone only for the creating login. Every
+ * hook that stays is logged with why.
  */
-export async function removeAccountHooks(deps: Pick<Deps, "db" | "secrets" | "logger">, account: GitCredentialRow): Promise<void> {
+async function removeFromGithub(deps: Pick<Deps, "db" | "secrets" | "logger">, account: GitCredentialRow): Promise<RepoHookRow[]> {
   const rows = deps.db.select().from(githubRepoWebhooks).where(eq(githubRepoWebhooks.credentialId, account.id)).all();
   let token: string | null = null;
   try {
@@ -145,11 +167,29 @@ export async function removeAccountHooks(deps: Pick<Deps, "db" | "secrets" | "lo
   } catch {
     token = null;
   }
-  await Promise.allSettled(
+  await Promise.all(
     rows
-      .filter((row) => row.remoteId && token)
-      .map((row) => githubRequest(`/repos/${row.repo}/hooks/${row.remoteId}`, { method: "DELETE", auth: token })),
+      .filter((row) => row.remoteId)
+      .map(async (row) => {
+        const refused = cannotRemove(row, account) ?? (token ? null : "the account's token cannot be opened");
+        if (refused) return warnLeftOnGithub(deps, row, refused);
+        try {
+          await githubRequest(`/repos/${row.repo}/hooks/${row.remoteId}`, { method: "DELETE", auth: token });
+        } catch (error) {
+          if (error instanceof GithubApiError && error.status === 404) return;
+          warnLeftOnGithub(deps, row, describeGithubError(error));
+        }
+      }),
   );
+  return rows;
+}
+
+/**
+ * Removes every webhook the account created, now: its token is about to be
+ * deleted, so a job could not do it later.
+ */
+export async function removeAccountHooks(deps: Pick<Deps, "db" | "secrets" | "logger">, account: GitCredentialRow): Promise<void> {
+  const rows = await removeFromGithub(deps, account);
   if (rows.length > 0)
     deps.db
       .delete(githubRepoWebhooks)
@@ -162,14 +202,52 @@ export async function removeAccountHooks(deps: Pick<Deps, "db" | "secrets" | "lo
       .run();
 }
 
-/** Removes a webhook from GitHub; retried while GitHub is unreachable. */
-export const removeRepoHookJob = defineJob<{ credentialId: string; repo: string; remoteId: string }>({
+export function loginChangedReason(login: string): string {
+  return `The connected GitHub account is now @${login}: the webhook is created again with its token within the hour. Pushes are picked up by polling the branch meanwhile.`;
+}
+
+/**
+ * The connected account is about to hold another GitHub login's token: its
+ * webhooks are removed with the old token while it is still there (the new
+ * one could not remove them), and their rows wait for repairRepoHooks to
+ * create them again with the new token. Services keep polling meanwhile.
+ */
+export async function releaseAccountHooks(
+  deps: Pick<Deps, "db" | "secrets" | "logger">,
+  account: GitCredentialRow,
+  nextLogin: string,
+): Promise<void> {
+  const rows = await removeFromGithub(deps, account);
+  if (rows.length === 0) return;
+  deps.db
+    .update(githubRepoWebhooks)
+    .set({ remoteId: null, url: null, createdLogin: null, error: loginChangedReason(nextLogin) })
+    .where(
+      inArray(
+        githubRepoWebhooks.id,
+        rows.map((r) => r.id),
+      ),
+    )
+    .run();
+}
+
+/**
+ * Removes a webhook from GitHub; retried while GitHub is unreachable. Only
+ * with the token of the login that created it: another login's token gets
+ * 404 for a repository it does not administer, which says nothing.
+ */
+export const removeRepoHookJob = defineJob<{ credentialId: string; repo: string; remoteId: string; login?: string | null }>({
   type: removeRepoHookJobType,
   maxAttempts: 6,
   async run(payload, deps) {
     const account = deps.db.select().from(gitCredentials).where(eq(gitCredentials.id, payload.credentialId)).get();
     if (!account) {
-      deps.logger.warn({ repo: payload.repo }, "a GitHub repository webhook could not be removed: its account was disconnected");
+      warnLeftOnGithub(deps, payload, "its account was disconnected");
+      return;
+    }
+    const refused = cannotRemove({ createdLogin: payload.login ?? null, repo: payload.repo }, account);
+    if (refused) {
+      warnLeftOnGithub(deps, payload, refused);
       return;
     }
     try {
@@ -178,7 +256,7 @@ export const removeRepoHookJob = defineJob<{ credentialId: string; repo: string;
         auth: accountToken(deps.secrets, account),
       });
     } catch (error) {
-      // Already gone on GitHub: nothing left to do.
+      // Already gone on GitHub (the token that created it gets 404 only then): nothing left to do.
       if (error instanceof GithubApiError && error.status === 404) return;
       throw error;
     }

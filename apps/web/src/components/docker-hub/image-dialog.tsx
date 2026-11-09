@@ -404,8 +404,7 @@ function ImageFacts({ config, wrongArch }: { config: ImageConfig | undefined; wr
     return (
       <LoadingRegion
         label={t("dockerHub.reading")}
-        className="flex min-w-0 flex-col gap-3 self-start rounded-card px-4 py-3.5 text-[12.5px]"
-        style={{ background: "var(--highlight)" }}
+        className="flex min-w-0 flex-col gap-3 self-start rounded-card px-4 py-3.5 text-[12.5px] bg-highlight"
       >
         <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
           <IconBrandDocker size={16} stroke={1.8} aria-hidden="true" />
@@ -428,10 +427,7 @@ function ImageFacts({ config, wrongArch }: { config: ImageConfig | undefined; wr
   }
   const health = config.healthcheck && config.healthcheck.test[0] !== "NONE" ? config.healthcheck.test.slice(1).join(" ") : null;
   return (
-    <div
-      className="flex min-w-0 flex-col gap-3 self-start rounded-card px-4 py-3.5 text-[12.5px]"
-      style={{ background: "var(--highlight)" }}
-    >
+    <div className="flex min-w-0 flex-col gap-3 self-start rounded-card px-4 py-3.5 text-[12.5px] bg-highlight">
       <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
         <IconBrandDocker size={16} stroke={1.8} aria-hidden="true" />
         {t("dockerHub.image")}

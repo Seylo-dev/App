@@ -9,7 +9,7 @@
 
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { ids } from "./demo/fixtures";
+import { ids, nodes as demoNodes } from "./demo/fixtures";
 import { installDemo, type Preset, presets } from "./demo/routes";
 import { ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
@@ -223,7 +223,7 @@ test.describe("screens", () => {
     }
   });
 
-  test("the service tabs stay one row, fade where they hide tabs and keep the current tab in view", async ({ page }) => {
+  test("the service tabs show every tab from md up (wrapping with a line per row), and swipe on a phone", async ({ page }) => {
     await installDemo(page);
     const bar = page.getByRole("navigation", { name: "Service sections" });
     const measure = () =>
@@ -239,22 +239,39 @@ test.describe("screens", () => {
         };
       });
 
-    // 1440 wide: an app's 17 tabs used to wrap into two rows with the underline under the second only.
-    // Now they stay on one row that scrolls sideways, and the end fades while tabs hide past it.
+    // 1440 wide: an app's 16 tabs fit one row, nothing hidden.
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(service(svc.api));
     await settle(page);
     const desktop = await measure();
     expect(desktop.rows, "the tab bar wraps").toBe(1);
-    expect(desktop.fadeEnd).toBe(desktop.hidden > 0);
-    expect(desktop.fadeStart).toBe(false);
+    expect(desktop.hidden).toBe(0);
+    expect({ start: desktop.fadeStart, end: desktop.fadeEnd }).toEqual({ start: false, end: false });
     mkdirSync(shots, { recursive: true });
     await page.screenshot({ path: `${shots}/service-tabs-desktop.png` });
 
-    // Opening a later tab scrolls the row (not the page) so the current tab shows whole.
-    await page.goto(service(svc.api, "settings"));
-    await settle(page);
-    await expect(bar.getByRole("link", { name: "Settings" })).toBeInViewport({ ratio: 1 });
-    expect(await page.evaluate(() => window.scrollX)).toBe(0);
+    // 1280 and 1024 (a laptop with a mouse, which cannot scroll a sideways row): the tabs wrap, every one
+    // shows, and each row has its own track line, so the current tab's underline sits on a line.
+    for (const width of [1280, 1024]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(service(svc.api, "settings"));
+      await settle(page);
+      const wrapped = await measure();
+      expect(wrapped.rows, `${width}: two rows`).toBe(2);
+      expect(wrapped.hidden, `${width}: nothing hidden`).toBe(0);
+      expect(wrapped.height, `${width}: 40px rows`).toBe(80);
+      expect(wrapped.fadeEnd || wrapped.fadeStart).toBe(false);
+      expect(await bar.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("repeating-linear-gradient");
+      for (const name of ["Notes", "Settings"]) await expect(bar.getByRole("link", { name })).toBeInViewport({ ratio: 1 });
+      // The underline of the current tab (in the second row) lies on that row's line.
+      const currentBottom = await bar.evaluate((el) => {
+        const current = el.querySelector('[aria-current="page"]') as HTMLElement;
+        return current.getBoundingClientRect().bottom - el.getBoundingClientRect().top;
+      });
+      expect(currentBottom).toBe(80);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: `${shots}/service-tabs-${width}.png` });
+    }
 
     // A phone keeps one swipe row: the end fades while tabs hide past it, the start once scrolled.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -301,6 +318,51 @@ test.describe("screens", () => {
     await settle(page, "dialog");
     const views = page.getByRole("radiogroup", { name: "Node views" });
     await expect(views.getByRole("radio", { name: "Settings" })).toBeInViewport({ ratio: 1 });
+  });
+
+  test("the node list never runs past its card: a table that does not fit becomes stacked rows", async ({ page }) => {
+    // The widest cells: a full IPv6 address, Update now and a can-build warning on one row.
+    const wide = {
+      ...demoNodes[2],
+      publicIpv4: null,
+      publicIpv6: "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+      canBuildWarning: "docker buildx is missing",
+      wildcardDomain: "apps-production-eu-central.example.com",
+    };
+    await installDemo(page, { overrides: { "nodes.list": () => ({ nodes: [demoNodes[0], demoNodes[1], wide] }) } });
+    const list = page.getByRole("region", { name: "Node list" });
+    const layout = () =>
+      list.evaluate((el) => {
+        const table = el.querySelector("table");
+        const wideRow = [...el.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Health").at(-1);
+        return {
+          table: table !== null,
+          tableRight: table?.getBoundingClientRect().right ?? 0,
+          healthRight: wideRow?.getBoundingClientRect().right ?? 0,
+          right: el.getBoundingClientRect().right,
+          scrolls: el.scrollWidth > el.clientWidth + 1,
+          page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await page.goto("/nodes");
+    await settle(page);
+    // Resized in place, as a window is: the table turns into stacked rows once it would not fit, and back.
+    for (const width of [1920, 1440, 1366, 1340, 1320, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(300);
+      const at = await layout();
+      if (width === 1920) expect(at.table, "1920: the table").toBe(true);
+      if (width === 1320) expect(at.table, "1320: stacked rows").toBe(false);
+      if (at.table) {
+        expect(at.tableRight, `${width}: the table sticks out of the card`).toBeLessThanOrEqual(at.right + 1);
+        expect(at.scrolls, `${width}: the table scrolls inside the card`).toBe(false);
+      }
+      expect(at.healthRight, `${width}: Health is off the card`).toBeLessThanOrEqual(at.right);
+      expect(at.page, `${width}: the page scrolls sideways`).toBeLessThanOrEqual(0);
+    }
+    mkdirSync(shots, { recursive: true });
+    await page.screenshot({ path: `${shots}/nodes-wide-row.png` });
   });
 
   test("phone width has no sideways scroll", async ({ page }) => {

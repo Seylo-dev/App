@@ -296,10 +296,7 @@ function OwnerStep({
           {device ? (
             <DeviceCodeCard code={device} waiting />
           ) : (
-            <div
-              className="flex items-center justify-center rounded-card px-4 py-7 text-[13px] text-muted-foreground"
-              style={{ background: "var(--highlight)" }}
-            >
+            <div className="flex items-center justify-center rounded-card px-4 py-7 text-[13px] text-muted-foreground bg-highlight">
               {t("setup.githubIdle")}
             </div>
           )}

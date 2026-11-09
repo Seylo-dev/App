@@ -241,7 +241,7 @@ function EnvironmentEditor({ service, initial }: { service: ServiceDetail; initi
                     key={fix.title}
                     type="button"
                     onClick={() => runFix(p.diagnostic, i)}
-                    className="cursor-pointer rounded-chip border-0 bg-card px-1.5 py-0.5 text-[11.5px] font-medium text-link shadow-control"
+                    className="cursor-pointer rounded-chip border-0 bg-button px-1.5 py-0.5 text-[11.5px] font-medium text-link shadow-button transition-interactive hover:bg-button-hover"
                   >
                     {fixTitle(fix, service.name)}
                   </button>

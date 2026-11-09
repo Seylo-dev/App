@@ -19,3 +19,16 @@ test("noWrap keeps lines whole and scrolls sideways", () => {
   expect(classes).toContain("whitespace-pre");
   expect(classes).not.toContain("whitespace-pre-wrap");
 });
+
+test("without a title, Copy sits outside the scrolling code, so it stays in view in a long block", () => {
+  const html = renderToStaticMarkup(<CodeBlock code={"line\n".repeat(40)} maxHeight={260} />);
+  const [inside = "", after = ""] = html.split("</pre>");
+  // In the code only a hidden gap the first lines flow around, never a button.
+  expect(inside).not.toContain("<button");
+  expect(inside).toContain('aria-hidden="true"');
+  expect(after).toContain("<button");
+  expect(after).toContain("absolute");
+  // With a title it stays in the title bar.
+  const titled = renderToStaticMarkup(<CodeBlock code="x" title="bash" />);
+  expect(titled.split("<pre")[0]).toContain("<button");
+});

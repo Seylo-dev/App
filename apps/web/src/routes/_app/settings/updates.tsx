@@ -192,9 +192,13 @@ function StatusSections({ data }: { data: Status }) {
               id: "name",
               header: t("settings.updates.node"),
               cell: (row) => (
-                <span className="flex items-center gap-2">
-                  <StatusDot status={row.online ? "ok" : "off"} />
-                  <span className="font-medium whitespace-nowrap">{row.name}</span>
+                <span className="flex flex-col">
+                  <span className="flex items-center gap-2">
+                    <StatusDot status={row.online ? "ok" : "off"} />
+                    <span className="font-medium whitespace-nowrap">{row.name}</span>
+                  </span>
+                  {/* On a phone the Version column is hidden: the version as a line here. */}
+                  <span className="pl-4 font-mono text-xs text-muted-foreground md:hidden">{row.version ?? "-"}</span>
                 </span>
               ),
               sortValue: (row) => row.name,
@@ -296,13 +300,33 @@ function stepDetail(step: Step): string {
 
 const runTones = { running: "blue", succeeded: "green", failed: "red", cancelled: "gray" } as const;
 
+/** What a run's step updates: the panel or a node. */
+function stepName(step: Run["steps"][number]): string {
+  return step.target === "panel" ? t("settings.updates.panel") : (step.nodeName ?? step.target);
+}
+
 function History() {
   const [before, setBefore] = useState<string[]>([]);
   const cursor = before.at(-1);
   const query = useOp(updates.history, cursor ? { limit: 20, before: cursor } : { limit: 20 });
   const columns: DataTableColumn<Run>[] = [
     // Placeholder widths: what the columns get with typical runs; the steps column takes the rest.
-    { id: "when", header: t("settings.updates.when"), skeletonWidth: "28%", cell: (run) => formatDateTime(run.createdAt) },
+    {
+      id: "when",
+      header: t("settings.updates.when"),
+      skeletonWidth: "28%",
+      cell: (run) => (
+        <span className="flex flex-col">
+          {formatDateTime(run.createdAt)}
+          {/* On a phone Trigger and Steps are hidden: the same facts as one line here. */}
+          <span className="text-xs text-muted-foreground [overflow-wrap:anywhere] md:hidden">
+            {[t(`settings.updates.triggers.${run.trigger}`), run.steps.map(stepName).join(", ")]
+              .filter(Boolean)
+              .join(t("format.separator"))}
+          </span>
+        </span>
+      ),
+    },
     {
       id: "version",
       header: t("settings.updates.version"),
@@ -324,7 +348,7 @@ function History() {
           {run.steps.map((step) => (
             <Tip key={step.id} content={stepDetail(step)}>
               <Chip tone={stepTone(step)} tabIndex={0} aria-label={`${step.nodeName ?? t("settings.updates.panel")}: ${stepDetail(step)}`}>
-                {step.target === "panel" ? t("settings.updates.panel") : (step.nodeName ?? step.target)}
+                {stepName(step)}
               </Chip>
             </Tip>
           ))}

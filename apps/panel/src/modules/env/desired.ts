@@ -40,16 +40,19 @@ export function sealDeploymentEnv(deps: Pick<Deps, "db" | "secrets">, serviceId:
  * project's shared variables): Railpack and Nixpacks start commands and
  * most frameworks listen on $PORT, so the app listens where domains and
  * health checks look. Part of the env a deploy starts with, so it takes
- * effect on the next deploy, never as a restart of a running app.
+ * effect on the next deploy, never as a restart of a running app. Only for
+ * services created from 0.2.2 on (spec.portEnv): an app deployed before
+ * may run an image whose own ENV PORT points elsewhere (a proxy in front of
+ * the server), so its env stays as it was.
  */
 export function withPortEnv(
   env: EnvVar[],
   service: { kind: string; parentId: string | null },
-  spec: Pick<ServiceSpecJson, "source" | "ports">,
+  spec: Pick<ServiceSpecJson, "source" | "ports" | "portEnv">,
 ): EnvVar[] {
   const port = spec.ports[0]?.containerPort;
   const fromRepo = spec.source.type === "github" || spec.source.type === "provider" || spec.source.type === "git";
-  if (service.kind !== "app" || service.parentId !== null || !fromRepo || !port) return env;
+  if (!spec.portEnv || service.kind !== "app" || service.parentId !== null || !fromRepo || !port) return env;
   if (env.some((v) => v.name === "PORT")) return env;
   return [...env, { name: "PORT", value: String(port), secret: false }];
 }

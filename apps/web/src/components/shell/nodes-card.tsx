@@ -42,8 +42,7 @@ export function NodesCard({
       to="/nodes"
       aria-label={t("sidebar.nodesCard")}
       aria-busy={loading || status.isPending || undefined}
-      className="flex flex-col gap-[7px] rounded-card p-3.5 text-foreground hover:text-foreground"
-      style={{ background: "var(--highlight)" }}
+      className="flex flex-col gap-[7px] rounded-card p-3.5 text-foreground hover:text-foreground bg-highlight"
     >
       {loading ? (
         <LineSkeleton className="w-32 text-[13.5px]" />

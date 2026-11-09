@@ -193,7 +193,7 @@ function Preview({
   preview: ReturnType<typeof useOpMutation<typeof templates.preview>>;
 }) {
   return (
-    <div className="flex flex-col gap-[9px] rounded-card px-4 py-3.5" style={{ background: "var(--highlight)" }}>
+    <div className="flex flex-col gap-[9px] rounded-card px-4 py-3.5 bg-highlight">
       <b className="font-semibold text-foreground">{t("newService.thisCreates")}</b>
       {preview.isError && <QueryError error={preview.error} />}
       {!preview.data && !preview.isError && (

@@ -51,6 +51,9 @@
   --secondary-hover: #f6f8fb;
   --secondary-on-card: #f1f3f7;
   --secondary-on-card-hover: #e9edf3;
+  /* On gray strips, fields, tracks, callouts and the highlight panel: the white button with its shadow in light presets. */
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
   --secondary-foreground: #0f172a;
   /* The raised pill of a segmented track. */
   --pill: #ffffff;
@@ -181,6 +184,9 @@
   --secondary-hover: #242d4c;
   --secondary-on-card: #1f2846;
   --secondary-on-card-hover: #283253;
+  /* --secondary is the strips' own fill here, so a button on them is a step lighter. */
+  --secondary-on-raised: #2c3759;
+  --secondary-on-raised-hover: #343f63;
   --secondary-foreground: #d6dce8;
   --pill: #2a3454;
   --button-dark: #2c3657;
@@ -282,6 +288,9 @@
   --secondary-hover: #2a2a33;
   --secondary-on-card: #24242c;
   --secondary-on-card-hover: #2d2d37;
+  /* --secondary is the strips' own fill here, so a button on them is a step lighter. */
+  --secondary-on-raised: #30303b;
+  --secondary-on-raised-hover: #383844;
   --secondary-foreground: #ececf1;
   --pill: #32323d;
   --button-dark: #34343f;

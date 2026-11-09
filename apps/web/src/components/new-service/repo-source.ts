@@ -10,6 +10,10 @@
 // that connection reads it by its exact name (github.branches /
 // gitProviders.branches, the same check connectRepo makes): the account
 // alone says nothing about which repositories an installation may read.
+// The connected GitHub account reads any public repository, so the panel
+// counts only its own (private, pushed to, administered or in its list;
+// others are NOT_FOUND, reason notOwned): someone else's public repository
+// becomes a plain git URL, never a source that follows their pushes.
 // Only a clear answer decides: NOT_FOUND (it cannot read it) and FORBIDDEN
 // (the connection is not usable here); any other failure leaves the field
 // unchecked, so a private repository never quietly becomes a public URL.

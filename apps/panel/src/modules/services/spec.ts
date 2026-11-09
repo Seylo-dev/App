@@ -83,6 +83,12 @@ export const ServiceSpecJson = Type.Object({
   preview: Type.Union([Type.Object({ ofServiceId: Type.String(), prNumber: Type.Integer() }), Type.Null()]),
   /** Glob patterns a push must touch to deploy (@seylo/ops watch-paths); empty = every push deploys. */
   watchPaths: services.WatchPaths,
+  /**
+   * Whether a repository build gets PORT=<first port> (env/desired.ts
+   * withPortEnv). Services created from 0.2.2 on store true (insertService);
+   * older rows read false, so a panel update never changes their env.
+   */
+  portEnv: Type.Boolean(),
 });
 export type ServiceSpecJson = Static<typeof ServiceSpecJson>;
 
@@ -146,6 +152,7 @@ export function defaultSpec(): ServiceSpecJson {
     stack: null,
     preview: null,
     watchPaths: [],
+    portEnv: false,
   };
 }
 

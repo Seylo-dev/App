@@ -1,0 +1,1 @@
+ALTER TABLE `github_repo_webhooks` ADD `created_login` text;

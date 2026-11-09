@@ -5,7 +5,8 @@
 // connected (no "Connect GitHub first", the account's repositories,
 // connecting with accountId), and the New app Port field (80 filled in,
 // the Docker Hub image's exposed port, an edit that sticks, PORT for
-// built apps). The ops are answered by the demo and recorded.
+// built apps, no port for Set up later). The ops are answered by the demo
+// and recorded.
 
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
@@ -218,4 +219,20 @@ test("a built app's Port says it becomes PORT, and 80 is what gets created", asy
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/p/${svc.project}/s/${svc.api}$`));
   expect(calls("services.create")[0]).toMatchObject({ ports: [{ containerPort: 80, protocol: "tcp" }] });
+});
+
+test("Set up later shows no Port and sends none, so the empty app opens no first-run port", async ({ page }) => {
+  const calls = watchOps(page);
+  await installDemo(page);
+  const dialog = await openNewApp(page);
+  // A port typed for another source is not sent either.
+  await dialog.locator("#ns-port").fill("8080");
+  await dialog.getByRole("radio", { name: "Set up later", exact: true }).click();
+  await expect(dialog.locator("#ns-port")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/p/${svc.project}/s/${svc.api}$`));
+  const create = calls("services.create")[0];
+  expect(create).toMatchObject({ kind: "app", deployNow: false });
+  expect(create?.ports).toBeUndefined();
+  expect(create?.source).toBeUndefined();
 });

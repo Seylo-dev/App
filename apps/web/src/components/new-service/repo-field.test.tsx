@@ -193,7 +193,7 @@ test("the line under the field says what the repository becomes", async () => {
   expect(missed).toContain(escaped("Not in your GitHub App (acme) - cloned as public. Private? Give the App access first."));
   expect(missed).not.toContain("Public GitHub repository");
   expect(await note("x", { type: "git", repo: githubRef, missedIn: lee })).toContain(
-    "The connected GitHub account (@lee) cannot read it - cloned as public.",
+    "Not a repository of the connected GitHub account (@lee) - cloned as public.",
   );
   expect(
     await note(
@@ -314,7 +314,7 @@ test("a repository no installation reads is asked of the connected account, and 
     lists(account)(client);
     failedQuery(client, accountBranchesKey("lee/secret"), new OpError("NOT_FOUND", "It cannot read lee/secret.", { field: "repo" }));
   });
-  expect(neither).toContain("The connected GitHub account (@lee) cannot read it - cloned as public.");
+  expect(neither).toContain("Not a repository of the connected GitHub account (@lee) - cloned as public.");
 });
 
 test("a lookup or a list that failed leaves the field unchecked with Try again, never a public URL", async () => {

@@ -38,8 +38,7 @@ export function UpdatesBanner() {
     // Narrow, the right side wraps under the left one, from the left edge.
     <section
       aria-label={t("nodes.updates.title")}
-      className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card px-[18px] py-4"
-      style={{ background: "var(--highlight)" }}
+      className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card px-[18px] py-4 bg-highlight"
     >
       <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-1">
         <label htmlFor="auto-update" className="flex cursor-pointer items-center gap-2.5 text-[13.5px] font-semibold">

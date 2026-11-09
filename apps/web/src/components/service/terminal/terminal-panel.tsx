@@ -12,7 +12,7 @@ import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { downloadText } from "../deploy-log";
 import { isNotBuilt } from "../op-state";
-import type { TicketSource } from "./use-terminal-session";
+import type { SessionState, TicketSource } from "./use-terminal-session";
 import { useTerminalSession } from "./use-terminal-session";
 import { type XtermHandle, XtermView } from "./xterm-view";
 
@@ -37,6 +37,9 @@ export function TerminalPanel({
   sessionKey = "",
   prefill,
   onPrefilled,
+  onStdin,
+  pendingLine,
+  onPendingSent,
 }: {
   label: string;
   /** The Console | Shell switch, or a title. */
@@ -69,6 +72,11 @@ export function TerminalPanel({
   /** Typed once the shell says it is ready, without Enter: the person reads it and runs it (node-shell.tsx). */
   prefill?: string;
   onPrefilled?: () => void;
+  /** Takes a stdin line instead of the session (a watched console, which sends nothing): it opens the session that does. */
+  onStdin?: (line: string) => void;
+  /** A stdin line sent once the session is ready, with Enter, as if typed (the line that opened it). */
+  pendingLine?: string;
+  onPendingSent?: () => void;
 }) {
   const session = useTerminalSession(source, describe);
   const view = useRef<XtermHandle | null>(null);
@@ -108,6 +116,22 @@ export function TerminalPanel({
     input(prefill.replace(/[\r\n]/g, ""));
     onPrefilled?.();
   }, [prefill, shellReady, input, onPrefilled]);
+  // The pending line waits for a session that became ready after it was set:
+  // in the render that sets it, the session it replaces may still look ready.
+  const pendingFrom = useRef<{ line: string; state: SessionState } | null>(null);
+  const sessionState = session.state;
+  useEffect(() => {
+    if (pendingLine === undefined) {
+      pendingFrom.current = null;
+      return;
+    }
+    if (pendingFrom.current?.line !== pendingLine) pendingFrom.current = { line: pendingLine, state: sessionState };
+    if (!shellReady || sessionState === pendingFrom.current.state) return;
+    pendingFrom.current = null;
+    input(`${pendingLine}\n`);
+    view.current?.write(`\x1b[33m> ${pendingLine}\x1b[0m\r\n`);
+    onPendingSent?.();
+  }, [pendingLine, shellReady, sessionState, input, onPendingSent]);
 
   // Connect once the terminal exists (its size goes into the ticket request),
   // and again for each new terminal of a new session; with `start`, only
@@ -123,8 +147,11 @@ export function TerminalPanel({
   const send = (e: FormEvent) => {
     e.preventDefault();
     if (!line) return;
-    session.input(`${line}\n`);
-    view.current?.write(`\x1b[33m> ${line}\x1b[0m\r\n`);
+    if (onStdin) onStdin(line);
+    else {
+      session.input(`${line}\n`);
+      view.current?.write(`\x1b[33m> ${line}\x1b[0m\r\n`);
+    }
     setLine("");
   };
 

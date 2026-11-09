@@ -3,10 +3,11 @@
 // the can-build and games-first switches; Health and Settings. The live
 // topic "panel" refreshes it when a node changes or reports usage.
 //
-// The table needs about 1000px. In a narrower list (a phone, a tablet, a
-// small laptop next to the sidebar) each node is a stacked row instead:
-// the same facts and controls one under the other, with their column
-// names as small labels, so nothing is cut off or scrolled out of view.
+// The table needs about 1000px, more for a long address or Update now with
+// a warning. In a narrower list (a phone, a tablet, a small laptop next to
+// the sidebar) each node is a stacked row instead: the same facts and
+// controls one under the other, with their column names as small labels,
+// so nothing is cut off or scrolled out of view.
 
 import { nodes, system, updates } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -19,7 +20,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { Tip } from "@seylo/ui/components/tooltip";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconHeart, IconServer2 } from "@tabler/icons-react";
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { formatPercent, formatUsedOfTotal } from "../../lib/format";
@@ -35,29 +36,52 @@ const statusRing: Record<NodeRow["status"], { ring: string; dot: string }> = {
 
 const healthTone = { pass: "text-status-ok", warn: "text-status-busy", fail: "text-status-error", skipped: "text-ink-faint" } as const;
 
-/** The list's width from which the table fits without squeezing its columns. */
+/** The list's width from which the table can fit without squeezing its columns. */
 const tableWidth = 1000;
 
+type RefCallback<T> = (el: T | null) => (() => void) | undefined;
+
 /**
- * Whether the element is at least `min` px wide, kept in step as it
- * resizes. The ref callback measures before the first paint, so the list
- * never flashes the other layout.
+ * Whether the table fits the list: the list is at least `min` px wide and
+ * the table, once drawn, is no wider than the list (its cells keep long
+ * addresses and Update now with a warning on one line). A table that does
+ * not fit records the width it needs, so the list stays stacked until it
+ * is that wide. Both ref callbacks measure before the first paint, so the
+ * list never flashes the other layout, and again as either resizes.
  */
-function useAtLeast(min: number): [(el: HTMLElement | null) => (() => void) | undefined, boolean] {
-  const [wide, setWide] = useState(true);
-  const ref = useCallback(
-    (el: HTMLElement | null) => {
-      if (!el) return undefined;
-      const update = () => setWide(el.clientWidth >= min);
-      update();
-      if (typeof ResizeObserver === "undefined") return undefined;
-      const observer = new ResizeObserver(update);
-      observer.observe(el);
-      return () => observer.disconnect();
-    },
-    [min],
+function useTableFits(min: number): [RefCallback<HTMLElement>, RefCallback<HTMLTableElement>, boolean] {
+  const section = useRef<HTMLElement | null>(null);
+  const table = useRef<HTMLTableElement | null>(null);
+  const [size, setSize] = useState({ width: Number.POSITIVE_INFINITY, need: min });
+  const check = useCallback(() => {
+    const el = section.current;
+    if (!el) return;
+    const width = el.clientWidth;
+    const drawn = table.current?.offsetWidth ?? 0;
+    setSize((s) => {
+      const need = drawn > width + 1 ? Math.max(s.need, Math.ceil(drawn)) : s.need;
+      return s.width === width && s.need === need ? s : { width, need };
+    });
+  }, []);
+  const observe = useCallback(
+    <T extends HTMLElement>(holder: { current: T | null }) =>
+      (el: T | null) => {
+        holder.current = el;
+        if (!el) return undefined;
+        check();
+        if (typeof ResizeObserver === "undefined") return undefined;
+        const observer = new ResizeObserver(check);
+        observer.observe(el);
+        return () => {
+          observer.disconnect();
+          if (holder.current === el) holder.current = null;
+        };
+      },
+    [check],
   );
-  return [ref, wide];
+  const sectionRef = useMemo(() => observe(section), [observe]);
+  const tableRef = useMemo(() => observe(table), [observe]);
+  return [sectionRef, tableRef, size.width >= size.need];
 }
 
 interface RowProps {
@@ -79,7 +103,7 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
     onSuccess: () => toast.info(t("nodes.updateStarted")),
     onError: failed,
   });
-  const [measure, wide] = useAtLeast(tableWidth);
+  const [measure, measureTable, wide] = useTableFits(tableWidth);
 
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
 
@@ -96,9 +120,15 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
   );
 
   return (
-    <section ref={measure} aria-label={t("nodes.list")} aria-busy={list.isPending} className="relative rounded-card bg-card shadow-card">
+    <section
+      ref={measure}
+      aria-label={t("nodes.list")}
+      aria-busy={list.isPending}
+      // The table never runs past the card: it turns into stacked rows when it does not fit, and scrolls inside meanwhile.
+      className={cn("relative rounded-card bg-card shadow-card", wide && "overflow-x-auto")}
+    >
       {wide ? (
-        <table className="w-full border-collapse text-[13px]">
+        <table ref={measureTable} className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <Th first>{t("nodes.columns.node")}</Th>

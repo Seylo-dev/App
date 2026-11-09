@@ -75,6 +75,20 @@ export const openConsole = defineOp({
   audit: true,
 });
 
+export const watchConsole = defineOp({
+  id: "terminals.watchConsole",
+  kind: "query",
+  summary: "Watch the console of a service",
+  description:
+    "Returns a one-minute ticket for a WebSocket with the console's output only, like terminals.console without stdin: recent output first, then live output; what is sent on it is dropped. Like reading logs it is not written to the audit log; the Overview's console card watches and opens terminals.console once someone types.",
+  input: Type.Object({ ...serviceInput, tail: Type.Optional(Type.Integer({ minimum: 0, maximum: 5000, default: 100 })) }),
+  output: TerminalTicket,
+  permission: permission.service("terminals.console", (input: { serviceId: string }) => input.serviceId),
+  sensitive: { output: ["url", "ticket"] },
+  mcp: false,
+  audit: false,
+});
+
 export const openShell = defineOp({
   id: "terminals.shell",
   kind: "mutation",

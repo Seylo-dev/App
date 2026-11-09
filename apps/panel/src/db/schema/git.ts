@@ -189,6 +189,12 @@ export const githubRepoWebhooks = sqliteTable(
       .references(() => services.id, { onDelete: "cascade" }),
     /** The account (git_credentials row) whose token created it; null once that account is gone. */
     credentialId: text("credential_id").references(() => gitCredentials.id, { onDelete: "set null" }),
+    /**
+     * The GitHub login whose token created it: only that login's token may
+     * remove it (a token of another login gets 404 for a repository it does
+     * not administer). Null on rows from before it was kept.
+     */
+    createdLogin: text("created_login"),
     /** "owner/name". */
     repo: text("repo").notNull(),
     secretSealed: sealed("secret_sealed").notNull(),

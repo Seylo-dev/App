@@ -45,6 +45,8 @@ export interface TerminalTicket {
   sessionId?: string;
   /** Closes the session after this long without input or output; default idleTimeoutSeconds. */
   idleSeconds?: number;
+  /** Console output only (terminals.watchConsole): what the viewer sends is dropped. */
+  watch?: boolean;
 }
 
 /** The running replica to attach to: the one asked for, else the first running one the node reports. */
@@ -110,6 +112,11 @@ function issue(
 }
 
 const openConsole = implement(terminals.openConsole, (input, ctx) => issue(ctx, "console", input, { tail: input.tail ?? 100 }));
+
+// Output only, so nothing reaches the process: not audited, like reading its logs.
+const watchConsole = implement(terminals.watchConsole, (input, ctx) =>
+  issue(ctx, "console", input, { tail: input.tail ?? 100, watch: true }),
+);
 
 const openShell = implement(terminals.openShell, (input, ctx) =>
   issue(ctx, "shell", input, {
@@ -268,7 +275,7 @@ export function startTerminal(
 
   return {
     input(bytes) {
-      if (ended) return;
+      if (ended || ticket.watch) return;
       touch();
       const message =
         ticket.mode === "console"
@@ -342,4 +349,4 @@ function terminalHttp(deps: Deps) {
   });
 }
 
-export default defineModule({ name: "terminals", ops: [openConsole, openShell], http: terminalHttp });
+export default defineModule({ name: "terminals", ops: [openConsole, watchConsole, openShell], http: terminalHttp });

@@ -20,12 +20,14 @@ import { readSpec } from "../services/spec";
 import { readPanelName } from "../settings/keys";
 import {
   accountById,
+  accountLogin,
   accountRepos,
   accountToken,
   checkGithubToken,
   connectedAccount,
   forgetAccountRepos,
   type GithubRepo,
+  sameLogin,
   saveAccount,
   toAccount,
 } from "./account";
@@ -43,7 +45,7 @@ import {
   tokenForInstallation,
   webhookUrl,
 } from "./app";
-import { ensureRepoHook, removeAccountHooks, repoHookOf } from "./repo-hooks";
+import { ensureRepoHook, releaseAccountHooks, removeAccountHooks, repoHookOf } from "./repo-hooks";
 
 type GithubApp = Static<typeof githubOps.GithubApp>;
 type Installation = Static<typeof githubOps.Installation>;
@@ -301,6 +303,8 @@ const repos = implement(githubOps.repos, async (input, ctx) => {
   try {
     all = await reposVia(ctx, via);
   } catch (error) {
+    if (error instanceof GithubApiError && error.rateLimited)
+      throw new OpError("UNAVAILABLE", "GitHub is rate limiting this connection. Try again in a few minutes.", { reason: "rateLimited" });
     if (error instanceof GithubApiError && via.accountId !== null)
       throw new OpError(
         error.status === 401 ? "CONFLICT" : "UNAVAILABLE",
@@ -344,33 +348,95 @@ async function tokenVia(ctx: Pick<OpContext, "db" | "secrets">, via: GithubVia):
   };
 }
 
+/** GitHub's rate limit (rateLimitedAnswer): it clears by itself, so it is UNAVAILABLE and says nothing about the repository. */
+function rateLimited(who: string): OpError {
+  return new OpError("UNAVAILABLE", `GitHub is rate limiting ${who.replace(/^The /, "the ")}. Try again in a few minutes.`, {
+    field: "repo",
+    reason: "rateLimited",
+  });
+}
+
+/**
+ * The answer to a failed read of a repository: NOT_FOUND (field repo) when
+ * GitHub says it cannot read it (404; 403 for the account: a fine-grained
+ * token without access to it, or an organization that has not approved the
+ * panel), UNAVAILABLE when GitHub rate limits the token, did not answer or
+ * failed. Only NOT_FOUND says something about the repository.
+ */
+function repoReadError(error: unknown, via: GithubVia, who: string, notFound: () => OpError): OpError {
+  if (error instanceof OpError) return error;
+  if (!(error instanceof GithubApiError))
+    return new OpError("UNAVAILABLE", "GitHub did not answer. Try again in a moment.", { field: "repo" });
+  if (error.rateLimited) return rateLimited(who);
+  if (error.status === 404 || (error.status === 403 && via.accountId !== null)) return notFound();
+  return new OpError("UNAVAILABLE", error.message, { field: "repo" });
+}
+
+interface RepoInfoAnswer {
+  default_branch: string;
+  full_name?: string;
+  private?: boolean;
+  permissions?: { admin?: boolean; maintain?: boolean; push?: boolean };
+}
+
+/**
+ * Whether the connected account reaches the repository as its own: private
+ * (GitHub shows it only to people with access), one it may push to or
+ * administer, or one of its list (GET /user/repos: its own, ones it
+ * collaborates on, its organizations'). GitHub answers any token for any
+ * public repository, so a public one of someone else would otherwise
+ * become a GitHub source that follows that person's pushes through the
+ * account; a plain git URL fits it (the New app dialog makes one).
+ */
+async function accountOwns(ctx: Pick<OpContext, "db" | "secrets">, via: GithubVia, repo: string, info: RepoInfoAnswer): Promise<boolean> {
+  if (via.accountId === null) return true;
+  if (info.private !== false) return true;
+  const permissions = info.permissions ?? {};
+  if (permissions.admin || permissions.maintain || permissions.push) return true;
+  const name = (info.full_name ?? repo).toLowerCase();
+  const listed = await accountRepos(ctx, accountById(ctx.db, via.accountId));
+  return listed.some((r) => r.full_name.toLowerCase() === name || r.full_name.toLowerCase() === repo.toLowerCase());
+}
+
+function notOwnedError(who: string, repo: string): OpError {
+  return new OpError(
+    "NOT_FOUND",
+    `${repo} is public and not a repository of ${who.replace(/^The /, "the ")}. Use its git URL instead: a public repository needs no account.`,
+    { field: "repo", reason: "notOwned" },
+  );
+}
+
 /**
  * Branches of a repo through the App or the connected account, default
  * branch first. GitHub answers 404 for a repository it cannot read (or that
  * does not exist): NOT_FOUND with field repo, so the New app dialog can tell
- * it from GitHub not answering (UNAVAILABLE), which says nothing about the
- * repository.
+ * it from GitHub not answering or rate limiting (UNAVAILABLE), which says
+ * nothing about the repository. Through the account, a public repository
+ * that is not the account's (accountOwns) is NOT_FOUND too, reason notOwned.
  */
 export async function repoBranches(ctx: Pick<OpContext, "db" | "secrets">, viaOrInstallation: GithubVia | string, repo: string) {
   const via: GithubVia = typeof viaOrInstallation === "string" ? { installationId: viaOrInstallation, accountId: null } : viaOrInstallation;
   const { token, who, fix } = await tokenVia(ctx, via);
+  let info: RepoInfoAnswer;
+  let names: string[];
   try {
-    const [info, names] = await Promise.all([
-      githubRequest<{ default_branch: string }>(`/repos/${repo}`, { auth: token }),
+    const [answer, list] = await Promise.all([
+      githubRequest<RepoInfoAnswer>(`/repos/${repo}`, { auth: token }),
       githubPages<string>(`/repos/${repo}/branches`, token, (page) => (page as { name: string }[]).map((b) => b.name), 10),
     ]);
-    const defaultBranch = info.data.default_branch;
-    return { defaultBranch, branches: [defaultBranch, ...names.filter((b) => b !== defaultBranch).sort()] };
+    info = answer.data;
+    names = list;
+    if (!(await accountOwns(ctx, via, repo, info))) throw notOwnedError(who, repo);
   } catch (error) {
-    if (!(error instanceof GithubApiError)) throw error;
-    // 403 too: a fine-grained token without access to this repository, or an organization that has not approved the panel.
-    if (error.status === 404 || (error.status === 403 && via.accountId !== null)) {
-      throw new OpError("NOT_FOUND", `${who} cannot read ${repo}, or there is no such repository. ${fix}`, {
-        field: "repo",
-      });
-    }
-    throw new OpError("UNAVAILABLE", error.message, { field: "repo" });
+    throw repoReadError(
+      error,
+      via,
+      who,
+      () => new OpError("NOT_FOUND", `${who} cannot read ${repo}, or there is no such repository. ${fix}`, { field: "repo" }),
+    );
   }
+  const defaultBranch = info.default_branch;
+  return { defaultBranch, branches: [defaultBranch, ...names.filter((b) => b !== defaultBranch).sort()] };
 }
 
 /** The source fields of a GitHub source read through the App or the account. */
@@ -398,11 +464,24 @@ const connectRepo = implement(githubOps.connectRepo, async (input, ctx) => {
   assertSourceAllowed(ctx, row.projectId, { type: "github", ...fields, repo: input.repo }, "");
   const { token, who, fix } = await tokenVia(ctx, via);
   try {
-    await githubRequest(`/repos/${input.repo}/branches/${encodeURIComponent(input.branch)}`, { auth: token });
-  } catch {
-    throw new OpError("BAD_REQUEST", `${who} cannot read ${input.repo} at ${input.branch}. Check the branch. ${fix}`, {
-      field: "repo",
-    });
+    const [info] = await Promise.all([
+      via.accountId !== null ? githubRequest<RepoInfoAnswer>(`/repos/${input.repo}`, { auth: token }) : null,
+      githubRequest(`/repos/${input.repo}/branches/${encodeURIComponent(input.branch)}`, { auth: token }),
+    ]);
+    if (info && !(await accountOwns(ctx, via, input.repo, info.data))) {
+      const refused = notOwnedError(who, input.repo);
+      throw new OpError("BAD_REQUEST", refused.message, refused.details);
+    }
+  } catch (error) {
+    throw repoReadError(
+      error,
+      via,
+      who,
+      () =>
+        new OpError("BAD_REQUEST", `${who} cannot read ${input.repo} at ${input.branch}. Check the branch. ${fix}`, {
+          field: "repo",
+        }),
+    );
   }
   const next = updateSpec(ctx, row.id, (spec) => ({
     ...spec,
@@ -439,10 +518,24 @@ const repoWebhook = implement(githubOps.repoWebhook, (input, ctx) => {
   };
 });
 
+/**
+ * Connects an account, replacing the connected one in place (saveAccount).
+ * When the new token is another GitHub login's, the old login's webhooks
+ * are removed first with its token, while the panel still has it: the new
+ * token could not remove them later, so they would keep sending every push
+ * of those repositories to the panel. They are created again with the new
+ * token (repairRepoHooks).
+ */
+async function storeAccount(ctx: OpContext, input: Parameters<typeof saveAccount>[1]) {
+  const existing = connectedAccount(ctx.db);
+  if (existing && !sameLogin(accountLogin(existing), input.login)) await releaseAccountHooks(ctx, existing, input.login);
+  return saveAccount(ctx, input);
+}
+
 const tokenConnect = implement(githubOps.tokenConnect, async (input, ctx) => {
   const token = input.token.trim();
   const checked = await checkGithubToken(token);
-  const row = saveAccount(ctx, { token, login: checked.login, scopes: checked.scopes, origin: "github_token" });
+  const row = await storeAccount(ctx, { token, login: checked.login, scopes: checked.scopes, origin: "github_token" });
   publishAccount(ctx);
   return toAccount(row);
 });
@@ -533,7 +626,7 @@ const devicePoll = implement(githubOps.devicePoll, async (input, ctx) => {
     .map((s) => s.trim())
     .filter(Boolean);
   // Replaces a pasted token too, in place: services that read through the account keep it.
-  const credential = saveAccount(ctx, { token: data.access_token, login: user.data.login, scopes, origin: "device" });
+  const credential = await storeAccount(ctx, { token: data.access_token, login: user.data.login, scopes, origin: "device" });
   ctx.db.delete(githubDeviceFlows).where(eq(githubDeviceFlows.id, flow.id)).run();
   publishAccount(ctx);
   return { status: "done" as const, login: user.data.login, gitCredentialId: credential.id };

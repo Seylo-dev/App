@@ -122,18 +122,26 @@
  * the control shadow; on a white card, dialog, sheet or menu it takes the
  * quiet on-card fill without a shadow, so it never vanishes into the card.
  * The nearest surface wins, so a gray footer strip or a tinted callout
- * inside a card goes back to the white button.
+ * inside a card goes back to the white button. Dark presets fill their
+ * strips with --secondary itself, so there the strips (and the highlight
+ * panel) take --secondary-on-raised, a step lighter, to keep an edge.
  */
 @layer base {
   :root,
-  .bg-background,
+  .bg-background {
+    --button: var(--secondary);
+    --button-hover: var(--secondary-hover);
+    --button-shadow: var(--shadow-control);
+  }
+
   .bg-raised,
   .bg-muted,
   .bg-field,
   .bg-track,
+  .bg-highlight,
   [data-slot="alert"] {
-    --button: var(--secondary);
-    --button-hover: var(--secondary-hover);
+    --button: var(--secondary-on-raised);
+    --button-hover: var(--secondary-on-raised-hover);
     --button-shadow: var(--shadow-control);
   }
 
@@ -154,6 +162,11 @@
 @theme {
   --default-transition-duration: 200ms;
   --default-transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* The highlight panel's gradient (--highlight): the Nodes update strip, the device code, callouts. */
+@utility bg-highlight {
+  background: var(--highlight);
 }
 
 /* What changes on hover, focus and selection: colors, fills, shadows (rings), opacity and filters (brightness). */

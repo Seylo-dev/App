@@ -258,6 +258,10 @@ function McpClients() {
                 <span className="flex min-w-0 flex-col max-md:max-w-[170px]">
                   <span className="truncate font-medium">{c.name}</span>
                   <span className="truncate font-mono text-xs text-muted-foreground">{c.redirectUris[0] ?? ""}</span>
+                  {/* On a phone the Active tokens column is hidden: the count as a line here. */}
+                  <span className="text-xs text-muted-foreground md:hidden">
+                    {t("settingsKeys.mcp.activeTokensCount", { count: c.activeTokens })}
+                  </span>
                 </span>
               ),
             },

@@ -25,28 +25,39 @@ export interface CodeBlockProps {
 /**
  * Monospace code or config with a copy button. No syntax colors; use Monaco
  * for editing. With a title the copy button sits in the title bar; without
- * one it floats at the top right of the code, so a one-line command is not
- * a half-empty bar over a line of text. Titles are labels in the sans font
- * and wrap, never cut off ("SSH tunnel, then open http://127.0.0.1:3000").
+ * one it sits at the top right of the code, so a one-line command is not
+ * a half-empty bar over a line of text: the first lines flow around a
+ * same-sized gap in the code, and the button itself stays put outside the
+ * scrolling code, so it is still there after scrolling a long block down.
+ * Titles are labels in the sans font and wrap, never cut off ("SSH tunnel,
+ * then open http://127.0.0.1:3000").
  */
 export function CodeBlock({ code, title, tone = "light", noCopy = false, noWrap = false, className, maxHeight }: CodeBlockProps) {
   const labels = useUiLabels();
   const [copied, copy] = useCopy();
   const dark = tone === "dark";
+  const face = (
+    <>
+      {copied ? <IconCheck size={14} stroke={2.2} /> : <IconCopy size={14} />}
+      {copied ? labels.copied : labels.copy}
+    </>
+  );
+  const shape = "flex h-7 shrink-0 items-center gap-1.5 rounded-chip border-0 px-2 font-sans text-[12px] leading-none";
   const copyButton = (
     <button
       type="button"
       onClick={() => void copy(code)}
       className={cn(
-        "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-chip border-0 px-2 font-sans text-[12px] leading-none transition-interactive",
+        shape,
+        "cursor-pointer transition-interactive",
+        // Over the code (no title) it keeps the block's fill, so scrolled code never shows through it.
         dark
-          ? "bg-transparent text-terminal-muted hover:bg-terminal-bar"
-          : "bg-transparent text-ink-faint hover:bg-muted hover:text-foreground",
-        title ? "ml-auto" : "float-right -mt-[3px] -mr-2 ml-2",
+          ? cn(title ? "bg-transparent" : "bg-terminal", "text-terminal-muted hover:bg-terminal-bar")
+          : cn(title ? "bg-transparent" : "bg-raised", "text-ink-faint hover:bg-muted hover:text-foreground"),
+        title ? "ml-auto" : "absolute top-[9px] right-1.5 z-10",
       )}
     >
-      {copied ? <IconCheck size={14} stroke={2.2} /> : <IconCopy size={14} />}
-      {copied ? labels.copied : labels.copy}
+      {face}
     </button>
   );
   return (
@@ -77,9 +88,15 @@ export function CodeBlock({ code, title, tone = "light", noCopy = false, noWrap 
         )}
         style={maxHeight ? { maxHeight } : undefined}
       >
-        {!title && !noCopy && copyButton}
+        {/* The room the button takes on the first lines: the same size, never read or clicked. */}
+        {!title && !noCopy && (
+          <span aria-hidden="true" className={cn(shape, "invisible float-right -mt-[3px] -mr-2 ml-2")}>
+            {face}
+          </span>
+        )}
         <code>{code}</code>
       </pre>
+      {!title && !noCopy && copyButton}
     </div>
   );
 }

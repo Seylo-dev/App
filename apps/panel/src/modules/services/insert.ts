@@ -62,7 +62,8 @@ export function insertService(tx: Tx, input: InsertServiceInput): { id: string }
   }
   assertNameFree(tx, input.projectId, input.name);
   assertNode(tx, input.nodeId);
-  const spec = checkSpec({ ...defaultSpec(), ...input.spec });
+  // New services get PORT for repository builds (spec.portEnv); a copied spec (clone, preview) keeps its own.
+  const spec = checkSpec({ ...defaultSpec(), portEnv: true, ...input.spec });
 
   const row = tx
     .insert(services)

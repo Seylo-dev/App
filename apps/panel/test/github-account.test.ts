@@ -11,11 +11,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { github, projects, services as serviceOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { auditLog, deployments, gitCredentials, githubRepoWebhooks } from "../src/db/schema";
+import { auditLog, deployments, gitCredentials, githubRepoWebhooks, services } from "../src/db/schema";
+import type { JobContext } from "../src/jobs/queue";
 import { resolveBuild } from "../src/modules/deployments/source";
 import { deploymentEnv, sealDeploymentEnv, withPortEnv } from "../src/modules/env/desired";
 import { userRepoPages } from "../src/modules/github/account";
 import { pollBranches } from "../src/modules/github/poll";
+import { removeAccountHooks, removeRepoHookJob, repairRepoHooks } from "../src/modules/github/repo-hooks";
 import { loadService } from "../src/modules/services/rows";
 import { readSpec } from "../src/modules/services/spec";
 import { setSetting } from "../src/settings";
@@ -30,6 +32,8 @@ const tokens = {
   fineNoContents: `github_pat_${"e".repeat(40)}`,
   rejected: `ghp_${"z".repeat(36)}`,
   device: `gho_${"f".repeat(36)}`,
+  /** Another person's classic token (login sam), who administers none of acme's repositories. */
+  sam: `ghp_${"g".repeat(36)}`,
 };
 
 let panel: TestPanel;
@@ -76,8 +80,9 @@ function fakeGithub() {
         [tokens.classic]: "repo, read:org",
         [tokens.classicNoRepo]: "read:user",
         [tokens.device]: "repo",
+        [tokens.sam]: "repo",
       };
-      return json(200, { login: "lee" }, auth in scopes ? { "x-oauth-scopes": scopes[auth] as string } : {});
+      return json(200, { login: auth === tokens.sam ? "sam" : "lee" }, auth in scopes ? { "x-oauth-scopes": scopes[auth] as string } : {});
     }
     if (url.pathname === "/user/repos") {
       expect(url.searchParams.get("affiliation")).toBe("owner,collaborator,organization_member");
@@ -93,6 +98,42 @@ function fakeGithub() {
     if (method === "GET" && url.pathname === "/repos/acme/shop/commits" && url.searchParams.get("per_page") === "1") {
       return auth === tokens.fineNoContents ? json(403, { message: "Resource not accessible by personal access token" }) : json(200, []);
     }
+    // Someone else's public repository: GitHub answers any token, with read access only.
+    if (url.pathname === "/repos/louislam/uptime-kuma")
+      return json(200, {
+        full_name: "louislam/uptime-kuma",
+        default_branch: "master",
+        private: false,
+        permissions: { admin: false, push: false, pull: true },
+      });
+    if (url.pathname === "/repos/louislam/uptime-kuma/branches") return json(200, [{ name: "master" }]);
+    if (url.pathname.startsWith("/repos/louislam/uptime-kuma/branches/")) return json(200, { name: "master" });
+    // A public fork lee may push to, and a public repository of lee's organization (in /user/repos).
+    if (url.pathname === "/repos/lee/fork")
+      return json(200, {
+        full_name: "lee/fork",
+        default_branch: "main",
+        private: false,
+        permissions: { admin: false, push: true, pull: true },
+      });
+    if (url.pathname === "/repos/acme/repo-001")
+      return json(200, {
+        full_name: "acme/repo-001",
+        default_branch: "main",
+        private: false,
+        permissions: { admin: false, push: false, pull: true },
+      });
+    if (url.pathname === "/repos/lee/fork/branches" || url.pathname === "/repos/acme/repo-001/branches")
+      return json(200, [{ name: "main" }]);
+    // The token's hourly requests are used up (403) or a secondary limit hit (429).
+    if (url.pathname.startsWith("/repos/acme/busy"))
+      return json(
+        403,
+        { message: "API rate limit exceeded for user ID 1." },
+        { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1900000000" },
+      );
+    if (url.pathname.startsWith("/repos/acme/burst"))
+      return json(429, { message: "You have exceeded a secondary rate limit." }, { "retry-after": "60" });
     if (url.pathname.startsWith("/repos/acme/repo-")) return json(200, []);
     if (url.pathname === "/repos/acme/shop") return json(200, { default_branch: "main" });
     if (url.pathname === "/repos/acme/shop/branches") return json(200, [{ name: "main" }, { name: "dev" }]);
@@ -109,8 +150,11 @@ function fakeGithub() {
     if (method === "POST" && url.pathname === "/repos/acme/shop/hooks") {
       if (auth.startsWith("github_pat_")) return json(403, { message: "Resource not accessible by personal access token" });
       hookSecret = (body as { config: { secret: string } }).config.secret;
-      return json(201, { id: 991 });
+      return json(201, { id: auth === tokens.sam ? 992 : 991 });
     }
+    // sam's token cannot see the hooks of a repository sam does not administer.
+    if (method === "DELETE" && url.pathname.startsWith("/repos/acme/shop/hooks/") && auth === tokens.sam)
+      return json(404, { message: "Not Found" });
     if (method === "DELETE" && url.pathname === "/repos/acme/shop/hooks/991") return json(204, null);
     return json(404, { message: "Not Found" });
   }) as typeof fetch;
@@ -128,6 +172,12 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   panel.close();
 });
+
+function loadAccount(id: string) {
+  const row = panel.deps.db.select().from(gitCredentials).where(eq(gitCredentials.id, id)).get();
+  if (!row) throw new Error("no account row");
+  return row;
+}
 
 async function connect(token = tokens.classic) {
   const res = await callOp(panel, github.tokenConnect, { token }, { cookie });
@@ -258,6 +308,51 @@ describe("the account as a source", () => {
     expect(missing.status).toBe(404);
     expect(missing.body.error.details).toMatchObject({ field: "repo" });
     expect(missing.body.error.message).toContain("@lee");
+  });
+
+  test("a public repository that is not the account's is not read through it; its own, a fork it pushes to and its org's are", async () => {
+    const { body: account } = await connect();
+    const branchesOf = (repo: string) => callOp(panel, github.branches, { projectId, accountId: account.id, repo }, { cookie });
+    const other = await branchesOf("louislam/uptime-kuma");
+    expect(other.status).toBe(404);
+    expect(other.body.error.details).toMatchObject({ field: "repo", reason: "notOwned" });
+    expect(other.body.error.message).toContain("@lee");
+    expect((await branchesOf("lee/fork")).body).toEqual({ defaultBranch: "main", branches: ["main"] });
+    expect((await branchesOf("acme/repo-001")).body).toEqual({ defaultBranch: "main", branches: ["main"] });
+    expect((await branchesOf("acme/shop")).status).toBe(200);
+    // connectRepo makes the same check: no account source (and no webhook, no polling) for it.
+    const id = await app();
+    const refused = await callOp(
+      panel,
+      github.connectRepo,
+      { serviceId: id, accountId: account.id, repo: "louislam/uptime-kuma", branch: "master", deployOnPush: true },
+      { cookie },
+    );
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.details).toMatchObject({ field: "repo", reason: "notOwned" });
+    expect(readSpec(loadService(panel.deps.db, id).spec).source.type).toBe("none");
+  });
+
+  test("a rate-limited token is UNAVAILABLE, never 'no such repository'", async () => {
+    const { body: account } = await connect();
+    for (const repo of ["acme/busy", "acme/burst"]) {
+      const res = await callOp(panel, github.branches, { projectId, accountId: account.id, repo }, { cookie });
+      expect(res.status).toBe(503);
+      expect(res.body.error.details).toMatchObject({ field: "repo", reason: "rateLimited" });
+      expect(res.body.error.message).toContain("rate limiting the connected GitHub account (@lee)");
+      const id = await app(repo.replace("/", "-"));
+      const connectRes = await callOp(
+        panel,
+        github.connectRepo,
+        { serviceId: id, accountId: account.id, repo, branch: "main", deployOnPush: true },
+        { cookie },
+      );
+      expect(connectRes.status).toBe(503);
+      expect(connectRes.body.error.details).toMatchObject({ reason: "rateLimited" });
+    }
+    // A permission 403 still says the account cannot read it.
+    const denied = await callOp(panel, github.branches, { projectId, accountId: account.id, repo: "acme/gone" }, { cookie });
+    expect(denied.status).toBe(404);
   });
 
   test("a service stores the account on its source and clones with its token and login", async () => {
@@ -420,29 +515,93 @@ describe("the account as a source", () => {
   });
 });
 
+describe("another GitHub login replacing the account", () => {
+  test("removes the old login's webhooks with its token first, then creates them again with the new one", async () => {
+    setSetting(panel.deps.db, "panelDomain", "panel.example.com");
+    const { body: account } = await connect();
+    const id = await app();
+    await connectRepo(id, account.id);
+    expect(panel.deps.db.select().from(githubRepoWebhooks).get()).toMatchObject({ remoteId: "991", createdLogin: "lee" });
+
+    calls = [];
+    const replaced = await connect(tokens.sam);
+    expect(replaced.body).toMatchObject({ id: account.id, login: "sam" });
+    // lee's token removed lee's webhook while the panel still had it.
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => [c.path, c.auth])).toEqual([
+      ["/repos/acme/shop/hooks/991", tokens.classic],
+    ]);
+    const waiting = panel.deps.db.select().from(githubRepoWebhooks).get();
+    expect(waiting).toMatchObject({ credentialId: account.id, remoteId: null, createdLogin: null });
+    expect(waiting?.error).toContain("@sam");
+    expect((await callOp(panel, github.repoWebhook, { serviceId: id }, { cookie })).body).toMatchObject({ created: false });
+
+    // The poll schedule creates it again with sam's token.
+    expect(await repairRepoHooks(panel.deps)).toBe(1);
+    expect(calls.find((c) => c.method === "POST" && c.path === "/repos/acme/shop/hooks")?.auth).toBe(tokens.sam);
+    expect(panel.deps.db.select().from(githubRepoWebhooks).get()).toMatchObject({ remoteId: "992", createdLogin: "sam", error: null });
+
+    // A new token of the same login keeps the webhooks as they are.
+    calls = [];
+    await connect(tokens.sam);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(panel.deps.db.select().from(githubRepoWebhooks).get()).toMatchObject({ remoteId: "992" });
+  });
+
+  test("a webhook another login created is never counted as removed by a 404 to the current token", async () => {
+    setSetting(panel.deps.db, "panelDomain", "panel.example.com");
+    const { body: account } = await connect();
+    const id = await app();
+    await connectRepo(id, account.id);
+    // The account row now holds sam's token without the hooks being released (a row an older panel left).
+    panel.deps.db
+      .update(gitCredentials)
+      .set({ githubLogin: "sam", username: "sam", secretSealed: panel.deps.secrets.seal(tokens.sam, "git.credential") })
+      .where(eq(gitCredentials.id, account.id))
+      .run();
+    const warnings: string[] = [];
+    const logger = { ...panel.deps.logger, warn: (_meta: unknown, message: string) => void warnings.push(message) };
+    calls = [];
+    await removeRepoHookJob.run({ credentialId: account.id, repo: "acme/shop", remoteId: "991", login: "lee" }, {
+      ...panel.deps,
+      logger,
+      jobId: "test",
+      attempt: 1,
+    } as JobContext);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(warnings.join(" ")).toContain("could not be removed");
+
+    warnings.length = 0;
+    await removeAccountHooks({ ...panel.deps, logger } as typeof panel.deps, loadAccount(account.id));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(warnings.join(" ")).toContain("could not be removed");
+    expect(panel.deps.db.select().from(githubRepoWebhooks).all()).toHaveLength(0);
+  });
+});
+
 describe("PORT for apps built from a repository", () => {
   const git = { type: "git" as const, url: "https://github.com/acme/shop.git", branch: "main", credentialId: null, deployOnPush: false };
   const ports = [{ containerPort: 80, protocol: "tcp" as const }];
   const plain = { kind: "app", parentId: null };
+  const portEnv = true;
 
   test("gets its first port as PORT", () => {
-    expect(withPortEnv([{ name: "A", value: "1", secret: false }], plain, { source: git, ports })).toEqual([
+    expect(withPortEnv([{ name: "A", value: "1", secret: false }], plain, { source: git, ports, portEnv })).toEqual([
       { name: "A", value: "1", secret: false },
       { name: "PORT", value: "80", secret: false },
     ]);
     const github = { type: "github" as const, installationId: null, accountId: "a", repo: "acme/shop", branch: "main", deployOnPush: true };
-    expect(withPortEnv([], plain, { source: github, ports: [{ containerPort: 3000, protocol: "tcp" }] })).toEqual([
+    expect(withPortEnv([], plain, { source: github, ports: [{ containerPort: 3000, protocol: "tcp" }], portEnv })).toEqual([
       { name: "PORT", value: "3000", secret: false },
     ]);
   });
 
   test("keeps a PORT the service sets, and leaves images, members, crons and portless apps alone", () => {
     const own = [{ name: "PORT", value: "5000", secret: false }];
-    expect(withPortEnv(own, plain, { source: git, ports })).toEqual(own);
-    expect(withPortEnv([], plain, { source: { type: "image", image: "nginx:1.27", registryId: null }, ports })).toEqual([]);
-    expect(withPortEnv([], { kind: "app", parentId: "stack" }, { source: git, ports })).toEqual([]);
-    expect(withPortEnv([], { kind: "cron", parentId: null }, { source: git, ports })).toEqual([]);
-    expect(withPortEnv([], plain, { source: git, ports: [] })).toEqual([]);
+    expect(withPortEnv(own, plain, { source: git, ports, portEnv })).toEqual(own);
+    expect(withPortEnv([], plain, { source: { type: "image", image: "nginx:1.27", registryId: null }, ports, portEnv })).toEqual([]);
+    expect(withPortEnv([], { kind: "app", parentId: "stack" }, { source: git, ports, portEnv })).toEqual([]);
+    expect(withPortEnv([], { kind: "cron", parentId: null }, { source: git, ports, portEnv })).toEqual([]);
+    expect(withPortEnv([], plain, { source: git, ports: [], portEnv })).toEqual([]);
   });
 
   test("is part of the env a deploy starts with", async () => {
@@ -459,5 +618,17 @@ describe("PORT for apps built from a repository", () => {
       { cookie },
     );
     expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, image))?.some((v) => v.name === "PORT")).toBe(false);
+  });
+
+  test("an app created before 0.2.2 keeps the env it had: no PORT on its next deploy", async () => {
+    const { body: account } = await connect();
+    const id = await app("old", [{ containerPort: 80, protocol: "tcp" }]);
+    await connectRepo(id, account.id);
+    // A row an older panel wrote has no portEnv key.
+    const { portEnv: _, ...older } = readSpec(loadService(panel.deps.db, id).spec);
+    panel.deps.db.update(services).set({ spec: older }).where(eq(services.id, id)).run();
+    expect(readSpec(loadService(panel.deps.db, id).spec).portEnv).toBe(false);
+    expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, id))?.some((v) => v.name === "PORT")).toBe(false);
+    expect(withPortEnv([], plain, { source: git, ports, portEnv: false })).toEqual([]);
   });
 });

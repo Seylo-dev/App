@@ -2,7 +2,8 @@
 // Console | Shell switch changing the mode in place (one page tab, the mode
 // in ?mode=shell, the old session closed, one card height for both modes),
 // /shell landing there, the Overview's console card (one height in every
-// state, its session kept through a restart, no focus taken, Open full,
+// state, its session kept through a restart, watching until a line is
+// sent, no focus taken, Open full,
 // closed when left, only the modes a member may open and a shell only when
 // asked, phone width), and a deploy that failed at Clone: its title and the
 // private repo hint. Screenshots go to $CONSOLE_SHOTS_DIR (default
@@ -247,6 +248,31 @@ test.describe("console and shell", () => {
     await expect.poll(() => openSockets()).toEqual([]);
   });
 
+  test("the Overview card only watches the console; a line sent there opens the real console and goes to it", async ({ page }) => {
+    await installDemo(page);
+    const tickets = ticketRequests(page);
+    await page.goto(api);
+    const card = page.getByRole("region", { name: "Console" });
+    await expect(card.getByText(consoleLine)).toBeVisible();
+    // Looking at the page is no console use: a watch ticket, which the audit log does not get.
+    expect(tickets).toEqual(["terminals.watchConsole"]);
+    const watched = terminalSockets.length;
+    await card.getByPlaceholder(stdinPlaceholder).fill("stats");
+    await card.getByRole("button", { name: "Send" }).click();
+    // The watch closes, the console (audited) opens in its place and gets the line.
+    await expect(card.getByText("> stats")).toBeVisible();
+    await expect(card.getByText("cache hits 92.4%", { exact: false })).toBeVisible();
+    expect(tickets).toEqual(["terminals.watchConsole", "terminals.console"]);
+    await expect.poll(() => terminalSockets.slice(0, watched).every((s) => s.closed)).toBe(true);
+    await expect.poll(() => openSockets()).toEqual(["console"]);
+    expect((await box(card)).height).toBe(360);
+    // Further lines go straight to it.
+    await card.getByPlaceholder(stdinPlaceholder).fill("keys");
+    await card.getByRole("button", { name: "Send" }).click();
+    await expect(card.getByText("> keys")).toBeVisible();
+    expect(tickets).toEqual(["terminals.watchConsole", "terminals.console"]);
+  });
+
   test("a narrow Overview column keeps the card's header on one row when the shell connects", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await installDemo(page);
@@ -295,8 +321,8 @@ test.describe("console and shell", () => {
       expect((await box(lastHour(page))).y, label).toBe(usageBox.y);
       if (label === "Crashed") await page.screenshot({ path: `${shots}/overview-console-card-crashed.png` });
     }
-    // One session the whole time: no new ticket for each flip of the status.
-    expect(tickets).toEqual(["terminals.console"]);
+    // One session the whole time: no new ticket for each flip of the status (a watch: output only, not audited).
+    expect(tickets).toEqual(["terminals.watchConsole"]);
     expect(terminalSockets.map((s) => s.kind)).toEqual(["console"]);
   });
 

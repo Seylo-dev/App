@@ -189,10 +189,12 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
  * never moves when the status changes. The first session waits for a
  * running container; after that the terminal stays until the page is left,
  * so a crash or a restart keeps the last output, the exit note and
- * Reconnect, and opens no new ticket. It opens the console by itself and a
- * shell only when asked (the switch, or Open shell for a person who may
- * open only the shell), never takes focus until clicked, and offers only
- * the modes the person may open: none at all hides it.
+ * Reconnect, and opens no new ticket. It watches the console by itself
+ * (output only, not in the audit log: looking at the page is no console
+ * use) and opens the real console when a line is sent, a shell only when
+ * asked (the switch, or Open shell for a person who may open only the
+ * shell), never takes focus until clicked, and offers only the modes the
+ * person may open: none at all hides it.
  */
 function ConsoleCard({ service }: { service: ServiceDetail }) {
   const modes = useTerminalModes(service);
@@ -228,6 +230,8 @@ function ConsoleCard({ service }: { service: ServiceDetail }) {
       height={consoleCardHeight}
       start={mode === "shell" && !picked ? t("serviceTerminal.openShell") : undefined}
       subtitle={false}
+      // Looking at the Overview is no console use: output only, until a line is sent.
+      watch
       actions={
         <Link
           to="/p/$projectId/s/$serviceId/console"

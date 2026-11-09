@@ -14,9 +14,23 @@ export class GithubApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** GitHub refused for its rate limit (rateLimitedAnswer), not for what was asked. */
+    readonly rateLimited = false,
   ) {
     super(message);
   }
+}
+
+/**
+ * Whether a 403 or 429 is GitHub's rate limit (the token's hourly requests
+ * used up, or a secondary limit) rather than a permission: it sends
+ * x-ratelimit-remaining: 0 or retry-after, or says so in the message. It
+ * clears by itself, so it says nothing about the repository.
+ */
+export function rateLimitedAnswer(status: number, headers: Headers, message: string): boolean {
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  return headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after") || /rate limit/i.test(message);
 }
 
 export interface GithubResponse<T> {
@@ -61,7 +75,11 @@ export async function githubRequest<T>(path: string, options: GithubRequestOptio
   }
   if (!response.ok) {
     const message = (data && typeof data === "object" && "message" in data ? String(data.message) : text) || response.statusText;
-    throw new GithubApiError(response.status, `GitHub answered ${response.status}: ${message.slice(0, 300)}`);
+    throw new GithubApiError(
+      response.status,
+      `GitHub answered ${response.status}: ${message.slice(0, 300)}`,
+      rateLimitedAnswer(response.status, response.headers, message),
+    );
   }
   return { status: response.status, data: data as T, ...meta };
 }

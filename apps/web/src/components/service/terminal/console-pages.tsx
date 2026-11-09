@@ -3,7 +3,10 @@
 // shell. All share TerminalPanel. The console attaches to the main process
 // (its output, and stdin a line at a time); the shell is a new PTY inside a
 // running container. The Console | Shell switch changes the mode in place:
-// the open session closes and the other one opens in the same card.
+// the open session closes and the other one opens in the same card. The
+// Overview's card watches the console (terminals.watchConsole: output only,
+// not in the audit log) and opens the real console, which is audited, only
+// once someone sends a line.
 
 import { databases, terminals } from "@seylo/ops";
 import { useOpClient } from "@seylo/ops/react";
@@ -12,7 +15,7 @@ import { EmptyState } from "@seylo/ui/components/empty-state";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { IconLock } from "@tabler/icons-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useRef } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { TerminalSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
@@ -87,6 +90,7 @@ export function ServiceTerminal({
   start,
   actions,
   subtitle = true,
+  watch = false,
 }: {
   service: ServiceDetail;
   mode: TerminalMode;
@@ -101,26 +105,43 @@ export function ServiceTerminal({
   actions?: ReactNode;
   /** The one-line description next to the switch. */
   subtitle?: boolean;
+  /**
+   * The console opens as output only (terminals.watchConsole, not audited);
+   * the first line sent opens the real console in its place and goes to it.
+   */
+  watch?: boolean;
 }) {
   const client = useOpClient();
   const idle = useRef(0);
   const shell = mode === "shell";
+  // Watching until someone types: then the audited console, which gets the line they sent.
+  const [typing, setTyping] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+  const watching = watch && !shell && !typing;
   const source = useMemo(
     () => ({
       open: async (size: { columns: number; rows: number }) => {
         // Console: attach to the main process. Shell: a new PTY sized like the terminal.
         const ticket = shell
           ? await client.call(terminals.openShell, { serviceId: service.id, columns: size.columns, rows: size.rows })
-          : await client.call(terminals.openConsole, { serviceId: service.id, tail: 200 });
+          : await client.call(watching ? terminals.watchConsole : terminals.openConsole, { serviceId: service.id, tail: 200 });
         idle.current = ticket.idleTimeoutSeconds;
         return ticket;
       },
     }),
-    [client, service.id, shell],
+    [client, service.id, shell, watching],
   );
+  const startTyping = useCallback((line: string) => {
+    setPending(line);
+    setTyping(true);
+  }, []);
+  const sent = useCallback(() => setPending(null), []);
   return (
     <TerminalPanel
-      sessionKey={mode}
+      sessionKey={watching ? "console-watch" : mode}
+      onStdin={watching ? startTyping : undefined}
+      pendingLine={pending ?? undefined}
+      onPendingSent={sent}
       label={t(`serviceTerminal.modes.${mode}`)}
       switcher={<ModeSwitch mode={mode} modes={modes} onChange={onModeChange} />}
       subtitle={subtitle ? t(shell ? "serviceTerminal.shellSubtitle" : "serviceTerminal.consoleSubtitle") : undefined}

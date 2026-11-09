@@ -81,15 +81,7 @@ function KeyForm({ kind, onDone }: { kind: Kind; onDone: () => void }) {
           <SheetDescription>{t("settingsKeys.create.createdDescription")}</SheetDescription>
         </SheetHeader>
         <SheetBody>
-          <Alert tone="warning">{t("settingsKeys.create.onlyOnce")}</Alert>
-          <Field label={t("settingsKeys.create.token")}>
-            <CopyField value={created.token} aria-label={t("settingsKeys.create.token")} />
-          </Field>
-          {kind === "api" ? (
-            <CodeBlock title={t("settingsKeys.create.tryIt")} code={example} tone="dark" />
-          ) : (
-            <p className="m-0 text-[13px] text-muted-foreground">{t("settingsKeys.create.mcpNext")}</p>
-          )}
+          <CreatedToken kind={kind} token={created.token} example={example} />
         </SheetBody>
         <SheetFooter>
           <Button variant="primary" onClick={onDone}>
@@ -183,5 +175,26 @@ function KeyForm({ kind, onDone }: { kind: Kind; onDone: () => void }) {
         </Button>
       </SheetFooter>
     </form>
+  );
+}
+
+/**
+ * The new key, shown once. An API key shows in the curl example under it
+ * anyway, so it is in plain view; an MCP token stays dots until the eye is
+ * pressed, for a screen being shared. Copy copies the real value either way.
+ */
+export function CreatedToken({ kind, token, example }: { kind: Kind; token: string; example: string }) {
+  return (
+    <>
+      <Alert tone="warning">{t("settingsKeys.create.onlyOnce")}</Alert>
+      <Field label={t("settingsKeys.create.token")}>
+        <CopyField value={token} secret={kind === "mcp"} aria-label={t("settingsKeys.create.token")} />
+      </Field>
+      {kind === "api" ? (
+        <CodeBlock title={t("settingsKeys.create.tryIt")} code={example} tone="dark" />
+      ) : (
+        <p className="m-0 text-[13px] text-muted-foreground">{t("settingsKeys.create.mcpNext")}</p>
+      )}
+    </>
   );
 }

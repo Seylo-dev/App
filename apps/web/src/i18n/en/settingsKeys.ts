@@ -79,6 +79,7 @@ export default {
     clientsDescription: "AI tools that registered through OAuth. Revoking one ends all of its tokens.",
     noClients: "No tools have connected yet",
     activeTokens: "Live tokens",
+    activeTokensCount: { one: "{count} live token", other: "{count} live tokens" },
     clientRevoked: "Tool disconnected",
     revokeClientTitle: "Disconnect {name}?",
     revokeClientDescription: "Its registration and every token it got are deleted. It has to ask for access again.",

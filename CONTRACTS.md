@@ -1603,7 +1603,16 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `reason` `rejected`, `scope`, `noRepos` or `contents`. The token is
   sealed with master.key (purpose `git.credential`) and never returned;
   the input is `sensitive`, so the audit log never holds it. Connecting
-  again (either way) replaces the row in place, so its id stays. Whose
+  again (either way) replaces the row in place, so its id stays. When the
+  new token is another GitHub login's (`storeAccount` in `ops.ts`), the old
+  login's repository webhooks are removed first with its token, while the
+  panel still has it (another login's token gets 404 for a repository it
+  does not administer, so it could never remove them), and their rows wait
+  with the reason for `repairRepoHooks` to create them again with the new
+  token. Each hook row keeps the login that created it
+  (`github_repo_webhooks.created_login`); `github.removeRepoHook` and
+  `deviceDisconnect` remove a hook only with that login's token (a 404 to
+  it means gone) and log one that stays on GitHub with why. Whose
   token a service uses: the panel-wide connected account, named on the
   GitHub source as `accountId` (git_credentials.id) with `installationId:
   null`; `github.connectRepo`, `github.repos` and `github.branches` take
@@ -1618,6 +1627,17 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `affiliation=owner,collaborator,organization_member&sort=pushed`, every
   page of 100 (at most 10) read once a minute at most and again when the
   token changes, then filtered and paged by 30 like an installation's.
+  The account reads any public repository, so `github.branches` and
+  `connectRepo` through it take only its own: private, one it may push to
+  or administer (`permissions` of `GET /repos/{repo}`), or one of its list;
+  someone else's public repository is NOT_FOUND (branches) or BAD_REQUEST
+  (connectRepo), `details.reason` `notOwned`, and the New app dialog makes
+  it a plain git URL, never a source that follows that person's pushes. A
+  rate-limited token (403 or 429 with `x-ratelimit-remaining: 0`,
+  `retry-after` or "rate limit" in the message, `GithubApiError.rateLimited`)
+  is UNAVAILABLE `reason` `rateLimited` in `repos`, `branches` and
+  `connectRepo`, never "no such repository"; `connectRepo` answers a
+  GitHub that did not answer UNAVAILABLE too.
   Organizations that restrict OAuth app access hide their private
   repositories from a device login until an owner approves the panel's
   OAuth app (github.com/organizations/<org>/settings/oauth_application_policy);
@@ -2038,7 +2058,12 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   domains and health checks look. It is part of the deployment's env
   snapshot (like every env change, it applies on the next deploy), so a
   panel update never recreates a running app for it. Images, inline
-  Dockerfiles and uploads get none.
+  Dockerfiles and uploads get none. Only services created from 0.2.2 on get
+  it (`spec.portEnv`, which `insertService` sets; a clone or preview keeps
+  its source's): rows an older panel wrote read false, so an app deployed
+  before keeps the env it had, whatever its image's own `ENV PORT` points
+  at. The New app dialog's Set up later sends no port (it shows no Port
+  field), so an empty app opens no first-run IP:port access.
 - Agent versions: the hello and `NodeFacts.agent_version` carry the bare
   version ("0.1.1"); `parseVersion` also accepts the older
   "0.1.0 (commit ..., built ...)". An update run's agent step finishes by
@@ -3380,9 +3405,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   a live version; before that a dark card with the switch and "The
   console opens once the app runs."); once shown the terminal stays until
   the page is left, so a crash or a restart keeps the output, the exit
-  note and Reconnect and opens no new ticket. It opens the console by
-  itself but a shell only when asked: the switch, or "Open shell"
-  (`TerminalPanel`'s `start`) for a person who may open only the shell.
+  note and Reconnect and opens no new ticket. It watches the console by
+  itself (`terminals.watchConsole`: a query for the console's output only,
+  the panel drops what is sent on it, not in the audit log, like reading
+  logs; same permission as `terminals.console`), so looking at the page is
+  no console use; the first stdin line sent opens `terminals.console`
+  (audited) in its place in a fresh terminal (the tail replays) and goes to
+  it once it is ready. A shell opens only when asked: the switch, or "Open
+  shell" (`TerminalPanel`'s `start`) for a person who may open only the
+  shell.
   It never takes focus until clicked and closes its socket when the page
   is left. Both offer only the modes the person may open
   (`useTerminalModes`: owners and admins every mode, members what
@@ -3493,14 +3524,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   more" centered, the same detail sheet); on a phone it keeps What and
   Result and repeats who and when under the action. Tables that hide
   columns on a phone (`hideOnMobile`) repeat those facts as one line in a
-  kept cell (project People, internal git hosts). The node list renders
-  its table only when the list is at least 1000 px wide
-  (`node-table.tsx` `useAtLeast`), else one stacked row per node with the
-  column names as labels. Rows that scroll sideways on a phone (project
-  tabs, service tabs, the settings sections, the node sheet's views,
-  template categories) use `scroll-row` with `scrollFadeRef`, which the
-  kit's `TabList` and `Segmented` carry themselves, and scroll the current
-  item into view. Unknown paths go to `routes/_app/$.tsx` (the 404 next to
+  kept cell (project People, internal git hosts, git providers, MCP
+  clients, Updates). The node list renders its table only when the list
+  is at least 1000 px wide and the drawn table fits it (`node-table.tsx`
+  `useTableFits`: a long address or Update now with a warning needs more,
+  and that width is kept), else one stacked row per node with the column
+  names as labels; it never runs past the card. Rows that scroll sideways
+  on a phone (project tabs, service tabs, the settings sections, the node
+  sheet's views, template categories) use `scroll-row` with
+  `scrollFadeRef`, which the kit's `TabList` and `Segmented` carry
+  themselves, and scroll the current item into view. From md up the
+  service tabs show every tab instead (a mouse wheel cannot scroll a
+  sideways row): one row at 1440 px, wrapping below with a track line per
+  40 px row. Unknown paths go to `routes/_app/$.tsx` (the 404 next to
   the sidebar); the root's not-found and error screens sit in `AuthFrame`.
 - Hiding projects (0.2.1, per person, not global): the person's
   preferences (`auth.preferences` / `auth.updatePreferences`, the
@@ -3601,7 +3637,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   modes at four window sizes with a one-row header, no ring on the
   switch in a dark preset, `/shell` redirecting, the Overview console
   card: 360 px while loading, while nothing runs and through a restart and
-  a crash with its session kept, no socket while nothing runs, no focus
+  a crash with its session kept, a watch ticket until a line is sent, then
+  the console with that line, no socket while nothing runs, no focus
   taken, the header one row when a shell connects at 1024 px, Open full,
   closed when left, a member's modes and Open shell for shell-only, phone
   width; a failed clone's title and private repo hint),
@@ -3617,8 +3654,10 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   that project, none on the Panel project, the logo link home, Approvals
   hidden until MCP or the assistant is on) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
-  four theme presets, plus the phone width, the service tab bar and the
-  accent check;
+  four theme presets, plus the phone width, the service tab bar (one row
+  at 1440 px, two wrapped rows with their lines at 1280 and 1024, a swipe
+  row on a phone), the node list with its widest row at four laptop
+  widths and the accent check;
   screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`
   narrow it).
 

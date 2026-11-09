@@ -278,7 +278,7 @@ function TimedExpose({ service }: { service: ServiceDetail }) {
   const [opening, setOpening] = useState(false);
   const timed = access.data?.timed ?? [];
   return (
-    <div className="flex flex-col gap-2.5 rounded-card bg-[image:var(--highlight)] px-4 py-3.5">
+    <div className="flex flex-col gap-2.5 rounded-card bg-highlight px-4 py-3.5">
       <div className="flex items-center gap-2">
         <b className="text-[13.5px] font-semibold">{t("serviceDomains.dev.timed")}</b>
         <span className="ml-auto">
@@ -319,7 +319,7 @@ function TimedRow({ service, x }: { service: ServiceDetail; x: Timed }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-        <span className="rounded-chip bg-card px-2 py-1 font-mono shadow-control">
+        <span className="rounded-chip bg-button px-2 py-1 font-mono shadow-button">
           {x.host}:{x.port ?? "…"} → {service.name}:{x.targetPort}
         </span>
         <span className="text-ink-strong">
@@ -455,7 +455,7 @@ function TunnelCard({ service }: { service: ServiceDetail }) {
             {data.url ? (
               <CopyField value={data.url} className="min-w-0 flex-1" aria-label={t("serviceDomains.dev.tunnel")} />
             ) : (
-              <span className="rounded-chip bg-card px-2 py-1 font-mono shadow-control">
+              <span className="rounded-chip bg-button px-2 py-1 font-mono shadow-button">
                 {data.hostname ? `https://${data.hostname}` : t("serviceDomains.dev.quickUrl")}
               </span>
             )}

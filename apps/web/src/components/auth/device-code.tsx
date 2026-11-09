@@ -59,7 +59,7 @@ export function DeviceCodeCard({ code, waiting }: { code: DeviceCodeView; waitin
   const [copied, copy] = useCopy();
   return (
     <div className="flex flex-col gap-3.5">
-      <div className="flex items-center justify-center gap-4 rounded-card px-4 py-6" style={{ background: "var(--highlight)" }}>
+      <div className="flex items-center justify-center gap-4 rounded-card px-4 py-6 bg-highlight">
         <span className="font-mono text-[30px] font-medium tracking-[0.18em] text-foreground">
           <span className="sr-only">{t("auth.github.code")} </span>
           {code.userCode}
@@ -68,7 +68,7 @@ export function DeviceCodeCard({ code, waiting }: { code: DeviceCodeView; waitin
           type="button"
           aria-label={t("auth.github.copyCode")}
           onClick={() => void copy(code.userCode)}
-          className="flex size-8 cursor-pointer items-center justify-center rounded-control border-0 bg-card text-ink-strong shadow-control"
+          className="flex size-8 cursor-pointer items-center justify-center rounded-control border-0 bg-button text-ink-strong shadow-button transition-interactive hover:bg-button-hover"
         >
           {copied ? <IconCheck size={15} stroke={2} /> : <IconCopy size={15} stroke={1.8} />}
         </button>

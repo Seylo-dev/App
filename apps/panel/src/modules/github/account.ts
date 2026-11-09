@@ -53,10 +53,20 @@ export function tokenKindOf(row: Pick<GitCredentialRow, "origin" | "scopes">): "
   return row.origin === "github_token" && row.scopes === "" ? "fineGrained" : "classic";
 }
 
+/** The GitHub login the account's token belongs to. */
+export function accountLogin(row: Pick<GitCredentialRow, "githubLogin" | "username">): string {
+  return row.githubLogin ?? row.username ?? "";
+}
+
+/** GitHub logins compare without case; an unknown one (null) matches anything. */
+export function sameLogin(a: string | null, b: string | null): boolean {
+  return !a || !b || a.toLowerCase() === b.toLowerCase();
+}
+
 export function toAccount(row: GitCredentialRow): GithubAccount {
   return {
     id: row.id,
-    login: row.githubLogin ?? row.username ?? "",
+    login: accountLogin(row),
     method: row.origin === "github_token" ? "token" : "device",
     scopes: scopesOf(row),
     tokenKind: tokenKindOf(row),
@@ -129,7 +139,7 @@ export async function githubSourceAuth(
     };
   }
   const row = accountForSource(deps.db, source.accountId);
-  const login = row.githubLogin ?? row.username ?? "";
+  const login = accountLogin(row);
   return { token: accountToken(deps.secrets, row), username: login, via: "account", label: `@${login}` };
 }
 
@@ -245,7 +255,9 @@ export async function checkGithubToken(token: string): Promise<{ login: string; 
 
 /**
  * Stores the account's token, replacing the connected account in place
- * (its id stays, so services that read through it keep working).
+ * (its id stays, so services that read through it keep working). Ops call
+ * it through storeAccount (ops.ts), which first removes another login's
+ * webhooks with that login's token.
  */
 export function saveAccount(
   ctx: Pick<OpContext, "db" | "secrets" | "principal">,
