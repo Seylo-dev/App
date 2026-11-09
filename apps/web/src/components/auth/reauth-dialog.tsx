@@ -1,9 +1,10 @@
 // The re-auth dialog. lib/reauth.ts opens it when the
 // panel refuses a change for want of a recent sign-in; it confirms with the
-// password, an authenticator code or a passkey (whichever the account has)
-// through auth.reauth, and the refused call then runs again by itself. An
-// account with none of the three signs in again instead. The /reauth page
-// (for the server-rendered MCP consent page) uses the same form.
+// password, an authenticator code or a passkey through auth.reauth, or with
+// the linked GitHub login through the device flow (auth.reauthGithubStart
+// and Poll), whichever the account has, and the refused call then runs
+// again by itself. An account with none of them signs in again instead. The
+// /reauth page (for the server-rendered MCP consent page) uses the same form.
 
 import { auth, OpError } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -19,8 +20,9 @@ import { t } from "../../i18n/t";
 import { errorMessage, opClient } from "../../lib/api";
 import { setReauthPrompt } from "../../lib/reauth";
 import { getPasskeyAssertion, passkeysSupported } from "../../lib/webauthn";
+import { DeviceCodeCard, type DeviceCodeView, GitHubMark, useDevicePolling } from "./device-code";
 
-type Method = "password" | "totp" | "passkey";
+type Method = "password" | "totp" | "passkey" | "github";
 
 /** Mounted once at the root; every refused call in the app shows this one dialog. */
 export function ReauthHost() {
@@ -86,6 +88,21 @@ export function ReauthForm({
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const reauth = useOpMutation(auth.reauth);
+  // The GitHub device flow while it runs: the code on screen, polled until GitHub answers.
+  const [device, setDevice] = useState<DeviceCodeView | null>(null);
+  useDevicePolling(
+    device,
+    (ticket) => opClient.call(auth.reauthGithubPoll, { ticket }),
+    (result) => {
+      setDevice(null);
+      if (result.status === "done") onDone();
+      else setError(t(result.status === "denied" ? "auth.reauth.githubDenied" : "auth.reauth.githubExpired"));
+    },
+    (cause) => {
+      setDevice(null);
+      setError(errorMessage(cause, t("common.unknownError")));
+    },
+  );
 
   if (security.isPending) {
     return (
@@ -108,6 +125,7 @@ export function ReauthForm({
   if (data.passwordSet) methods.push("password");
   if (data.totp.enabled) methods.push("totp");
   if (data.passkeysAvailable && data.passkeys.length > 0 && passkeysSupported()) methods.push("passkey");
+  if (data.github && data.githubAvailable) methods.push("github");
   const method = chosen && methods.includes(chosen) ? chosen : methods[0];
 
   async function run(confirm: () => Promise<unknown>) {
@@ -161,7 +179,21 @@ export function ReauthForm({
         const response = await getPasskeyAssertion(begin.options);
         await reauth.mutateAsync({ passkey: { ticket: begin.ticket, response } });
       });
+    if (method === "github" && !device) void startGithub();
   };
+
+  // Shows the code; the polling above confirms and closes once GitHub says yes.
+  async function startGithub() {
+    setError(null);
+    setBusy(true);
+    try {
+      setDevice(await opClient.call(auth.reauthGithubStart, {}));
+    } catch (cause) {
+      setError(errorMessage(cause, t("common.unknownError")));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const fieldError = error && reauth.error instanceof OpError ? reauth.error.details?.field : undefined;
   const ready = method === "password" ? password !== "" : method === "totp" ? code.trim().length >= 6 : true;
@@ -174,9 +206,10 @@ export function ReauthForm({
           value={method}
           onValueChange={(next) => {
             setChosen(next as Method);
+            setDevice(null);
             setError(null);
           }}
-          className="self-start"
+          className="max-w-full flex-wrap self-start"
         >
           {methods.map((m) => (
             <SegmentedItem key={m} value={m}>
@@ -216,19 +249,35 @@ export function ReauthForm({
         </div>
       )}
       {method === "passkey" && <p className="m-0 text-[13px] text-muted-foreground">{t("auth.reauth.passkeyHint")}</p>}
+      {method === "github" && data.github && (
+        <p className="m-0 text-[13px] text-muted-foreground">
+          {t(device ? "auth.reauth.githubCode" : "auth.reauth.githubHint", { login: data.github.login })}
+        </p>
+      )}
+      {method === "github" && device && <DeviceCodeCard code={device} waiting />}
       {error && <ErrorLine text={error} />}
       <div className="flex justify-end gap-2">
         <Button disabled={busy} onClick={onCancel}>
           {t("common.cancel")}
         </Button>
-        <Button type="submit" variant="primary" disabled={busy || !ready} aria-busy={busy}>
-          {method === "passkey" && <IconFingerprint size={16} stroke={1.8} aria-hidden="true" />}
-          {busy ? t("auth.reauth.confirming") : method === "passkey" ? t("auth.reauth.usePasskey") : t("auth.reauth.confirm")}
-        </Button>
+        {!(method === "github" && device) && (
+          <Button type="submit" variant="primary" disabled={busy || !ready} aria-busy={busy}>
+            {method === "passkey" && <IconFingerprint size={16} stroke={1.8} aria-hidden="true" />}
+            {method === "github" && <GitHubMark size={16} />}
+            {busy ? t("auth.reauth.confirming") : t(submitLabel[method])}
+          </Button>
+        )}
       </div>
     </form>
   );
 }
+
+const submitLabel = {
+  password: "auth.reauth.confirm",
+  totp: "auth.reauth.confirm",
+  passkey: "auth.reauth.usePasskey",
+  github: "auth.reauth.confirmGithub",
+} as const satisfies Record<Method, string>;
 
 function ErrorLine({ text }: { text: string }) {
   return (

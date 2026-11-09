@@ -78,6 +78,7 @@ export type ChallengePurpose =
   | "passkeyRegister"
   | "passkeyLogin"
   | "passkeyReauth"
+  | "githubReauth"
   | "githubSignIn"
   | "githubLink"
   | "githubSetup";

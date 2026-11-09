@@ -1,7 +1,7 @@
 // GitHub OAuth device flow (like `gh auth login`) with the org-owned OAuth
 // App's public client id: no client secret ships with the panel, and it
 // works while the panel is still on a bare IP. Used for owner sign-up,
-// sign-in and linking a GitHub login. The device code never leaves the
+// sign-in, linking a GitHub login and confirming it's you with it. The device code never leaves the
 // panel: the browser polls with an auth_challenges ticket instead.
 //
 // Endpoints: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow
@@ -114,7 +114,7 @@ export interface DeviceStart {
 /** Asks GitHub for a device code and stores it behind a new ticket. */
 export async function startDeviceFlow(
   deps: { db: PanelDb; config: Config; secrets: SecretBox },
-  purpose: Extract<ChallengePurpose, "githubSignIn" | "githubLink" | "githubSetup">,
+  purpose: Extract<ChallengePurpose, "githubSignIn" | "githubLink" | "githubSetup" | "githubReauth">,
   options: { userId?: string | null; repoAccess: boolean },
 ): Promise<DeviceStart> {
   if (!githubAvailable(deps)) throw unavailable();

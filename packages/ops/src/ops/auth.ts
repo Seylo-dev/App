@@ -347,14 +347,15 @@ export const regenerateRecoveryCodes = defineOp({
 // (auth.passkeyRegisterBegin, auth.githubLinkStart, auth.totpEnroll,
 // apiKeys.create, cliLogin.approve, a first password) need a sign-in or a
 // re-auth from the last 15 minutes. Otherwise they fail with FORBIDDEN and
-// details.reason "reauth"; the client confirms here and retries.
+// details.reason "reauth"; the client confirms here (auth.reauth, or the
+// linked GitHub login through auth.reauthGithubStart and Poll) and retries.
 
 export const reauth = defineOp({
   id: "auth.reauth",
   kind: "mutation",
   summary: "Confirm it's you",
   description:
-    'Confirms the signed-in person with exactly one of: the password, a code (6-digit authenticator code or an unused recovery code, which is used up), or a passkey assertion for the ticket from auth.reauthPasskeyBegin. The session then counts as freshly signed in for 15 minutes. A wrong answer is BAD_REQUEST with details.field "password", "code" or "passkey". Browser sessions only.',
+    'Confirms the signed-in person with exactly one of: the password, a code (6-digit authenticator code or an unused recovery code, which is used up), or a passkey assertion for the ticket from auth.reauthPasskeyBegin. The session then counts as freshly signed in for 15 minutes. A wrong answer is BAD_REQUEST with details.field "password", "code" or "passkey". A linked GitHub login confirms through auth.reauthGithubStart instead. Browser sessions only.',
   input: Type.Object({
     password: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
     code: Type.Optional(Type.String({ minLength: 6, maxLength: 32 })),
@@ -381,6 +382,41 @@ export const reauthPasskeyBegin = defineOp({
   output: Type.Object({ ticket: Type.String(), options: WebAuthnJson }),
   permission: permission.signedIn(),
   sensitive: { output: ["ticket"] },
+  mcp: false,
+  audit: true,
+});
+
+export const reauthGithubStart = defineOp({
+  id: "auth.reauthGithubStart",
+  kind: "mutation",
+  summary: "Start confirming it's you with GitHub",
+  description:
+    "Starts the GitHub device flow to confirm the signed-in person with the GitHub login linked to their account, for accounts that sign in with GitHub. Show userCode, open verificationUri, then call auth.reauthGithubPoll every intervalSeconds. CONFLICT when the account has no linked GitHub login, UNAVAILABLE while the OAuth client id is a placeholder. Browser sessions only.",
+  input: Empty,
+  output: DeviceCode,
+  permission: permission.signedIn(),
+  sensitive: { output: ["ticket"] },
+  rateLimit: "strict",
+  mcp: false,
+  audit: true,
+});
+
+export const reauthGithubPoll = defineOp({
+  id: "auth.reauthGithubPoll",
+  kind: "mutation",
+  summary: "Check a GitHub confirmation",
+  description:
+    'Polls the device flow started by auth.reauthGithubStart. With status done GitHub approved it as the login linked to this account, and the session counts as freshly signed in for 15 minutes (freshUntil), as after auth.reauth. Approving as another GitHub login is BAD_REQUEST with details.field "github" and counts toward the per-address lock; an unknown, used or expired ticket is BAD_REQUEST. Browser sessions only.',
+  input: Type.Object({ ticket: Ticket }),
+  output: Type.Object({
+    status: DevicePollStatus,
+    intervalSeconds: Type.Integer({ minimum: 1 }),
+    /** With status done: until then ops that add a way in work without asking again. */
+    freshUntil: Type.Optional(Timestamp),
+  }),
+  permission: permission.signedIn(),
+  sensitive: { input: ["ticket"] },
+  rateLimit: "standard",
   mcp: false,
   audit: true,
 });

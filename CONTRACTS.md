@@ -1056,10 +1056,17 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   `cliLogin.approve`, a first password in `auth.changePassword`) also need
   a fresh session: signed in or confirmed with `auth.reauth` (password, an
   authenticator or recovery code, or a passkey via
-  `auth.reauthPasskeyBegin`) in the last 15 minutes (`requireFreshSignIn`
+  `auth.reauthPasskeyBegin`) or with the linked GitHub login
+  (`auth.reauthGithubStart` and `auth.reauthGithubPoll`, the sign-in
+  device flow with the sign-in scopes; only a GitHub user id equal to the
+  account's linked one counts, and the token is kept as after a GitHub
+  sign-in) in the last 15 minutes (`requireFreshSignIn`
   in `src/auth/fresh.ts`, `sessions.reauth_at`); otherwise FORBIDDEN with
   `details.reason: "reauth"`, which the web turns into a re-auth dialog
-  and a retry. Wrong answers count toward the per-address lock. The MCP
+  and a retry. Wrong answers (another GitHub login too, `details.field:
+  "github"`) count toward the per-address lock. Nothing in the web app
+  calls these ops in the background: the dialog opens only for a change
+  the person made. The MCP
   OAuth consent (`/oauth/authorize`) sends a stale session to the web
   app's `/reauth?redirect=<back>` page first and refuses a stale Allow.
   Ops that hand someone else lasting access need the same fresh session
@@ -3399,8 +3406,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (`lib/reauth.ts`), so any mutation refused with
   `details.reason: "reauth"` opens the dialog mounted once in `main.tsx`
   (`components/auth/reauth-dialog.tsx`: password, authenticator or
-  recovery code, or passkey from `auth.security`, else sign in again) and
-  runs once more after `auth.reauth`; nothing per op is needed. A closed
+  recovery code, passkey, or "Confirm with GitHub" when `auth.security`
+  has a linked `github` and `githubAvailable` (the device code card from
+  `components/auth/device-code.tsx`, polled until GitHub answers), else
+  sign in again) and runs once more after the confirmation; nothing per op
+  is needed. A closed
   dialog fails the call with `isReauthCancelled(error)` true, which
   `toastError` and the screens keep quiet. `/reauth?redirect=<path>` is the
   same form as a page (for the MCP consent page). `?redirect=` on `/login`
@@ -3439,8 +3449,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   channels on the real panel), `reauth.spec.ts` (the re-auth dialog on the
   real panel: it ages the owner's sessions in `panel.db`, then API key,
   a git provider connection, authenticator setup, CLI approval, GitHub
-  link, passkey and a node join command each ask first and go through;
-  `/reauth`; sign in again),
+  link, passkey, a GitHub-only account confirming with GitHub (mocked
+  answers, another GitHub login refused) and a node join command each ask
+  first and go through; `/reauth`; sign in again),
   `git-providers.spec.ts` (Settings > Git providers, a provider repository
   in the Source tab and the watch paths tester, on the demo data),
   `dockerhub.spec.ts` (Docker Hub search, tag picker, prefilled form and

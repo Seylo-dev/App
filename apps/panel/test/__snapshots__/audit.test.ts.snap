@@ -395,6 +395,32 @@ exports[`people op contracts: permission, audit, MCP and redaction (snapshot) 1`
   },
   {
     "audit": true,
+    "id": "auth.reauthGithubPoll",
+    "kind": "mutation",
+    "mcp": false,
+    "permission": "signed-in",
+    "rateLimit": "standard",
+    "sensitive": {
+      "input": [
+        "ticket",
+      ],
+    },
+  },
+  {
+    "audit": true,
+    "id": "auth.reauthGithubStart",
+    "kind": "mutation",
+    "mcp": false,
+    "permission": "signed-in",
+    "rateLimit": "strict",
+    "sensitive": {
+      "output": [
+        "ticket",
+      ],
+    },
+  },
+  {
+    "audit": true,
     "id": "auth.reauthPasskeyBegin",
     "kind": "mutation",
     "mcp": false,
