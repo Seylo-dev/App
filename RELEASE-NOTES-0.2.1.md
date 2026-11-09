@@ -31,6 +31,7 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-1
 - An update step that timed out raised no alert. It now does, a node's step is tried once more after 5 minutes, and the alert resolves when the node gets there.
 - IP:port addresses could drop or hang requests for about a second around each deploy.
 - Settings > Updates on a release candidate no longer says it stays on the pre-release before the first check.
+- A new node made its Traefik twice, a few seconds apart, so a health check right after the join could fail on ports 80 and 443.
 
 ## Before you update
 

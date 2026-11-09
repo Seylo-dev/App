@@ -26,6 +26,7 @@ import (
 	"github.com/seylo-dev/app/go/internal/edge"
 	"github.com/seylo-dev/app/go/internal/portgate"
 	"github.com/seylo-dev/app/go/internal/proxy"
+	"github.com/seylo-dev/app/go/internal/state"
 	"github.com/seylo-dev/app/go/internal/systemd"
 	"github.com/seylo-dev/app/go/internal/wings"
 )
@@ -66,6 +67,11 @@ type networkParts struct {
 	edgeNet  string
 	edgePort int
 
+	// firstDesiredWait is how long the first Traefik waits on a node with
+	// no desired state yet (a fresh join) for the first one, which brings
+	// the ACME email. 0 starts it at once; it is used once per agent run.
+	firstDesiredWait time.Duration
+
 	mu          sync.Mutex
 	gateway     string
 	acmeEmail   string
@@ -87,7 +93,8 @@ func provideNetwork(d *Deps) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	log = log.With("component", "network")
-	p := &networkParts{log: log, reassert: 15 * time.Second, traefikWake: make(chan struct{}, 1), edgeNet: docker.EdgeNetwork, edgePort: edge.DefaultPort}
+	p := &networkParts{log: log, reassert: 15 * time.Second, traefikWake: make(chan struct{}, 1), edgeNet: docker.EdgeNetwork, edgePort: edge.DefaultPort,
+		firstDesiredWait: firstDesiredWait}
 	p.traefikDown.kind, p.traefikDown.title, p.traefikDown.hint = agentv1.NodeAlertKind_NODE_ALERT_KIND_TRAEFIK_DOWN, "Traefik (ports 80 and 443) cannot start", traefikHint
 
 	if moby, err := proxy.NewMobyDocker(); err != nil {
@@ -400,6 +407,7 @@ func (p *networkParts) runTraefik(ctx context.Context, d *Deps) error {
 	// the config hash and recreate a running Traefik on every agent start
 	// (and again once the settings arrive).
 	if d.Feed != nil {
+		p.awaitFirstDesired(ctx, d.Feed)
 		p.mu.Lock()
 		if p.acmeEmail == "" {
 			p.acmeEmail = d.Feed.Settings().GetAcmeEmail()
@@ -437,6 +445,44 @@ func (p *networkParts) runTraefik(ctx context.Context, d *Deps) error {
 		case <-p.traefikWake:
 		case <-time.After(30 * time.Second):
 		}
+	}
+}
+
+// firstDesiredWait bounds awaitFirstDesired. The panel sends the first
+// desired state a moment after a new node connects; a panel that does not
+// answer must not keep the node's Traefik down.
+const firstDesiredWait = 15 * time.Second
+
+// awaitFirstDesired holds the first Traefik of a fresh node (no desired
+// state stored, revision 0) until the panel's first desired state arrives,
+// or for p.firstDesiredWait at most. Without it Traefik is made without the
+// ACME email while its image is pulled, and the email arriving meanwhile
+// replaces it a moment after it started: a health check run right after
+// the join then finds it "created" and ports 80 and 443 held by a dying
+// container. A node with a stored state goes on at once.
+func (p *networkParts) awaitFirstDesired(ctx context.Context, feed *state.DesiredFeed) {
+	p.mu.Lock()
+	wait := p.firstDesiredWait
+	p.firstDesiredWait = 0
+	p.mu.Unlock()
+	if wait <= 0 {
+		return
+	}
+	got := make(chan struct{})
+	var once sync.Once
+	cancel := feed.Subscribe(func(s *agentv1.DesiredState) {
+		if s.GetRevision() > 0 {
+			once.Do(func() { close(got) })
+		}
+	})
+	defer cancel()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-got:
+	case <-ctx.Done():
+	case <-timer.C:
+		p.log.Info("no settings from the panel yet; starting Traefik without the ACME email", "waited", wait)
 	}
 }
 

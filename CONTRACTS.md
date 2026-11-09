@@ -856,7 +856,11 @@ local API, join and resume. The areas:
   the container, logged at INFO as `Traefik recreated` with the reason.
   Creating the owner resends the settings of every connected node (others
   get them with the full sync when they connect), so the recreate for the
-  new contact happens during setup, before anything is routed. Next to the Wings fork the files go to its
+  new contact happens during setup, before anything is routed. A node with
+  no desired state yet (a fresh join, revision 0) makes its first Traefik
+  only once the first desired state arrives, or after 15 s without one, so
+  it is made once, with the contact, and not replaced seconds after the
+  join (since 0.2.1). Next to the Wings fork the files go to its
   `<proxy.data_dir>/dynamic` instead. The edge listener binds
   `<seylo-edge gateway>:5756`; Traefik rewrites to its paths under
   `/_seylo/` (`/page/maintenance/<id>`, `/page/status/<id>`, `/ticket`,
