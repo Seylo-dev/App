@@ -40,8 +40,13 @@ export default {
     rollback: "Rollback",
     move: "Move to another node",
     image: "Deploy {image}",
+    branch: "Deploy from {branch}",
+    source: "Deploy from {source}",
     generation: "Generation {generation}",
   },
+  /** Under a deploy whose clone failed for a git URL on a known host with no credential; {sourceTab} is a link. */
+  privateRepo: "If the repository is private, connect it through {provider} on the {sourceTab}, or pick a git credential there.",
+  sourceTab: "Source tab",
   chips: {
     builtOn: "Built on {node}",
     notBuilt: "Pulled, not built",

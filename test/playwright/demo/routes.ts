@@ -181,10 +181,14 @@ const runningTailscale = () => ({
 });
 let tailscaleStatus: Record<string, any> = runningTailscale();
 
+/** Every terminal socket a page opened since installDemo, in order: its kind and whether the page closed it. */
+export const terminalSockets: { kind: "console" | "shell"; closed: boolean }[] = [];
+
 /** Puts the panel access and Tailscale demo state back (installDemo runs it for every page). */
 function resetDemoState() {
   panelAccess = openPanelAccess();
   tailscaleStatus = runningTailscale();
+  terminalSockets.length = 0;
 }
 
 const settingsHandlers: Record<string, Handler> = Object.fromEntries(
@@ -298,6 +302,11 @@ async function installSockets(page: Page): Promise<void> {
   });
   await page.routeWebSocket(/\/api\/terminal/, (ws) => {
     const shell = /shell|db/.test(ws.url());
+    const entry = { kind: shell ? ("shell" as const) : ("console" as const), closed: false };
+    terminalSockets.push(entry);
+    ws.onClose(() => {
+      entry.closed = true;
+    });
     ws.send(JSON.stringify({ type: "ready", containerId: "c0ffee", generation: 42, user: shell ? "bun" : "", workdir: shell ? "/app" : "" }));
     if (shell) ws.send(encode("\x1b[32mbun@api\x1b[0m:\x1b[34m/app\x1b[0m$ "));
     else

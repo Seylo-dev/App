@@ -1,10 +1,14 @@
 // English strings: serviceTerminal. See ../t.ts for keys, placeholders and plurals.
-// The Console and Shell tabs.
+// The Console tab and the Overview's console card, in console and shell mode.
 
 export default {
   switch: "Console or shell",
+  modes: { console: "Console", shell: "Shell" },
   consoleSubtitle: "Live output of the main process. Input goes to its stdin.",
   shellSubtitle: "A new shell inside the running container.",
+  openFull: "Open full",
+  notRunning: "The console opens once the app runs.",
+  noAccess: "You cannot open the console or a shell of this service. An owner or admin can give you access.",
   connected: "Connected to {name} (generation {generation})",
   connectedAs: "as {user}",
   connectedIn: "in {workdir}",

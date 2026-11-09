@@ -7,7 +7,7 @@ test("a full terminal scrollback stays small at a wide window", () => {
   expect(xtermBufferBytes(TERMINAL_SCROLLBACK, 200)).toBeLessThanOrEqual(25_000_000);
 });
 
-test("the Console and Shell tabs keep that scrollback (no larger one of their own)", async () => {
+test("the Console tab, in both modes, keeps that scrollback (no larger one of its own)", async () => {
   const panel = await Bun.file(new URL("./terminal-panel.tsx", import.meta.url)).text();
   expect(panel).not.toContain("scrollback=");
 });

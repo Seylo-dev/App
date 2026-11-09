@@ -1,4 +1,5 @@
-// The Overview tab. Apps: where it runs, the live and latest deploy, its
+// The Overview tab. Apps: where it runs, the live and latest deploy, the
+// console (with the same Console | Shell switch as the Console tab), its
 // domains, a usage graph and quick actions. Compose stacks: their members.
 // Cron services: the schedule and recent runs. Boxes: the editor's state.
 // Databases have no overview; their first tab is Connection.
@@ -14,9 +15,9 @@ import { KeyValue } from "@seylo/ui/components/key-value";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
 import { toast } from "@seylo/ui/components/toast";
-import { IconLock, IconTerminal2, IconWorld } from "@tabler/icons-react";
+import { IconArrowUpRight, IconLock, IconTerminal2, IconWorld } from "@tabler/icons-react";
 import { Link, Navigate } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { useLiveUp } from "../../../lib/live";
@@ -27,10 +28,16 @@ import { deploymentTitle, deploymentVersion } from "../deployment-meta";
 import { formatBytes, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { isNotBuilt, OpErrorNote, retryOp } from "../op-state";
-import { isActiveDeployment, isDatabaseKind } from "../status";
+import { PrivateRepoHint } from "../private-repo-hint";
+import { hasRunningInstance, isActiveDeployment, isDatabaseKind } from "../status";
 import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
+import { pickMode, type TerminalMode, useTerminalModes } from "../terminal/access";
+import { ServiceTerminal } from "../terminal/console-pages";
 import { crashPolicyLabel } from "../usage-strip";
 import type { ServiceDetail } from "../use-service";
+
+/** The Overview console card's height: about 14 lines of output with the header and the stdin line. */
+export const consoleCardHeight = 360;
 
 export function OverviewPage({ service }: { service: ServiceDetail }) {
   if (isDatabaseKind(service.kind))
@@ -59,6 +66,7 @@ function AppOverview({ service }: { service: ServiceDetail }) {
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
         <LatestDeploy service={service} />
+        <ConsoleCard service={service} />
         <UsagePanel service={service} />
       </div>
       <div className="flex min-w-0 flex-col gap-4">
@@ -157,17 +165,18 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
       ) : (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <b className="text-[13.5px] font-semibold">{deploymentTitle(latest)}</b>
+            <b className="text-[13.5px] font-semibold">{deploymentTitle(latest, service.source)}</b>
             <span className="font-mono text-xs text-muted-foreground">{deploymentVersion(latest)}</span>
             <DeploymentStatusChip status={latest.status} />
             <span className="ml-auto text-xs text-muted-foreground">{formatRelative(latest.createdAt)}</span>
           </div>
           <StepChips steps={latest.steps} />
           {latest.error && <span className="text-[12.5px] text-chip-red-fg">{latest.error}</span>}
+          <PrivateRepoHint service={service} d={latest} />
           {live && live.id !== latest.id && (
             <span className="text-[12.5px] text-muted-foreground">
               {t("serviceOverview.liveIs", {
-                version: deploymentVersion(live) || deploymentTitle(live),
+                version: deploymentVersion(live) || deploymentTitle(live, service.source),
                 when: formatRelative(live.createdAt),
               })}
             </span>
@@ -175,6 +184,53 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+/**
+ * The console on the Overview: the Console tab's terminal at a fixed
+ * height, with the same Console | Shell switch. It opens a session only
+ * while a container runs (the session closes when the page is left or the
+ * app stops), never takes focus until clicked, and offers only the modes the
+ * person may open: none at all hides it.
+ */
+function ConsoleCard({ service }: { service: ServiceDetail }) {
+  const modes = useTerminalModes(service);
+  const [wanted, setWanted] = useState<TerminalMode>("console");
+  if (modes === null)
+    return (
+      <LoadingRegion label={t("common.loading")}>
+        <Skeleton className="rounded-card bg-terminal" style={{ height: consoleCardHeight }} />
+      </LoadingRegion>
+    );
+  const mode = pickMode(wanted, modes);
+  if (!mode) return null;
+  if (!hasRunningInstance(service))
+    return (
+      <Panel title={t("serviceTerminal.modes.console")}>
+        <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceTerminal.notRunning")}</p>
+      </Panel>
+    );
+  return (
+    <ServiceTerminal
+      service={service}
+      mode={mode}
+      modes={modes}
+      onModeChange={setWanted}
+      height={consoleCardHeight}
+      subtitle={false}
+      actions={
+        <Link
+          to="/p/$projectId/s/$serviceId/console"
+          params={{ projectId: service.projectId, serviceId: service.id }}
+          search={{ mode: mode === "shell" ? "shell" : undefined }}
+          className="ml-1 inline-flex items-center gap-1 rounded-chip px-2 py-[5px] text-[12.5px] font-medium text-terminal-muted hover:text-terminal-foreground"
+        >
+          <IconArrowUpRight size={14} stroke={1.9} aria-hidden="true" />
+          {t("serviceTerminal.openFull")}
+        </Link>
+      }
+    />
   );
 }
 
@@ -422,7 +478,7 @@ function BoxOverview({ service }: { service: ServiceDetail }) {
   );
 }
 
-/** The app overview's two columns while the service loads: deploys and usage on the left, facts, domains and actions on the right. */
+/** The app overview's two columns while the service loads: deploys, console and usage on the left, facts, domains and actions on the right. */
 export function OverviewSkeleton() {
   return (
     <LoadingRegion label={t("common.loading")} className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
@@ -441,6 +497,7 @@ export function OverviewSkeleton() {
             ))}
           </div>
         </Card>
+        <Skeleton className="rounded-card bg-terminal" style={{ height: consoleCardHeight }} />
         <Card>
           <SkeletonText className="w-20 text-[15px]" />
           <div className="grid gap-4 sm:grid-cols-2">

@@ -35,7 +35,6 @@ export default {
     environment: "Environment",
     domains: "Domains",
     console: "Console",
-    shell: "Shell",
     logs: "Logs",
     metrics: "Metrics",
     storage: "Storage",

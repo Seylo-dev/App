@@ -1,10 +1,13 @@
-// The dark terminal card of the Console and Shell tabs (Service.dc.html):
+// The dark terminal card of the Console tab and the Overview (Service.dc.html):
 // a Console | Shell switch, a subtitle, search / pause / download / clear,
-// the xterm view, and for the console a stdin line with Send.
+// the xterm view, and for the console a stdin line with Send. A new
+// sessionKey (the switch moving from Console to Shell) closes the session
+// and opens the next one in a fresh terminal, while the header and the
+// switch stay put, so focus and the switch's sliding background stay too.
 
 import { cn } from "@seylo/ui/lib/utils";
 import { IconDownload, IconPlayerPause, IconPlayerPlay, IconSearch, IconTrash } from "@tabler/icons-react";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { downloadText } from "../deploy-log";
@@ -23,13 +26,17 @@ export function TerminalPanel({
   keyboard = false,
   fileName,
   minHeight = 520,
+  height,
+  actions,
+  sessionKey = "",
   prefill,
   onPrefilled,
 }: {
   label: string;
-  /** Console | Shell links, or a title. */
+  /** The Console | Shell switch, or a title. */
   switcher: ReactNode;
-  subtitle: string;
+  /** Left out where the header has no room for it (the Overview card). */
+  subtitle?: string;
   source: TicketSource;
   describe: (info: { generation: number; user: string; workdir: string }) => string;
   /** Console: a line input that writes to the process's stdin. */
@@ -38,6 +45,12 @@ export function TerminalPanel({
   keyboard?: boolean;
   fileName: string;
   minHeight?: number;
+  /** A fixed height instead of minHeight (the Overview card). */
+  height?: number;
+  /** After the header's buttons, for example "Open full". */
+  actions?: ReactNode;
+  /** Which session this is: a new value closes the open one and starts the next in a fresh terminal. */
+  sessionKey?: string;
   /** Typed once the shell says it is ready, without Enter: the person reads it and runs it (node-shell.tsx). */
   prefill?: string;
   onPrefilled?: () => void;
@@ -48,9 +61,30 @@ export function TerminalPanel({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [line, setLine] = useState("");
-  const { connect, input } = session;
+  const stdinId = useId();
+  const { connect, input, reset } = session;
+
+  // A new session starts with the controls as they are for a new terminal.
+  const [shownKey, setShownKey] = useState(sessionKey);
+  if (shownKey !== sessionKey) {
+    setShownKey(sessionKey);
+    setPaused(false);
+    setSearching(false);
+    setQuery("");
+    setLine("");
+  }
 
   const prefilled = useRef(false);
+  // The old session closes as the key changes, before the new terminal mounts,
+  // so nothing of it reaches the new one; leaving the page closes it too.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the cleanup is meant to run when sessionKey changes.
+  useLayoutEffect(
+    () => () => {
+      prefilled.current = false;
+      reset();
+    },
+    [sessionKey, reset],
+  );
   const shellReady = session.state.status === "ready" && session.state.info !== null;
   useEffect(() => {
     if (!prefill || prefilled.current || !shellReady) return;
@@ -60,11 +94,12 @@ export function TerminalPanel({
     onPrefilled?.();
   }, [prefill, shellReady, input, onPrefilled]);
 
-  // Connect once the terminal exists (its size goes into the ticket request).
-  const [mounted, setMounted] = useState(false);
+  // Connect once the terminal exists (its size goes into the ticket request),
+  // and again for each new terminal of a new session.
+  const [views, setViews] = useState(0);
   useEffect(() => {
-    if (mounted) void connect();
-  }, [mounted, connect]);
+    if (views > 0) void connect();
+  }, [views, connect]);
 
   const send = (e: FormEvent) => {
     e.preventDefault();
@@ -82,11 +117,11 @@ export function TerminalPanel({
     <section
       aria-label={label}
       className="flex flex-col overflow-hidden rounded-card bg-terminal shadow-[0_1px_2px_rgb(15_23_42/0.08),0_8px_24px_rgb(15_23_42/0.12)]"
-      style={{ minHeight }}
+      style={height ? { height } : { minHeight }}
     >
       <div className="flex flex-wrap items-center gap-1 bg-terminal-bar px-2.5 py-2">
         {switcher}
-        <span className="ml-2.5 text-xs text-terminal-muted">{subtitle}</span>
+        {subtitle && <span className="ml-2.5 text-xs text-terminal-muted">{subtitle}</span>}
         {state.status === "ready" && state.info && (state.info.user || state.info.workdir) && (
           <span
             title={t("serviceTerminal.where")}
@@ -154,10 +189,13 @@ export function TerminalPanel({
           <button type="button" aria-label={t("serviceTerminal.clear")} className={iconButton} onClick={() => view.current?.clear()}>
             <IconTrash size={15} stroke={1.8} />
           </button>
+          {actions}
         </div>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col px-[18px] pt-4 pb-2">
         <XtermView
+          // Console and Shell differ in xterm options that are set once (stdin, cursor, line endings): a new session gets a new terminal.
+          key={sessionKey}
           aria-label={label}
           className="flex-1"
           onData={keyboard ? (d) => session.input(d) : undefined}
@@ -165,7 +203,7 @@ export function TerminalPanel({
           onReady={(h) => {
             view.current = h;
             session.attach(h);
-            setMounted(true);
+            setViews((n) => n + 1);
           }}
         />
         {(state.status === "error" || state.status === "closed" || state.status === "connecting") && (
@@ -193,11 +231,11 @@ export function TerminalPanel({
       </div>
       {stdin && (
         <form onSubmit={send} className="mx-2.5 mb-2.5 flex items-center gap-2.5 rounded-control bg-terminal-bar py-1.5 pr-1.5 pl-3">
-          <label htmlFor="console-stdin" className="font-mono text-[13px] text-terminal-prompt">
+          <label htmlFor={stdinId} className="font-mono text-[13px] text-terminal-prompt">
             &gt;
           </label>
           <input
-            id="console-stdin"
+            id={stdinId}
             value={line}
             onChange={(e) => setLine(e.target.value)}
             disabled={state.status !== "ready"}

@@ -41,8 +41,11 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
   ["service-source", service(svc.api, "source")],
   ["service-environment", service(svc.worker, "environment")],
   ["service-domains", service(svc.web, "domains")],
+  // One Console tab with two modes; /shell redirects to the second (console.spec.ts).
   ["service-console", service(svc.api, "console")],
-  ["service-shell", service(svc.api, "shell")],
+  ["service-console-shell", `${service(svc.api, "console")}?mode=shell`],
+  // Nothing runs: the Overview's console note, and the failed clone's title and hint.
+  ["service-overview-failed-clone", service(svc.privateApi)],
   ["service-logs", service(svc.api, "logs")],
   ["service-metrics", service(svc.api, "metrics")],
   ["service-storage", service(svc.api, "storage")],
@@ -220,7 +223,7 @@ test.describe("screens", () => {
         };
       });
 
-    // 1440 wide: an app's 17 tabs wrap instead of running past the content box with no scrollbar.
+    // 1440 wide: an app's 16 tabs wrap instead of running past the content box with no scrollbar.
     await page.goto(service(svc.api));
     await settle(page);
     await expect(bar.getByRole("link", { name: "Settings" })).toBeInViewport();

@@ -3231,7 +3231,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/{__root,_app,login,setup}.tsx`, `src/routes/_app/` and
   `src/components/`. Every service and database page with all its tabs
   (overview, deployments, source, environment with Monaco, domains, logs,
-  console, shell, metrics, storage and the Files popup, backups, previews,
+  console, metrics, storage and the Files popup, backups, previews,
   cron jobs, alerts, advanced, notes, settings, connection) is
   `src/routes/_app/p/$projectId/s/` and `src/components/service/`, with the
   tab sets per kind in `src/components/service-tabs.ts` (`tabsFor(kind)`).
@@ -3257,6 +3257,37 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   loopback only, the same form as the panel's `recovery.sshTunnel`), and a
   dismiss button remembered per browser (localStorage
   `<slug>.plainHttpNoticeDismissed`, every access in try/catch).
+- Service terminal (`components/service/terminal/`): one Console tab with
+  two modes, console (attach to the main process, stdin a line at a time,
+  `terminals.console`) and shell (a PTY in a running container,
+  `terminals.shell`). The mode is `?mode=shell` on the Console tab (left
+  out: console), so links and reloads keep it; the old `/shell` route
+  redirects there, and the service tab links ignore search so the Console
+  tab stays current (on a phone the tabs' swipe row scrolls the current
+  tab into view, never the page). The Console | Shell switch in the terminal header
+  (`Segmented` with `tone="terminal"`) changes the mode in place:
+  `TerminalPanel`'s `sessionKey` closes the open session and opens the
+  other in a fresh xterm while the header stays mounted, so focus and the
+  sliding background stay; a ticket that arrives after its session was
+  closed opens no socket. The Overview shows the same terminal as a card
+  under Deploys (360 px, "Open full" to the Console tab in the same mode):
+  it opens a session only while a container runs (`hasRunningInstance`:
+  running, partial, unhealthy, or a deploy on top of a live version;
+  otherwise "The console opens once the app runs."), never takes focus
+  until clicked, and closes its socket when the page is left. Both offer
+  only the modes the person may open (`useTerminalModes`: owners and
+  admins every mode, members what `grants.mine` allows on the service or
+  its project); with none the card is hidden and the tab says so. The
+  database shell and the node's host shell use the same `TerminalPanel`.
+- Deploy titles (`deploymentTitle(d, service.source)`): the commit
+  message, else Rollback, Move, or "Deploy <image>" for a pulled image,
+  else "Deploy from <branch>", else "Deploy from <source>", else the
+  generation. The panel registry's own address (`127.0.0.1:5755/...`, any
+  loopback registry, or any image a builder made) is never shown. A deploy
+  whose clone failed with git's exit 128 ("could not fetch") for a plain
+  git URL on github.com, gitlab.com or bitbucket.org with no credential
+  gets one hint under the error (`private-repo-hint.tsx`): connect it
+  through that provider on the Source tab, or pick a git credential there.
 - Copy fields (`packages/ui/src/components/copy-field.tsx`, since 0.2.1):
   a click anywhere on the field copies, the copy icon included
   (`copy.spec.ts`).
@@ -3350,7 +3381,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   hidden, the palette and the project page still open it, Unhide),
   `env-save.spec.ts`
   (typing during a slow service or shared environment save keeps the new
-  text unsaved) and
+  text unsaved), `console.spec.ts` (the Console | Shell switch in place
+  with `?mode=shell` and the old session closed, `/shell` redirecting, the
+  Overview console card: no socket while nothing runs, no focus taken,
+  Open full, closed when left, a member's modes, phone width; a failed
+  clone's title and private repo hint) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar and the
   accent check;

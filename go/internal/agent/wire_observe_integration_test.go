@@ -561,7 +561,7 @@ func TestITTTYContainer(t *testing.T) {
 	_ = st.CloseSend()
 }
 
-// The Shell tab's database client: redis-cli already signed in.
+// The Connection tab's database shell: redis-cli already signed in.
 func TestITDatabaseShell(t *testing.T) {
 	e := newITEnv(t)
 	const image = "redis:7.4.1-alpine"

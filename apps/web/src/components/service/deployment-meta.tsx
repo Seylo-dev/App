@@ -39,12 +39,38 @@ export function triggerLabel(trigger: Trigger): string {
   return t(`serviceDeploys.trigger.${trigger}`);
 }
 
-/** Bold title of a row: the commit message, else a sentence for image deploys, rollbacks and moves. */
-export function deploymentTitle(d: Deployment): string {
+/**
+ * An image of the panel's own registry relay (127.0.0.1:5755/<service id>:<generation>,
+ * deployments/source.ts in the panel): an address inside the nodes that
+ * says nothing to a person. Image sources can never point at loopback.
+ */
+export function isPanelImage(reference: string): boolean {
+  return /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?\//i.test(reference);
+}
+
+/** What the service builds from, for a deploy that has no commit: its branch and its source line. */
+export interface TitleSource {
+  label: string;
+  branch: string | null;
+}
+
+/**
+ * Bold title of a row: the commit message (its short sha shows next to it),
+ * else a sentence for rollbacks, moves and image deploys, else the branch
+ * ("Deploy from main"), else the source. Never the panel's internal image
+ * address: a build that failed before it had a commit used to show
+ * "Deploy 127.0.0.1:5755/<id>:1".
+ */
+export function deploymentTitle(d: Deployment, source?: TitleSource | null): string {
   if (d.commit?.message) return d.commit.message.split("\n")[0] ?? "";
   if (d.trigger === "rollback") return t("serviceDeploys.title.rollback");
   if (d.trigger === "move") return t("serviceDeploys.title.move");
-  if (d.image) return t("serviceDeploys.title.image", { image: d.image.reference });
+  // Built images (a builder ran) are always the panel's own; only a pulled image's address means something.
+  if (d.image && d.builder === null && !isPanelImage(d.image.reference))
+    return t("serviceDeploys.title.image", { image: d.image.reference });
+  const branch = d.commit?.branch || source?.branch;
+  if (branch) return t("serviceDeploys.title.branch", { branch });
+  if (source?.label) return t("serviceDeploys.title.source", { source: source.label });
   return t("serviceDeploys.title.generation", { generation: d.generation });
 }
 

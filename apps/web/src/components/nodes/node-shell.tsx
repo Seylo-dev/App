@@ -1,5 +1,5 @@
 // The Shell view of the node sheet: a root login shell on the node itself,
-// through the same terminal as a service's Shell tab. Off until the owner
+// through the same terminal as a service's Console tab. Off until the owner
 // allows it for the node (a recent sign-in, asked for by the re-auth
 // dialog); then owners and admins open one, each after a recent sign-in,
 // at most two at a time, closed after 15 minutes without input or output.

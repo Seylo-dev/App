@@ -11,7 +11,7 @@
 //   - Pre-logged-in shells: ClientCommand gives the psql, mysql/mariadb,
 //     mongosh, clickhouse-client or redis-cli/valkey-cli/keydb-cli command
 //     (and the env carrying the password) to exec inside the database
-//     container for the Shell tab.
+//     container for the database shell on the Connection tab.
 //   - The exposed user (DatabaseExposure.user/password): ExposedUsers
 //     creates it inside the running database, or rotates its password,
 //     with the engine's client (Postgres, MySQL, MariaDB, Mongo,

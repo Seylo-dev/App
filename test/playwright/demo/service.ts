@@ -23,6 +23,9 @@ export const ids = {
   stack: "svcmonitoring0a6",
   // Not in the project list: opened by its URL only (databases.spec.ts, the connection screen).
   clickhouse: "svcevents0000c01",
+  // Not in the project list either (console.spec.ts): a plain git URL to a private
+  // GitHub repo with no credential, whose only deploy failed at Clone, so nothing runs.
+  privateApi: "svcprivapi0000d1",
   box: "svcbox000000000a",
   cron: "svcreports00000b",
   nodeDe: world.de,
@@ -122,6 +125,19 @@ const servicesById = {
     address: "events:9000",
     liveDeployment: null,
   }),
+  [ids.privateApi]: baseService({
+    id: ids.privateApi,
+    name: "private-api",
+    kind: "app",
+    status: "idle",
+    source: { type: "git", label: "github.com/acme/private-api", branch: "main", builder: "railpack" },
+    sourceConfig: { type: "git", url: "https://github.com/acme/private-api.git", branch: "main", credentialId: null, deployOnPush: false },
+    cpuPercent: null,
+    memoryBytes: null,
+    liveDeployment: null,
+    lastDeployedAt: null,
+    generation: 1,
+  }),
   [ids.web]: baseService({ id: ids.web, name: "web", kind: "app", address: "shop.example.com" }),
   [ids.box]: baseService({ id: ids.box, name: "box", kind: "box", ports: [], liveDeployment: null }),
   [ids.cron]: baseService({
@@ -210,7 +226,51 @@ const deployments = [
   })),
 ];
 
+/**
+ * private-api's only deploy: git could not fetch the private repository
+ * (exit 128) before there was a commit, so the panel knows only the image
+ * it was going to push, an address in its own registry relay.
+ */
+const cloneFailed = "fetching the source failed: could not fetch main - check the address, the branch and the credentials (exit status 128)";
+export const privateApiDeploy = {
+  id: "d0000000000000f1",
+  serviceId: ids.privateApi,
+  generation: 1,
+  status: "failed",
+  live: false,
+  trigger: "manual",
+  actor: "you@example.com",
+  commit: null,
+  builder: "railpack",
+  builtOn: de,
+  shippedTo: [],
+  image: { reference: `127.0.0.1:5755/${ids.privateApi}:1`, digest: null, sizeBytes: null, shippedBytes: null },
+  steps: [
+    step("clone", "failed", de, cloneFailed, 1400),
+    step("build", "pending", de, "", null),
+    step("ship", "pending", null, "", null),
+    step("health", "pending", null, "", null),
+    step("switch", "pending", null, "", null),
+  ],
+  durationMs: 2000,
+  canRollback: false,
+  rollbackOf: null,
+  error: cloneFailed,
+  createdAt: ago(5 * min),
+  startedAt: ago(5 * min),
+  finishedAt: ago(5 * min - 2000),
+};
+
 const logLines = (deploymentId: string) => {
+  if (deploymentId === privateApiDeploy.id) {
+    const t0 = Date.parse(privateApiDeploy.createdAt);
+    return [
+      ["clone", "Building on de-fsn-1."],
+      ["clone", "Fetching https://github.com/acme/private-api.git (main)"],
+      ["clone", "fatal: could not read Username for 'https://github.com': terminal prompts disabled"],
+      ["clone", `\u001b[31m${cloneFailed}\u001b[0m`],
+    ].map(([s, text], i) => ({ seq: i, ts: new Date(t0 + i * 400).toISOString(), step: s, text, error: i >= 2 }));
+  }
   const d = deployments.find((x) => x.id === deploymentId) ?? deployments[1];
   const t0 = Date.parse(d.startedAt ?? d.createdAt);
   const raw = [
@@ -390,11 +450,19 @@ const run = (i: number, status: string) => ({
 export const handlers: Record<string, (input: Input) => unknown> = {
   "services.get": (input: Input) => servicesById[input.serviceId] ?? servicesById[ids.api],
   "deployments.list": (input: Input) => ({
-    deployments: input.serviceId === ids.worker ? deployments : deployments.slice(1).map((d, i) => ({ ...d, serviceId: input.serviceId, status: i === 0 ? "live" : d.status })),
+    deployments:
+      input.serviceId === ids.privateApi
+        ? [privateApiDeploy]
+        : input.serviceId === ids.worker
+          ? deployments
+          : deployments.slice(1).map((d, i) => ({ ...d, serviceId: input.serviceId, status: i === 0 ? "live" : d.status })),
     nextCursor: null,
-    keptImages: 5,
+    keptImages: input.serviceId === ids.privateApi ? 0 : 5,
   }),
-  "deployments.get": (input: Input) => ({ deployment: deployments.find((d) => d.id === input.deploymentId) ?? deployments[1], logTopic: `deployment:${input.deploymentId}` }),
+  "deployments.get": (input: Input) => ({
+    deployment: input.deploymentId === privateApiDeploy.id ? privateApiDeploy : (deployments.find((d) => d.id === input.deploymentId) ?? deployments[1]),
+    logTopic: `deployment:${input.deploymentId}`,
+  }),
   "deployments.log": (input: Input) => {
     const running = deployments.find((d) => d.id === input.deploymentId)?.status === "building";
     return { lines: (input.afterSeq ?? -1) >= 0 ? [] : logLines(input.deploymentId), done: !running };

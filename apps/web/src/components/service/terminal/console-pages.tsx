@@ -1,15 +1,22 @@
-// The Console (main process output + stdin) and Shell (a PTY in a running
-// container) tabs, and the pre-logged-in database shell. All three share
-// TerminalPanel; only the ticket op and the keyboard mode differ.
+// A service's terminal: the Console tab (console or shell mode, the mode in
+// ?mode=shell), the Overview's console card, and the pre-logged-in database
+// shell. All share TerminalPanel. The console attaches to the main process
+// (its output, and stdin a line at a time); the shell is a new PTY inside a
+// running container. The Console | Shell switch changes the mode in place:
+// the open session closes and the other one opens in the same card.
 
 import { databases, terminals } from "@seylo/ops";
 import { useOpClient } from "@seylo/ops/react";
-import { ActiveIndicator } from "@seylo/ui/components/motion";
-import { cn } from "@seylo/ui/lib/utils";
-import { Link } from "@tanstack/react-router";
-import { useMemo, useRef } from "react";
+import { Card } from "@seylo/ui/components/card";
+import { EmptyState } from "@seylo/ui/components/empty-state";
+import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
+import { IconLock } from "@tabler/icons-react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { type ReactNode, useMemo, useRef } from "react";
 import { t } from "../../../i18n/t";
+import { TerminalSkeleton } from "../service-skeletons";
 import type { ServiceDetail } from "../use-service";
+import { pickMode, type TerminalMode, useTerminalModes } from "./access";
 import { TerminalPanel } from "./terminal-panel";
 
 /**
@@ -30,83 +37,116 @@ function idleText(seconds: number): string {
 }
 
 /**
- * Console | Shell in the terminal header. The current item's background is
- * one shared element (layoutId "terminal-switch") that slides to the item
- * you click, like every other tab group.
+ * Console | Shell in the terminal header. It changes the mode in place (no
+ * page change); the current item's background slides to the one you pick,
+ * like every other tab group. With one allowed mode it is just its name.
  */
-export function Switcher({ service, current }: { service: Pick<ServiceDetail, "id" | "projectId">; current: "console" | "shell" }) {
-  const item = (to: "console" | "shell", label: string) => (
-    <Link
-      to={to === "console" ? "/p/$projectId/s/$serviceId/console" : "/p/$projectId/s/$serviceId/shell"}
-      params={{ projectId: service.projectId, serviceId: service.id }}
-      aria-current={current === to ? "page" : undefined}
-      className={cn(
-        "relative isolate cursor-pointer rounded-chip px-3 py-[5px] text-[12.5px] font-medium transition-interactive",
-        current === to ? "text-terminal-foreground" : "text-terminal-muted hover:text-terminal-foreground",
-      )}
-    >
-      {current === to && <ActiveIndicator layoutId="terminal-switch" className="rounded-chip bg-terminal-field" />}
-      {label}
-    </Link>
-  );
+export function ModeSwitch({
+  mode,
+  modes,
+  onChange,
+}: {
+  mode: TerminalMode;
+  modes: readonly TerminalMode[];
+  onChange: (mode: TerminalMode) => void;
+}) {
+  if (modes.length < 2)
+    return <span className="px-2 text-[12.5px] font-medium text-terminal-foreground">{t(`serviceTerminal.modes.${mode}`)}</span>;
   return (
-    <nav aria-label={t("serviceTerminal.switch")} className="flex gap-0.5 rounded-control bg-terminal p-[3px]">
-      {item("console", t("service.tabs.console"))}
-      {item("shell", t("service.tabs.shell"))}
-    </nav>
+    <Segmented
+      tone="terminal"
+      aria-label={t("serviceTerminal.switch")}
+      value={mode}
+      onValueChange={(next) => onChange(next as TerminalMode)}
+    >
+      {modes.map((m) => (
+        <SegmentedItem key={m} value={m} className="px-3 font-medium">
+          {t(`serviceTerminal.modes.${m}`)}
+        </SegmentedItem>
+      ))}
+    </Segmented>
   );
 }
 
-export function ConsolePage({ service }: { service: ServiceDetail }) {
+/** One service's terminal in console or shell mode, with the switch; a new mode is a new session in the same card. */
+export function ServiceTerminal({
+  service,
+  mode,
+  modes,
+  onModeChange,
+  height,
+  actions,
+  subtitle = true,
+}: {
+  service: ServiceDetail;
+  mode: TerminalMode;
+  modes: readonly TerminalMode[];
+  onModeChange: (mode: TerminalMode) => void;
+  height?: number;
+  actions?: ReactNode;
+  /** The one-line description next to the switch. */
+  subtitle?: boolean;
+}) {
   const client = useOpClient();
   const idle = useRef(0);
+  const shell = mode === "shell";
   const source = useMemo(
     () => ({
-      open: async () => {
-        const ticket = await client.call(terminals.openConsole, { serviceId: service.id, tail: 200 });
+      open: async (size: { columns: number; rows: number }) => {
+        // Console: attach to the main process. Shell: a new PTY sized like the terminal.
+        const ticket = shell
+          ? await client.call(terminals.openShell, { serviceId: service.id, columns: size.columns, rows: size.rows })
+          : await client.call(terminals.openConsole, { serviceId: service.id, tail: 200 });
         idle.current = ticket.idleTimeoutSeconds;
         return ticket;
       },
     }),
-    [client, service.id],
+    [client, service.id, shell],
   );
   return (
     <TerminalPanel
-      key={service.id}
-      label={t("service.tabs.console")}
-      switcher={<Switcher service={service} current="console" />}
-      subtitle={t("serviceTerminal.consoleSubtitle")}
+      sessionKey={mode}
+      label={t(`serviceTerminal.modes.${mode}`)}
+      switcher={<ModeSwitch mode={mode} modes={modes} onChange={onModeChange} />}
+      subtitle={subtitle ? t(shell ? "serviceTerminal.shellSubtitle" : "serviceTerminal.consoleSubtitle") : undefined}
       source={source}
       describe={(info) => connectedNote(service.name, info, idleText(idle.current))}
-      stdin
-      fileName={`${service.name}-console.log`}
+      stdin={!shell}
+      keyboard={shell}
+      fileName={`${service.name}-${mode}.log`}
+      height={height}
+      actions={actions}
     />
   );
 }
 
-export function ShellPage({ service }: { service: ServiceDetail }) {
-  const client = useOpClient();
-  const idle = useRef(0);
-  const source = useMemo(
-    () => ({
-      open: async (size: { columns: number; rows: number }) => {
-        const ticket = await client.call(terminals.openShell, { serviceId: service.id, columns: size.columns, rows: size.rows });
-        idle.current = ticket.idleTimeoutSeconds;
-        return ticket;
-      },
-    }),
-    [client, service.id],
-  );
+/** For a person with neither terminals.console nor terminals.shell here. */
+export function TerminalNoAccess() {
   return (
-    <TerminalPanel
+    <Card>
+      <EmptyState compact icon={<IconLock />} title={t("serviceTerminal.noAccess")} />
+    </Card>
+  );
+}
+
+/** The Console tab: the terminal in the mode of ?mode= (console when left out). */
+export function ConsolePage({ service }: { service: ServiceDetail }) {
+  const search = useSearch({ from: "/_app/p/$projectId/s/$serviceId/console" });
+  const navigate = useNavigate({ from: "/p/$projectId/s/$serviceId/console" });
+  const modes = useTerminalModes(service);
+  if (!modes) return <TerminalSkeleton />;
+  const mode = pickMode(search.mode ?? "console", modes);
+  if (!mode) return <TerminalNoAccess />;
+  return (
+    <ServiceTerminal
       key={service.id}
-      label={t("service.tabs.shell")}
-      switcher={<Switcher service={service} current="shell" />}
-      subtitle={t("serviceTerminal.shellSubtitle")}
-      source={source}
-      describe={(info) => connectedNote(service.name, info, idleText(idle.current))}
-      keyboard
-      fileName={`${service.name}-shell.log`}
+      service={service}
+      mode={mode}
+      modes={modes}
+      // The mode lives in the URL, so links and reloads keep it; switching replaces the entry, like a filter.
+      onModeChange={(next) =>
+        void navigate({ search: (prev) => ({ ...prev, mode: next === "shell" ? "shell" : undefined }), replace: true })
+      }
     />
   );
 }
