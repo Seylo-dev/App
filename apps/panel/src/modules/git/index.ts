@@ -98,8 +98,23 @@ const generateSshKey = implement(gitOps.generateSshKey, (input, ctx) => {
   return toCredential(row, 0);
 });
 
+/**
+ * The connected GitHub account (device sign-in or a pasted token) is a git
+ * credential row too, but it is changed on Settings > GitHub, where the
+ * token is checked with GitHub and the account's repository webhooks follow
+ * it. Editing or deleting it here would skip both.
+ */
+function refuseAccountRow(row: { origin: string }): void {
+  if (row.origin === "device" || row.origin === "github_token") {
+    throw new OpError("CONFLICT", "This is the connected GitHub account. Change or disconnect it on Settings > GitHub.", {
+      reason: "githubAccount",
+    });
+  }
+}
+
 const updateCredential = implement(gitOps.updateCredential, (input, ctx) => {
   const row = loadCredential(ctx.db, input.credentialId);
+  refuseAccountRow(row);
   const changes: Partial<typeof gitCredentials.$inferInsert> = {};
   if (input.name !== undefined) changes.name = input.name.trim();
   if (input.knownHosts !== undefined) {
@@ -137,6 +152,7 @@ const updateCredential = implement(gitOps.updateCredential, (input, ctx) => {
 
 const deleteCredential = implement(gitOps.deleteCredential, (input, ctx) => {
   const row = loadCredential(ctx.db, input.credentialId);
+  refuseAccountRow(row);
   const used = credentialUsage(ctx.db, row.id).get(row.id) ?? 0;
   if (used > 0) throw new OpError("CONFLICT", `${used} service(s) still clone with "${row.name}". Change their source first.`);
   ctx.db.delete(gitCredentials).where(eq(gitCredentials.id, row.id)).run();

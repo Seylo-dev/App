@@ -9,7 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { github, projects, services as serviceOps } from "@seylo/ops";
+import { git, github, projects, services as serviceOps, webhooks } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog, deployments, gitCredentials, githubRepoWebhooks, services } from "../src/db/schema";
 import type { JobContext } from "../src/jobs/queue";
@@ -630,5 +630,33 @@ describe("PORT for apps built from a repository", () => {
     expect(readSpec(loadService(panel.deps.db, id).spec).portEnv).toBe(false);
     expect(deploymentEnv(panel.deps, sealDeploymentEnv(panel.deps, id))?.some((v) => v.name === "PORT")).toBe(false);
     expect(withPortEnv([], plain, { source: git, ports, portEnv: false })).toEqual([]);
+  });
+});
+
+// Found by the 0.2.2 docs check: the account row is a git credential too, and
+// Settings > Git providers offered Edit and Delete for a token-connected one,
+// which skipped the GitHub check and the account's webhooks. And Retry failed
+// on an account source's deliveries searched the App's and sent nothing again.
+describe("the account is managed on Settings > GitHub only", () => {
+  test("git.updateCredential and git.deleteCredential refuse the account row", async () => {
+    const { body: account } = await connect();
+    const update = await callOp(panel, git.updateCredential, { credentialId: account.id, token: "ghp_other" }, { cookie });
+    expect(update.status).toBe(409);
+    expect(update.body.error.details?.reason).toBe("githubAccount");
+    const del = await callOp(panel, git.deleteCredential, { credentialId: account.id }, { cookie });
+    expect(del.status).toBe(409);
+    expect(panel.deps.secrets.open(loadAccount(account.id).secretSealed, "git.credential")).toBe(tokens.classic);
+  });
+
+  test("deliveries of an account source cannot be sent again, and say why", async () => {
+    const { body: account } = await connect();
+    const id = await app();
+    await connectRepo(id, account.id);
+    const list = await callOp(panel, webhooks.listDeliveries, { serviceId: id }, { cookie });
+    expect(list.status).toBe(200);
+    expect(list.body.deliveries.every((d: { canRedeliver: boolean }) => !d.canRedeliver)).toBe(true);
+    const res = await callOp(panel, webhooks.redeliver, { serviceId: id }, { cookie });
+    expect(res.status).toBe(409);
+    expect(res.body.error.details?.reason).toBe("notApp");
   });
 });

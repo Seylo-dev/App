@@ -104,7 +104,10 @@ export function knownHostsName(host: string): string {
  */
 export function knownHostsCover(text: string, host: string): boolean {
   const name = knownHostsName(host);
-  return text.split("\n").some((raw) => {
+  const lines = text.split("\n").map((raw) => raw.trim());
+  // The panel refuses any hashed line ("|1|..."), so the form does too.
+  if (lines.some((line) => line.startsWith("|"))) return false;
+  return lines.some((raw) => {
     const line = raw.trim();
     if (!line || line.startsWith("#")) return false;
     const fields = line.split(/\s+/);

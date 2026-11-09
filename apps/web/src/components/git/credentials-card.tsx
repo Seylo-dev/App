@@ -99,7 +99,7 @@ function CredentialsList() {
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{c.name}</span>
                   <Chip tone="gray">{t(`gitCredentials.kinds.${c.kind}`)}</Chip>
-                  {c.origin === "device" && <Chip tone="sky">{t("gitCredentials.list.githubAccount")}</Chip>}
+                  {isGithubAccount(c) && <Chip tone="sky">{t("gitCredentials.list.githubAccount")}</Chip>}
                   {missingHostKeys(c) && <Chip tone="amber">{t("gitCredentials.list.hostKeysMissing")}</Chip>}
                 </span>
               ),
@@ -136,7 +136,7 @@ function CredentialsList() {
               header: "",
               align: "right",
               cell: (c) =>
-                c.origin === "device" ? (
+                isGithubAccount(c) ? (
                   <Button asChild size="sm" variant="ghost">
                     <Link to="/settings/github">{t("gitCredentials.list.onGithubPage")}</Link>
                   </Button>
@@ -332,4 +332,9 @@ function InUseDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** The connected GitHub account, by device sign-in or a pasted token: managed on Settings > GitHub. */
+function isGithubAccount(c: { origin: string }): boolean {
+  return c.origin === "device" || c.origin === "github_token";
 }

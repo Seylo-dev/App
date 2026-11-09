@@ -13,6 +13,7 @@ import { githubPages, githubRequest } from "../github/api";
 import { appJwt, panelBaseUrl, requireApp } from "../github/app";
 import { defineModule } from "../module";
 import { loadService } from "../services/rows";
+import { readSpec } from "../services/spec";
 import { deployTriggerPath, triggerRoute } from "./trigger";
 
 const redeliverWindowMs = 3 * 24 * 60 * 60_000;
@@ -59,8 +60,19 @@ const deleteTrigger = implement(webhookOps.deleteTrigger, (input, ctx) => {
   return {};
 });
 
+/**
+ * Whether the service's GitHub deliveries come through the panel's GitHub
+ * App, the only ones GitHub can send again (/app/hook/deliveries). A source
+ * through the connected account gets them from its own repository webhook.
+ */
+function deliversThroughApp(row: { spec: unknown }): boolean {
+  const spec = readSpec(row.spec);
+  return spec.source.type === "github" && spec.source.installationId !== null;
+}
+
 const listDeliveries = implement(webhookOps.listDeliveries, (input, ctx) => {
-  loadService(ctx.db, input.serviceId);
+  const svc = loadService(ctx.db, input.serviceId);
+  const viaApp = deliversThroughApp(svc);
   const rows = ctx.db
     .select()
     .from(webhookDeliveries)
@@ -77,14 +89,23 @@ const listDeliveries = implement(webhookOps.listDeliveries, (input, ctx) => {
       outcome: r.outcome,
       detail: r.detail,
       deploymentId: r.deploymentId,
-      canRedeliver: r.source === "github" && r.outcome === "failed" && r.receivedAt.getTime() > cutoff && !r.deliveryId.startsWith("poll-"),
+      canRedeliver:
+        viaApp && r.source === "github" && r.outcome === "failed" && r.receivedAt.getTime() > cutoff && !r.deliveryId.startsWith("poll-"),
       receivedAt: r.receivedAt.toISOString(),
     })),
   };
 });
 
 const redeliver = implement(webhookOps.redeliver, async (input, ctx) => {
-  loadService(ctx.db, input.serviceId);
+  const svc = loadService(ctx.db, input.serviceId);
+  if (!deliversThroughApp(svc)) {
+    // Before, this went on to search the App's deliveries and quietly sent nothing again.
+    throw new OpError(
+      "CONFLICT",
+      "Only deliveries through the GitHub App can be sent again. This service gets pushes from its repository webhook: push again or deploy it.",
+      { reason: "notApp" },
+    );
+  }
   const since = new Date(Date.now() - redeliverWindowMs);
   const rows = ctx.db
     .select()

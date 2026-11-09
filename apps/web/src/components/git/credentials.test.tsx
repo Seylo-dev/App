@@ -93,6 +93,8 @@ test("pasted known_hosts lines count only when one names the host as the panel m
   // Several names on one line, and comments and blank lines around it.
   expect(knownHostsCover(`# office\n\n  10.0.0.5,[gitea.lan]:2222 ${key}  \n`, "gitea.lan:2222")).toBe(true);
   expect(knownHostsCover(`# [gitea.lan]:2222 ${key}`, "gitea.lan:2222")).toBe(false);
+  // A hashed line next to a good one: the panel refuses the whole text, so the form does too.
+  expect(knownHostsCover(`[gitea.lan]:2222 ${key}\n|1|abc=|def= ${key}`, "gitea.lan:2222")).toBe(false);
   // Hashed lines from ~/.ssh/known_hosts name no host.
   expect(knownHostsCover(`|1|F1E1KeoE/eEWhi10WpGv4OdiO6Y=|3988QV0VE8wmZL7suNrYQLITLCg= ${key}`, "gitea.lan")).toBe(false);
   // A name with no key allows nothing.
@@ -180,13 +182,13 @@ const items = [
 ];
 
 /** Renders inside a router (rows link to Settings > GitHub) with whoami and git.listCredentials in the cache. */
-async function render(role: "owner" | "admin" | "member", node: ReactNode) {
+async function render(role: "owner" | "admin" | "member", node: ReactNode, list = items) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } } });
   queryClient.setQueryData(opQueryKey(auth.whoami, {}), {
     viewer: { id: "u1", email: "a@example.com", name: "Ada", role },
     via: "session",
   });
-  queryClient.setQueryData(opQueryKey(git.listCredentials, {}), { items });
+  queryClient.setQueryData(opQueryKey(git.listCredentials, {}), { items: list });
   // No request leaves the test: the answers are in the cache already.
   const client = { call: () => new Promise(() => {}) } as unknown as OpClient;
   const router = createRouter({
@@ -236,6 +238,15 @@ test("an SSH key with no host keys for its host is marked, so it can be fixed wi
 
 test("the GitHub account from the device flow is managed on Settings > GitHub, not renamed or deleted here", async () => {
   const out = await render("owner", <GitCredentialsCard />);
+  expect(out).toContain(t("gitCredentials.list.githubAccount"));
+  expect(out).toMatch(new RegExp(`<a [^>]*href="/settings/github"[^>]*>${t("gitCredentials.list.onGithubPage")}</a>`));
+});
+
+// An account connected with Use a token (origin github_token) is the same
+// account: before, it showed as a plain credential with Edit and Delete.
+test("the GitHub account from a pasted token is managed on Settings > GitHub too", async () => {
+  const tokenAccount = items.map((c) => (c.origin === "device" ? { ...c, origin: "github_token" as const } : c));
+  const out = await render("owner", <GitCredentialsCard />, tokenAccount);
   expect(out).toContain(t("gitCredentials.list.githubAccount"));
   expect(out).toMatch(new RegExp(`<a [^>]*href="/settings/github"[^>]*>${t("gitCredentials.list.onGithubPage")}</a>`));
 });
