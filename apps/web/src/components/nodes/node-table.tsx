@@ -177,23 +177,22 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
                     t("nodes.noWings")
                   )}
                 </Td>
-                <Td last className="text-right whitespace-nowrap">
-                  <Button
-                    size="sm"
-                    className="mr-1.5 h-7 rounded-[7px] bg-muted px-2.5 shadow-none"
-                    onClick={() => onOpen(node.id, "health")}
-                  >
-                    <IconHeart
-                      size={14}
-                      stroke={2}
-                      aria-hidden="true"
-                      className={node.health.worst ? healthTone[node.health.worst] : "text-status-error"}
-                    />
-                    {t("nodes.health")}
-                  </Button>
-                  <Button size="sm" className="h-7 rounded-[7px] bg-muted px-2.5 shadow-none" onClick={() => onOpen(node.id, "settings")}>
-                    {t("nodes.settings")}
-                  </Button>
+                <Td last className="whitespace-nowrap">
+                  {/* A flex row: two inline buttons line up by their text baseline, and the icon pushed Health down. */}
+                  <div className="flex items-center justify-end gap-1.5">
+                    <Button size="sm" className="h-7 rounded-[7px] bg-muted px-2.5 shadow-none" onClick={() => onOpen(node.id, "health")}>
+                      <IconHeart
+                        size={14}
+                        stroke={2}
+                        aria-hidden="true"
+                        className={node.health.worst ? healthTone[node.health.worst] : "text-status-error"}
+                      />
+                      {t("nodes.health")}
+                    </Button>
+                    <Button size="sm" className="h-7 rounded-[7px] bg-muted px-2.5 shadow-none" onClick={() => onOpen(node.id, "settings")}>
+                      {t("nodes.settings")}
+                    </Button>
+                  </div>
                 </Td>
               </tr>
             );
