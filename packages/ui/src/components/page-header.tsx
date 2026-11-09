@@ -4,7 +4,8 @@ import { cn } from "../lib/utils";
 /**
  * The title row at the top of a screen: optional breadcrumb above, a
  * leading icon or avatar, the title and subtitle, and actions on the right
- * (they wrap under the title on narrow screens).
+ * (on a phone they sit on their own row under the title, starting at the
+ * left edge).
  */
 export function PageHeader({
   title,
@@ -34,7 +35,8 @@ export function PageHeader({
           <h1 className="m-0 text-2xl font-semibold tracking-[-0.02em]">{title}</h1>
           {subtitle && <div className="m-0 text-[13.5px] text-muted-foreground">{subtitle}</div>}
         </div>
-        {actions && <div className="ml-auto flex flex-wrap gap-2">{actions}</div>}
+        {/* On a phone the actions take their own full row under the title, so a search field spans it. */}
+        {actions && <div className="flex flex-wrap gap-2 max-sm:w-full sm:ml-auto">{actions}</div>}
       </div>
     </header>
   );

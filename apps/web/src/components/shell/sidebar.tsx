@@ -86,7 +86,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={shell.openPalette}
-          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-field pr-2.5 pl-3 text-[13px] text-muted-foreground hover:text-foreground"
+          className="flex h-[38px] w-full cursor-pointer items-center gap-2 rounded-control border-0 bg-field pr-2.5 pl-3 text-[13px] text-muted-foreground transition-interactive hover:text-foreground"
         >
           <IconSearch size={15} stroke={1.8} aria-hidden="true" />
           <span className="truncate">{t("nav.search")}</span>

@@ -71,6 +71,9 @@ export interface CopyFieldProps {
  * Focus alone never copies: tabbing across a page must not put its secrets
  * on the clipboard. Keyboard focus on the value rings the whole field, the
  * same 2px ring the kit's :focus-visible draws around a button.
+ * A long value (a join command, an invite link) wraps onto more lines
+ * instead of ending in an ellipsis, so people can read what they paste; the
+ * copy and eye buttons stay on the first line.
  */
 export function CopyField({ value, secret = false, masked, prefix, mono = true, tone = "card", className, ...rest }: CopyFieldProps) {
   const labels = useUiLabels();
@@ -89,19 +92,23 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
         void copy(value);
       }}
       className={cn(
-        "group relative flex h-[38px] min-w-0 cursor-pointer items-center gap-1 rounded-control pr-1 pl-3 text-[13px]",
+        "group relative flex min-h-[38px] min-w-0 cursor-pointer items-start gap-1 rounded-control pr-1 pl-3 text-[13px]",
         "has-[[data-slot=copy-field-value]:focus-visible]:outline-2 has-[[data-slot=copy-field-value]:focus-visible]:outline-offset-2 has-[[data-slot=copy-field-value]:focus-visible]:outline-ring",
         dark ? "bg-terminal text-terminal-foreground" : "bg-field text-foreground shadow-[inset_0_0_0_1px_var(--input)]",
         className,
       )}
     >
-      {prefix && <span className={cn("shrink-0 select-none font-mono", dark ? "text-terminal-prompt" : "text-ink-faint")}>{prefix}</span>}
+      {prefix && (
+        <span className={cn("shrink-0 select-none py-[9px] font-mono leading-5", dark ? "text-terminal-prompt" : "text-ink-faint")}>
+          {prefix}
+        </span>
+      )}
       <button
         type="button"
         data-slot="copy-field-value"
         aria-label={rest["aria-label"] ? `${labels.copy}: ${rest["aria-label"]}` : labels.copy}
         className={cn(
-          "min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent p-0 text-left text-inherit outline-none select-text",
+          "min-w-0 flex-1 cursor-pointer border-0 bg-transparent px-0 py-[9px] text-left text-inherit leading-5 whitespace-pre-wrap [overflow-wrap:anywhere] outline-none select-text",
           mono && "font-mono text-[12.5px]",
         )}
       >
@@ -115,7 +122,7 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
           aria-pressed={revealed}
           onClick={() => setRevealed((r) => !r)}
           className={cn(
-            "flex size-[30px] shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent transition-interactive",
+            "mt-1 flex size-[30px] shrink-0 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent transition-interactive",
             dark ? "text-terminal-muted hover:bg-terminal-bar" : "text-ink-faint hover:bg-muted hover:text-foreground",
           )}
         >
@@ -125,7 +132,7 @@ export function CopyField({ value, secret = false, masked, prefix, mono = true, 
       <span
         aria-live="polite"
         className={cn(
-          "flex h-[30px] shrink-0 items-center gap-1 rounded-chip px-2 text-[12px] font-medium",
+          "mt-1 flex h-[30px] shrink-0 items-center gap-1 rounded-chip px-2 text-[12px] font-medium",
           copied ? (dark ? "text-ansi-green" : "text-chip-green-fg") : dark ? "text-terminal-muted" : "text-ink-faint",
         )}
       >

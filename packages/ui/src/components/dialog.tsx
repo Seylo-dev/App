@@ -10,7 +10,7 @@ export const DialogClose = DialogPrimitive.Close;
 export function DialogContent({ className, children, ...props }: React.ComponentProps<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className={cn("fixed inset-0 z-50 bg-foreground/20", overlayMotion)} />
+      <DialogPrimitive.Overlay className={cn("fixed inset-0 z-50 bg-scrim", overlayMotion)} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(

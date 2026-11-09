@@ -7,7 +7,9 @@ import { SkeletonText } from "./skeleton";
  * A titled card for one section of a settings or detail page: header with
  * title, description and actions; the content; and an optional footer (a
  * save bar or a hint) on a quiet strip. `flush` drops the content padding
- * for tables and lists that run edge to edge.
+ * for tables and lists that run edge to edge. The title column keeps at
+ * least 240px: on a narrow card (a phone) the actions wrap under the title
+ * instead of squeezing it to one word per line.
  */
 export function SectionCard({
   title,
@@ -34,7 +36,7 @@ export function SectionCard({
     <Card className={cn("gap-0 overflow-hidden p-0", className)} {...props}>
       {(title || actions) && (
         <div className={cn("flex flex-wrap items-start gap-3 px-5 pt-[18px]", flush ? "pb-3.5" : "pb-1")}>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-[1_1_240px] flex-col gap-1">
             {title && <h2 className={cn("m-0 text-[15px] font-semibold", danger && "text-chip-red-fg")}>{title}</h2>}
             {description && <p className="m-0 text-[13px] leading-relaxed text-muted-foreground">{description}</p>}
           </div>
@@ -85,7 +87,7 @@ export function SectionCardSkeleton({
     <Card aria-hidden="true" className={cn("gap-0 overflow-hidden p-0", className)}>
       {header && (
         <div className={cn("flex flex-wrap items-start gap-3 px-5 pt-[18px]", flush ? "pb-3.5" : "pb-1")}>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-[1_1_240px] flex-col gap-1">
             <SkeletonText className={cn("text-[15px]", titleWidth)} />
             {description && (
               <SkeletonText

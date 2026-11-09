@@ -46,3 +46,18 @@ test("only the value button rings the field, not the eye button", () => {
   expect(field.some((c) => c.startsWith("has-[:focus-visible]") || c.startsWith("focus-within"))).toBe(false);
   expect(out.match(/data-slot="copy-field-value"/g)?.length).toBe(1);
 });
+
+// Commands and links wrap instead of ending in "...": the join command's
+// token and the invite link were cut off, so people pasted what they could
+// not read. The buttons stay on the first line.
+test("a long value wraps instead of being cut off", () => {
+  const out = renderToStaticMarkup(<CopyField value={`curl -fsSL https://install.example.dev | sh -s -- --token ${"x".repeat(80)}`} />);
+  const value = classesOf(out, "button", "copy-field-value");
+  expect(value).not.toContain("truncate");
+  expect(value).toContain("whitespace-pre-wrap");
+  expect(value).toContain("[overflow-wrap:anywhere]");
+  const field = classesOf(out, "div", "copy-field");
+  expect(field).toContain("min-h-[38px]");
+  expect(field).toContain("items-start");
+  expect(field).not.toContain("h-[38px]");
+});

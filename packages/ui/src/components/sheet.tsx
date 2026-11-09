@@ -37,7 +37,7 @@ export function SheetContent({
   const labels = useUiLabels();
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className={cn("fixed inset-0 z-50 bg-foreground/20", overlayMotion)} />
+      <DialogPrimitive.Overlay className={cn("fixed inset-0 z-50 bg-scrim", overlayMotion)} />
       <DialogPrimitive.Content data-slot="sheet" className={cn(sheetVariants({ side }), className)} {...props}>
         {children}
         {!hideClose && (

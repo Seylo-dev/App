@@ -11,6 +11,7 @@ import { EmptyState } from "@seylo/ui/components/empty-state";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { Segmented, SegmentedItem, SegmentPill } from "@seylo/ui/components/segmented";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
+import { scrollFadeRef } from "@seylo/ui/lib/scroll-fade";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLayoutGrid, IconSearch } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -107,16 +108,18 @@ function TemplatesPage() {
         {hub && <HubResults query={hubQuery} onPick={setImage} />}
 
         {!hub && all.isPending && (
-          <div aria-hidden="true" className="flex max-w-full gap-0.5 self-start rounded-control bg-track p-[3px]">
+          <div aria-hidden="true" className="flex max-w-full gap-0.5 self-start overflow-hidden rounded-control bg-track p-[3px]">
             {["w-9", "w-[86px]", "w-[74px]", "w-[82px]", "w-16", "w-12", "w-[104px]"].map((width) => (
-              <Skeleton key={width} className={`h-7 rounded-chip bg-card/70 ${width}`} />
+              <Skeleton key={width} className={`h-[26px] shrink-0 rounded-chip bg-card/70 ${width}`} />
             ))}
           </div>
         )}
         {!hub && categories.length > 0 && (
+          // One row like the kit's Segmented: on a phone it scrolls sideways (faded edge, the chosen category in view) instead of wrapping in its track.
           <fieldset
+            ref={scrollFadeRef}
             aria-label={t("templates.categories")}
-            className="m-0 flex max-w-full min-w-0 border-0 flex-wrap gap-0.5 self-start rounded-control bg-track p-[3px]"
+            className="scroll-row m-0 flex max-w-full min-w-0 flex-nowrap gap-0.5 self-start rounded-control border-0 bg-track p-[3px]"
           >
             <CategoryButton pressed={!search.category} onClick={() => pickCategory(undefined)}>
               {t("templates.all")}
@@ -202,7 +205,7 @@ function CategoryButton({ pressed, onClick, children }: { pressed: boolean; onCl
       aria-pressed={pressed}
       onClick={onClick}
       className={cn(
-        "relative isolate h-7 cursor-pointer rounded-chip border-0 bg-transparent px-3 text-[12.5px]",
+        "relative isolate h-[26px] shrink-0 cursor-pointer whitespace-nowrap rounded-chip border-0 bg-transparent px-3 text-[12.5px] transition-colors focus-visible:-outline-offset-2",
         pressed ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >

@@ -279,7 +279,8 @@ function TrackButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "relative isolate cursor-pointer rounded-chip border-0 bg-transparent px-[11px] py-[5px] text-[12.5px]",
+        // The kit's SegmentedItem size: 26px in a 32px track.
+        "relative isolate inline-flex h-[26px] shrink-0 cursor-pointer items-center whitespace-nowrap rounded-chip border-0 bg-transparent px-[11px] text-[12.5px] transition-colors",
         active ? "text-foreground" : "text-ink-strong hover:text-foreground",
       )}
     >

@@ -53,7 +53,7 @@ export function NodeUsage() {
           {usage.isPending &&
             Array.from({ length: nodeCount }, (_, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders.
-              <Skeleton key={i} className="h-[31px] w-[84px] rounded-[7px]" />
+              <Skeleton key={i} className="h-8 w-[84px] rounded-[7px]" />
             ))}
           {series.map((node, index) => {
             const off = hidden.has(node.nodeId);
@@ -65,8 +65,9 @@ export function NodeUsage() {
                 title={t("dashboard.toggleNode")}
                 onClick={() => setHidden(toggleHidden(hidden, node.nodeId))}
                 className={cn(
-                  "flex cursor-pointer items-center gap-[7px] rounded-[7px] border-0 px-[11px] py-1.5 text-[12.5px]",
-                  off ? "bg-card text-ink-faint" : "bg-muted text-foreground",
+                  // The kit's ChartLegend chip: 32px like the range picker next to it.
+                  "flex h-8 cursor-pointer items-center gap-[7px] rounded-[7px] border-0 px-[11px] text-[12.5px] transition-colors",
+                  off ? "bg-transparent text-ink-faint hover:bg-muted/60 hover:text-muted-foreground" : "bg-muted text-foreground",
                 )}
               >
                 <span
@@ -78,12 +79,7 @@ export function NodeUsage() {
               </button>
             );
           })}
-          <Segmented
-            aria-label={t("dashboard.timeRange")}
-            value={range}
-            onValueChange={(v) => setRange(v as MetricsRange)}
-            className="ml-1.5"
-          >
+          <Segmented aria-label={t("dashboard.timeRange")} value={range} onValueChange={(v) => setRange(v as MetricsRange)}>
             {ranges.map((r) => (
               <SegmentedItem key={r} value={r}>
                 {r}

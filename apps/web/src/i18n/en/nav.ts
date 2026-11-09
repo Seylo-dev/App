@@ -10,7 +10,8 @@ export default {
   settings: "Settings",
   projects: "Projects",
   newProject: "New project",
-  search: "Search or run a command",
+  // Short so it fits the 248px sidebar beside the shortcut; the palette's placeholder says the rest.
+  search: "Search",
   logout: "Log out",
   yourAccount: "Your sign-in methods and sessions",
   breadcrumb: "Breadcrumb",

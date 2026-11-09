@@ -9,7 +9,7 @@ import { Chip } from "@seylo/ui/components/chip";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
-import { TabIndicator, tabClassName } from "@seylo/ui/components/tabs";
+import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { NewServiceMenu } from "../../../../components/new-service/new-service-menu";
@@ -89,7 +89,8 @@ function ProjectPage() {
         />
       )}
 
-      <div role="tablist" aria-label={t("project.sections")} className="flex flex-wrap gap-1 border-b border-border">
+      {/* One row on a phone too: the tabs scroll sideways with a faded edge instead of wrapping under the underline. */}
+      <TabList role="tablist" aria-label={t("project.sections")}>
         {tabs.map((item) => (
           <button
             key={item}
@@ -104,7 +105,7 @@ function ProjectPage() {
             {t(tabLabels[item])}
           </button>
         ))}
-      </div>
+      </TabList>
 
       <EnterOnChange motionKey={tab} subtle role="tabpanel" aria-label={t(tabLabels[tab])}>
         {!data ? (

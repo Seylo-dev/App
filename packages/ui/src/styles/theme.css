@@ -41,8 +41,22 @@
 
   /* Quiet fills: search box, segmented tracks, neutral chips. */
   --muted: #f1f3f7;
+  /*
+   * Secondary buttons: white with the control shadow on the page ground.
+   * On a white surface (a card, a dialog, a menu) white would vanish, so
+   * there they take the quiet "on card" fill and no shadow. tailwind.css
+   * picks the pair by the surface a button sits on.
+   */
   --secondary: #ffffff;
+  --secondary-hover: #f6f8fb;
+  --secondary-on-card: #f1f3f7;
+  --secondary-on-card-hover: #e9edf3;
   --secondary-foreground: #0f172a;
+  /* The raised pill of a segmented track. */
+  --pill: #ffffff;
+  /* The "dark" button (GitHub sign-in, Deny): near black on light presets, a raised fill on dark ones. */
+  --button-dark: #0f172a;
+  --button-dark-foreground: #ffffff;
   --accent: #e6ecfc; /* selected nav item */
   --accent-foreground: #1f4fd1;
   --field: #f3f5f9;
@@ -54,6 +68,12 @@
   --grid-line: #eef0f4; /* chart grid */
   --input: #e3e7ee;
   --ring: #2563eb;
+  /* Off switches and unticked checkboxes and radios: visible on a card and on a raised row. */
+  --control-off: #c5ccd7;
+  --switch-thumb: #ffffff;
+
+  /* Behind dialogs and sheets: dims the page in every preset (never a light wash). */
+  --scrim: rgb(15 23 42 / 0.2);
 
   --destructive: #e5484d;
   --destructive-foreground: #ffffff;
@@ -158,7 +178,13 @@
   --link-hover: #b2c0ff;
   --muted: #1c2440;
   --secondary: #1c2440;
+  --secondary-hover: #242d4c;
+  --secondary-on-card: #1f2846;
+  --secondary-on-card-hover: #283253;
   --secondary-foreground: #d6dce8;
+  --pill: #2a3454;
+  --button-dark: #2c3657;
+  --button-dark-foreground: #eef1f7;
   --accent: #222b4a;
   --accent-foreground: #b2c0ff;
   --field: #1c2440;
@@ -169,6 +195,9 @@
   --grid-line: #222b42;
   --input: #2a3350;
   --ring: #6f8bff;
+  --control-off: #3d4869;
+  --switch-thumb: #c3cad9;
+  --scrim: rgb(0 0 0 / 0.55);
   --chip-blue-bg: #1e2a52;
   --chip-blue-fg: #a9b9ff;
   --chip-sky-bg: #16304a;
@@ -191,11 +220,12 @@
   --chart-1: #6f8bff;
   --chart-3: #8b94a7;
   --highlight: linear-gradient(160deg, #1e2a52 0%, #151c30 100%);
-  --shadow-card: inset 0 0 0 1px #222b42;
-  --shadow-control: inset 0 0 0 1px #2a3350;
+  /* Fill-only, as in the light preset: fills set surfaces apart, with soft drop shadows and no hairline rings. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
   --shadow-primary: none;
-  --shadow-segment: inset 0 0 0 1px #2a3350;
-  --shadow-popover: 0 0 0 1px #2a3350, 0 12px 32px rgb(0 0 0 / 0.4);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
   --skeleton-shine: rgb(255 255 255 / 0.05);
   color-scheme: dark;
 }
@@ -249,7 +279,13 @@
   --link-hover: #c4b5fd;
   --muted: #22222a;
   --secondary: #22222a;
+  --secondary-hover: #2a2a33;
+  --secondary-on-card: #24242c;
+  --secondary-on-card-hover: #2d2d37;
   --secondary-foreground: #ececf1;
+  --pill: #32323d;
+  --button-dark: #34343f;
+  --button-dark-foreground: #f4f4f7;
   --accent: #2a2440;
   --accent-foreground: #c4b5fd;
   --field: #22222a;
@@ -260,6 +296,9 @@
   --grid-line: #2a2a33;
   --input: #2e2e38;
   --ring: #8b6cf6;
+  --control-off: #43434f;
+  --switch-thumb: #c4c4ce;
+  --scrim: rgb(0 0 0 / 0.6);
   --chip-blue-bg: #1f2547;
   --chip-blue-fg: #a9b6ff;
   --chip-sky-bg: #142c3d;
@@ -286,11 +325,12 @@
   --radius: 2px;
   --radius-control: 2px;
   --radius-chip: 2px;
-  --shadow-card: inset 0 0 0 1px #2a2a33;
-  --shadow-control: inset 0 0 0 1px #2e2e38;
+  /* Fill-only, like Seylo Night: no hairline rings around cards, buttons or the segmented pill. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.2);
   --shadow-primary: none;
-  --shadow-segment: inset 0 0 0 1px #2e2e38;
-  --shadow-popover: 0 0 0 1px #2e2e38, 0 12px 32px rgb(0 0 0 / 0.5);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.4), 0 16px 40px rgb(0 0 0 / 0.55);
   --skeleton-shine: rgb(255 255 255 / 0.05);
   color-scheme: dark;
 }
