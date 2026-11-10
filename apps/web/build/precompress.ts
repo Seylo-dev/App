@@ -6,7 +6,7 @@
 // is not smaller is not written.
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
 /** Extensions worth compressing; images, fonts in woff/woff2 and archives already are. */
@@ -68,7 +68,7 @@ export function precompress() {
     name: "seylo-precompress",
     apply: "build" as const,
     configResolved(config: { root: string; build: { outDir: string } }) {
-      outDir = join(config.root, config.build.outDir);
+      outDir = resolve(config.root, config.build.outDir);
     },
     closeBundle() {
       precompressDir(outDir);
