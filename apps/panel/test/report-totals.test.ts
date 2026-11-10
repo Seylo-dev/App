@@ -177,11 +177,12 @@ describe("report_totals", () => {
       fresh.$client.run("PRAGMA foreign_keys = ON");
       migrate(fresh, { migrationsFolder: before });
       const old = fresh as unknown as PanelDb;
-      const node = old
-        .insert(nodes)
-        .values({ name: "n", publicKey: Buffer.alloc(32, 1) })
-        .returning()
-        .get();
+      // In plain SQL: the nodes table has columns since that rc.2 does not have (0009_node_location).
+      const node = { id: "node-from-rc2" };
+      const now = Date.now();
+      old.run(
+        sql`insert into nodes (id, name, public_key, created_at, updated_at) values (${node.id}, 'n', ${Buffer.alloc(32, 1)}, ${now}, ${now})`,
+      );
       addReports(old, node.id, 7, "cronRun");
       addReports(old, node.id, 3, "nodeAlert");
       expect(old.all(sql`select name from sqlite_master where name = 'report_totals'`)).toEqual([]);

@@ -94,6 +94,17 @@ export const Node = Type.Object({
   name: NodeName,
   /** Free text the owner sets, for example "Falkenstein, Germany". */
   location: Nullable(Type.String({ maxLength: 80 })),
+  /**
+   * Where the location came from. "detected": the panel filled it in from the node's public IP
+   * address (Geolocation by DB-IP, through the site API) when the node joined; a suggestion until
+   * someone saves the field. "manual": saved through nodes.updateSettings, never filled in again.
+   * Missing when neither happened, also for locations saved before the panel recorded this.
+   */
+  locationSource: Type.Optional(
+    Type.Union([Type.Literal("detected"), Type.Literal("manual")], {
+      description: '"detected" from the public IP address (Geolocation by DB-IP) until saved; "manual" once saved.',
+    }),
+  ),
   tags: Type.Array(NodeTag),
   status: NodeStatus,
   /** Runs the panel and the image registry; it cannot be removed. */
@@ -345,7 +356,15 @@ export const updateSettings = defineOp({
     "Changes a node's location label, public address, wildcard domain, how many builds run at once and how much log history each service keeps. Omitted fields stay as they are.",
   input: Type.Object({
     nodeId: Id,
-    location: Type.Optional(Nullable(Type.String({ maxLength: 80 }))),
+    location: Type.Optional(
+      Nullable(
+        Type.String({
+          maxLength: 80,
+          description:
+            'Any value, the detected one unchanged or null, makes it locationSource "manual": the panel never fills it in from the address again.',
+        }),
+      ),
+    ),
     publicAddress: Type.Optional(
       Nullable(
         Type.String({

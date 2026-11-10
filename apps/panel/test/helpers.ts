@@ -18,6 +18,7 @@ import { apiKeys, grants, type Role, users } from "../src/db/schema";
 import type { ProxyTrust } from "../src/http/proxy-trust";
 import { type Logger, silentLogger } from "../src/logger";
 import type { PanelModule } from "../src/modules/module";
+import { type GeoFetch, setGeoFetch } from "../src/modules/nodes/location";
 import type { RateLimiter } from "../src/ops/rate-limit";
 import { createPanel, type Panel } from "../src/panel";
 import { hashPassword } from "../src/security/password";
@@ -25,6 +26,16 @@ import { hashToken, prefixedToken } from "../src/security/tokens";
 import { getSetting } from "../src/settings";
 
 const packageRoot = join(import.meta.dir, "..");
+
+/**
+ * No test asks the real geolocation API: a node that connects with a public
+ * address gets a failed lookup at once (modules/nodes/location.ts), unless a
+ * test answers lookups itself with setGeoFetch and puts this back after.
+ */
+export const refuseGeoLookups: GeoFetch = async () => {
+  throw new Error("tests never ask the geolocation API");
+};
+setGeoFetch(refuseGeoLookups);
 
 export interface TestPanel extends Panel {
   close(): void;

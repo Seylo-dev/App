@@ -1,18 +1,21 @@
 // Node settings in the node sheet. Each group saves on its own op:
 // rename, tags, the general settings (location, wildcard domain, parallel
 // builds, log retention), the can-build switch and games-first CPU (only
-// when Wings is detected), and removing the node.
+// when Wings is detected), and removing the node. A location the panel
+// detected from the node's address is marked Detected until the form is
+// saved, which makes it the owner's (locationSource "manual").
 
 import { nodes } from "@seylo/ops";
 import { opQueryKey, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
+import { Chip } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { Input, Label } from "@seylo/ui/components/input";
 import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage, queryClient } from "../../lib/api";
 import type { NodeDetail } from "../../lib/types";
@@ -27,6 +30,13 @@ function refresh(nodeId: string) {
 export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemoved: () => void }) {
   const [name, setName] = useState(node.name);
   const [location, setLocation] = useState(node.location ?? "");
+  const [locationEdited, setLocationEdited] = useState(false);
+  // A location the panel detects while the form is open shows up in it, unless the field was edited.
+  useEffect(() => {
+    if (!locationEdited) setLocation(node.location ?? "");
+  }, [node.location, locationEdited]);
+  // Detected from the node's address and not saved yet: marked until someone saves the form.
+  const locationDetected = node.locationSource === "detected" && location === (node.location ?? "");
   const [publicAddress, setPublicAddress] = useState(node.publicAddress ?? "");
   const [tags, setTags] = useState(node.tags.join(", "));
   const [wildcard, setWildcard] = useState(node.wildcardDomain ?? "");
@@ -91,13 +101,28 @@ export function NodeSettingsForm({ node, onRemoved }: { node: NodeDetail; onRemo
               required
             />
           </Field>
-          <Field id="node-location" label="nodes.form.location">
+          <Field
+            id="node-location"
+            label="nodes.form.location"
+            badge={
+              locationDetected && (
+                <Chip tone="sky" className="px-[7px] py-0 text-[11px]">
+                  {t("nodes.form.locationDetected")}
+                </Chip>
+              )
+            }
+            note={locationDetected && <DetectedLocationHint />}
+          >
             <Input
               id="node-location"
               value={location}
-              onChange={(e) => setLocation(e.target.value)}
+              onChange={(e) => {
+                setLocationEdited(true);
+                setLocation(e.target.value);
+              }}
               maxLength={80}
               placeholder="Falkenstein, Germany"
+              aria-describedby={locationDetected ? "node-location-note" : undefined}
             />
           </Field>
         </div>
@@ -241,12 +266,60 @@ export function DnsRecordLine({ record }: { record: string }) {
   );
 }
 
-function Field({ id, label, hint, children }: { id: string; label: MessageKey; hint?: MessageKey; children: ReactNode }) {
+/** "Geolocation by DB-IP": the link back DB-IP's license asks for wherever a location from its database shows. */
+export function DbIpLink() {
+  return (
+    <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="font-medium">
+      {t("nodes.geolocationByDbIp")}
+    </a>
+  );
+}
+
+/** "From the server's IP address, Geolocation by DB-IP. Change it if it is wrong." under a detected location. */
+function DetectedLocationHint() {
+  return (
+    <>
+      {t("nodes.form.locationDetectedBefore")} <DbIpLink />
+      {t("nodes.form.locationDetectedAfter")}
+    </>
+  );
+}
+
+function Field({
+  id,
+  label,
+  hint,
+  badge,
+  note,
+  children,
+}: {
+  id: string;
+  label: MessageKey;
+  hint?: MessageKey;
+  /** Next to the label, for example the Detected chip. */
+  badge?: ReactNode;
+  /** Under the field instead of the hint, with the id `<id>-note` for aria-describedby. */
+  note?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <Label htmlFor={id}>{t(label)}</Label>
+      {badge ? (
+        <div className="flex items-center gap-2">
+          <Label htmlFor={id}>{t(label)}</Label>
+          {badge}
+        </div>
+      ) : (
+        <Label htmlFor={id}>{t(label)}</Label>
+      )}
       {children}
-      {hint && <span className="text-xs text-muted-foreground">{t(hint)}</span>}
+      {note ? (
+        <span id={`${id}-note`} className="text-xs text-muted-foreground">
+          {note}
+        </span>
+      ) : (
+        hint && <span className="text-xs text-muted-foreground">{t(hint)}</span>
+      )}
     </div>
   );
 }

@@ -44,6 +44,12 @@ export interface Config {
   /** Where telemetry reports go; derived from the brand's site. */
   telemetryUrl: string;
   /**
+   * The site API's geolocation lookup (GET <url>?ip=), asked once per node to
+   * fill in its location (modules/nodes/location.ts); derived from the
+   * brand's site like telemetryUrl. Not asked while telemetryOffBy is set.
+   */
+  geoUrl: string;
+  /**
    * What turns telemetry off on this container whatever the setting says:
    * "SEYLO_TELEMETRY" (set to off, 0, false or no) or "DO_NOT_TRACK" (set to
    * 1, true or yes). Unset or null: the setting decides.
@@ -104,7 +110,8 @@ export function loadConfig(env: Record<string, string | undefined>, packageRoot:
       .filter(Boolean),
     secureCookies: parseBool("SECURE_COOKIES", read("SECURE_COOKIES") ?? "true"),
     publicUrl: parseUrl("PUBLIC_URL", read("PUBLIC_URL")),
-    telemetryUrl: parseUrl("TELEMETRY_URL", read("TELEMETRY_URL")) ?? defaultTelemetryUrl(),
+    telemetryUrl: parseUrl("TELEMETRY_URL", read("TELEMETRY_URL")) ?? siteApiUrl("telemetry"),
+    geoUrl: parseUrl("GEO_URL", read("GEO_URL")) ?? siteApiUrl("geo"),
     telemetryOffBy: telemetryOffBy(read("TELEMETRY"), env.DO_NOT_TRACK),
     ...githubClientId(read("GITHUB_CLIENT_ID")),
     image: parseImage(read("IMAGE")),
@@ -126,9 +133,9 @@ function githubClientId(value: string | undefined): { githubClientId?: string } 
   return { githubClientId: value };
 }
 
-/** api.<site host>/telemetry, the collector of the site repo. */
-function defaultTelemetryUrl(): string {
-  return `https://api.${new URL(siteUrl).host}/telemetry`;
+/** api.<site host>/<path>, the site repo's API: the telemetry collector and the geolocation lookup. */
+function siteApiUrl(path: "telemetry" | "geo"): string {
+  return `https://api.${new URL(siteUrl).host}/${path}`;
 }
 
 function parseUrl(name: string, value: string | undefined): string | null {

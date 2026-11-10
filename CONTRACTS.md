@@ -153,7 +153,10 @@ migration (`0001_features` for 0.2, shipped in 0.2.0-rc.1, so frozen too;
 their reconnect retry; `0003_perf_indexes` for 0.2.0; `0004_join_token_can_build`
 for 0.2.1: `join_tokens.can_build`, default false, so tokens made before
 the update and the direct-insert test helpers keep making nodes that do
-not build; `0008_user_avatars`: `users.avatar` and `user_avatars`), which the panel applies at start, also
+not build; for 0.2.5 `0007_domain_origin`, `0008_user_avatars`
+(`users.avatar` and `user_avatars`) and `0009_node_location`
+(`nodes.location_source` and `nodes.location_looked_up_at`, both null on
+existing rows)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -2113,6 +2116,41 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   handshake; dropped when the node connects from a private address or is
   removed), since an agent cannot make it up (git addresses count it as a
   trusted node address).
+- Node locations (`nodes/location.ts`): a node whose `location` is empty,
+  never saved (`location_source` null) and never answered for
+  (`location_looked_up_at` null) is looked up once by its public IP: the
+  first of `publicIpv4`, `publicIpv6` and an IP-literal `publicAddress`
+  that `blockedReason` calls public (private, reserved and host names never
+  leave the panel). The panel asks `config.geoUrl` (`SEYLO_GEO_URL`,
+  default `https://api.<site host>/geo`, derived like the telemetry URL)
+  `?ip=<address>` with a 5 s timeout, in the background, when a node
+  connects (`onConnection`), at panel start for every such node (also ones
+  that joined before), after `nodes.updateSettings` changes
+  `publicAddress`, and after the setup link seeds the panel node's address.
+  The join never waits for it and nothing in it fails the join. A 200 with
+  a JSON object (at most 4 KB) is stored as "City, Country" or the country
+  alone (`locationLabel`, at most 80 characters, nothing without a country)
+  with `location_source` "detected"; that answer or a 400 sets
+  `location_looked_up_at`, so the node is never asked about again; any
+  other status or body, a timeout or a network error records nothing, and
+  the node is asked again only after the panel restarts (one try per node
+  per process). The write is conditional on the
+  location still being empty and unsaved, so an owner's value always
+  wins. `nodes.updateSettings` with `location` present (any value, the
+  detected one unchanged, or null/empty) sets `location_source` "manual",
+  and a manual location is never filled in again. Nothing is asked while
+  `config.telemetryOffBy` is set (`SEYLO_TELEMETRY=off`, `DO_NOT_TRACK=1`)
+  or after the installer's `--no-telemetry` (`offAtInstall`, until the
+  owner changes telemetry): the lookup sends the node's address to the
+  site API like reports do. The stored switch alone does not stop it,
+  since panels from before 0.2.4 have reports off by default. The
+  `Node` output carries `locationSource` ("detected" | "manual", absent
+  while null); the web app marks a detected location in the Location field
+  (Detected chip, "Geolocation by DB-IP" linking to db-ip.com, as DB-IP's
+  CC BY 4.0 license asks) until the form is saved, and the node list shows
+  it with a tooltip and DB-IP's credit under the list. Panel tests never
+  reach the network: `test/helpers.ts` sets `setGeoFetch` to a refusing
+  fetch.
 - Deployments keep the env they started with (`deployments.env_sealed`,
   sealed JSON): an app's desired spec uses its target deployment's env, so a
   saved but undeployed env change, or a failed deploy, never reaches the

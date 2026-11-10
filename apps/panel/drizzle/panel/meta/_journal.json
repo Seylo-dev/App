@@ -64,6 +64,13 @@
       "when": 1794293004266,
       "tag": "0008_user_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794293582881,
+      "tag": "0009_node_location",
+      "breakpoints": true
     }
   ]
 }

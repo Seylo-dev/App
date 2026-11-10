@@ -34,6 +34,15 @@ export const nodes = sqliteTable(
     name: text("name").notNull(),
     /** Free text the owner sets, for example "Falkenstein, Germany". */
     location: text("location"),
+    /**
+     * Where `location` came from: "detected" when the panel filled it in from the node's public
+     * address (modules/nodes/location.ts), a suggestion until someone saves the field; "manual"
+     * once it was saved, kept or cleared, after which it is never filled in again. Null for rows
+     * from before this column and nodes the panel has not filled in.
+     */
+    locationSource: text("location_source").$type<"detected" | "manual">(),
+    /** When the geolocation API answered for this node: it is asked once per node. */
+    locationLookedUpAt: timestamp("location_looked_up_at"),
     /** Owner-chosen labels for grouping and filters. */
     tags: json<string[]>("tags").notNull().default([]),
     /** Raw 32-byte Ed25519 key; every connection is a signed nonce (handshake.proto). */

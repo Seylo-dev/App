@@ -59,6 +59,7 @@ export function toNode(deps: Deps, row: NodeRow) {
     id: row.id,
     name: row.name,
     location: row.location,
+    ...(row.locationSource ? { locationSource: row.locationSource } : {}),
     tags: row.tags,
     status: row.disabledAt ? ("disabled" as const) : online ? ("online" as const) : ("offline" as const),
     isPanelNode: row.isPanelNode,

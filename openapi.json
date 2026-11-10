@@ -44674,6 +44674,19 @@
                         }
                       ]
                     },
+                    "locationSource": {
+                      "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                      "anyOf": [
+                        {
+                          "const": "detected",
+                          "type": "string"
+                        },
+                        {
+                          "const": "manual",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "tags": {
                       "type": "array",
                       "items": {
@@ -45395,6 +45408,19 @@
                               }
                             ]
                           },
+                          "locationSource": {
+                            "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                            "anyOf": [
+                              {
+                                "const": "detected",
+                                "type": "string"
+                              },
+                              {
+                                "const": "manual",
+                                "type": "string"
+                              }
+                            ]
+                          },
                           "tags": {
                             "type": "array",
                             "items": {
@@ -46073,6 +46099,19 @@
                         }
                       ]
                     },
+                    "locationSource": {
+                      "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                      "anyOf": [
+                        {
+                          "const": "detected",
+                          "type": "string"
+                        },
+                        {
+                          "const": "manual",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "tags": {
                       "type": "array",
                       "items": {
@@ -46739,6 +46778,19 @@
                         }
                       ]
                     },
+                    "locationSource": {
+                      "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                      "anyOf": [
+                        {
+                          "const": "detected",
+                          "type": "string"
+                        },
+                        {
+                          "const": "manual",
+                          "type": "string"
+                        }
+                      ]
+                    },
                     "tags": {
                       "type": "array",
                       "items": {
@@ -47187,6 +47239,19 @@
                         },
                         {
                           "type": "null"
+                        }
+                      ]
+                    },
+                    "locationSource": {
+                      "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                      "anyOf": [
+                        {
+                          "const": "detected",
+                          "type": "string"
+                        },
+                        {
+                          "const": "manual",
+                          "type": "string"
                         }
                       ]
                     },
@@ -47646,6 +47711,19 @@
                         },
                         {
                           "type": "null"
+                        }
+                      ]
+                    },
+                    "locationSource": {
+                      "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                      "anyOf": [
+                        {
+                          "const": "detected",
+                          "type": "string"
+                        },
+                        {
+                          "const": "manual",
+                          "type": "string"
                         }
                       ]
                     },
@@ -48128,6 +48206,7 @@
                     "anyOf": [
                       {
                         "maxLength": 80,
+                        "description": "Any value, the detected one unchanged or null, makes it locationSource \"manual\": the panel never fills it in from the address again.",
                         "type": "string"
                       },
                       {
@@ -48250,6 +48329,19 @@
                         },
                         {
                           "type": "null"
+                        }
+                      ]
+                    },
+                    "locationSource": {
+                      "description": "\"detected\" from the public IP address (Geolocation by DB-IP) until saved; \"manual\" once saved.",
+                      "anyOf": [
+                        {
+                          "const": "detected",
+                          "type": "string"
+                        },
+                        {
+                          "const": "manual",
+                          "type": "string"
                         }
                       ]
                     },
