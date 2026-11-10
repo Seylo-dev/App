@@ -3679,10 +3679,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   columns on a phone (`hideOnMobile`) repeat those facts as one line in a
   kept cell (project People, internal git hosts, git providers, MCP
   clients, Updates). The node list renders its table only when the list
-  is at least 1000 px wide and the drawn table fits it (`node-table.tsx`
+  is at least 1000 px wide and the drawn table fits it (`lib/use-table-fits.ts`
   `useTableFits`: a long address or Update now with a warning needs more,
   and that width is kept), else one stacked row per node with the column
-  names as labels; it never runs past the card. Rows that scroll sideways
+  names as labels; it never runs past the card. The dashboard's service
+  table does the same from 760 px. Rows that scroll sideways
   on a phone (project tabs, service tabs, the settings sections, the node
   sheet's views, template categories) use `scroll-row` with
   `scrollFadeRef`, which the kit's `TabList` and `Segmented` carry
@@ -3730,6 +3731,30 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   still reach hidden projects, and a hidden project whose pages are open
   shows alone at the end of the sidebar list until you leave it
   (`hiddenInSidebar`), so the sidebar still marks where you are.
+- Dashboard projects views (`components/dashboard/`): a Cards | List |
+  Table switch (kit `Segmented`) next to Expand all | Collapse all,
+  remembered per browser (localStorage `<slug>.dashboardView`, every
+  access in try/catch, `lib/dashboard-view.ts`), Cards by default and for
+  any unknown value. Cards (`project-sections.tsx`): each project is a
+  title row on the page ground (tile, name and counts linking to the
+  project, then open, Settings (`?tab=settings`), + with the New service
+  menu for that project (not on the protected Panel project), the "..."
+  menu and the chevron) over a grid of the project page's service cards
+  in their compact size (`components/project/service-card.tsx`
+  `ServiceCard compact`), 1 to 5 columns by the width the sections get (a
+  container query); an empty project shows a dashed Add a service card,
+  a collapsed one only its title row. List is the one-card-per-project
+  layout. Table (`service-table.tsx`): every service of the projects on
+  screen (collapsed ones too, hidden ones with Show hidden and a Hidden
+  chip) with Service, Project, Status, CPU, Memory, Node and Last deploy;
+  unsorted it follows the projects' order, then the names; a header sorts
+  (`service-sort.ts`: CPU, memory and last deploy start with the largest
+  and newest, words from A; the third click goes back; empty values last
+  both ways; `aria-sort` on the header), and the service link covers its
+  row. Expand and collapse are hidden there. Each view has placeholders in
+  its own shape (a card, a row or a table row per service of a project
+  still loading). A line (`bg-border`, the ground's line token) with a gap
+  on both sides separates the projects from Recent deploys and Alerts.
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the
@@ -3788,7 +3813,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   in the Source tab and the watch paths tester, on the demo data),
   `dockerhub.spec.ts` (Docker Hub search, tag picker, prefilled form and
   create, popular images, with `demo/dockerhub.ts`),
-  `template-logos.spec.ts` (app logos on the Templates page from the real
+  `dashboard-views.spec.ts` (the dashboard's Cards, List and Table views on
+  the demo data: compact service cards with status and bars, collapsing,
+  sorting the table by CPU with the mouse and keys, the view kept across
+  reloads, phone width, the divider, screenshots per view in a light and a
+  dark preset), `template-logos.spec.ts` (app logos on the Templates page from the real
   catalog: logo images, letter tiles without one or when one fails to load,
   the popular images row and its dialog, a screenshot per preset),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo

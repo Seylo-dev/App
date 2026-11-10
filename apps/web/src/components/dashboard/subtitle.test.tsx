@@ -64,6 +64,10 @@ test("the dashboard subtitle counts nodes and services once they are in", async 
       [services.list, { projectId: "p1" }, { services: [summary("s1", "api"), summary("s2", "web")] }],
     ]),
   );
-  expect(out).toContain([t("dashboard.nodeCount", { count: 2 }), t("sidebar.serviceCount", { count: 2 })].join(t("format.separator")));
+  // One chip each: nodes, then services.
+  const nodesAt = out.indexOf(`${t("dashboard.nodeCount", { count: 2 })}</a>`);
+  const servicesAt = out.indexOf(`${t("sidebar.serviceCount", { count: 2 })}</span>`);
+  expect(nodesAt).toBeGreaterThan(0);
+  expect(servicesAt).toBeGreaterThan(nodesAt);
   expect(out).not.toContain('data-slot="skeleton"');
 });

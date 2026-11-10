@@ -1,27 +1,18 @@
-// The project's services as cards (Project.dc.html): kind tag, name,
-// status, source line, address, CPU and memory bars, node and last
-// activity, plus the dashed "Add a service" card that opens the New
-// service menu.
+// The project's services as cards (Project.dc.html, service-card.tsx),
+// plus the dashed "Add a service" card that opens the New service menu.
 
-import { nodes, services } from "@seylo/ops";
+import { services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
-import { Chip, StatusDot } from "@seylo/ui/components/chip";
-import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
-import { cn } from "@seylo/ui/lib/utils";
+import { LoadingRegion } from "@seylo/ui/components/skeleton";
 import { IconPlus } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
-import { formatBytes, formatPercent } from "../../lib/format";
-import { kindTag, lastActivity, placementLine, sourceLine, statusDisplay } from "../../lib/service-display";
-import type { NodeRow, ServiceSummary } from "../../lib/types";
-import { KindBadge } from "../new-service/kinds";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { QueryError } from "../query-error";
+import { ServiceCard, ServiceCardSkeleton, useMemoryTotals } from "./service-card";
 
 export function ServicesGrid({ projectId, canCreate }: { projectId: string; canCreate: boolean }) {
   const list = useOp(services.list, { projectId });
-  const nodeList = useOp(nodes.list, {}, { retry: false });
-  const memoryTotals = new Map((nodeList.data?.nodes ?? []).map((node: NodeRow) => [node.id, node.facts?.memoryTotalBytes ?? 0]));
+  const memoryTotals = useMemoryTotals();
 
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
   const rows = list.data?.services.filter((service) => service.parentId === null) ?? [];
@@ -60,112 +51,5 @@ export function ServicesGridSkeleton() {
         <ServiceCardSkeleton key={key} />
       ))}
     </LoadingRegion>
-  );
-}
-
-/** ServiceCard's rows at their real heights. */
-function ServiceCardSkeleton() {
-  return (
-    <div aria-hidden="true" className="flex min-w-0 flex-col gap-3.5 overflow-hidden rounded-card bg-card p-[18px] shadow-card">
-      <div className="flex items-center gap-2.5">
-        <Skeleton className="h-[26px] w-[34px] shrink-0 rounded-chip" />
-        <SkeletonText className="w-20 text-[15px]" />
-        <Skeleton className="ml-auto h-[23px] w-[74px] rounded-chip" />
-      </div>
-      <div className="flex flex-col gap-1">
-        <SkeletonText className="w-48 text-[12.5px]" />
-        <SkeletonText className="w-36 text-xs leading-4" />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {[t("dashboard.cpu"), t("dashboard.memory")].map((label) => (
-          <div key={label} className="flex flex-col gap-1.5">
-            <span className="flex justify-between text-[11.5px] text-muted-foreground">
-              <span>{label}</span>
-              <SkeletonText className="w-10" />
-            </span>
-            <Skeleton className="h-[5px] rounded-[3px]" />
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center gap-2 border-t border-divider pt-3 text-xs">
-        <Skeleton className="h-5 w-16 rounded-chip" />
-        <SkeletonText className="ml-auto w-20 leading-4" />
-      </div>
-    </div>
-  );
-}
-
-function ServiceCard({ service, memoryTotal }: { service: ServiceSummary; memoryTotal: number }) {
-  const tag = kindTag(service);
-  const status = statusDisplay(service.status);
-  const cpu = service.cpuPercent;
-  const memory = service.memoryBytes;
-  const memoryOf = service.memoryLimitBytes ?? memoryTotal;
-  return (
-    <Link
-      to="/p/$projectId/s/$serviceId"
-      params={{ projectId: service.projectId, serviceId: service.id }}
-      className="flex min-w-0 flex-col gap-3.5 overflow-hidden rounded-card bg-card p-[18px] text-foreground shadow-card transition-shadow hover:text-foreground hover:shadow-popover"
-    >
-      <div className="flex flex-wrap items-center gap-2.5">
-        <KindBadge tag={tag.label} tone={tag.tone} className="w-[34px]" />
-        <span className="text-[15px] font-semibold">{service.name}</span>
-        <Chip tone={status.tone} className="ml-auto text-[11.5px]">
-          <StatusDot status={status.dot} pulse={status.dot === "busy"} />
-          {status.label}
-        </Chip>
-      </div>
-      <div className="flex flex-col gap-1 text-[12.5px] text-ink-strong">
-        <span className="truncate">{sourceLine(service)}</span>
-        <CardAddress service={service} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <UsageBar label={t("dashboard.cpu")} value={cpu === null ? "-" : formatPercent(cpu)} percent={cpu ?? 0} />
-        <UsageBar
-          label={t("dashboard.memory")}
-          value={memory === null ? "-" : formatBytes(memory)}
-          percent={memory !== null && memoryOf > 0 ? (memory / memoryOf) * 100 : 0}
-        />
-      </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-divider pt-3 text-xs text-muted-foreground">
-        <Chip tone="track" className="px-[7px] py-0.5">
-          {placementLine(service)}
-        </Chip>
-        <span className="ml-auto">{lastActivity(service)}</span>
-      </div>
-    </Link>
-  );
-}
-
-/**
- * The card's address line, as the service header shows it: a public domain
- * in link blue, an internal name:port in muted mono, and plain muted words
- * when the service has no port. The whole card is one link, so none of
- * these is a link of its own.
- */
-function CardAddress({ service }: { service: ServiceSummary }) {
-  const { address } = service;
-  if (address === null)
-    return (
-      <span className="truncate text-xs text-muted-foreground">
-        {t(service.kind === "app" || service.kind === "cron" ? "service.header.noPorts" : "project.noAddress")}
-      </span>
-    );
-  // The panel writes "<name>:<port>" when the service has a port but no domain.
-  const internal = address.startsWith(`${service.name}:`) && /^\d+$/.test(address.slice(service.name.length + 1));
-  return <span className={cn("truncate font-mono text-xs", internal ? "text-muted-foreground" : "text-link")}>{address}</span>;
-}
-
-function UsageBar({ label, value, percent }: { label: string; value: string; percent: number }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="flex justify-between text-[11.5px] text-muted-foreground">
-        <span>{label}</span>
-        <span className="font-medium text-foreground">{value}</span>
-      </span>
-      <span className="h-[5px] rounded-[3px] bg-muted" aria-hidden="true">
-        <span className="block h-[5px] rounded-[3px] bg-primary" style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
-      </span>
-    </div>
   );
 }
