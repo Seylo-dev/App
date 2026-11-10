@@ -8,7 +8,7 @@ export default {
   schedule: "Scheduled cleanup",
   scheduleHint: "The node cleans up by itself, also while the panel is down. Only what this panel created is ever removed.",
   enabled: "Clean up on its own",
-  enabledHint: "Off until you turn it on.",
+  enabledHint: "On by default: daily at 04:00 node time and when a disk passes 80%, as set below.",
   onSchedule: "On a schedule",
   cron: "Cron expression",
   cronHint: "Five fields: minute, hour, day, month, weekday. Times are in the node's time zone ({zone}).",

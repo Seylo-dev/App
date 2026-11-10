@@ -62,30 +62,39 @@ function report(agent: FakeAgent, run: Record<string, unknown>) {
 }
 
 describe("cleanup schedule", () => {
-  test("off by default, then set: the agent gets it, with the node's time zone and the next run", async () => {
+  test("on by default: a node that never saved a schedule runs the default one; saved off, it stops", async () => {
+    // Since 0.2.5 (before: off until turned on).
     const agent = await join();
     const before = await ok(callOp(panel, cleanup.getSchedule, { nodeId: agent.nodeId }, { cookie: owner.cookie }));
     expect(before).toMatchObject({
-      schedule: { enabled: false, cron: "0 4 * * *", diskPercent: 80, kinds: { unusedVolumes: false } },
+      schedule: { enabled: true, cron: "0 4 * * *", diskPercent: 80, kinds: { unusedVolumes: false } },
       timeZone: "Europe/Berlin",
-      nextRunAt: null,
       supported: true,
     });
-    const syncs = agent.requests("SyncDesired").length;
-    const saved = await ok(callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: daily }, { cookie: owner.cookie }));
     // 04:00 in Berlin is 02:00 or 03:00 UTC.
-    expect(saved.nextRunAt).toMatch(/T0[23]:00:00\.000Z$/);
+    expect(before.nextRunAt).toMatch(/T0[23]:00:00\.000Z$/);
     await panel.deps.agents.desired.settled();
-    const sent = (await agent.waitFor("SyncDesired", syncs + 1)).at(-1).state.settings.cleanup;
-    expect(sent).toMatchObject({ enabled: true, cron: "0 4 * * *", diskPercent: 80, images: true, unusedVolumes: false });
+    const first = (await agent.waitFor("SyncDesired", 1)).at(-1).state.settings.cleanup;
+    expect(first).toMatchObject({ enabled: true, cron: "0 4 * * *", diskPercent: 80, images: true, unusedVolumes: false });
 
-    // Turned off: the setting is not sent at all.
+    // Turned off: the setting is not sent at all, and it stays off.
+    const syncs = agent.requests("SyncDesired").length;
     await ok(
       callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: { ...daily, enabled: false } }, { cookie: owner.cookie }),
     );
     await panel.deps.agents.desired.settled();
-    const off = (await agent.waitFor("SyncDesired", syncs + 2)).at(-1).state.settings;
+    const off = (await agent.waitFor("SyncDesired", syncs + 1)).at(-1).state.settings;
     expect(off.cleanup).toBeUndefined();
+    expect((await ok(callOp(panel, cleanup.getSchedule, { nodeId: agent.nodeId }, { cookie: owner.cookie }))).schedule.enabled).toBe(false);
+
+    // Saved on again with another time: the agent gets it.
+    const saved = await ok(
+      callOp(panel, cleanup.setSchedule, { nodeId: agent.nodeId, schedule: { ...daily, cron: "30 3 * * *" } }, { cookie: owner.cookie }),
+    );
+    expect(saved.nextRunAt).toMatch(/T0[12]:30:00\.000Z$/);
+    await panel.deps.agents.desired.settled();
+    const on = (await agent.waitFor("SyncDesired", syncs + 2)).at(-1).state.settings.cleanup;
+    expect(on).toMatchObject({ enabled: true, cron: "30 3 * * *" });
 
     const audits = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "cleanup.setSchedule")).all();
     expect(audits).toHaveLength(2);

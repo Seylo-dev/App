@@ -11,9 +11,13 @@ import { isTimeZone, nextCronRun, nodeCronProblem, normalizeCronSchedule } from 
 
 type Schedule = OpOutput<typeof cleanup.getSchedule>["schedule"];
 
-/** Off until turned on: daily at 04:00 node time and above 80% disk, without volumes. */
+/**
+ * On unless turned off (since 0.2.5; before, off until turned on): daily at
+ * 04:00 node time and above 80% disk, without volumes. A node that never had
+ * a schedule saved follows this; one saved off stays off.
+ */
 export const defaultSchedule: CleanupScheduleJson = {
-  enabled: false,
+  enabled: true,
   cron: "0 4 * * *",
   diskPercent: 80,
   images: true,

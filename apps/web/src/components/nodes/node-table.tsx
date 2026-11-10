@@ -90,6 +90,8 @@ interface RowProps {
   canBuild: { pending: boolean; set: (canBuild: boolean) => void };
   gamesFirst: { pending: boolean; set: (enabled: boolean) => void };
   update: { pending: boolean; run: () => void };
+  /** Some node runs Wings: the table has the "Game servers first" column (only Wings nodes have the switch). */
+  wingsColumn: boolean;
 }
 
 export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView) => void }) {
@@ -107,12 +109,15 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
 
   if (list.isError) return <QueryError error={list.error} onRetry={() => void list.refetch()} />;
 
+  // "Game servers first" only means something next to Wings: the column shows once some node runs it.
+  const wingsColumn = list.data?.nodes.some((n) => n.wings.detected) ?? false;
   const rowProps = (node: NodeRow): RowProps => ({
     node,
     onOpen,
     canBuild: { pending: setCanBuild.isPending, set: (canBuild) => setCanBuild.mutate({ nodeId: node.id, canBuild }) },
     gamesFirst: { pending: setGamesFirst.isPending, set: (enabled) => setGamesFirst.mutate({ nodeId: node.id, enabled }) },
     update: { pending: updateNode.isPending, run: () => updateNode.mutate({ nodeId: node.id }) },
+    wingsColumn,
   });
   const placeholders = list.isPending ? Math.max(1, nodeCount) : 0;
   const empty = list.data?.nodes.length === 0 && (
@@ -136,7 +141,7 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
               <Th>{t("nodes.columns.usage")}</Th>
               <Th>{t("nodes.columns.version")}</Th>
               <Th>{t("nodes.columns.canBuild")}</Th>
-              <Th>{t("nodes.columns.gamesFirst")}</Th>
+              {wingsColumn && <Th>{t("nodes.columns.gamesFirst")}</Th>}
               <Th last>
                 <span className="sr-only">{t("nodes.columns.actions")}</span>
               </Th>
@@ -149,7 +154,7 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
             ))}
             {empty && (
               <tr>
-                <td colSpan={7}>{empty}</td>
+                <td colSpan={wingsColumn ? 7 : 6}>{empty}</td>
               </tr>
             )}
             {list.data?.nodes.map((node) => (
@@ -192,9 +197,11 @@ function TableRow(props: RowProps) {
       <Td>
         <CanBuild {...props} />
       </Td>
-      <Td className="text-[12.5px] leading-[18px] whitespace-nowrap text-muted-foreground">
-        {node.wings.detected ? <GamesFirst {...props} /> : t("nodes.noWings")}
-      </Td>
+      {props.wingsColumn && (
+        <Td className="text-[12.5px] leading-[18px] whitespace-nowrap text-muted-foreground">
+          {node.wings.detected ? <GamesFirst {...props} /> : t("nodes.noWings")}
+        </Td>
+      )}
       <Td last className="whitespace-nowrap">
         <Actions {...props} className="justify-end" />
       </Td>
@@ -408,9 +415,6 @@ function NodeRowSkeleton() {
       </Td>
       <Td className="w-[98px]">
         <SkeletonText className="w-12 text-[12.5px] leading-[18px]" />
-      </Td>
-      <Td className="w-[131px]">
-        <SkeletonText className="w-16 text-[12.5px] leading-[18px]" />
       </Td>
       <Td last className="w-[190px] text-right whitespace-nowrap">
         <div className="flex justify-end gap-1.5">
