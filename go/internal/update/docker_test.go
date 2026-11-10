@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -47,14 +48,17 @@ func TestParsers(t *testing.T) {
 	}
 }
 
-// scripted answers commands from a table and records them.
+// scripted answers commands from a table and records them. "!fail" fails
+// the command; "!block" waits until its context ends (a slow apt-get).
 type scripted struct {
+	mu      sync.Mutex
 	answers map[string]string
 	calls   []string
 }
 
-func (s *scripted) run(_ context.Context, w io.Writer, name string, args ...string) error {
+func (s *scripted) run(ctx context.Context, w io.Writer, name string, args ...string) error {
 	cmd := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	s.mu.Lock()
 	s.calls = append(s.calls, cmd)
 	best := ""
 	for prefix := range s.answers {
@@ -62,14 +66,44 @@ func (s *scripted) run(_ context.Context, w io.Writer, name string, args ...stri
 			best = prefix
 		}
 	}
-	if best == "" {
+	out := s.answers[best]
+	s.mu.Unlock()
+	switch {
+	case best == "":
 		return fmt.Errorf("unexpected command %q", cmd)
+	case out == "!fail":
+		return fmt.Errorf("%s: exit status 1", cmd)
+	case out == "!block":
+		<-ctx.Done()
+		return fmt.Errorf("%s: %w", cmd, ctx.Err())
 	}
-	if out := s.answers[best]; out != "!fail" {
-		_, _ = io.WriteString(w, out)
-		return nil
+	_, _ = io.WriteString(w, out)
+	return nil
+}
+
+// set changes one answer.
+func (s *scripted) set(prefix, out string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.answers[prefix] = out
+}
+
+// ran returns the commands so far.
+func (s *scripted) ran() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.calls...)
+}
+
+// count is how many commands so far start with prefix.
+func (s *scripted) count(prefix string) int {
+	n := 0
+	for _, c := range s.ran() {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
 	}
-	return fmt.Errorf("%s: exit status 1", cmd)
+	return n
 }
 
 func TestDockerUpdateApt(t *testing.T) {
@@ -98,7 +132,7 @@ func TestDockerUpdateApt(t *testing.T) {
 	if res, _ := d.Update(context.Background(), &agentv1.UpdateDockerRequest{DryRun: true}); res.GetWarning() != "" {
 		t.Fatalf("warning with live-restore on: %v", res)
 	}
-	for _, c := range sc.calls {
+	for _, c := range sc.ran() {
 		if strings.HasPrefix(c, "env ") {
 			t.Fatal("dry run upgraded")
 		}
@@ -112,7 +146,7 @@ func TestDockerUpdateApt(t *testing.T) {
 		t.Fatalf("result = %v", r)
 	}
 	var upgrade string
-	for _, c := range sc.calls {
+	for _, c := range sc.ran() {
 		if strings.HasPrefix(c, "env ") {
 			upgrade = c
 		}

@@ -20,7 +20,7 @@ import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@seylo/ui/components/sheet";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
-import { IconFileText, IconPower, IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { IconFileText, IconPower, IconSparkles } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../i18n/t";
@@ -30,6 +30,7 @@ import { useLiveTopic } from "../../lib/live";
 import type { NodeDetail } from "../../lib/types";
 import { QueryError } from "../query-error";
 import { AgentLogsDialog } from "./agent-logs";
+import { DockerUpdateButton, DockerVersion } from "./docker-version";
 import { NodeCleanup } from "./node-cleanup";
 import { NodeGraphs } from "./node-graphs";
 import { NodeHealth } from "./node-health";
@@ -188,14 +189,11 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
           <IconSparkles size={15} aria-hidden="true" />
           {node.updateAvailable ? t("nodes.updateNow") : t("nodes.agentUpToDate")}
         </Button>
-        <Button
-          size="sm"
-          disabled={!online || dockerCheck.isPending}
+        <DockerUpdateButton
+          node={node}
+          pending={dockerCheck.isPending}
           onClick={() => dockerCheck.mutate({ nodeId: node.id, dryRun: true }, { onSuccess: () => setConfirm("docker") })}
-        >
-          <IconRefresh size={15} aria-hidden="true" />
-          {t("nodes.updateDocker")}
-        </Button>
+        />
         <Button size="sm" disabled={!online} onClick={() => setConfirm("reboot")}>
           <IconPower size={15} aria-hidden="true" />
           {t("nodes.reboot")}
@@ -223,7 +221,12 @@ function Overview({ node, onClose }: { node: NodeDetail; onClose: () => void }) 
                 label: t("nodes.facts.disk"),
                 value: t("nodes.facts.diskFree", { free: formatBytes(facts.diskFreeBytes), total: formatBytes(facts.diskTotalBytes) }),
               },
-              { label: t("nodes.facts.docker"), value: facts.dockerVersion, mono: true },
+              {
+                key: "docker",
+                label: t("nodes.facts.docker"),
+                value: <DockerVersion version={facts.dockerVersion} docker={node.docker} />,
+                mono: true,
+              },
               { label: t("nodes.facts.cgroup"), value: `v${facts.cgroupVersion}` },
               // "v0.9.4", as the node list and the sidebar write it.
               { label: t("nodes.facts.agent"), value: node.agentVersion ? `v${node.agentVersion.replace(/^v/, "")}` : "-", mono: true },

@@ -66,6 +66,9 @@ export default {
   dockerCurrent: "Docker {version} is the newest version the package manager offers. Run the update anyway?",
   dockerStarted: "Docker update started on {name}.",
   dockerWarning: "Warning: {warning}",
+  // The node agent's own daily look for a newer Docker Engine (docker-version.tsx).
+  dockerAvailable: "Docker {latest} is available. Update it from this node's actions.",
+  dockerUpToDate: "Docker is up to date ({version}, checked {ago})",
   updates: {
     title: "Updates",
     autoUpdate: "Auto-update the panel and all nodes",

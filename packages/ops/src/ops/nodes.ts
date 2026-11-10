@@ -52,6 +52,30 @@ export const NodeFacts = Type.Object({
   bootTime: Nullable(Timestamp),
 });
 
+/**
+ * The node's newest look for a newer Docker Engine (added in 0.2.5): the
+ * agent's own check, about daily, or what nodes.updateDocker found. Only on
+ * nodes whose agent advertises node.docker-check.v1 and has reported once.
+ */
+export const NodeDocker = Type.Object({
+  version: Type.String({ description: 'The Docker Engine version the node runs, for example "29.9.3".' }),
+  latest: Nullable(
+    Type.String({ description: "The newest version the node's package manager offers; null when the agent cannot update Docker there." }),
+  ),
+  updateAvailable: Nullable(
+    Type.Boolean({
+      description:
+        "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+    }),
+  ),
+  checkedAt: Timestamp,
+  reason: Nullable(
+    Type.String({
+      description: "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+    }),
+  ),
+});
+
 export const WingsInfo = Type.Object({
   detected: Type.Boolean({ description: "Pelican Wings runs on this node; the games-first switch is only shown then." }),
   version: Nullable(Type.String()),
@@ -129,6 +153,8 @@ export const Node = Type.Object({
   wings: WingsInfo,
   gamesFirstCpu: Type.Boolean(),
   facts: Nullable(NodeFacts),
+  /** Whether a newer Docker Engine is there; left out while unknown (older agents, no check yet). */
+  docker: Type.Optional(NodeDocker),
   usage: Nullable(NodeUsage),
   /** Services with a placement on this node. */
   serviceCount: Type.Integer({ minimum: 0 }),
@@ -418,7 +444,7 @@ export const updateDocker = defineOp({
   kind: "mutation",
   summary: "Update Docker on a node",
   description:
-    "Upgrades Docker Engine with the distribution's package manager. Running containers restart with the daemon. With dryRun it only reports the versions.",
+    "Upgrades Docker Engine with the distribution's package manager. Running containers restart with the daemon. With dryRun it only reports the versions. Either way what it found becomes the node's docker (whether a newer version is there) on agents that check by themselves.",
   input: Type.Object({ nodeId: Id, dryRun: Type.Optional(Type.Boolean({ default: false })) }),
   output: Type.Object({
     fromVersion: Type.String(),

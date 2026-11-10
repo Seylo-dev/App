@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -44,6 +45,15 @@ type DockerOptions struct {
 	// LiveRestore reports whether dockerd keeps containers running while
 	// it restarts; nil or an error means unknown (no warning).
 	LiveRestore func(ctx context.Context) (bool, error)
+	// Checked receives every finding about the installed and the newest
+	// Docker Engine: RunChecks' own checks, dry runs, refusals because
+	// Docker did not come from a package manager, and finished upgrades.
+	// The agent puts it in NodeFacts.docker_update.
+	Checked func(*agentv1.DockerUpdateInfo)
+	// After is the timer RunChecks sleeps on; default time.After.
+	After func(time.Duration) <-chan time.Time
+	// Schedule is RunChecks' pace; zero fields take the defaults.
+	Schedule DockerCheckSchedule
 }
 
 // liveRestoreWarning is UpdateDockerResponse.warning when live-restore is
@@ -52,11 +62,16 @@ type DockerOptions struct {
 const liveRestoreWarning = "Docker's live-restore is off: every service and the panel on this node stop while Docker restarts, " +
 	"until the agent starts them again. Turn it on first: add \"live-restore\": true to /etc/docker/daemon.json and run `systemctl reload docker` (restarts nothing)."
 
-// DockerUpdater upgrades Docker Engine with the package manager.
+// DockerUpdater upgrades Docker Engine with the package manager, and looks
+// for a newer one by itself (RunChecks, docker_check.go).
 type DockerUpdater struct {
 	opts DockerOptions
 	lock *Lock
 	bg   background
+	// lastChecked is when the newest finding went to Checked; RunChecks
+	// waits a day from it. Guarded by checkMu.
+	checkMu     sync.Mutex
+	lastChecked time.Time
 }
 
 // NewDockerUpdater fills defaults.
@@ -76,6 +91,13 @@ func NewDockerUpdater(opts DockerOptions, lock *Lock) *DockerUpdater {
 	if opts.LookPath == nil {
 		opts.LookPath = lookPath
 	}
+	if opts.Checked == nil {
+		opts.Checked = func(*agentv1.DockerUpdateInfo) {}
+	}
+	if opts.After == nil {
+		opts.After = time.After
+	}
+	opts.Schedule = opts.Schedule.withDefaults()
 	if lock == nil {
 		lock = &Lock{}
 	}
@@ -97,12 +119,14 @@ type dockerPlan struct {
 
 // Update reports the installed and the available version and, unless
 // dryRun, upgrades in the background and reports a durable UpdateResult.
+// What it finds is also the newest check (Checked).
 func (d *DockerUpdater) Update(ctx context.Context, req *agentv1.UpdateDockerRequest) (*agentv1.UpdateDockerResponse, error) {
 	release, ok := d.lock.TryAcquire(holdDockerUpdate)
 	if !ok {
 		return nil, busy(d.lock.Holder())
 	}
 	plan, err := d.plan(ctx)
+	d.record(plan, err)
 	if err != nil {
 		release()
 		return nil, err
@@ -132,10 +156,51 @@ func (d *DockerUpdater) Update(ctx context.Context, req *agentv1.UpdateDockerReq
 		defer release()
 		ctx := d.bg.get()
 		err := d.upgrade(ctx, plan)
+		if err == nil {
+			// The candidate is what is installed now.
+			upgraded := plan
+			upgraded.from = plan.to
+			d.record(upgraded, nil)
+		}
 		d.report(ctx, req.GetUpdateId(), plan, started, err == nil, err)
 	}()
 	return res, nil
 }
+
+// record hands what a plan found to Checked and returns it: the versions,
+// or why the agent cannot update Docker here. Other errors (a failed
+// apt-get update, a cancelled call) teach nothing: nil, and the last
+// finding stays.
+func (d *DockerUpdater) record(p dockerPlan, err error) *agentv1.DockerUpdateInfo {
+	now := d.opts.Now()
+	info := &agentv1.DockerUpdateInfo{PackageManager: string(p.pm), CheckedAt: timestamppb.New(now)}
+	var refused *notPackagedError
+	switch {
+	case errors.As(err, &refused):
+		info.Reason = refused.reason
+	case err != nil:
+		return nil
+	default:
+		info.Installed, info.Candidate, info.Updatable = p.from, p.to, true
+	}
+	d.checkMu.Lock()
+	d.lastChecked = now
+	d.checkMu.Unlock()
+	d.opts.Checked(info)
+	return info
+}
+
+// notPackagedError is a plan's refusal because the agent cannot update
+// Docker Engine here at all: no package manager it drives, or Docker did
+// not come from it (static binaries, snap). It is ErrRejected
+// (INVALID_ARGUMENT) for UpdateDocker; checks report it with reason.
+type notPackagedError struct {
+	msg    string
+	reason string
+}
+
+func (e *notPackagedError) Error() string { return ErrRejected.Error() + ": " + e.msg }
+func (e *notPackagedError) Unwrap() error { return ErrRejected }
 
 func (d *DockerUpdater) report(ctx context.Context, updateID string, plan dockerPlan, started time.Time, ok bool, cause error) {
 	r := &agentv1.UpdateResult{
@@ -172,7 +237,10 @@ func (d *DockerUpdater) plan(ctx context.Context) (dockerPlan, error) {
 	case d.opts.LookPath("yum"):
 		p.pm = pmYum
 	default:
-		return p, fmt.Errorf("%w: no supported package manager (apt, dnf or yum) found; update Docker by hand", ErrRejected)
+		return p, &notPackagedError{
+			msg:    "no supported package manager (apt, dnf or yum) found; update Docker by hand",
+			reason: "This node has no package manager the agent updates Docker with (apt, dnf or yum). Update Docker by hand.",
+		}
 	}
 	for _, pkg := range dockerPackages[p.pm] {
 		installed, held := d.installed(ctx, p.pm, pkg)
@@ -188,7 +256,11 @@ func (d *DockerUpdater) plan(ctx context.Context) (dockerPlan, error) {
 		engine = "docker.io"
 	}
 	if !containsString(p.packages, engine) {
-		return p, fmt.Errorf("%w: Docker Engine was not installed with the package manager; update it the way it was installed", ErrRejected)
+		return p, &notPackagedError{
+			msg: "Docker Engine was not installed with the package manager; update it the way it was installed",
+			reason: fmt.Sprintf("Docker Engine was not installed with %s (static binaries or snap, for example), so the agent cannot update it. "+
+				"Update it the way it was installed.", p.pm),
+		}
 	}
 	switch p.pm {
 	case pmApt:

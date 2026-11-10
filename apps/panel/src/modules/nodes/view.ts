@@ -1,5 +1,6 @@
 // Builds the Node and NodeDetail outputs from the nodes table plus the
-// in-memory node state (online, facts, usage, services).
+// in-memory node state (online, facts, usage, services) and the newest
+// Docker version check (docker-check.ts).
 
 import { fromJson } from "@bufbuild/protobuf";
 import { timestampDate } from "@bufbuild/protobuf/wkt";
@@ -12,6 +13,7 @@ import type { Deps } from "../../deps";
 import { usageOf } from "../metrics/index";
 import { metricsFor } from "../metrics/ingest";
 import { latestRelease } from "../updates/release-state";
+import { dockerView } from "./docker-check";
 
 type NodeRow = typeof nodes.$inferSelect;
 type CheckStatus = "pass" | "warn" | "fail" | "skipped";
@@ -55,6 +57,7 @@ export function toNode(deps: Deps, row: NodeRow) {
   const serviceCount = deps.db.select({ n: count() }).from(servicePlacements).where(eq(servicePlacements.nodeId, row.id)).get()?.n ?? 0;
   const latest = latestRelease(deps.db);
   const version = facts?.agentVersion || row.agentVersion;
+  const docker = dockerView(row.dockerUpdate, facts);
   return {
     id: row.id,
     name: row.name,
@@ -93,6 +96,8 @@ export function toNode(deps: Deps, row: NodeRow) {
           bootTime: facts.bootTime ? timestampDate(facts.bootTime).toISOString() : null,
         }
       : null,
+    // Left out while nothing is known (docker-check.ts).
+    ...(docker ? { docker } : {}),
     usage: online ? usageOf(metricsFor(deps).latestNode(row.id)) : null,
     serviceCount,
     health: { checkedAt: iso(row.healthCheckedAt), worst: worstStatus(row.healthReport) },

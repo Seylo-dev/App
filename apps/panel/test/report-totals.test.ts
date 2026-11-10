@@ -177,7 +177,7 @@ describe("report_totals", () => {
       fresh.$client.run("PRAGMA foreign_keys = ON");
       migrate(fresh, { migrationsFolder: before });
       const old = fresh as unknown as PanelDb;
-      // In plain SQL: the nodes table has columns since that rc.2 does not have (0009_node_location).
+      // In plain SQL: the nodes table has columns since that rc.2 does not have (0009_node_location, 0010_docker_update).
       const node = { id: "node-from-rc2" };
       const now = Date.now();
       old.run(

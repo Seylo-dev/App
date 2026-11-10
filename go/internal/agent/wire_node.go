@@ -119,6 +119,15 @@ func provideNode(d *Deps) error {
 					return false, err
 				}
 				return info.LiveRestoreEnabled, nil
+			},
+			// What the Docker version check, dry runs and upgrades found
+			// goes to the panel in the node facts.
+			Checked: func(info *agentv1.DockerUpdateInfo) {
+				if d.Facts == nil {
+					return
+				}
+				found := proto.Clone(info).(*agentv1.DockerUpdateInfo)
+				d.Facts.Update(func(f *agentv1.NodeFacts) { f.DockerUpdate = found })
 			}}, lock),
 		System: update.NewSystemdSystem(),
 		Lock:   lock,
@@ -130,7 +139,8 @@ func provideNode(d *Deps) error {
 // wireNode: register UpdateAgent, UpdatePanel, UpdateDocker, Reboot,
 // RunHealthCheck and Troubleshoot; finish or undo updates interrupted by a
 // restart; after each connect confirm a pending agent update and check for
-// a newer release; run the health checks hourly for alerts.
+// a newer release; run the health checks hourly for alerts; look for a
+// newer Docker Engine daily (node.docker-check.v1).
 func wireNode(reg *Registry, d *Deps) error {
 	svc, ok := d.Updater.(*update.Service)
 	if !ok {
@@ -138,6 +148,8 @@ func wireNode(reg *Registry, d *Deps) error {
 	}
 	checks := &healthMemory{last: map[string]agentv1.NodeCheckStatus{}}
 	registerHostShell(reg, d)
+	reg.Advertise(update.DockerCheckCapability)
+	d.Components.Add("docker-check", svc.Docker.RunChecks)
 
 	rpc.HandleUnary(reg, "UpdateAgent", func(ctx context.Context, req *agentv1.UpdateAgentRequest) (*agentv1.UpdateAgentResponse, error) {
 		if err := d.Updater.UpdateAgent(ctx, req); err != nil {

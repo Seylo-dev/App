@@ -88,7 +88,12 @@ type NodeFacts struct {
 	// The tailscaled on this node's host, as the agent reads it over its
 	// LocalAPI socket. Unset when there is no tailscaled socket, and from
 	// agents before 0.2.1. added in 0.2.1 (tailnet)
-	Tailscale     *TailscaleInfo `protobuf:"bytes,23,opt,name=tailscale,proto3" json:"tailscale,omitempty"`
+	Tailscale *TailscaleInfo `protobuf:"bytes,23,opt,name=tailscale,proto3" json:"tailscale,omitempty"`
+	// The agent's own check for a newer Docker Engine (DockerUpdateInfo).
+	// Agents that make it advertise node.docker-check.v1. Unset until the
+	// first check after an agent start, and from older agents: the panel then
+	// shows no update information. added in 0.2.5 (docker check)
+	DockerUpdate  *DockerUpdateInfo `protobuf:"bytes,24,opt,name=docker_update,json=dockerUpdate,proto3" json:"docker_update,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -284,6 +289,114 @@ func (x *NodeFacts) GetTailscale() *TailscaleInfo {
 	return nil
 }
 
+func (x *NodeFacts) GetDockerUpdate() *DockerUpdateInfo {
+	if x != nil {
+		return x.DockerUpdate
+	}
+	return nil
+}
+
+// DockerUpdateInfo is what the agent found when it last looked for a newer
+// Docker Engine: the plan of UpdateDocker's dry run (apt refreshes its
+// package lists first), upgrading nothing. It checks shortly after it
+// starts, then at most once a day, and never while an update holds the
+// node's update lock; an UpdateDocker dry run or upgrade also refreshes it.
+// added in 0.2.5 (docker check)
+type DockerUpdateInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Upstream version of the installed Docker Engine package, for example
+	// "29.9.3". Empty when updatable is false.
+	Installed string `protobuf:"bytes,1,opt,name=installed,proto3" json:"installed,omitempty"`
+	// The newest version the package manager offers; equal to installed when
+	// nothing newer is there. Empty when updatable is false.
+	Candidate string `protobuf:"bytes,2,opt,name=candidate,proto3" json:"candidate,omitempty"`
+	// "apt", "dnf" or "yum"; empty when there is no package manager the
+	// agent drives.
+	PackageManager string `protobuf:"bytes,3,opt,name=package_manager,json=packageManager,proto3" json:"package_manager,omitempty"`
+	// When the check ran, on the agent's clock.
+	CheckedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`
+	// UpdateDocker can upgrade Docker here. False when Docker Engine did not
+	// come from a package manager the agent drives (static binaries, snap) or
+	// there is none; reason says why.
+	Updatable bool `protobuf:"varint,5,opt,name=updatable,proto3" json:"updatable,omitempty"`
+	// Why updatable is false, a sentence for people; empty otherwise.
+	Reason        string `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DockerUpdateInfo) Reset() {
+	*x = DockerUpdateInfo{}
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DockerUpdateInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DockerUpdateInfo) ProtoMessage() {}
+
+func (x *DockerUpdateInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DockerUpdateInfo.ProtoReflect.Descriptor instead.
+func (*DockerUpdateInfo) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DockerUpdateInfo) GetInstalled() string {
+	if x != nil {
+		return x.Installed
+	}
+	return ""
+}
+
+func (x *DockerUpdateInfo) GetCandidate() string {
+	if x != nil {
+		return x.Candidate
+	}
+	return ""
+}
+
+func (x *DockerUpdateInfo) GetPackageManager() string {
+	if x != nil {
+		return x.PackageManager
+	}
+	return ""
+}
+
+func (x *DockerUpdateInfo) GetCheckedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CheckedAt
+	}
+	return nil
+}
+
+func (x *DockerUpdateInfo) GetUpdatable() bool {
+	if x != nil {
+		return x.Updatable
+	}
+	return false
+}
+
+func (x *DockerUpdateInfo) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 // BuildxInfo is the result of `docker buildx version` on the node.
 // added in 0.2.1 (build default)
 type BuildxInfo struct {
@@ -299,7 +412,7 @@ type BuildxInfo struct {
 
 func (x *BuildxInfo) Reset() {
 	*x = BuildxInfo{}
-	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -311,7 +424,7 @@ func (x *BuildxInfo) String() string {
 func (*BuildxInfo) ProtoMessage() {}
 
 func (x *BuildxInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_node_proto_msgTypes[1]
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -324,7 +437,7 @@ func (x *BuildxInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildxInfo.ProtoReflect.Descriptor instead.
 func (*BuildxInfo) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{1}
+	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *BuildxInfo) GetInstalled() bool {
@@ -361,7 +474,7 @@ type WingsInfo struct {
 
 func (x *WingsInfo) Reset() {
 	*x = WingsInfo{}
-	mi := &file_seylo_agent_v1_node_proto_msgTypes[2]
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -373,7 +486,7 @@ func (x *WingsInfo) String() string {
 func (*WingsInfo) ProtoMessage() {}
 
 func (x *WingsInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_node_proto_msgTypes[2]
+	mi := &file_seylo_agent_v1_node_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -386,7 +499,7 @@ func (x *WingsInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WingsInfo.ProtoReflect.Descriptor instead.
 func (*WingsInfo) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{2}
+	return file_seylo_agent_v1_node_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *WingsInfo) GetVersion() string {
@@ -421,7 +534,7 @@ var File_seylo_agent_v1_node_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cseylo/agent/v1/tailnet.proto\"\xf0\x06\n" +
+	"\x19seylo/agent/v1/node.proto\x12\x0eseylo.agent.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cseylo/agent/v1/tailnet.proto\"\xb7\a\n" +
 	"\tNodeFacts\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x16\n" +
@@ -448,7 +561,16 @@ const file_seylo_agent_v1_node_proto_rawDesc = "" +
 	"\ttime_zone\x18\x14 \x01(\tR\btimeZone\x12/\n" +
 	"\x13interface_addresses\x18\x15 \x03(\tR\x12interfaceAddresses\x122\n" +
 	"\x06buildx\x18\x16 \x01(\v2\x1a.seylo.agent.v1.BuildxInfoR\x06buildx\x12;\n" +
-	"\ttailscale\x18\x17 \x01(\v2\x1d.seylo.agent.v1.TailscaleInfoR\ttailscale\"D\n" +
+	"\ttailscale\x18\x17 \x01(\v2\x1d.seylo.agent.v1.TailscaleInfoR\ttailscale\x12E\n" +
+	"\rdocker_update\x18\x18 \x01(\v2 .seylo.agent.v1.DockerUpdateInfoR\fdockerUpdate\"\xe8\x01\n" +
+	"\x10DockerUpdateInfo\x12\x1c\n" +
+	"\tinstalled\x18\x01 \x01(\tR\tinstalled\x12\x1c\n" +
+	"\tcandidate\x18\x02 \x01(\tR\tcandidate\x12'\n" +
+	"\x0fpackage_manager\x18\x03 \x01(\tR\x0epackageManager\x129\n" +
+	"\n" +
+	"checked_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcheckedAt\x12\x1c\n" +
+	"\tupdatable\x18\x05 \x01(\bR\tupdatable\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\"D\n" +
 	"\n" +
 	"BuildxInfo\x12\x1c\n" +
 	"\tinstalled\x18\x01 \x01(\bR\tinstalled\x12\x18\n" +
@@ -472,24 +594,27 @@ func file_seylo_agent_v1_node_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_node_proto_rawDescData
 }
 
-var file_seylo_agent_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_seylo_agent_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_seylo_agent_v1_node_proto_goTypes = []any{
 	(*NodeFacts)(nil),             // 0: seylo.agent.v1.NodeFacts
-	(*BuildxInfo)(nil),            // 1: seylo.agent.v1.BuildxInfo
-	(*WingsInfo)(nil),             // 2: seylo.agent.v1.WingsInfo
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
-	(*TailscaleInfo)(nil),         // 4: seylo.agent.v1.TailscaleInfo
+	(*DockerUpdateInfo)(nil),      // 1: seylo.agent.v1.DockerUpdateInfo
+	(*BuildxInfo)(nil),            // 2: seylo.agent.v1.BuildxInfo
+	(*WingsInfo)(nil),             // 3: seylo.agent.v1.WingsInfo
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
+	(*TailscaleInfo)(nil),         // 5: seylo.agent.v1.TailscaleInfo
 }
 var file_seylo_agent_v1_node_proto_depIdxs = []int32{
-	3, // 0: seylo.agent.v1.NodeFacts.boot_time:type_name -> google.protobuf.Timestamp
-	2, // 1: seylo.agent.v1.NodeFacts.wings:type_name -> seylo.agent.v1.WingsInfo
-	1, // 2: seylo.agent.v1.NodeFacts.buildx:type_name -> seylo.agent.v1.BuildxInfo
-	4, // 3: seylo.agent.v1.NodeFacts.tailscale:type_name -> seylo.agent.v1.TailscaleInfo
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: seylo.agent.v1.NodeFacts.boot_time:type_name -> google.protobuf.Timestamp
+	3, // 1: seylo.agent.v1.NodeFacts.wings:type_name -> seylo.agent.v1.WingsInfo
+	2, // 2: seylo.agent.v1.NodeFacts.buildx:type_name -> seylo.agent.v1.BuildxInfo
+	5, // 3: seylo.agent.v1.NodeFacts.tailscale:type_name -> seylo.agent.v1.TailscaleInfo
+	1, // 4: seylo.agent.v1.NodeFacts.docker_update:type_name -> seylo.agent.v1.DockerUpdateInfo
+	4, // 5: seylo.agent.v1.DockerUpdateInfo.checked_at:type_name -> google.protobuf.Timestamp
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_node_proto_init() }
@@ -504,7 +629,7 @@ func file_seylo_agent_v1_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_node_proto_rawDesc), len(file_seylo_agent_v1_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

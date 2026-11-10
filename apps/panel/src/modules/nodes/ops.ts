@@ -16,6 +16,7 @@ import { hashToken, prefixedToken } from "../../security/tokens";
 import { privateIpv4Of } from "../domains/lookup";
 import { metricsFor } from "../metrics/ingest";
 import { blockedReason } from "../uptime/targets";
+import { checksDocker, recordUpdateDockerAnswer } from "./docker-check";
 import { joinCommand } from "./join-command";
 import { agentJoinTarget } from "./join-target";
 import { forgetNodeCertificate, refreshLbPeers } from "./lb-tls";
@@ -222,10 +223,19 @@ const reboot = implement(nodeOps.reboot, async (input, ctx) => {
   return { rebootingAt: new Date(Date.now() + rebootDelaySeconds * 1000).toISOString() };
 });
 
+/**
+ * What the agent's answer found is the node's newest Docker check, on
+ * agents that check by themselves (docker-check.ts); older ones keep none.
+ */
+function noteDockerAnswer(ctx: OpContext, row: typeof nodes.$inferSelect, answer: { fromVersion: string; toVersion: string }) {
+  if (checksDocker(factsOf(ctx, row)) && recordUpdateDockerAnswer(ctx.db, row.id, answer)) publishNode(ctx, row.id);
+}
+
 const updateDocker = implement(nodeOps.updateDocker, async (input, ctx) => {
   const row = nodeRow(ctx, input.nodeId);
   if (input.dryRun) {
     const res = await ctx.agents.call(row.id, "updateDocker", { dryRun: true }, { timeoutMs: 120_000 });
+    noteDockerAnswer(ctx, row, res);
     return { fromVersion: res.fromVersion, toVersion: res.toVersion, runId: null, warning: res.warning };
   }
   // A single-step run in the update history; the final UpdateResult event finishes it (updates module).
@@ -241,6 +251,8 @@ const updateDocker = implement(nodeOps.updateDocker, async (input, ctx) => {
     .get();
   try {
     const res = await ctx.agents.call(row.id, "updateDocker", { dryRun: false, updateId: step.id }, { timeoutMs: 600_000 });
+    // The upgrade's UpdateResult records the new version (index.ts).
+    noteDockerAnswer(ctx, row, res);
     ctx.db
       .update(updateSteps)
       .set({ fromVersion: res.fromVersion || null, toVersion: res.toVersion || "latest" })

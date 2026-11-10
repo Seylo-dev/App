@@ -1,11 +1,12 @@
 // Nodes: list, settings, join tokens, health checks, reboot and Docker
 // updates (ops.ts). start() also wires the agent hub for the whole panel:
 // PanelService handlers, the desired-state flusher, the agent version
-// policy, stored facts, live invalidations when nodes or their services
-// change, and the locations detected for nodes that have none (location.ts).
+// policy, stored facts, Docker version checks (docker-check.ts), live
+// invalidations when nodes or their services change, and the locations
+// detected for nodes that have none (location.ts).
 
 import { toJson } from "@bufbuild/protobuf";
-import { NodeFactsSchema } from "@seylo/proto";
+import { NodeFactsSchema, UpdateTarget } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { createPanelService } from "../../agent-hub/panel-service";
 import type { ReportLane } from "../../agent-hub/report-budget";
@@ -20,12 +21,14 @@ import { edgeAccessAllowed } from "../databases/edge-ticket";
 import { defineModule } from "../module";
 import { runningMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
+import { checksDocker, recordAgentFinding, recordDockerUpgraded, reportFromAgent } from "./docker-check";
 import { importInstallerJoinToken } from "./installer-join";
 import { confirmGraceMs, confirmNodeCertificate, issueNodeCertificate, lbTlsContributor, refreshLbPeers, rememberLbPeers } from "./lb-tls";
 import { detectNodeLocation, detectNodeLocations } from "./location";
 import { nodeHandlers, publishNode } from "./ops";
 import { ensurePanelService, panelContributor, panelServiceId } from "./panel-service";
 import { pruneTables } from "./retention";
+import { factsOf } from "./view";
 
 const flushers = new WeakMap<object, DesiredFlusher>();
 
@@ -142,6 +145,9 @@ function start(deps: Deps) {
       })
       .where(eq(nodes.id, nodeId))
       .run();
+    // The agent's own Docker version check, unless the panel holds a newer one (docker-check.ts).
+    const dockerReport = reportFromAgent(facts.dockerUpdate);
+    if (dockerReport) recordAgentFinding(deps.db, nodeId, dockerReport);
     publishNode(deps, nodeId);
   };
   const factsWriter = {
@@ -170,6 +176,13 @@ function start(deps: Deps) {
       }
     },
   };
+
+  // A Docker upgrade that finished: its version is installed and nothing newer is offered.
+  deps.agents.onEvent("updateResult", (nodeId, result, _event, meta) => {
+    if (!meta.durable || result.target !== UpdateTarget.DOCKER || !result.success) return;
+    const row = deps.db.select().from(nodes).where(eq(nodes.id, nodeId)).get();
+    if (row && checksDocker(factsOf(deps, row)) && recordDockerUpgraded(deps.db, nodeId, result)) publishNode(deps, nodeId);
+  });
 
   deps.agents.onConnection((nodeId, online) => {
     // Its LB identity exists before the connect sync compiles the node's settings; the other
