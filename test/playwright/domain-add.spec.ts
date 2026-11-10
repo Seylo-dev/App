@@ -139,3 +139,16 @@ test("the Overview's domains card flags a domain that does not reach the node", 
   await expect(card.locator("li").filter({ hasText: "api.example.com" }).getByText("Not reaching this node")).toBeVisible();
   await expect(card.locator("li").filter({ hasText: "shop.example.com" }).getByText("Not reaching this node")).toHaveCount(0);
 });
+
+test("the Overview's Domains card adds a domain with its + button", async ({ page }) => {
+  const calls = watchOps(page);
+  await installDemo(page, { overrides: { "domains.add": added } });
+  await page.goto(`/p/${ids.acme}/s/${svc.api}`);
+  const card = page.getByRole("heading", { name: "Domains", level: 2 }).locator("xpath=ancestor::*[@data-slot='card'][1]");
+  await card.getByRole("button", { name: "Add domain" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a domain" });
+  await dialog.getByLabel("Domain", { exact: true }).fill("api2.example.com");
+  await dialog.getByRole("button", { name: "Add domain" }).click();
+  await expect.poll(() => calls("domains.add").length).toBe(1);
+  expect(calls("domains.add")[0]).toMatchObject({ serviceId: svc.api, host: "api2.example.com" });
+});

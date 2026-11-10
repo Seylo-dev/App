@@ -5,6 +5,8 @@ export default {
   title: "Source",
   description: "Where the code or image comes from. Changes apply on the next deploy.",
   current: "In use now",
+  moreProviders: "GitLab, Gitea and Bitbucket show here once you connect one.",
+  moreProvidersLink: "Settings > Git providers",
   rootDir: "Root directory",
   rootDirHint: "Folder inside the repository to build. Empty is the root.",
   deployOnPush: "Deploy on push",

@@ -174,6 +174,7 @@ export default {
       "Release candidates are offered as updates before they are final, and auto-update installs them. Going back to Stable later never installs an older version.",
     prereleaseConfirm: "Follow pre-releases",
     running: "Rolling out {version} - {done} of {total} done",
+    runningDocker: "Updating Docker - {done} of {total} done",
     panelTitle: "Panel",
     check: "Check now",
     checking: "Checking",

@@ -4,6 +4,7 @@
 // few pixels, so a click still opens what it lands on; the keyboard moves
 // items too (Space, arrows, Space).
 
+import { mkdirSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
@@ -32,8 +33,10 @@ async function open(page: Page, path = "/"): Promise<Calls> {
   return calls;
 }
 
-/** Drags `from` onto `to` with the mouse, in small steps like a person would. */
-async function drag(page: Page, from: Locator, to: Locator) {
+const shots = `${process.env.SHOTS_DIR ?? "shots"}/project-order`;
+
+/** Drags `from` onto `to` with the mouse, in small steps like a person would; `shot` names a screenshot taken mid-drag. */
+async function drag(page: Page, from: Locator, to: Locator, shot?: string) {
   const a = await from.boundingBox();
   const b = await to.boundingBox();
   if (!a || !b) throw new Error("nothing to drag");
@@ -41,7 +44,11 @@ async function drag(page: Page, from: Locator, to: Locator) {
   await page.mouse.down();
   await page.mouse.move(a.x + 20, a.y + a.height / 2 + 8, { steps: 4 });
   await page.mouse.move(b.x + 20, b.y + b.height / 2, { steps: 12 });
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(250);
+  if (shot) {
+    mkdirSync(shots, { recursive: true });
+    await page.screenshot({ path: `${shots}/${shot}.png` });
+  }
   await page.mouse.up();
 }
 
@@ -52,7 +59,7 @@ test("a project dragged in the sidebar moves there and on the dashboard, and is 
   const calls = await open(page);
   await expect(dashboardHeading(page)).toBeVisible();
   await expect(sidebarProjects(page).first()).toContainText("acme-shop");
-  await drag(page, sidebarProjects(page).nth(1).locator("> div").first(), sidebarProjects(page).first().locator("> div").first());
+  await drag(page, sidebarProjects(page).nth(1).locator("> div").first(), sidebarProjects(page).first().locator("> div").first(), "sidebar-mid-drag");
   await expect.poll(() => calls.filter((c) => c.op === "projects.reorder").map((c) => c.input.projectIds)).toEqual([
     [ids.personal, ids.acme, ids.panel],
   ]);
@@ -71,7 +78,7 @@ test("a service card dragged on the dashboard moves in its project, in the sideb
   const acme = page.getByRole("region", { name: "Projects" }).locator("article").first();
   const cards = acme.locator("[data-sortable-card]");
   await expect(cards.first()).toContainText("web");
-  await drag(page, cards.nth(1), cards.first());
+  await drag(page, cards.nth(1), cards.first(), "cards-mid-drag");
   await expect
     .poll(() => (calls.find((c) => c.op === "services.reorder")?.input.serviceIds as string[] | undefined)?.slice(0, 2))
     .toEqual([ids.api, ids.web]);

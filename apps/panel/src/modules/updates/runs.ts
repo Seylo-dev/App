@@ -433,8 +433,18 @@ export async function advanceRun(ctx: RunCtx, runId: string): Promise<number | n
   const publish = () => ctx.live.publish("panel", { type: "invalidate", ops: ["updates.status", "updates.history", "nodes.list"] });
 
   if (step.status === "running" && step.target === "docker") {
-    // Only its UpdateResult finishes a Docker step (applyUpdateResult); the
-    // node going offline is expected while Docker restarts.
+    // Its UpdateResult finishes a Docker step (applyUpdateResult); the node
+    // going offline is expected while Docker restarts. When that result is
+    // lost (the agent restarted with Docker), the node's facts tell: once it
+    // is back with another Docker version than the step started from (the
+    // one it aimed for, when known), the update happened.
+    const now = step.nodeId && ctx.agents.isOnline(step.nodeId) ? ctx.agents.state.get(step.nodeId)?.facts?.dockerVersion : undefined;
+    if (now && step.fromVersion && now !== step.fromVersion && (!step.toVersion || step.toVersion === "latest" || step.toVersion === now)) {
+      db.update(updateSteps).set({ toVersion: now }).where(eq(updateSteps.id, step.id)).run();
+      finishStep(db, step.id, "succeeded");
+      publish();
+      return 0;
+    }
     const error = !step.nodeId
       ? dockerNodeRemovedError
       : step.startedAt && Date.now() - step.startedAt.getTime() > dockerStepTimeoutMs

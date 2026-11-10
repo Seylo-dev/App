@@ -72,7 +72,10 @@ export function UpdatesBanner() {
           {run ? (
             <Chip tone="amber">
               <StatusDot status="busy" pulse />
-              {t("nodes.updates.rollingOut", { version: run.targetVersion, done: run.doneSteps, total: run.totalSteps })}
+              {/* nodes.updateDocker runs are single-step runs named "docker", not a release. */}
+              {run.targetVersion === "docker"
+                ? t("nodes.updates.updatingDocker", { done: run.doneSteps, total: run.totalSteps })
+                : t("nodes.updates.rollingOut", { version: run.targetVersion, done: run.doneSteps, total: run.totalSteps })}
             </Chip>
           ) : data?.panel.updateAvailable && data.panel.latestVersion ? (
             <Button size="sm" variant="primary" disabled={updatePanel.isPending} onClick={() => updatePanel.mutate({})}>

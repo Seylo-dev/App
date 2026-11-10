@@ -149,10 +149,12 @@ test.describe("git providers", () => {
     const connect = calls.find((c) => c.op === "gitProviders.connectRepo");
     expect(connect?.input).toMatchObject({ providerId: gitlab.id, repo: "acme/site", branch: "trunk", deployOnPush: true });
 
-    // Without a connection of that kind the card says where to add one.
-    await page.getByRole("radio", { name: /Bitbucket/ }).click();
-    await expect(page.getByText("Connect Bitbucket first")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Add a connection" })).toHaveAttribute("href", "/settings/git-providers");
+    // Without a connection of that kind there is no card (0.2.6, owner request); a line says where to connect one.
+    await expect(page.getByRole("radio", { name: /GitLab/ })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Bitbucket/ })).toHaveCount(0);
+    await expect(page.getByRole("radio", { name: /Gitea/ })).toHaveCount(0);
+    await expect(page.getByText("GitLab, Gitea and Bitbucket show here once you connect one.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings > Git providers" })).toHaveAttribute("href", "/settings/git-providers");
     expect(errors).toEqual([]);
   });
 

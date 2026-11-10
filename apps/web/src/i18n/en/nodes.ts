@@ -74,6 +74,7 @@ export default {
     autoUpdate: "Auto-update the panel and all nodes",
     hint: "The panel updates first, then nodes one at a time. A node that was offline gets the update when it reconnects.",
     rollingOut: "Rolling out v{version} · {done} of {total} done",
+    updatingDocker: "Updating Docker · {done} of {total} done",
     upToDate: "v{version} · up to date",
     updateTo: "Update to v{version}",
     checkNow: "Check now",

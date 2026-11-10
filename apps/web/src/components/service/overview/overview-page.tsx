@@ -14,15 +14,16 @@ import { EmptyState } from "@seylo/ui/components/empty-state";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { SmoothChart } from "@seylo/ui/components/smooth-chart";
-import { IconArrowUpRight, IconLock, IconWorld } from "@tabler/icons-react";
+import { IconArrowUpRight, IconLock, IconPlus, IconWorld } from "@tabler/icons-react";
 import { Link, Navigate } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { useLiveUp } from "../../../lib/live";
 import { CronRuns } from "../cron/cron-page";
 import { describeCron } from "../cron-text";
 import { StepChips } from "../deploy-steps";
 import { deploymentTitle, deploymentVersion } from "../deployment-meta";
+import { AddDomainDialog } from "../domains/domain-dialogs";
 import { formatBytes, formatPercent, formatRelative } from "../format";
 import { KindBadge } from "../kind-badge";
 import { OpErrorNote, retryOp } from "../op-state";
@@ -39,6 +40,8 @@ import type { ServiceDetail } from "../use-service";
 
 /** The Overview console card's height: about 20 lines of output with the header and the stdin line. */
 export const consoleCardHeight = 480;
+/** The tallest the Overview's console gets while it follows the right column (owner request). */
+const consoleCardMaxHeight = 600;
 
 export function OverviewPage({ service }: { service: ServiceDetail }) {
   if (isDatabaseKind(service.kind))
@@ -63,13 +66,19 @@ function Panel({ title, action, children, className }: { title: string; action?:
 
 function AppOverview({ service }: { service: ServiceDetail }) {
   const p = { projectId: service.projectId, serviceId: service.id };
+  const right = useRef<HTMLDivElement>(null);
+  const deploys = useRef<HTMLDivElement>(null);
+  const consoleHeight = useConsoleHeight(right, deploys);
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
-        <ConsoleCard service={service} />
-        <LatestDeploy service={service} />
+        <ConsoleCard service={service} height={consoleHeight} />
+        <div ref={deploys} className="flex flex-col">
+          <LatestDeploy service={service} />
+        </div>
       </div>
-      <div className="flex min-w-0 flex-col gap-4">
+      {/* self-start: the column is as tall as its cards, so the console can be sized to end level with it. */}
+      <div ref={right} className="flex min-w-0 flex-col gap-4 lg:self-start">
         <Panel title={t("serviceOverview.runsOn")}>
           <KeyValue
             items={[
@@ -205,7 +214,7 @@ function LatestDeploy({ service }: { service: ServiceDetail }) {
  * shell), never takes focus until clicked, and offers only the modes the
  * person may open: none at all hides it.
  */
-function ConsoleCard({ service }: { service: ServiceDetail }) {
+function ConsoleCard({ service, height }: { service: ServiceDetail; height: number }) {
   const modes = useTerminalModes(service);
   const [wanted, setWanted] = useState<TerminalMode>("console");
   // The person used the switch: the mode they picked opens at once, a shell too.
@@ -214,7 +223,7 @@ function ConsoleCard({ service }: { service: ServiceDetail }) {
   const running = hasRunningInstance(service);
   const mode = modes ? pickMode(wanted, modes) : null;
   if (mode && running && !shown) setShown(true);
-  if (modes === null) return <TerminalSkeleton height={consoleCardHeight} />;
+  if (modes === null) return <TerminalSkeleton height={height} />;
   if (!mode) return null;
   const choose = (next: TerminalMode) => {
     setWanted(next);
@@ -225,7 +234,7 @@ function ConsoleCard({ service }: { service: ServiceDetail }) {
       <TerminalNote
         label={t(`serviceTerminal.modes.${mode}`)}
         switcher={<ModeSwitch mode={mode} modes={modes} onChange={choose} />}
-        height={consoleCardHeight}
+        height={height}
       >
         {t(mode === "shell" ? "serviceTerminal.notRunningShell" : "serviceTerminal.notRunning")}
       </TerminalNote>
@@ -236,7 +245,7 @@ function ConsoleCard({ service }: { service: ServiceDetail }) {
       mode={mode}
       modes={modes}
       onModeChange={choose}
-      height={consoleCardHeight}
+      height={height}
       start={mode === "shell" && !picked ? t("serviceTerminal.openShell") : undefined}
       subtitle={false}
       // Looking at the Overview is no console use: output only, until a line is sent.
@@ -255,6 +264,37 @@ function ConsoleCard({ service }: { service: ServiceDetail }) {
       }
     />
   );
+}
+
+/**
+ * The console's height on a wide screen: the right column's height less the
+ * deploys card under the console (and the gap between them), so both columns
+ * end on one line; between consoleCardHeight (480) and 600 px. One column
+ * (under lg): consoleCardHeight.
+ */
+function useConsoleHeight(right: RefObject<HTMLDivElement | null>, below: RefObject<HTMLDivElement | null>): number {
+  const [height, setHeight] = useState(consoleCardHeight);
+  useLayoutEffect(() => {
+    const a = right.current;
+    const b = below.current;
+    if (!a || !b || typeof ResizeObserver === "undefined") return;
+    const wide = window.matchMedia("(min-width: 1024px)");
+    const update = () => {
+      const fit = Math.round(a.offsetHeight - b.offsetHeight - 16);
+      const next = wide.matches ? Math.min(consoleCardMaxHeight, Math.max(consoleCardHeight, fit)) : consoleCardHeight;
+      setHeight((current) => (Math.abs(current - next) < 2 ? current : next));
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(a);
+    observer.observe(b);
+    wide.addEventListener("change", update);
+    update();
+    return () => {
+      observer.disconnect();
+      wide.removeEventListener("change", update);
+    };
+  }, [right, below]);
+  return height;
 }
 
 function UsagePanel({ service }: { service: ServiceDetail }) {
@@ -332,8 +372,36 @@ function UsagePanel({ service }: { service: ServiceDetail }) {
 export function DomainsPanel({ service }: { service: ServiceDetail }) {
   const list = useOp(domains.list, { serviceId: service.id }, { retry: retryOp });
   const rows = list.data?.domains.slice(0, 4) ?? [];
+  const [adding, setAdding] = useState(false);
+  // Mounted once first opened (and kept, so it can close with its animation): the Overview pays nothing for it before.
+  const [dialogUsed, setDialogUsed] = useState(false);
   return (
-    <Panel title={t("service.tabs.domains")}>
+    <Panel
+      title={t("service.tabs.domains")}
+      action={
+        <button
+          type="button"
+          onClick={() => {
+            setDialogUsed(true);
+            setAdding(true);
+          }}
+          aria-label={t("serviceDomains.add")}
+          title={t("serviceDomains.add")}
+          className="flex size-7 cursor-pointer items-center justify-center rounded-chip border-0 bg-transparent p-0 text-ink-faint transition-colors duration-200 hover:bg-muted hover:text-foreground"
+        >
+          <IconPlus size={15} stroke={2} aria-hidden="true" />
+        </button>
+      }
+    >
+      {dialogUsed && (
+        <AddDomainDialog
+          service={service}
+          open={adding}
+          onOpenChange={setAdding}
+          // The panel makes the first routed domain primary: the same rule as the Domains tab.
+          becomesPrimary={list.data !== undefined && !list.data.domains.some((d) => d.primary)}
+        />
+      )}
       {list.isError ? (
         <OpErrorNote error={list.error} compact />
       ) : list.isPending ? (

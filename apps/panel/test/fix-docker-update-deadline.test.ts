@@ -137,3 +137,33 @@ test("a Docker run an older panel left running gets watched when the panel start
   await drain();
   expect(runStatus(runId)).toBe("failed");
 });
+
+test("a lost result does not hold the step for an hour: the node back with the new Docker version finishes it", async () => {
+  const node = await join("0.8.0", "n1");
+  const real = await ok(callOp(panel, nodeOps.updateDocker, { nodeId: node.nodeId }, { cookie: owner.cookie }));
+  const runId = real.runId as string;
+  await goOffline(node);
+  // Still on 27.0 after it reconnects: not done yet.
+  const same = await joinAgent(panel, url, {
+    nodeId: node.nodeId,
+    key: node.key,
+    agentVersion: "0.8.0",
+    facts: { agentVersion: "0.8.0", dockerVersion: "27.0" },
+  });
+  agents.push(same);
+  await drain();
+  expect(stepOf(runId)?.status).toBe("running");
+  await same.close();
+  for (let i = 0; i < 100 && panel.deps.agents.isOnline(node.nodeId); i++) await Bun.sleep(5);
+  // Back on 29.0 (the version it aimed for): the update happened, without its UpdateResult.
+  const back = await joinAgent(panel, url, {
+    nodeId: node.nodeId,
+    key: node.key,
+    agentVersion: "0.8.0",
+    facts: { agentVersion: "0.8.0", dockerVersion: "29.0" },
+  });
+  agents.push(back);
+  await drain();
+  expect(stepOf(runId)).toMatchObject({ status: "succeeded", toVersion: "29.0" });
+  expect(runStatus(runId)).toBe("succeeded");
+});

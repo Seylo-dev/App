@@ -117,7 +117,11 @@ function StatusSections({ data }: { data: Status }) {
       {run && (
         <Alert
           tone="info"
-          title={t("settings.updates.running", { version: run.targetVersion, done: run.doneSteps, total: run.totalSteps })}
+          title={
+            run.targetVersion === "docker"
+              ? t("settings.updates.runningDocker", { done: run.doneSteps, total: run.totalSteps })
+              : t("settings.updates.running", { version: run.targetVersion, done: run.doneSteps, total: run.totalSteps })
+          }
         >
           <Progress value={run.totalSteps ? (run.doneSteps / run.totalSteps) * 100 : null} className="mt-2" />
         </Alert>
