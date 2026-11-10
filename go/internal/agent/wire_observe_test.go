@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/console/dockerapi"
+	"github.com/seylo-dev/app/go/internal/metrics"
 	"github.com/seylo-dev/app/go/internal/rpc"
 	"github.com/seylo-dev/app/go/internal/rpc/rpctest"
 )
@@ -271,5 +274,53 @@ func TestObserveDockerDownErrors(t *testing.T) {
 	var m agentv1.GetMetricsResponse
 	if err := panel.Call(ctx, "GetMetrics", &agentv1.GetMetricsRequest{}, &m); err != nil || len(m.GetSamples()) != 0 {
 		t.Fatalf("metrics before any sample = %v %v", m.GetSamples(), err)
+	}
+}
+
+// watchRecorder answers WatchMetrics with one sample, then ends as a
+// lease that ran out does, and keeps the options it was asked for.
+type watchRecorder struct {
+	metrics.Collector
+	got chan metrics.WatchOptions
+}
+
+func (w *watchRecorder) Watch(_ context.Context, o metrics.WatchOptions, fn func(*agentv1.MetricsReport) error) error {
+	w.got <- o
+	return fn(&agentv1.MetricsReport{Node: &agentv1.NodeUsage{CpuPercent: 7}})
+}
+
+func TestWatchMetricsTakesLightAndLease(t *testing.T) {
+	d, reg := observeTestDeps(t)
+	rec := &watchRecorder{got: make(chan metrics.WatchOptions, 2)}
+	d.Metrics = rec
+	panel := rpctest.NewPeer(t, reg)
+	ctx := context.Background()
+
+	st, err := panel.Open(ctx, "WatchMetrics", &agentv1.WatchMetricsRequest{
+		Interval: durationpb.New(2 * time.Second),
+		Light:    true,
+		Lease:    durationpb.New(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sample agentv1.WatchMetricsResponse
+	if err := st.Recv(&sample); err != nil || sample.GetSample().GetNode().GetCpuPercent() != 7 {
+		t.Fatalf("sample = %v, %v", &sample, err)
+	}
+	// The lease ran out: the stream closes with OK, not an error.
+	if err := st.Finish(nil); err != nil {
+		t.Fatalf("watch end = %v", err)
+	}
+	if o := <-rec.got; o.Interval != 2*time.Second || !o.Light || o.Lease != time.Minute || len(o.ServiceIDs) != 0 {
+		t.Fatalf("options = %+v", o)
+	}
+
+	// An older panel's request: full samples of the listed services, no lease.
+	st, _ = panel.Open(ctx, "WatchMetrics", &agentv1.WatchMetricsRequest{ServiceIds: []string{"svc1"}})
+	_ = st.Recv(&sample)
+	_ = st.Finish(nil)
+	if o := <-rec.got; o.Interval != 0 || o.Light || o.Lease != 0 || !slices.Equal(o.ServiceIDs, []string{"svc1"}) {
+		t.Fatalf("older panel's options = %+v", o)
 	}
 }

@@ -10,6 +10,12 @@
 // Container memory is usage - inactive_file (what `docker stats` reports),
 // not raw usage, which counts page cache and looks like a leak.
 //
+// The dashboard's live graphs ask for light watches (WatchOptions.Light):
+// CPU, memory and the network counters only, three small /proc reads per
+// sample, no Docker. They run only while the panel holds the stream (a
+// browser shows the graphs), and a lease ends each one by itself, so a
+// watch the panel forgets stops within a lease.
+//
 // Ported in part from the Wings fork's environment/docker/stats.go (MIT).
 //
 // Interfaces used by other packages:

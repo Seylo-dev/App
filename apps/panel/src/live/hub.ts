@@ -32,6 +32,15 @@ export interface LiveHub {
   addDisconnector(fn: (match: DisconnectMatch) => void): () => void;
   /** Topics a socket follows now. */
   topics(socket: LiveSocket): LiveTopic[];
+  /** Sockets that follow a topic now. */
+  subscribers(topic: LiveTopic): number;
+  /**
+   * Called when the first socket follows a topic (true) and when the last
+   * one leaves it (false: unsubscribe, a closed socket, a dropped grant),
+   * for topics whose events cost work only while somebody reads them
+   * (node-live). Listeners must not throw. Returns a remover.
+   */
+  onTopicActive(listener: (topic: LiveTopic, active: boolean) => void): () => void;
   /**
    * Re-checks the subscriptions of a person's sockets right away (their role
    * or grants changed): topics they may no longer follow are dropped.
@@ -47,21 +56,29 @@ export function createLiveHub(): LiveHub {
   const bySocket = new Map<string, Set<LiveTopic>>();
   const disconnectors = new Set<(match: DisconnectMatch) => void>();
   const recheckers = new Set<(match: { userId: string }) => void>();
+  const activity = new Set<(topic: LiveTopic, active: boolean) => void>();
+  const tellActive = (topic: LiveTopic, active: boolean) => {
+    for (const listener of activity) listener(topic, active);
+  };
 
   const unsubscribe = (socket: LiveSocket, topic: LiveTopic) => {
-    byTopic.get(topic)?.delete(socket.id);
-    if (byTopic.get(topic)?.size === 0) byTopic.delete(topic);
+    const sockets = byTopic.get(topic);
+    const left = sockets?.delete(socket.id) ?? false;
+    if (sockets?.size === 0) byTopic.delete(topic);
     bySocket.get(socket.id)?.delete(topic);
+    if (left && sockets?.size === 0) tellActive(topic, false);
   };
 
   return {
     subscribe(socket, topic) {
       const sockets = byTopic.get(topic) ?? new Map<string, LiveSocket>();
+      const first = sockets.size === 0;
       sockets.set(socket.id, socket);
       byTopic.set(topic, sockets);
       const topics = bySocket.get(socket.id) ?? new Set<LiveTopic>();
       topics.add(topic);
       bySocket.set(socket.id, topics);
+      if (first) tellActive(topic, true);
     },
     unsubscribe,
     drop(socket) {
@@ -80,6 +97,13 @@ export function createLiveHub(): LiveHub {
     },
     topics(socket) {
       return [...(bySocket.get(socket.id) ?? [])];
+    },
+    subscribers(topic) {
+      return byTopic.get(topic)?.size ?? 0;
+    },
+    onTopicActive(listener) {
+      activity.add(listener);
+      return () => activity.delete(listener);
     },
     recheck(match) {
       for (const fn of recheckers) fn(match);

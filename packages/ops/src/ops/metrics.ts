@@ -35,6 +35,25 @@ export const NodeSeries = Type.Object({
   points: Type.Array(NodePoint),
 });
 
+/**
+ * The dashboard's live graphs: while a tab follows "node-live:<id>", the
+ * panel keeps a light watch open on the node's agent (CPU, memory and
+ * network every intervalMs, nothing stored) and sends each sample as a
+ * "nodeLive" event. The graphs show the last windowMs of them, seeded
+ * with the 10-second points of range "live".
+ */
+export const nodeLive = { intervalMs: 2000, windowMs: 5 * 60_000 } as const;
+
+/** One live sample of a node (a "nodeLive" event on "node-live:<id>"). */
+export const NodeLiveSample = Type.Object({
+  t: Type.Integer({ minimum: 0, description: "When the agent read it, Unix milliseconds on the node's clock." }),
+  cpuPercent: Type.Number({ minimum: 0 }),
+  memoryUsedBytes: Type.Integer({ minimum: 0 }),
+  memoryTotalBytes: Type.Integer({ minimum: 0 }),
+  networkRxBytesPerSec: Type.Number({ minimum: 0 }),
+  networkTxBytesPerSec: Type.Number({ minimum: 0 }),
+});
+
 export const ServicePoint = Type.Object({
   t: PointTime,
   /** Summed over replicas and nodes; 0-100 per core, like `docker stats`. */

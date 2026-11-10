@@ -244,6 +244,15 @@ export interface DemoOptions {
    * function says for an op id), so loading states stay on screen.
    */
   delay?: number | ((opId: string) => number);
+  /**
+   * The nodes' live samples on node-live:<id> (the dashboard's Live
+   * graphs): "stream" (default) sends one per node every intervalMs,
+   * "silent" accepts the topic and sends nothing (older or offline
+   * agents), "refuse" answers the subscription with an error.
+   */
+  nodeLive?: "stream" | "silent" | "refuse";
+  /** Milliseconds between live samples (default 2000, as the panel asks agents). */
+  nodeLiveIntervalMs?: number;
 }
 
 export async function installDemo(page: Page, options: DemoOptions = {}): Promise<void> {
@@ -283,15 +292,47 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(answer) });
   });
-  await installSockets(page);
+  await installSockets(page, options);
 }
 
 const encode = (text: string) => Buffer.from(text, "utf8");
 
-async function installSockets(page: Page): Promise<void> {
+async function installSockets(page: Page, options: DemoOptions): Promise<void> {
   await page.routeWebSocket(/\/api\/live/, (ws) => {
+    // node-live:<id> streams while followed, like the panel's agent watch.
+    const streams = new Map<string, ReturnType<typeof setInterval>>();
+    const stopAll = () => {
+      for (const timer of streams.values()) clearInterval(timer);
+      streams.clear();
+    };
+    ws.onClose(stopAll);
     ws.onMessage((raw) => {
       const message = JSON.parse(String(raw)) as { type: string; topic: string };
+      if (message.topic.startsWith("node-live:")) {
+        clearInterval(streams.get(message.topic));
+        streams.delete(message.topic);
+        if (message.type !== "subscribe") return;
+        const mode = options.nodeLive ?? "stream";
+        if (mode === "refuse") {
+          ws.send(JSON.stringify({ type: "error", topic: message.topic, code: "FORBIDDEN", message: "You cannot follow this." }));
+          return;
+        }
+        ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+        if (mode === "silent") return;
+        const nodeId = message.topic.slice("node-live:".length);
+        const send = () => {
+          try {
+            ws.send(
+              JSON.stringify({ type: "event", topic: message.topic, event: { type: "nodeLive", nodeId, sample: world.liveUsage(nodeId, Date.now()) } }),
+            );
+          } catch {
+            stopAll();
+          }
+        };
+        send();
+        streams.set(message.topic, setInterval(send, options.nodeLiveIntervalMs ?? 2000));
+        return;
+      }
       if (message.type !== "subscribe") return;
       ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
       // A running deployment keeps printing build lines on its topic.

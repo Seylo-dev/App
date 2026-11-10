@@ -66,6 +66,61 @@ export function toSegments(
   return runs;
 }
 
+/**
+ * toSegments on a time axis: values[i] sits at times[i] (any unit), x
+ * from `start` (0) over `span` (width), so points outside the box keep
+ * their place beyond its edges. A gap longer than maxGap between two
+ * points breaks the line as a null does (the node was away).
+ */
+export function toTimeSegments(
+  times: readonly number[],
+  values: readonly (number | null | undefined)[],
+  box: { width: number; height: number; min: number; max: number; start: number; span: number; maxGap?: number },
+): Point[][] {
+  const runs: Point[][] = [];
+  let run: Point[] = [];
+  const range = box.max - box.min || 1;
+  const scale = box.span > 0 ? box.width / box.span : 0;
+  let previous = Number.NEGATIVE_INFINITY;
+  values.forEach((v, i) => {
+    const t = times[i];
+    if (t === undefined || v === null || v === undefined || !Number.isFinite(v) || !Number.isFinite(t)) {
+      if (run.length) runs.push(run);
+      run = [];
+      return;
+    }
+    if (run.length && box.maxGap !== undefined && t - previous > box.maxGap) {
+      runs.push(run);
+      run = [];
+    }
+    previous = t;
+    const clamped = Math.min(box.max, Math.max(box.min, v));
+    run.push([(t - box.start) * scale, box.height - ((clamped - box.min) / range) * box.height]);
+  });
+  if (run.length) runs.push(run);
+  return runs;
+}
+
+/** The smallest of 1, 2, 2.5 and 5 times a power of ten that is at least v (1 for 0 or less). */
+export function niceCeil(v: number): number {
+  if (!(v > 0) || !Number.isFinite(v)) return 1;
+  const base = 10 ** Math.floor(Math.log10(v));
+  for (const step of [1, 2, 2.5, 5]) if (step * base >= v * (1 - 1e-12)) return step * base;
+  return 10 * base;
+}
+
+/**
+ * A y maximum for a live graph that does not move with every sample: the
+ * nice step above the data (with headroom), grown at once when the data
+ * needs more room, shrunk only once the data would fit in well under half
+ * of it.
+ */
+export function stickyNiceMax(previous: number | undefined, dataMax: number, headroom = 1.1): number {
+  const wanted = niceCeil(dataMax * headroom);
+  if (previous === undefined || wanted > previous) return wanted;
+  return wanted * 2.5 <= previous ? wanted : previous;
+}
+
 /** A y range that fits every value with a little headroom; min stays at 0 for non-negative data. */
 export function niceDomain(
   values: Iterable<number | null | undefined>,

@@ -50,7 +50,8 @@ interface Bucket {
   diskTotal: number;
 }
 
-interface Counter {
+/** A reading of cumulative network counters at agent time t (Unix ms). */
+export interface Counter {
   t: number;
   rx: bigint;
   tx: bigint;
@@ -118,7 +119,8 @@ const emptyBucket = (minute: number): Bucket => ({
   diskTotal: 0,
 });
 
-function rate(prev: Counter | undefined, t: number, rx: bigint, tx: bigint): { rx: number; tx: number } {
+/** Bytes per second between two readings of cumulative counters; 0 without a previous one or after a counter reset. */
+export function rate(prev: Counter | undefined, t: number, rx: bigint, tx: bigint): { rx: number; tx: number } {
   if (!prev || t <= prev.t) return { rx: 0, tx: 0 };
   const seconds = (t - prev.t) / 1000;
   const drx = rx >= prev.rx ? Number(rx - prev.rx) : 0;
@@ -237,6 +239,11 @@ export class MetricsIngest {
 
   latestNode(nodeId: string): NodePointNow | null {
     return this.nodeLive.get(nodeId)?.at(-1) ?? null;
+  }
+
+  /** The node's network counters from its latest periodic sample, so a live watch has a rate from its first sample on. */
+  networkCounter(nodeId: string): Counter | undefined {
+    return this.nodeCounters.get(nodeId);
   }
 
   liveNode(nodeId: string, now = Date.now()): NodePointNow[] {

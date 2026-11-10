@@ -6,8 +6,9 @@
 // The signed-in layout connects and
 // disconnects it; subscriptions made while it is down are sent on
 // (re)connect. Topics that carry more than invalidations (deployment logs,
-// AI replies) are read with listen(), which also says whether the panel
-// accepted the subscription, so a screen can fall back to polling when not.
+// AI replies, the dashboard's live node samples in node-live.ts) are read
+// with listen(), which also says whether the panel accepted the
+// subscription, so a screen can fall back to polling when not.
 
 import {
   type LiveEvent,

@@ -534,7 +534,19 @@ type WatchMetricsRequest struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	ServiceIds []string               `protobuf:"bytes,1,rep,name=service_ids,json=serviceIds,proto3" json:"service_ids,omitempty"`
 	// Minimum 1s, default 2s.
-	Interval      *durationpb.Duration `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	Interval *durationpb.Duration `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	// Node usage only, and only what the dashboard's live graphs draw: CPU,
+	// memory and the network counters (no disks, load or services;
+	// service_ids is ignored), read from /proc/stat, /proc/meminfo and
+	// /proc/net/dev. false = full samples. Agents that do not know it send
+	// full node samples, which carry the same fields.
+	Light bool `protobuf:"varint,3,opt,name=light,proto3" json:"light,omitempty"`
+	// The watch ends by itself (status OK) this long after it started, so a
+	// watch the panel forgets costs one lease at most; while somebody still
+	// watches, the panel opens the next one before this one ends. Unset or
+	// 0 = until the panel cancels it; at least 10s otherwise. Agents that do
+	// not know it stream until cancelled.
+	Lease         *durationpb.Duration `protobuf:"bytes,4,opt,name=lease,proto3" json:"lease,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -579,6 +591,20 @@ func (x *WatchMetricsRequest) GetServiceIds() []string {
 func (x *WatchMetricsRequest) GetInterval() *durationpb.Duration {
 	if x != nil {
 		return x.Interval
+	}
+	return nil
+}
+
+func (x *WatchMetricsRequest) GetLight() bool {
+	if x != nil {
+		return x.Light
+	}
+	return false
+}
+
+func (x *WatchMetricsRequest) GetLease() *durationpb.Duration {
+	if x != nil {
+		return x.Lease
 	}
 	return nil
 }
@@ -679,11 +705,13 @@ const file_seylo_agent_v1_metrics_proto_rawDesc = "" +
 	"serviceIds\x120\n" +
 	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"M\n" +
 	"\x12GetMetricsResponse\x127\n" +
-	"\asamples\x18\x01 \x03(\v2\x1d.seylo.agent.v1.MetricsReportR\asamples\"m\n" +
+	"\asamples\x18\x01 \x03(\v2\x1d.seylo.agent.v1.MetricsReportR\asamples\"\xb4\x01\n" +
 	"\x13WatchMetricsRequest\x12\x1f\n" +
 	"\vservice_ids\x18\x01 \x03(\tR\n" +
 	"serviceIds\x125\n" +
-	"\binterval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\binterval\"M\n" +
+	"\binterval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\binterval\x12\x14\n" +
+	"\x05light\x18\x03 \x01(\bR\x05light\x12/\n" +
+	"\x05lease\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x05lease\"M\n" +
 	"\x14WatchMetricsResponse\x125\n" +
 	"\x06sample\x18\x01 \x01(\v2\x1d.seylo.agent.v1.MetricsReportR\x06sampleB\xb7\x01\n" +
 	"\x12com.seylo.agent.v1B\fMetricsProtoP\x01Z9github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1;agentv1\xa2\x02\x03SAX\xaa\x02\x0eSeylo.Agent.V1\xca\x02\x0eSeylo\\Agent\\V1\xe2\x02\x1aSeylo\\Agent\\V1\\GPBMetadata\xea\x02\x10Seylo::Agent::V1b\x06proto3"
@@ -721,12 +749,13 @@ var file_seylo_agent_v1_metrics_proto_depIdxs = []int32{
 	8, // 4: seylo.agent.v1.GetMetricsRequest.since:type_name -> google.protobuf.Timestamp
 	0, // 5: seylo.agent.v1.GetMetricsResponse.samples:type_name -> seylo.agent.v1.MetricsReport
 	9, // 6: seylo.agent.v1.WatchMetricsRequest.interval:type_name -> google.protobuf.Duration
-	0, // 7: seylo.agent.v1.WatchMetricsResponse.sample:type_name -> seylo.agent.v1.MetricsReport
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	9, // 7: seylo.agent.v1.WatchMetricsRequest.lease:type_name -> google.protobuf.Duration
+	0, // 8: seylo.agent.v1.WatchMetricsResponse.sample:type_name -> seylo.agent.v1.MetricsReport
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_metrics_proto_init() }

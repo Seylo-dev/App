@@ -72,7 +72,7 @@ i18n section. Without the provider each label shows its own key.
 | `progress` | `Progress` (value or indeterminate), `usageTone(percent)` | |
 | `avatar` | `Avatar` image or tinted initials | |
 | `skeleton`, `kbd`, `command` | loading blocks, key caps, the command palette | |
-| `smooth-chart` | `SmoothChart`, `ChartLegend`, `toggleHidden`, `seriesColor` | Catmull-Rom lines + light areas (`lib/smooth-path`), hover tooltip, lines draw in once; one legend can drive several charts through `hidden` |
+| `smooth-chart` | `SmoothChart`, `ChartLegend`, `toggleHidden`, `seriesColor`, `ChartWindow` | Catmull-Rom lines + light areas (`lib/smooth-path`), hover tooltip, lines draw in once; one legend can drive several charts through `hidden`; `window` puts each series on its own `times` in a sliding time window (live graphs: a compositor animation between renders, a sticky nice y maximum, no sliding with reduced motion) |
 | `sparkline` | `Sparkline` | tiny trend for tiles and cells |
 | `log-viewer` | `LogViewer`, `useLogBuffer`, `LogBuffer` | see below |
 | `labels` | `UiLabelsProvider`, `useUiLabels`, `UiLabels` | the kit's own words |
