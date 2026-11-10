@@ -27,6 +27,13 @@ export const users = sqliteTable(
     lockedUntil: timestamp("locked_until"),
     /** Per-person UI choices that follow them across browsers (collapsed projects, color mode). */
     preferences: json<Record<string, unknown>>("preferences").notNull().default(sql`'{}'`),
+    /**
+     * The assistant's auto mode (ai.setAutoMode): the person's own chats run
+     * changes without an approval, with their permissions. One choice for
+     * every chat and device; off for new people. Not in preferences, which
+     * API keys can write.
+     */
+    aiAutoMode: integer("ai_auto_mode", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

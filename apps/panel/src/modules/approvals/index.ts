@@ -24,6 +24,11 @@ function scope(ctx: OpContext): SQL | undefined {
   return isNarrowedKey(p) ? and(byRole, keyApprovalScope(ctx.db, p)) : byRole;
 }
 
+/** Who reads: an approval's chat title is only theirs to see when the chat is theirs. */
+function viewerOf(ctx: OpContext): string | null {
+  return ctx.principal.type === "anonymous" ? null : ctx.principal.user.id;
+}
+
 const list = implement(approvalOps.list, (input, ctx) => {
   expireOverdue(ctx);
   const limit = input.limit ?? 50;
@@ -57,7 +62,7 @@ const list = implement(approvalOps.list, (input, ctx) => {
       .where(and(visible, eq(approvals.status, "pending")))
       .get()?.n ?? 0;
   return {
-    approvals: page.map((row) => toApproval(ctx.db, row)),
+    approvals: page.map((row) => toApproval(ctx.db, row, viewerOf(ctx))),
     nextCursor: rows.length > limit && last ? `${last.createdAt.getTime()}_${last.id}` : null,
     pendingCount,
   };
@@ -67,7 +72,7 @@ const get = implement(approvalOps.get, (input, ctx) => {
   expireOverdue(ctx);
   const row = ctx.db.select().from(approvals).where(eq(approvals.id, input.approvalId)).get();
   if (!row || !canSee(ctx.db, ctx.principal, row)) throw new OpError("NOT_FOUND", "There is no such approval.");
-  return toApproval(ctx.db, row);
+  return toApproval(ctx.db, row, viewerOf(ctx));
 });
 
 // Approving replays the call with the approver's full rights, so it takes a
@@ -75,10 +80,13 @@ const get = implement(approvalOps.get, (input, ctx) => {
 // past the key's own scope. Denying only stops something, so keys may.
 const approve = implement(approvalOps.approve, async (input, ctx) => {
   requireSession(ctx);
-  return toApproval(ctx.db, await approveRequest(ctx, input.approvalId, ctx.principal, { ip: ctx.ip, userAgent: ctx.userAgent }));
+  const done = await approveRequest(ctx, input.approvalId, ctx.principal, { ip: ctx.ip, userAgent: ctx.userAgent });
+  return toApproval(ctx.db, done, viewerOf(ctx));
 });
 
-const deny = implement(approvalOps.deny, (input, ctx) => toApproval(ctx.db, denyRequest(ctx, input.approvalId, ctx.principal, input.note)));
+const deny = implement(approvalOps.deny, (input, ctx) =>
+  toApproval(ctx.db, denyRequest(ctx, input.approvalId, ctx.principal, input.note), viewerOf(ctx)),
+);
 
 const expireJob = defineJob<Record<string, unknown>>({
   type: expireJobType,

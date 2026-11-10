@@ -24,6 +24,12 @@ export const approvals = sqliteTable(
     requestedById: text("requested_by_id"),
     /** MCP token (api_keys id) or AI conversation that asked; shown as the client name. */
     requestedVia: text("requested_via"),
+    /**
+     * What that source was called when it asked: the chat's title or the MCP
+     * token's name, so the Approvals page still names it after the chat or
+     * token is gone. Empty on approvals made before it existed.
+     */
+    sourceLabel: text("source_label").notNull().default(""),
     /** Why the model wants to do it, in its own words. */
     reason: text("reason").notNull().default(""),
     /** Project or service the op names, resolved when the approval is created, for the list and filtering. */

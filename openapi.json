@@ -68,7 +68,7 @@
       "get": {
         "operationId": "ai.conversation",
         "summary": "Get an AI conversation",
-        "description": "Returns one of the caller's conversations with all its messages.",
+        "description": "Returns one of the caller's conversations with all its messages; a reply still streaming comes with its text so far. Another person's conversation is NOT_FOUND.",
         "tags": [
           "ai"
         ],
@@ -112,6 +112,8 @@
                         "title",
                         "context",
                         "costUsd",
+                        "streaming",
+                        "pendingApprovals",
                         "createdAt",
                         "updatedAt"
                       ],
@@ -142,6 +144,13 @@
                         "costUsd": {
                           "minimum": 0,
                           "type": "number"
+                        },
+                        "streaming": {
+                          "type": "boolean"
+                        },
+                        "pendingApprovals": {
+                          "minimum": 0,
+                          "type": "integer"
                         },
                         "createdAt": {
                           "format": "date-time",
@@ -272,6 +281,56 @@
                                           "type": "null"
                                         }
                                       ]
+                                    },
+                                    "target": {
+                                      "type": "object",
+                                      "required": [
+                                        "type",
+                                        "id",
+                                        "name",
+                                        "projectId",
+                                        "projectName"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "anyOf": [
+                                            {
+                                              "const": "project",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "const": "service",
+                                              "type": "string"
+                                            }
+                                          ]
+                                        },
+                                        "id": {
+                                          "pattern": "^[a-z0-9]{16}$",
+                                          "description": "Panel-issued id.",
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "projectId": {
+                                          "anyOf": [
+                                            {
+                                              "pattern": "^[a-z0-9]{16}$",
+                                              "description": "Panel-issued id.",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "projectName": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "auto": {
+                                      "type": "boolean"
                                     }
                                   }
                                 }
@@ -356,7 +415,7 @@
       "get": {
         "operationId": "ai.conversations",
         "summary": "List AI conversations",
-        "description": "Lists the caller's assistant conversations, most recently active first.",
+        "description": "Lists the caller's assistant conversations, most recently active first; nobody sees anyone else's, not even owners. query keeps the ones whose title holds it.",
         "tags": [
           "ai"
         ],
@@ -389,6 +448,15 @@
               "maxLength": 64,
               "type": "string"
             }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -412,6 +480,8 @@
                           "title",
                           "context",
                           "costUsd",
+                          "streaming",
+                          "pendingApprovals",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -442,6 +512,13 @@
                           "costUsd": {
                             "minimum": 0,
                             "type": "number"
+                          },
+                          "streaming": {
+                            "type": "boolean"
+                          },
+                          "pendingApprovals": {
+                            "minimum": 0,
+                            "type": "integer"
                           },
                           "createdAt": {
                             "format": "date-time",
@@ -532,6 +609,499 @@
           }
         },
         "x-op-kind": "destructive",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/ai.me": {
+      "get": {
+        "operationId": "ai.me",
+        "summary": "Get your assistant",
+        "description": "Says whether the caller can use the assistant (and why not), whether the Assistant page is on, the caller's auto mode and whether this month's budget is used up.",
+        "tags": [
+          "ai"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "available",
+                    "reason",
+                    "chatPage",
+                    "autoMode",
+                    "budgetReached"
+                  ],
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "noKey",
+                              "type": "string"
+                            },
+                            {
+                              "const": "disabled",
+                              "type": "string"
+                            },
+                            {
+                              "const": "notAllowed",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "chatPage": {
+                      "type": "boolean"
+                    },
+                    "autoMode": {
+                      "type": "boolean"
+                    },
+                    "budgetReached": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/ai.renameConversation": {
+      "post": {
+        "operationId": "ai.renameConversation",
+        "summary": "Rename an AI conversation",
+        "description": "Changes the title of one of the caller's conversations (set from the first message when it starts).",
+        "tags": [
+          "ai"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "conversationId",
+                  "title"
+                ],
+                "properties": {
+                  "conversationId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "title": {
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "title",
+                    "context",
+                    "costUsd",
+                    "streaming",
+                    "pendingApprovals",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "context": {
+                      "type": "object",
+                      "properties": {
+                        "projectId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "serviceId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "costUsd": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "streaming": {
+                      "type": "boolean"
+                    },
+                    "pendingApprovals": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/ai.retry": {
+      "post": {
+        "operationId": "ai.retry",
+        "summary": "Try the assistant's last reply again",
+        "description": "Starts a new reply after the conversation's last one failed or was stopped; the failed reply stays as it was. Returns at once; the reply streams like ai.send's. CONFLICT while a reply is streaming or when the last reply did not fail.",
+        "tags": [
+          "ai"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "conversationId"
+                ],
+                "properties": {
+                  "conversationId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "assistantMessage"
+                  ],
+                  "properties": {
+                    "assistantMessage": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "role",
+                        "parts",
+                        "model",
+                        "status",
+                        "error",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "role": {
+                          "anyOf": [
+                            {
+                              "const": "user",
+                              "type": "string"
+                            },
+                            {
+                              "const": "assistant",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "parts": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "type",
+                                  "text"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "const": "text",
+                                    "type": "string"
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "type",
+                                  "toolCallId",
+                                  "opId",
+                                  "input",
+                                  "status",
+                                  "approvalId",
+                                  "resultPreview"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "const": "tool_call",
+                                    "type": "string"
+                                  },
+                                  "toolCallId": {
+                                    "type": "string"
+                                  },
+                                  "opId": {
+                                    "type": "string"
+                                  },
+                                  "input": {},
+                                  "status": {
+                                    "anyOf": [
+                                      {
+                                        "const": "running",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "done",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "error",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "needs_approval",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "const": "denied",
+                                        "type": "string"
+                                      }
+                                    ]
+                                  },
+                                  "approvalId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "resultPreview": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "required": [
+                                      "type",
+                                      "id",
+                                      "name",
+                                      "projectId",
+                                      "projectName"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "anyOf": [
+                                          {
+                                            "const": "project",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "service",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "projectId": {
+                                        "anyOf": [
+                                          {
+                                            "pattern": "^[a-z0-9]{16}$",
+                                            "description": "Panel-issued id.",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "projectName": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "auto": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "model": {
+                          "anyOf": [
+                            {
+                              "anyOf": [
+                                {
+                                  "const": "haiku",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "sonnet",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "opus",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "const": "streaming",
+                              "type": "string"
+                            },
+                            {
+                              "const": "done",
+                              "type": "string"
+                            },
+                            {
+                              "const": "error",
+                              "type": "string"
+                            },
+                            {
+                              "const": "cancelled",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
         "x-permission": "signed-in, whole account",
         "x-mcp": false
       }
@@ -744,6 +1314,56 @@
                                         "type": "null"
                                       }
                                     ]
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "required": [
+                                      "type",
+                                      "id",
+                                      "name",
+                                      "projectId",
+                                      "projectName"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "anyOf": [
+                                          {
+                                            "const": "project",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "service",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "projectId": {
+                                        "anyOf": [
+                                          {
+                                            "pattern": "^[a-z0-9]{16}$",
+                                            "description": "Panel-issued id.",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "projectName": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "auto": {
+                                    "type": "boolean"
                                   }
                                 }
                               }
@@ -926,6 +1546,56 @@
                                         "type": "null"
                                       }
                                     ]
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "required": [
+                                      "type",
+                                      "id",
+                                      "name",
+                                      "projectId",
+                                      "projectName"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "anyOf": [
+                                          {
+                                            "const": "project",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "service",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      "id": {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "projectId": {
+                                        "anyOf": [
+                                          {
+                                            "pattern": "^[a-z0-9]{16}$",
+                                            "description": "Panel-issued id.",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "projectName": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "auto": {
+                                    "type": "boolean"
                                   }
                                 }
                               }
@@ -1005,6 +1675,69 @@
         "x-mcp": false
       }
     },
+    "/api/v1/ai.setAutoMode": {
+      "post": {
+        "operationId": "ai.setAutoMode",
+        "summary": "Turn the assistant's auto mode on or off",
+        "description": "Sets the caller's auto mode for every chat and device. On, the assistant runs changes in the caller's chats without an approval, as the caller and with the caller's own permissions (audited with autoMode); off, every change waits in Approvals. Only from the browser: API keys get FORBIDDEN.",
+        "tags": [
+          "ai"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "autoMode"
+                  ],
+                  "properties": {
+                    "autoMode": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
     "/api/v1/ai.settings": {
       "get": {
         "operationId": "ai.settings",
@@ -1036,7 +1769,8 @@
                     "keyHint",
                     "routing",
                     "monthlyBudgetUsd",
-                    "allowMembers"
+                    "allowMembers",
+                    "chatPage"
                   ],
                   "properties": {
                     "enabled": {
@@ -1101,6 +1835,9 @@
                       ]
                     },
                     "allowMembers": {
+                      "type": "boolean"
+                    },
+                    "chatPage": {
                       "type": "boolean"
                     }
                   }
@@ -1211,6 +1948,9 @@
                   },
                   "allowMembers": {
                     "type": "boolean"
+                  },
+                  "chatPage": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -1230,7 +1970,8 @@
                     "keyHint",
                     "routing",
                     "monthlyBudgetUsd",
-                    "allowMembers"
+                    "allowMembers",
+                    "chatPage"
                   ],
                   "properties": {
                     "enabled": {
@@ -1295,6 +2036,9 @@
                       ]
                     },
                     "allowMembers": {
+                      "type": "boolean"
+                    },
+                    "chatPage": {
                       "type": "boolean"
                     }
                   }
@@ -3053,6 +3797,7 @@
                     "opKind",
                     "inputPreview",
                     "via",
+                    "source",
                     "requestedBy",
                     "reason",
                     "target",
@@ -3097,6 +3842,65 @@
                         {
                           "const": "ai",
                           "type": "string"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "conversationId",
+                            "title",
+                            "mine"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "assistant",
+                              "type": "string"
+                            },
+                            "conversationId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "mine": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "keyId",
+                            "clientName"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "mcp",
+                              "type": "string"
+                            },
+                            "keyId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "clientName": {
+                              "type": "string"
+                            }
+                          }
                         }
                       ]
                     },
@@ -3318,6 +4122,7 @@
                     "opKind",
                     "inputPreview",
                     "via",
+                    "source",
                     "requestedBy",
                     "reason",
                     "target",
@@ -3362,6 +4167,65 @@
                         {
                           "const": "ai",
                           "type": "string"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "conversationId",
+                            "title",
+                            "mine"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "assistant",
+                              "type": "string"
+                            },
+                            "conversationId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "mine": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "keyId",
+                            "clientName"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "mcp",
+                              "type": "string"
+                            },
+                            "keyId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "clientName": {
+                              "type": "string"
+                            }
+                          }
                         }
                       ]
                     },
@@ -3571,6 +4435,7 @@
                     "opKind",
                     "inputPreview",
                     "via",
+                    "source",
                     "requestedBy",
                     "reason",
                     "target",
@@ -3615,6 +4480,65 @@
                         {
                           "const": "ai",
                           "type": "string"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "conversationId",
+                            "title",
+                            "mine"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "assistant",
+                              "type": "string"
+                            },
+                            "conversationId": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "mine": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "keyId",
+                            "clientName"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "const": "mcp",
+                              "type": "string"
+                            },
+                            "keyId": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "clientName": {
+                              "type": "string"
+                            }
+                          }
                         }
                       ]
                     },
@@ -3885,6 +4809,7 @@
                           "opKind",
                           "inputPreview",
                           "via",
+                          "source",
                           "requestedBy",
                           "reason",
                           "target",
@@ -3929,6 +4854,65 @@
                               {
                                 "const": "ai",
                                 "type": "string"
+                              }
+                            ]
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "conversationId",
+                                  "title",
+                                  "mine"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "const": "assistant",
+                                    "type": "string"
+                                  },
+                                  "conversationId": {
+                                    "pattern": "^[a-z0-9]{16}$",
+                                    "description": "Panel-issued id.",
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "mine": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "keyId",
+                                  "clientName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "const": "mcp",
+                                    "type": "string"
+                                  },
+                                  "keyId": {
+                                    "anyOf": [
+                                      {
+                                        "pattern": "^[a-z0-9]{16}$",
+                                        "description": "Panel-issued id.",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "clientName": {
+                                    "type": "string"
+                                  }
+                                }
                               }
                             ]
                           },

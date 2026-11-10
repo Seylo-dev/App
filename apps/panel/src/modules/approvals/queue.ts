@@ -9,7 +9,7 @@ import { and, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { createAccess, isNarrowedKey, type Target } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
-import { apiKeys, approvals, projects, services, users } from "../../db/schema";
+import { aiConversations, apiKeys, approvals, projects, services, users } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { parseInput } from "../../ops/validate";
 import { runOpAs } from "./run-as";
@@ -35,6 +35,23 @@ export interface ApprovalRequest {
   requestedVia: string | null;
   reason?: string;
   target?: Target | undefined;
+}
+
+/**
+ * The source's name as the request is made: the chat's title, or the MCP
+ * token's name (an MCP app's registered name). Stored on the approval, so
+ * the Approvals page still names it after the chat or token is gone.
+ */
+function sourceLabelOf(db: PanelDb, request: ApprovalRequest): string {
+  if (request.via === "mcp") {
+    if (request.principal.type === "apiKey") return request.principal.keyName;
+    if (!request.requestedVia) return "";
+    return db.select({ name: apiKeys.name }).from(apiKeys).where(eq(apiKeys.id, request.requestedVia)).get()?.name ?? "";
+  }
+  if (!request.requestedVia) return "";
+  return (
+    db.select({ title: aiConversations.title }).from(aiConversations).where(eq(aiConversations.id, request.requestedVia)).get()?.title ?? ""
+  );
 }
 
 export interface ApprovalDecision {
@@ -76,6 +93,7 @@ export function requestApproval(deps: Pick<Deps, "db" | "secrets" | "live" | "al
       requestedByType: request.via,
       requestedById: request.principal.user.id,
       requestedVia: request.requestedVia,
+      sourceLabel: sourceLabelOf(deps.db, request).slice(0, 200),
       reason: (request.reason ?? "").slice(0, 2000),
       targetType: request.target?.type ?? null,
       targetId: request.target?.id ?? null,
@@ -286,8 +304,11 @@ export function deny(deps: Deps, approvalId: string, decider: Principal, note: s
   return done;
 }
 
-/** The approval as the API returns it. */
-export function toApproval(db: PanelDb, row: ApprovalRow) {
+/**
+ * The approval as the API returns it, for `viewerId`: a chat's title goes
+ * to the person whose chat it is only (chats are private).
+ */
+export function toApproval(db: PanelDb, row: ApprovalRow, viewerId: string | null) {
   const op = opById(row.opId);
   const requester = row.requestedById
     ? db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, row.requestedById)).get()
@@ -299,6 +320,25 @@ export function toApproval(db: PanelDb, row: ApprovalRow) {
   const decider = row.decidedBy
     ? db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.id, row.decidedBy)).get()
     : undefined;
+  const chat =
+    row.requestedByType === "ai" && row.requestedVia
+      ? db
+          .select({ title: aiConversations.title, userId: aiConversations.userId })
+          .from(aiConversations)
+          .where(eq(aiConversations.id, row.requestedVia))
+          .get()
+      : undefined;
+  const ownChat = viewerId !== null && row.requestedById === viewerId;
+  const clientName = key?.name ?? (row.sourceLabel || "MCP client");
+  const source =
+    row.requestedByType === "ai"
+      ? {
+          kind: "assistant" as const,
+          conversationId: row.requestedVia ?? row.id,
+          title: ownChat ? (chat?.title ?? row.sourceLabel) : "",
+          mine: ownChat && chat?.userId === viewerId,
+        }
+      : { kind: "mcp" as const, keyId: row.requestedVia, clientName };
   let target = null;
   if (row.targetType && row.targetId) {
     const table = row.targetType === "project" ? projects : services;
@@ -312,10 +352,11 @@ export function toApproval(db: PanelDb, row: ApprovalRow) {
     opKind: op?.kind === "destructive" ? ("destructive" as const) : ("mutation" as const),
     inputPreview: row.inputPreview,
     via: row.requestedByType === "ai" ? ("ai" as const) : ("mcp" as const),
+    source,
     requestedBy: {
       userId: row.requestedById,
       userName: requester ? requester.name || requester.email : "",
-      clientName: row.requestedByType === "ai" ? "AI assistant" : (key?.name ?? "MCP client"),
+      clientName: row.requestedByType === "ai" ? "AI assistant" : clientName,
     },
     reason: row.reason,
     target,

@@ -8,9 +8,9 @@
 
 import type { ai as aiOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
-import { and, asc, desc, eq, gte, lt, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, lt, sql, sum } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { type AiMessageRole, type AiMessageStatus, aiConversations, aiMessages, aiUsage } from "../../db/schema";
+import { type AiMessageRole, type AiMessageStatus, aiConversations, aiMessages, aiUsage, approvals } from "../../db/schema";
 import type { Anthropic } from "./client";
 import { costMicroUsd, modelIds, type Tier, type TokenUsage } from "./models";
 
@@ -113,11 +113,32 @@ export function conversationCostUsd(db: PanelDb, conversationId: string): number
 }
 
 export function toConversation(db: PanelDb, row: ConversationRow): Static<typeof aiOps.AiConversation> {
+  // A reply's row says "streaming" from ai.send until it ends (and is reset at start after a crash).
+  const streaming = db
+    .select({ id: aiMessages.id })
+    .from(aiMessages)
+    .where(and(eq(aiMessages.conversationId, row.id), eq(aiMessages.status, "streaming")))
+    .limit(1)
+    .get();
+  const waiting = db
+    .select({ n: count() })
+    .from(approvals)
+    .where(
+      and(
+        eq(approvals.requestedByType, "ai"),
+        eq(approvals.requestedVia, row.id),
+        eq(approvals.status, "pending"),
+        gt(approvals.expiresAt, new Date()),
+      ),
+    )
+    .get();
   return {
     id: row.id,
     title: row.title,
     context: row.context,
     costUsd: conversationCostUsd(db, row.id),
+    streaming: streaming !== undefined,
+    pendingApprovals: waiting?.n ?? 0,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

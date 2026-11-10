@@ -50,6 +50,14 @@ export interface OpCall {
    */
   approvalId?: string | null;
   /**
+   * Set only by the AI assistant's loop when the person it chats with turned
+   * auto mode on (ai.setAutoMode): a destructive call runs without an
+   * approval, as that person and after the same permission check, and is
+   * audited with `autoMode: true`. Honoured on the "ai" transport only;
+   * never from request input.
+   */
+  autoMode?: boolean;
+  /**
    * Run as this principal instead of authenticating credentials. Only
    * internal callers set it (the AI assistant and approvals act for a
    * person without holding their credentials); never from request input.
@@ -73,12 +81,16 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
     let projectId: string | null = null;
     const actor: { user?: PrincipalUser; details?: Record<string, unknown> } = {};
     const via = viaOf(call);
+    const autoMode = call.autoMode === true && call.transport === "ai";
     // The listener goes into every audit row of a tailnet call, refused ones
-    // included, and wins over input or handler details of the same name.
+    // included, and wins over input or handler details of the same name; so
+    // does the assistant's auto mode.
     const audited = () => {
-      const extra = via ? { ...actor.details, ...via } : actor.details;
+      const marks = { ...(via ?? {}), ...(autoMode ? { autoMode: true } : {}) };
+      const marked = Object.keys(marks).length > 0;
+      const extra = marked ? { ...actor.details, ...marks } : actor.details;
       if (!extra) return input;
-      if (input === undefined) return via ? extra : input;
+      if (input === undefined) return marked ? extra : input;
       return input && typeof input === "object" ? { ...(input as object), ...extra } : input;
     };
 
@@ -101,7 +113,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       access.require(op.permission, op.kind, input);
       // Read the name now: after a delete it would be gone.
       if (target && op.audit) label = targetLabel(deps.db, target);
-      if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId) {
+      if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId && !autoMode) {
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
       }
 

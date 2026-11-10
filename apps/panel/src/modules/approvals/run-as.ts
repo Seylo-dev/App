@@ -17,6 +17,8 @@ export interface RunAsCall {
   userId: string;
   transport: "mcp" | "ai";
   approvalId?: string | null;
+  /** The assistant's auto mode for this person (OpCall.autoMode); only the assistant's loop sets it. */
+  autoMode?: boolean;
   ip?: string | null;
   userAgent?: string | null;
 }
@@ -41,5 +43,6 @@ export async function runOpAs(deps: Pick<Deps, "db" | "ops">, call: RunAsCall): 
     userAgent: call.userAgent ?? null,
     http: null,
     approvalId: call.approvalId ?? null,
+    autoMode: call.autoMode === true,
   });
 }

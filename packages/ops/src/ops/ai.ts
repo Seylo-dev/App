@@ -1,9 +1,11 @@
 // The AI assistant: Anthropic only, with routing between Haiku, Sonnet and
 // Opus, a monthly budget, usage with a projected bill, and conversations.
 // The assistant calls the same ops as MCP; anything that is not a query
-// becomes an approval. Replies stream over the live socket: subscribe to
-// the topic `ai:<conversationId>` (see aiLiveTopic) before sending, and
-// apply the AiStreamEvent payloads it carries.
+// becomes an approval, unless the person turned auto mode on for their own
+// chats (ai.setAutoMode). Replies stream over the live socket: subscribe to
+// the topic `ai:<conversationId>` (see aiLiveTopic) and apply the
+// AiStreamEvent payloads it carries; ai.conversation returns a streaming
+// reply as far as it got, so a late subscriber catches up (see "delta").
 
 import { type Static, Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
@@ -34,6 +36,8 @@ export const AiSettings = Type.Object({
   monthlyBudgetUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
   /** Members may use the assistant (it only ever acts with their own permissions). */
   allowMembers: Type.Boolean(),
+  /** The Assistant page in the sidebar, for longer chats; the chat bubble shows either way. */
+  chatPage: Type.Boolean(),
 });
 export type AiSettings = Static<typeof AiSettings>;
 
@@ -61,6 +65,7 @@ export const updateSettings = defineOp({
     routing: Type.Optional(AiRouting),
     monthlyBudgetUsd: Type.Optional(Type.Union([Type.Number({ minimum: 0, maximum: 100_000 }), Type.Null()])),
     allowMembers: Type.Optional(Type.Boolean()),
+    chatPage: Type.Optional(Type.Boolean()),
   }),
   output: AiSettings,
   permission: permission.global("settings.manage"),
@@ -102,6 +107,57 @@ export const usage = defineOp({
   audit: false,
 });
 
+// ---------------------------------------------------------------- the caller
+
+/** Why the assistant is not there for the caller. */
+export const AiUnavailableReason = Type.Union([
+  /** No Anthropic key is stored. */
+  Type.Literal("noKey"),
+  /** An owner or admin turned it off. */
+  Type.Literal("disabled"),
+  /** The caller is a member and members may not use it. */
+  Type.Literal("notAllowed"),
+]);
+
+export const AiMe = Type.Object({
+  /** Whether the caller can chat (the bubble shows); false with `reason` otherwise. */
+  available: Type.Boolean(),
+  reason: Type.Union([AiUnavailableReason, Type.Null()]),
+  /** The Assistant page setting (settings.chatPage); the page shows when this and `available` are true. */
+  chatPage: Type.Boolean(),
+  /** The caller's auto mode: their chats run changes without an approval, with their own permissions. */
+  autoMode: Type.Boolean(),
+  /** The monthly budget is used up: the assistant answers again next month. */
+  budgetReached: Type.Boolean(),
+});
+export type AiMe = Static<typeof AiMe>;
+
+export const me = defineOp({
+  id: "ai.me",
+  kind: "query",
+  summary: "Get your assistant",
+  description:
+    "Says whether the caller can use the assistant (and why not), whether the Assistant page is on, the caller's auto mode and whether this month's budget is used up.",
+  input: Empty,
+  output: AiMe,
+  permission: permission.account(),
+  mcp: false,
+  audit: false,
+});
+
+export const setAutoMode = defineOp({
+  id: "ai.setAutoMode",
+  kind: "mutation",
+  summary: "Turn the assistant's auto mode on or off",
+  description:
+    "Sets the caller's auto mode for every chat and device. On, the assistant runs changes in the caller's chats without an approval, as the caller and with the caller's own permissions (audited with autoMode); off, every change waits in Approvals. Only from the browser: API keys get FORBIDDEN.",
+  input: Type.Object({ enabled: Type.Boolean() }),
+  output: Type.Object({ autoMode: Type.Boolean() }),
+  permission: permission.account(),
+  mcp: false,
+  audit: true,
+});
+
 // ---------------------------------------------------------------- conversations
 
 export const ToolCallStatus = Type.Union([
@@ -112,6 +168,18 @@ export const ToolCallStatus = Type.Union([
   Type.Literal("needs_approval"),
   Type.Literal("denied"),
 ]);
+
+/** What a tool call acts on: a project, or a service with its project. */
+export const AiToolTarget = Type.Object({
+  type: Type.Union([Type.Literal("project"), Type.Literal("service")]),
+  id: Id,
+  /** Its name when the call was made ("" when it did not exist). */
+  name: Type.String(),
+  /** The project itself, or the service's project; null for a service that did not exist. */
+  projectId: Type.Union([Id, Type.Null()]),
+  projectName: Type.String(),
+});
+export type AiToolTarget = Static<typeof AiToolTarget>;
 
 export const AiMessagePart = Type.Union([
   Type.Object({ type: Type.Literal("text"), text: Type.String() }),
@@ -125,6 +193,10 @@ export const AiMessagePart = Type.Union([
     approvalId: Type.Union([Id, Type.Null()]),
     /** Short redacted result or error text for the chat; the full output stays server side. */
     resultPreview: Type.Union([Type.String(), Type.Null()]),
+    /** The project or service the op names, for the chat's action card and its link. */
+    target: Type.Optional(AiToolTarget),
+    /** It ran without an approval because the person's auto mode was on. */
+    auto: Type.Optional(Type.Boolean()),
   }),
 ]);
 export type AiMessagePart = Static<typeof AiMessagePart>;
@@ -156,18 +228,26 @@ export const AiConversation = Type.Object({
   title: Type.String(),
   context: AiContext,
   costUsd: Type.Number({ minimum: 0 }),
+  /** A reply is being written right now. */
+  streaming: Type.Boolean(),
+  /** Changes the assistant asked for here that still wait in Approvals. */
+  pendingApprovals: Type.Integer({ minimum: 0 }),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
+export type AiConversation = Static<typeof AiConversation>;
 
 export const conversations = defineOp({
   id: "ai.conversations",
   kind: "query",
   summary: "List AI conversations",
-  description: "Lists the caller's assistant conversations, most recently active first.",
+  description:
+    "Lists the caller's assistant conversations, most recently active first; nobody sees anyone else's, not even owners. query keeps the ones whose title holds it.",
   input: Type.Object({
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 30 })),
     cursor: Type.Optional(Type.String({ maxLength: 64 })),
+    /** Case-insensitive part of the title. */
+    query: Type.Optional(Type.String({ maxLength: 100 })),
   }),
   output: Type.Object({ conversations: Type.Array(AiConversation), nextCursor: Type.Union([Type.String(), Type.Null()]) }),
   permission: permission.account(),
@@ -179,7 +259,8 @@ export const conversation = defineOp({
   id: "ai.conversation",
   kind: "query",
   summary: "Get an AI conversation",
-  description: "Returns one of the caller's conversations with all its messages.",
+  description:
+    "Returns one of the caller's conversations with all its messages; a reply still streaming comes with its text so far. Another person's conversation is NOT_FOUND.",
   input: Type.Object({ conversationId: Id }),
   output: Type.Object({ conversation: AiConversation, messages: Type.Array(AiMessage) }),
   permission: permission.account(),
@@ -209,6 +290,32 @@ export const send = defineOp({
   }),
   permission: permission.account(),
   rateLimit: "strict",
+  mcp: false,
+  audit: true,
+});
+
+export const retry = defineOp({
+  id: "ai.retry",
+  kind: "mutation",
+  summary: "Try the assistant's last reply again",
+  description:
+    "Starts a new reply after the conversation's last one failed or was stopped; the failed reply stays as it was. Returns at once; the reply streams like ai.send's. CONFLICT while a reply is streaming or when the last reply did not fail.",
+  input: Type.Object({ conversationId: Id }),
+  output: Type.Object({ assistantMessage: AiMessage }),
+  permission: permission.account(),
+  rateLimit: "strict",
+  mcp: false,
+  audit: true,
+});
+
+export const renameConversation = defineOp({
+  id: "ai.renameConversation",
+  kind: "mutation",
+  summary: "Rename an AI conversation",
+  description: "Changes the title of one of the caller's conversations (set from the first message when it starts).",
+  input: Type.Object({ conversationId: Id, title: Type.String({ minLength: 1, maxLength: 120 }) }),
+  output: AiConversation,
+  permission: permission.account(),
   mcp: false,
   audit: true,
 });
@@ -249,10 +356,23 @@ export function aiLiveTopic(conversationId: string): `ai:${string}` {
  * Apply them to the message from ai.send: "delta" appends text to the
  * part at `index` (creating a text part there when missing), "part" sets
  * the part at `index` (tool calls, and their later status changes),
- * "done" ends it. After a reconnect, refetch ai.conversation.
+ * "done" ends it. After a reconnect, refetch ai.conversation. A reply that
+ * starts again (after its approvals were decided, or a retry) sends an
+ * "invalidate" of ai.conversation on the same topic first.
  */
 export const AiStreamEvent = Type.Union([
-  Type.Object({ type: Type.Literal("delta"), messageId: Id, index: Type.Integer({ minimum: 0 }), text: Type.String() }),
+  Type.Object({
+    type: Type.Literal("delta"),
+    messageId: Id,
+    index: Type.Integer({ minimum: 0 }),
+    text: Type.String(),
+    /**
+     * The part's text length before this delta. A client holding less text
+     * missed some and refetches ai.conversation; one holding more already
+     * has this text (from ai.conversation) and skips what it has.
+     */
+    at: Type.Optional(Type.Integer({ minimum: 0 })),
+  }),
   Type.Object({ type: Type.Literal("part"), messageId: Id, index: Type.Integer({ minimum: 0 }), part: AiMessagePart }),
   Type.Object({
     type: Type.Literal("done"),
