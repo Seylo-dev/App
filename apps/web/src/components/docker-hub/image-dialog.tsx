@@ -46,6 +46,8 @@ import { TagPicker } from "./tag-picker";
 export interface HubTarget {
   repository: string;
   description?: string;
+  /** A popular image's logo, shown in the dialog's header. */
+  logoUrl?: string;
   port?: number;
   volumes?: string[];
   env?: Record<string, string>;
@@ -161,7 +163,7 @@ function ImageForm({ target, fixedProjectId, onClose }: { target: HubTarget; fix
     // Only the middle scrolls: the title and the Create button stay in view on a short screen.
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-divider px-[22px] py-[18px]">
-        <TemplateLogo slug={target.repository} name={defaultServiceName(target.repository)} logoUrl={null} size={38} />
+        <TemplateLogo slug={target.repository} name={defaultServiceName(target.repository)} logoUrl={target.logoUrl ?? null} size={38} />
         <span className="flex min-w-0 flex-col gap-px">
           <DialogTitle className="text-base">{t("dockerHub.dialogTitle", { name: target.repository })}</DialogTitle>
           <DialogDescription className="truncate text-[12.5px]">{target.description || t("dockerHub.fromDockerHub")}</DialogDescription>

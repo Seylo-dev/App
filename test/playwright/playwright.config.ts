@@ -24,7 +24,7 @@ export default defineConfig({
     { name: "smoke", testMatch: /smoke\.spec\.ts$/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
     {
       name: "app",
-      testMatch: /(flows|reauth|screens|motion|loading|editor|copy|dockerhub|git-providers|git-credentials|internal-git-hosts|nodeops|clone-move|databases|certificates|updates|env-save|toasts|tailscale|nodes-build-default|panel-access|build-settings|hide-projects|console|repo-picker|sidebar-new-service|github-account|deploy-lock|domain-add|settings-cleanup|settings-ai|mcp-setup)\.spec\.ts$/,
+      testMatch: /(flows|reauth|screens|motion|loading|editor|copy|dockerhub|git-providers|git-credentials|internal-git-hosts|nodeops|clone-move|databases|certificates|updates|env-save|toasts|tailscale|nodes-build-default|panel-access|build-settings|hide-projects|console|repo-picker|sidebar-new-service|github-account|deploy-lock|domain-add|settings-cleanup|settings-ai|mcp-setup|template-logos)\.spec\.ts$/,
       dependencies: ["smoke"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } },
     },

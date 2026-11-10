@@ -20,7 +20,7 @@ export const TemplateSummary = Type.Object({
   /** "Automation", "Analytics", "Monitoring", "Storage", "CMS", "Developer tools", ... */
   category: Type.String(),
   tags: Type.Array(Type.String()),
-  /** Logo served by the panel: the template's own SVG, or a generated monogram. Never null; the type keeps null for older clients. */
+  /** The app's logo, served by the panel (`/api/templates/<slug>/logo.svg`, `.webp` or `.png`) for built-in templates that ship one; null otherwise (the web shows a letter tile). */
   logoUrl: Type.Union([Type.String(), Type.Null()]),
   /** What installing creates, for the card: "App + Postgres", "Compose · 3 services". */
   creates: Type.String(),

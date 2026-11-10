@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import { popularImages } from "./popular";
 import {
   archOf,
@@ -129,5 +131,20 @@ describe("popular images", () => {
       expect.arrayContaining(["nginx", "louislam/uptime-kuma", "gitea/gitea", "rustfs/rustfs"]),
     );
     for (const image of popularImages) for (const path of image.volumes ?? []) expect(path).toMatch(/^\/[^\s]+$/);
+  });
+
+  test("logos are small bundled files listed in templates/NOTICE; RustFS keeps its letter tile", () => {
+    // Under bun test an asset import is the file's path.
+    const notice = readFileSync(new URL("../../../../../templates/NOTICE", import.meta.url), "utf8");
+    const withLogo = popularImages.filter((image) => image.logo);
+    expect(withLogo.length).toBe(popularImages.length - 1);
+    expect(popularImages.find((image) => image.id === "rustfs")?.logo).toBeUndefined();
+    for (const image of withLogo) {
+      const path = image.logo as string;
+      const file = basename(path);
+      expect(file).toMatch(/^[a-z0-9-]+\.(svg|webp)$/);
+      expect({ file, size: statSync(path).size <= (file.endsWith(".svg") ? 50_000 : 30_000) }).toEqual({ file, size: true });
+      expect(notice).toContain(`  ${file} `);
+    }
   });
 });

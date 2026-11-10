@@ -97,6 +97,13 @@
   --chip-amber-bg: #fff1e2;
   --chip-amber-fg: #8a4300;
 
+  /*
+   * Behind app logos (templates, popular images). Light in every preset:
+   * vendors draw their logos for light backgrounds, so a dark tile would
+   * hide the black and navy ones (Ghost, Umami, Mattermost).
+   */
+  --logo-tile: #f1f3f7;
+
   /* Status dots. */
   --status-ok: #16a34a;
   --status-busy: #f59e0b;
@@ -218,6 +225,8 @@
   --chip-green-fg: #7dd3a8;
   --chip-amber-bg: #3a2a14;
   --chip-amber-fg: #f2bd63;
+  /* A step down from white, so the tile does not glare on the dark cards. */
+  --logo-tile: #e3e8f0;
   --status-off: #4b5570;
   /* The terminal sits a step darker than the page so its card still reads as one. */
   --terminal: #060914;
@@ -322,6 +331,7 @@
   --chip-green-fg: #7dd3a8;
   --chip-amber-bg: #372914;
   --chip-amber-fg: #f2bd63;
+  --logo-tile: #e4e4ea;
   --status-off: #4a4a55;
   /* Neutral terminal to match the preset (the default one is ink blue). */
   --terminal: #0b0b0e;

@@ -38,7 +38,7 @@ test/playwright/          browser tests (`test/playwright/run.sh`)
 .github/workflows/install-smoke.yml  installs a published release with its install.sh on GitHub's amd64 and arm64 runners and runs test/install-smoke/smoke.sh (read-only token, no secret)
 test/install-smoke/       smoke.sh: owner, API key, a whoami service, its IP:port answers
 .gitleaks.toml            secret scan config: gitleaks' default rules plus the known fake test secrets
-templates/                one-click template catalog (meta.yaml + index.ts per app; README.md has the format)
+templates/                one-click template catalog (meta.yaml + index.ts per app, logo.* where one exists; README.md has the format, NOTICE the logos' source)
 ```
 
 The Go module path is `github.com/seylo-dev/app/go` (lowercase, as Go
@@ -1995,9 +1995,20 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
 - Registry GC: every successful deploy enqueues `deployments.registryGc`; a daily
   `deployments.registryGcSweep` retries services whose old images are still in
   the registry.
-- Template logos: `logoUrl` is always `/api/templates/<slug>/logo.svg` (public):
-  a built-in template's own `templates/<slug>/logo.svg`, else a generated
-  monogram. No third-party logos.
+- Template logos: a built-in template may ship its app's logo as
+  `templates/<slug>/logo.svg`, else `logo.webp` or `logo.png`
+  (`catalog.ts` `logoFiles`, the first one found); `logoUrl` is then
+  `/api/templates/<slug>/<that file>` (public, `nosniff`, sandbox CSP, one
+  day of cache), and null for templates without one and every custom
+  template (the web shows the letter tile, as it does when an image fails
+  to load). The route serves only the file the template ships. The logos
+  are vendored from dashboard-icons (Apache-2.0) at a pinned commit, never
+  hotlinked: `templates/NOTICE` lists each file, its source and the
+  trademark note, `templates/LICENSE.dashboard-icons` is the license. The
+  popular images row bundles its own copies in
+  `apps/web/src/components/docker-hub/logos/`. SVGs stay under 50 KB and
+  rasters under 30 KB, with nothing active or remote in an SVG
+  (`template-logos.test.ts`).
 - First-run IP:port also opens when an app without ports gets its first port
   (`services.update`, no domain yet) and for compose members whose file
   publishes a TCP port. Exposures record `openedBy` "ai"/"mcp" from
@@ -2126,7 +2137,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
 | Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
-| Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (no third-party images, monograms instead) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
+| Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (letter tiles instead; only the popular images row has app logos, bundled with the web app) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
 | Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled on the panel's node by `sudo seylo panel rotate-key --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key, LB CA and agents' TLS key, so every node is joined again with the printed `seylo join --force` command and its new pin; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates. Agents from before `lb.tls.peers` keep working with upgraded ones: every certificate carries the shared name and chains to the LB CA through its issuer, upgraded nodes reach them by the shared name and accept their certificate when the panel lists them | During an update run only |
@@ -3625,6 +3636,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   in the Source tab and the watch paths tester, on the demo data),
   `dockerhub.spec.ts` (Docker Hub search, tag picker, prefilled form and
   create, popular images, with `demo/dockerhub.ts`),
+  `template-logos.spec.ts` (app logos on the Templates page from the real
+  catalog: logo images, letter tiles without one or when one fails to load,
+  the popular images row and its dialog, a screenshot per preset),
   `nodeops.spec.ts` (the node sheet's Cleanup and Shell views with the demo
   data: saving a schedule, allowing and opening a host shell),
   `clone-move.spec.ts` (the Clone and Move to project dialogs on the demo

@@ -1,0 +1,62 @@
+App logos
+
+The logo files below are copied from dashboard-icons
+(https://github.com/homarr-labs/dashboard-icons) at commit
+d767d7327db7f8ebd3715b552523f61889eea41c, under the Apache License,
+Version 2.0. The full license text is LICENSE.dashboard-icons in this folder.
+
+  Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and Homarr Labs
+
+The logos and product names are trademarks of their owners. They are shown
+only to identify each app in the template catalog and the popular images
+row; showing them does not mean the owners endorse this project.
+
+SVG files are unchanged copies of the upstream svg/<name>.svg. WebP files are
+the upstream png/<name>.png resized to 128 px and saved as WebP (the upstream
+SVG is missing or embeds a large PNG). Apps the set has no usable logo for
+(Appsmith, Redis Insight, and RustFS, which has only a wordmark) keep their
+letter tile.
+
+Template logos, served by the panel at /api/templates/<slug>/logo.<ext>:
+
+  templates/code-server/logo.webp     png/code-server.png (resized)
+  templates/directus/logo.svg         svg/directus.svg
+  templates/excalidraw/logo.svg       svg/excalidraw.svg
+  templates/filebrowser/logo.svg      svg/filebrowser.svg
+  templates/ghost/logo.webp           png/ghost.png (resized)
+  templates/gitea/logo.svg            svg/gitea.svg
+  templates/grafana/logo.svg          svg/grafana.svg
+  templates/it-tools/logo.svg         svg/it-tools.svg
+  templates/listmonk/logo.svg         svg/listmonk.svg
+  templates/mattermost/logo.svg       svg/mattermost.svg
+  templates/meilisearch/logo.svg      svg/meilisearch.svg
+  templates/metabase/logo.svg         svg/metabase.svg
+  templates/n8n/logo.svg              svg/n8n.svg
+  templates/nocodb/logo.svg           svg/nocodb.svg
+  templates/pgadmin/logo.svg          svg/pgadmin.svg
+  templates/plausible/logo.svg        svg/plausible.svg
+  templates/prometheus/logo.svg       svg/prometheus.svg
+  templates/stirling-pdf/logo.svg     svg/stirling-pdf.svg
+  templates/umami/logo.svg            svg/umami.svg
+  templates/uptime-kuma/logo.svg      svg/uptime-kuma.svg
+  templates/vaultwarden/logo.svg      svg/vaultwarden.svg
+
+Popular images logos, bundled into the web app
+(apps/web/src/components/docker-hub/logos/):
+
+  excalidraw.svg                      svg/excalidraw.svg
+  gitea.svg                           svg/gitea.svg
+  grafana.svg                         svg/grafana.svg
+  mailpit.svg                         svg/mailpit.svg
+  memos.webp                          png/memos.png (resized)
+  metabase.svg                        svg/metabase.svg
+  n8n.svg                             svg/n8n.svg
+  nginx.svg                           svg/nginx.svg
+  node-red.svg                        svg/node-red.svg
+  uptime-kuma.svg                     svg/uptime-kuma.svg
+  vaultwarden.svg                     svg/vaultwarden.svg
+
+To add or update one: take the file from the same repository at a pinned
+commit (raw.githubusercontent.com/homarr-labs/dashboard-icons/<commit>/...),
+keep an SVG under 50 KB and a raster under 30 KB, list it here and update the
+commit above.
