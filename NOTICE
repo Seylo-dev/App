@@ -1,8 +1,9 @@
 Seylo
 Licensed under the GNU Affero General Public License v3.0 (see LICENSE).
 
-This repository contains code ported from third-party projects under their
-own licenses. The files keep their original notices.
+This repository contains code ported from third-party projects, and logo
+files copied from one, under their own licenses. The files keep their
+original notices.
 
 -------------------------------------------------------------------------------
 Pelican Wings (https://github.com/pelican-dev/wings), via the Wings fork
@@ -37,3 +38,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+-------------------------------------------------------------------------------
+dashboard-icons (https://github.com/homarr-labs/dashboard-icons), Apache
+License 2.0
+
+Copied: the app logos in templates/*/logo.* and
+apps/web/src/components/docker-hub/logos/. templates/NOTICE lists each file,
+the upstream commit and what was changed; the license text is
+templates/LICENSE.dashboard-icons. The logos are trademarks of their owners.
+
+Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and Homarr Labs

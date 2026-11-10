@@ -26,6 +26,7 @@ export function PopularRow({ onPick }: { onPick: (target: HubTarget) => void }) 
               onPick({
                 repository: image.repository,
                 description: t(image.description),
+                ...(image.logo ? { logoUrl: image.logo } : {}),
                 ...(image.port ? { port: image.port } : {}),
                 ...(image.volumes ? { volumes: image.volumes } : {}),
                 ...(image.env ? { env: image.env } : {}),
@@ -33,7 +34,7 @@ export function PopularRow({ onPick }: { onPick: (target: HubTarget) => void }) 
             }
             className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-card border-0 bg-card px-3 py-2.5 text-left text-foreground shadow-card transition-shadow hover:shadow-popover"
           >
-            <TemplateLogo slug={image.id} name={image.name} logoUrl={null} size={30} />
+            <TemplateLogo slug={image.id} name={image.name} logoUrl={image.logo ?? null} size={30} />
             <span className="flex min-w-0 flex-col">
               <b className="truncate text-[13px] font-semibold">{image.name}</b>
               <span className="truncate font-mono text-[11px] text-muted-foreground">{image.repository}</span>

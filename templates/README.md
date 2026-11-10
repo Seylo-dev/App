@@ -3,8 +3,9 @@
 One-click templates for the panel. Each folder is one template in the same
 shape Easypanel uses: `meta.yaml` (name, description, the install form) and
 `index.ts` with a `generate(input)` function that returns the services to
-create. This catalog is written for this project; nothing is copied from
-other catalogs.
+create, plus the app's logo when there is one. The templates are written
+for this project; nothing is copied from other catalogs. The logos are
+copied from dashboard-icons (see "Logo" below).
 
 Template code never runs in the panel's own JavaScript engine. The panel
 compiles `index.ts` and runs it in a QuickJS WebAssembly sandbox
@@ -92,3 +93,19 @@ apps offer `URL`, `DOMAIN` and `INTERNAL_URL`.
 Pin image tags. Every template is run by
 `apps/panel/test/templates.test.ts`, which checks the output and that each
 template installs.
+
+## Logo
+
+`logo.svg` next to `meta.yaml`, or `logo.webp` (or `logo.png`) when the app
+has no small SVG. The card and the install dialog show it on a light tile;
+a template without one shows its first letter. The panel serves it at
+`/api/templates/<slug>/logo.svg` (or `.webp`, `.png`).
+
+Take the logo from
+[dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
+(Apache-2.0) at the commit in `NOTICE`: an SVG from `svg/<name>.svg` as is,
+or `png/<name>.png` resized to 128 px and saved as WebP when the SVG is
+missing or embeds a large image. Pick the variant drawn for light
+backgrounds (not `-light`). Keep an SVG under 50 KB and a raster under
+30 KB, and add the file to `NOTICE`; `apps/panel/test/template-logos.test.ts`
+checks both. Never point at a CDN: panels may have no internet access.

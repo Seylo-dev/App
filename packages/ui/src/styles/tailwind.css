@@ -92,6 +92,8 @@
   --color-chip-amber-bg: var(--chip-amber-bg);
   --color-chip-amber-fg: var(--chip-amber-fg);
 
+  --color-logo-tile: var(--logo-tile);
+
   --color-status-ok: var(--status-ok);
   --color-status-busy: var(--status-busy);
   --color-status-error: var(--status-error);

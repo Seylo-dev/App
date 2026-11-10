@@ -1,6 +1,7 @@
 // The template catalog: built-in templates shipped in templates/<slug>/
-// (meta.yaml + index.ts) and templates people added on this panel
-// (custom_templates). Only metadata is read here; code runs in the sandbox.
+// (meta.yaml + index.ts, and the app's logo when there is one) and
+// templates people added on this panel (custom_templates). Only metadata is
+// read here; code runs in the sandbox.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -17,7 +18,13 @@ export interface Template {
   detail: TemplateDetail;
   source: string;
   metaYaml: string;
+  /** A built-in template's logo file (logo.ts serves it); null for custom templates and built-in ones without. */
+  logoPath: string | null;
 }
+
+/** The logo file names a built-in template's folder may hold, the one used first when there are several. */
+export const logoFiles = ["logo.svg", "logo.webp", "logo.png"] as const;
+export type LogoFile = (typeof logoFiles)[number];
 
 interface MetaProperty {
   type?: string;
@@ -102,8 +109,8 @@ export function parseMeta(slug: string, text: string, builtIn: boolean): Templat
     description: meta.description,
     category: meta.category ?? "Other",
     tags: meta.tags ?? [],
-    // Every template has a logo: its own logo.svg or a generated monogram (logo.ts).
-    logoUrl: `/api/templates/${encodeURIComponent(slug)}/logo.svg`,
+    // builtInTemplates sets it when the template's folder has a logo file; custom templates have none.
+    logoUrl: null,
     creates: meta.creates ?? "",
     builtIn,
     body: meta.body ?? "",
@@ -125,7 +132,14 @@ export function builtInTemplates(): Map<string, Template> {
       const codePath = join(dir, slug, "index.ts");
       if (!existsSync(metaPath) || !existsSync(codePath)) continue;
       const metaYaml = readFileSync(metaPath, "utf8");
-      out.set(slug, { detail: parseMeta(slug, metaYaml, true), source: readFileSync(codePath, "utf8"), metaYaml });
+      const logo = logoFiles.find((file) => existsSync(join(dir, slug, file))) ?? null;
+      const detail = parseMeta(slug, metaYaml, true);
+      out.set(slug, {
+        detail: { ...detail, logoUrl: logo && `/api/templates/${encodeURIComponent(slug)}/${logo}` },
+        source: readFileSync(codePath, "utf8"),
+        metaYaml,
+        logoPath: logo && join(dir, slug, logo),
+      });
     }
   }
   builtInCache = out;
@@ -139,7 +153,7 @@ export function allTemplates(db: PanelDb): Map<string, Template> {
     if (out.has(row.slug)) continue;
     try {
       const yamlText = typeof row.meta.yaml === "string" ? row.meta.yaml : "";
-      out.set(row.slug, { detail: parseMeta(row.slug, yamlText, false), source: row.source, metaYaml: yamlText });
+      out.set(row.slug, { detail: parseMeta(row.slug, yamlText, false), source: row.source, metaYaml: yamlText, logoPath: null });
     } catch {
       // A broken custom template is left out of the catalog rather than breaking it.
     }
