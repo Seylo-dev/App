@@ -609,8 +609,9 @@ func (m *Manager) relay(a *active, client net.Conn) {
 	cancel()
 	if err != nil {
 		m.log.Debug("portgate relay failed", "service_id", a.svc, "listener", a.lid, "err", err)
-		if now := time.Now().UnixNano(); now-a.warnedAt.Load() > int64(unreachableWarnEvery) {
-			a.warnedAt.Store(now)
+		// Connections that fail together race here: only the one whose swap wins writes the warning.
+		now, last := time.Now().UnixNano(), a.warnedAt.Load()
+		if now-last > int64(unreachableWarnEvery) && a.warnedAt.CompareAndSwap(last, now) {
 			m.log.Warn("portgate cannot reach the service; closing the connections it cannot serve",
 				"service_id", a.svc, "listener", a.lid, "port", a.port, "waited", m.cfg.ConnectTimeout, "err", err)
 		}

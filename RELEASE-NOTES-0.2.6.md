@@ -17,6 +17,7 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-6
 
 - **Choppy screens after opening a code editor.** Once the Environment tab, a Dockerfile source or the custom CSS editor had opened, the editor's theme was rebuilt on every frame, on every page, until a reload: about 1,000 style recalculations a second, a fifth of the browser's main thread. It now repaints only when the theme, the color mode, the accent or the custom CSS changes.
 - The Environment tab loads the editor when you open it (not when you hover the link) and creates it after the page has eased in, so opening the tab no longer stutters.
+- **Locked to Tailscale:** when the tailnet stopped, the panel could reopen IP access and still show the tailnet as working for 5 more minutes, without the "tailnet stopped" alert. It now saves the stop before it reopens.
 - **A Docker update on a node** said "Rolling out vdocker" and could stay at 0 of 1 done. It now says "Updating Docker" and finishes as soon as the node is back with the new Docker version.
 
 ## After you update
