@@ -13,6 +13,7 @@ import { isNull } from "drizzle-orm";
 import { alerts, nodes } from "../src/db/schema";
 import { compileDesiredState } from "../src/desired";
 import { ensurePanelService, panelServiceId } from "../src/modules/nodes/panel-service";
+import { ipAccessCheck } from "../src/modules/settings";
 import {
   applyPanelIpAccess,
   panelPublishBindCapability,
@@ -23,7 +24,7 @@ import {
 import { anyPrivatePathWorking } from "../src/modules/settings/private-paths";
 import { panelPublicUrl } from "../src/modules/settings/public-url";
 import { tailnetServeCapability } from "../src/modules/tailscale/facts";
-import { recordReport, settle, tailnetDownMs } from "../src/modules/tailscale/status";
+import { recordReport, settle, tailnetDownMs, tailnetPathState } from "../src/modules/tailscale/status";
 import { setSetting } from "../src/settings";
 import { type TestPanel, testPanel } from "./helpers";
 import { type FakeAgent, fakeAgent } from "./seed-helpers";
@@ -139,6 +140,25 @@ test("the tailnet stopping for 5 minutes reopens IP access, and it closes again 
   expect(again).toMatchObject({ closed: true, by: "system" });
   expect(again.reason).toContain("has worked for an hour");
   expect(bindAddresses()).toEqual(["127.0.0.1", ""]);
+});
+
+test("the 1-minute IP access check ends the tailnet's debounce first, so the restart a reopen takes keeps the tailnet stopped", () => {
+  // e2e check 40 on 0.2.6: this check ran before tailscale.check, reopened IP access on the tailnet's
+  // read-time state, and the panel restart that followed started the 5 minutes over with the tailnet "working".
+  closeOverTheTailnet();
+  report(stopped(), Date.now() - tailnetDownMs - 60_000);
+  ipAccessCheck(panel.deps);
+  const reopened = readIpAccessApplied(panel.deps);
+  expect(reopened).toMatchObject({ closed: false, by: "system" });
+  expect(reopened.reason).toContain("stopped working");
+  expect(openAlerts("tailnet-stopped:")[0]?.message).toContain("reopen");
+
+  // The panel restarts to publish its port again: its agent goes away, comes back and reports.
+  agent.disconnect();
+  agent = fakeAgent(panel, panelNode, {}, [], [panelPublishBindCapability, tailnetServeCapability]);
+  report(stopped());
+  expect(tailnetPathState(panel.deps).working).toBe(false);
+  expect(anyPrivatePathWorking(panel.deps)).toBe(false);
 });
 
 test("keep-closed: the tailnet stopping leaves IP access closed", () => {
