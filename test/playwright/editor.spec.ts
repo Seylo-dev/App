@@ -106,3 +106,34 @@ test("the custom CSS editor shows a swatch next to a color", async ({ page }) =>
   await expect(editor.locator(".colorpicker-color-decoration")).toHaveCount(1);
   expect(errors).toEqual([]);
 });
+
+// The editors' theme follows the page (editor/theme.ts followPageTheme), but
+// only what the colors come from: before 0.2.5 every change in <head>
+// repainted it, Monaco's own repaint wrote <head> again, and every page kept
+// recalculating styles about 1,000 times a second once an editor had opened.
+test("an opened editor leaves the page idle, and still follows a theme change", async ({ page }) => {
+  await installDemo(page, { nodeLive: "silent" });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const recalcs = async () =>
+    (await cdp.send("Performance.getMetrics")).metrics.find((m) => m.name === "RecalcStyleCount")?.value ?? 0;
+
+  await page.goto(`/p/${ids.acme}/s/${svc.worker}/environment`);
+  const editor = page.locator(".monaco-editor").first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  const background = () => editor.evaluate((el) => getComputedStyle(el.querySelector(".monaco-editor-background") ?? el).backgroundColor);
+  const light = await background();
+
+  // Back on the dashboard, nothing should be recalculating styles on its own.
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Dashboard" }).click();
+  await page.waitForTimeout(1500);
+  const before = await recalcs();
+  await page.waitForTimeout(3000);
+  expect(await recalcs(), "style recalculations in 3 s of idle").toBeLessThan(before + 120);
+
+  // A dark page still repaints the editor.
+  await page.goBack();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await page.evaluate(() => document.documentElement.classList.add("dark"));
+  await expect.poll(background).not.toBe(light);
+});

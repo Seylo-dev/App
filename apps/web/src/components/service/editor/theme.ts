@@ -6,6 +6,7 @@
 // page's --card color, and followPageTheme() repaints open editors when the
 // preset, color mode or accent changes.
 
+import { settings } from "@seylo/ops";
 import type * as Monaco from "monaco-editor/editor/editor.api";
 
 export const lightTheme = "seylo-light";
@@ -122,26 +123,77 @@ function hex(color: string): string {
 }
 
 /**
+ * What the editor's colors come from: the preset, the color mode and the
+ * accent and custom CSS styles (lib/theme.ts). Repaints compare it, so a
+ * change that does not touch them costs nothing.
+ */
+export function pageThemeKey(): string {
+  if (typeof document === "undefined") return "";
+  const html = document.documentElement;
+  const dom = settings.bootDom;
+  return [
+    html.getAttribute(dom.themeAttribute),
+    html.getAttribute(dom.colorModeAttribute),
+    html.classList.contains(dom.darkClass),
+    document.getElementById(dom.accentStyleId)?.textContent ?? "",
+    document.getElementById(dom.customCssStyleId)?.textContent ?? "",
+  ].join("\u0000");
+}
+
+/** True when a <head> change touched the accent or custom CSS style (not Monaco's own styles, nor the page title). */
+export function touchesThemeStyle(records: readonly Pick<MutationRecord, "target" | "addedNodes" | "removedNodes">[]): boolean {
+  const ids = new Set<string>([settings.bootDom.accentStyleId, settings.bootDom.customCssStyleId]);
+  const isTheme = (node: Node | null): boolean => {
+    for (let n: Node | null = node; n && n !== document.head; n = n.parentNode) {
+      if (n instanceof Element && ids.has(n.id)) return true;
+    }
+    return false;
+  };
+  return records.some(
+    (r) =>
+      isTheme(r.target) ||
+      [...r.addedNodes].some((n) => isTheme(n)) ||
+      [...r.removedNodes].some((n) => n instanceof Element && ids.has(n.id)),
+  );
+}
+
+/**
  * Repaints Monaco when the preset, color mode or accent changes (Settings >
  * Appearance previews in place, the system can switch to dark), so editors
- * that are already open follow without a reload.
+ * that are already open follow without a reload. It watches only what the
+ * colors come from: <head> also changes when Monaco writes its own styles
+ * (every repaint does) and when a page sets its title, and repainting on
+ * those kept the browser recalculating styles about 1,000 times a second,
+ * on every page, once an editor had opened.
  */
 export function followPageTheme(monaco: typeof Monaco): void {
   if (typeof document === "undefined") return;
   let queued = false;
+  let painted = pageThemeKey();
   const repaint = () => {
     if (queued) return;
     queued = true;
     requestAnimationFrame(() => {
       queued = false;
+      const key = pageThemeKey();
+      if (key === painted) return;
+      painted = key;
       defineSeyloThemes(monaco);
       // Monaco has one theme for every editor: leave the custom CSS editor's own theme alone while it is open.
       if (!document.querySelector('[data-monaco-theme="custom-css"]')) monaco.editor.setTheme(pickTheme());
     });
   };
-  const observer = new MutationObserver(repaint);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-color-mode", "class"] });
-  observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+  const dom = settings.bootDom;
+  new MutationObserver(repaint).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [dom.themeAttribute, dom.colorModeAttribute, "class"],
+  });
+  new MutationObserver((records) => touchesThemeStyle(records) && repaint()).observe(document.head, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  // A system mode follows the device: lib/theme.ts toggles the dark class, which the first observer sees.
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", repaint);
 }
 
