@@ -40,7 +40,8 @@ export const HttpsMode = Type.Union([Type.Literal("acme"), Type.Literal("custom"
  * ok: the record points at the service's node. missing: no record yet.
  * wrongTarget: the record points somewhere else. proxied: only Cloudflare
  * proxy addresses answer, which works once the origin is reachable but hides
- * the target from the check. unknown: never checked or the lookup failed.
+ * the target from the check (the origin check, OriginStatus, tells whether it
+ * reaches the node). unknown: never checked or the lookup failed.
  */
 export const DnsStatus = Type.Union([
   Type.Literal("unknown"),
@@ -49,6 +50,19 @@ export const DnsStatus = Type.Union([
   Type.Literal("wrongTarget"),
   Type.Literal("proxied"),
 ]);
+
+/**
+ * Whether a custom domain whose DNS is ok or proxied reaches the service's
+ * node, from the panel's origin check: it fetches
+ * http://<host>/.well-known/<slug>-origin/<challenge> and the node's agent
+ * answers with a proof signed by its key. node: one of the service's nodes
+ * answered. elsewhere: something else answered, so behind Cloudflare's
+ * proxy the record there points at another server (Let's Encrypt cannot
+ * reach the node either). unknown: no answer (timeout, network error, a
+ * 5xx such as Cloudflare's own errors), or not every node of the service
+ * runs an agent that answers the check yet.
+ */
+export const OriginStatus = Type.Union([Type.Literal("node"), Type.Literal("elsewhere"), Type.Literal("unknown")]);
 
 export const CertificateStatus = Type.Union([Type.Literal("none"), Type.Literal("pending"), Type.Literal("valid"), Type.Literal("failed")]);
 
@@ -110,6 +124,15 @@ export const Domain = Type.Object({
    * domains.list.
    */
   pointsTo: Type.Optional(Type.Array(Type.String())),
+  /**
+   * The last origin check of a custom domain (not automatic, not
+   * redirect-only) while its DNS is ok or proxied; absent before the first
+   * check and while DNS is in another state. domains.checkDns runs it, and
+   * so does the panel a few seconds after domains.add.
+   */
+  origin: Type.Optional(OriginStatus),
+  /** When origin was checked. */
+  originCheckedAt: Type.Optional(Timestamp),
   certificate: Type.Object({
     status: CertificateStatus,
     expiresAt: Type.Union([Timestamp, Type.Null()]),
@@ -153,6 +176,12 @@ export const DnsCheck = Type.Object({
    * zone is not on Cloudflare.
    */
   cloudflareDnsUrl: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The origin check run with this DNS check (see Domain.origin): set by
+   * domains.checkDns for a custom domain whose status is ok or proxied,
+   * absent otherwise.
+   */
+  origin: Type.Optional(OriginStatus),
   checkedAt: Timestamp,
 });
 
@@ -202,7 +231,7 @@ export const add = defineOp({
   kind: "mutation",
   summary: "Add a custom domain",
   description:
-    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Set forward to make it a redirect-only domain, for example www to the apex.",
+    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
   input: Type.Object({
     serviceId: Id,
     host: Hostname,
@@ -226,7 +255,7 @@ export const checkDns = defineOp({
   kind: "query",
   summary: "Check a domain's DNS",
   description:
-    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. Also refreshes the stored status.",
+    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node. Also refreshes the stored status.",
   input: Type.Object(DomainRef),
   output: DnsCheck,
   permission: byService("domains.view"),

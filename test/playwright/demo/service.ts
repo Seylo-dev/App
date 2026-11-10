@@ -397,8 +397,9 @@ const domain = (over: Input) => ({
   ...over,
 });
 
-const domains = [
-  domain({ id: "m000000000000001", host: "shop.example.com", primary: true, url: "https://shop.example.com", dnsStatus: "proxied", certificate: { status: "valid", expiresAt: new Date(now + 90 * day).toISOString(), issuer: "Cloudflare", error: null } }),
+const domains: Input[] = [
+  // Behind Cloudflare's proxy, and the panel's origin check reached the node through it.
+  domain({ id: "m000000000000001", host: "shop.example.com", primary: true, url: "https://shop.example.com", dnsStatus: "proxied", origin: "node", originCheckedAt: ago(min), certificate: { status: "valid", expiresAt: new Date(now + 90 * day).toISOString(), issuer: "Cloudflare", error: null } }),
   domain({ id: "m000000000000002", host: "web.de1.example.com", auto: true, url: "https://web.de1.example.com" }),
   domain({ id: "m000000000000003", host: "www.example.com", url: "https://www.example.com", forward: { url: "https://shop.example.com", permanent: true, keepPath: true } }),
   domain({
@@ -411,7 +412,38 @@ const domains = [
     certificate: { status: "pending", expiresAt: null, issuer: null, error: null },
     middlewares: { basicAuth: { usernames: ["ops"] }, ipAllowList: ["198.51.100.24", "10.0.0.0/8"], rateLimit: null, redirects: [] },
   }),
+  // Proxied too, but its record in Cloudflare still points at the old host: the origin check reached another server.
+  domain({
+    id: "m000000000000005",
+    host: "api.example.com",
+    url: "https://api.example.com",
+    dnsStatus: "proxied",
+    origin: "elsewhere",
+    originCheckedAt: ago(min),
+    liveAt: null,
+    certificate: { status: "pending", expiresAt: null, issuer: null, error: null },
+    createdAt: ago(2 * hour),
+  }),
 ];
+
+/** domains.checkDns for a demo domain: what its row shows (the record to create, the origin check). */
+function checkDns(input: Input) {
+  const d = domains.find((x) => x.id === input.domainId) ?? domains[3];
+  const name = String(d.host).replace(/\.example\.com$/, "");
+  return {
+    domainId: input.domainId,
+    host: d.host,
+    status: d.dnsStatus,
+    message: d.dnsStatus === "missing" ? `No A record for ${d.host} yet` : `${d.host} is proxied by Cloudflare, so the panel cannot see where it points.`,
+    expected: [{ type: "A", name, value: "203.0.113.10" }],
+    found: d.dnsStatus === "proxied" ? [{ type: "A", name, value: "104.16.1.1" }] : [],
+    zone: "example.com",
+    cloudflareManaged: true,
+    cloudflareDnsUrl: "https://dash.cloudflare.com/?to=/:account/example.com/dns",
+    ...(d.origin ? { origin: d.origin } : {}),
+    checkedAt: ago(min),
+  };
+}
 
 const logEntries = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -508,18 +540,7 @@ export const handlers: Record<string, (input: Input) => unknown> = {
     ],
   }),
   "domains.list": () => ({ domains, autoDomainSuggestion: null }),
-  "domains.checkDns": (input: Input) => ({
-    domainId: input.domainId,
-    host: "admin.example.com",
-    status: "missing",
-    message: "No A record for admin.example.com yet",
-    expected: [{ type: "A", name: "admin", value: "203.0.113.10" }],
-    found: [],
-    zone: "example.com",
-    cloudflareManaged: true,
-    cloudflareDnsUrl: "https://dash.cloudflare.com/?to=/:account/example.com/dns",
-    checkedAt: ago(min),
-  }),
+  "domains.checkDns": checkDns,
   "exposures.get": () => ({
     firstRun: {
       status: "closed",

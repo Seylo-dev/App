@@ -6,6 +6,7 @@ import type { Static } from "@sinclair/typebox";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { domains } from "../../db/schema";
+import { originApplies } from "./origin";
 
 export type DomainRow = typeof domains.$inferSelect;
 export type Domain = Static<typeof domainOps.Domain>;
@@ -50,6 +51,10 @@ export function toDomain(row: DomainRow): Domain {
     },
     dnsStatus: row.dnsStatus,
     dnsCheckedAt: row.dnsCheckedAt?.toISOString() ?? null,
+    // Said only while it can be true: a record that moved since (missing, wrong target) makes it stale.
+    ...(row.originStatus && row.originCheckedAt && originApplies(row, row.dnsStatus)
+      ? { origin: row.originStatus, originCheckedAt: row.originCheckedAt.toISOString() }
+      : {}),
     certificate: {
       status: row.https === "off" ? "none" : row.certStatus,
       expiresAt: row.certExpiresAt?.toISOString() ?? null,

@@ -28,6 +28,20 @@ http:
       service: seylo-svc7-local
       tls:
         options: seylo-lb
+    seylo-svc7-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`lb.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc7-edge
+      tls:
+        certResolver: le
+    seylo-svc7-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`lb.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc7-edge
     seylo-svc7-r-r1-retry:
       entryPoints:
         - websecure

@@ -4,7 +4,7 @@ http:
     seylo-svc1-probe:
       entryPoints:
         - web
-      rule: PathPrefix(`/_seylo/probe/svc1/e2e69b81a232ce9f`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
+      rule: PathPrefix(`/_seylo/probe/svc1/72759b25fc994435`) && Header(`X-Seylo-Probe`, `s3cret`) && ClientIP(`172.30.0.1`)
       priority: 2000000000
       middlewares:
         - seylo-svc1-probe-mark
@@ -28,6 +28,20 @@ http:
       middlewares:
         - seylo-svc1-https
       service: seylo-svc1
+    seylo-svc1-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: (Host(`app.example.com`) || Host(`www.example.com`)) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc1-edge
+      tls:
+        certResolver: le
+    seylo-svc1-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: (Host(`app.example.com`) || Host(`www.example.com`)) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc1-edge
     seylo-svc1-r-r1-retry:
       entryPoints:
         - websecure
@@ -47,7 +61,7 @@ http:
     seylo-svc1-probe-mark:
       headers:
         customResponseHeaders:
-          X-Seylo-Route: e2e69b81a232ce9f
+          X-Seylo-Route: 72759b25fc994435
     seylo-svc1-probe-path:
       replacePath:
         path: /

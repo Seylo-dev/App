@@ -39,6 +39,10 @@ const (
 	TicketPath = InternalPrefix + "/ticket"
 	// ProbePath + "/<service id>/<version>" is the rollout probe.
 	ProbePath = InternalPrefix + "/probe"
+	// OriginPath + "<challenge>" is the origin proof the panel fetches on a
+	// service's domains (edge/origin.go). Not under InternalPrefix: it is a
+	// well-known path of the domain, routed on every service host.
+	OriginPath = "/.well-known/" + brand.Slug + "-origin/"
 )
 
 // PageContentSecurityPolicy is sent with every page the edge serves on a

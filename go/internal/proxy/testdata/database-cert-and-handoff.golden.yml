@@ -33,6 +33,20 @@ http:
       middlewares:
         - seylo-svc8-https
       service: seylo-svc8
+    seylo-svc8-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`app.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc8-edge
+      tls:
+        certResolver: le
+    seylo-svc8-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`app.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc8-edge
   middlewares:
     seylo-svc8-https:
       redirectScheme:

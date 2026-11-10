@@ -19,6 +19,12 @@ http:
       service: seylo-svc9-local-p9000
       tls:
         options: seylo-lb
+    seylo-svc9-r-admin-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`admin.x.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc9-edge
     seylo-svc9-r-admin-retry:
       entryPoints:
         - web
@@ -46,6 +52,12 @@ http:
       service: seylo-svc9-local
       tls:
         options: seylo-lb
+    seylo-svc9-r-web-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`x.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc9-edge
     seylo-svc9-r-web-retry:
       entryPoints:
         - web

@@ -3,7 +3,9 @@
 // the CA's reason and Regenerate certificate), a menu of actions, and for a
 // domain still waiting on DNS, the record to create with a Cloudflare link.
 // A domain whose DNS works names the address it points at (DNS -> IP, or
-// the origin behind Cloudflare's proxy), like the panel domain card.
+// the origin behind Cloudflare's proxy), like the panel domain card, and
+// what the panel's origin check found: that requests reach this node, or
+// that something else answers (a red chip and the record to fix, below).
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -56,10 +58,15 @@ type Tone = "ok" | "busy" | "error" | "off";
 
 function domainTone(d: Domain): Tone {
   if (d.forward) return "ok";
-  if (d.dnsStatus === "wrongTarget" || d.certificate.status === "failed") return "error";
+  if (d.dnsStatus === "wrongTarget" || d.certificate.status === "failed" || elsewhere(d)) return "error";
   if (!d.auto && d.dnsStatus !== "ok" && d.dnsStatus !== "proxied") return "busy";
   if (d.https !== "off" && d.certificate.status !== "valid") return "busy";
   return "ok";
+}
+
+/** The origin check found that requests to the domain reach another server, not this service's node. */
+function elsewhere(d: Domain): boolean {
+  return !d.auto && !d.forward && d.origin === "elsewhere" && (d.dnsStatus === "ok" || d.dnsStatus === "proxied");
 }
 
 const tileTone: Record<Tone, string> = {
@@ -179,8 +186,9 @@ export function DomainRow({
         </div>
       </div>
       {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} />}
+      {!waiting && elsewhere(d) && <OriginHelp serviceId={serviceId} d={d} />}
       {rateLimited && <RateLimitNote />}
-      {generating && !waiting && <PendingCertNote d={d} />}
+      {generating && !waiting && !elsewhere(d) && <PendingCertNote serviceId={serviceId} d={d} />}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -198,8 +206,11 @@ export function DomainRow({
  * Where a working domain's DNS goes: "DNS -> <node IP>" when its record
  * points at the node, "Cloudflare proxy -> <node IP>" behind the proxy (the
  * origin to set there). The full sentence, every address and when it was
- * checked are the chip's title. Nothing while DNS is not working yet: the
- * waiting state below the row names the record to create.
+ * checked are the chip's title. Once the panel's origin check reached the
+ * node the chip is green with a check and says so; when something else
+ * answered it turns red ("..., not this node") and OriginHelp below the row
+ * says what to fix. Nothing while DNS is not working yet: the waiting state
+ * below the row names the record to create.
  */
 function DnsChip({ d }: { d: Domain }) {
   const ips = d.pointsTo ?? [];
@@ -207,11 +218,30 @@ function DnsChip({ d }: { d: Domain }) {
   if (!first || (d.dnsStatus !== "ok" && d.dnsStatus !== "proxied")) return null;
   const proxied = d.dnsStatus === "proxied";
   const shown = ips.length > 1 ? `${first} +${ips.length - 1}` : first;
-  const checked = d.dnsCheckedAt ? ` ${t("serviceDomains.dnsChecked", { when: formatRelative(d.dnsCheckedAt) })}` : "";
-  const title = t(proxied ? "serviceDomains.dnsProxiedHint" : "serviceDomains.dnsOkHint", { host: d.host, ips: ips.join(", ") }) + checked;
+  // The later of the two checks (ISO times compare as text).
+  const when = d.originCheckedAt && (!d.dnsCheckedAt || d.originCheckedAt > d.dnsCheckedAt) ? d.originCheckedAt : d.dnsCheckedAt;
+  const checked = when ? ` ${t("serviceDomains.dnsChecked", { when: formatRelative(when) })}` : "";
+  if (elsewhere(d)) {
+    const title =
+      t(proxied ? "serviceDomains.originElsewhereProxiedHint" : "serviceDomains.originElsewhereHint", { host: d.host, ip: first }) +
+      checked;
+    return (
+      <Chip tone="red" title={title} data-testid="dns-chip">
+        <IconAlertTriangle size={12} stroke={2.2} aria-hidden="true" />
+        <span>{t(proxied ? "serviceDomains.originElsewhereProxied" : "serviceDomains.originElsewhere", { ip: shown })}</span>
+      </Chip>
+    );
+  }
+  const reaches = d.origin === "node";
+  const hint = t(proxied ? "serviceDomains.dnsProxiedHint" : "serviceDomains.dnsOkHint", { host: d.host, ips: ips.join(", ") });
+  const title = hint + (reaches ? ` ${t("serviceDomains.originNodeHint")}` : "") + checked;
   return (
-    <Chip tone={proxied ? "gray" : "green"} title={title} data-testid="dns-chip">
-      {proxied ? <IconCloud size={12} stroke={2} aria-hidden="true" /> : <IconCheck size={12} stroke={2.2} aria-hidden="true" />}
+    <Chip tone={proxied && !reaches ? "gray" : "green"} title={title} data-testid="dns-chip" data-origin={reaches ? "node" : undefined}>
+      {proxied && !reaches ? (
+        <IconCloud size={12} stroke={2} aria-hidden="true" />
+      ) : (
+        <IconCheck size={12} stroke={2.2} aria-hidden="true" />
+      )}
       <span>{t(proxied ? "serviceDomains.dnsProxiedTo" : "serviceDomains.dnsOkTo", { ip: shown })}</span>
     </Chip>
   );
@@ -222,19 +252,94 @@ const slowCertMs = 10 * 60_000;
 
 /**
  * Why a certificate can stay on "Generating": Let's Encrypt reaches the
- * host over its DNS, so behind Cloudflare's proxy the panel cannot tell
- * where the record points (said at once, with the node's address), and with
- * the record on the node, something in front of port 80 may stop it (said
- * once it takes longer than usual). The node reports a failure it sees in
- * Traefik's log on its own; this covers the checks that never arrive.
+ * host over its DNS. Behind Cloudflare's proxy, until the panel's origin
+ * check reached the node, it says the record there must point at the node
+ * (at once, with the node's address); once it has, and with the record on
+ * the node, what else can stop it (once it takes longer than usual):
+ * Cloudflare's settings, or something in front of port 80. The node reports
+ * a failure it sees in Traefik's log on its own; this covers the checks
+ * that never arrive. While it shows, the DNS and origin checks run again
+ * (at most once a minute), so a record fixed in Cloudflare shows up here.
  */
-function PendingCertNote({ d }: { d: Domain }) {
+function PendingCertNote({ serviceId, d }: { serviceId: string; d: Domain }) {
+  const reaches = d.origin === "node";
+  useOp(domains.checkDns, { serviceId, domainId: d.id }, { retry: retryOp, staleTime: 60_000, enabled: !d.auto && !d.forward && !reaches });
   const ip = d.pointsTo?.[0];
   if (!ip) return null;
-  if (d.dnsStatus === "proxied")
+  const proxied = d.dnsStatus === "proxied";
+  if (proxied && !reaches)
     return <p className="m-0 text-xs text-muted-foreground">{t("serviceDomains.certProxiedHint", { host: d.host, ip })}</p>;
   if (Date.now() - Date.parse(d.createdAt) < slowCertMs) return null;
-  return <p className="m-0 text-xs text-muted-foreground">{t("serviceDomains.certSlowHint", { host: d.host, ip })}</p>;
+  return (
+    <p className="m-0 text-xs text-muted-foreground">
+      {t(proxied ? "serviceDomains.certProxiedSlowHint" : "serviceDomains.certSlowHint", { host: d.host, ip })}
+    </p>
+  );
+}
+
+/**
+ * Below a domain whose origin check reached another server: behind
+ * Cloudflare's proxy, the record to set there (with the zone's Cloudflare
+ * DNS link, like DnsHelp); with the record on the node's address, that
+ * something in front of the node answers instead. Opening it runs the
+ * check again (at most once a minute), and Check now runs it at once.
+ */
+function OriginHelp({ serviceId, d }: { serviceId: string; d: Domain }) {
+  const check = useOp(domains.checkDns, { serviceId, domainId: d.id }, { retry: retryOp, staleTime: 60_000 });
+  const invalidate = useInvalidate();
+  const [copied, copy] = useCopy();
+  const ip = d.pointsTo?.[0];
+  if (!ip) return null;
+  const proxied = d.dnsStatus === "proxied";
+  const data = check.data;
+  const record = data?.expected.find((r) => r.value === ip) ?? data?.expected[0];
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-[10px] bg-card px-3.5 py-3 shadow-control" data-testid="origin-help">
+      <span className="text-[12.5px] text-ink-strong">
+        {t(proxied ? "serviceDomains.originFixProxied" : "serviceDomains.originFixDirect", { host: d.host, ip })}
+      </span>
+      {proxied && record && (
+        <>
+          <span className="flex gap-1.5 font-mono text-[12.5px]">
+            <span className="rounded-chip bg-field px-2 py-1 font-medium">{record.type}</span>
+            <span className="rounded-chip bg-field px-2 py-1">{record.name}</span>
+            <span className="rounded-chip bg-field px-2 py-1">{record.value}</span>
+          </span>
+          <Button
+            size="icon"
+            className="size-[30px] rounded-control bg-muted shadow-none"
+            aria-label={t("serviceDomains.copyRecord")}
+            onClick={() => void copy(record.value)}
+          >
+            {copied ? <IconCheck size={14} /> : <IconCopy size={14} stroke={1.9} />}
+          </Button>
+        </>
+      )}
+      <span className="ml-auto flex flex-wrap gap-2">
+        {proxied && data?.cloudflareDnsUrl && (
+          <a
+            href={data.cloudflareDnsUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex h-8 items-center gap-1.5 rounded-control bg-chip-amber-bg px-[11px] text-[12.5px] font-medium text-chip-amber-fg"
+          >
+            {t("serviceDomains.openCloudflare")}
+            <IconArrowUpRight size={12} stroke={2.2} />
+          </a>
+        )}
+        <Button
+          size="sm"
+          className="bg-muted shadow-none"
+          disabled={check.isFetching}
+          onClick={() => {
+            void check.refetch().then(() => invalidate(domains.list));
+          }}
+        >
+          {t("serviceDomains.checkNow")}
+        </Button>
+      </span>
+    </div>
+  );
 }
 
 /** Let's Encrypt renews 30 days before expiry; under two weeks left means renewals are failing. */

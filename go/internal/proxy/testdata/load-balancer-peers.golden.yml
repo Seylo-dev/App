@@ -28,6 +28,20 @@ http:
       service: seylo-svc10-local
       tls:
         options: seylo-lb
+    seylo-svc10-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`peers.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc10-edge
+      tls:
+        certResolver: le
+    seylo-svc10-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`peers.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc10-edge
     seylo-svc10-r-r1-retry:
       entryPoints:
         - websecure
@@ -57,6 +71,12 @@ http:
       service: seylo-svc10-local-p9000
       tls:
         options: seylo-lb
+    seylo-svc10-r-r2-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`admin.peers.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc10-edge
     seylo-svc10-r-r2-retry:
       entryPoints:
         - web

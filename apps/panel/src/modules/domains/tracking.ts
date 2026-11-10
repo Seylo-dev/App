@@ -26,7 +26,14 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
     const set: Partial<typeof domains.$inferInsert> = {};
     switch (route.state) {
       case RouteState.ACTIVE:
-        if (row.https === "acme" && row.certStatus !== "valid") set.certStatus = "valid";
+        if (row.https === "acme" && row.certStatus !== "valid") {
+          set.certStatus = "valid";
+          // Let's Encrypt reached a node of the service: an "elsewhere" from before is out of date (origin.ts).
+          if (row.originStatus === "elsewhere") {
+            set.originStatus = null;
+            set.originCheckedAt = null;
+          }
+        }
         if (row.certError) set.certError = null;
         if (row.https === "acme" && row.certStatus === "failed") deps.alerts.resolve(`certificate:${row.id}:`);
         if (!row.liveAt) {
