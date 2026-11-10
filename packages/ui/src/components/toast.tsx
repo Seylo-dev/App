@@ -1,6 +1,8 @@
 // Toasts, sonner-style: call toast() from anywhere (see lib/toast-store),
 // mount <Toaster /> once. Bottom right, newest at the bottom, auto-hide
-// paused while the pointer is over the stack.
+// paused while the pointer is over the stack. An app that keeps something
+// fixed in that corner (the assistant's chat bubble) sets --toast-lift on
+// the root, and the stack sits that much higher.
 
 import { IconAlertTriangle, IconCircleCheck, IconCircleX, IconInfoCircle, IconX } from "@tabler/icons-react";
 import { AnimatePresence, m, useReducedMotionConfig } from "motion/react";
@@ -28,7 +30,7 @@ export function Toaster({ store = toastStore }: { store?: ToastStore }) {
     <section
       aria-label={labels.notifications}
       aria-live="polite"
-      className="pointer-events-none fixed right-4 bottom-4 z-[60] flex w-[calc(100%-32px)] max-w-[380px] flex-col gap-2"
+      className="pointer-events-none fixed right-4 bottom-[calc(16px+var(--toast-lift,0px))] z-[60] flex w-[calc(100%-32px)] max-w-[380px] flex-col gap-2"
       onPointerEnter={() => setPaused(true)}
       onPointerLeave={() => setPaused(false)}
     >

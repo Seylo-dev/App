@@ -8,6 +8,8 @@ export default {
   needsKey: "Add an Anthropic API key below to turn it on.",
   allowMembers: "Members can use it",
   allowMembersHint: "Otherwise only owners and admins see the assistant.",
+  chatPage: "Assistant page",
+  chatPageHint: "Adds an Assistant page to the sidebar for longer chats. The chat bubble works on every page either way.",
   keyTitle: "Anthropic API key",
   keyDescription: "Stored encrypted and never shown again. It is checked with a small request before it is saved.",
   key: "API key",

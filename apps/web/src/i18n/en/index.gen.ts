@@ -2,6 +2,7 @@
 
 import activity from "./activity";
 import approvals from "./approvals";
+import assistant from "./assistant";
 import auth from "./auth";
 import cliLogin from "./cliLogin";
 import common from "./common";
@@ -59,4 +60,4 @@ import sidebar from "./sidebar";
 import templates from "./templates";
 
 /** The English catalog: one section per file in this folder, keyed by file name. */
-export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, gitCredentials, gitHosts, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, plainHttp, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCopy, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsSecurity, settingsTailscale, setup, sidebar, templates } as const;
+export const en = { activity, approvals, assistant, auth, cliLogin, common, dashboard, devkit, dockerHub, format, gitCredentials, gitHosts, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, plainHttp, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCopy, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsSecurity, settingsTailscale, setup, sidebar, templates } as const;

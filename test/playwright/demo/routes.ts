@@ -7,9 +7,12 @@
 // (dockerhub.ts). Ops
 // without demo data go to the real panel the run started (signed in).
 // Sockets: the live socket accepts every subscription and streams a few
-// deployment log lines; log follow and the terminals answer like an agent.
+// deployment log lines and the assistant's replies (assistant.ts, whose
+// handlers a test passes as overrides); log follow and the terminals answer
+// like an agent.
 
 import type { Page, Route } from "@playwright/test";
+import { followAssistantTopic, resetAssistantDemo } from "./assistant";
 import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
 import { handlers as gitHandlers, resetGitDemo } from "./git";
@@ -195,6 +198,7 @@ function resetDemoState() {
   tailscaleStatus = runningTailscale();
   terminalSockets.length = 0;
   resetGitDemo();
+  resetAssistantDemo();
 }
 
 const settingsHandlers: Record<string, Handler> = Object.fromEntries(
@@ -290,10 +294,25 @@ const encode = (text: string) => Buffer.from(text, "utf8");
 
 async function installSockets(page: Page): Promise<void> {
   await page.routeWebSocket(/\/api\/live/, (ws) => {
+    // Assistant replies (demo/assistant.ts) stream on the ai:<id> topics this socket follows.
+    const assistantTopics = new Map<string, () => void>();
+    ws.onClose(() => {
+      for (const stop of assistantTopics.values()) stop();
+    });
     ws.onMessage((raw) => {
       const message = JSON.parse(String(raw)) as { type: string; topic: string };
+      if (message.type === "unsubscribe") {
+        assistantTopics.get(message.topic)?.();
+        assistantTopics.delete(message.topic);
+      }
       if (message.type !== "subscribe") return;
       ws.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
+      if (message.topic.startsWith("ai:") && !assistantTopics.has(message.topic)) {
+        assistantTopics.set(
+          message.topic,
+          followAssistantTopic(message.topic, (text) => ws.send(text)),
+        );
+      }
       // A running deployment keeps printing build lines on its topic.
       if (message.topic.startsWith("deployment:")) {
         let seq = 9;

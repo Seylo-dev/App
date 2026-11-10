@@ -6,6 +6,7 @@ export default {
   nodes: "Nodes",
   templates: "Templates",
   activity: "Activity",
+  assistant: "Assistant",
   approvals: "Approvals",
   settings: "Settings",
   projects: "Projects",

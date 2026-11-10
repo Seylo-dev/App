@@ -1,6 +1,7 @@
 // Settings > AI assistant: the Anthropic key, model routing between Haiku,
-// Sonnet and Opus, a monthly budget, who may use it, and this month's
-// usage with the bill projected from the pace so far.
+// Sonnet and Opus, a monthly budget, who may use it, whether it has its own
+// Assistant page in the sidebar, and this month's usage with the bill
+// projected from the pace so far.
 
 import { ai, type OpOutput } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -52,6 +53,7 @@ function AiSkeleton() {
       <SectionCardSkeleton header={false}>
         <SettingRowSkeleton titleWidth="w-44" />
         <SettingRowSkeleton titleWidth="w-56" />
+        <SettingRowSkeleton titleWidth="w-48" />
       </SectionCardSkeleton>
       <SectionCardSkeleton titleWidth="w-36" description="w-96">
         <FieldSkeleton span hint />
@@ -99,7 +101,7 @@ function UsageSkeleton() {
 function AiSettingsForm({ saved }: { saved: Settings }) {
   const [key, setKey] = useState("");
   const [budget, setBudget] = useState(saved.monthlyBudgetUsd === null ? "" : String(saved.monthlyBudgetUsd));
-  const refresh = [ai.settings, ai.usage];
+  const refresh = [ai.settings, ai.usage, ai.me];
   const toggle = useSettingsMutation(ai.updateSettings, { invalidates: refresh, success: t("settings.saved") });
   const route = useSettingsMutation(ai.updateSettings, { invalidates: refresh, success: t("settings.saved") });
   const saveKey = useSettingsMutation(ai.updateSettings, {
@@ -113,6 +115,7 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
   const pending = toggle.isPending ? toggle.variables : undefined;
   const enabled = pending?.enabled ?? saved.enabled;
   const allowMembers = pending?.allowMembers ?? saved.allowMembers;
+  const chatPage = pending?.chatPage ?? saved.chatPage;
   const routing = (route.isPending ? route.variables?.routing : undefined) ?? saved.routing;
   const setRouting = (patch: Partial<Settings["routing"]>) => route.mutate({ routing: { ...routing, ...patch } });
 
@@ -144,6 +147,18 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
               disabled={toggle.isPending}
               onCheckedChange={(on) => toggle.mutate({ allowMembers: on })}
               aria-label={t("settingsAi.allowMembers")}
+            />
+          }
+        />
+        <SettingRow
+          title={t("settingsAi.chatPage")}
+          description={t("settingsAi.chatPageHint")}
+          control={
+            <Switch
+              checked={chatPage}
+              disabled={toggle.isPending}
+              onCheckedChange={(on) => toggle.mutate({ chatPage: on })}
+              aria-label={t("settingsAi.chatPage")}
             />
           }
         />
