@@ -22,7 +22,7 @@ import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skel
 import { toast } from "@seylo/ui/components/toast";
 import { IconFileText, IconPower, IconSparkles } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { formatAgo, formatBytes } from "../../lib/format";
@@ -35,7 +35,10 @@ import { NodeCleanup } from "./node-cleanup";
 import { NodeGraphs } from "./node-graphs";
 import { NodeHealth } from "./node-health";
 import { NodeSettingsForm } from "./node-settings";
-import { NodeShell, ShellSkeleton } from "./node-shell";
+import { ShellSkeleton } from "./shell-skeleton";
+
+/** The Shell view and its terminal (xterm) load when the view is opened, not with the Nodes page. */
+const NodeShell = lazy(() => import("./node-shell").then((m) => ({ default: m.NodeShell })));
 
 export type NodeView = "overview" | "health" | "cleanup" | "shell" | "settings";
 
@@ -155,7 +158,9 @@ function NodeSheetBody({
           ) : view === "cleanup" ? (
             <NodeCleanup nodeId={nodeId} />
           ) : view === "shell" ? (
-            <NodeShell node={node.data} />
+            <Suspense fallback={<ShellSkeleton />}>
+              <NodeShell node={node.data} />
+            </Suspense>
           ) : (
             <NodeSettingsForm key={node.data.updatedAt} node={node.data} onRemoved={onClose} />
           )}

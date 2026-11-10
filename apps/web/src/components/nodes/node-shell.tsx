@@ -32,6 +32,10 @@ import { isShellPrefill, shellPrefills } from "./shell-prefill";
 
 export { isShellPrefill, type ShellPrefill, shellPrefills } from "./shell-prefill";
 
+import { ShellSkeleton } from "./shell-skeleton";
+
+export { ShellSkeleton };
+
 /** What the prefill note says before the command is typed: why no shell types it here, by cause. */
 export function prefillText(s: Pick<OpOutput<typeof hostShell.status>, "enabled" | "available" | "canOpen" | "canEnable">) {
   if (!s.enabled) return s.canEnable ? ("nodeShell.prefillOff" as const) : ("nodeShell.prefillOffOwner" as const);
@@ -236,22 +240,5 @@ function HostTerminal({
       prefill={prefill}
       onPrefilled={onPrefilled}
     />
-  );
-}
-
-/** Shaped like the off state, which every node starts in: the lock heading, the two-line hint and the button. */
-export function ShellSkeleton() {
-  return (
-    <LoadingRegion label={t("nodeShell.loading")} className="flex flex-col items-start gap-3 rounded-control bg-raised p-4">
-      <div className="flex items-center gap-2">
-        <Skeleton className="size-[17px] shrink-0 rounded-[4px] bg-track" />
-        <SkeletonText ground className="w-44 text-sm" />
-      </div>
-      <span className="flex w-full flex-col">
-        <SkeletonText ground className="w-full text-[12.5px] leading-relaxed" />
-        <SkeletonText ground className="w-2/3 text-[12.5px] leading-relaxed" />
-      </span>
-      <ButtonSkeleton size="sm" className="w-28 bg-track" />
-    </LoadingRegion>
   );
 }
