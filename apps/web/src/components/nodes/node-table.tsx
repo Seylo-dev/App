@@ -1,4 +1,5 @@
-// The node list (Nodes.dc.html): status, name, location and badges;
+// The node list (Nodes.dc.html): status, name, location (a detected one
+// with a tooltip, and DB-IP's credit under the list) and badges;
 // addresses; CPU, memory and disk bars; agent version with "Update now";
 // the can-build and games-first switches; Health and Settings. The live
 // topic "panel" refreshes it when a node changes or reports usage.
@@ -26,6 +27,7 @@ import { errorMessage } from "../../lib/api";
 import { formatPercent, formatUsedOfTotal } from "../../lib/format";
 import type { NodeRow } from "../../lib/types";
 import { QueryError } from "../query-error";
+import { DbIpLink } from "./node-settings";
 import type { NodeView } from "./node-sheet";
 
 const statusRing: Record<NodeRow["status"], { ring: string; dot: string }> = {
@@ -169,6 +171,11 @@ export function NodeTable({ onOpen }: { onOpen: (nodeId: string, view: NodeView)
           ))}
         </ul>
       )}
+      {list.data?.nodes.some((node) => node.locationSource === "detected") && (
+        <p className="m-0 border-t border-divider px-[18px] py-2.5 text-xs text-muted-foreground">
+          {t("nodes.detectedLocations")} <DbIpLink />
+        </p>
+      )}
     </section>
   );
 }
@@ -255,7 +262,13 @@ function Identity({ node, onOpen }: RowProps) {
         >
           {node.name}
         </button>
-        <div className="mt-0.5 text-xs text-muted-foreground">{node.location ?? t("nodes.noLocation")}</div>
+        {node.locationSource === "detected" && node.location ? (
+          <Tip content={t("nodes.locationDetectedTip")}>
+            <span className="mt-0.5 self-start text-xs text-muted-foreground">{node.location}</span>
+          </Tip>
+        ) : (
+          <div className="mt-0.5 text-xs text-muted-foreground">{node.location ?? t("nodes.noLocation")}</div>
+        )}
         <Badges node={node} />
       </div>
     </div>

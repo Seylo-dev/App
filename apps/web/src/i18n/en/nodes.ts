@@ -29,6 +29,10 @@ export default {
     healthWarn: "Health warnings",
   },
   noLocation: "No location set",
+  locationDetectedTip: "Detected from the server's IP address. Change it in the node's settings.",
+  detectedLocations: "Detected locations:",
+  // DB-IP's license asks for this credit, with a link to db-ip.com, wherever a detected location shows.
+  geolocationByDbIp: "Geolocation by DB-IP",
   noWildcard: "no wildcard domain",
   noUsage: "No usage yet",
   cpu: "CPU",
@@ -169,6 +173,10 @@ export default {
     name: "Name",
     nameHint: "Lowercase letters, digits, dots and hyphens.",
     location: "Location",
+    locationDetected: "Detected",
+    // Around the "Geolocation by DB-IP" link: "From the server's IP address, Geolocation by DB-IP. Change it if it is wrong."
+    locationDetectedBefore: "From the server's IP address,",
+    locationDetectedAfter: ". Change it if it is wrong.",
     publicAddress: "Public address",
     publicAddressHint:
       "Where people and other nodes reach this server, if not the detected address: for example the public IP of a cloud server that only sees a private one. Used for IP:port links, exposed databases, load balancing and join commands. Empty uses the detected address.",

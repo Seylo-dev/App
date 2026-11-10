@@ -12,6 +12,7 @@ import { users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { hashPassword } from "../../security/password";
 import { rememberSetupHost } from "../nodes/address";
+import { detectNodeLocations } from "../nodes/location";
 import { applySetupChoice } from "../telemetry";
 
 /** Throws unless the link can still create the owner; returns the token row. */
@@ -39,8 +40,10 @@ function insertOwner(ctx: OpContext, token: string, values: { email: string; nam
       .get();
   });
   removeSetupTokenFile(ctx.config.dataDir);
-  // Where the owner reached the panel is how people reach the panel node (1:1 NAT clouds hide it).
+  // Where the owner reached the panel is how people reach the panel node (1:1 NAT clouds hide it),
+  // and with it the panel node may now have an address to find its location by.
   rememberSetupHost(ctx.db, ctx.origin);
+  detectNodeLocations(ctx);
   // The owner's email is every node's ACME contact, and Traefik is
   // recreated when it changes. Send it now, while nothing is routed yet,
   // rather than with whatever full sync comes next (setting the panel

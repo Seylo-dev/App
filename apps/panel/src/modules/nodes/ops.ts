@@ -20,6 +20,7 @@ import { joinCommand } from "./join-command";
 import { agentJoinTarget } from "./join-target";
 import { forgetNodeCertificate, refreshLbPeers } from "./lb-tls";
 import { nodeLive } from "./live";
+import { detectNodeLocation } from "./location";
 import { factsOf, toNode, toNodeDetail } from "./view";
 
 const joinTokenTtlMs = 60 * 60 * 1000;
@@ -174,7 +175,11 @@ const setGamesFirstCpu = implement(nodeOps.setGamesFirstCpu, (input, ctx) => {
 
 const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
   const set: Partial<typeof nodes.$inferInsert> = {};
-  if (input.location !== undefined) set.location = input.location?.trim() || null;
+  if (input.location !== undefined) {
+    set.location = input.location?.trim() || null;
+    // Saved, a detected one kept as is or the field cleared: the panel never fills it in again (location.ts).
+    set.locationSource = "manual";
+  }
   if (input.publicAddress !== undefined) set.publicAddress = checkPublicAddress(input.publicAddress);
   if (input.wildcardDomain !== undefined) set.wildcardDomain = input.wildcardDomain;
   if (input.maxParallelBuilds !== undefined) set.maxParallelBuilds = input.maxParallelBuilds;
@@ -186,6 +191,8 @@ const updateSettings = implement(nodeOps.updateSettings, (input, ctx) => {
   const row = changeNode(ctx, input.nodeId, set, { desired: agentsCare });
   // Other nodes balance load to this one at its address.
   if (input.publicAddress !== undefined) ctx.agents.desired.markDirty({ all: true });
+  // A node behind 1:1 NAT may only now have an address to find its location by.
+  if (input.publicAddress !== undefined) void detectNodeLocation(ctx, input.nodeId);
   return toNodeDetail(ctx, row);
 });
 

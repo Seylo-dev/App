@@ -1,8 +1,8 @@
 // Nodes: list, settings, join tokens, health checks, reboot and Docker
 // updates (ops.ts). start() also wires the agent hub for the whole panel:
 // PanelService handlers, the desired-state flusher, the agent version
-// policy, stored facts, and live invalidations when nodes or their
-// services change.
+// policy, stored facts, live invalidations when nodes or their services
+// change, and the locations detected for nodes that have none (location.ts).
 
 import { toJson } from "@bufbuild/protobuf";
 import { NodeFactsSchema } from "@seylo/proto";
@@ -22,6 +22,7 @@ import { runningMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
 import { importInstallerJoinToken } from "./installer-join";
 import { confirmGraceMs, confirmNodeCertificate, issueNodeCertificate, lbTlsContributor, refreshLbPeers, rememberLbPeers } from "./lb-tls";
+import { detectNodeLocation, detectNodeLocations } from "./location";
 import { nodeHandlers, publishNode } from "./ops";
 import { ensurePanelService, panelContributor, panelServiceId } from "./panel-service";
 import { pruneTables } from "./retention";
@@ -185,6 +186,8 @@ function start(deps: Deps) {
     else if (deps.config.image) ensure();
     if (online) seedPanelNodeAddress(deps.db);
     publishNode(deps, nodeId);
+    // A node with an empty location gets one from its public address, in the background (location.ts).
+    if (online) void detectNodeLocation({ ...deps, logger: nodesLogger }, nodeId);
   });
 
   deps.agents.state.onChange((nodeId, change) => {
@@ -209,6 +212,9 @@ function start(deps: Deps) {
   });
 
   deps.schedules.ensure({ key: "nodes.pruneReports", jobType: "nodes.pruneReports", cron: "17 * * * *" });
+  // Nodes that joined before the panel filled in locations, and ones whose lookup got no answer
+  // before the last restart, get theirs now, connected or not.
+  detectNodeLocations({ ...deps, logger: nodesLogger });
 }
 
 export default defineModule({ name: "nodes", ops: nodeHandlers, jobs: [pruneReports], start });

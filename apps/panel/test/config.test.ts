@@ -22,10 +22,16 @@ test("reads brand-prefixed variables and rejects bad values", () => {
   expect(() => loadConfig(env("TRUST_PROXY", "yes"), "/x")).toThrow(ConfigError);
 });
 
-test("public URL, telemetry URL and an own GitHub OAuth client id", () => {
+test("public URL, telemetry and geolocation URLs and an own GitHub OAuth client id", () => {
   const env = (name: string, value: string) => ({ [envPrefix + name]: value });
   const defaults = loadConfig({}, "/x");
-  expect(defaults).toMatchObject({ publicUrl: null, telemetryUrl: "https://api.seylo.dev/telemetry" });
+  expect(defaults).toMatchObject({
+    publicUrl: null,
+    telemetryUrl: "https://api.seylo.dev/telemetry",
+    geoUrl: "https://api.seylo.dev/geo",
+  });
+  expect(loadConfig(env("GEO_URL", "http://127.0.0.1:4000/geo/"), "/x").geoUrl).toBe("http://127.0.0.1:4000/geo");
+  expect(() => loadConfig(env("GEO_URL", "geo"), "/x")).toThrow(ConfigError);
   expect(defaults.githubClientId).toBeUndefined();
   expect(loadConfig({ ...env("PUBLIC_URL", "http://203.0.113.7:3000/"), ...env("GITHUB_CLIENT_ID", "Iv1.abc123") }, "/x")).toMatchObject({
     publicUrl: "http://203.0.113.7:3000",
