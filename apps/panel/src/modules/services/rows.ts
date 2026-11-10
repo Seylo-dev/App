@@ -275,9 +275,17 @@ export function volumesOf(db: PanelDb, serviceId: string): ServiceDetail["volume
 }
 
 /** Rows of a project in list order: stacks followed by their members, then by name. */
-export function projectServiceRows(db: PanelDb, projectId: string): ServiceRow[] {
+/**
+ * A project's services, compose members after their stack. `order` (a
+ * person's services.reorder) puts the listed top-level services first in
+ * that order; the rest follow by name.
+ */
+export function projectServiceRows(db: PanelDb, projectId: string, order?: readonly string[] | null): ServiceRow[] {
   const rows = db.select().from(services).where(eq(services.projectId, projectId)).orderBy(asc(services.nameKey)).all();
-  const top = rows.filter((r) => r.parentId === null);
+  const rank = new Map((order ?? []).map((id, i) => [id, i]));
+  const top = rows
+    .filter((r) => r.parentId === null)
+    .sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
   const byParent = new Map<string, ServiceRow[]>();
   for (const r of rows) {
     if (r.parentId === null) continue;

@@ -2,9 +2,9 @@
 // Delete is delete.ts, move is move.ts.
 
 import { normalizeWatchPaths, OpError, services as serviceOps, watchPatternProblem } from "@seylo/ops";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
-import { domains, servicePlacements, services, volumes } from "../../db/schema";
+import { domains, projectPrefs, projects, servicePlacements, services, volumes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
@@ -69,9 +69,49 @@ function forbidMemberEdit(row: ServiceRow, what: string): void {
     throw new OpError("CONFLICT", `${row.name} belongs to a compose stack: change its ${what} in the stack's compose file.`);
 }
 
+/** The caller's own order of a project's services (services.reorder), or null. */
+function serviceOrderOf(ctx: OpContext, projectId: string): string[] | null {
+  const user = userOf(ctx.principal);
+  if (!user) return null;
+  return (
+    ctx.db
+      .select({ order: projectPrefs.serviceOrder })
+      .from(projectPrefs)
+      .where(and(eq(projectPrefs.userId, user.id), eq(projectPrefs.projectId, projectId)))
+      .get()?.order ?? null
+  );
+}
+
 const list = implement(serviceOps.list, (input, ctx) => ({
-  services: toSummaries(ctx.db, ctx.agents, projectServiceRows(ctx.db, input.projectId)),
+  services: toSummaries(ctx.db, ctx.agents, projectServiceRows(ctx.db, input.projectId, serviceOrderOf(ctx, input.projectId))),
 }));
+
+/** The caller's own order; only their row changes, so nothing goes to shared live topics. */
+const reorder = implement(serviceOps.reorder, (input, ctx) => {
+  const user = userOf(ctx.principal);
+  if (!user) throw new OpError("UNAUTHENTICATED", "Sign in or use a valid API key.");
+  if (!ctx.db.select({ id: projects.id }).from(projects).where(eq(projects.id, input.projectId)).get()) {
+    throw new OpError("NOT_FOUND", "No project with this id.");
+  }
+  const own = new Set(
+    ctx.db
+      .select({ id: services.id })
+      .from(services)
+      .where(and(eq(services.projectId, input.projectId), isNull(services.parentId)))
+      .all()
+      .map((r) => r.id),
+  );
+  const serviceIds = input.serviceIds.filter((id) => own.has(id));
+  ctx.db
+    .insert(projectPrefs)
+    .values({ userId: user.id, projectId: input.projectId, serviceOrder: serviceIds })
+    .onConflictDoUpdate({
+      target: [projectPrefs.userId, projectPrefs.projectId],
+      set: { serviceOrder: serviceIds, updatedAt: new Date() },
+    })
+    .run();
+  return { projectId: input.projectId, serviceIds };
+});
 
 const get = implement(serviceOps.get, (input, ctx) => toDetail(ctx.db, ctx.agents, loadService(ctx.db, input.serviceId)));
 
@@ -400,6 +440,7 @@ const restart = implement(serviceOps.restart, async (input, ctx) => {
 
 export const serviceOpsHandlers = [
   list,
+  reorder,
   get,
   create,
   update,

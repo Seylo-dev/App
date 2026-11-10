@@ -39,6 +39,11 @@ export const projectPrefs = sqliteTable(
     collapsed: integer("collapsed", { mode: "boolean" }).notNull().default(false),
     /** null = not ordered; sorted by name after the ordered ones. */
     position: integer("position"),
+    /**
+     * The person's own order of the project's services (top-level ids, top to
+     * bottom; services.reorder). null or a missing id: after the listed ones, by name.
+     */
+    serviceOrder: json<string[]>("service_order"),
     updatedAt: updatedAt(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.projectId] }), index("project_prefs_project_idx").on(t.projectId)],

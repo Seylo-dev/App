@@ -381,6 +381,19 @@ export const list = defineOp({
   audit: false,
 });
 
+export const reorder = defineOp({
+  id: "services.reorder",
+  kind: "mutation",
+  summary: "Reorder a project's services",
+  description:
+    "Sets the order of a project's services in the caller's own sidebar, dashboard and project page. serviceIds lists the project's services top to bottom; compose members follow their stack, ids of other projects or members are ignored, and unlisted services follow by name. Other people's order does not change.",
+  input: Type.Object({ projectId: Id, serviceIds: Type.Array(Id, { maxItems: 1000, uniqueItems: true }) }),
+  output: Type.Object({ projectId: Id, serviceIds: Type.Array(Id) }),
+  permission: permission.project("services.view", projectScope),
+  mcp: false,
+  audit: true,
+});
+
 export const get = defineOp({
   id: "services.get",
   kind: "query",

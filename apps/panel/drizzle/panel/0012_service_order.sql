@@ -1,0 +1,1 @@
+ALTER TABLE `project_prefs` ADD `service_order` text;
