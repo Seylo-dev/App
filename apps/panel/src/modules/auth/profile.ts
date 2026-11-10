@@ -9,6 +9,7 @@ import { implement, type OpContext } from "../../ops/implement";
 /** Preferences are small UI choices; anything bigger is a bug or abuse. */
 const maxPreferencesBytes = 16 * 1024;
 const maxHiddenProjects = auth.HiddenProjectIds.maxItems as number;
+const knownSidebarItems = new Set<string>(auth.sidebarItems);
 
 function currentUserId(ctx: OpContext): string {
   if (ctx.principal.type === "anonymous") throw new OpError("UNAUTHENTICATED", "Sign in first.");
@@ -51,9 +52,26 @@ function withSidebarChoice(preferences: Record<string, unknown>): Record<string,
   return stored === false ? preferences : rest;
 }
 
-/** The preferences as they are stored and answered (see the two helpers above). */
+/**
+ * hiddenSidebarItems keeps only the items a person can take out of the
+ * sidebar (auth.sidebarItems), each once, in the stored order. A name the
+ * panel does not know (an item of a newer or older web app, or "settings",
+ * which never hides) drops out instead of failing the call, and an empty
+ * list leaves the key out, the same as hiding nothing. The stored value
+ * may be anything, as with the keys above.
+ */
+function withKnownSidebarItems(preferences: Record<string, unknown>): Record<string, unknown> {
+  const { hiddenSidebarItems: stored, ...rest } = preferences;
+  if (stored === undefined) return preferences;
+  const kept = Array.isArray(stored)
+    ? [...new Set(stored.filter((name): name is string => typeof name === "string" && knownSidebarItems.has(name)))]
+    : [];
+  return kept.length > 0 ? { ...rest, hiddenSidebarItems: kept } : rest;
+}
+
+/** The preferences as they are stored and answered (see the three helpers above). */
 function cleaned(ctx: OpContext, preferences: Record<string, unknown>): Record<string, unknown> {
-  return withSidebarChoice(withVisibleHidden(ctx, preferences));
+  return withKnownSidebarItems(withSidebarChoice(withVisibleHidden(ctx, preferences)));
 }
 
 export const updateProfile = implement(auth.updateProfile, (input, ctx) => {
@@ -81,7 +99,7 @@ export const updatePreferences = implement(auth.updatePreferences, (input, ctx) 
       if (value === null) delete merged[key];
       else merged[key] = value;
     }
-    // Stored as it is answered: ids of other people's or deleted projects are not kept, nor a showHiddenInSidebar of true.
+    // Stored as it is answered: ids of other people's or deleted projects are not kept, nor a showHiddenInSidebar of true or unknown sidebar items.
     merged = cleaned(ctx, merged);
     if (new TextEncoder().encode(JSON.stringify(merged)).length > maxPreferencesBytes) {
       throw new OpError("BAD_REQUEST", "Preferences are limited to 16 KB.");

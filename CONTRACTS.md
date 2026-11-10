@@ -3114,7 +3114,12 @@ hidden` show them without unhiding); `projects.list`, the command palette
 and the project pages ignore the list. `auth.preferences.showHiddenInSidebar`
 (per person, on by default) turns the sidebar's `Hidden (N)` group off; the
 panel stores it only as `false` (true, null and non-booleans leave the key
-out). Global `templates.manage` gates custom templates.
+out). `auth.preferences.hiddenSidebarItems` (per person, none by default)
+lists main navigation items taken out of that person's sidebar; the panel
+keeps only names in `auth.sidebarItems` (dashboard, nodes, templates,
+activity, approvals: never settings), each once, drops unknown names
+without an error and leaves the key out when none is left. Global
+`templates.manage` gates custom templates.
 
 APIs for other modules (all in `apps/panel/src/modules/`):
 
@@ -3361,7 +3366,18 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   navigation (sidebar and command palette, `use-main-nav.ts`) only while
   something can ask for one (`system.features`: MCP or the assistant on),
   something waits for the viewer, or the page is open
-  (`nav-items.ts` `showApprovals`).
+  (`nav-items.ts` `showApprovals`). Settings > Preferences has a switch
+  per main navigation item but Settings, all on by default
+  (`auth.preferences.hiddenSidebarItems`, `lib/use-sidebar-items.ts`).
+  Off only takes the item out of the sidebar, the phone menu included
+  (`use-main-nav.ts` `useSidebarNav`, `nav-items.ts` `inSidebar`): the
+  command palette (`useMainNav`) still lists it and its page still opens
+  at its link. Settings never hides, so the switches stay in reach;
+  Approvals turned off still shows while a request waits for the viewer;
+  an item a rule of its own leaves out (Approvals with MCP and the
+  assistant off) stays out when its switch is on. Until the preferences
+  answer the sidebar shows one placeholder per item, so a hidden item
+  never flashes.
 - Session key: the op client's fetch (`lib/session-key.ts` `sessionFetch`)
   sends the key from localStorage on every call and keeps the one an
   answer hands out (an empty one clears it); the live socket and the

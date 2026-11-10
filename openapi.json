@@ -6267,7 +6267,7 @@
       "get": {
         "operationId": "auth.preferences",
         "summary": "Get your UI preferences",
-        "description": "Returns the signed-in person's UI preferences (hidden projects, whether the sidebar shows them, color mode and similar).",
+        "description": "Returns the signed-in person's UI preferences (hidden projects, whether the sidebar shows them, the sidebar items they turned off, color mode and similar).",
         "tags": [
           "auth"
         ],
@@ -6312,6 +6312,35 @@
                             "showHiddenInSidebar": {
                               "description": "Whether this person's sidebar shows the folded \"Hidden (N)\" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under \"Show hidden\", in search and at their links either way.",
                               "type": "boolean"
+                            },
+                            "hiddenSidebarItems": {
+                              "uniqueItems": true,
+                              "description": "Main navigation items this person took out of their sidebar. Missing means none: every item shows. Settings never hides, and Approvals still shows while a request waits for the person. The pages still open at their links and from search.",
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "const": "dashboard",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "nodes",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "templates",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "activity",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "approvals",
+                                    "type": "string"
+                                  }
+                                ]
+                              }
                             }
                           }
                         },
@@ -7179,7 +7208,7 @@
       "post": {
         "operationId": "auth.updatePreferences",
         "summary": "Change your UI preferences",
-        "description": "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. showHiddenInSidebar is kept only when false (true is the default). At most 16 KB in total.",
+        "description": "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. showHiddenInSidebar is kept only when false (true is the default). hiddenSidebarItems keeps only names the panel knows, and an empty list removes the key. At most 16 KB in total.",
         "tags": [
           "auth"
         ],
@@ -7238,6 +7267,25 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "hiddenSidebarItems": {
+                            "errorMessage": "must be a list of distinct sidebar item names (at most 32), or null",
+                            "anyOf": [
+                              {
+                                "maxItems": 32,
+                                "uniqueItems": true,
+                                "description": "Names of main navigation items to take out of the sidebar. Names the panel does not know (settings among them) are dropped.",
+                                "type": "array",
+                                "items": {
+                                  "minLength": 1,
+                                  "maxLength": 40,
+                                  "type": "string"
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         }
                       },
@@ -7285,6 +7333,35 @@
                             "showHiddenInSidebar": {
                               "description": "Whether this person's sidebar shows the folded \"Hidden (N)\" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under \"Show hidden\", in search and at their links either way.",
                               "type": "boolean"
+                            },
+                            "hiddenSidebarItems": {
+                              "uniqueItems": true,
+                              "description": "Main navigation items this person took out of their sidebar. Missing means none: every item shows. Settings never hides, and Approvals still shows while a request waits for the person. The pages still open at their links and from search.",
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "const": "dashboard",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "nodes",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "templates",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "activity",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "approvals",
+                                    "type": "string"
+                                  }
+                                ]
+                              }
                             }
                           }
                         },

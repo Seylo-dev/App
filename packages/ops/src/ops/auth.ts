@@ -132,11 +132,33 @@ export const ShowHiddenInSidebar = Type.Boolean({
     'Whether this person\'s sidebar shows the folded "Hidden (N)" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under "Show hidden", in search and at their links either way.',
 });
 
+/**
+ * Main navigation items a person can take out of their sidebar. Settings is
+ * not one of them: it holds the switches that bring the others back.
+ */
+export const sidebarItems = ["dashboard", "nodes", "templates", "activity", "approvals"] as const;
+export type SidebarItemName = (typeof sidebarItems)[number];
+export const SidebarItem = Type.Union(sidebarItems.map((item) => Type.Literal(item)));
+
+/** The sidebar items the person turned off; missing means none (every item shows). */
+export const HiddenSidebarItems = Type.Array(SidebarItem, {
+  uniqueItems: true,
+  description:
+    "Main navigation items this person took out of their sidebar. Missing means none: every item shows. Settings never hides, and Approvals still shows while a request waits for the person. The pages still open at their links and from search.",
+});
+
 /** Keys without a shape of their own stay free-form, as before 0.2.1. */
 const AnyKeys = Type.Record(Type.String(), Type.Unknown());
 
 export const Preferences = Type.Intersect(
-  [Type.Object({ hiddenProjectIds: Type.Optional(HiddenProjectIds), showHiddenInSidebar: Type.Optional(ShowHiddenInSidebar) }), AnyKeys],
+  [
+    Type.Object({
+      hiddenProjectIds: Type.Optional(HiddenProjectIds),
+      showHiddenInSidebar: Type.Optional(ShowHiddenInSidebar),
+      hiddenSidebarItems: Type.Optional(HiddenSidebarItems),
+    }),
+    AnyKeys,
+  ],
   {
     description:
       "Per-person UI choices that follow them across browsers, for example hidden projects or color mode. Keys not listed here are free-form.",
@@ -151,6 +173,21 @@ const PreferencesChange = Type.Intersect(
         Type.Union([HiddenProjectIds, Type.Null()], { errorMessage: "must be a list of distinct project ids (at most 200), or null" }),
       ),
       showHiddenInSidebar: Type.Optional(Type.Union([ShowHiddenInSidebar, Type.Null()], { errorMessage: "must be true, false or null" })),
+      // Any short name is taken, so a web app that knows an item this panel does not still saves; the panel keeps only sidebarItems.
+      hiddenSidebarItems: Type.Optional(
+        Type.Union(
+          [
+            Type.Array(Type.String({ minLength: 1, maxLength: 40 }), {
+              maxItems: 32,
+              uniqueItems: true,
+              description:
+                "Names of main navigation items to take out of the sidebar. Names the panel does not know (settings among them) are dropped.",
+            }),
+            Type.Null(),
+          ],
+          { errorMessage: "must be a list of distinct sidebar item names (at most 32), or null" },
+        ),
+      ),
     }),
     AnyKeys,
   ],
@@ -161,7 +198,8 @@ export const preferences = defineOp({
   id: "auth.preferences",
   kind: "query",
   summary: "Get your UI preferences",
-  description: "Returns the signed-in person's UI preferences (hidden projects, whether the sidebar shows them, color mode and similar).",
+  description:
+    "Returns the signed-in person's UI preferences (hidden projects, whether the sidebar shows them, the sidebar items they turned off, color mode and similar).",
   input: Empty,
   output: Type.Object({ preferences: Preferences }),
   permission: permission.account(),
@@ -174,7 +212,7 @@ export const updatePreferences = defineOp({
   kind: "mutation",
   summary: "Change your UI preferences",
   description:
-    "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. showHiddenInSidebar is kept only when false (true is the default). At most 16 KB in total.",
+    "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. showHiddenInSidebar is kept only when false (true is the default). hiddenSidebarItems keeps only names the panel knows, and an empty list removes the key. At most 16 KB in total.",
   input: Type.Object({ preferences: PreferencesChange }),
   output: Type.Object({ preferences: Preferences }),
   permission: permission.account(),
