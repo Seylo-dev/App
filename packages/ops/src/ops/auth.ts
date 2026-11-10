@@ -107,10 +107,28 @@ export const updateProfile = defineOp({
   id: "auth.updateProfile",
   kind: "mutation",
   summary: "Change your name",
-  description: "Changes the display name of the signed-in person. Email changes go through an owner or admin (users.update).",
+  description: "Changes the display name of the signed-in person. The email changes with auth.changeEmail.",
   input: Type.Object({ name: PersonName }),
   output: Type.Object({ viewer: Viewer }),
   permission: permission.signedIn(),
+  mcp: false,
+  audit: true,
+});
+
+export const changeEmail = defineOp({
+  id: "auth.changeEmail",
+  kind: "mutation",
+  summary: "Change your email",
+  description:
+    'Changes the signed-in person\'s email, which they sign in with. Needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason "reauth" otherwise). CONFLICT with details.field "email" when another account uses it. When the panel has an SMTP channel the old address is told (oldAddressNotified). Browser sessions only.',
+  input: Type.Object({ email: Email }),
+  output: Type.Object({
+    viewer: Viewer,
+    /** True when an email about the change went to the old address. */
+    oldAddressNotified: Type.Boolean(),
+  }),
+  permission: permission.signedIn(),
+  rateLimit: "strict",
   mcp: false,
   audit: true,
 });
@@ -345,8 +363,8 @@ export const regenerateRecoveryCodes = defineOp({
 // ---------------------------------------------------------------------------
 // Re-auth ("confirm it's you"). Ops that add a way into the account
 // (auth.passkeyRegisterBegin, auth.githubLinkStart, auth.totpEnroll,
-// apiKeys.create, cliLogin.approve, a first password) need a sign-in or a
-// re-auth from the last 15 minutes. Otherwise they fail with FORBIDDEN and
+// apiKeys.create, cliLogin.approve, a first password) and auth.changeEmail
+// need a sign-in or a re-auth from the last 15 minutes. Otherwise they fail with FORBIDDEN and
 // details.reason "reauth"; the client confirms here (auth.reauth, or the
 // linked GitHub login through auth.reauthGithubStart and Poll) and retries.
 

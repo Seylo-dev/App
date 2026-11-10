@@ -42,6 +42,11 @@ test("the password comes from stdin", async () => {
   const { code, dataDir } = await run(["Owner@Example.com"], "a long enough password\n");
   expect(code).toBe(0);
   expect(owners(dataDir)).toEqual(["owner@example.com"]);
+  // The owner gets a random generated face, like every new account.
+  const db = new Database(join(dataDir, "panel.db"), { readonly: true });
+  const row = db.query("select avatar from users").get() as { avatar: string };
+  db.close();
+  expect(JSON.parse(row.avatar)).toMatchObject({ kind: "preset", style: "notionists", seed: expect.stringMatching(/^[a-z0-9]{10}$/) });
 });
 
 test("a password on the command line is refused, and so is a short one", async () => {

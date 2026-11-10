@@ -70,7 +70,7 @@ export function lookupSession(
       keyHash: sessions.keyHash,
       lastSeenAt: sessions.lastSeenAt,
       createdAt: sessions.createdAt,
-      user: { id: users.id, email: users.email, name: users.name, role: users.role, disabledAt: users.disabledAt },
+      user: { id: users.id, email: users.email, name: users.name, role: users.role, avatar: users.avatar, disabledAt: users.disabledAt },
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))

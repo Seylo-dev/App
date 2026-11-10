@@ -8,6 +8,7 @@
 // - Nobody changes their own role, disables or removes themselves.
 
 import { Type } from "@sinclair/typebox";
+import { AvatarUrl } from "../avatars";
 import { defineOp } from "../define";
 import { Email, Grant, PersonName, Role } from "../people";
 import { permission } from "../permission";
@@ -19,6 +20,8 @@ export const User = Type.Object({
   id: Id,
   email: Email,
   name: Type.String(),
+  /** The person's avatar image (added with avatars). */
+  avatarUrl: Type.Optional(AvatarUrl),
   role: Role,
   status: UserStatus,
   /** Authenticator app turned on. */
@@ -64,7 +67,8 @@ export const update = defineOp({
   id: "users.update",
   kind: "mutation",
   summary: "Change a person's name or email",
-  description: "Changes another account's display name or email. CONFLICT when the email is taken.",
+  description:
+    "Changes an account's display name or email (people change their own email with auth.changeEmail). CONFLICT when the email is taken.",
   input: Type.Object({
     userId: Id,
     name: Type.Optional(PersonName),

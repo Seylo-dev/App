@@ -3,6 +3,7 @@
 
 import { OpError } from "@seylo/ops";
 import { eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { avatarField } from "../../auth/avatar";
 import type { PanelDb } from "../../db/client";
 import { githubAccounts, grants, passkeys, totpSecrets, users } from "../../db/schema";
 
@@ -43,6 +44,7 @@ export function toUsers(db: PanelDb, rows: UserRow[]) {
     id: row.id,
     email: row.email,
     name: row.name,
+    ...avatarField(row.id, row.avatar),
     role: row.role,
     status: row.disabledAt ? ("disabled" as const) : ("active" as const),
     twoFactor: twoFactor.has(row.id),

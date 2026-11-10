@@ -72,6 +72,9 @@ const update = implement(userOps.update, (input, ctx) => {
   if (input.name !== undefined) values.name = input.name.trim();
   if (input.email !== undefined) {
     const email = input.email.trim().toLowerCase();
+    // An owner or admin changing their own sign-in email here asks for the
+    // same fresh sign-in as auth.changeEmail, so People is no way around it.
+    if (target.id === actor.id && email !== target.email) requireFreshIfSession(ctx);
     const taken = ctx.db.select({ id: users.id }).from(users).where(eq(users.email, email)).get();
     if (taken && taken.id !== target.id) throw new OpError("CONFLICT", "Another account already uses this email.");
     values.email = email;

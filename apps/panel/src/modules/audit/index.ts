@@ -8,6 +8,7 @@ import { slug } from "@seylo/brand";
 import { actionAllowed, audit as auditOps, OpError } from "@seylo/ops";
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { isNarrowedKey } from "../../auth/access";
+import { avatarUrlsOf } from "../../auth/avatar";
 import { auditLog } from "../../db/schema";
 import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
@@ -43,7 +44,14 @@ const list = implement(auditOps.list, (input, ctx) => {
   const rows = queryAudit(ctx.db, where, { beforeId: parseCursor(input.cursor), limit: input.limit + 1 });
   const page = rows.slice(0, input.limit);
   const last = page[page.length - 1];
-  return { entries: page.map(toEntry), nextCursor: rows.length > input.limit && last ? String(last.id) : null };
+  const avatars = avatarUrlsOf(
+    ctx.db,
+    page.map((row) => row.actorId),
+  );
+  return {
+    entries: page.map((row) => toEntry(row, row.actorId ? avatars.get(row.actorId) : undefined)),
+    nextCursor: rows.length > input.limit && last ? String(last.id) : null,
+  };
 });
 
 const get = implement(auditOps.get, (input, ctx) => {
@@ -54,7 +62,7 @@ const get = implement(auditOps.get, (input, ctx) => {
     .where(and(eq(auditLog.id, Number(input.entryId)), ...keyScope(ctx)))
     .get();
   if (!row || (only && row.actorId !== only)) throw new OpError("NOT_FOUND", "That audit entry does not exist.");
-  return toEntry(row);
+  return toEntry(row, row.actorId ? avatarUrlsOf(ctx.db, [row.actorId]).get(row.actorId) : undefined);
 });
 
 const exportLog = implement(auditOps.exportLog, (input, ctx) => {

@@ -4,6 +4,7 @@
 // passkey relying party).
 
 import { defineModule } from "../module";
+import { changeEmail } from "./email";
 import { githubLinkPoll, githubLinkStart, githubPoll, githubStart, githubUnlink } from "./github";
 import { login, verifySecondFactor } from "./login";
 import { logout } from "./logout";
@@ -22,6 +23,7 @@ export default defineModule({
     logout,
     whoami,
     updateProfile,
+    changeEmail,
     preferences,
     updatePreferences,
     listSessions,

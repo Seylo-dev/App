@@ -3,6 +3,7 @@
 // there is an op module.
 
 import { Type } from "@sinclair/typebox";
+import { AvatarUrl } from "./avatars";
 import { Id, Timestamp } from "./schemas";
 
 export const Role = Type.Union([Type.Literal("owner"), Type.Literal("admin"), Type.Literal("member")], {
@@ -24,6 +25,8 @@ export const Viewer = Type.Object({
   email: Email,
   name: Type.String(),
   role: Role,
+  /** Added with avatars; absent only for an account the panel has not given one yet. */
+  avatarUrl: Type.Optional(AvatarUrl),
 });
 
 /**

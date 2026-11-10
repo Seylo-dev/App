@@ -6,6 +6,7 @@
 // decide them: approve and deny are not MCP tools.
 
 import { type Static, Type } from "@sinclair/typebox";
+import { AvatarUrl } from "../avatars";
 import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Id, Timestamp } from "../schemas";
@@ -34,6 +35,8 @@ export const Approval = Type.Object({
     /** The person the token or assistant acts for. */
     userId: Type.Union([Id, Type.Null()]),
     userName: Type.String(),
+    /** The person's avatar, while the account exists. */
+    avatarUrl: Type.Optional(AvatarUrl),
     /** MCP token name or "AI assistant". */
     clientName: Type.String(),
   }),

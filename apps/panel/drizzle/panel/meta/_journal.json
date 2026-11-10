@@ -50,6 +50,13 @@
       "when": 1794211663520,
       "tag": "0006_github_repo_webhook_login",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794291455208,
+      "tag": "0007_user_avatars",
+      "breakpoints": true
     }
   ]
 }

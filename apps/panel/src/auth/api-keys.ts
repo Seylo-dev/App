@@ -11,7 +11,7 @@ export function lookupApiKey(db: PanelDb, token: string, now = new Date()): Prin
   const row = db
     .select({
       key: apiKeys,
-      user: { id: users.id, email: users.email, name: users.name, role: users.role, disabledAt: users.disabledAt },
+      user: { id: users.id, email: users.email, name: users.name, role: users.role, avatar: users.avatar, disabledAt: users.disabledAt },
     })
     .from(apiKeys)
     .innerJoin(users, eq(users.id, apiKeys.userId))

@@ -4,6 +4,7 @@
 import { displayName } from "@seylo/brand";
 import { invites as inviteOps, OpError } from "@seylo/ops";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import { randomPresetAvatar } from "../../auth/avatar";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { githubAvailable } from "../../auth/github-device";
 import { finishSignIn, toViewer } from "../../auth/sign-in";
@@ -197,7 +198,7 @@ const accept = implement(inviteOps.accept, async (input, ctx) => {
   try {
     user = ctx.db
       .insert(users)
-      .values({ email: row.email, name: input.name?.trim() ?? "", role: "member", passwordHash })
+      .values({ email: row.email, name: input.name?.trim() ?? "", role: "member", passwordHash, avatar: randomPresetAvatar() })
       .returning()
       .get();
   } catch {

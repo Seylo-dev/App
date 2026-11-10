@@ -7,6 +7,7 @@ import { OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { users } from "../db/schema";
 import type { OpContext } from "../ops/implement";
+import { avatarField } from "./avatar";
 import { createChallenge } from "./challenges";
 import { clearFailures, emailKey, rememberSignedInAddress, userKey } from "./lockout";
 import type { PrincipalUser } from "./principal";
@@ -18,7 +19,7 @@ export const secondFactorTtlMs = 5 * 60 * 1000;
 export type UserRow = typeof users.$inferSelect;
 
 export function toViewer(user: PrincipalUser) {
-  return { id: user.id, email: user.email, name: user.name, role: user.role };
+  return { id: user.id, email: user.email, name: user.name, role: user.role, ...avatarField(user.id, user.avatar) };
 }
 
 export interface LoginResult {
