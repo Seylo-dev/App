@@ -99,7 +99,9 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
         </div>
       </div>
 
-      {!data.pending && data.projects.length === 0 && (
+      {/* With no projects loaded, an error is projects.list's: say so instead of "No projects yet". */}
+      {!data.pending && data.projects.length === 0 && data.error && <QueryError error={data.error} />}
+      {!data.pending && data.projects.length === 0 && !data.error && (
         <div className="rounded-card bg-card shadow-card">
           <EmptyState
             compact
