@@ -10,6 +10,9 @@ export default {
   empty: "No approvals yet",
   emptyHint: "When an MCP tool or the assistant wants to change or delete something, it shows up here.",
   via: { mcp: "MCP", ai: "Assistant" },
+  session: "Session #{id}",
+  openSession: "Open this chat",
+  forPerson: "For {person}",
   destructive: "Deletes data",
   statuses: {
     pending: "Waiting",
@@ -19,7 +22,6 @@ export default {
     executed: "Done",
     failed: "Failed",
   },
-  requestedBy: "{client}, for {person}",
   target: { project: "Project", service: "Service" },
   expires: "expires {when}",
   reason: "Why",

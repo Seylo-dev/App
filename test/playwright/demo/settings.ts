@@ -190,7 +190,7 @@ export const fixtures: Record<string, unknown> = {
   },
   "settings.appearance": { preset: "seylo", colorMode: "system", accent: null, customCss: "/* Tighter corners for the whole panel */\n:root {\n  --radius: 6px;\n}\n" },
   "settings.branding": { name: "Acme Cloud", logoLight: null, logoDark: null, favicon: null, loginMessage: "Acme internal panel. Ask an admin for access.", hidePoweredBy: true },
-  "ai.settings": { enabled: true, keySet: true, keyHint: "x9Qa", routing: { mode: "auto", model: "sonnet", allowOpus: false }, monthlyBudgetUsd: 50, allowMembers: false },
+  "ai.settings": { enabled: true, keySet: true, keyHint: "x9Qa", routing: { mode: "auto", model: "sonnet", allowOpus: false }, monthlyBudgetUsd: 50, allowMembers: false, chatPage: true },
   "ai.usage": (input: Input) => {
     const month = input.month ?? "2026-11";
     const byDay = [1, 2, 3, 4, 5].map((d) => ({ day: `${month}-0${d}`, costUsd: [0.42, 1.1, 0.05, 2.3, 0.8][d - 1] }));
@@ -253,8 +253,8 @@ export const fixtures: Record<string, unknown> = {
   },
   "approvals.list": {
     approvals: [
-      { id: "appr000000000001", opId: "projects.delete", opSummary: "Delete a project", opKind: "destructive", inputPreview: { projectId: world.personal }, via: "mcp", requestedBy: { userId: "user000000000001", userName: "Owner", avatarUrl: avatars.owner, clientName: "Claude Code on laptop" }, reason: "You asked me to clean up the unused docs project; it has no deploys in 90 days.", target: { type: "project", id: world.personal, name: "docs" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 23), createdAt: ago(15) },
-      { id: "appr000000000002", opId: "services.restart", opSummary: "Restart a service", opKind: "mutation", inputPreview: { serviceId: "svc0000000000002" }, via: "ai", requestedBy: { userId: "user000000000002", userName: "Lee Park", avatarUrl: avatars.lee, clientName: "AI assistant" }, reason: "The api service is answering 502 and its memory is at the limit.", target: { type: "service", id: "svc0000000000002", name: "api" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 20), createdAt: ago(40) },
+      { id: "appr000000000001", opId: "projects.delete", opSummary: "Delete a project", opKind: "destructive", inputPreview: { projectId: world.personal }, via: "mcp", source: { kind: "mcp", keyId: "key0000000000003", clientName: "Claude Code on laptop" }, requestedBy: { userId: "user000000000001", userName: "Owner", avatarUrl: avatars.owner, clientName: "Claude Code on laptop" }, reason: "You asked me to clean up the unused docs project; it has no deploys in 90 days.", target: { type: "project", id: world.personal, name: "docs" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 23), createdAt: ago(15) },
+      { id: "appr000000000002", opId: "services.restart", opSummary: "Restart a service", opKind: "mutation", inputPreview: { serviceId: "svc0000000000002" }, via: "ai", source: { kind: "assistant", conversationId: "c7k2m9q4w1x8z3b5", title: "", mine: false }, requestedBy: { userId: "user000000000002", userName: "Lee Park", avatarUrl: avatars.lee, clientName: "AI assistant" }, reason: "The api service is answering 502 and its memory is at the limit.", target: { type: "service", id: "svc0000000000002", name: "api" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 20), createdAt: ago(40) },
     ],
     nextCursor: null,
     pendingCount: 2,

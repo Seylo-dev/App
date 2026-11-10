@@ -78,6 +78,13 @@
       "when": 1794293978010,
       "tag": "0010_docker_update",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794294309364,
+      "tag": "0011_assistant_chat",
+      "breakpoints": true
     }
   ]
 }

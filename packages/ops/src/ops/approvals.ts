@@ -21,6 +21,29 @@ export const ApprovalStatus = Type.Union([
 ]);
 export type ApprovalStatus = Static<typeof ApprovalStatus>;
 
+/**
+ * Where a request came from, for the chips on the Approvals page and the
+ * link back: an assistant chat, or an MCP token.
+ */
+export const ApprovalSource = Type.Union([
+  Type.Object({
+    kind: Type.Literal("assistant"),
+    conversationId: Id,
+    /** The chat's title, only for the person whose chat it is (chats are private); empty for everyone else. */
+    title: Type.String(),
+    /** The chat still exists and is the caller's, so the chip can open it. */
+    mine: Type.Boolean(),
+  }),
+  Type.Object({
+    kind: Type.Literal("mcp"),
+    /** The token that asked; null when the approval does not name one. */
+    keyId: Type.Union([Id, Type.Null()]),
+    /** The token's name (an MCP app's registered name), or the name it had when it asked. */
+    clientName: Type.String(),
+  }),
+]);
+export type ApprovalSource = Static<typeof ApprovalSource>;
+
 export const Approval = Type.Object({
   id: Id,
   opId: Type.String(),
@@ -31,6 +54,8 @@ export const Approval = Type.Object({
   inputPreview: Type.Unknown(),
   /** Which kind of model asked. */
   via: Type.Union([Type.Literal("mcp"), Type.Literal("ai")]),
+  /** The chat or token that asked. */
+  source: ApprovalSource,
   requestedBy: Type.Object({
     /** The person the token or assistant acts for. */
     userId: Type.Union([Id, Type.Null()]),

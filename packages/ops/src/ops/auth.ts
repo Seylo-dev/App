@@ -154,7 +154,7 @@ export const ShowHiddenInSidebar = Type.Boolean({
  * Main navigation items a person can take out of their sidebar. Settings is
  * not one of them: it holds the switches that bring the others back.
  */
-export const sidebarItems = ["dashboard", "nodes", "templates", "activity", "approvals"] as const;
+export const sidebarItems = ["dashboard", "nodes", "templates", "activity", "assistant", "approvals"] as const;
 export type SidebarItemName = (typeof sidebarItems)[number];
 export const SidebarItem = Type.Union(sidebarItems.map((item) => Type.Literal(item)));
 

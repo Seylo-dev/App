@@ -2,16 +2,21 @@
 // topic ai:<conversationId>), run the tools it asks for, call it again with
 // the results, until it answers or asks for something a person must
 // approve. Queries run at once through the op pipeline as the person
-// (transport "ai"); anything else becomes an approval and the reply ends.
-// When the approvals are decided the results are added and the reply
-// continues (resumeAfterApproval). Ideas from an earlier in-house implementation by the same authors.
+// (transport "ai"); anything else becomes an approval and the reply ends,
+// unless the person's auto mode is on: then it runs as they would run it
+// (same permission check, audited with autoMode). When the approvals are
+// decided the results are added and the reply continues
+// (resumeAfterApproval). The parts of a running reply are kept in memory
+// (liveParts), so ai.conversation hands a late subscriber the text so far.
+// Ideas from an earlier in-house implementation by the same authors.
 
 import { displayName } from "@seylo/brand";
 import { type AnyOpContract, ai as aiOps, allOps, OpError, redact } from "@seylo/ops";
 import { buildAiTools } from "@seylo/ops/generators";
 import { eq } from "drizzle-orm";
-import { createAccess } from "../../auth/access";
+import { createAccess, type Target, targetOf } from "../../auth/access";
 import type { PrincipalUser } from "../../auth/principal";
+import type { PanelDb } from "../../db/client";
 import { aiConversations, aiMessages, projects, services, users } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { parseInput } from "../../ops/validate";
@@ -19,7 +24,7 @@ import { type ApprovalDecision, opById, requestApproval } from "../approvals/que
 import { runOpAs } from "../approvals/run-as";
 import { readPanelName } from "../settings/keys";
 import { type Anthropic, modelProvider } from "./client";
-import { readAiSettings } from "./keys";
+import { readAiSettings, readAutoMode } from "./keys";
 import { effortFor, modelIds, type Tier } from "./models";
 import { appendMessage, type MessageRow, monthSpendUsd, type Part, recordUsage, rowsOf, transcript, unanswered } from "./store";
 
@@ -39,9 +44,17 @@ const modelTools: Anthropic.Tool[] = aiTools.map((tool) => ({
 
 /** One running reply per conversation; ai.cancel aborts it. */
 const active = new Map<string, AbortController>();
+/** The parts of each running reply as far as they got, by reply message id. */
+const live = new Map<string, Part[]>();
 
 export function isRunning(conversationId: string): boolean {
   return active.has(conversationId);
+}
+
+/** A copy of a running reply's parts (text streamed so far included); undefined when it is not running. */
+export function liveParts(replyId: string): Part[] | undefined {
+  const parts = live.get(replyId);
+  return parts ? structuredClone(parts) : undefined;
 }
 
 export function cancelRun(conversationId: string): boolean {
@@ -73,7 +86,9 @@ function systemPrompt(deps: Pick<Deps, "db">, user: PrincipalUser, conversationI
     `You are the assistant built into ${panelName}, a self-hosted deploy panel (${displayName}) that runs apps, databases and compose stacks on the owner's servers ("nodes").`,
     `You are helping ${user.name || user.email} (role: ${user.role}). You act with their permissions only.`,
     "Use the tools to look things up instead of guessing; tool names are the panel's operations with dots replaced by underscores.",
-    "Tools that change anything do not run right away: each call becomes an approval request that a person approves in the panel's Approvals page. Ask for one change at a time, say what you asked for and why, and do not claim it is done until you see the result.",
+    readAutoMode(deps.db, user.id)
+      ? "Auto mode is on for this person: tools that change anything run right away as them, without an approval. Make one change at a time, say what you are about to do and why before you call the tool, never delete anything they did not clearly ask to delete, and report the result you see."
+      : "Tools that change anything do not run right away: each call becomes an approval request that a person approves in the panel's Approvals page or in this chat. Ask for one change at a time, say what you asked for and why, and do not claim it is done until you see the result.",
     "Never ask for passwords, keys or tokens, and never repeat secret values you see. Keep answers short and concrete; use plain lists, not long essays.",
     `Today is ${new Date().toISOString().slice(0, 10)} (UTC).`,
   ];
@@ -109,6 +124,37 @@ interface ToolOutcome {
   result?: Anthropic.ToolResultBlockParam;
 }
 
+/**
+ * The project or service a call names, with names for the chat's card and
+ * its link, read before the call runs (so a delete keeps them).
+ */
+export function toolTarget(db: PanelDb, op: AnyOpContract, input: unknown): aiOps.AiToolTarget | undefined {
+  let target: Target | undefined;
+  try {
+    target = targetOf(op.permission, input);
+  } catch {
+    return undefined;
+  }
+  if (!target || typeof target.id !== "string" || !/^[a-z0-9]{16}$/.test(target.id)) return undefined;
+  if (target.type === "project") {
+    const project = db.select({ name: projects.name }).from(projects).where(eq(projects.id, target.id)).get();
+    return { type: "project", id: target.id, name: project?.name ?? "", projectId: target.id, projectName: project?.name ?? "" };
+  }
+  const service = db
+    .select({ name: services.name, projectId: services.projectId, projectName: projects.name })
+    .from(services)
+    .leftJoin(projects, eq(projects.id, services.projectId))
+    .where(eq(services.id, target.id))
+    .get();
+  return {
+    type: "service",
+    id: target.id,
+    name: service?.name ?? "",
+    projectId: service?.projectId ?? null,
+    projectName: service?.projectName ?? "",
+  };
+}
+
 async function runTool(deps: Deps, run: RunInput, use: Anthropic.ToolUseBlock, reason: string): Promise<ToolOutcome> {
   const tool = toolsByName.get(use.name);
   const op: AnyOpContract | undefined = tool ? opById(tool.opId) : undefined;
@@ -120,18 +166,26 @@ async function runTool(deps: Deps, run: RunInput, use: Anthropic.ToolUseBlock, r
     };
   }
   const shownInput = redact(use.input, op.sensitive?.input);
+  const shownTarget = toolTarget(deps.db, op, use.input);
+  const where = shownTarget ? { target: shownTarget } : {};
 
-  if (!tool.needsApproval) {
-    const outcome = await runOpAs(deps, { op, input: use.input, userId: run.user.id, transport: "ai" });
+  // Auto mode is read at each call, so turning it off stops the next change even mid-reply.
+  const auto = tool.needsApproval && readAutoMode(deps.db, run.user.id);
+  if (!tool.needsApproval || auto) {
+    const outcome = await runOpAs(deps, { op, input: use.input, userId: run.user.id, transport: "ai", autoMode: auto });
+    const marks = { ...where, ...(auto ? { auto: true } : {}) };
     if (outcome.ok) {
       const text = JSON.stringify(redact(outcome.output, op.sensitive?.output));
       return {
-        part: { ...base, input: shownInput, status: "done", resultPreview: preview(text) },
+        part: { ...base, ...marks, input: shownInput, status: "done", resultPreview: preview(text) },
         result: toolResult(use.id, text, false),
       };
     }
     const message = `${outcome.error.code}: ${outcome.error.message}`;
-    return { part: { ...base, input: shownInput, status: "error", resultPreview: message }, result: toolResult(use.id, message, true) };
+    return {
+      part: { ...base, ...marks, input: shownInput, status: "error", resultPreview: message },
+      result: toolResult(use.id, message, true),
+    };
   }
 
   // Not a query: check it could run at all, then queue it for a person.
@@ -140,10 +194,13 @@ async function runTool(deps: Deps, run: RunInput, use: Anthropic.ToolUseBlock, r
     const input = parseInput(op.input, use.input, false);
     const target = createAccess(deps.db, principal).require(op.permission, op.kind, input);
     const approval = requestApproval(deps, { op, input, principal, via: "ai", requestedVia: run.conversationId, reason, target });
-    return { part: { ...base, input: shownInput, status: "needs_approval", approvalId: approval.id } };
+    return { part: { ...base, ...where, input: shownInput, status: "needs_approval", approvalId: approval.id } };
   } catch (error) {
     const message = error instanceof OpError ? `${error.code}: ${error.message}` : "INTERNAL: the request could not be queued.";
-    return { part: { ...base, input: shownInput, status: "error", resultPreview: message }, result: toolResult(use.id, message, true) };
+    return {
+      part: { ...base, ...where, input: shownInput, status: "error", resultPreview: message },
+      result: toolResult(use.id, message, true),
+    };
   }
 }
 
@@ -158,6 +215,7 @@ export async function runReply(deps: Deps, run: RunInput): Promise<void> {
   active.set(run.conversationId, controller);
   const reply = deps.db.select().from(aiMessages).where(eq(aiMessages.id, run.replyId)).get();
   const parts: Part[] = [...((reply?.parts ?? []) as Part[])];
+  live.set(run.replyId, parts);
   let costMicro = 0;
   let status: "done" | "error" | "cancelled" = "done";
   let error: string | null = null;
@@ -192,8 +250,9 @@ export async function runReply(deps: Deps, run: RunInput): Promise<void> {
           parts.push({ type: "text", text: "" });
         } else if (event.type === "content_block_delta" && event.delta.type === "text_delta" && textIndex >= 0) {
           const part = parts[textIndex] as Extract<Part, { type: "text" }>;
+          const at = part.text.length;
           part.text += event.delta.text;
-          publish(deps, run.conversationId, { type: "delta", messageId: run.replyId, index: textIndex, text: event.delta.text });
+          publish(deps, run.conversationId, { type: "delta", messageId: run.replyId, index: textIndex, text: event.delta.text, at });
         }
       }
       const message = await stream.finalMessage();
@@ -235,15 +294,21 @@ export async function runReply(deps: Deps, run: RunInput): Promise<void> {
       let waiting = false;
       for (const use of uses) {
         const index = parts.length;
+        // Shown while it runs ("Restarting api"): the op and what it names, the input once redacted.
+        const known = toolsByName.get(use.name);
+        const op = known ? opById(known.opId) : undefined;
+        const target = op ? toolTarget(deps.db, op, use.input) : undefined;
         parts.push({
           type: "tool_call",
           toolCallId: use.id,
-          opId: use.name,
-          input: {},
+          opId: op?.id ?? use.name,
+          input: op ? redact(use.input, op.sensitive?.input) : {},
           status: "running",
           approvalId: null,
           resultPreview: null,
+          ...(target ? { target } : {}),
         });
+        publish(deps, run.conversationId, { type: "part", messageId: run.replyId, index, part: parts[index] as Part });
         // A truncated reply may hold a cut-off tool input; never run it.
         const outcome =
           message.stop_reason === "max_tokens"
@@ -287,6 +352,7 @@ export async function runReply(deps: Deps, run: RunInput): Promise<void> {
     }
   } finally {
     active.delete(run.conversationId);
+    live.delete(run.replyId);
     saveParts(deps, run.replyId, parts);
     deps.db.update(aiMessages).set({ status, error }).where(eq(aiMessages.id, run.replyId)).run();
     publish(deps, run.conversationId, {
@@ -406,6 +472,8 @@ export function resumeAfterApproval(deps: Deps, decision: ApprovalDecision, atte
   }
   saveParts(deps, reply.id, parts);
   publish(deps, conversationId, { type: "part", messageId: reply.id, index: partIndex, part: parts[partIndex] as Part });
+  // The chat list counts what still waits.
+  deps.live.publish("panel", { type: "invalidate", ops: ["ai.conversations"] });
 
   // Add the result where the model expects it, if the transcript still waits for it.
   const useIndex = rows.findIndex(
@@ -440,6 +508,21 @@ export function resumeAfterApproval(deps: Deps, decision: ApprovalDecision, atte
   if (!user) return;
   deps.db.update(aiMessages).set({ status: "streaming", error: null }).where(eq(aiMessages.id, reply.id)).run();
   void runReply(deps, { conversationId, replyId: reply.id, user, tier: (reply.model as Tier | null) ?? "sonnet" });
+  announceReply(deps, conversationId);
+}
+
+/**
+ * A reply started (a new message, a retry) or started again (after its
+ * approvals): every chat open on the conversation refetches it, so a tab
+ * that did not send sees the message and the reply that streams.
+ */
+export function announceReply(deps: Pick<Deps, "live">, conversationId: string): void {
+  deps.live.publish(aiOps.aiLiveTopic(conversationId), {
+    type: "invalidate",
+    ops: ["ai.conversation"],
+    match: { conversationId: [conversationId] },
+  });
+  deps.live.publish("panel", { type: "invalidate", ops: ["ai.conversations"] });
 }
 
 function loadUser(deps: Pick<Deps, "db">, userId: string): PrincipalUser | null {

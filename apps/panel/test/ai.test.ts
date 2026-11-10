@@ -4,63 +4,21 @@
 // usage and budget, settings with the key check.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { ai, approvals as approvalOps, type LiveServerMessage } from "@seylo/ops";
+import { ai, approvals as approvalOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { aiMessages, aiUsage, projects } from "../src/db/schema";
-import { type Anthropic, KeyCheckError, type ModelClient, type StreamParams, setModelProvider } from "../src/modules/ai/client";
+import { aiUsage, projects } from "../src/db/schema";
+import { setModelProvider } from "../src/modules/ai/client";
 import { costMicroUsd, routeModel } from "../src/modules/ai/models";
+import { listen, type ScriptedModel, scriptedModel, settled } from "./ai-fake";
 import { callOp, createApiKey, createUser, type TestPanel, testPanel } from "./helpers";
 
-type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown };
-
 let panel: TestPanel;
-let script: Block[][] = [];
-let calls: StreamParams[] = [];
-
-function fakeClient(): ModelClient {
-  return {
-    stream(params) {
-      calls.push(structuredClone(params));
-      const blocks = script.shift() ?? [{ type: "text", text: "(no more script)" }];
-      const events: Anthropic.MessageStreamEvent[] = [];
-      blocks.forEach((block, index) => {
-        if (block.type === "text") {
-          events.push({ type: "content_block_start", index, content_block: { type: "text", text: "", citations: null } } as never);
-          for (const piece of block.text.match(/.{1,5}/g) ?? []) {
-            events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: piece } } as never);
-          }
-        }
-      });
-      const message = {
-        id: "msg",
-        type: "message",
-        role: "assistant",
-        model: params.model,
-        content: blocks,
-        stop_reason: blocks.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn",
-        stop_sequence: null,
-        usage: { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 500, cache_creation_input_tokens: 0 },
-      } as unknown as Anthropic.Message;
-      return {
-        async *[Symbol.asyncIterator]() {
-          for (const event of events) yield event;
-        },
-        finalMessage: async () => message,
-      };
-    },
-  };
-}
+let model: ScriptedModel;
 
 beforeEach(() => {
   panel = testPanel();
-  script = [];
-  calls = [];
-  setModelProvider({
-    client: () => fakeClient(),
-    checkKey: async (key) => {
-      if (key.includes("bad")) throw new KeyCheckError("Anthropic refused this key.", true);
-    },
-  });
+  model = scriptedModel();
+  setModelProvider(model.provider);
 });
 afterEach(() => {
   setModelProvider(null);
@@ -76,21 +34,6 @@ async function enable(cookie: string, extra: Record<string, unknown> = {}) {
   );
   expect(res.status).toBe(200);
   return res.body;
-}
-
-async function settled(conversationId: string) {
-  for (let i = 0; i < 200; i++) {
-    const rows = panel.deps.db.select().from(aiMessages).where(eq(aiMessages.conversationId, conversationId)).all();
-    if (!rows.some((r) => r.status === "streaming")) return;
-    await Bun.sleep(5);
-  }
-  throw new Error("reply never finished");
-}
-
-function listen(topic: `ai:${string}`) {
-  const got: LiveServerMessage[] = [];
-  panel.deps.live.subscribe({ id: crypto.randomUUID(), send: (m) => got.push(m) }, topic);
-  return got;
 }
 
 test("routing and prices", () => {
@@ -119,6 +62,7 @@ test("settings: the key is checked, sealed and never returned", async () => {
     routing: { mode: "auto", model: "sonnet", allowOpus: false },
     monthlyBudgetUsd: 5,
     allowMembers: false,
+    chatPage: true,
   });
   const read = await callOp(panel, ai.settings, {}, { cookie });
   expect(JSON.stringify(read.body)).not.toContain("sk-ant");
@@ -128,20 +72,23 @@ test("a query tool runs at once and the reply streams to the live topic", async 
   const { user, cookie } = await createUser(panel, "owner");
   await enable(cookie);
   panel.deps.db.insert(projects).values({ name: "Shop", nameKey: "shop" }).run();
-  script = [[{ type: "tool_use", id: "tu_1", name: "projects_list", input: {} }], [{ type: "text", text: "You have one project: Shop." }]];
+  model.script = [
+    [{ type: "tool_use", id: "tu_1", name: "projects_list", input: {} }],
+    [{ type: "text", text: "You have one project: Shop." }],
+  ];
 
   const sent = await callOp(panel, ai.send, { message: "list my projects" }, { cookie });
   expect(sent.status).toBe(200);
   expect(sent.body.assistantMessage).toMatchObject({ status: "streaming", model: "haiku", parts: [] });
   const id = sent.body.conversationId as string;
-  const events = listen(`ai:${id}`);
-  await settled(id);
+  const events = listen(panel, `ai:${id}`);
+  await settled(panel, id);
 
-  expect(calls).toHaveLength(2);
-  expect(calls[0]?.model).toBe("claude-haiku-5-5");
-  expect(calls[0]?.system).toContain("You are helping owner (role: owner)");
-  expect(calls[0]?.tools?.some((t) => (t as { name: string }).name === "projects_list")).toBe(true);
-  const second = calls[1]?.messages ?? [];
+  expect(model.calls).toHaveLength(2);
+  expect(model.calls[0]?.model).toBe("claude-haiku-5-5");
+  expect(model.calls[0]?.system).toContain("You are helping owner (role: owner)");
+  expect(model.calls[0]?.tools?.some((t) => (t as { name: string }).name === "projects_list")).toBe(true);
+  const second = model.calls[1]?.messages ?? [];
   const toolResult = ((second.at(-1)?.content ?? []) as { type: string; content: string }[])[0];
   expect(toolResult?.type).toBe("tool_result");
   expect(toolResult?.content).toContain("Shop");
@@ -172,7 +119,7 @@ test("a change becomes an approval; approving runs it and the reply continues", 
   const { cookie } = await createUser(panel, "owner");
   await enable(cookie);
   const project = panel.deps.db.insert(projects).values({ name: "Old", nameKey: "old" }).returning().get();
-  script = [
+  model.script = [
     [
       { type: "text", text: "I will delete the project Old." },
       { type: "tool_use", id: "tu_del", name: "projects_delete", input: { projectId: project.id, confirmName: "Old" } },
@@ -181,7 +128,7 @@ test("a change becomes an approval; approving runs it and the reply continues", 
   ];
   const sent = await callOp(panel, ai.send, { message: "Delete the project called Old please" }, { cookie });
   const id = sent.body.conversationId as string;
-  await settled(id);
+  await settled(panel, id);
 
   const waiting = (await callOp(panel, ai.conversation, { conversationId: id }, { cookie })).body.messages[1];
   expect(waiting.parts[1]).toMatchObject({ type: "tool_call", opId: "projects.delete", status: "needs_approval" });
@@ -199,13 +146,13 @@ test("a change becomes an approval; approving runs it and the reply continues", 
   expect(approved.body.status).toBe("executed");
   expect(panel.deps.db.select().from(projects).where(eq(projects.id, project.id)).get()).toBeUndefined();
   await Bun.sleep(10);
-  await settled(id);
+  await settled(panel, id);
 
   const done = (await callOp(panel, ai.conversation, { conversationId: id }, { cookie })).body.messages[1];
   expect(done.status).toBe("done");
   expect(done.parts[1]).toMatchObject({ status: "done" });
   expect(done.parts.at(-1)).toEqual({ type: "text", text: "Done, Old is gone." });
-  const lastCall = calls.at(-1)?.messages ?? [];
+  const lastCall = model.calls.at(-1)?.messages ?? [];
   expect(JSON.stringify(lastCall.at(-1))).toContain("tool_result");
 });
 
@@ -213,17 +160,17 @@ test("a new message while an approval waits keeps the transcript valid", async (
   const { cookie } = await createUser(panel, "owner");
   await enable(cookie);
   const project = panel.deps.db.insert(projects).values({ name: "Keep", nameKey: "keep" }).returning().get();
-  script = [
+  model.script = [
     [{ type: "tool_use", id: "tu_x", name: "projects_delete", input: { projectId: project.id, confirmName: "Keep" } }],
     [{ type: "text", text: "Okay." }],
   ];
   const first = await callOp(panel, ai.send, { message: "delete Keep" }, { cookie });
   const id = first.body.conversationId as string;
-  await settled(id);
+  await settled(panel, id);
   const second = await callOp(panel, ai.send, { conversationId: id, message: "never mind" }, { cookie });
   expect(second.status).toBe(200);
-  await settled(id);
-  const sentMessages = calls.at(-1)?.messages ?? [];
+  await settled(panel, id);
+  const sentMessages = model.calls.at(-1)?.messages ?? [];
   const results = sentMessages
     .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
     .filter((b) => (b as { type: string }).type === "tool_result");
@@ -256,10 +203,10 @@ test("conversations are private and can be deleted", async () => {
   const owner = await createUser(panel, "owner");
   const other = await createUser(panel, "admin");
   await enable(owner.cookie);
-  script = [[{ type: "text", text: "Hello!" }]];
+  model.script = [[{ type: "text", text: "Hello!" }]];
   const sent = await callOp(panel, ai.send, { message: "hello there" }, { cookie: owner.cookie });
   const id = sent.body.conversationId as string;
-  await settled(id);
+  await settled(panel, id);
   expect((await callOp(panel, ai.conversations, {}, { cookie: owner.cookie })).body.conversations).toHaveLength(1);
   expect((await callOp(panel, ai.conversation, { conversationId: id }, { cookie: other.cookie })).status).toBe(404);
   expect((await callOp(panel, ai.deleteConversation, { conversationId: id }, { cookie: owner.cookie })).status).toBe(200);

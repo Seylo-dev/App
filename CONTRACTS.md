@@ -156,8 +156,10 @@ the update and the direct-insert test helpers keep making nodes that do
 not build; for 0.2.5 `0007_domain_origin`, `0008_user_avatars`
 (`users.avatar` and `user_avatars`), `0009_node_location`
 (`nodes.location_source` and `nodes.location_looked_up_at`, both null on
-existing rows) and `0010_docker_update` (`nodes.docker_update`, the newest
-Docker version check)), which the panel applies at start, also
+existing rows), `0010_docker_update` (`nodes.docker_update`, the newest
+Docker version check) and `0011_assistant_chat` (`users.ai_auto_mode`,
+default false, and `approvals.source_label`, default '')), which the panel
+applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -1138,8 +1140,21 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   "Ask before destructive actions" is off (`mcp.update`
   `askBeforeDestructive: false`, settings key `mcpAskBeforeDestructive`,
   on when missing) run it right away, still audited and still refused for
-  read-only tokens. The assistant (transport `ai`, a session) never skips
-  it, and queues every change itself anyway.
+  read-only tokens. The assistant (transport `ai`, a session) skips it
+  only in auto mode, below; otherwise it queues every change itself.
+  The other way: `OpCall.autoMode`, which only the assistant's loop
+  sets (transport `ai` only, never from input) for a person who turned
+  auto mode on (`ai.setAutoMode`, browser sessions only, stored on
+  `users.ai_auto_mode`, off for new people): the call runs as that person
+  after the same permission check, audited with `autoMode: true`. The
+  loop reads the setting at each tool call, so turning it off stops the
+  next change; with it off, every non-query call becomes an approval.
+- Approval sources: an approval names where it came from
+  (`Approval.source`): `assistant` with the chat's id, its title only for
+  the person whose chat it is (`mine` when it still exists, so the chip
+  opens it), or `mcp` with the token's id and name. `requestApproval`
+  stores the name it had (`source_label`) for after the chat or token is
+  gone, so MCP's `tools.ts` passes nothing new.
 - Second factor: sign-in ops return a `LoginResult`; with 2FA there is no
   session yet, only a 5-minute ticket (`auth_challenges`) that
   `auth.verifySecondFactor` exchanges for one. The challenge says whether
@@ -1411,7 +1426,8 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
 - Running ops for someone: `deps.ops.execute(call)` is the pipeline;
   `runOpAs(deps, { op, input, userId, transport, approvalId? })`
   (`modules/approvals/run-as.ts`) runs one as a person. Models (MCP, AI)
-  never set `approvalId`; only `approvals.approve` does.
+  never set `approvalId`; only `approvals.approve` does. `autoMode` is set
+  by the assistant's loop alone, for a person whose auto mode is on.
 - Live sockets are re-checked every 15 s, on open and on each subscribe
   (without sliding the session) and closed
   (code 4401) when their session ended (a socket needs the session key in
@@ -1425,7 +1441,15 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   `recheck` call every one, so a sign-out closes the person's sockets on
   both listeners (`setDisconnector`/`setRechecker`, which kept only the
   last, are gone). Topics and `publish` are shared by both. `ai:<id>` is for the conversation's
-  owner only; `deployment:<id>` needs `services.view` on its service.
+  owner only (owners and admins never read other people's chats, live or
+  through `ai.conversations`/`ai.conversation`); `deployment:<id>` needs `services.view` on its service.
+  A reply streams there as `ai.AiStreamEvent`s: every `delta` carries
+  `at` (the part's text length before it), running tool calls come as
+  `part` events, and a reply that starts or starts again (ai.send,
+  ai.retry, after its approvals) sends an `invalidate` of
+  `ai.conversation` first; `ai.conversation` returns a streaming reply's
+  parts as far as they got (`liveParts` in `modules/ai/loop.ts`), so a
+  late subscriber or a second tab catches up without doubling text.
   Messages bypass the op pipeline, so the endpoint limits them itself
   (`src/live/endpoint.ts`), before parsing or any database work: a token
   bucket per person over all their sockets (`liveMessageRule`, 300 then 30
@@ -2209,7 +2233,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
-| The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`) | Works as tested |
+| The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`; the chat bubble and the Assistant page against the demo world's scripted replies only) | Works as tested |
 | Real-agent checks not done yet: `FetchGitFile` through the panel (compose from a git host; tested against a local git http-backend), backups to a real cloud bucket (MinIO only), Mongo/Redis/MySQL databases, Boxes. Load balancing has no active health check of copies: a failed request is sent to the next copy per request (a copy that cannot be reached: every method; a 502-504: GET/HEAD/OPTIONS only, so a POST to a copy on another node that just died fails). With sticky sessions a client pinned to a copy on the balancing node that died gets errors until that copy is back (about 5s with the crash policy) | Covered by unit, fake-agent and VM package tests |
 | CLI sign-in: `cliLogin.approve` keeps `readOnly` optional (the web page always sends it; an API client that leaves it out gets full access, as before; the lifetime defaults to 7 days like the page). `viewerAddress`, the audit details, the per-computer limit and the `security_change` alert on every approval are built | API clients choose their own scope |
 | Removing or changing the panel domain while nodes dial it: `settings.updateGeneral { domain: null }` (or a new domain) drops the old domain's route at once. Nodes that joined over the agents' TLS port keep it as a standing pinned fallback and come back through it after 5 minutes (then move to a new domain by themselves); a node that joined over the domain (every node added once a domain is set: Add node prints the unpinned domain) or whose address before the move was an unpinned https:// address (another domain) has no fallback and cannot reach the panel until it rejoins (`seylo join --force`). The panel cannot tell these apart, so since 0.2.1 the change is refused (CONFLICT `nodesOnDomain`, `details.nodeIds`) while enabled nodes dial `https://<domain>` (`settings.general.domainNodes`, from `nodeDialedUrls`), unless the call passes `acknowledgeNodesOffline: true`; Settings > General and Lock to Tailscale name the nodes and ask first, and Lock to Tailscale then leaves the agents' port open. Plain-HTTP nodes never move, so this does not reach them | Acknowledged nodes go offline after a domain removal or change; the node offline alert fires |
@@ -3798,8 +3822,32 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   its own shape (a card, a row or a table row per service of a project
   still loading). A line (`bg-border`, the ground's line token) with a gap
   on both sides separates the projects from Recent deploys and Alerts.
+- Assistant chat (`components/assistant/`, `routes/_app/assistant.tsx`):
+  a round bubble bottom right on every signed-in page but the Assistant
+  page while `ai.me.available` (the assistant on, with a key, and for
+  members only with `allowMembers`), opening a compact chat (a full-screen
+  sheet under `sm`); the Assistant page in the main navigation while
+  `ai.me.chatPage` too (Settings > AI assistant > Assistant page, on by
+  default; `nav-items.ts` `showAssistant`). Both show one person's chats
+  from one query cache: the chat open and the current chat live in
+  `assistant-context.tsx` (above the pages, and the tab's sessionStorage
+  `<slug>.assistant`, per person), the page's chat is `?c=<id>`. A chat's
+  data is `use-chat.ts`: `ai.conversation` kept current by `ai:<id>` (one
+  follow per chat, a log of recent events applied on top of each fetch;
+  `stream.ts` applies an event twice safely and asks for a refetch on a
+  gap). Tool calls are action cards (`action-card.tsx`, phrases per op in
+  the `assistant` i18n section, `phrases.ts`, else the op's summary);
+  one with an `approvalId` is the approval itself (`approvals.get`, Approve
+  and Reject call `approvals.approve`/`deny`), so the chat and the
+  Approvals page decide the same record. Empty chats offer chips for the
+  page they were opened on (`place.ts`), which is also a new chat's
+  context. The auto switch is in both headers and the composer says when
+  it is on. While the bubble shows, the shell's `main` ends 96 px higher
+  and toasts sit above it (`--toast-lift`), so it never covers a page's
+  last buttons. The Approvals page shows each request's source as chips
+  (Assistant and the chat, linking to it for its owner; MCP and the token).
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
-  (deployment logs), `useLiveUp()` to poll only while the socket is down.
+  (deployment logs, assistant replies), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the
   same string).
 - Re-auth: `lib/api.ts` wraps the one op client in `withReauth`
@@ -3906,7 +3954,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (Settings > Personal details above Security: the name, a taken email
   under its field, the generated faces with Randomize, another style and a
   pick, an upload cut to 256 px in the browser and removed again, the
-  sidebar chip following; screenshots in a light and a dark preset) and
+  sidebar chip following; screenshots in a light and a dark preset),
+  `assistant.spec.ts` (the chat bubble and the Assistant page with
+  `demo/assistant.ts`, which streams replies over the demo live socket:
+  page suggestions, a streamed reply and its action card, an approval card
+  approved from the chat and resolved on the Approvals page with its
+  source chips, the auto switch, the chats menu, search, the bubble hidden
+  on the page and back elsewhere with the same chat, room under the page,
+  who sees it, a phone; screenshots in `$SHOTS_DIR/assistant/`) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar (one row
   at 1440 px, two wrapped rows with their lines at 1280 and 1024, a swipe

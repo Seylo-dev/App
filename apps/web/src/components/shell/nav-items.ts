@@ -1,7 +1,15 @@
 // The sidebar's main navigation, shared with the command palette.
 
 import type { auth } from "@seylo/ops";
-import { IconActivity, IconAdjustmentsHorizontal, IconHome, IconLayoutGrid, IconServer2, IconShieldCheck } from "@tabler/icons-react";
+import {
+  IconActivity,
+  IconAdjustmentsHorizontal,
+  IconHome,
+  IconLayoutGrid,
+  IconServer2,
+  IconShieldCheck,
+  IconSparkles,
+} from "@tabler/icons-react";
 import type { MessageKey } from "../../i18n/t";
 
 export const mainNav = [
@@ -9,6 +17,7 @@ export const mainNav = [
   { id: "nodes", to: "/nodes", label: "nav.nodes", icon: IconServer2, exact: false },
   { id: "templates", to: "/templates", label: "nav.templates", icon: IconLayoutGrid, exact: false },
   { id: "activity", to: "/activity", label: "nav.activity", icon: IconActivity, exact: false },
+  { id: "assistant", to: "/assistant", label: "nav.assistant", icon: IconSparkles, exact: false },
   { id: "approvals", to: "/approvals", label: "nav.approvals", icon: IconShieldCheck, exact: false },
   { id: "settings", to: "/settings", label: "nav.settings", icon: IconAdjustmentsHorizontal, exact: false },
 ] as const satisfies readonly { id: auth.SidebarItemName | "settings"; to: string; label: MessageKey; icon: unknown; exact: boolean }[];
@@ -45,4 +54,13 @@ export function canHide(item: { id: string }): boolean {
  */
 export function inSidebar<I extends { id: string }>(items: readonly I[], hidden: ReadonlySet<string>, pendingCount: number): I[] {
   return items.filter((item) => !canHide(item) || !hidden.has(item.id) || (item.id === "approvals" && pendingCount > 0));
+}
+
+/**
+ * Whether the Assistant page belongs in the navigation: the assistant is
+ * there for the viewer (ai.me) and the Chat page setting is on. While
+ * ai.me has not answered it stays out, so it never flashes in and out.
+ */
+export function showAssistant(me: { available: boolean; chatPage: boolean } | undefined): boolean {
+  return me?.available === true && me.chatPage;
 }

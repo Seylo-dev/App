@@ -59,16 +59,16 @@ describe("hidden sidebar items", () => {
   test("every item but Settings can be hidden; unknown names and settings drop out without an error", async () => {
     const { cookie } = await createUser(panel, "owner");
     const all = await hideItems(cookie, [...auth.sidebarItems]);
-    expect(all.body.preferences).toEqual({ hiddenSidebarItems: ["dashboard", "nodes", "templates", "activity", "approvals"] });
+    expect(all.body.preferences).toEqual({ hiddenSidebarItems: ["dashboard", "nodes", "templates", "activity", "assistant", "approvals"] });
 
     // An item another web app knows, and Settings, which must stay to bring the others back.
-    const mixed = await hideItems(cookie, ["assistant", "templates", "settings", "Templates", "nodes"]);
+    const mixed = await hideItems(cookie, ["backups", "templates", "settings", "Templates", "nodes"]);
     expect(mixed.status).toBe(200);
     expect(mixed.body.preferences).toEqual({ hiddenSidebarItems: ["templates", "nodes"] });
     expect(await read(cookie)).toEqual({ hiddenSidebarItems: ["templates", "nodes"] });
 
     // Nothing known left: the key goes, the same as hiding nothing.
-    expect((await hideItems(cookie, ["settings", "assistant"])).body.preferences).toEqual({});
+    expect((await hideItems(cookie, ["settings", "backups"])).body.preferences).toEqual({});
     expect(await read(cookie)).toEqual({});
   });
 

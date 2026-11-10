@@ -1,10 +1,13 @@
-// The AI assistant: settings (sealed Anthropic key, routing, budget),
-// usage with the projected bill, conversations, and the streaming reply
-// loop (loop.ts) whose events go to the live topic ai:<conversationId>.
+// The AI assistant: settings (sealed Anthropic key, routing, budget, the
+// Assistant page), usage with the projected bill, each person's own
+// conversations and auto mode, and the streaming reply loop (loop.ts)
+// whose events go to the live topic ai:<conversationId>.
 // Contracts: packages/ops/src/ops/ai.ts.
 
 import { ai, OpError } from "@seylo/ops";
-import { and, count, desc, eq, gte, lt, or, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, or, sql, sum } from "drizzle-orm";
+import type { PrincipalUser } from "../../auth/principal";
+import { requireSession } from "../../auth/sign-in";
 import { aiConversations, aiMessages, aiUsage, users } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
@@ -12,9 +15,9 @@ import { setSetting } from "../../settings";
 import { onApprovalDecided } from "../approvals/queue";
 import { defineModule } from "../module";
 import { KeyCheckError, modelProvider } from "./client";
-import { readAiSettings } from "./keys";
-import { cancelRun, closeOpenCalls, isRunning, resumeAfterApproval, runReply } from "./loop";
-import { routeModel } from "./models";
+import { readAiSettings, readAutoMode, type StoredAiSettings } from "./keys";
+import { announceReply, cancelRun, closeOpenCalls, isRunning, liveParts, resumeAfterApproval, runReply } from "./loop";
+import { routeModel, type Tier } from "./models";
 import {
   appendMessage,
   currentMonth,
@@ -37,7 +40,42 @@ function settingsView(deps: Pick<Deps, "db">) {
     routing: s.routing,
     monthlyBudgetUsd: s.monthlyBudgetUsd,
     allowMembers: s.allowMembers,
+    chatPage: s.chatPage,
   };
+}
+
+/** Why the assistant is not there for this person, or null when it is. */
+function unavailableReason(settings: StoredAiSettings, user: PrincipalUser): "noKey" | "disabled" | "notAllowed" | null {
+  if (!settings.keySealed) return "noKey";
+  if (!settings.enabled) return "disabled";
+  if (user.role === "member" && !settings.allowMembers) return "notAllowed";
+  return null;
+}
+
+function budgetReached(deps: Pick<Deps, "db">, settings: StoredAiSettings): boolean {
+  return settings.monthlyBudgetUsd !== null && monthSpendUsd(deps.db) >= settings.monthlyBudgetUsd;
+}
+
+/** What starting a reply needs (ai.send and ai.retry): a browser session, the assistant on and for this person, budget left. */
+function chattingUser(ctx: OpContext): PrincipalUser {
+  if (ctx.principal.type !== "session") {
+    throw new OpError("FORBIDDEN", "The assistant is used from the panel, not with API keys or MCP tokens.");
+  }
+  const user = ctx.principal.user;
+  const settings = readAiSettings(ctx.db);
+  switch (unavailableReason(settings, user)) {
+    case "noKey":
+      throw new OpError("UNAVAILABLE", "Add an Anthropic API key in Settings > AI assistant first.", { reason: "noKey" });
+    case "disabled":
+      throw new OpError("UNAVAILABLE", "The AI assistant is turned off.", { reason: "disabled" });
+    case "notAllowed":
+      throw new OpError("FORBIDDEN", "The assistant is only for owners and admins on this panel.");
+    default:
+  }
+  if (budgetReached(ctx, settings)) {
+    throw new OpError("FORBIDDEN", "The monthly AI budget is used up. It resets at the start of next month.", { reason: "budget" });
+  }
+  return user;
 }
 
 const settingsOp = implement(ai.settings, (_input, ctx) => settingsView(ctx));
@@ -70,9 +108,33 @@ const updateSettings = implement(ai.updateSettings, async (input, ctx) => {
     ...(input.routing !== undefined ? { routing: input.routing } : {}),
     ...(input.monthlyBudgetUsd !== undefined ? { monthlyBudgetUsd: input.monthlyBudgetUsd } : {}),
     ...(input.allowMembers !== undefined ? { allowMembers: input.allowMembers } : {}),
+    ...(input.chatPage !== undefined ? { chatPage: input.chatPage } : {}),
   });
-  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.settings", "ai.usage", "system.features"] });
+  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.settings", "ai.usage", "ai.me", "system.features"] });
   return settingsView(ctx);
+});
+
+const me = implement(ai.me, (_input, ctx) => {
+  if (ctx.principal.type === "anonymous") throw new OpError("UNAUTHENTICATED", "Sign in first.");
+  const settings = readAiSettings(ctx.db);
+  const reason = unavailableReason(settings, ctx.principal.user);
+  return {
+    available: reason === null,
+    reason,
+    chatPage: settings.chatPage,
+    autoMode: readAutoMode(ctx.db, ctx.principal.user.id),
+    budgetReached: budgetReached(ctx, settings),
+  };
+});
+
+// Auto mode lifts the approval step for the person's own chats, so only the
+// person in the browser turns it on or off: never an API key.
+const setAutoMode = implement(ai.setAutoMode, (input, ctx) => {
+  const { userId } = requireSession(ctx);
+  ctx.db.update(users).set({ aiAutoMode: input.enabled, updatedAt: new Date() }).where(eq(users.id, userId)).run();
+  // Every tab and device of this person follows (ai.me is per caller, so others only refetch their own).
+  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.me"] });
+  return { autoMode: input.enabled };
 });
 
 const usage = implement(ai.usage, (input, ctx) => {
@@ -161,12 +223,17 @@ const conversations = implement(ai.conversations, (input, ctx) => {
     if (!match) throw new OpError("BAD_REQUEST", "The cursor is not valid.", { field: "cursor" });
     after = { at: new Date(Number(match[1])), id: match[2] as string };
   }
+  // LIKE's own wildcards in the search are matched as themselves.
+  const query = input.query?.trim();
+  const titleLike = query ? `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
   const rows = ctx.db
     .select()
     .from(aiConversations)
     .where(
       and(
+        // Only the caller's own chats, whatever their role: owners never read other people's.
         eq(aiConversations.userId, ctx.principal.user.id),
+        titleLike ? sql`${aiConversations.title} like ${titleLike} escape '\\'` : undefined,
         after
           ? or(lt(aiConversations.updatedAt, after.at), and(eq(aiConversations.updatedAt, after.at), lt(aiConversations.id, after.id)))
           : undefined,
@@ -185,23 +252,17 @@ const conversations = implement(ai.conversations, (input, ctx) => {
 
 const conversation = implement(ai.conversation, (input, ctx) => {
   const row = ownConversation(ctx, input.conversationId);
-  return { conversation: toConversation(ctx.db, row), messages: visibleMessages(rowsOf(ctx.db, row.id)) };
+  // A reply still being written comes with its text so far, so a chat opened (or subscribed) mid-reply catches up.
+  const messages = visibleMessages(rowsOf(ctx.db, row.id)).map((message) => {
+    const parts = message.status === "streaming" ? liveParts(message.id) : undefined;
+    return parts ? { ...message, parts } : message;
+  });
+  return { conversation: toConversation(ctx.db, row), messages };
 });
 
 const send = implement(ai.send, (input, ctx) => {
-  if (ctx.principal.type !== "session") {
-    throw new OpError("FORBIDDEN", "The assistant is used from the panel, not with API keys or MCP tokens.");
-  }
-  const user = ctx.principal.user;
+  const user = chattingUser(ctx);
   const settings = readAiSettings(ctx.db);
-  if (!settings.keySealed)
-    throw new OpError("UNAVAILABLE", "Add an Anthropic API key in Settings > AI assistant first.", { reason: "noKey" });
-  if (!settings.enabled) throw new OpError("UNAVAILABLE", "The AI assistant is turned off.", { reason: "disabled" });
-  if (user.role === "member" && !settings.allowMembers)
-    throw new OpError("FORBIDDEN", "The assistant is only for owners and admins on this panel.");
-  if (settings.monthlyBudgetUsd !== null && monthSpendUsd(ctx.db) >= settings.monthlyBudgetUsd) {
-    throw new OpError("FORBIDDEN", "The monthly AI budget is used up. It resets at the start of next month.", { reason: "budget" });
-  }
 
   let conversationRow: ReturnType<typeof ownConversation>;
   let fresh = false;
@@ -246,8 +307,42 @@ const send = implement(ai.send, (input, ctx) => {
       event: { type: "title", conversationId: conversationRow.id, title: conversationRow.title },
     });
   }
-  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.conversations"] });
+  // The same chat open in another tab (the bubble and the Assistant page, a phone) shows the message at once.
+  announceReply(ctx, conversationRow.id);
   return { conversationId: conversationRow.id, userMessage: toMessage(userRow), assistantMessage: toMessage(replyRow) };
+});
+
+const retry = implement(ai.retry, (input, ctx) => {
+  const user = chattingUser(ctx);
+  const row = ownConversation(ctx, input.conversationId);
+  if (isRunning(row.id)) throw new OpError("CONFLICT", "The assistant is still answering. Wait or stop it first.");
+  const last = visibleMessages(rowsOf(ctx.db, row.id)).at(-1);
+  if (last?.role !== "assistant" || (last.status !== "error" && last.status !== "cancelled")) {
+    throw new OpError("CONFLICT", "The last reply did not fail, so there is nothing to try again.");
+  }
+  closeOpenCalls(ctx, row.id);
+  // The same model as the reply that failed: retrying is not a new question.
+  const tier: Tier = last.model ?? routeModel(readAiSettings(ctx.db).routing, "");
+  const replyRow = appendMessage(ctx.db, row.id, { role: "assistant", content: [], parts: [], model: tier, status: "streaming" });
+  void runReply(ctx, { conversationId: row.id, replyId: replyRow.id, user, tier });
+  announceReply(ctx, row.id);
+  return { assistantMessage: toMessage(replyRow) };
+});
+
+const renameConversation = implement(ai.renameConversation, (input, ctx) => {
+  const row = ownConversation(ctx, input.conversationId);
+  const title = input.title.replace(/\s+/g, " ").trim();
+  if (!title) throw new OpError("BAD_REQUEST", "Give the chat a title.", { field: "title" });
+  const renamed = ctx.db
+    .update(aiConversations)
+    .set({ title, updatedAt: row.updatedAt })
+    .where(eq(aiConversations.id, row.id))
+    .returning()
+    .get() as typeof row;
+  ctx.live.publish(ai.aiLiveTopic(row.id), { type: "ai", event: { type: "title", conversationId: row.id, title } });
+  // Approvals show the chat's title to its owner.
+  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.conversations", "approvals.list", "approvals.get"] });
+  return toConversation(ctx.db, renamed);
 });
 
 const cancel = implement(ai.cancel, (input, ctx) => {
@@ -260,8 +355,9 @@ const deleteConversation = implement(ai.deleteConversation, (input, ctx) => {
   const row = ownConversation(ctx, input.conversationId);
   cancelRun(row.id);
   // Usage rows keep their cost (conversation_id is set null), so the bill stays right.
+  // Its approvals stay: they keep the title they were made with and still run when approved.
   ctx.db.delete(aiConversations).where(eq(aiConversations.id, row.id)).run();
-  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.conversations"] });
+  ctx.live.publish("panel", { type: "invalidate", ops: ["ai.conversations", "approvals.list", "approvals.get"] });
   return {};
 });
 
@@ -277,6 +373,19 @@ function start(deps: Deps) {
 
 export default defineModule({
   name: "ai",
-  ops: [settingsOp, updateSettings, usage, conversations, conversation, send, cancel, deleteConversation],
+  ops: [
+    settingsOp,
+    updateSettings,
+    usage,
+    me,
+    setAutoMode,
+    conversations,
+    conversation,
+    send,
+    retry,
+    renameConversation,
+    cancel,
+    deleteConversation,
+  ],
   start,
 });

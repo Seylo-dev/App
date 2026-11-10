@@ -38,6 +38,13 @@ export const users = sqliteTable(
     preferences: json<Record<string, unknown>>("preferences").notNull().default(sql`'{}'`),
     /** A random face from the moment the account is created; null only on rows from before avatars, until the panel starts. */
     avatar: json<StoredAvatar>("avatar"),
+    /**
+     * The assistant's auto mode (ai.setAutoMode): the person's own chats run
+     * changes without an approval, with their permissions. One choice for
+     * every chat and device; off for new people. Not in preferences, which
+     * API keys can write.
+     */
+    aiAutoMode: integer("ai_auto_mode", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

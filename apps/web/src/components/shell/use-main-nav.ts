@@ -1,18 +1,20 @@
 // The main navigation as this panel shows it: every item, except Approvals
-// while nothing can ask for one (nav-items.ts showApprovals). The command
-// palette lists all of it; the sidebar (useSidebarNav) also leaves out the
-// items the person turned off under Settings > Preferences. Both read the
-// same cached queries.
+// while nothing can ask for one (nav-items.ts showApprovals) and the
+// Assistant page while it is off or not for the viewer (showAssistant). The
+// command palette lists all of it; the sidebar (useSidebarNav) also leaves
+// out the items the person turned off under Settings > Preferences. Both
+// read the same cached queries.
 
-import { approvals, auth, system } from "@seylo/ops";
+import { ai, approvals, auth, system } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { useRouterState } from "@tanstack/react-router";
 import { useLiveUp } from "../../lib/live";
 import { hiddenSidebarItems } from "../../lib/use-sidebar-items";
-import { inSidebar, type MainNavItem, mainNav, showApprovals } from "./nav-items";
+import { inSidebar, type MainNavItem, mainNav, showApprovals, showAssistant } from "./nav-items";
 
 export function useMainNav(): { items: MainNavItem[]; pendingCount: number } {
   const features = useOp(system.features, {});
+  const me = useOp(ai.me, {}, { retry: false, staleTime: 60_000 });
   // The panel filters approvals per person, so this is what waits for the viewer.
   // The panel topic refreshes it the moment a request arrives or is decided; poll only while the socket is down.
   const liveUp = useLiveUp();
@@ -25,7 +27,9 @@ export function useMainNav(): { items: MainNavItem[]; pendingCount: number } {
     pendingCount,
     onApprovals,
   });
-  return { items: mainNav.filter((item) => item.id !== "approvals" || approvalsShown), pendingCount };
+  const assistantShown = showAssistant(me.data);
+  const items = mainNav.filter((item) => (item.id !== "approvals" || approvalsShown) && (item.id !== "assistant" || assistantShown));
+  return { items, pendingCount };
 }
 
 /**

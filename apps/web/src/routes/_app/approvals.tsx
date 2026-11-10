@@ -1,14 +1,17 @@
 // Approvals: changes that MCP tools and the AI assistant asked for, waiting
-// for a person. Each shows what would run, on what, why the model wants
-// it, and the exact (redacted) input. Approving runs it at once with the
-// approver's own permissions; denying tells the model, with a note.
+// for a person. Each shows what would run, on what, where it came from
+// (chips: the assistant and its chat, or MCP and the token), why the model
+// wants it, and the exact (redacted) input. Approving runs it at once with
+// the approver's own permissions; denying tells the model, with a note.
+// The assistant's chat shows the same approval as a card (one record), so
+// deciding in either place updates both.
 
 import { approvals, type OpOutput } from "@seylo/ops";
 import { Alert } from "@seylo/ui/components/alert";
 import { Avatar } from "@seylo/ui/components/avatar";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
-import { Chip } from "@seylo/ui/components/chip";
+import { Chip, chipVariants } from "@seylo/ui/components/chip";
 import { CodeBlock } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { EmptyState } from "@seylo/ui/components/empty-state";
@@ -16,9 +19,11 @@ import { PageHeader } from "@seylo/ui/components/page-header";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Textarea } from "@seylo/ui/components/textarea";
-import { IconChevronDown, IconChevronUp, IconRobot, IconShieldCheck } from "@tabler/icons-react";
-import { createFileRoute } from "@tanstack/react-router";
+import { cn } from "@seylo/ui/lib/utils";
+import { IconChevronDown, IconChevronUp, IconMessage, IconPlugConnected, IconShieldCheck, IconSparkles } from "@tabler/icons-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { useAssistant, useAssistantAccess } from "../../components/assistant/assistant-context";
 import { formatDateTime, formatRelative } from "../../components/settings/format";
 import { useSettingsMutation } from "../../components/settings/mutation";
 import { OpErrorCallout } from "../../components/settings/op-state";
@@ -95,14 +100,17 @@ function ApprovalsPage() {
   );
 }
 
-/** An approval card while the list loads: source and title, the details line, the reason, the input and the two actions. */
+/** An approval card while the list loads: the title, the source chips, the details line, the reason, the input and the two actions. */
 function ApprovalCardSkeleton() {
   return (
     <Card aria-hidden="true" className="gap-3 px-5 py-4">
       <div className="flex items-center gap-2">
-        <Skeleton className="h-[22px] w-14 rounded-chip" />
         <SkeletonText className="w-36 text-[14.5px]" />
         <Skeleton className="ml-auto h-[22px] w-16 rounded-chip" />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Skeleton className="h-[22px] w-20 rounded-chip" />
+        <Skeleton className="h-[22px] w-28 rounded-chip" />
       </div>
       <div className="flex flex-wrap gap-x-5 text-[12.5px]">
         <SkeletonText className="w-44" />
@@ -147,10 +155,6 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       {/* The status stays top right on every card: only the title side wraps. */}
       <div className="flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <Chip tone={approval.via === "ai" ? "violet" : "sky"}>
-            <IconRobot size={13} stroke={1.8} aria-hidden="true" />
-            {t(`approvals.via.${approval.via}`)}
-          </Chip>
           <b className="text-[14.5px] font-semibold">{approval.opSummary}</b>
           {destructive && <Chip tone="red">{t("approvals.destructive")}</Chip>}
         </div>
@@ -158,6 +162,8 @@ function ApprovalCard({ approval }: { approval: Approval }) {
           {t(`approvals.statuses.${approval.status}`)}
         </Chip>
       </div>
+
+      <SourceChips source={approval.source} />
 
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
@@ -169,7 +175,7 @@ function ApprovalCard({ approval }: { approval: Approval }) {
               decorative
             />
           )}
-          {t("approvals.requestedBy", { client: approval.requestedBy.clientName, person: approval.requestedBy.userName })}
+          {t("approvals.forPerson", { person: approval.requestedBy.userName })}
         </span>
         {approval.target && (
           <span>
@@ -266,5 +272,64 @@ function ApprovalCard({ approval }: { approval: Approval }) {
         }}
       />
     </Card>
+  );
+}
+
+/**
+ * Where the request came from, as chips under its title: "Assistant" and
+ * the chat (its title for the person whose chat it is, else "Session
+ * #<id>"; the person's own chat opens on a click), or "MCP" and the
+ * token's name.
+ */
+function SourceChips({ source }: { source: Approval["source"] }) {
+  const assistant = useAssistant();
+  const access = useAssistantAccess();
+  if (source.kind === "mcp") {
+    return (
+      <div data-slot="approval-source" className="flex flex-wrap items-center gap-1.5">
+        <Chip tone="sky">
+          <IconPlugConnected size={13} stroke={1.8} aria-hidden="true" />
+          {t("approvals.via.mcp")}
+        </Chip>
+        <Chip tone="gray">{source.clientName}</Chip>
+      </div>
+    );
+  }
+  const label = source.title || t("approvals.session", { id: source.conversationId.slice(0, 6) });
+  const opens = cn(
+    chipVariants({ tone: "gray" }),
+    "max-w-full cursor-pointer border-0 transition-interactive hover:bg-track hover:text-foreground",
+  );
+  const face = (
+    <>
+      <IconMessage size={13} stroke={1.8} aria-hidden="true" />
+      <span className="truncate">{label}</span>
+    </>
+  );
+  return (
+    <div data-slot="approval-source" className="flex flex-wrap items-center gap-1.5">
+      <Chip tone="violet">
+        <IconSparkles size={13} stroke={1.8} aria-hidden="true" />
+        {t("approvals.via.ai")}
+      </Chip>
+      {!source.mine || !access.available ? (
+        <Chip tone="gray" className="max-w-full">
+          {face}
+        </Chip>
+      ) : access.page ? (
+        <Link to="/assistant" search={{ c: source.conversationId }} title={t("approvals.openSession")} className={opens}>
+          {face}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          title={t("approvals.openSession")}
+          onClick={() => assistant.showChat(source.conversationId)}
+          className={opens}
+        >
+          {face}
+        </button>
+      )}
+    </div>
   );
 }
