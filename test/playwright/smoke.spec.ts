@@ -247,6 +247,8 @@ test.describe("signed in", () => {
     const input = page.getByPlaceholder("Type a command or search");
     await expect(input).toBeVisible();
     await input.fill(projectName);
+    // The projects load with the palette; Enter before they are in picks nothing.
+    await expect(page.getByRole("option", { name: projectName, selected: true })).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { level: 1, name: projectName })).toBeVisible();
     expect(errors).toEqual([]);
