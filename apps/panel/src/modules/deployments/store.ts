@@ -224,19 +224,7 @@ export function onDeploymentChange(db: object, listener: DeploymentListener): ()
 }
 
 export function publishDeploymentChange(deps: Pick<Deps, "db" | "live">, serviceId: string, deploymentId?: string): void {
-  if (deploymentId) {
-    const row = loadDeployment(deps.db, serviceId, deploymentId);
-    if (row) deps.live.publish(`deployment:${deploymentId}`, { type: "deployment", deployment: toDeployment(deps.db, row) });
-    if (row) {
-      for (const listener of deploymentListeners.get(deps.db) ?? []) {
-        try {
-          listener(row);
-        } catch {
-          // A listener's failure is its own; the deploy goes on.
-        }
-      }
-    }
-  }
+  if (deploymentId) publishDeploymentEvent(deps, serviceId, deploymentId);
   const svc = deps.db.select({ projectId: services.projectId }).from(services).where(eq(services.id, serviceId)).get();
   deps.live.publish(`service:${serviceId}`, {
     type: "invalidate",
@@ -246,4 +234,26 @@ export function publishDeploymentChange(deps: Pick<Deps, "db" | "live">, service
     deps.live.publish(`project:${svc.projectId}`, { type: "invalidate", ops: [serviceOps.list.id, projectOps.get.id] });
   }
   deps.live.publish("panel", { type: "invalidate", ops: [buildOps.queue.id, deploymentOps.recent.id] });
+}
+
+/**
+ * Only the deployment's own event (its log window's steps and timers) and
+ * the in-process listeners, without the service, project and panel
+ * invalidations of publishDeploymentChange. The log's 400 ms tick
+ * (logs.ts) uses it: those invalidations made every open screen refetch
+ * the deploy list, the service, the project's services and the recent
+ * deploys every second while a build printed output. Status and step
+ * changes still go through publishDeploymentChange.
+ */
+export function publishDeploymentEvent(deps: Pick<Deps, "db" | "live">, serviceId: string, deploymentId: string): void {
+  const row = loadDeployment(deps.db, serviceId, deploymentId);
+  if (!row) return;
+  deps.live.publish(`deployment:${deploymentId}`, { type: "deployment", deployment: toDeployment(deps.db, row) });
+  for (const listener of deploymentListeners.get(deps.db) ?? []) {
+    try {
+      listener(row);
+    } catch {
+      // A listener's failure is its own; the deploy goes on.
+    }
+  }
 }

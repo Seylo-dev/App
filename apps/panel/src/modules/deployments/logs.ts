@@ -6,7 +6,7 @@
 import { and, desc, eq, gt } from "drizzle-orm";
 import { type DeployStepKey, deploymentLogs } from "../../db/schema";
 import type { Deps } from "../../deps";
-import { publishDeploymentChange } from "./store";
+import { publishDeploymentEvent } from "./store";
 
 /** Most lines kept per deployment; later lines are dropped with one notice. */
 export const maxLinesPerDeployment = 20_000;
@@ -79,9 +79,7 @@ function schedulePublish(deps: LogDeps, serviceId: string, deploymentId: string)
   const timer = setTimeout(() => {
     map.delete(deploymentId);
     try {
-      publishDeploymentChange(deps, serviceId, deploymentId);
-      // Older web builds refetch on this instead of reading the deployment event.
-      deps.live.publish(`deployment:${deploymentId}`, { type: "invalidate", ops: ["deployments.get"] });
+      publishDeploymentEvent(deps, serviceId, deploymentId);
     } catch {
       // The panel shut down (or a test closed its database) before the hint went out.
     }

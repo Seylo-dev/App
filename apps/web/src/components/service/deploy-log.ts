@@ -11,6 +11,7 @@ import type { LogBuffer, LogLineInput } from "@seylo/ui/components/log-viewer";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { type LiveSignal, live } from "../../lib/live";
+import { isActiveDeployment } from "./status";
 
 export type DeployLogLine = (typeof deployments.LogLine)["static"];
 type Deployment = (typeof deployments.Deployment)["static"];
@@ -150,8 +151,9 @@ export function useDeploymentLog(serviceId: string, deploymentId: string | null,
         if (fresh.length) setState({ done, lines: count, error: null, live: true });
       } else if (signal.event.type === "deployment") {
         applyDeployment(cache, signal.event.deployment);
-        // A finished deployment also finishes its log: one page reads the end and "done".
-        void page();
+        // A finished deployment also finishes its log: one page reads the end and "done". While it
+        // runs, its lines come as "log" events; the deployment event comes every 400 ms then.
+        if (!isActiveDeployment(signal.event.deployment.status)) void page();
       } else if (signal.event.type === "invalidate") {
         void page();
       }

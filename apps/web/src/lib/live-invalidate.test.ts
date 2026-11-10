@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { metrics } from "@seylo/ops";
 import { opQueryKey } from "@seylo/ops/react";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { createInvalidator, invalidateIntervalMs, matchesInput } from "./live-invalidate";
+import { createInvalidator, invalidateIntervalMs, matchesInput, topicMatch } from "./live-invalidate";
 import { applyNodeUsage } from "./live-metrics";
 
 function setup() {
@@ -126,4 +126,26 @@ test("node usage samples update the cached graphs' latest values in place", () =
   expect(
     cache.getQueryData<{ series: { latest: unknown } }>(opQueryKey(metrics.node, { nodeId: "b", range: "24h" }))?.series.latest,
   ).toBeNull();
+});
+
+describe("topicMatch", () => {
+  const key = (opId: string, input: unknown) => ({ queryKey: ["op", opId, input] });
+
+  test("a project, service or node topic names only its own", () => {
+    expect(topicMatch("project:p1")).toEqual({ projectId: ["p1"] });
+    expect(topicMatch("service:s1")).toEqual({ serviceId: ["s1"] });
+    expect(topicMatch("node:n1")).toEqual({ nodeId: ["n1"] });
+    expect(topicMatch("panel")).toBeUndefined();
+    expect(topicMatch("deployment:d1")).toBeUndefined();
+    expect(topicMatch("node-live:n1")).toBeUndefined();
+    expect(topicMatch("project:")).toBeUndefined();
+  });
+
+  test("services.list of another project stays; inputs without the key still refetch", () => {
+    const match = topicMatch("project:p1") as NonNullable<ReturnType<typeof topicMatch>>;
+    expect(matchesInput(key("services.list", { projectId: "p1" }), match)).toBe(true);
+    expect(matchesInput(key("services.list", { projectId: "p2" }), match)).toBe(false);
+    expect(matchesInput(key("deployments.recent", {}), match)).toBe(true);
+    expect(matchesInput(key("services.get", { serviceId: "s9" }), match)).toBe(true);
+  });
 });

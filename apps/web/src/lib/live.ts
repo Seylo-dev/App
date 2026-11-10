@@ -21,7 +21,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { useEffect, useSyncExternalStore } from "react";
 import { queryClient } from "./api";
-import { createInvalidator } from "./live-invalidate";
+import { createInvalidator, topicMatch } from "./live-invalidate";
 import { applyNodeUsage } from "./live-metrics";
 import { readSessionKey } from "./session-key";
 
@@ -72,6 +72,7 @@ export function createLiveClient(cache: QueryClient): LiveClient {
   };
   let socket: WebSocket | undefined;
   let attempt = 0;
+  let reconnecting = false;
   let wanted = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -91,11 +92,17 @@ export function createLiveClient(cache: QueryClient): LiveClient {
       attempt = 0;
       setUp(true);
       for (const topic of counts.keys()) send({ type: "subscribe", topic });
+      // Anything missed while the socket was down is refetched, once it is back.
+      if (reconnecting) {
+        reconnecting = false;
+        invalidator.invalidateAll();
+      }
     };
     ws.onmessage = (event) => {
       const message = JSON.parse(String(event.data)) as LiveServerMessage;
       if (message.type === "event") {
-        if (message.event.type === "invalidate") invalidator.invalidate(message.event.ops, message.event.match);
+        if (message.event.type === "invalidate")
+          invalidator.invalidate(message.event.ops, message.event.match ?? topicMatch(message.topic));
         else if (message.event.type === "nodeUsage") applyNodeUsage(cache, message.event);
         tell(message.topic, { type: "event", event: message.event });
       } else if (message.type === "subscribed") tell(message.topic, { type: "subscribed" });
@@ -110,12 +117,12 @@ export function createLiveClient(cache: QueryClient): LiveClient {
       if (!wanted || socket !== ws) return;
       if (event.code === liveUnauthorizedCloseCode) return onUnauthorized();
       // Jittered exponential backoff: 0.5s, 1s, 2s ... up to 15s. Anything
-      // missed while down is refetched on reconnect.
+      // missed while down is refetched once the socket is back (onopen),
+      // not before every attempt, which refetched every page's queries each
+      // time a reconnect failed.
       const delay = Math.min(maxBackoffMs, 500 * 2 ** attempt++) * (0.75 + Math.random() / 2);
-      retryTimer = setTimeout(() => {
-        invalidator.invalidateAll();
-        open(onUnauthorized);
-      }, delay);
+      reconnecting = true;
+      retryTimer = setTimeout(() => open(onUnauthorized), delay);
     };
   };
 
@@ -159,6 +166,7 @@ export function createLiveClient(cache: QueryClient): LiveClient {
     },
     disconnect() {
       wanted = false;
+      reconnecting = false;
       clearTimeout(retryTimer);
       socket?.close();
       socket = undefined;

@@ -27,6 +27,32 @@ export interface InvalidatorOptions {
   hidden?: () => boolean;
 }
 
+/**
+ * The match an invalidation without its own gets from its topic. The panel
+ * publishes "services.list is stale" on project:<id> when a container of
+ * that project changes; without a match every project's services.list on
+ * screen (the dashboard, the sidebar's open projects) refetched each time.
+ * A project, service or node topic names only that one; an input without
+ * the key still matches (matchesInput), so nothing that refetched for the
+ * topic's own project, service or node stops refetching.
+ */
+export function topicMatch(topic: string): LiveInputMatch | undefined {
+  const colon = topic.indexOf(":");
+  if (colon < 0) return undefined;
+  const id = topic.slice(colon + 1);
+  if (!id) return undefined;
+  switch (topic.slice(0, colon)) {
+    case "project":
+      return { projectId: [id] };
+    case "service":
+      return { serviceId: [id] };
+    case "node":
+      return { nodeId: [id] };
+    default:
+      return undefined;
+  }
+}
+
 /** True when the query's input matches (a key the input leaves out matches: the op's default applies). */
 export function matchesInput(query: Pick<Query, "queryKey">, match: LiveInputMatch): boolean {
   const input = query.queryKey[2];

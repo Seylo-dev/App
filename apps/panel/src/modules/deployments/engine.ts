@@ -275,6 +275,8 @@ async function start(s: EngineState, d: DeploymentRow): Promise<void> {
     steps: setStep(load(s, d.id)?.steps ?? current.steps, "clone", "running", { detail: resolved.cloneDetail }),
   });
   log(s, current, "clone", `Source: ${resolved.cloneDetail}. Builder: ${resolved.builderLabel}.`);
+  // The commit and branch reach the deploy list and the service now (the log's tick only updates its own window).
+  publishDeploymentChange(s.deps, d.serviceId, d.id);
 
   if (resolved.request.source?.source.case === "uploadId") {
     try {
@@ -524,6 +526,7 @@ function recordSourceInfo(
     })
     .where(eq(deployments.id, deploymentId))
     .run();
+  if (!d.commitSha || !d.commitMessage || !d.commitAuthor) publishDeploymentChange(s.deps, d.serviceId, deploymentId);
 }
 
 /** Points the service at this deployment and lets the agents roll it out. */
