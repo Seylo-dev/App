@@ -14,7 +14,7 @@ export default {
   peak: "Peak",
   received: "Received",
   sent: "Sent",
-  perNode: "Now, per node",
+  perNode: "Per node",
   node: "Node",
   sampled: "Sampled",
 } as const;
