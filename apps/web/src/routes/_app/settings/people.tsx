@@ -98,7 +98,7 @@ function UsersSection() {
               sortValue: (u) => u.email,
               cell: (u) => (
                 <span className="flex min-w-0 items-center gap-2.5">
-                  <Avatar name={u.name || u.email} size="sm" />
+                  <Avatar name={u.name || u.email} src={u.avatarUrl} size="sm" decorative />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{u.name || u.email}</span>
                     {u.name && <span className="truncate text-xs text-muted-foreground">{u.email}</span>}

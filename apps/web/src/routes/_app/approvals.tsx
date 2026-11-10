@@ -5,6 +5,7 @@
 
 import { approvals, type OpOutput } from "@seylo/ops";
 import { Alert } from "@seylo/ui/components/alert";
+import { Avatar } from "@seylo/ui/components/avatar";
 import { Button } from "@seylo/ui/components/button";
 import { Card } from "@seylo/ui/components/card";
 import { Chip } from "@seylo/ui/components/chip";
@@ -159,7 +160,17 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       </div>
 
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-muted-foreground">
-        <span>{t("approvals.requestedBy", { client: approval.requestedBy.clientName, person: approval.requestedBy.userName })}</span>
+        <span className="inline-flex items-center gap-1.5">
+          {approval.requestedBy.userId && (
+            <Avatar
+              name={approval.requestedBy.userName || approval.requestedBy.clientName}
+              src={approval.requestedBy.avatarUrl}
+              size="xs"
+              decorative
+            />
+          )}
+          {t("approvals.requestedBy", { client: approval.requestedBy.clientName, person: approval.requestedBy.userName })}
+        </span>
         {approval.target && (
           <span>
             {t(`approvals.target.${approval.target.type}`)}: <span className="font-medium text-foreground">{approval.target.name}</span>

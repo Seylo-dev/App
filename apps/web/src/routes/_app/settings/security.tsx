@@ -1,6 +1,6 @@
-// Settings > Security (your account): your name, password, authenticator
-// app with recovery codes, passkeys, a linked GitHub login and the
-// browsers you are signed in on.
+// Settings > Security (your account): your password, authenticator app
+// with recovery codes, passkeys, a linked GitHub login and the browsers
+// you are signed in on. Name, email and avatar are on Personal details.
 
 import { auth } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -29,7 +29,6 @@ function SecurityPage() {
   const security = useOp(auth.security, {});
   return (
     <SettingsPage title={t("settingsSecurity.title")} subtitle={t("settingsSecurity.subtitle")}>
-      <ProfileSection />
       <QueryView query={security} skeleton={<SecuritySkeleton />} className="flex flex-col gap-5">
         {(data) => (
           <>
@@ -42,29 +41,6 @@ function SecurityPage() {
       </QueryView>
       <SessionsSection />
     </SettingsPage>
-  );
-}
-
-function ProfileSection() {
-  const me = useOp(auth.whoami, {});
-  return (
-    <SectionCard title={t("settingsSecurity.profile.title")}>
-      <QueryView
-        query={me}
-        skeleton={
-          <>
-            <FormGrid>
-              <FieldSkeleton hint={false} labelWidth="w-12" />
-              <FieldSkeleton labelWidth="w-12" />
-            </FormGrid>
-            <FormActionsSkeleton />
-          </>
-        }
-        className="flex flex-col gap-3"
-      >
-        {(data) => <ProfileForm key={data.viewer.name} name={data.viewer.name} email={data.viewer.email} />}
-      </QueryView>
-    </SectionCard>
   );
 }
 
@@ -97,34 +73,6 @@ function SecuritySkeleton() {
         <ButtonSkeleton className="w-44" />
       </SectionCardSkeleton>
     </>
-  );
-}
-
-function ProfileForm({ name: initial, email }: { name: string; email: string }) {
-  const [name, setName] = useState(initial);
-  const save = useSettingsMutation(auth.updateProfile, { invalidates: [auth.whoami], success: t("settings.saved") });
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        save.mutate({ name: name.trim() });
-      }}
-      className="flex flex-col gap-3"
-    >
-      <FormGrid>
-        <Field label={t("settingsPeople.user.name")} htmlFor="profile-name">
-          <Input id="profile-name" value={name} maxLength={80} autoComplete="name" onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label={t("settingsPeople.invite.email")} hint={t("settingsSecurity.profile.emailHint")} htmlFor="profile-email">
-          <Input id="profile-email" value={email} readOnly className="bg-field text-muted-foreground" />
-        </Field>
-      </FormGrid>
-      <FormActions>
-        <Button type="submit" variant="primary" disabled={name.trim() === initial || save.isPending}>
-          {t("settings.save")}
-        </Button>
-      </FormActions>
-    </form>
   );
 }
 

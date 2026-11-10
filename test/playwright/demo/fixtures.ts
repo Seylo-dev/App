@@ -526,7 +526,18 @@ export function metricsNode(nodeId: string, range = "1h") {
   return { range, stepSeconds: all.stepSeconds, series: all.nodes.find((n) => n.nodeId === nodeId) ?? all.nodes[0] };
 }
 
-export const viewer = { id: "user000000000001", email: "you@example.com", name: "", role: "owner" };
+/**
+ * Generated faces of the demo people, drawn by the real panel the run
+ * started (/api/avatars/<style>/<seed>.svg). The contractor has none, so the
+ * initials show.
+ */
+export const avatars = {
+  owner: "/api/avatars/notionists/acme-owner.svg",
+  lee: "/api/avatars/lorelei/lee-park.svg",
+  intern: "/api/avatars/notionists/former-intern.svg",
+};
+
+export const viewer = { id: "user000000000001", email: "you@example.com", name: "", role: "owner", avatarUrl: avatars.owner };
 
 export const systemInfo = { name: "Seylo", version: "0.9.4", panelId: "demo", startedAt: iso(3 * day), nodes: { total: 3, online: 3 } };
 

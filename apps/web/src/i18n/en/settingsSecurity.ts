@@ -8,10 +8,6 @@ export default {
   copied: "Copied",
   copyAll: "Copy all",
   download: "Download",
-  profile: {
-    title: "Profile",
-    emailHint: "An owner or admin can change your email under People.",
-  },
   password: {
     title: "Password",
     description: "Changing it signs you out everywhere else.",
