@@ -158,8 +158,9 @@ not build; for 0.2.5 `0007_domain_origin`, `0008_user_avatars`
 (`nodes.location_source` and `nodes.location_looked_up_at`, both null on
 existing rows), `0010_docker_update` (`nodes.docker_update`, the newest
 Docker version check) and `0011_assistant_chat` (`users.ai_auto_mode`,
-default false, and `approvals.source_label`, default '')), which the panel
-applies at start, also
+default false, and `approvals.source_label`, default ''); for 0.2.6
+`0012_service_order` (`project_prefs.service_order`, a person's order of a
+project's services, services.reorder)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people

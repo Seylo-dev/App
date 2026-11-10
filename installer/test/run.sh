@@ -224,7 +224,7 @@ grep -q "^BRAND_MINISIGN_PUBLIC_KEY='${BRAND_PLACEHOLDER_PREFIX}" "$PLACEHOLDER_
 run_installer() {
   local verifier=$1 installer=$2 mode=panel
   shift 2
-  case ${1:-} in join | uninstall) mode=$1; shift ;; esac
+  case ${1:-} in join | uninstall) mode=$1; shift ;; ask) mode=; shift ;; esac
   R=$T/root-$RANDOM$RANDOM
   mkdir -p "$R"
   [ -z "${PRESEED:-}" ] || cp -R "$PRESEED/." "$R/"
@@ -245,8 +245,8 @@ run_installer() {
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     FAKE_STATUS="${FAKE_STATUS:-}" FAKE_STATUS_EXIT="${FAKE_STATUS_EXIT:-}" INSTALLER_TEST_JOIN_WAIT="${INSTALLER_TEST_JOIN_WAIT:-}" \
     INSTALLER_TEST_COLOR="${TEST_COLOR:-}" NO_COLOR="${TEST_NO_COLOR:-}" TERM="${TEST_TERM:-}" COLORTERM="${TEST_COLORTERM:-}" \
-    DO_NOT_TRACK="${TEST_DO_NOT_TRACK:-}" SEYLO_TELEMETRY="${TEST_TELEMETRY:-}" \
-    "$SH" "$installer" "$mode" --root "$R" --release-url "$BASE" "$@" 2>&1)
+    DO_NOT_TRACK="${TEST_DO_NOT_TRACK:-}" SEYLO_TELEMETRY="${TEST_TELEMETRY:-}" SEYLO_TTY="${TEST_TTY:-}" \
+    "$SH" "$installer" ${mode:+"$mode"} --root "$R" --release-url "$BASE" "$@" 2>&1)
   RC=$?
   set -e
 }
@@ -334,6 +334,26 @@ fake_binary "$T/local-binary"
 run_installer none "$PLACEHOLDER_INSTALLER" join --panel http://panel.test:3000 --token t --binary "$T/local-binary" --insecure
 expect_ok "join with --binary needs no release download" "Joining http://panel.test:3000"
 [ -z "$(curl_log)" ] && pass "join with --binary downloaded nothing" || flunk "join with --binary downloaded" "$(curl_log)"
+
+# The menu (ask_mode): a run that names no mode, with a person at the
+# terminal, asks what the server should do. TEST_TTY is the "terminal".
+printf '2\n%s\n' "curl -fsSL https://install.example.dev | sudo sh -s -- join --panel 'http://panel.test:3000' --token 'tok-123' --version '$V' --insecure" >"$T/answers-paste"
+TEST_TTY="$T/answers-paste" run_installer none "$PLACEHOLDER_INSTALLER" ask --binary "$T/local-binary"
+expect_ok "the menu's Join takes a pasted join command: address, token, --insecure" \
+  "What should this server do?" "Paste it here:" "Joining http://panel.test:3000"
+has "Join token" && flunk "the pasted command's token was asked for again" "$OUT" || pass "the pasted command's token is used, not asked again"
+printf '2\nhttps://192.0.2.10:3443\n  tok-456  \n' >"$T/answers-url"
+TEST_TTY="$T/answers-url" run_installer none "$PLACEHOLDER_INSTALLER" ask --binary "$T/local-binary" --pin "sha256:$(printf '%064d' 1)"
+expect_ok "the menu's Join takes a bare address, then asks for the token" "Join token (from Add node):" "Joining https://192.0.2.10:3443"
+printf 'x\n1\n' >"$T/answers-panel"
+TEST_TTY="$T/answers-panel" run_installer minisign "$INSTALLER" ask --version "$V"
+expect_ok "the menu asks again on a wrong answer, and 1 sets up a panel" "Type 1 or 2." "+ docker pull $PANEL_REF"
+run_installer minisign "$INSTALLER" ask --version "$V"
+expect_ok "no terminal: no menu, a panel as before" "+ docker pull $PANEL_REF"
+has "What should this server do?" && flunk "the menu showed without a terminal" "$OUT" || pass "the menu needs a terminal"
+printf '2\n' >"$T/answers-short"
+TEST_TTY="$T/answers-short" run_installer none "$PLACEHOLDER_INSTALLER" ask --binary "$T/local-binary"
+expect_fail "an answer that ends early stops with how to join by hand" "join --panel <url> --token <token>"
 
 # ufw: a joining node allows load balancing (5757) from the panel's address
 # when that is an IP, and every install says the agent's IP:port addresses
@@ -742,13 +762,15 @@ preflight --no-secret-key FAKE_GH_PUSH=false
 expect_fail "release preflight --no-secret-key still refuses a GitHub repo the releaser cannot push to" "cannot push to it"
 
 # ---- Docker missing: installed without a question (owner decision for 0.2.1)
-# The installer asks nothing, with or without a terminal: a join piped into
-# sh over ssh, from cloud-init or in CI has nobody to answer, and it used to
-# stop halfway with "Docker is missing".
-if grep -qF -- '[y/N]' "$INSTALLER" || grep -q -- '/dev/tty' "$INSTALLER"; then
-  flunk "the installer asks no questions" "found [y/N] or /dev/tty in $INSTALLER"
+# The installer asks nothing on the way: a join piped into sh over ssh, from
+# cloud-init or in CI has nobody to answer, and it used to stop halfway with
+# "Docker is missing". The one question is the menu (ask_mode, 0.2.6, owner
+# request), only when no mode is named and a person is at a terminal.
+outside_menu=$(awk '/^ask_mode\(\) \{/{inside=1} inside&&/^\}/{inside=0; next} !inside' "$INSTALLER")
+if grep -qF -- '[y/N]' "$INSTALLER" || printf '%s\n' "$outside_menu" | grep -q -- '/dev/tty'; then
+  flunk "the installer asks no questions outside the menu" "found [y/N] or /dev/tty outside ask_mode in $INSTALLER"
 else
-  pass "the installer asks no questions"
+  pass "the installer asks no questions outside the menu"
 fi
 for mode in panel join; do
   args=(--version "$V")
