@@ -32,8 +32,6 @@ export const Route = createFileRoute("/_app")({
 
 function AppLayout() {
   const navigate = useNavigate();
-  // The page's own route (a project, a service, settings): its tabs and sections animate themselves.
-  const page = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
 
   useEffect(() => {
     live.connect(() => void navigate({ to: "/login" }));
@@ -46,7 +44,7 @@ function AppLayout() {
         <PanelTopic />
         <div className="flex min-h-dvh flex-col md:flex-row">
           <Sidebar />
-          <Main page={page} />
+          <Main />
         </div>
         <AssistantBubble />
       </AssistantProvider>
@@ -54,7 +52,13 @@ function AppLayout() {
   );
 }
 
-function Main({ page }: { page: string }) {
+/**
+ * The page column. It, not the layout, follows the current page, so a
+ * navigation re-renders this column and leaves the sidebar alone.
+ */
+function Main() {
+  // The page's own route (a project, a service, settings): its tabs and sections animate themselves.
+  const page = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   // While the assistant's bubble shows, the page ends higher, so its last buttons can always scroll clear of it.
   const bubble = useBubbleShown();
   return (

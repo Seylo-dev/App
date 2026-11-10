@@ -26,10 +26,12 @@ export function prefetchOp<C extends QueryOp>(
   { queryClient, opClient }: RouterContext,
   op: C,
   input: OpInput<C>,
+  /** The page's own staleTime when it sets one (an editor that keeps its first answer). */
+  options: { staleTime?: number } = {},
 ): Promise<OpOutput<C> | undefined> {
   const queryKey = opQueryKey(op, input);
   return queryClient
-    .prefetchQuery({ queryKey, queryFn: ({ signal }) => opClient.call(op, input, { signal }) })
+    .prefetchQuery({ queryKey, queryFn: ({ signal }) => opClient.call(op, input, { signal }), ...options })
     .then(() => queryClient.getQueryData<OpOutput<C>>(queryKey))
     .catch(() => undefined);
 }

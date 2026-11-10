@@ -19,8 +19,12 @@ import { Field, FormActions, FormGrid, SettingRow, SettingsPage } from "../../..
 import { PanelDomainCard } from "../../../components/settings/panel-access-card";
 import { FieldSkeleton, FormActionsSkeleton, SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
+import { prefetchOp, startPrefetch } from "../../../lib/prefetch";
 
 export const Route = createFileRoute("/_app/settings/general")({
+  // The settings and the panel access card's data, together (the card used to wait for the settings).
+  loader: ({ context }) =>
+    startPrefetch(() => Promise.all([prefetchOp(context, settings.general, {}), prefetchOp(context, settings.panelAccess, {})])),
   component: GeneralPage,
 });
 

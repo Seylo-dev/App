@@ -30,6 +30,7 @@ import { PrivateRepoHint } from "../private-repo-hint";
 import { TerminalSkeleton } from "../service-skeletons";
 import { hasRunningInstance, isActiveDeployment, isDatabaseKind } from "../status";
 import { DeploymentStatusChip, ServiceStatusChip } from "../status-chip";
+import { latestDeployLimit } from "../tab-prefetch";
 import { pickMode, type TerminalMode, useTerminalModes } from "../terminal/access";
 import { ModeSwitch, ServiceTerminal } from "../terminal/console-pages";
 import { TerminalNote } from "../terminal/terminal-panel";
@@ -124,10 +125,15 @@ function AppOverview({ service }: { service: ServiceDetail }) {
 }
 
 function LatestDeploy({ service }: { service: ServiceDetail }) {
+  // service:<id> refreshes this list when a deployment moves; poll fast only while the socket is down.
+  const liveUp = useLiveUp();
   const list = useOp(
     deployments.list,
-    { serviceId: service.id, limit: 5 },
-    { retry: retryOp, refetchInterval: (q) => (q.state.data?.deployments.some((d) => isActiveDeployment(d.status)) ? 2000 : false) },
+    { serviceId: service.id, limit: latestDeployLimit },
+    {
+      retry: retryOp,
+      refetchInterval: (q) => (q.state.data?.deployments.some((d) => isActiveDeployment(d.status)) ? (liveUp ? 15_000 : 2000) : false),
+    },
   );
   const p = { projectId: service.projectId, serviceId: service.id };
   const latest = list.data?.deployments[0];

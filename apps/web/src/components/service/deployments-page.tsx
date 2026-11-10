@@ -43,10 +43,11 @@ import { isNotBuilt, OpErrorNote, retryOp } from "./op-state";
 import { PrivateRepoHint } from "./private-repo-hint";
 import { isActiveDeployment } from "./status";
 import { DeploymentStatusChip } from "./status-chip";
+import { deploymentsPageSize } from "./tab-prefetch";
 import { useNow } from "./use-now";
 import type { ServiceDetail } from "./use-service";
 
-const pageSize = 20;
+const pageSize = deploymentsPageSize;
 
 export function DeploymentsPage({ service }: { service: ServiceDetail }) {
   const [pages, setPages] = useState<string[]>([]);

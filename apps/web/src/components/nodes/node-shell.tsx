@@ -9,7 +9,7 @@
 // ready, never with Enter: the person reads it and runs it. Unknown names
 // are dropped by the route's validateSearch.
 
-import { hostShell, type OpOutput, tailscale } from "@seylo/ops";
+import { hostShell, type OpOutput } from "@seylo/ops";
 import { useOp, useOpClient, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -28,16 +28,9 @@ import { isReauthCancelled } from "../../lib/reauth";
 import type { NodeDetail } from "../../lib/types";
 import { QueryError } from "../query-error";
 import { TerminalPanel } from "../service/terminal/terminal-panel";
+import { isShellPrefill, shellPrefills } from "./shell-prefill";
 
-/** The commands ?prefill= may type, by name. Nothing else is ever typed for the person. */
-export const shellPrefills = {
-  "tailscale-install": tailscale.tailscaleInstallCommand,
-} as const;
-export type ShellPrefill = keyof typeof shellPrefills;
-
-export function isShellPrefill(value: unknown): value is ShellPrefill {
-  return typeof value === "string" && Object.hasOwn(shellPrefills, value);
-}
+export { isShellPrefill, type ShellPrefill, shellPrefills } from "./shell-prefill";
 
 /** What the prefill note says before the command is typed: why no shell types it here, by cause. */
 export function prefillText(s: Pick<OpOutput<typeof hostShell.status>, "enabled" | "available" | "canOpen" | "canEnable">) {

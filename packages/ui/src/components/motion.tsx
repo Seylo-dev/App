@@ -81,9 +81,10 @@ export function EnterOnChange({
   return (
     <m.div
       key={motionKey}
-      initial={enter ? { opacity: 0, y: subtle ? 3 : 5 } : false}
+      // From 40% opacity, not 0: the new page is readable on its first frame and still eases in.
+      initial={enter ? { opacity: 0.4, y: subtle ? 3 : 5 } : false}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: subtle ? 0.15 : 0.18, ease: "easeOut" }}
+      transition={{ duration: subtle ? 0.14 : 0.16, ease: "easeOut" }}
       className={className}
       {...rest}
     >

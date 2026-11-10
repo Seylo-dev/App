@@ -2,7 +2,7 @@
 // network, and five sections as tabs (?tab=): services, shared
 // environment, people, activity and settings.
 
-import { projects } from "@seylo/ops";
+import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
@@ -22,6 +22,7 @@ import { SharedEnv } from "../../../../components/project/shared-env";
 import { QueryError } from "../../../../components/query-error";
 import { type MessageKey, t } from "../../../../i18n/t";
 import { useLiveTopic } from "../../../../lib/live";
+import { prefetchOp, startPrefetch } from "../../../../lib/prefetch";
 
 const tabs = ["services", "env", "people", "activity", "settings"] as const;
 type Tab = (typeof tabs)[number];
@@ -35,6 +36,14 @@ const tabLabels: Record<Tab, MessageKey> = {
 };
 
 export const Route = createFileRoute("/_app/p/$projectId/")({
+  // The project and its services start on hover, together (the grid used to wait for the project).
+  loader: ({ context, params }) =>
+    startPrefetch(() =>
+      Promise.all([
+        prefetchOp(context, projects.get, { projectId: params.projectId }),
+        prefetchOp(context, services.list, { projectId: params.projectId }),
+      ]),
+    ),
   validateSearch: (search: Record<string, unknown>): { tab?: Tab } =>
     tabs.includes(search.tab as Tab) && search.tab !== "services" ? { tab: search.tab as Tab } : {},
   component: ProjectPage,

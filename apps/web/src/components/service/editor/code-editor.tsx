@@ -28,13 +28,9 @@ export interface CodeEditorProps {
   options?: MonacoApi.editor.IStandaloneEditorConstructionOptions;
 }
 
-let loading: Promise<typeof import("./monaco")> | null = null;
+import { loadMonaco } from "./load-monaco";
 
-/** Loads Monaco once for the whole app. */
-export function loadMonaco(): Promise<typeof import("./monaco")> {
-  loading ??= import("./monaco");
-  return loading;
-}
+export { loadMonaco };
 
 export function CodeEditor({
   value,

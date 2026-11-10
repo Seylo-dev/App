@@ -3,17 +3,19 @@
 // cleanup|shell|settings); ?add=true starts the add flow (from the palette and the
 // dashboard's empty state).
 
+import { nodes } from "@seylo/ops";
 import { Button } from "@seylo/ui/components/button";
 import { IconPlus } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { AddNodeCard, type AddNodeHandle } from "../../components/nodes/add-node";
 import { NodeSheet, type NodeView } from "../../components/nodes/node-sheet";
-import { isShellPrefill, type ShellPrefill } from "../../components/nodes/node-shell";
 import { NodeTable } from "../../components/nodes/node-table";
+import { isShellPrefill, type ShellPrefill } from "../../components/nodes/shell-prefill";
 import { UpdatesBanner } from "../../components/nodes/updates-banner";
 import { PageHeader } from "../../components/page-header";
 import { t } from "../../i18n/t";
+import { prefetchOp, startPrefetch } from "../../lib/prefetch";
 
 const views: readonly NodeView[] = ["overview", "health", "cleanup", "shell", "settings"];
 
@@ -21,7 +23,7 @@ interface NodesSearch {
   node?: string;
   view?: NodeView;
   add?: boolean;
-  /** The Shell view types this command in, from a fixed list (node-shell.tsx). */
+  /** The Shell view types this command in, from a fixed list (shell-prefill.ts). */
   prefill?: ShellPrefill;
 }
 
@@ -32,6 +34,9 @@ export const Route = createFileRoute("/_app/nodes")({
     add: search.add === true || search.add === "true" ? true : undefined,
     prefill: isShellPrefill(search.prefill) ? search.prefill : undefined,
   }),
+  // The node list and the open join tokens of "Add a node" start on hover.
+  loader: ({ context }) =>
+    startPrefetch(() => Promise.all([prefetchOp(context, nodes.list, {}), prefetchOp(context, nodes.listJoinTokens, {})])),
   component: NodesPage,
 });
 

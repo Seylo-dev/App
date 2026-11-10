@@ -14,6 +14,7 @@ import { OpErrorNote } from "../../../../../components/service/op-state";
 import { ParentCrumb } from "../../../../../components/service/parent-crumb";
 import { ServiceHeader } from "../../../../../components/service/service-header";
 import { ServiceHeaderSkeleton, UsageStripSkeleton } from "../../../../../components/service/service-skeletons";
+import { prefetchServiceLayout } from "../../../../../components/service/tab-prefetch";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
 import { useService } from "../../../../../components/service/use-service";
 import { type TabPath, tabsFor, usageStripTabs } from "../../../../../components/service-tabs";
@@ -21,6 +22,8 @@ import { t } from "../../../../../i18n/t";
 import { useLiveTopic } from "../../../../../lib/live";
 
 export const Route = createFileRoute("/_app/p/$projectId/s/$serviceId")({
+  // The service and its project start on hover, not after the layout rendered (tab-prefetch.ts).
+  loader: ({ context, params }) => prefetchServiceLayout(context, params),
   component: ServiceLayout,
 });
 

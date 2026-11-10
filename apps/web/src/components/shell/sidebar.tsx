@@ -33,11 +33,6 @@ export function Sidebar() {
   const shell = useShell();
   const info = useOp(system.info, {});
   const [menuOpen, setMenuOpen] = useState(false);
-  const path = useRouterState({ select: (state) => state.location.pathname });
-
-  // Leaving a page closes the phone menu.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: path is the trigger, not an input
-  useEffect(() => setMenuOpen(false), [path]);
 
   return (
     // layoutRoot: the sidebar is sticky, so the sliding background measures against it, not the scrolled page.
@@ -46,6 +41,7 @@ export function Sidebar() {
       aria-label={t("nav.main")}
       className="box-border flex w-full flex-col gap-3.5 bg-sidebar px-3.5 pt-[18px] pb-3.5 text-sidebar-foreground shadow-sidebar md:sticky md:top-0 md:h-dvh md:w-[248px] md:shrink-0 md:overflow-y-auto"
     >
+      <CloseMenuOnNavigate close={setMenuOpen} />
       <div className="flex items-center gap-2.5 px-1.5 py-0.5">
         {/* The mark and name go home (the dashboard), as in most apps. */}
         <Link
@@ -151,4 +147,16 @@ export function MainNavLinks({ nodeCount }: { nodeCount: number | undefined }) {
       ))}
     </div>
   );
+}
+
+/**
+ * Leaving a page closes the phone menu. Its own component: the sidebar
+ * following the path re-rendered all of it (the project tree too) on every
+ * navigation.
+ */
+function CloseMenuOnNavigate({ close }: { close: (open: false) => void }) {
+  const path = useRouterState({ select: (state) => state.location.pathname });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: path is the trigger, not an input
+  useEffect(() => close(false), [path, close]);
+  return null;
 }
