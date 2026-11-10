@@ -3985,6 +3985,7 @@ p40_run() {
     return 1
   fi
   st=$(panel_access)
+  echo "    settings.panelAccess after the reopen: $(echo "$st" | jq -c '{serveOnIp, openReason, actual, privatePaths}')" >>"$RES/$CUR.log"
   expect "the tailnet counts as not working and Serve on IP address stays off" \
     jq_ok "$st" '(.serveOnIp | not) and ([.privatePaths[] | select(.kind == "tailnet" and (.working | not))] | length == 1)'
   expect "a security_change alert says IP access reopened" security_alert "IP access reopened" "$since"

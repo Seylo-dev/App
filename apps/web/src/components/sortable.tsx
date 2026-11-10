@@ -29,15 +29,25 @@ import { IconGripVertical } from "@tabler/icons-react";
 import { type CSSProperties, createContext, type ReactNode, useContext } from "react";
 import { t } from "../i18n/t";
 
-/** Whether a drag is on, and when the last one ended: the click the browser fires right after must not open a link. */
+/**
+ * Whether a drag is on, and when the last one ended: the click the browser fires right after must not open a link.
+ * Never 0: performance.now() starts at 0 when the page loads, so the first 250 ms would count as right after a drop.
+ */
 let dragOn = false;
-let lastDragEnd = 0;
+let lastDragEnd = Number.NEGATIVE_INFINITY;
+
+/** The click a drop leaves behind: a pointer's click (detail 1 or more) within 250 ms of the drag ending. */
+export function isDropClick(detail: number, now: number, dragEnd: number): boolean {
+  return detail > 0 && now - dragEnd < 250;
+}
 
 // After a drop dnd-kit stops the click from propagating, so React (and the
 // item's own handler) never sees it, but the browser would still follow the
 // link under the pointer. These run before dnd-kit's own listeners: the
 // pointerup that ends a drag is noted, and the click right after has its
-// default cancelled.
+// default cancelled. Only a pointer's click (detail 1 or more): Enter in a
+// form fires a click on its submit button with detail 0, and that one must
+// still submit.
 if (typeof window !== "undefined") {
   window.addEventListener(
     "pointerup",
@@ -49,7 +59,7 @@ if (typeof window !== "undefined") {
   window.addEventListener(
     "click",
     (event) => {
-      if (performance.now() - lastDragEnd < 250) event.preventDefault();
+      if (isDropClick(event.detail, performance.now(), lastDragEnd)) event.preventDefault();
     },
     true,
   );
