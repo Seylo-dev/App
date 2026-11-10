@@ -66,3 +66,22 @@ test("with a primary domain already, the box is a free choice and starts off", a
   await primary.click();
   await expect(primary).toBeChecked();
 });
+
+test("a working domain names the address its DNS points at; behind Cloudflare's proxy, the origin", async ({ page }) => {
+  await installDemo(page);
+  await page.goto(`/p/${ids.acme}/s/${svc.api}/domains`);
+  // shop.example.com is proxied by Cloudflare: the chip names the origin to set there.
+  const shop = page.locator('[data-domain="shop.example.com"]');
+  await expect(shop.getByTestId("dns-chip")).toHaveText("Cloudflare proxy → 203.0.113.10");
+  await expect(shop.getByTestId("dns-chip")).toHaveAttribute("title", /behind Cloudflare's proxy\. Its record in Cloudflare should point at 203\.0\.113\.10/);
+  // www.example.com points straight at the node.
+  const www = page.locator('[data-domain="www.example.com"]');
+  await expect(www.getByTestId("dns-chip")).toHaveText("DNS → 203.0.113.10");
+  // The automatic domain needs no record of its own; the one waiting for DNS shows the record to create instead.
+  await expect(page.locator('[data-domain="web.de1.example.com"]').getByTestId("dns-chip")).toHaveCount(0);
+  const admin = page.locator('[data-domain="admin.example.com"]');
+  await expect(admin.getByTestId("dns-chip")).toHaveCount(0);
+  await expect(admin.getByText("Waiting for DNS")).toBeVisible();
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/dns-chips.png` });
+});

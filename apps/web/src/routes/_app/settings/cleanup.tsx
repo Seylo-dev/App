@@ -10,13 +10,16 @@ import { StatusDot } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { SectionCard } from "@seylo/ui/components/section-card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
-import { createFileRoute } from "@tanstack/react-router";
+import { SkeletonText } from "@seylo/ui/components/skeleton";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { triggerLabel } from "../../../components/nodes/node-cleanup";
 import { formatBytes } from "../../../components/settings/format";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { LoadingLines, OpErrorCallout } from "../../../components/settings/op-state";
 import { Field, SettingsPage } from "../../../components/settings/page";
 import { t } from "../../../i18n/t";
+import { formatAgo, formatExpiresIn } from "../../../lib/format";
 
 export const Route = createFileRoute("/_app/settings/cleanup")({
   component: CleanupPage,
@@ -42,6 +45,7 @@ function CleanupPage() {
   const input: Input = { nodeId, ...picked };
   const preview = useOp(cleanup.preview, asked ?? input, { enabled: asked !== null, staleTime: 0 });
   const run = useSettingsMutation(cleanup.run, {
+    invalidates: [cleanup.runs],
     success: (out) => t("settings.cleanup.done", { size: formatBytes(out.bytes) }),
     onSuccess: (out) => {
       setRan(out);
@@ -79,6 +83,7 @@ function CleanupPage() {
             </SelectContent>
           </Select>
         </Field>
+        {nodeId && <LastCleanup nodeId={nodeId} />}
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {kinds.map((kind) => (
             <label key={kind} htmlFor={`cleanup-${kind}`} className="flex cursor-pointer items-start gap-2.5 rounded-control bg-raised p-3">
@@ -167,5 +172,37 @@ function ResultList({ result, label }: { result: Result; label: string }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * The node's last cleanup (its own schedule, a disk past its limit, or one
+ * started here or on Nodes), what it freed or why it failed, and when the
+ * schedule runs next, with the way to the node's schedule and history.
+ */
+function LastCleanup({ nodeId }: { nodeId: string }) {
+  const runs = useOp(cleanup.runs, { nodeId, limit: 1 });
+  const schedule = useOp(cleanup.getSchedule, { nodeId });
+  if (runs.isPending || schedule.isPending) return <SkeletonText className="w-80 text-[12.5px]" />;
+  const last = runs.data?.runs[0];
+  const next = schedule.data?.schedule.enabled ? schedule.data.nextRunAt : null;
+  return (
+    <p data-testid="last-cleanup" className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-muted-foreground">
+      <span>
+        {!last
+          ? t("settings.cleanup.lastNone")
+          : last.status === "failed"
+            ? t("settings.cleanup.lastFailed", { when: formatAgo(last.finishedAt), trigger: triggerLabel(last), error: last.error ?? "" })
+            : t("settings.cleanup.last", {
+                when: formatAgo(last.finishedAt),
+                trigger: triggerLabel(last),
+                size: formatBytes(last.bytesFreed),
+              })}
+      </span>
+      <span>{next ? t("settings.cleanup.next", { when: formatExpiresIn(next) }) : t("settings.cleanup.scheduleOff")}</span>
+      <Link to="/nodes" search={{ node: nodeId, view: "cleanup" }} className="font-medium">
+        {t("settings.cleanup.scheduleLink")}
+      </Link>
+    </p>
   );
 }

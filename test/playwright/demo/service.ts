@@ -388,6 +388,8 @@ const domain = (over: Input) => ({
   middlewares: { basicAuth: null, ipAllowList: [], rateLimit: null, redirects: [] },
   dnsStatus: "ok",
   dnsCheckedAt: ago(min),
+  // domains.list: what the records point at (the service's node).
+  pointsTo: ["203.0.113.10"],
   certificate: { status: "valid", expiresAt: new Date(now + 80 * day).toISOString(), issuer: "Let's Encrypt (R11)", error: null },
   liveAt: ago(2 * day),
   createdAt: ago(10 * day),
@@ -396,7 +398,7 @@ const domain = (over: Input) => ({
 });
 
 const domains = [
-  domain({ id: "m000000000000001", host: "shop.example.com", primary: true, url: "https://shop.example.com", certificate: { status: "valid", expiresAt: new Date(now + 90 * day).toISOString(), issuer: "Cloudflare", error: null } }),
+  domain({ id: "m000000000000001", host: "shop.example.com", primary: true, url: "https://shop.example.com", dnsStatus: "proxied", certificate: { status: "valid", expiresAt: new Date(now + 90 * day).toISOString(), issuer: "Cloudflare", error: null } }),
   domain({ id: "m000000000000002", host: "web.de1.example.com", auto: true, url: "https://web.de1.example.com" }),
   domain({ id: "m000000000000003", host: "www.example.com", url: "https://www.example.com", forward: { url: "https://shop.example.com", permanent: true, keepPath: true } }),
   domain({

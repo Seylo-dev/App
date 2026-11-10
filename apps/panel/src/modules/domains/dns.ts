@@ -107,23 +107,32 @@ export interface DnsResult {
   cloudflareDnsUrl: string | null;
 }
 
+type DnsNode = { ipv4: string | null; ipv6: string | null; publicAddress?: string | null };
+
+/** A node's addresses a record points at: the owner's public address (1:1 NAT clouds) when it is an IP, else its own. */
+function addressesOf(n: DnsNode): { ipv4: string | null; ipv6: string | null } {
+  const own = n.publicAddress ?? null;
+  return {
+    ipv4: own && isIPv4(own) ? own : n.ipv4,
+    ipv6: own && isIPv6(own) ? own : n.ipv6,
+  };
+}
+
+/**
+ * What a domain's A and AAAA records point at: each node's IPv4, then its
+ * IPv6 (the values of checkHost's expected records, without a lookup).
+ * domains.list sends it so every row can name the address.
+ */
+export function pointsTo(nodes: readonly DnsNode[]): string[] {
+  const addresses = nodes.map(addressesOf);
+  return [...new Set([...addresses.map((a) => a.ipv4), ...addresses.map((a) => a.ipv6)].filter((ip): ip is string => !!ip))];
+}
+
 /**
  * Looks a host up and classifies it against the nodes it should point at.
  * A failed lookup (resolver timeout) is "unknown", never an exception.
  */
-export async function checkHost(
-  host: string,
-  nodes: readonly { ipv4: string | null; ipv6: string | null; publicAddress?: string | null }[],
-  dns: DnsLookups,
-): Promise<DnsResult> {
-  // The owner's public address (1:1 NAT clouds) is what a record points at when it is an IP.
-  const addressesOf = (n: (typeof nodes)[number]) => {
-    const own = n.publicAddress ?? null;
-    return {
-      ipv4: own && isIPv4(own) ? own : n.ipv4,
-      ipv6: own && isIPv6(own) ? own : n.ipv6,
-    };
-  };
+export async function checkHost(host: string, nodes: readonly DnsNode[], dns: DnsLookups): Promise<DnsResult> {
   const nodeIps = new Set(
     nodes
       .flatMap((n) => [n.ipv4, n.ipv6, addressesOf(n).ipv4, addressesOf(n).ipv6])

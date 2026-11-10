@@ -46,6 +46,9 @@ export default {
   badLinkTitle: "This setup link does not work",
   badLinkHint: "It has expired or was already used. To get a new one, run this on the node the panel runs on:",
   badLinkCommand: "Setup link command",
+  noLinkTitle: "Open the setup link",
+  noLinkHint:
+    "This panel has no owner yet. Open the one-time link the installer printed. Lost it, or closed the terminal? Run this on the node the panel runs on for a new one:",
   ownerExistsTitle: "The owner account exists",
   ownerExistsHint: "Sign in with it to finish the remaining setup steps.",
   completedTitle: "Setup is done",

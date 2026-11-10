@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { domains as domainOps, exposures as exposureOps, services as serviceOps } from "@seylo/ops";
 import { HttpsMode, PublicPortMode, RouteState } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { alerts, services } from "../src/db/schema";
+import { alerts, nodes, services } from "../src/db/schema";
 import { serviceNetworking } from "../src/modules/domains/desired";
 import { classifyRecords, type DnsLookups, isCloudflareIp, relativeName, setDnsLookups } from "../src/modules/domains/dns";
 import { deploymentEnv, sealDeploymentEnv } from "../src/modules/env/desired";
@@ -117,6 +117,18 @@ describe("domains ops", () => {
     expect((await callOp(panel, serviceOps.get, { serviceId: app.id }, { cookie })).body.appPort).toBe(80);
     const image = seedService(panel, { projectId: project.id, name: "img2", ports: [], nodeIds: [node.id] });
     expect((await callOp(panel, serviceOps.get, { serviceId: image.id }, { cookie })).body.appPort).toBeNull();
+  });
+
+  test("domains.list names what every record points at: the node's IP, its public address when that is one", async () => {
+    // The Domains tab shows it on each row (DNS -> IP, or the origin behind Cloudflare's proxy).
+    const { service, node } = setup();
+    setDnsLookups(fakeDns({ a: { "x.acme.dev": ["203.0.113.10"] } }));
+    expect((await callOp(panel, domainOps.add, { serviceId: service.id, host: "x.acme.dev" }, { cookie })).status).toBe(200);
+    const list = async () => (await callOp(panel, domainOps.list, { serviceId: service.id }, { cookie })).body.domains;
+    expect((await list())[0].pointsTo).toEqual(["203.0.113.10"]);
+    // A 1:1 NAT cloud: the owner's public address is what the record points at.
+    panel.deps.db.update(nodes).set({ publicAddress: "198.51.100.7" }).where(eq(nodes.id, node.id)).run();
+    expect((await list())[0].pointsTo).toEqual(["198.51.100.7"]);
   });
 
   test("custom domains get a DNS check with records to create and the Cloudflare link", async () => {

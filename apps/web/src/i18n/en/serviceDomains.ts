@@ -31,6 +31,15 @@ export default {
   rateLimitNote:
     "Let's Encrypt allows 5 failed validations per host name per hour, and this domain reached that limit. Fix what made the earlier attempts fail, wait for the hour to pass, then regenerate.",
   checked: "checked {when}",
+  dnsOkTo: "DNS → {ip}",
+  dnsProxiedTo: "Cloudflare proxy → {ip}",
+  dnsOkHint: "{host} points at {ips}, the node that serves this service.",
+  dnsProxiedHint: "{host} is behind Cloudflare's proxy. Its record in Cloudflare should point at {ips}, the node that serves this service.",
+  dnsChecked: "Checked {when}.",
+  certProxiedHint:
+    "{host} is behind Cloudflare's proxy, so the panel cannot see where its record points. Let's Encrypt only reaches this node, and the certificate only comes, once that record in Cloudflare points at {ip}.",
+  certSlowHint:
+    "Still no certificate. Let's Encrypt checks http://{host} on port 80 at {ip}: a firewall or another proxy in front of the node can stop it. Regenerate certificate in the menu tries again.",
   addRecord: "Add this record where the domain's DNS is managed:",
   addRecordIn: "Add this record where {zone}'s DNS is managed:",
   copyRecord: "Copy record",

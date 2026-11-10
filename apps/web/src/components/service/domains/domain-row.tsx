@@ -2,6 +2,8 @@
 // where it routes, certificate or DNS state (Generating SSL certificate, or
 // the CA's reason and Regenerate certificate), a menu of actions, and for a
 // domain still waiting on DNS, the record to create with a Cloudflare link.
+// A domain whose DNS works names the address it points at (DNS -> IP, or
+// the origin behind Cloudflare's proxy), like the panel domain card.
 
 import { domains, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -24,6 +26,7 @@ import {
   IconArrowUpRight,
   IconCheck,
   IconClock,
+  IconCloud,
   IconCopy,
   IconCornerDownRight,
   IconDots,
@@ -136,6 +139,7 @@ export function DomainRow({
               </span>
             )}
           </span>
+          {!d.auto && <DnsChip d={d} />}
           {mw.basicAuth && <Chip tone="gray">{t("serviceDomains.chips.basicAuth")}</Chip>}
           {mw.ipAllowList.length > 0 && <Chip tone="gray">{t("serviceDomains.chips.allowlist", { count: mw.ipAllowList.length })}</Chip>}
           {mw.rateLimit && <Chip tone="gray">{t("serviceDomains.chips.rateLimit", { average: mw.rateLimit.average })}</Chip>}
@@ -176,6 +180,7 @@ export function DomainRow({
       </div>
       {waiting && <DnsHelp serviceId={serviceId} domainId={d.id} />}
       {rateLimited && <RateLimitNote />}
+      {generating && !waiting && <PendingCertNote d={d} />}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -187,6 +192,49 @@ export function DomainRow({
       />
     </div>
   );
+}
+
+/**
+ * Where a working domain's DNS goes: "DNS -> <node IP>" when its record
+ * points at the node, "Cloudflare proxy -> <node IP>" behind the proxy (the
+ * origin to set there). The full sentence, every address and when it was
+ * checked are the chip's title. Nothing while DNS is not working yet: the
+ * waiting state below the row names the record to create.
+ */
+function DnsChip({ d }: { d: Domain }) {
+  const ips = d.pointsTo ?? [];
+  const first = ips[0];
+  if (!first || (d.dnsStatus !== "ok" && d.dnsStatus !== "proxied")) return null;
+  const proxied = d.dnsStatus === "proxied";
+  const shown = ips.length > 1 ? `${first} +${ips.length - 1}` : first;
+  const checked = d.dnsCheckedAt ? ` ${t("serviceDomains.dnsChecked", { when: formatRelative(d.dnsCheckedAt) })}` : "";
+  const title = t(proxied ? "serviceDomains.dnsProxiedHint" : "serviceDomains.dnsOkHint", { host: d.host, ips: ips.join(", ") }) + checked;
+  return (
+    <Chip tone={proxied ? "gray" : "green"} title={title} data-testid="dns-chip">
+      {proxied ? <IconCloud size={12} stroke={2} aria-hidden="true" /> : <IconCheck size={12} stroke={2.2} aria-hidden="true" />}
+      <span>{t(proxied ? "serviceDomains.dnsProxiedTo" : "serviceDomains.dnsOkTo", { ip: shown })}</span>
+    </Chip>
+  );
+}
+
+/** A certificate is usually there within a minute or two of the record pointing at the node. */
+const slowCertMs = 10 * 60_000;
+
+/**
+ * Why a certificate can stay on "Generating": Let's Encrypt reaches the
+ * host over its DNS, so behind Cloudflare's proxy the panel cannot tell
+ * where the record points (said at once, with the node's address), and with
+ * the record on the node, something in front of port 80 may stop it (said
+ * once it takes longer than usual). The node reports a failure it sees in
+ * Traefik's log on its own; this covers the checks that never arrive.
+ */
+function PendingCertNote({ d }: { d: Domain }) {
+  const ip = d.pointsTo?.[0];
+  if (!ip) return null;
+  if (d.dnsStatus === "proxied")
+    return <p className="m-0 text-xs text-muted-foreground">{t("serviceDomains.certProxiedHint", { host: d.host, ip })}</p>;
+  if (Date.now() - Date.parse(d.createdAt) < slowCertMs) return null;
+  return <p className="m-0 text-xs text-muted-foreground">{t("serviceDomains.certSlowHint", { host: d.host, ip })}</p>;
 }
 
 /** Let's Encrypt renews 30 days before expiry; under two weeks left means renewals are failing. */

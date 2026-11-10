@@ -103,6 +103,13 @@ export const Domain = Type.Object({
   middlewares: DomainMiddlewares,
   dnsStatus: DnsStatus,
   dnsCheckedAt: Type.Union([Timestamp, Type.Null()]),
+  /**
+   * What the domain's A and AAAA records point at: the public IPv4, then
+   * IPv6, of the node(s) serving the service (their public address when it
+   * is an IP). Behind Cloudflare's proxy, the origin to set there. Set by
+   * domains.list.
+   */
+  pointsTo: Type.Optional(Type.Array(Type.String())),
   certificate: Type.Object({
     status: CertificateStatus,
     expiresAt: Type.Union([Timestamp, Type.Null()]),

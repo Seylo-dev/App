@@ -127,6 +127,26 @@ test.describe("copy", () => {
     await expect(panel.getByText("Copied")).toBeVisible();
   });
 
+  test("the panel's address opened without a link says how to get one, not that a link expired", async ({ page }) => {
+    // The installer's output was closed: the setup page names the command for a new link.
+    await installDemo(page, {
+      overrides: {
+        "setup.status": () => ({
+          ownerExists: false,
+          completed: false,
+          link: null,
+          githubAvailable: false,
+          steps: ["owner", "panelDomain", "wildcardDomain", "firstProject"],
+        }),
+      },
+    });
+    await page.goto("/setup");
+    const panel = page.getByRole("region", { name: "Open the setup link" });
+    await expect(panel.getByText("Lost it, or closed the terminal?", { exact: false })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Copy: Setup link command" })).toHaveText(/^\S+ panel setup-link$/);
+    await expect(page.getByText("This setup link does not work")).toHaveCount(0);
+  });
+
   test("the pgvector SQL and cron commands copy with one click", async ({ page }) => {
     await installDemo(page, {
       overrides: {

@@ -87,7 +87,7 @@ function SetupPage() {
     body = <QueryError error={status.error} className="w-full max-w-[560px]" onRetry={() => void status.refetch()} />;
   else if (finishing) body = <Finish skipped={skipped} />;
   else if (status.data.completed && !step) body = <AlreadyDone signedIn={signedIn} />;
-  else if (!status.data.ownerExists && !(status.data.link?.valid ?? false)) body = <BadLink />;
+  else if (!status.data.ownerExists && !(status.data.link?.valid ?? false)) body = <BadLink hasToken={token !== undefined} />;
   else if (status.data.ownerExists && !signedIn) body = <OwnerExists token={token} />;
   else if (step === "owner")
     body = (
@@ -560,10 +560,12 @@ function SkipOnly({ onSkip }: { onSkip: () => void }) {
   );
 }
 
-function BadLink() {
+/** A used or expired link, or none at all (the panel's address opened without it, the installer's output closed). */
+function BadLink({ hasToken }: { hasToken: boolean }) {
+  const title = hasToken ? t("setup.badLinkTitle") : t("setup.noLinkTitle");
   return (
-    <Panel label={t("setup.badLinkTitle")} className="w-full max-w-[560px] flex-none">
-      <Heading title={t("setup.badLinkTitle")} hint={t("setup.badLinkHint")} />
+    <Panel label={title} className="w-full max-w-[560px] flex-none">
+      <Heading title={title} hint={hasToken ? t("setup.badLinkHint") : t("setup.noLinkHint")} />
       <CopyField value={`${slug} panel setup-link`} tone="terminal" prefix="$" aria-label={t("setup.badLinkCommand")} />
     </Panel>
   );

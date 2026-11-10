@@ -10,7 +10,7 @@ import type { OpContext } from "../../ops/implement";
 import { implement } from "../../ops/implement";
 import { applyDomainLive } from "../exposures/logic";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
-import { checkHost, dnsLookups } from "./dns";
+import { checkHost, dnsLookups, pointsTo } from "./dns";
 import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
 import { type DomainRow, getDomain, primaryDomain, serviceDomains, toDomain } from "./rows";
@@ -69,7 +69,12 @@ function autoSuggestion(db: PanelDb, service: ServiceRow): string | null {
 
 export const list = implement(domainOps.list, (input, ctx) => {
   const service = getService(ctx.db, input.serviceId);
-  return { domains: serviceDomains(ctx.db, service.id).map(toDomain), autoDomainSuggestion: autoSuggestion(ctx.db, service) };
+  // The address every row names: what its records point at (one lookup of the nodes, no DNS query).
+  const addresses = pointsTo(serviceNodes(ctx.db, service.id));
+  return {
+    domains: serviceDomains(ctx.db, service.id).map((row) => ({ ...toDomain(row), pointsTo: addresses })),
+    autoDomainSuggestion: autoSuggestion(ctx.db, service),
+  };
 });
 
 export const addAuto = implement(domainOps.addAuto, (input, ctx) => {

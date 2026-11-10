@@ -25032,6 +25032,12 @@
                             }
                           ]
                         },
+                        "pointsTo": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
                         "certificate": {
                           "type": "object",
                           "required": [
@@ -25584,6 +25590,12 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "pointsTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "certificate": {
                       "type": "object",
@@ -26181,6 +26193,12 @@
                               }
                             ]
                           },
+                          "pointsTo": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "certificate": {
                             "type": "object",
                             "required": [
@@ -26654,6 +26672,12 @@
                         }
                       ]
                     },
+                    "pointsTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -27058,6 +27082,12 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "pointsTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "certificate": {
                       "type": "object",
@@ -27560,6 +27590,12 @@
                         }
                       ]
                     },
+                    "pointsTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -27951,6 +27987,12 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "pointsTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "certificate": {
                       "type": "object",
@@ -28407,6 +28449,12 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "pointsTo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "certificate": {
                       "type": "object",

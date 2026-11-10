@@ -242,7 +242,7 @@ function ScheduleForm({ nodeId, data }: { nodeId: string; data: ScheduleData }) 
   );
 }
 
-function triggerLabel(run: Run): string {
+export function triggerLabel(run: Pick<Run, "trigger" | "diskPercent" | "startedBy">): string {
   if (run.trigger === "disk") {
     return run.diskPercent !== null ? t("nodeCleanup.trigger.disk", { percent: run.diskPercent }) : t("nodeCleanup.trigger.diskUnknown");
   }

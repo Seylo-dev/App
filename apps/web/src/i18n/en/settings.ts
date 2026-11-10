@@ -264,6 +264,12 @@ export default {
     onlyOurs: "Everything else on the machine is left alone, including images from other tools and Pelican Wings.",
     node: "Node",
     pickNode: "Pick a node",
+    last: "Last cleanup {when} ({trigger}), freed {size}.",
+    lastFailed: "Last cleanup {when} ({trigger}) failed: {error}",
+    lastNone: "No cleanup has run on this node yet.",
+    next: "Next automatic cleanup {when}.",
+    scheduleOff: "Automatic cleanup is off on this node.",
+    scheduleLink: "Schedule and history",
     kinds: {
       images: { name: "Unused images", hint: "Images no service needs any more. Images kept for rollback stay." },
       buildCache: { name: "Build cache", hint: "Cached build layers; the next build of each app is slower." },
