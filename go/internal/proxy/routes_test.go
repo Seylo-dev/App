@@ -3,6 +3,7 @@ package proxy
 import (
 	"errors"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -404,5 +405,126 @@ func TestBuildRemoteCopyNames(t *testing.T) {
 	if len(names) != 4 || names[1] != "seylo-svc7-node-"+nodeKey("Node_2") || !strings.HasPrefix(names[1], "seylo-svc7-node-x") ||
 		names[2] != "seylo-svc7-node-n3" || names[3] != "seylo-svc7-node-n3-2" {
 		t.Fatalf("names %v", names)
+	}
+}
+
+// Every route with hosts sends OriginPath to the edge, above every other
+// router of its hosts (the panel's own, raised as owned, included), in
+// every mode, on plain HTTP without the redirect and on HTTPS with the
+// route's certificate, and without the route's middlewares. The LB file
+// and the tool host get none, and nothing is routed before the edge
+// address is known.
+func TestBuildOriginRouters(t *testing.T) {
+	decode := func(in BuildInput) dynamicConfig {
+		t.Helper()
+		built, err := Build(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg dynamicConfig
+		if err := yaml.Unmarshal(built.Data, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	origins := func(cfg dynamicConfig) map[string]*router {
+		out := map[string]*router{}
+		for name, r := range cfg.HTTP.Routers {
+			if strings.Contains(r.Rule, OriginPath) {
+				out[name] = r
+			}
+		}
+		return out
+	}
+	guarded := route("r1", "app.example.com")
+	guarded.AllowedSourceCidrs = []string{"10.0.0.0/8"}
+	guarded.BasicAuth = &agentv1.BasicAuth{Users: []*agentv1.BasicAuthUser{{Username: "u", PasswordHash: "$2y$05$abcdefghijklmnopqrstuuxN0J7Zqf6g2b2b6ZJ1Q2YjY1Jj1Jj1W"}}}
+	custom := &agentv1.Route{Id: "r2", Hosts: []string{"corp.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_CUSTOM_CERTIFICATE,
+		Certificate: &agentv1.Certificate{CertPem: "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n", KeyPem: "-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----\n"}}
+	plain := &agentv1.Route{Id: "r3", Hosts: []string{"plain.example.com"}, Https: agentv1.HttpsMode_HTTPS_MODE_OFF}
+	spec := app("svc1", guarded, custom, plain)
+	running := BuildInput{Service: spec, Upstreams: ups("http://seylo-svc1-7:3000", "http://seylo-svc1-7-1:3000"), Edge: testEdge, ProbeSecret: "s"}
+
+	cfg := decode(running)
+	got := origins(cfg)
+	want := map[string]struct {
+		entry string
+		tls   *routerTLS
+	}{
+		"seylo-svc1-r-r1-origin-http": {EntryPointWeb, nil},
+		"seylo-svc1-r-r1-origin":      {EntryPointSecure, &routerTLS{CertResolver: CertResolver}},
+		"seylo-svc1-r-r2-origin-http": {EntryPointWeb, nil},
+		"seylo-svc1-r-r2-origin":      {EntryPointSecure, &routerTLS{}},
+		"seylo-svc1-r-r3-origin-http": {EntryPointWeb, nil},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("origin routers %v, want %d", slices.Sorted(maps.Keys(got)), len(want))
+	}
+	top := 0
+	for name, r := range cfg.HTTP.Routers {
+		if _, ok := got[name]; !ok && r.Priority > top && r.Priority < priorityHandoff {
+			top = r.Priority
+		}
+	}
+	for name, w := range want {
+		r := got[name]
+		if r == nil {
+			t.Fatalf("no %s in %v", name, slices.Sorted(maps.Keys(got)))
+		}
+		if !slices.Equal(r.EntryPoints, []string{w.entry}) || r.Service != "seylo-svc1-edge" || len(r.Middlewares) != 0 ||
+			r.Priority != priorityOrigin || r.Priority <= top {
+			t.Errorf("%s: %+v", name, r)
+		}
+		if (r.TLS == nil) != (w.tls == nil) || (r.TLS != nil && *r.TLS != *w.tls) {
+			t.Errorf("%s: tls %+v, want %+v", name, r.TLS, w.tls)
+		}
+	}
+	if r := got["seylo-svc1-r-r1-origin-http"]; r.Rule != "Host(`app.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)" {
+		t.Errorf("rule %q", r.Rule)
+	}
+
+	// Stopped and in maintenance: still answered by the edge.
+	for name, in := range map[string]BuildInput{
+		"stopped":     {Service: spec, Edge: testEdge},
+		"maintenance": {Service: spec, Upstreams: running.Upstreams, Edge: testEdge, Settings: &agentv1.NodeSettings{Maintenance: &agentv1.Maintenance{Enabled: true}}},
+	} {
+		if n := len(origins(decode(in))); n != len(want) {
+			t.Errorf("%s: %d origin routers, want %d", name, n, len(want))
+		}
+	}
+
+	// The panel's own routes are raised as owned; the origin routers stay above them.
+	panel := app("panel1", route("r1", "panel.example.com"))
+	panel.Protected = true
+	cfg = decode(BuildInput{Service: panel, Upstreams: ups("http://seylo-panel1-1:5755"), Edge: testEdge})
+	for name, r := range cfg.HTTP.Routers {
+		if !strings.Contains(r.Rule, OriginPath) && r.Priority >= priorityOrigin {
+			t.Errorf("%s (priority %d) outranks the origin routers", name, r.Priority)
+		}
+	}
+	if n := len(origins(cfg)); n != 2 {
+		t.Errorf("panel service: %d origin routers", n)
+	}
+
+	// The tool host of a Box is the panel's link, not a domain anyone checks.
+	box := &agentv1.ServiceSpec{Id: "box1", Kind: agentv1.ServiceKind_SERVICE_KIND_BOX}
+	cfg = decode(BuildInput{Service: box, Settings: &agentv1.NodeSettings{WildcardDomain: "n1.example.com"}, Edge: testEdge})
+	if n := len(origins(cfg)); n != 0 {
+		t.Errorf("tool host: %d origin routers", n)
+	}
+
+	// The LB Traefik next to the Wings fork gets none: it only takes other
+	// nodes' forwarded traffic.
+	lb := running
+	lb.LBOnly, lb.Settings = true, &agentv1.NodeSettings{LbTls: fakeLBTLS}
+	if built, err := Build(lb); err != nil || strings.Contains(string(built.Data), OriginPath) {
+		t.Fatalf("LB file: %v\n%s", err, built.Data)
+	}
+
+	// Without the edge address there is nothing to answer with yet.
+	none := running
+	none.Edge = ""
+	if built, err := Build(none); err != nil || strings.Contains(string(built.Data), OriginPath) {
+		t.Fatalf("no edge: %v\n%s", err, built.Data)
 	}
 }

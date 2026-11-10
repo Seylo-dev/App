@@ -40,6 +40,20 @@ export default {
     "{host} is behind Cloudflare's proxy, so the panel cannot see where its record points. Let's Encrypt only reaches this node, and the certificate only comes, once that record in Cloudflare points at {ip}.",
   certSlowHint:
     "Still no certificate. Let's Encrypt checks http://{host} on port 80 at {ip}: a firewall or another proxy in front of the node can stop it. Regenerate certificate in the menu tries again.",
+  certProxiedSlowHint:
+    "Still no certificate, though requests through Cloudflare reach this node. In Cloudflare, set SSL/TLS to Full (strict) and turn off Always Use HTTPS, so Let's Encrypt reaches http://{host}. Regenerate certificate in the menu tries again.",
+  originNodeHint: "Requests to it reach this node.",
+  originElsewhere: "DNS → {ip}, not this node",
+  originElsewhereProxied: "Cloudflare proxy, not this node",
+  originElsewhereHint: "{host} points at {ip}, but another server answers there, not this node.",
+  originElsewhereProxiedHint:
+    "{host} is behind Cloudflare's proxy, and requests through it reach another server, not this node. Its record in Cloudflare must point at {ip}.",
+  originElsewhereShort: "Not reaching this node",
+  theNode: "the node",
+  originFixProxied:
+    "The record for {host} in Cloudflare must point at {ip}, this service's node. Requests through Cloudflare reach another server now, so Let's Encrypt cannot reach the node either.",
+  originFixDirect:
+    "{host} points at {ip}, but another server answers there, such as a router, port forward or proxy in front of the node. Ports 80 and 443 on {ip} must reach this node.",
   addRecord: "Add this record where the domain's DNS is managed:",
   addRecordIn: "Add this record where {zone}'s DNS is managed:",
   copyRecord: "Copy record",

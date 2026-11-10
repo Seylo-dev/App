@@ -2,6 +2,7 @@ package edge
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -65,6 +66,10 @@ type Config struct {
 	// Access rechecks tool sessions with the panel (session.go); nil keeps
 	// a session until UnconfirmedTTL after its ticket.
 	Access AccessChecker
+	// Identity is the node's Ed25519 key, the one its handshake signs
+	// with: origin proofs are signed with it (origin.go). Nil answers
+	// proxy.OriginPath 404.
+	Identity ed25519.PrivateKey
 	// RecheckEvery and UnconfirmedTTL default to the constants; Now to
 	// time.Now. Tests shorten them.
 	RecheckEvery, UnconfirmedTTL time.Duration
@@ -81,7 +86,8 @@ type Config struct {
 //     proxy.TicketPath?t=..[&to=/path] exchanges a panel-signed ticket for
 //     a session cookie, then requests with the cookie are proxied to the
 //     tool's upstream (WebSockets included);
-//   - proxy.ProbePath: 204, for rollout probes of routes that point here.
+//   - proxy.ProbePath: 204, for rollout probes of routes that point here;
+//   - proxy.OriginPath<challenge>: the origin proof (origin.go).
 type HTTPServer struct {
 	cfg        Config
 	log        *slog.Logger
@@ -176,6 +182,12 @@ func (s *HTTPServer) Run(ctx context.Context, addr string) error {
 
 // ServeHTTP implements http.Handler.
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Before tools: only the origin routers send this path here, and a tool
+	// header the visitor added must not turn the proof into a sign-in page.
+	if strings.HasPrefix(r.URL.Path, proxy.OriginPath) {
+		s.origin(w, r)
+		return
+	}
 	if subject := r.Header.Get(proxy.HeaderTool); subject != "" {
 		s.serveTool(w, r, subject)
 		return

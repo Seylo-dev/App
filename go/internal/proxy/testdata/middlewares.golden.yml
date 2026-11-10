@@ -22,6 +22,20 @@ http:
         - seylo-svc3-r-r1-redirect-0
         - seylo-svc3-https
       service: seylo-svc3
+    seylo-svc3-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`secure.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc3-edge
+      tls:
+        certResolver: le
+    seylo-svc3-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`secure.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc3-edge
   middlewares:
     seylo-svc3-https:
       redirectScheme:

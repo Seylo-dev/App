@@ -1,0 +1,239 @@
+// The origin check of custom domains. A domain behind Cloudflare's proxy
+// resolves to Cloudflare's addresses, so the DNS check (dns.ts, "proxied")
+// cannot tell whether the record in Cloudflare points at the service's
+// node; when it does not, Let's Encrypt's HTTP-01 check never reaches the
+// node and the certificate stays on Generating. The panel's own domain is
+// proven through /api/health (settings/domain.ts); on a service's domain the
+// app answers, so the node's agent answers a reserved path itself:
+//
+//   GET http://<host>/.well-known/<slug>-origin/<challenge>
+//
+// Every route file sends it to the agent's edge (go/internal/proxy,
+// addOrigin), which answers with the node key's Ed25519 signature over
+//
+//   "<slug>-origin-v1" 0x00 host 0x00 challenge
+//
+// in base64url (go/internal/edge/origin.go, origin_test.go has the shared
+// vector). The key is the one the node's handshake signs with, and the
+// panel checks the answer against the public keys it stored when the
+// service's nodes joined, so no secret is shared. The answer:
+//
+//   node       a node of the service signed the challenge for this host;
+//   elsewhere  something answered without that proof, and every node of
+//              the service would have given it (each advertised
+//              routing.origin-proof.v1 and reported the domain's route);
+//   unknown    no answer (timeout, network error, a 5xx such as
+//              Cloudflare's 52x for an origin it cannot reach, a redirect
+//              off the host or the path), no node with the capability, or
+//              a node that may have answered without the proof (an older
+//              agent, one without the route yet, one offline).
+//
+// It runs for custom domains (not automatic, not redirect-only) whose DNS
+// is ok or proxied: in domains.checkDns, and a few seconds after
+// domains.add as the domains.checkOrigin job, once the nodes have the route.
+
+import { randomBytes } from "node:crypto";
+import { slug } from "@seylo/brand";
+import { domains as domainOps } from "@seylo/ops";
+import { eq } from "drizzle-orm";
+import { verifyEd25519 } from "../../agent-hub/signature";
+import { type DnsStatus, domains, nodes, type OriginStatus, servicePlacements } from "../../db/schema";
+import type { Deps } from "../../deps";
+import { defineJob } from "../../jobs/queue";
+import { nodeHasCapability } from "../databases/capability";
+import { enqueueNext } from "../nodes/recurring";
+import { invalidateService } from "./lookup";
+import type { DomainRow } from "./rows";
+
+/** Advertised by agents whose edge answers the origin path (go/internal/edge OriginCapability). */
+export const originCapability = "routing.origin-proof.v1";
+export const originContext = `${slug}-origin-v1`;
+/** go/internal/proxy OriginPath. */
+export const originPath = `/.well-known/${slug}-origin/`;
+
+/** What a proof signs; the Go agent builds the same bytes (edge.OriginSignedBytes). */
+export function originSignedBytes(host: string, challenge: string): Uint8Array {
+  return new TextEncoder().encode(`${originContext}\0${host}\0${challenge}`);
+}
+
+/** The custom domains the check is for, and the DNS states it runs in. */
+export function originApplies(row: Pick<DomainRow, "auto" | "forward">, dnsStatus: DnsStatus): boolean {
+  return !row.auto && !row.forward && (dnsStatus === "ok" || dnsStatus === "proxied");
+}
+
+/** The fetch the check goes through (the public network, like the panel domain's probe); tests swap in a fake. */
+export type OriginFetch = (
+  url: string,
+  init: { signal: AbortSignal; redirect: "manual"; headers: Record<string, string> },
+) => Promise<Response>;
+
+const publicFetch: OriginFetch = (url, init) => fetch(url, init);
+let originFetch: OriginFetch = publicFetch;
+
+export function setOriginFetch(next: OriginFetch | null): void {
+  originFetch = next ?? publicFetch;
+}
+
+/** The whole check, redirects included. Cloudflare answers an origin it cannot reach with a 52x well within it. */
+export const originTimeoutMs = 6000;
+/** http -> https (Always Use HTTPS) and a little more. */
+const maxRedirects = 3;
+/** A proof is 87 bytes; an app's page that answers instead is never read past this. */
+const maxBodyBytes = 1024;
+
+export type OriginAnswer = { kind: "proof"; nodeId: string } | { kind: "other" } | { kind: "none" };
+
+/**
+ * Fetches the origin path of host with a fresh challenge and checks the
+ * answer against keys. A redirect is followed only to http(s) on the same
+ * host and default port with the same path, so the request still asks the
+ * domain itself.
+ */
+export async function probeOrigin(
+  host: string,
+  keys: readonly { id: string; publicKey: Uint8Array }[],
+  fetcher: OriginFetch = originFetch,
+): Promise<OriginAnswer> {
+  const challenge = randomBytes(24).toString("base64url");
+  const path = `${originPath}${challenge}`;
+  let url = `http://${host}${path}`;
+  const signal = AbortSignal.timeout(originTimeoutMs);
+  try {
+    for (let hops = 0; ; hops++) {
+      const response = await fetcher(url, { signal, redirect: "manual", headers: { accept: "text/plain" } });
+      const location = response.headers.get("location");
+      if (response.status >= 300 && response.status < 400 && location) {
+        await response.body?.cancel();
+        const next = new URL(location, url);
+        const same =
+          (next.protocol === "http:" || next.protocol === "https:") &&
+          next.hostname.toLowerCase() === host &&
+          next.port === "" &&
+          next.username === "" &&
+          next.password === "" &&
+          next.pathname === path;
+        if (!same || hops >= maxRedirects) return { kind: "none" };
+        url = next.toString();
+        continue;
+      }
+      if (response.status >= 500) {
+        await response.body?.cancel();
+        return { kind: "none" };
+      }
+      const body = (await readCapped(response, maxBodyBytes)).trim();
+      if (!/^[A-Za-z0-9_-]{86}$/.test(body)) return { kind: "other" };
+      const signature = Buffer.from(body, "base64url");
+      const message = originSignedBytes(host, challenge);
+      const signer = keys.find((key) => verifyEd25519(key.publicKey, message, signature));
+      return signer ? { kind: "proof", nodeId: signer.id } : { kind: "other" };
+    }
+  } catch {
+    return { kind: "none" };
+  }
+}
+
+async function readCapped(response: Response, max: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < max) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.length;
+  }
+  await reader.cancel().catch(() => {});
+  return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, max));
+}
+
+export interface OriginCheck {
+  origin: OriginStatus;
+  /**
+   * An online node with the capability has not reported the domain's route
+   * yet (it was just added): the answer may change once it has.
+   */
+  waiting: boolean;
+}
+
+/** The domain's origin now, against the nodes the service is placed on. */
+export async function checkOrigin(
+  deps: Pick<Deps, "db" | "agents">,
+  row: Pick<DomainRow, "id" | "serviceId" | "host">,
+  fetcher: OriginFetch = originFetch,
+): Promise<OriginCheck> {
+  const placed = deps.db
+    .select({ id: nodes.id, publicKey: nodes.publicKey })
+    .from(servicePlacements)
+    .innerJoin(nodes, eq(nodes.id, servicePlacements.nodeId))
+    .where(eq(servicePlacements.serviceId, row.serviceId))
+    .all()
+    .map((n) => {
+      const view = deps.agents.state.get(n.id);
+      const routed =
+        deps.agents.isOnline(n.id) && !!view?.synced && !!view.services.get(row.serviceId)?.routes.some((r) => r.routeId === row.id);
+      return { ...n, capable: nodeHasCapability(deps.db, deps.agents, n.id, originCapability), routed };
+    });
+  const waiting = placed.some((n) => n.capable && !n.routed && deps.agents.isOnline(n.id));
+  if (!placed.some((n) => n.capable)) return { origin: "unknown", waiting: false };
+  const answer = await probeOrigin(row.host, placed, fetcher);
+  if (answer.kind === "proof") return { origin: "node", waiting: false };
+  // Only a node that answers the check and has the route gives the proof for certain.
+  if (answer.kind === "other" && placed.every((n) => n.capable && n.routed)) return { origin: "elsewhere", waiting: false };
+  return { origin: "unknown", waiting };
+}
+
+/** Stores an origin (null clears it); tells open screens when it changed. Returns whether it did. */
+export function saveOrigin(
+  deps: Pick<Deps, "db" | "live">,
+  row: Pick<DomainRow, "id" | "serviceId" | "originStatus">,
+  origin: OriginStatus | null,
+  at = new Date(),
+): boolean {
+  deps.db
+    .update(domains)
+    .set({ originStatus: origin, originCheckedAt: origin ? at : null })
+    .where(eq(domains.id, row.id))
+    .run();
+  const changed = (row.originStatus ?? null) !== origin;
+  if (changed) invalidateService(deps, row.serviceId, [domainOps.list.id]);
+  return changed;
+}
+
+export const originCheckJobType = "domains.checkOrigin";
+
+/** How long after domains.add the first check runs: the node writes the route in about a second, Traefik reads it in another. */
+export const originCheckDelayMs = 5_000;
+/** Checks while a node has not reported the route yet, 10 s apart. */
+const originCheckTries = 4;
+
+/** domains.add enqueues the first origin check of a domain whose DNS is ok or proxied. */
+export function enqueueOriginCheck(deps: Pick<Deps, "jobs">, domainId: string, now = Date.now()): void {
+  deps.jobs.enqueue(
+    originCheckJobType,
+    { domainId, tries: 1 },
+    { runAt: new Date(now + originCheckDelayMs), dedupeKey: `${originCheckJobType}:${domainId}` },
+  );
+}
+
+/**
+ * The origin check after domains.add. While an online node has not
+ * reported the route it runs again 10 s later (4 tries), since whatever
+ * answers before the route is there (Traefik's 404, the app) is no proof
+ * either way.
+ */
+export const originCheckJob = defineJob<{ domainId: string; tries?: number }>({
+  type: originCheckJobType,
+  maxAttempts: 1,
+  async run(payload, ctx) {
+    const row = ctx.db.select().from(domains).where(eq(domains.id, payload.domainId)).get();
+    if (!row || !originApplies(row, row.dnsStatus)) return;
+    const check = await checkOrigin(ctx, row);
+    const tries = payload.tries ?? 1;
+    if (check.waiting && tries < originCheckTries) {
+      enqueueNext(ctx, originCheckJobType, new Date(Date.now() + 10_000), { domainId: row.id, tries: tries + 1 });
+      return;
+    }
+    saveOrigin(ctx, row, check.origin);
+  },
+});

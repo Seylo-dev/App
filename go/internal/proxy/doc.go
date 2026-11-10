@@ -2,7 +2,7 @@
 // seylo-<service>.yml file per service with routers, services and
 // middlewares (HTTPS, redirects, basic auth, IP allowlist, rate limit,
 // sticky load balancing over local replicas and copies on other nodes,
-// maintenance, status pages and tools through the edge). Files are written
+// maintenance, status pages, tools and the origin proof through the edge). Files are written
 // to a temp name and renamed, so Traefik never sees half a file and a
 // deploy switches traffic atomically; Verify then probes through Traefik
 // until it serves the new file and reaches the new upstream.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -324,6 +325,46 @@ func TestEdgeBridgeProblem(t *testing.T) {
 	// A name too long for an interface never gets a bridge name: nothing to say.
 	if msg := edgeBridgeProblem("a-network-name-longer-than-15", proxy.NetworkInfo{}); msg != "" {
 		t.Fatalf("long name: %q", msg)
+	}
+}
+
+// The edge signs origin proofs with the node key the handshake uses, so
+// the panel checks them against the key it stored at the join; the
+// capability is advertised only with that key.
+func TestWireNetworkOriginProof(t *testing.T) {
+	d, _ := newTestDeps(t)
+	if err := provideNetwork(d); err != nil {
+		t.Fatal(err)
+	}
+	reg := newRegistry()
+	if err := wireNetwork(reg, d); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(reg.Capabilities(), edge.OriginCapability) {
+		t.Fatal("advertised without a node key")
+	}
+
+	pub, key, _ := ed25519.GenerateKey(nil)
+	d, _ = newTestDeps(t)
+	d.Identity = key
+	if err := provideNetwork(d); err != nil {
+		t.Fatal(err)
+	}
+	reg = newRegistry()
+	if err := wireNetwork(reg, d); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(reg.Capabilities(), edge.OriginCapability) {
+		t.Fatalf("capability not advertised: %v", reg.Capabilities())
+	}
+	challenge := "panel-challenge-0123456789"
+	req := httptest.NewRequest(http.MethodGet, proxy.OriginPath+challenge, nil)
+	req.Host = "shop.example.com"
+	rec := httptest.NewRecorder()
+	d.Gate.(*networkParts).edge.ServeHTTP(rec, req)
+	sig, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(rec.Body.String()))
+	if rec.Code != http.StatusOK || err != nil || !ed25519.Verify(pub, edge.OriginSignedBytes("shop.example.com", challenge), sig) {
+		t.Fatalf("proof %d %q: %v", rec.Code, rec.Body.String(), err)
 	}
 }
 

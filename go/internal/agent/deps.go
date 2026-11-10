@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/ed25519"
 	"log/slog"
 
 	"github.com/seylo-dev/app/go/internal/backup"
@@ -70,6 +71,11 @@ type Deps struct {
 	Layout datadir.Layout
 	Logger *slog.Logger
 	Config Config
+	// Identity is the agent's Ed25519 key (identity.go), the one it signs
+	// the handshake with; the panel stores its public half for the node.
+	// The edge signs origin proofs with it (edge/origin.go). Nil in tests
+	// that do not set it.
+	Identity ed25519.PrivateKey
 	// PanelAddress returns the panel URL and pin the agent dials now. It
 	// follows a move to the panel's new address (move.go), where Config
 	// keeps the values config.yml had at start. Nil in some tests: use

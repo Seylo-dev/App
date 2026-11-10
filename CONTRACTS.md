@@ -75,7 +75,7 @@ packages use. "Built" means implemented and tested.
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
 | `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS, certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
-| `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM) |
+| `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM) |
 | `build` | Railpack/Nixpacks/Dockerfile builds: git/upload/inline/image sources, capped buildx builders (one per project), FIFO queue (`max_parallel_builds`), detached jobs with replayable output, push to 127.0.0.1:5755, local image and cache retention. Every variable reaches Railpack and Dockerfile builds as a BuildKit secret (Dockerfile builds also get the non-secret ones as build args); Nixpacks builds see only non-secret variables (it bakes every variable into the image), the build log says so. The panel's `EnvVar.secret` is a real classification (`@seylo/env-analyzer` `isSecretEntry`: `# @public`/`# @secret` comment, name, value, references to secrets; `EnvGraph.isSecret`) | Built (Docker builds verified in the VM) |
 | `registry` | 127.0.0.1:5755 relay over RegistryTunnel (`TCPRelay`), `Tunnel` handler (registry and service-port targets; a `RegistryTarget.scope` makes it an HTTP-aware gate: only the node's pull/push repositories, never DELETE of content, the catalog or foreign blob mounts), the registry container on the panel's node (`Server`, GC) | Built (push/pull through the relay, and scoped push/pull/refusals with the real Docker and registry, verified in the VM) |
@@ -599,7 +599,9 @@ local API, join and resume. The areas:
   `doc.go`.
 - `Deps` (`deps.go`) core block, set by the agent: `Layout`, `Logger`, `Config`
   (node id, panel URL, `CanBuild` from config.yml; the node id is empty
-  until the first join, `ConnInfo.NodeID` always has it), `Desired`
+  until the first join, `ConnInfo.NodeID` always has it), `Identity` (the
+  agent's Ed25519 key the handshake signs with; the edge signs origin
+  proofs with it; nil in tests that do not set it), `Desired`
   (desired store), `DesiredSync` (`Sync`/`Apply`/`Remove` with the
   revision rules: save to `Desired`, then publish to `Feed`; handlers use
   it), `PanelControl` (optional: set it to back `seylo panel start|logs`),
@@ -864,7 +866,20 @@ local API, join and resume. The areas:
   `<proxy.data_dir>/dynamic` instead. The edge listener binds
   `<seylo-edge gateway>:5756`; Traefik rewrites to its paths under
   `/_seylo/` (`/page/maintenance/<id>`, `/page/status/<id>`, `/ticket`,
-  `/handoff`, `/probe`). Every page the edge serves (custom maintenance and
+  `/handoff`, `/probe`). Every route with hosts also sends
+  `/.well-known/<slug>-origin/` (`proxy.OriginPath`) to the edge, in every
+  mode (running, stopped, maintenance), on web without the HTTPS redirect
+  and on websecure with the route's TLS, at priority 1999998000 (above
+  every router of the hosts, owned ones included; Traefik's ACME challenge
+  router never matches the path), without the route's middlewares (an
+  allowlist or basic auth would hide the node from the check); routes of a
+  service on the same hosts share them, the tool host and the LB file get
+  none. The edge answers `GET <OriginPath><challenge>` (16 to 128
+  base64url characters, anything else 404, before the tool header is
+  looked at) with the node key's Ed25519 signature over
+  `<slug>-origin-v1` 0x00 host 0x00 challenge (host from the Host header,
+  lower case, without port, brackets or a trailing dot), base64url without
+  padding and a newline, as `text/plain`, `no-store`, nosniff. Every page the edge serves (custom maintenance and
   down pages as is, its default pages) carries
   `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline' https:; img-src https: data:; font-src https: data:; frame-ancestors 'none'`
   and `X-Content-Type-Options: nosniff`; Traefik's errors middleware passes
@@ -2217,6 +2232,7 @@ the node is offline (`modules/databases/capability.ts`).
 | `backup.signed.v1` | Backup destinations without keys (`BackupDestination.signing_id`): the agent asks `PanelService.SignBackupRequests` for each S3 step (`backup.SignedStore`). The panel sends backups and restores only to agents that advertised it |
 | `panel.publish-bind.v1` (0.2.1, `reconcile.PanelPublishBindCapability`, `wire_runtime.go`) | The agent publishes the protected panel's ports on `PublicPort.bind_address` (empty = every address; only a loopback address, only on the protected panel service: `validateSpec` refuses anything else), adopts an installer-started panel container only when its actual bindings match the desired list (HostIP included; otherwise it rolls), and reports the bindings in `seylo panel status`. The panel closes IP access only on a panel node that is online and advertised it (`panelNodeState.capable`; else block `agentTooOld` and `decidePanelIpAccess` keeps it open); an older agent ignores the field and keeps every address |
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
+| `routing.origin-proof.v1` (`edge.OriginCapability`, `wire_network.go`, only with the node key) | Every route file sends `GET /.well-known/<slug>-origin/<challenge>` on the route's hosts to the edge (`proxy` `addOrigin`), which answers with the node key's signature (`edge/origin.go`). The panel's origin check (`modules/domains/origin.ts`) asks only when a node of the service advertised it, and calls an answer without the proof "elsewhere" only when every node of the service did and reported the domain's route; otherwise "unknown" |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
 
 ## Panel access and the tailnet
@@ -3330,6 +3346,33 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the database through the agent's `Exec` with the password on stdin.
 - DNS checks use public resolvers (1.1.1.1, 8.8.8.8);
   `domains/dns.ts` `setDnsLookups` swaps them in tests.
+- Origin check (`modules/domains/origin.ts`): for a custom domain (not
+  automatic, not redirect-only) whose DNS is ok or proxied, the panel
+  fetches `http://<host>/.well-known/<slug>-origin/<challenge>` (24 random
+  bytes, base64url) through the public network, 6 s for everything,
+  following up to 3 redirects only to http(s) on the same host, default
+  port and path (Always Use HTTPS), reads at most 1 KiB, and verifies the
+  signature against the stored keys of the service's nodes
+  (`agent-hub/signature.ts` `verifyEd25519`; the shared vector is in
+  `go/internal/edge/origin_test.go` and `test/domain-origin.test.ts`).
+  `node`: a node's key signed. `elsewhere`: an answer below 500 without
+  the proof while every node of the service advertised
+  `routing.origin-proof.v1`, is online and reported the domain's route.
+  `unknown`: no node with the capability (nothing is fetched), a network
+  error, timeout, 5xx (Cloudflare's 52x), a redirect off the host or path,
+  or a node that may have answered without the proof. Stored in
+  `domains.origin_status`/`origin_checked_at` (migration
+  `0007_domain_origin`), cleared when DNS leaves ok/proxied, and an
+  `elsewhere` is cleared when an ACME route turns ACTIVE (Let's Encrypt
+  reached a node). `Domain.origin`/`originCheckedAt` are set only while
+  DNS is ok or proxied; `DnsCheck.origin` only from `domains.checkDns`.
+  Runs in `domains.checkDns`, and 5 s after `domains.add` as the
+  `domains.checkOrigin` job (one attempt; while an online node with the
+  capability has not reported the route it enqueues itself again 10 s
+  later, 4 tries, storing nothing meanwhile). `setOriginFetch` swaps the
+  fetch in tests. The web's Domains row asks `domains.checkDns` while a
+  certificate is generating and the origin is not `node`, and below a row
+  whose origin is `elsewhere`.
 
 ## Web app
 

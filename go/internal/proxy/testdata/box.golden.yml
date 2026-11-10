@@ -17,6 +17,20 @@ http:
       middlewares:
         - seylo-box1-https
       service: seylo-box1-edge
+    seylo-box1-r-r1-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`box.n1.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-box1-edge
+      tls:
+        certResolver: le
+    seylo-box1-r-r1-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`box.n1.example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-box1-edge
   middlewares:
     seylo-box1-https:
       redirectScheme:

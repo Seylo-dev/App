@@ -26,6 +26,11 @@ var ErrInvalidRoute = errors.New("invalid route")
 const (
 	priorityProbe   = 2_000_000_000
 	priorityHandoff = 1_999_999_000
+	// priorityOrigin puts the origin routers above every router of the
+	// same hosts, owned ones included. Traefik's own ACME challenge router
+	// (/.well-known/acme-challenge/, priority MaxInt32 or more) never
+	// matches the same path, so it keeps answering Let's Encrypt.
+	priorityOrigin = 1_999_998_000
 	// priorityOwned (plus the rule's length) lifts the routers of hosts
 	// nobody else may serve: the panel's own routes, tool hosts and a
 	// database's certificate host. A longer rule for the same host in
@@ -614,6 +619,9 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		}
 		b.cfg.HTTP.Routers[b.n.route(r.GetId(), "handoff")] = h
 	}
+	if b.in.Edge != "" && r.GetId() != toolRouteID {
+		b.addOrigin(r.GetId(), ruleText, tls)
+	}
 
 	if b.lbRouters() && len(r.GetAllowedSourceCidrs()) == 0 && (m != modeUpstream || len(b.in.Upstreams) == 0) && m != modeTool {
 		// No copy here right now (stopped, between restarts, maintenance):
@@ -650,6 +658,45 @@ func (b *builder) addRoute(r *agentv1.Route, m mode, handoff bool) error {
 		}
 	}
 	return nil
+}
+
+// addOrigin sends OriginPath on a route's hosts to the edge, which answers
+// the panel's challenge with a proof signed by the node's key
+// (edge/origin.go): how the panel tells that a custom domain reaches this
+// node, also behind Cloudflare's proxy. In every mode (the app running,
+// stopped or in maintenance), on plain HTTP without the HTTPS redirect (the
+// panel asks over http://, Cloudflare may forward either way) and on HTTPS
+// with the route's certificate, above every other router of the hosts. The
+// route's middlewares stay off: an allowlist or a password would hide the
+// node from the check, and the answer reveals nothing else. Next to the
+// Wings fork the routers go to its Traefik like the rest of the file; the
+// LB file (LBOnly) keeps none. Routes of the service on the same hosts
+// (other paths) share the routers of the first.
+func (b *builder) addOrigin(routeID, ruleText string, tls *routerTLS) {
+	ruleText = fmt.Sprintf("%s && PathPrefix(`%s`)", hostsOnly(ruleText), OriginPath)
+	edge := b.n.svc("edge")
+	if !b.hasOrigin(EntryPointWeb, ruleText) {
+		b.cfg.HTTP.Routers[b.n.route(routeID, "origin-http")] = &router{
+			EntryPoints: []string{EntryPointWeb}, Rule: ruleText, Priority: priorityOrigin, Service: edge,
+		}
+	}
+	if tls != nil && !b.hasOrigin(EntryPointSecure, ruleText) {
+		t := *tls
+		b.cfg.HTTP.Routers[b.n.route(routeID, "origin")] = &router{
+			EntryPoints: []string{EntryPointSecure}, Rule: ruleText, Priority: priorityOrigin, Service: edge, TLS: &t,
+		}
+	}
+}
+
+// hasOrigin reports whether the file has an origin router with this rule on
+// this entry point.
+func (b *builder) hasOrigin(entryPoint, ruleText string) bool {
+	for _, rt := range b.cfg.HTTP.Routers {
+		if rt.Priority == priorityOrigin && rt.Rule == ruleText && slices.Equal(rt.EntryPoints, []string{entryPoint}) {
+			return true
+		}
+	}
+	return false
 }
 
 // lbRouters reports whether the route file gets routers on the LB entry

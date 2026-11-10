@@ -164,7 +164,7 @@ func provideNetwork(d *Deps) error {
 	if err != nil {
 		log.Warn("edge session key not kept; tool sessions end on restart", "err", err)
 	}
-	p.edge = edge.NewHTTPServer(edge.Config{Tickets: verifier, Handoffs: handoffs, SessionKey: sessionKey, Access: edgeAccess(d), Logger: log})
+	p.edge = edge.NewHTTPServer(edge.Config{Tickets: verifier, Handoffs: handoffs, SessionKey: sessionKey, Access: edgeAccess(d), Identity: d.Identity, Logger: log})
 
 	p.Manager = portgate.New(portgate.Config{
 		Resolve: func(ctx context.Context, serviceID string, port uint32) (string, error) {
@@ -266,7 +266,8 @@ func handoffLocation(h *edge.Handoffs) portgate.Handoff {
 
 // wireNetwork: RetryCertificate (cert_retry.go) is the area's only
 // AgentService method (routes and ports arrive in ServiceSpec), and it
-// advertises lb.tls.peers.v1; the edge listener, Traefik (own or the Wings
+// advertises lb.tls.peers.v1 and, with the node key, routing.origin-proof.v1
+// (the edge answers the panel's origin check); the edge listener, Traefik (own or the Wings
 // fork's) and the desired-state follower run as components, the edge
 // ticket key comes from each handshake, and Wings is reported in d.Facts.
 func wireNetwork(reg *Registry, d *Deps) error {
@@ -278,6 +279,11 @@ func wireNetwork(reg *Registry, d *Deps) error {
 	// The route files and the LB TLS file of this build answer the node's
 	// own LB name and take LoadBalancerTls.peers (proxy/lbtls.go).
 	reg.Advertise(proxy.LBPeersCapability)
+	// Every route file sends proxy.OriginPath to the edge, which signs the
+	// panel's challenge with the node key (edge/origin.go).
+	if d.Identity != nil {
+		reg.Advertise(edge.OriginCapability)
+	}
 	p, ok := d.Gate.(*networkParts)
 	if !ok {
 		// Tests replaced the components; nothing of ours to run.

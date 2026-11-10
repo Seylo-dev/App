@@ -344,7 +344,20 @@ export function DomainsPanel({ service }: { service: ServiceDetail }) {
                 {d.pathPrefix !== "/" ? d.pathPrefix : ""}
               </a>
               {d.primary && <Chip tone="blue">{t("serviceDomains.primary")}</Chip>}
-              {d.dnsStatus !== "ok" && !d.auto && !d.forward && <Chip tone="amber">{t(`serviceDomains.dns.${d.dnsStatus}`)}</Chip>}
+              {/* The origin check found another server answering (the Domains tab says what to fix). */}
+              {!d.auto && !d.forward && d.origin === "elsewhere" && (d.dnsStatus === "ok" || d.dnsStatus === "proxied") ? (
+                <Chip
+                  tone="amber"
+                  title={t(d.dnsStatus === "proxied" ? "serviceDomains.originElsewhereProxiedHint" : "serviceDomains.originElsewhereHint", {
+                    host: d.host,
+                    ip: d.pointsTo?.[0] ?? t("serviceDomains.theNode"),
+                  })}
+                >
+                  {t("serviceDomains.originElsewhereShort")}
+                </Chip>
+              ) : (
+                d.dnsStatus !== "ok" && !d.auto && !d.forward && <Chip tone="amber">{t(`serviceDomains.dns.${d.dnsStatus}`)}</Chip>
+              )}
             </li>
           ))}
         </ul>

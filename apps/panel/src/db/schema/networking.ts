@@ -22,6 +22,9 @@ export type DnsStatus = "unknown" | "ok" | "wrongTarget" | "missing" | "proxied"
 
 export type CertificateStatus = "none" | "pending" | "valid" | "failed";
 
+/** The origin check's answer (modules/domains/origin.ts). */
+export type OriginStatus = "node" | "elsewhere" | "unknown";
+
 /** acme: Let's Encrypt (default). custom: certificate_sealed. off: plain HTTP only. */
 export type HttpsMode = "acme" | "custom" | "off";
 
@@ -62,6 +65,13 @@ export const domains = sqliteTable(
     certError: text("cert_error"),
     dnsStatus: text("dns_status").$type<DnsStatus>().notNull().default("unknown"),
     dnsCheckedAt: timestamp("dns_checked_at"),
+    /**
+     * Whether the domain reaches the service's node (the origin check, run
+     * while DNS is ok or proxied); null before the first check and after DNS
+     * left those states.
+     */
+    originStatus: text("origin_status").$type<OriginStatus>(),
+    originCheckedAt: timestamp("origin_checked_at"),
     /** First time the route served with a valid certificate; starts the IP:port redirect-then-close. */
     liveAt: timestamp("live_at"),
     createdAt: createdAt(),

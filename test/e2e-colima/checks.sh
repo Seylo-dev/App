@@ -1924,7 +1924,7 @@ check_28() {
 
 check_29() {
   need_key || return 3
-  local svc host did st
+  local svc host did st nb pa dns
   # The root that signed Pebble's own TLS certificate (the image has no cat).
   on "$E2E_A" "docker cp e2e-pebble:/test/certs/pebble.minica.pem - | tar -xO" | on "$E2E_B" "cat >$BRAND_DATA_DIR/e2e-pebble-root.pem"
   on "$E2E_B" "grep -q 'BEGIN CERTIFICATE' $BRAND_DATA_DIR/e2e-pebble-root.pem" || { bad "could not copy Pebble's root to B"; return 1; }
@@ -1933,10 +1933,22 @@ check_29() {
   svc=$(state_get svc-whoami)
   host=acme.$(wildcard_of b)
   did=$(api domains.list "{\"serviceId\":\"$svc\"}" | jq -r --arg h "$host" '(.domains // .)[] | select(.host==$h) | .id' | head -1)
-  [ -n "$did" ] || did=$(api domains.add "{\"serviceId\":\"$svc\",\"host\":\"$host\",\"targetPort\":80,\"https\":\"acme\",\"primary\":false}" | jq -r .id) ||
+  [ -n "$did" ] || did=$(api domains.add "{\"serviceId\":\"$svc\",\"host\":\"$host\",\"targetPort\":80,\"https\":\"acme\",\"primary\":false}" | jq -r .domain.id) ||
     { bad "domains.add acme failed"; return 1; }
   wait_for 300 "a certificate" sh -c "curl -fsS -m 5 'https://$(node_ip b)' -H 'Host: $host' -k -o /dev/null --resolve '$host:443:$(node_ip b)' && echo | openssl s_client -connect $(node_ip b):443 -servername $host 2>/dev/null | openssl x509 -noout -issuer | grep -qi pebble" &&
     good "$host serves a certificate issued by Pebble" || bad "no Pebble certificate for $host: $(api domains.list "{\"serviceId\":\"$svc\"}" | jq -c --arg h "$host" '[.domains[]? // .[]? | select(.host==$h) | .certificate]')"
+  # The origin check: the panel fetches http://$host/.well-known/$SLUG-origin/<challenge>,
+  # which sslip.io sends to B, and B's agent signs the challenge with its key. DNS
+  # counts as ok (and the check runs) only against a known node address, and the
+  # VMs have private ones only: B gets its own as its public address meanwhile.
+  nb=$(node_id b)
+  pa=$(api nodes.get "{\"nodeId\":\"$nb\"}" | jq -c '.publicAddress // null')
+  api nodes.updateSettings "{\"nodeId\":\"$nb\",\"publicAddress\":\"$(node_ip b)\"}" >/dev/null || bad "nodes.updateSettings publicAddress failed"
+  dns=$(api domains.checkDns "{\"serviceId\":\"$svc\",\"domainId\":\"$did\"}")
+  ev "domains.checkDns $host: $(printf '%s' "$dns" | jq -c '{status, origin}')"
+  [ "$(printf '%s' "$dns" | jq -r '.origin // empty')" = node ] && good "the origin check of $host reached B (origin node)" ||
+    bad "the origin check of $host did not reach B: $(printf '%s' "$dns" | jq -c '{status, origin, message}')"
+  api nodes.updateSettings "{\"nodeId\":\"$nb\",\"publicAddress\":${pa:-null}}" >/dev/null || bad "restoring B's public address failed"
 }
 
 check_30() {

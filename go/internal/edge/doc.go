@@ -3,7 +3,10 @@
 // waking sleeping Boxes and database web UIs, and authenticating access to
 // them with panel-signed tickets verified locally against the Ed25519 key
 // from HelloAccepted (no round trip to the panel). It also hands cookies
-// over from IP:port to the domain (best effort). Certificates for exposed
+// over from IP:port to the domain (best effort), and answers the panel's
+// origin check on a service's domains with a proof signed by the node's
+// key (origin.go), so the panel knows the domain reaches this node even
+// behind Cloudflare's proxy. Certificates for exposed
 // databases are obtained by Traefik (a router per tls_hostname, see
 // package proxy) and read back with proxy.Certificates.
 //

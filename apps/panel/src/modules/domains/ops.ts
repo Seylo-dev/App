@@ -12,6 +12,7 @@ import { applyDomainLive } from "../exposures/logic";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
 import { checkHost, dnsLookups, pointsTo } from "./dns";
 import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
+import { checkOrigin, enqueueOriginCheck, originApplies, saveOrigin } from "./origin";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
 import { type DomainRow, getDomain, primaryDomain, serviceDomains, toDomain } from "./rows";
 
@@ -136,6 +137,8 @@ export const add = implement(domainOps.add, async (input, ctx) => {
     });
   });
   afterChange(ctx, service.id);
+  // The node writes the route a moment from now; the origin check waits for it (origin.ts).
+  if (originApplies(row, dns.status)) enqueueOriginCheck(ctx, row.id);
   return { domain: toDomain(row), dns: { domainId: row.id, host: row.host, checkedAt: new Date().toISOString(), ...dns } };
 });
 
@@ -143,10 +146,13 @@ export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
   const row = requireDomain(ctx.db, input.serviceId, input.domainId);
   const nodes = serviceNodes(ctx.db, input.serviceId);
   const dns = await checkHost(row.host, nodes, dnsLookups());
+  // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node.
+  const origin = originApplies(row, dns.status) ? (await checkOrigin(ctx, row)).origin : null;
   const checkedAt = new Date();
   ctx.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
-  if (dns.status !== row.dnsStatus) invalidateService(ctx, input.serviceId, [domainOps.list.id]);
-  return { domainId: row.id, host: row.host, checkedAt: checkedAt.toISOString(), ...dns };
+  const originChanged = saveOrigin(ctx, row, origin, checkedAt);
+  if (dns.status !== row.dnsStatus && !originChanged) invalidateService(ctx, input.serviceId, [domainOps.list.id]);
+  return { domainId: row.id, host: row.host, checkedAt: checkedAt.toISOString(), ...dns, ...(origin ? { origin } : {}) };
 });
 
 export const update = implement(domainOps.update, (input, ctx) => {

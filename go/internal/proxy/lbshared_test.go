@@ -72,6 +72,14 @@ func TestFileRouterLBDir(t *testing.T) {
 	if lbData, err := os.ReadFile(filepath.Join(lbDir, name)); err != nil || !strings.Contains(string(lbData), EntryPointLB) {
 		t.Fatalf("LB file: %v\n%s", err, lbData)
 	}
+	// The origin proof goes through the fork's Traefik (it serves 80 and
+	// 443) to our edge; the LB Traefik has no part in it.
+	r.SetEdge("http://172.30.0.1:5756")
+	mainData, _ = os.ReadFile(filepath.Join(main, name))
+	lbData, _ := os.ReadFile(filepath.Join(lbDir, name))
+	if !strings.Contains(string(mainData), "PathPrefix(`"+OriginPath+"`)") || strings.Contains(string(lbData), OriginPath) {
+		t.Fatalf("origin routers: main file\n%s\nLB file\n%s", mainData, lbData)
+	}
 	if got, _ := r.ProxyContainers(ctx); !slices.Equal(got, []string{"wings-traefik", LBTraefikContainer}) {
 		t.Fatalf("proxy containers = %v", got)
 	}

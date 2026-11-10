@@ -24676,7 +24676,7 @@
       "post": {
         "operationId": "domains.add",
         "summary": "Add a custom domain",
-        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Set forward to make it a redirect-only domain, for example www to the apex.",
+        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
         "tags": [
           "domains"
         ],
@@ -25038,6 +25038,26 @@
                             "type": "string"
                           }
                         },
+                        "origin": {
+                          "anyOf": [
+                            {
+                              "const": "node",
+                              "type": "string"
+                            },
+                            {
+                              "const": "elsewhere",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unknown",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "originCheckedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
                         "certificate": {
                           "type": "object",
                           "required": [
@@ -25268,6 +25288,22 @@
                             },
                             {
                               "type": "null"
+                            }
+                          ]
+                        },
+                        "origin": {
+                          "anyOf": [
+                            {
+                              "const": "node",
+                              "type": "string"
+                            },
+                            {
+                              "const": "elsewhere",
+                              "type": "string"
+                            },
+                            {
+                              "const": "unknown",
+                              "type": "string"
                             }
                           ]
                         },
@@ -25597,6 +25633,26 @@
                         "type": "string"
                       }
                     },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -25699,7 +25755,7 @@
       "get": {
         "operationId": "domains.checkDns",
         "summary": "Check a domain's DNS",
-        "description": "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. Also refreshes the stored status.",
+        "description": "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node. Also refreshes the stored status.",
         "tags": [
           "domains"
         ],
@@ -25883,6 +25939,22 @@
                         },
                         {
                           "type": "null"
+                        }
+                      ]
+                    },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
                         }
                       ]
                     },
@@ -26198,6 +26270,26 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "origin": {
+                            "anyOf": [
+                              {
+                                "const": "node",
+                                "type": "string"
+                              },
+                              {
+                                "const": "elsewhere",
+                                "type": "string"
+                              },
+                              {
+                                "const": "unknown",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "originCheckedAt": {
+                            "format": "date-time",
+                            "type": "string"
                           },
                           "certificate": {
                             "type": "object",
@@ -26678,6 +26770,26 @@
                         "type": "string"
                       }
                     },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -27088,6 +27200,26 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
                     },
                     "certificate": {
                       "type": "object",
@@ -27596,6 +27728,26 @@
                         "type": "string"
                       }
                     },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "certificate": {
                       "type": "object",
                       "required": [
@@ -27993,6 +28145,26 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
                     },
                     "certificate": {
                       "type": "object",
@@ -28455,6 +28627,26 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "origin": {
+                      "anyOf": [
+                        {
+                          "const": "node",
+                          "type": "string"
+                        },
+                        {
+                          "const": "elsewhere",
+                          "type": "string"
+                        },
+                        {
+                          "const": "unknown",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "originCheckedAt": {
+                      "format": "date-time",
+                      "type": "string"
                     },
                     "certificate": {
                       "type": "object",

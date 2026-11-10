@@ -9,6 +9,12 @@ http:
         - seylo-svc2-unreachable
         - seylo-svc2-r-api-strip
       service: seylo-svc2
+    seylo-svc2-r-api-origin-http:
+      entryPoints:
+        - web
+      rule: Host(`example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc2-edge
     seylo-svc2-r-docs:
       entryPoints:
         - websecure
@@ -25,6 +31,14 @@ http:
       middlewares:
         - seylo-svc2-unreachable
       service: seylo-svc2
+    seylo-svc2-r-docs-origin:
+      entryPoints:
+        - websecure
+      rule: Host(`example.com`) && PathPrefix(`/.well-known/seylo-origin/`)
+      priority: 1999998000
+      service: seylo-svc2-edge
+      tls:
+        certResolver: le
   middlewares:
     seylo-svc2-r-api-strip:
       stripPrefix:
