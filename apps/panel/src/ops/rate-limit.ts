@@ -18,8 +18,9 @@ export interface RateLimitRule {
 }
 
 export const defaultRules: Record<RateLimitClass, RateLimitRule> = {
-  // Generous: the web app fires several queries per screen.
-  standard: { burst: 120, refillPerSecond: 20 },
+  // Generous: the web app fires 15 or so queries per screen load (0.2.5), so
+  // a few quick reloads or tabs must fit; brute force goes through strict.
+  standard: { burst: 300, refillPerSecond: 50 },
   // Sign-in and token checks: 10 tries, then one every 6 seconds.
   strict: { burst: 10, refillPerSecond: 1 / 6 },
 };
