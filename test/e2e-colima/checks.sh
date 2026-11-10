@@ -3528,6 +3528,23 @@ p39_access_run() {
   expect "the recovery SSH tunnel goes to 127.0.0.1:$port ($(printf '%s' "$out" | jq -r '.recovery.sshTunnel // empty'))" \
     jq_ok "$out" --arg p "ssh -L 3000:127.0.0.1:$port " '.recovery.sshTunnel | startswith($p)'
 
+  # 0.2.7: the app and push notifications turn on only over the domain (the same origin proof
+  # through Traefik), and the manifest follows the switch. Turned off again, as nothing below needs it.
+  expect "push: turning the app on from the IP:port session is refused (notOnDomain)" \
+    refused_with notOnDomain sess "$ipjar" "$(panel_url)" push.updateSettings '{"enabled":true}'
+  expect "push: an API key cannot turn the app on" fails api push.updateSettings '{"enabled":true}'
+  expect "push: no manifest while the app is off" sh -c "[ \"\$(curl -s -m 10 --cacert '$P31_ROOT' -o /dev/null -w '%{http_code}' '$dom/manifest.webmanifest')\" = 404 ]"
+  out=$(sess "$jar" "$dom" push.updateSettings '{"enabled":true}' --cacert "$P31_ROOT") || out='{}'
+  ev "push.updateSettings over $dom: $(printf '%s' "$out" | jq -c '{enabled, active, domainUrl, onDomainNow, blocks: [.blocks[]?.code]}')"
+  expect "push: the app and push notifications turned on over $dom" jq_ok "$out" --arg d "$dom" '.enabled and .active and .onDomainNow and .domainUrl == $d'
+  out=$(p31_curl -f "$dom/manifest.webmanifest") || out='{}'
+  ev "the manifest on $dom: $(printf '%s' "$out" | jq -c '{name, short_name, display, start_url, icons: [.icons[]?.src]}')"
+  expect "push: $dom serves the app manifest" jq_ok "$out" '.display == "standalone" and .start_url == "/" and (.icons | length) > 0'
+  expect "push: the service worker is served as JavaScript, not cached" \
+    sh -c "curl -sS -m 10 --cacert '$P31_ROOT' -D - -o /dev/null '$dom/sw.js' | tr -d '\r' | grep -qi '^content-type: text/javascript' && curl -sS -m 10 --cacert '$P31_ROOT' -D - -o /dev/null '$dom/sw.js' | tr -d '\r' | grep -qi '^cache-control: no-cache'"
+  out=$(sess "$jar" "$dom" push.updateSettings '{"enabled":false}' --cacert "$P31_ROOT") || out='{}'
+  expect "push: turned off again" jq_ok "$out" '.enabled == false'
+
   # Refused: an API key, and an IP:port session that claims to be on the domain.
   expect "an API key cannot turn Serve on IP address off (notBrowserSession)" \
     refused_with notBrowserSession api settings.updatePanelAccess '{"serveOnIp":false}'

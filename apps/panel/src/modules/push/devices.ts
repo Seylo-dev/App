@@ -6,9 +6,11 @@
 
 import { createHash } from "node:crypto";
 import { push as pushOps } from "@seylo/ops";
-import { and, eq, ne } from "drizzle-orm";
-import { pushDevices, pushPrefs } from "../../db/schema";
+import { and, eq, inArray, lte, ne } from "drizzle-orm";
+import { pushDevices, pushPrefs, sessions } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { getSetting } from "../../settings";
+import "./keys";
 import { domainOrigin } from "./state";
 import type { PushTarget } from "./web-push";
 
@@ -42,14 +44,32 @@ export function forgetOtherOrigins(deps: Pick<Deps, "db">): number {
   return removed.length;
 }
 
-/** A person's devices, newest first, after the origin clean-up. */
+/**
+ * Removes devices whose session ended without a sign-out: it expired (idle
+ * for its lifetime, or past the hard cap, which expiresAt already holds).
+ * Expired session rows linger until their person signs in again, so the
+ * cascade alone would keep pushing to a browser nobody is signed in on.
+ */
+export function forgetEndedSessions(deps: Pick<Deps, "db">, now = new Date()): number {
+  const ended = deps.db.select({ id: sessions.id }).from(sessions).where(lte(sessions.expiresAt, now));
+  return deps.db.delete(pushDevices).where(inArray(pushDevices.sessionId, ended)).returning({ id: pushDevices.id }).all().length;
+}
+
+/** Devices of another origin or an ended session, gone; returns how many. */
+export function forgetStaleDevices(deps: Pick<Deps, "db">): number {
+  return forgetOtherOrigins(deps) + forgetEndedSessions(deps);
+}
+
+/** A person's devices, newest first, after the clean-up (devices waiting to be revoked are not theirs any more). */
 export function devicesOf(deps: Pick<Deps, "db">, userId: string): PushDeviceRow[] {
-  forgetOtherOrigins(deps);
+  forgetStaleDevices(deps);
+  const revokedBefore = getSetting(deps.db, "pushVapidRevoked")?.at ?? 0;
   return deps.db
     .select()
     .from(pushDevices)
     .where(eq(pushDevices.userId, userId))
     .all()
+    .filter((row) => row.createdAt.getTime() > revokedBefore)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 

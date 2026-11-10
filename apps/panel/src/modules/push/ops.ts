@@ -3,14 +3,14 @@
 // setEvents, test). Contracts: packages/ops/src/ops/push.ts.
 
 import { OpError, push as pushOps } from "@seylo/ops";
-import { eq, sql } from "drizzle-orm";
+import { eq, gt, sql } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { requireSession } from "../../auth/sign-in";
 import { pushDevices, pushPrefs } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
-import { setSetting } from "../../settings";
-import { devicesOf, endpointHash, eventsOf, forgetOtherOrigins, openTarget, removeDeviceOf, sealTarget, toDevice } from "./devices";
-import { ensureVapidKeys, readAppPush, vapidPublicKey } from "./keys";
+import { getSetting, setSetting } from "../../settings";
+import { devicesOf, endpointHash, eventsOf, forgetStaleDevices, openTarget, removeDeviceOf, sealTarget, toDevice } from "./devices";
+import { ensureVapidKeys, readAppPush } from "./keys";
 import { eventChoicesFor, recordSend, sendToDevice } from "./send";
 import { appPushActive, domainOrigin, onDomainNow, turnOnBlocks, unavailableReason } from "./state";
 import { validTargetKeys } from "./web-push";
@@ -25,10 +25,13 @@ function changed(ctx: OpContext): void {
 
 function settingsView(ctx: OpContext): pushOps.AppPushSettings {
   const stored = readAppPush(ctx.db);
-  forgetOtherOrigins(ctx);
+  forgetStaleDevices(ctx);
+  // Devices a key rotation is revoking are not in use any more.
+  const revokedBefore = new Date(getSetting(ctx.db, "pushVapidRevoked")?.at ?? 0);
   const counts = ctx.db
     .select({ devices: sql<number>`count(*)`, people: sql<number>`count(distinct ${pushDevices.userId})` })
     .from(pushDevices)
+    .where(gt(pushDevices.createdAt, revokedBefore))
     .get();
   return {
     enabled: stored.enabled,
@@ -76,7 +79,8 @@ const mine = implement(pushOps.mine, (_input, ctx) => {
     reason: active ? "" : unavailableReason(ctx),
     domainUrl: active ? domainOrigin(ctx) : null,
     onDomainNow: onDomainNow(ctx),
-    publicKey: active ? vapidPublicKey(ctx.db) : null,
+    // Made here when missing (a --new-panel-identity rotation drops it while push stays on).
+    publicKey: active ? ensureVapidKeys(ctx.db, ctx.secrets).publicKey : null,
     devices: devicesOf(ctx, user.id).map(toDevice),
     events: eventsOf(ctx, user.id).filter((event) => choices.includes(event)),
     eventChoices: choices,

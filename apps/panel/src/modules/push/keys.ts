@@ -21,12 +21,20 @@ declare module "../../settings" {
     appPush: StoredAppPush;
     /** The VAPID public key (base64url) and the sealed raw private key. */
     pushVapid: { publicKey: string; privateKeySealed: string };
+    /**
+     * The push key from before a --new-panel-identity rotation (a leaked
+     * panel.db), kept only to tell the devices it had to drop their
+     * subscription (push.revoke); `at` is when the rotation ran, ms. Devices
+     * added before it are the ones to revoke.
+     */
+    pushVapidRevoked: { publicKey: string; privateKeySealed: string; at: number };
   }
 }
 
 /** Job types (stored in rows: never rename). The alert sink enqueues the fan-out without importing send.ts. */
 export const pushFanoutJobType = "push.fanout";
 export const pushSendJobType = "push.send";
+export const pushRevokeJobType = "push.revoke";
 
 export const defaultAppPush: StoredAppPush = { enabled: false, changedAt: 0, by: null };
 
@@ -49,7 +57,10 @@ export function ensureVapidKeys(db: PanelDb, secrets: SecretBox): VapidKeys {
   return keys;
 }
 
-/** The public key alone, without opening or making anything; null before the first use. */
-export function vapidPublicKey(db: PanelDb): string | null {
-  return getSetting(db, "pushVapid")?.publicKey ?? null;
+/** The key a rotation set aside for revoking the old devices; null when there is none. */
+export function revokedVapidKeys(db: PanelDb, secrets: SecretBox): (VapidKeys & { at: number }) | null {
+  const stored = getSetting(db, "pushVapidRevoked");
+  if (!stored) return null;
+  const privateKey = secrets.open(stored.privateKeySealed, purpose);
+  return privateKey ? { publicKey: stored.publicKey, privateKey, at: stored.at } : null;
 }

@@ -4,7 +4,7 @@
 // notifications on, and only on the panel domain over HTTPS: anywhere else
 // the page says where to open it. lib/pwa.ts does the browser's part.
 
-import { type alerts, push } from "@seylo/ops";
+import { type alerts, OpError, push } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -106,6 +106,25 @@ function ThisDevice({ data }: { data: push.MyPush }) {
   const deviceId = useThisDeviceId(data.devices);
   const [busy, setBusy] = useState(false);
   const [denied, setDenied] = useState(() => "Notification" in window && Notification.permission === "denied");
+  // Allowed again in the site settings: the page notices without a reload.
+  useEffect(() => {
+    const recheck = () => setDenied("Notification" in window && Notification.permission === "denied");
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    let status: PermissionStatus | null = null;
+    void navigator.permissions
+      ?.query({ name: "notifications" })
+      .then((result) => {
+        status = result;
+        result.addEventListener("change", recheck);
+      })
+      .catch(() => {});
+    return () => {
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", recheck);
+      status?.removeEventListener("change", recheck);
+    };
+  }, []);
   const subscribe = useSettingsMutation(push.subscribe, { failure: false });
   const remove = useSettingsMutation(push.removeDevice, { failure: false });
   const test = useSettingsMutation(push.test, {
@@ -130,7 +149,10 @@ function ThisDevice({ data }: { data: push.MyPush }) {
   }
 
   async function turnOn() {
-    if (!data.publicKey) return;
+    if (!data.publicKey) {
+      toast.error(t("settingsPush.thisDevice.failed", { error: t("settingsPush.thisDevice.noKey") }));
+      return;
+    }
     setBusy(true);
     try {
       const input = await subscribeThisBrowser(data.publicKey);
@@ -142,8 +164,9 @@ function ThisDevice({ data }: { data: push.MyPush }) {
         const blocked = error.message === "denied";
         setDenied(blocked);
         toast.info(blocked ? t("settingsPush.thisDevice.denied") : t("settingsPush.thisDevice.dismissed"));
-      } else if (error && typeof error === "object" && "code" in error) {
-        toastError(error as never);
+      } else if (error instanceof OpError) {
+        // The panel refused the subscription: drop it here too.
+        toastError(error);
         await unsubscribeThisBrowser().catch(() => {});
       } else {
         toast.error(t("settingsPush.thisDevice.failed", { error: error instanceof Error ? error.message : String(error) }));
@@ -208,7 +231,8 @@ function Install() {
   useEffect(() => onInstallChange(() => rerender((n) => n + 1)), []);
   const [installed, setInstalled] = useState(false);
   let body: React.ReactNode;
-  if (support.standalone || installed) body = <span className="text-[13.5px]">{t("settingsPush.install.installed")}</span>;
+  if (support.standalone) body = <span className="text-[13.5px]">{t("settingsPush.install.installed")}</span>;
+  else if (installed) body = <span className="text-[13.5px]">{t("settingsPush.install.installedNow")}</span>;
   else if (canPromptInstall())
     body = (
       <Button variant="secondary" onClick={() => void promptInstall().then((done) => setInstalled(done))}>
@@ -290,7 +314,8 @@ function eventText(event: push.PushEventName): { name: string; hint: string } {
 
 function Events({ data }: { data: push.MyPush }) {
   const save = useSettingsMutation(push.setEvents, { invalidates: [push.mine], success: t("settingsPush.events.saved") });
-  const chosen = new Set(save.variables?.events ?? data.events);
+  // While a save runs, its choice; otherwise what the panel has (a failed save shows the truth again).
+  const chosen = new Set(save.isPending && save.variables ? save.variables.events : data.events);
   return (
     <SectionCard title={t("settingsPush.events.title")} description={t("settingsPush.events.description")}>
       <div className="flex flex-col">

@@ -61,6 +61,8 @@ export const memberPushEvents: readonly PushEventName[] = [
 /** Push services the panel sends to: the browser makers' (an endpoint anywhere else is refused). */
 export const pushServiceHosts = [
   "fcm.googleapis.com",
+  // Chrome Beta, Dev and Canary (and other non-stable Chromium builds) subscribe on Google's staging host.
+  "jmt17.google.com",
   "updates.push.services.mozilla.com",
   "push.services.mozilla.com",
   "web.push.apple.com",

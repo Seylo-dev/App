@@ -50,6 +50,7 @@ export default {
     unsupported: "This browser cannot get push notifications.",
     ios: "On iPhone and iPad, push notifications work in the installed app: tap Share, then Add to Home Screen, then open the panel from the Home Screen and turn them on there (iOS 16.4 or later).",
     failed: "Could not turn on push notifications: {error}",
+    noKey: "the panel has no push key yet. Reload the page and try again.",
   },
   test: {
     button: "Send a test",
@@ -79,7 +80,7 @@ export default {
     description: "The panel as an app with its own window and icon, opened from your home screen or dock.",
     installed: "You are using the installed app.",
     button: "Install",
-    installedNow: "Installed",
+    installedNow: "Installed. Open it from your home screen, dock or apps.",
     ios: "On iPhone and iPad: tap Share, then Add to Home Screen.",
     other: "Use your browser's menu: Install app, or Add to Home screen.",
   },

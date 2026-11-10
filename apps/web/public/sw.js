@@ -5,7 +5,8 @@
 // the page is on the panel domain over HTTPS.
 //
 // A message is the JSON the panel encrypts for this browser
-// (apps/panel/src/modules/push/send.ts): { title, body, url, tag }.
+// (apps/panel/src/modules/push/send.ts): { title, body, url, tag, at },
+// and { type: "revoke", ... } once after a key rotation.
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
@@ -24,16 +25,24 @@ self.addEventListener("push", (event) => {
   }
   const title = typeof message.title === "string" && message.title ? message.title : "Notification";
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: typeof message.body === "string" ? message.body : "",
-      // One notification per alert: a newer one about the same thing replaces it.
-      tag: typeof message.tag === "string" ? message.tag : undefined,
-      renotify: typeof message.tag === "string",
-      icon: "/pwa/icon-192.png",
-      badge: "/pwa/badge-96.png",
-      timestamp: typeof message.at === "number" ? message.at : Date.now(),
-      data: { url: samePanelPath(message.url) },
-    }),
+    (async () => {
+      // The panel's push key changed after a key rotation (modules/push send.ts revokeJob): this
+      // subscription must not take pushes any more. A push has to show something, so it says why.
+      if (message.type === "revoke") {
+        const subscription = await self.registration.pushManager.getSubscription();
+        await subscription?.unsubscribe();
+      }
+      await self.registration.showNotification(title, {
+        body: typeof message.body === "string" ? message.body : "",
+        // One notification per alert: a newer one about the same thing replaces it.
+        tag: typeof message.tag === "string" ? message.tag : undefined,
+        renotify: typeof message.tag === "string",
+        icon: "/pwa/icon-192.png",
+        badge: "/pwa/badge-96.png",
+        timestamp: typeof message.at === "number" ? message.at : Date.now(),
+        data: { url: samePanelPath(message.url) },
+      });
+    })(),
   );
 });
 

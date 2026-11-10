@@ -48,18 +48,35 @@ import { createSecretBox, type SealPurpose, type SecretBox, sealPurposes } from 
 
 /** `v1.<12-byte iv>.<16-byte tag>.<ciphertext>`, all base64url (secret-box.ts). */
 const sealedPattern = /^v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]*$/;
+/** Settings that hold the panel's identity keys; with "new" the panel makes new ones on start. */
+const identitySettings = ["edgeTicketKey", "lbTlsCa", "lbTlsNodes"];
+
 /**
- * Settings that hold the panel's identity keys; with "new" the panel makes
- * new ones on start (the push key when push is next used).
+ * With "new" (a leaked panel.db), the push key is not simply dropped:
+ * deleting it and the devices would not stop a copy of panel.db and
+ * master.key from pushing to the browsers' subscriptions, which stay valid
+ * at the push services. It moves to pushVapidRevoked, sealed under the new
+ * key with the devices, and the panel's next start sends each of those
+ * devices a last push telling it to drop its subscription (modules/push
+ * send.ts revokeJob), then deletes them and the old key. Push itself makes
+ * a new key when next used. A second rotation before that ran keeps the
+ * first key aside (the older devices' one) and drops the newer key and
+ * the devices made with it.
  */
-const identitySettings = ["edgeTicketKey", "lbTlsCa", "lbTlsNodes", "pushVapid"];
-/**
- * Rows a leaked panel.db makes dangerous to keep, dropped with "new": push
- * devices hold each browser's endpoint and secret, which with the old push
- * key would let whoever has the copy send notifications to people's phones.
- * People turn push on again on each device.
- */
-const identityTables = ["push_devices"];
+function setPushKeyAside(sqlite: Database, now: number): void {
+  const read = (key: string) => sqlite.query<{ value: string }, [string]>("SELECT value FROM settings WHERE key = ?").get(key);
+  const current = read("pushVapid");
+  if (!current) return;
+  const aside = read("pushVapidRevoked");
+  if (aside) {
+    const at = (JSON.parse(aside.value) as { at: number }).at;
+    sqlite.query("DELETE FROM push_devices WHERE created_at > ?").run(at);
+  } else {
+    const value = JSON.stringify({ ...(JSON.parse(current.value) as object), at: now });
+    sqlite.query("INSERT INTO settings (key, value, updated_at) VALUES ('pushVapidRevoked', ?, ?)").run(value, now);
+  }
+  sqlite.query("DELETE FROM settings WHERE key = 'pushVapid'").run();
+}
 /** How long a rotation waits for panel.db's write lock (a panel's start check may hold it). */
 const rotationLockWaitMs = 5_000;
 /** How long the panel's start waits for a rotation still running to commit. */
@@ -196,9 +213,9 @@ function resealAndCommit(sqlite: Database, paths: Paths, oldKey: Uint8Array, opt
     }
     // Dropped first, so the count only has what the panel keeps.
     if (fresh) for (const key of identitySettings) sqlite.query("DELETE FROM settings WHERE key = ?").run(key);
-    // A panel.db from before the table existed has nothing to drop.
-    const hasTable = (table: string) => sqlite.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== null;
-    if (fresh) for (const table of identityTables) if (hasTable(table)) sqlite.query(`DELETE FROM "${table}"`).run();
+    // A panel.db from before push (0.2.7) has no push key to set aside.
+    const hasPush = sqlite.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'push_devices'").get() !== null;
+    if (fresh && hasPush) setPushKeyAside(sqlite, Date.now());
     for (const { table, column } of textColumns(sqlite)) {
       const rows = sqlite
         .query<{ id: number; value: string }, []>(

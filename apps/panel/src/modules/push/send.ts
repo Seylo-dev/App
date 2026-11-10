@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { slug } from "@seylo/brand";
 import { type alerts as alertOps, push as pushOps } from "@seylo/ops";
-import { eq, isNull } from "drizzle-orm";
+import { eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { createAccess } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
 import { alerts, approvals, pushDevices, users } from "../../db/schema";
@@ -24,13 +24,14 @@ import type { Deps } from "../../deps";
 import { pinRequest } from "../../http/pinned-fetch";
 import { defineJob } from "../../jobs/queue";
 import { parseInput } from "../../ops/validate";
+import { deleteSetting, getSetting } from "../../settings";
 import { alertVisibility } from "../alerts/feed";
 import { canSee, opById, openInput } from "../approvals/queue";
 import { checkTarget, type TargetCheck } from "../uptime/targets";
-import { eventsOf, forgetOtherOrigins, openTarget, type PushDeviceRow } from "./devices";
-import { ensureVapidKeys, pushFanoutJobType, pushSendJobType } from "./keys";
+import { eventsOf, forgetStaleDevices, openTarget, type PushDeviceRow } from "./devices";
+import { ensureVapidKeys, pushFanoutJobType, pushRevokeJobType, pushSendJobType, revokedVapidKeys } from "./keys";
 import { appPushActive, domainOrigin } from "./state";
-import { maxPushPayloadBytes, type PushTarget, type PushUrgency, pushRequest } from "./web-push";
+import { maxPushPayloadBytes, type PushTarget, type PushUrgency, pushRequest, type VapidKeys } from "./web-push";
 
 type AlertRow = typeof alerts.$inferSelect;
 
@@ -72,10 +73,21 @@ export interface PushMessage {
   at: number;
 }
 
-/** "crash:<svc>:<ms>" -> "crash:<svc>": what one incident's alerts share. */
-function incidentOf(eventKey: string): string {
-  const cut = eventKey.lastIndexOf(":");
-  return cut > 0 ? eventKey.slice(0, cut) : eventKey;
+/** Good news that replaces its problem's notification: "node-online:<node>:<ms>" takes the place of "node-offline:<node>:...". */
+const recoveryOf: Record<string, string> = { "node-online": "node-offline" };
+
+/**
+ * What one incident's alerts share: the key without its trailing start
+ * time ("crash:<svc>:<ms>" -> "crash:<svc>"). Keys without one stay whole
+ * ("approval:<id>", "build-failed:<buildId>", "deploy-failed:<svc>:<gen>:<node>"),
+ * so two different builds or approvals never replace each other.
+ */
+export function incidentOf(eventKey: string): string {
+  const parts = eventKey.split(":");
+  if (parts.length >= 3 && /^\d+$/.test(parts.at(-1) as string)) parts.pop();
+  const kind = parts[0] as string;
+  if (recoveryOf[kind]) parts[0] = recoveryOf[kind] as string;
+  return parts.join(":");
 }
 
 /** A Topic and tag from an incident: 32 base64url characters of its hash. */
@@ -100,13 +112,23 @@ export function alertMessage(alert: AlertRow): PushMessage {
   return message;
 }
 
+/** Tells a device's service worker to drop its subscription (sw.js shows why: a push must show something). */
+export interface RevokeMessage {
+  type: "revoke";
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+  at: number;
+}
+
 export type SendResult =
   | { kind: "sent" }
   /** 404/410: the browser dropped the subscription. */
   | { kind: "gone"; error: string }
   /** 400/401/403/413 or a refused address: sending again will not help. */
   | { kind: "rejected"; error: string }
-  /** 429, 5xx, a timeout: worth a retry. */
+  /** 429 (WNS: 406), 5xx, a timeout: worth a retry. */
   | { kind: "retry"; error: string };
 
 /** Push service replies sometimes echo the endpoint; keep URLs out of stored errors. */
@@ -121,10 +143,17 @@ const scrub = (text: string) =>
 export async function sendToDevice(
   deps: Pick<Deps, "db" | "secrets">,
   target: PushTarget,
-  message: PushMessage,
-  options: { urgency: PushUrgency; ttlSeconds: number; topic?: string },
+  message: PushMessage | RevokeMessage,
+  options: {
+    urgency: PushUrgency;
+    ttlSeconds: number;
+    topic?: string;
+    /** Another key and subject: the revoke job sends with the key the device was subscribed with. */
+    keys?: VapidKeys;
+    subject?: string;
+  },
 ): Promise<SendResult> {
-  const subject = domainOrigin(deps);
+  const subject = options.subject ?? domainOrigin(deps);
   if (!subject) return { kind: "rejected", error: "The panel has no domain." };
   let url: URL;
   try {
@@ -143,7 +172,7 @@ export async function sendToDevice(
       : { kind: "rejected", error: "The push service's address is not one the panel may reach." };
   }
   const request = pushRequest(target, Buffer.from(JSON.stringify(message)), {
-    keys: ensureVapidKeys(deps.db, deps.secrets),
+    keys: options.keys ?? ensureVapidKeys(deps.db, deps.secrets),
     subject,
     ttlSeconds: options.ttlSeconds,
     urgency: options.urgency,
@@ -172,7 +201,8 @@ export async function sendToDevice(
   const text = scrub(await response.text().catch(() => ""));
   const error = `The push service answered ${response.status}${text ? `: ${text}` : "."}`;
   if (response.status === 404 || response.status === 410) return { kind: "gone", error };
-  if (response.status === 429 || response.status >= 500) return { kind: "retry", error };
+  // Microsoft's WNS says 406 when a device is over its throttle limit: later, not never.
+  if (response.status === 429 || response.status === 406 || response.status >= 500) return { kind: "retry", error };
   return { kind: "rejected", error };
 }
 
@@ -191,12 +221,14 @@ export function recordSend(deps: Pick<Deps, "db">, device: PushDeviceRow, result
     deps.db.update(pushDevices).set({ lastError: result.error }).where(eq(pushDevices.id, device.id)).run();
     return;
   }
-  const failures = device.failures + 1;
-  if (failures >= maxFailures) {
-    deps.db.delete(pushDevices).where(eq(pushDevices.id, device.id)).run();
-    return;
-  }
-  deps.db.update(pushDevices).set({ failures, lastError: result.error }).where(eq(pushDevices.id, device.id)).run();
+  // Counted in SQL: sends to one device run side by side, and a count from the row read before them would lose some.
+  const counted = deps.db
+    .update(pushDevices)
+    .set({ failures: sql`${pushDevices.failures} + 1`, lastError: result.error })
+    .where(eq(pushDevices.id, device.id))
+    .returning({ failures: pushDevices.failures })
+    .get();
+  if (counted && counted.failures >= maxFailures) deps.db.delete(pushDevices).where(eq(pushDevices.id, device.id)).run();
 }
 
 /** Takes one slot of the device's burst window; false when it is full. */
@@ -265,8 +297,14 @@ export const fanoutJob = defineJob<FanoutPayload>({
     if (!appPushActive(ctx)) return;
     const alert = ctx.db.select().from(alerts).where(eq(alerts.id, payload.alertId)).get();
     if (!alert || alert.muted || !(pushOps.pushEvents as readonly string[]).includes(alert.event)) return;
-    forgetOtherOrigins(ctx);
-    const devices = ctx.db.select({ id: pushDevices.id, userId: pushDevices.userId }).from(pushDevices).all();
+    forgetStaleDevices(ctx);
+    // Devices from before a --new-panel-identity rotation are being revoked (revokeJob), not pushed to.
+    const revokedBefore = new Date(getSetting(ctx.db, "pushVapidRevoked")?.at ?? 0);
+    const devices = ctx.db
+      .select({ id: pushDevices.id, userId: pushDevices.userId })
+      .from(pushDevices)
+      .where(gt(pushDevices.createdAt, revokedBefore))
+      .all();
     if (devices.length === 0) return;
     const people = ctx.db
       .select({ id: users.id, email: users.email, name: users.name, role: users.role })
@@ -319,3 +357,56 @@ export const sendJob = defineJob<SendPayload>({
     if (result.kind === "retry" && !finalTry) throw new Error(result.error);
   },
 });
+
+/**
+ * After a --new-panel-identity rotation (a leaked panel.db): every device
+ * from before it gets one last push, sent with the old key it subscribed
+ * with, telling its service worker to drop the subscription. Deleting the
+ * rows alone would not do: a copy of panel.db and master.key could still
+ * push to those subscriptions. A device the push service says is gone, or
+ * that refuses, is done too; one that does not answer is tried again, and
+ * the last try removes what is left. Then the old key goes.
+ */
+export const revokeJob = defineJob<Record<string, never>>({
+  type: pushRevokeJobType,
+  maxAttempts: 3,
+  async run(_payload, ctx) {
+    const old = revokedVapidKeys(ctx.db, ctx.secrets);
+    const stored = getSetting(ctx.db, "pushVapidRevoked");
+    if (!stored) return;
+    const before = new Date(stored.at);
+    const devices = ctx.db.select().from(pushDevices).where(lte(pushDevices.createdAt, before)).all();
+    const finalTry = ctx.attempt >= 3;
+    let pending = 0;
+    for (const device of devices) {
+      const target = old ? openTarget(ctx, device) : null;
+      const result: SendResult = target
+        ? await sendToDevice(
+            ctx,
+            target,
+            {
+              type: "revoke",
+              title: "Push notifications were reset",
+              body: "This panel's push key changed. Turn push notifications on again in Settings > Push notifications.",
+              url: "/settings/push",
+              tag: "push-revoke",
+              at: Date.now(),
+            },
+            { urgency: "normal", ttlSeconds: 7 * 24 * 3600, keys: old as VapidKeys, subject: device.origin },
+          )
+        : { kind: "rejected", error: "The old push key cannot be opened." };
+      if (result.kind === "retry" && !finalTry) {
+        pending++;
+        continue;
+      }
+      ctx.db.delete(pushDevices).where(eq(pushDevices.id, device.id)).run();
+    }
+    if (pending > 0) throw new Error(`${pending} device(s) did not answer; trying again`);
+    deleteSetting(ctx.db, "pushVapidRevoked");
+  },
+});
+
+/** At start: a rotation left devices to revoke. */
+export function revokeOnStart(deps: Deps): void {
+  if (getSetting(deps.db, "pushVapidRevoked")) deps.jobs.enqueue(pushRevokeJobType, {}, { dedupeKey: pushRevokeJobType, maxAttempts: 3 });
+}

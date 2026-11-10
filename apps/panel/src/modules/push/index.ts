@@ -6,11 +6,12 @@
 import { defineModule } from "../module";
 import { manifestRoutes } from "./http";
 import { pushOpHandlers } from "./ops";
-import { fanoutJob, sendJob } from "./send";
+import { fanoutJob, revokeJob, revokeOnStart, sendJob } from "./send";
 
 export default defineModule({
   name: "push",
   ops: pushOpHandlers,
-  jobs: [fanoutJob, sendJob],
+  jobs: [fanoutJob, sendJob, revokeJob],
   http: manifestRoutes,
+  start: revokeOnStart,
 });

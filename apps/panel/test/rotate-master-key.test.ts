@@ -465,12 +465,25 @@ test("--keep-panel-identity: push devices and the push key are sealed again and 
   after.close();
 });
 
-test("--new-panel-identity: push devices and the push key are dropped (a leaked panel.db must not push to phones)", () => {
+test("--new-panel-identity: the push key is set aside with its devices, for the next start to revoke them", () => {
   const { secrets: oldBox } = seed();
-  seedPush(oldBox);
+  const { target, vapid } = seedPush(oldBox);
+  const before = Date.now();
   rotateMasterKey(dir, { panelIdentity: "new" });
+  const newBox = createSecretBox(loadMasterKey(join(dir, "master.key"), false));
   const after = open();
-  expect(after.db.select().from(pushDevices).all()).toEqual([]);
+  // The devices stay, sealed under the new key, so the revoke push can still reach them.
+  const device = after.db.select().from(pushDevices).get();
+  expect(device && openTarget({ secrets: newBox }, device)).toEqual(target);
   expect(after.db.select().from(settings).where(eq(settings.key, "pushVapid")).get()).toBeUndefined();
+  const aside = after.db.select().from(settings).where(eq(settings.key, "pushVapidRevoked")).get()?.value as {
+    publicKey: string;
+    privateKeySealed: string;
+    at: number;
+  };
+  expect(aside.publicKey).toBe(vapid.publicKey);
+  expect(newBox.open(aside.privateKeySealed, "push.vapid-key")).toBe(vapid.privateKey);
+  expect(oldBox.open(aside.privateKeySealed, "push.vapid-key")).toBeNull();
+  expect(aside.at).toBeGreaterThanOrEqual(before);
   after.close();
 });

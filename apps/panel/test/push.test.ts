@@ -13,11 +13,11 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createDecipheriv, createECDH, createHmac } from "node:crypto";
 import { push, system } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { alertMutes, pushDevices, sessions } from "../src/db/schema";
+import { alertMutes, pushDevices, sessions, settings } from "../src/db/schema";
 import { createProxyTrust } from "../src/http/proxy-trust";
 import { endpointHash, forgetOtherOrigins } from "../src/modules/push/devices";
 import { pngSize, shortName } from "../src/modules/push/http";
-import { burstLimit, resetPushIo, setPushIo } from "../src/modules/push/send";
+import { burstLimit, incidentOf, recordSend, resetPushIo, revokeOnStart, setPushIo, topicOf } from "../src/modules/push/send";
 import { turnOnBlocks } from "../src/modules/push/state";
 import { getSetting, setSetting } from "../src/settings";
 import { callOp, createApiKey, createUser, grant, type TestPanel, testPanel } from "./helpers";
@@ -389,4 +389,91 @@ test("the manifest is served while push works, with the panel's name and the bui
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
   expect(pngSize(png)).toEqual({ width: 1, height: 1 });
   expect(pngSize(Buffer.from("not a png at all, really not"))).toBeNull();
+});
+
+test("incidents: the start time is cut off, one-part keys stay whole, node back online replaces node offline", () => {
+  expect(incidentOf("crash:svc1:1731250000000")).toBe("crash:svc1");
+  expect(incidentOf("approval:abc")).toBe("approval:abc");
+  expect(incidentOf("build-failed:b1")).not.toBe(incidentOf("build-failed:b2"));
+  expect(incidentOf("deploy-failed:svc1:3:node1")).toBe("deploy-failed:svc1:3:node1");
+  expect(incidentOf("security:u1:1731250000000:5f2c")).toBe("security:u1:1731250000000:5f2c");
+  expect(topicOf("node-online:n1:1731250099999")).toBe(topicOf("node-offline:n1:1731250000000"));
+  expect(topicOf("approval:a1")).not.toBe(topicOf("approval:a2"));
+});
+
+test("a throttled device (WNS 406) is retried and not counted as failing; a device of an ended session is dropped", async () => {
+  activeDomain();
+  const onDomain = await createUser(panel, "owner");
+  await turnOn(onDomain);
+  const service = seedService(panel, seedProject(panel).id);
+  await addDevice(onDomain);
+  status = () => 406;
+  panel.deps.alerts.raise({ event: "crash", key: `crash:${service.id}:1`, title: "crashed", serviceId: service.id });
+  await panel.runner.runDue(panel.deps);
+  await panel.runner.runDue(panel.deps);
+  const row = () => panel.deps.db.select().from(pushDevices).get();
+  expect(row()).toMatchObject({ failures: 0 });
+  expect(row()?.lastError).toContain("406");
+
+  // Two failures counted from the same stale row still count twice.
+  const stale = row() as NonNullable<ReturnType<typeof row>>;
+  recordSend(panel.deps, stale, { kind: "rejected", error: "403" }, true);
+  recordSend(panel.deps, stale, { kind: "rejected", error: "403" }, true);
+  expect(row()?.failures).toBe(2);
+
+  // The session expires without a sign-out: the device goes and gets nothing more.
+  panel.deps.db
+    .update(sessions)
+    .set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(sessions.id, stale.sessionId))
+    .run();
+  sent = [];
+  status = () => 201;
+  panel.deps.alerts.raise({ event: "crash", key: `crash:${service.id}:2`, title: "crashed again", serviceId: service.id });
+  await runJobs();
+  expect(sent).toHaveLength(0);
+  expect(panel.deps.db.select().from(pushDevices).all()).toEqual([]);
+});
+
+test("after a --new-panel-identity rotation the old devices get a revoke push with the old key, then go; new ones work at once", async () => {
+  activeDomain();
+  const owner = await createUser(panel, "owner");
+  await turnOn(owner);
+  const old = await addDevice(owner);
+  const oldKey = getSetting(panel.deps.db, "pushVapid");
+  // What the rotation leaves (security/rotate-master-key.ts setPushKeyAside), a moment after the device was added.
+  await Bun.sleep(5);
+  setSetting(panel.deps.db, "pushVapidRevoked", { ...(oldKey as NonNullable<typeof oldKey>), at: Date.now() });
+  panel.deps.db.delete(settings).where(eq(settings.key, "pushVapid")).run();
+  await Bun.sleep(5);
+
+  // Push stays on: the page gets a new key at once, without the old device in the list.
+  const mine = (await callOp(panel, push.mine, {}, { cookie: owner.cookie, headers: overDomain })).body;
+  expect(mine.publicKey).toHaveLength(87);
+  expect(mine.publicKey).not.toBe(oldKey?.publicKey);
+  expect(mine.devices).toEqual([]);
+  const fresh = await addDevice(owner);
+
+  // Alerts reach only the new device.
+  const service = seedService(panel, seedProject(panel).id);
+  panel.deps.alerts.raise({ event: "crash", key: `crash:${service.id}:1`, title: "crashed", serviceId: service.id });
+  await runJobs();
+  expect(sent.map((s) => new URL(s.url).pathname)).toEqual([new URL(fresh.sub.endpoint).pathname]);
+
+  // The panel starts: the old device gets one revoke push, signed with the key it subscribed with.
+  sent = [];
+  revokeOnStart(panel.deps);
+  await runJobs();
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.url.endsWith(new URL(old.sub.endpoint).pathname)).toBe(true);
+  expect(sent[0]?.headers.authorization).toEndWith(`k=${oldKey?.publicKey}`);
+  expect(openAsBrowser(old.sub.endpoint, sent[0]?.body as Buffer)).toMatchObject({ type: "revoke", url: "/settings/push" });
+  expect(
+    panel.deps.db
+      .select()
+      .from(pushDevices)
+      .all()
+      .map((d) => d.id),
+  ).toEqual([fresh.device.id]);
+  expect(getSetting(panel.deps.db, "pushVapidRevoked")).toBeUndefined();
 });
