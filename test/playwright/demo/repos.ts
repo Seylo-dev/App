@@ -145,6 +145,8 @@ export const handlers: Record<string, (input: Input) => unknown> = {
   "github.installations": () => installations(null),
   "github.repos": (input) => page(heldBy(input), input),
   "github.branches": (input) => branches(heldBy(input), input),
+  // acme/shop-api has a Dockerfile at its root; the other demo repositories do not.
+  "github.detectBuilder": (input) => ({ dockerfile: input.repo === "acme/shop-api" }),
   "github.repoWebhook": () => ({ configured: false, repo: null, url: null, created: false, error: null, lastDeliveryAt: null }),
   "gitProviders.list": () => ({ items: [gitlabConnection], hidden: false }),
   "gitProviders.repos": (input) => page(gitlabRepos, input),

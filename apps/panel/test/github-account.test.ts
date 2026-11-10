@@ -123,6 +123,10 @@ function fakeGithub() {
         private: false,
         permissions: { admin: false, push: false, pull: true },
       });
+    // acme/shop has a Dockerfile at its root on main; acme/repo-001 does not.
+    if (url.pathname === "/repos/acme/shop/contents/Dockerfile")
+      return url.searchParams.get("ref") === "main" ? json(200, { name: "Dockerfile", type: "file" }) : json(404, { message: "Not Found" });
+    if (url.pathname === "/repos/acme/repo-001/contents/Dockerfile") return json(404, { message: "Not Found" });
     if (url.pathname === "/repos/lee/fork/branches" || url.pathname === "/repos/acme/repo-001/branches")
       return json(200, [{ name: "main" }]);
     // The token's hourly requests are used up (403) or a secondary limit hit (429).
@@ -295,6 +299,18 @@ describe("the account as a source", () => {
     ]);
     expect(calls.filter((c) => c.path === "/user/repos" && c.search.includes("per_page=100"))).toHaveLength(3);
     expect(userRepoPages).toBe(10);
+  });
+
+  test("detectBuilder: a Dockerfile at the root on the branch, best effort", async () => {
+    const { body: account } = await connect();
+    const ask = (repo: string, branch: string) =>
+      callOp(panel, github.detectBuilder, { projectId, accountId: account.id, repo, branch }, { cookie });
+    expect((await ask("acme/shop", "main")).body).toEqual({ dockerfile: true });
+    expect((await ask("acme/shop", "dev")).body).toEqual({ dockerfile: false });
+    expect((await ask("acme/repo-001", "main")).body).toEqual({ dockerfile: false });
+    // GitHub not answering (rate limited) is no Dockerfile, not an error for the form.
+    expect((await ask("acme/busy", "main")).body).toEqual({ dockerfile: false });
+    expect(calls.find((c) => c.path === "/repos/acme/shop/contents/Dockerfile")?.search).toBe("?ref=main");
   });
 
   test("branches and installationId or accountId, exactly one", async () => {

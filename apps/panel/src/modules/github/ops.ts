@@ -462,6 +462,19 @@ const branches = implement(githubOps.branches, async (input, ctx) => {
   return { defaultBranch, branches: all.filter((b) => !q || b.toLowerCase().includes(q)).slice(0, 500) };
 });
 
+/** A Dockerfile at the repository's root on the branch, for the New app form's builder. Never fails the form. */
+const detectBuilder = implement(githubOps.detectBuilder, async (input, ctx) => {
+  const via = viaOf(input);
+  assertSourceAllowed(ctx, input.projectId, { type: "github", ...sourceVia(ctx, via), repo: input.repo }, "");
+  try {
+    const { token } = await tokenVia(ctx, via);
+    await githubRequest(`/repos/${input.repo}/contents/Dockerfile?ref=${encodeURIComponent(input.branch)}`, { auth: token });
+    return { dockerfile: true };
+  } catch {
+    return { dockerfile: false };
+  }
+});
+
 const connectRepo = implement(githubOps.connectRepo, async (input, ctx) => {
   const row = loadService(ctx.db, input.serviceId);
   if (row.kind !== "app" && row.kind !== "cron") throw new OpError("CONFLICT", `A ${row.kind} service cannot build from a repository.`);
@@ -660,6 +673,7 @@ export const githubHandlers = [
   syncInstallations,
   repos,
   branches,
+  detectBuilder,
   connectRepo,
   repoWebhook,
   tokenConnect,

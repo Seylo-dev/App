@@ -116,12 +116,20 @@ test("browse and pick a GitHub repository, pick another branch, create it connec
   await popover(page).getByRole("option", { name: "next" }).click();
   await expect(dialog.locator("#ns-branch")).toHaveValue("next");
 
+  // How it builds, before the first deploy: Railpack unless picked (this repository has no Dockerfile).
+  const builder = dialog.getByRole("combobox", { name: "Build with" });
+  await expect(builder).toHaveText("Railpack");
+  await builder.click();
+  await page.getByRole("option", { name: "Nixpacks" }).click();
+  await expect(builder).toHaveText("Nixpacks");
+
   await expect(dialog.getByRole("checkbox", { name: "Deploy right away" })).toBeChecked();
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/p/${svc.project}/s/${svc.api}$`));
   // services.create takes no GitHub source: it is connected through github.connectRepo after, then deployed.
   const [create] = calls("services.create");
   expect(create).toMatchObject({ projectId: ids.acme, name: "web", kind: "app", deployNow: false, ports: [{ containerPort: 80 }] });
+  expect(create?.build).toEqual({ builder: "nixpacks" });
   expect(create?.source).toBeUndefined();
   expect(calls("github.connectRepo")).toEqual([
     { serviceId: svc.api, installationId: installation.id, repo: "acme/storefront", branch: "next", deployOnPush: true },
@@ -694,3 +702,19 @@ test("the Browse list fits short windows and phones: inside the window, as wide 
   expect((pop?.x ?? 0) + (pop?.width ?? 0)).toBeLessThanOrEqual(390 - 16 + 1);
   await shot(page, "phone-browse");
 });
+
+test("a repository with a Dockerfile at its root starts on the Dockerfile builder, with its path", async ({ page }) => {
+  const calls = watchOps(page);
+  await installDemo(page);
+  const dialog = await openGithubTab(page);
+  await dialog.getByRole("button", { name: "Browse" }).click();
+  await popover(page).getByRole("option", { name: /acme\/shop-api/ }).click();
+  const builder = dialog.getByRole("combobox", { name: "Build with" });
+  await expect(builder).toHaveText("Dockerfile");
+  await expect(dialog.getByText("The repository has a Dockerfile, so Dockerfile is picked.")).toBeVisible();
+  await dialog.getByLabel("Dockerfile path").fill("docker/web.Dockerfile");
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  await expect.poll(() => calls("services.create").length).toBe(1);
+  expect(calls("services.create")[0]?.build).toEqual({ builder: "dockerfile", dockerfilePath: "docker/web.Dockerfile" });
+});
+

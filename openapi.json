@@ -37096,6 +37096,102 @@
         "x-mcp": false
       }
     },
+    "/api/v1/github.detectBuilder": {
+      "get": {
+        "operationId": "github.detectBuilder",
+        "summary": "Suggest how to build a repository",
+        "description": "Says whether a repository has a Dockerfile at its root on a branch, read through the App (installationId) or the connected GitHub account (accountId), so a new app can start with the Dockerfile builder. Best effort: dockerfile is false when GitHub does not answer.",
+        "tags": [
+          "github"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "installationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 255,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "dockerfile"
+                  ],
+                  "properties": {
+                    "dockerfile": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "project:services.create",
+        "x-mcp": true
+      }
+    },
     "/api/v1/github.deviceDisconnect": {
       "post": {
         "operationId": "github.deviceDisconnect",

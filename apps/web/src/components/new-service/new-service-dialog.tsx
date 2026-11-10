@@ -38,6 +38,10 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { ComposePreview } from "../../lib/types";
+
+type Builder = "railpack" | "nixpacks" | "dockerfile";
+const builders: readonly Builder[] = ["railpack", "nixpacks", "dockerfile"];
+
 import { portChoices } from "../docker-hub/prefill";
 import { useDebounced } from "../docker-hub/use-debounced";
 import { InternalHostNote, useCanManageGit } from "../git/internal-hosts";
@@ -152,6 +156,9 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   // null: the default (80, or the port the Docker Hub image exposes); a string once someone typed in the field.
   const [portEdit, setPortEdit] = useState<string | null>(null);
   const [deployNow, setDeployNow] = useState(true);
+  // How a repository is built, chosen before the first deploy (the Source tab changes it later).
+  const [builder, setBuilder] = useState<Builder>("railpack");
+  const [dockerfilePath, setDockerfilePath] = useState("Dockerfile");
   const [schedule, setSchedule] = useState("0 * * * *");
   const [command, setCommand] = useState("");
   const [engine, setEngine] = useState<Engine>("postgres");
@@ -252,6 +259,22 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   // An SSH URL has no deploy key yet: its first deploy can only fail.
   const deployBlocked = (githubTab || gitTab) && repoDecision.type === "git" && repoDecision.repo.ssh;
 
+  // A GitHub repository with a Dockerfile at its root starts on the Dockerfile builder, until the person picks one.
+  const [builderPicked, setBuilderPicked] = useState(false);
+  const ghSource = githubTab && repoSourceToCreate?.type === "github" ? repoSourceToCreate : null;
+  const detected = useOp(
+    github.detectBuilder,
+    {
+      projectId,
+      ...(ghSource?.installationId ? { installationId: ghSource.installationId } : { accountId: ghSource?.accountId ?? "" }),
+      repo: ghSource?.repo ?? "x/x",
+      branch: ghSource?.branch ?? "main",
+    },
+    { enabled: ghSource !== null && projectId !== "", retry: false, staleTime: 5 * 60_000 },
+  );
+  const detectedDockerfile = ghSource !== null && detected.data?.dockerfile === true;
+  const shownBuilder: Builder = builderPicked ? builder : detectedDockerfile ? "dockerfile" : builder;
+
   // The image's exposed port, from Docker Hub, once the name rests.
   const hubRef = dockerHubRef(useDebounced(image, 600));
   const hub = useOp(dockerHub.inspect, hubRef ?? { repository: "nginx", tag: "latest" }, {
@@ -320,11 +343,15 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             ? (repoSourceToCreate ?? undefined)
             : undefined;
       const deploy = deployNow && !deployBlocked;
+      const build =
+        appSource === "github" || appSource === "git"
+          ? { builder: shownBuilder, ...(shownBuilder === "dockerfile" ? { dockerfilePath: dockerfilePath.trim() || "Dockerfile" } : {}) }
+          : undefined;
       if (source?.type === "github") {
-        createAndConnect.mutate({ create: { ...base, kind: "app", ports, deployNow: false }, source, deployNow: deploy });
+        createAndConnect.mutate({ create: { ...base, kind: "app", ports, build, deployNow: false }, source, deployNow: deploy });
         return;
       }
-      createService.mutate({ ...base, kind: "app", source, ports, deployNow: appSource !== "none" && deploy });
+      createService.mutate({ ...base, kind: "app", source, ports, build, deployNow: appSource !== "none" && deploy });
     }
   };
 
@@ -467,6 +494,47 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             </div>
           )}
           {appSource === "none" && <p className="m-0 text-[13px] text-muted-foreground">{t("newService.sourceLaterHint")}</p>}
+          {portShown && (appSource === "github" || appSource === "git") && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                id="ns-builder"
+                label="newService.builder"
+                hintText={
+                  !builderPicked && detectedDockerfile ? t("newService.builderDetected") : t(`newService.builderHint.${shownBuilder}`)
+                }
+              >
+                <Select
+                  value={shownBuilder}
+                  onValueChange={(value) => {
+                    setBuilderPicked(true);
+                    setBuilder(value as Builder);
+                  }}
+                >
+                  <SelectTrigger id="ns-builder" aria-describedby="ns-builder-hint">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {builders.map((b) => (
+                      <SelectItem key={b} value={b}>
+                        {t(`serviceSource.builders.${b}.name`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {shownBuilder === "dockerfile" && (
+                <Field id="ns-dockerfile" label="newService.dockerfilePath">
+                  <Input
+                    id="ns-dockerfile"
+                    value={dockerfilePath}
+                    onChange={(e) => setDockerfilePath(e.target.value)}
+                    placeholder="Dockerfile"
+                    className="font-mono"
+                  />
+                </Field>
+              )}
+            </div>
+          )}
           {portShown && (
             <Field id="ns-port" label="newService.port" hintText={t(portHint.key, portHint.params)}>
               <Input

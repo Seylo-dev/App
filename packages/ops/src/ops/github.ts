@@ -242,6 +242,25 @@ export const branches = defineOp({
   audit: false,
 });
 
+export const detectBuilder = defineOp({
+  id: "github.detectBuilder",
+  kind: "query",
+  summary: "Suggest how to build a repository",
+  description:
+    "Says whether a repository has a Dockerfile at its root on a branch, read through the App (installationId) or the connected GitHub account (accountId), so a new app can start with the Dockerfile builder. Best effort: dockerfile is false when GitHub does not answer.",
+  input: Type.Object({
+    projectId: Id,
+    installationId: Type.Optional(Id),
+    accountId: Type.Optional(Id),
+    repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
+    branch: Type.String({ minLength: 1, maxLength: 255 }),
+  }),
+  output: Type.Object({ dockerfile: Type.Boolean() }),
+  permission: permission.project("services.create", projectScope),
+  mcp: true,
+  audit: false,
+});
+
 export const connectRepo = defineOp({
   id: "github.connectRepo",
   kind: "mutation",
