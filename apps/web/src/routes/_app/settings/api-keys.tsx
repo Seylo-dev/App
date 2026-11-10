@@ -1,13 +1,13 @@
 // Settings > API keys and MCP: scoped API keys for scripts and CI, and the
-// MCP server for model hosts (its URL, config snippets, tokens and the
-// OAuth clients that connected). MCP is read-only by default; anything
-// that changes something waits for a person in Approvals.
+// MCP server for model hosts (its URL, its two safety switches, one-click
+// installs and config snippets per AI tool, tokens and the OAuth clients
+// that connected). MCP is read-only by default and anything that deletes
+// something waits for a person in Approvals, until an admin turns either
+// switch off.
 
 import { auth, mcp, type OpOutput } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
-import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
-import { CodeBlock } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { CopyField } from "@seylo/ui/components/copy-field";
 import { DataTable } from "@seylo/ui/components/data-table";
@@ -17,11 +17,12 @@ import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
 import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { Switch } from "@seylo/ui/components/switch";
 import { IconPlugConnected, IconPlus } from "@tabler/icons-react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { formatRelative } from "../../../components/settings/format";
 import { KeySheet } from "../../../components/settings/keys/key-sheet";
 import { KeyTable } from "../../../components/settings/keys/key-table";
+import { McpHostSetup, type McpInfo, McpSafetyNote } from "../../../components/settings/keys/mcp-setup";
 import { useSettingsMutation } from "../../../components/settings/mutation";
 import { OpErrorCallout, QueryView } from "../../../components/settings/op-state";
 import { SettingRow, SettingsPage } from "../../../components/settings/page";
@@ -98,8 +99,6 @@ function ApiKeysSection({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-type McpInfo = OpOutput<typeof mcp.info>;
-
 function McpSection({ isAdmin }: { isAdmin: boolean }) {
   const info = useOp(mcp.info, {});
   return (
@@ -109,24 +108,21 @@ function McpSection({ isAdmin }: { isAdmin: boolean }) {
           {(data) => <McpServer data={data} isAdmin={isAdmin} />}
         </QueryView>
       </SectionCard>
-      <McpTokens isAdmin={isAdmin} />
+      <McpTokens isAdmin={isAdmin} askBeforeDestructive={info.data?.askBeforeDestructive ?? true} />
       {isAdmin && <McpClients />}
     </>
   );
 }
 
-const snippetHosts = ["claude-code", "claude-desktop", "cursor"] as const;
-type SnippetHost = (typeof snippetHosts)[number];
-
-function hostLabel(host: string): string {
-  return (snippetHosts as readonly string[]).includes(host) ? t(`settingsKeys.mcp.hosts.${host as SnippetHost}`) : host;
-}
-
-/** The MCP card's switch, safety note, the two addresses and the setup snippet while the info loads. */
+/** The MCP card's three switches, safety note, the two addresses and the setup snippet while the info loads. */
 function McpSkeleton() {
   return (
     <>
-      <SettingRowSkeleton titleWidth="w-24" />
+      <div className="flex flex-col">
+        <SettingRowSkeleton titleWidth="w-24" />
+        <SettingRowSkeleton titleWidth="w-48" />
+        <SettingRowSkeleton titleWidth="w-44" />
+      </div>
       <Skeleton className="h-[67px] bg-chip-blue-bg" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {[0, 1].map((i) => (
@@ -138,7 +134,9 @@ function McpSkeleton() {
       </div>
       <SkeletonText className="w-72 text-[12.5px]" />
       <div className="flex flex-col gap-2">
-        <Skeleton className="h-8 w-64" />
+        {/* Seven AI tools; the track scrolls on a phone. */}
+        <Skeleton className="h-8 w-[540px] max-w-full" />
+        <SkeletonText className="w-96 max-w-full text-[12.5px]" />
         {/* The setup snippet: one 12.5px line at 1.7 beside the floating Copy button, 12px above and below. */}
         <Skeleton className="h-[49px] bg-terminal" />
       </div>
@@ -146,34 +144,37 @@ function McpSkeleton() {
   );
 }
 
+type McpSwitch = "enabled" | "askBeforeDestructive" | "readOnlyByDefault";
+
+/** The card's switches, in order: the server itself, then the two safety defaults (both on until an admin turns them off). */
+const switchCopy = {
+  enabled: { title: "settingsKeys.mcp.enabled", hint: "settingsKeys.mcp.enabledHint" },
+  askBeforeDestructive: { title: "settingsKeys.mcp.askBeforeDestructive", hint: "settingsKeys.mcp.askBeforeDestructiveHint" },
+  readOnlyByDefault: { title: "settingsKeys.mcp.readOnlyByDefault", hint: "settingsKeys.mcp.readOnlyByDefaultHint" },
+} as const;
+
 function McpServer({ data, isAdmin }: { data: McpInfo; isAdmin: boolean }) {
   const update = useSettingsMutation(mcp.update, { invalidates: [mcp.info] });
-  const hosts = [
-    ...snippetHosts.filter((h) => h in data.snippets),
-    ...Object.keys(data.snippets).filter((h) => !snippetHosts.includes(h as never)),
-  ];
-  const [host, setHost] = useState(hosts[0] ?? "");
-  const snippet = data.snippets[host];
   return (
     <div className="flex flex-col gap-4">
-      <SettingRow
-        title={t("settingsKeys.mcp.enabled")}
-        description={t("settingsKeys.mcp.enabledHint")}
-        control={
-          <Switch
-            checked={data.enabled}
-            disabled={!isAdmin || update.isPending}
-            aria-label={t("settingsKeys.mcp.enabled")}
-            onCheckedChange={(enabled) => update.mutate({ enabled })}
+      <div className="flex flex-col">
+        {(Object.keys(switchCopy) as McpSwitch[]).map((field) => (
+          <SettingRow
+            key={field}
+            title={t(switchCopy[field].title)}
+            description={t(switchCopy[field].hint)}
+            control={
+              <Switch
+                checked={data[field]}
+                disabled={!isAdmin || update.isPending}
+                aria-label={t(switchCopy[field].title)}
+                onCheckedChange={(on) => update.mutate({ [field]: on })}
+              />
+            }
           />
-        }
-      />
-      <Alert tone="info" title={t("settingsKeys.mcp.safetyTitle")}>
-        {t("settingsKeys.mcp.safety")}{" "}
-        <Link to="/approvals" className="font-medium underline">
-          {t("settingsKeys.mcp.approvalsLink")}
-        </Link>
-      </Alert>
+        ))}
+      </div>
+      <McpSafetyNote info={data} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-1.5">
           <span className="text-[12.5px] font-medium text-ink-strong">{t("settingsKeys.mcp.url")}</span>
@@ -187,23 +188,12 @@ function McpServer({ data, isAdmin }: { data: McpInfo; isAdmin: boolean }) {
       <p className="m-0 text-[12.5px] text-muted-foreground">
         {t("settingsKeys.mcp.tools", { total: data.tools.total, readOnly: data.tools.readOnly, destructive: data.tools.destructive })}
       </p>
-      {hosts.length > 0 && snippet !== undefined && (
-        <div className="flex flex-col gap-2">
-          <Segmented value={host} onValueChange={setHost} aria-label={t("settingsKeys.mcp.host")} className="self-start">
-            {hosts.map((h) => (
-              <SegmentedItem key={h} value={h}>
-                {hostLabel(h)}
-              </SegmentedItem>
-            ))}
-          </Segmented>
-          <CodeBlock code={snippet} tone="dark" maxHeight={260} />
-        </div>
-      )}
+      <McpHostSetup info={data} />
     </div>
   );
 }
 
-function McpTokens({ isAdmin }: { isAdmin: boolean }) {
+function McpTokens({ isAdmin, askBeforeDestructive }: { isAdmin: boolean; askBeforeDestructive: boolean }) {
   const [creating, setCreating] = useState(false);
   const [whose, setWhose] = useState<Whose>("mine");
   const [revoked, setRevoked] = useState(false);
@@ -221,7 +211,7 @@ function McpTokens({ isAdmin }: { isAdmin: boolean }) {
     >
       <KeyFilters isAdmin={isAdmin} whose={whose} setWhose={setWhose} revoked={revoked} setRevoked={setRevoked} />
       <KeyTable kind="mcp" everyone={whose === "everyone"} includeRevoked={revoked} empty={t("settingsKeys.mcp.noTokens")} />
-      <KeySheet kind="mcp" open={creating} onOpenChange={setCreating} />
+      <KeySheet kind="mcp" open={creating} onOpenChange={setCreating} askBeforeDestructive={askBeforeDestructive} />
     </SectionCard>
   );
 }

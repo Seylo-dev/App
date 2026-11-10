@@ -111,7 +111,8 @@ export const test = base.extend<{ pageGuard: undefined }>({
   ],
 });
 
-const slug = /^BRAND_SLUG='([^']+)'$/m.exec(readFileSync(new URL("../../installer/brand.env", import.meta.url), "utf8"))?.[1] ?? "";
+/** The brand slug from installer/brand.env: storage keys, headers, and the name AI tools give the MCP server. */
+export const slug = /^BRAND_SLUG='([^']+)'$/m.exec(readFileSync(new URL("../../installer/brand.env", import.meta.url), "utf8"))?.[1] ?? "";
 
 /**
  * The browser half of a session (apps/web/src/lib/session-key.ts): the web

@@ -120,14 +120,29 @@ export const fixtures: Record<string, unknown> = {
       ],
     };
   },
+  // What apps/panel/src/modules/mcp/hosts.ts builds for this URL.
   "mcp.info": {
     enabled: true,
+    askBeforeDestructive: true,
+    readOnlyByDefault: true,
     url: "https://panel.acme.dev/mcp",
     oauthMetadataUrl: "https://panel.acme.dev/.well-known/oauth-authorization-server",
     snippets: {
-      "claude-code": "claude mcp add --transport http panel https://panel.acme.dev/mcp",
-      "claude-desktop": '{\n  "mcpServers": {\n    "panel": { "url": "https://panel.acme.dev/mcp" }\n  }\n}',
-      cursor: '{\n  "mcpServers": { "panel": { "url": "https://panel.acme.dev/mcp" } }\n}',
+      "claude-code": "claude mcp add --transport http seylo https://panel.acme.dev/mcp",
+      "claude-desktop": "https://panel.acme.dev/mcp",
+      cursor: '{\n  "mcpServers": {\n    "seylo": {\n      "url": "https://panel.acme.dev/mcp"\n    }\n  }\n}',
+      vscode: `code --add-mcp '{"name":"seylo","type":"http","url":"https://panel.acme.dev/mcp"}'`,
+      codex: "codex mcp add seylo --url https://panel.acme.dev/mcp",
+      "gemini-cli": "gemini mcp add --transport http seylo https://panel.acme.dev/mcp",
+      goose: "goose session --with-streamable-http-extension 'https://panel.acme.dev/mcp'",
+    },
+    installLinks: {
+      "claude-desktop": "https://claude.ai/customize/connectors",
+      cursor: "https://cursor.com/en/install-mcp?name=seylo&config=eyJ1cmwiOiJodHRwczovL3BhbmVsLmFjbWUuZGV2L21jcCJ9",
+      vscode:
+        "https://vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522seylo%2522%252C%2522type%2522%253A%2522http%2522%252C%2522url%2522%253A%2522https%253A%252F%252Fpanel.acme.dev%252Fmcp%2522%257D",
+      goose:
+        "goose://extension?url=https%3A%2F%2Fpanel.acme.dev%2Fmcp&type=streamable_http&id=seylo&name=seylo&description=Seylo%20deploy%20panel",
     },
     tools: { total: 148, readOnly: 71, destructive: 19 },
   },

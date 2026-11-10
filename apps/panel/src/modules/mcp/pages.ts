@@ -18,6 +18,10 @@ interface ConsentPage {
   fields: [string, string][];
   /** The scope the client asked for; shown, never used to preselect a choice. */
   requestedScope: string;
+  /** The choice that starts selected: the panel's "New AI tools start read-only" setting (keys.ts). */
+  preselect: "read" | "write";
+  /** Whether destructive calls wait for a person ("Ask before destructive actions"), for the Read and change line. */
+  askBeforeDestructive: boolean;
   csrf: string;
   sessionKey: string;
 }
@@ -91,7 +95,12 @@ export function consentPage(input: ConsentPage): Response {
   const asksWrite = input.requestedScope.split(/\s+/).includes("mcp:write");
   // Anyone can register a client under any name, so the name is marked as
   // unverified and the address the answer goes to is what identifies it.
-  // Read only is always the preselected choice, whatever the app asked for.
+  // The preselected choice is the panel's setting (read only unless someone
+  // with mcp.manage turned it off), never what the app asked for.
+  const checked = (access: "read" | "write") => (input.preselect === access ? " checked" : "");
+  const writeLine = input.askBeforeDestructive
+    ? "Also deploy, restart and edit. Deleting anything still waits for your approval."
+    : "Also deploy, restart, edit and delete, without asking you first.";
   const body = `
 <div class="brand">${escapeHtml(input.panelName)}</div>
 <h1>Connect an app at ${escapeHtml(input.redirectHost)}?</h1>
@@ -99,8 +108,8 @@ export function consentPage(input: ConsentPage): Response {
 <p class="note">It asked for ${asksWrite ? "read and change access" : "read only access"}.</p>
 <form method="post" action="/oauth/authorize">
 ${hidden}
-<label class="choice"><input type="radio" name="access" value="read" checked /><div><strong>Read only</strong><span>Look at projects, services, logs and settings. Nothing can be changed.</span></div></label>
-<label class="choice"><input type="radio" name="access" value="write" /><div><strong>Read and change</strong><span>Also deploy, restart and edit. Deleting anything still waits for your approval.</span></div></label>
+<label class="choice"><input type="radio" name="access" value="read"${checked("read")} /><div><strong>Read only</strong><span>Look at projects, services, logs and settings. Nothing can be changed.</span></div></label>
+<label class="choice"><input type="radio" name="access" value="write"${checked("write")} /><div><strong>Read and change</strong><span>${writeLine}</span></div></label>
 <p class="note">It never gets more than your own permissions. You can revoke it any time in Settings.</p>
 <div class="actions"><button type="submit" name="decision" value="deny">Deny</button><button class="primary" type="submit" name="decision" value="allow">Allow</button></div>
 </form>`;

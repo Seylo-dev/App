@@ -5,7 +5,8 @@
 //     -> rate limit -> run -> check output -> audit
 //
 // Calls a model made (MCP and AI transports, or any MCP token) only reach
-// ops marked mcp: true, and destructive ones need a person's approval.
+// ops marked mcp: true, and destructive ones need a person's approval
+// (MCP tokens skip it while "Ask before destructive actions" is off).
 //
 // Input is validated before the permission check because project and
 // service permissions read the resource id from the input. Anonymous
@@ -18,6 +19,7 @@ import { authenticate, type Credentials, signedOutError } from "../auth/authenti
 import { describePrincipal, type Principal, type PrincipalUser } from "../auth/principal";
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
+import { readMcpSafety } from "../modules/mcp/keys";
 import { anonymousErrorRows, firstOverCapThisHour, takeAnonymousErrorRow, targetLabel, targetProject, writeAudit } from "./audit";
 import { type HttpEffects, maxViaLoginLength, type OpContext, type OpHandler, type OpVia } from "./implement";
 import type { RateLimiter } from "./rate-limit";
@@ -46,7 +48,8 @@ export interface OpCall {
   /**
    * Set only by the approvals module when it replays a call a person
    * approved; never taken from request input. Destructive ops from models
-   * (MCP and AI transports, or any MCP token) refuse to run without it.
+   * (MCP and AI transports, or any MCP token) refuse to run without it,
+   * unless an MCP token calls while "Ask before destructive actions" is off.
    */
   approvalId?: string | null;
   /**
@@ -101,7 +104,7 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       access.require(op.permission, op.kind, input);
       // Read the name now: after a delete it would be gone.
       if (target && op.audit) label = targetLabel(deps.db, target);
-      if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId) {
+      if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId && !approvalWaived(deps, principal)) {
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
       }
 
@@ -133,6 +136,17 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
 /** Calls a model made: MCP and AI transports, and MCP tokens on any transport. */
 function fromModel(call: OpCall, principal: Principal): boolean {
   return call.transport !== "http" || (principal.type === "apiKey" && principal.keyKind === "mcp");
+}
+
+/**
+ * MCP tokens skip the approval while "Ask before destructive actions" is off
+ * (modules/mcp/keys.ts); the call is still audited, and a read-only token
+ * was refused by the permission check before this. The AI assistant never
+ * skips it: it runs as a session and queues every change itself
+ * (modules/ai/loop.ts).
+ */
+function approvalWaived(deps: Deps, principal: Principal): boolean {
+  return principal.type === "apiKey" && principal.keyKind === "mcp" && !readMcpSafety(deps.db).askBeforeDestructive;
 }
 
 /** via and viaLogin of a call, checked: only HTTP calls come in on a listener, and the login is cut. */

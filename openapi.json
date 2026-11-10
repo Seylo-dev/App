@@ -42152,7 +42152,7 @@
       "get": {
         "operationId": "mcp.info",
         "summary": "Get MCP server information",
-        "description": "Returns whether the MCP server is on, its URL, the OAuth metadata URL, config snippets for model hosts and how many tools it offers.",
+        "description": "Returns whether the MCP server is on, its two safety switches, its URL, the OAuth metadata URL, config snippets and one-click install links for model hosts, and how many tools it offers.",
         "tags": [
           "mcp"
         ],
@@ -42175,13 +42175,22 @@
                   "type": "object",
                   "required": [
                     "enabled",
+                    "askBeforeDestructive",
+                    "readOnlyByDefault",
                     "url",
                     "oauthMetadataUrl",
                     "snippets",
+                    "installLinks",
                     "tools"
                   ],
                   "properties": {
                     "enabled": {
+                      "type": "boolean"
+                    },
+                    "askBeforeDestructive": {
+                      "type": "boolean"
+                    },
+                    "readOnlyByDefault": {
                       "type": "boolean"
                     },
                     "url": {
@@ -42191,6 +42200,14 @@
                       "type": "string"
                     },
                     "snippets": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^(.*)$": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "installLinks": {
                       "type": "object",
                       "patternProperties": {
                         "^(.*)$": {
@@ -42295,8 +42312,8 @@
     "/api/v1/mcp.update": {
       "post": {
         "operationId": "mcp.update",
-        "summary": "Turn the MCP server on or off",
-        "description": "Switches the MCP endpoint on or off for the whole panel. Off refuses every token and OAuth flow but keeps them.",
+        "summary": "Change the MCP server settings",
+        "description": "Changes the MCP settings for the whole panel; fields left out keep their value. enabled switches the endpoint on or off: off refuses every token and OAuth flow but keeps them. askBeforeDestructive (on by default): destructive calls from MCP tokens wait for a person in approvals; off, they run right away, still audited and still refused for read-only tokens. readOnlyByDefault (on by default): the OAuth consent page preselects read only for a new AI tool; off, it preselects read and change.",
         "tags": [
           "mcp"
         ],
@@ -42315,11 +42332,14 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "enabled"
-                ],
                 "properties": {
                   "enabled": {
+                    "type": "boolean"
+                  },
+                  "askBeforeDestructive": {
+                    "type": "boolean"
+                  },
+                  "readOnlyByDefault": {
                     "type": "boolean"
                   }
                 }
@@ -42336,13 +42356,22 @@
                   "type": "object",
                   "required": [
                     "enabled",
+                    "askBeforeDestructive",
+                    "readOnlyByDefault",
                     "url",
                     "oauthMetadataUrl",
                     "snippets",
+                    "installLinks",
                     "tools"
                   ],
                   "properties": {
                     "enabled": {
+                      "type": "boolean"
+                    },
+                    "askBeforeDestructive": {
+                      "type": "boolean"
+                    },
+                    "readOnlyByDefault": {
                       "type": "boolean"
                     },
                     "url": {
@@ -42352,6 +42381,14 @@
                       "type": "string"
                     },
                     "snippets": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^(.*)$": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "installLinks": {
                       "type": "object",
                       "patternProperties": {
                         "^(.*)$": {

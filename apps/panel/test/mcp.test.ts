@@ -1,13 +1,16 @@
 // The MCP server end to end on app.handle: OAuth 2.1 with PKCE (register,
 // consent, code, token, refresh, revoke), the JSON-RPC endpoint (initialize,
 // tools/list filtered by token scope, tools/call through the op pipeline),
-// and destructive calls turning into approvals a person decides.
+// destructive calls turning into approvals a person decides, and the two
+// safety switches (Ask before destructive actions, New AI tools start
+// read-only).
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { approvals as approvalOps, auth, databases as dbOps, env as envOps, mcp } from "@seylo/ops";
+import { approvals as approvalOps, auth, databases as dbOps, env as envOps, mcp, projects as projectOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { approvals, auditLog, mcpAuthCodes, mcpClients, nodes, projects, services, sessions } from "../src/db/schema";
+import { runOpAs } from "../src/modules/approvals/run-as";
 import { enginesCapability } from "../src/modules/databases/engines";
 import { writeServiceEnv } from "../src/modules/env/store";
 import { setSetting } from "../src/settings";
@@ -358,13 +361,149 @@ test("destructive tool calls wait for a person; approving runs them as the appro
 test("mcp.info and switching the server", async () => {
   const { cookie } = await createUser(panel, "owner");
   const info = await callOp(panel, mcp.info, {}, { cookie });
-  expect(info.body).toMatchObject({ enabled: false, url: "http://localhost:3000/mcp" });
+  expect(info.body).toMatchObject({
+    enabled: false,
+    askBeforeDestructive: true,
+    readOnlyByDefault: true,
+    url: "http://localhost:3000/mcp",
+  });
   expect(info.body.snippets["claude-code"]).toBe("claude mcp add --transport http seylo http://localhost:3000/mcp");
+  expect(info.body.installLinks.cursor).toStartWith("https://cursor.com/en/install-mcp?name=seylo&config=");
   expect(info.body.tools.total).toBeGreaterThan(info.body.tools.destructive);
   const on = await callOp(panel, mcp.update, { enabled: true }, { cookie });
-  expect(on.body.enabled).toBe(true);
+  expect(on.body).toMatchObject({ enabled: true, askBeforeDestructive: true, readOnlyByDefault: true });
+  // Each switch on its own: fields left out keep their value.
+  const asks = await callOp(panel, mcp.update, { askBeforeDestructive: false }, { cookie });
+  expect(asks.body).toMatchObject({ enabled: true, askBeforeDestructive: false, readOnlyByDefault: true });
+  const writes = await callOp(panel, mcp.update, { readOnlyByDefault: false }, { cookie });
+  expect(writes.body).toMatchObject({ enabled: true, askBeforeDestructive: false, readOnlyByDefault: false });
+  const audited = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "mcp.update")).all();
+  expect(audited.map((row) => row.input)).toEqual([{ enabled: true }, { askBeforeDestructive: false }, { readOnlyByDefault: false }]);
   const member = await createUser(panel, "member");
   expect((await callOp(panel, mcp.update, { enabled: false }, { cookie: member.cookie })).status).toBe(403);
+  expect((await callOp(panel, mcp.update, { askBeforeDestructive: true }, { cookie: member.cookie })).status).toBe(403);
+  expect((await callOp(panel, mcp.info, {}, { cookie })).body).toMatchObject({ askBeforeDestructive: false, readOnlyByDefault: false });
+});
+
+test("Ask before destructive actions off: an MCP token's destructive call runs right away, audited; read-only tokens and the assistant still cannot", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  const owner = await createUser(panel, "owner");
+  const writer = await connect(owner.cookie, "write");
+  const reader = await connect(owner.cookie, "read");
+  const createProject = async (name: string) => {
+    const created = await rpc(writer.access_token, "tools/call", { name: "projects_create", arguments: { name } });
+    expect(created.body.result.isError).toBe(false);
+    return created.body.result.structuredContent.id as string;
+  };
+  const deleteProject = (token: string, projectId: string, confirmName: string) =>
+    rpc(token, "tools/call", { name: "projects_delete", arguments: { projectId, confirmName } });
+  const pendingApprovals = () => panel.deps.db.select().from(approvals).where(eq(approvals.status, "pending")).all();
+
+  // On (the default): the call becomes an approval and nothing is deleted.
+  const kept = await createProject("Kept");
+  expect((await deleteProject(writer.access_token, kept, "Kept")).body.result.content[0].text).toContain("needs a person's approval");
+  expect(pendingApprovals()).toHaveLength(1);
+  expect(panel.deps.db.select().from(projects).where(eq(projects.id, kept)).get()).toBeDefined();
+
+  expect((await callOp(panel, mcp.update, { askBeforeDestructive: false }, { cookie: owner.cookie })).status).toBe(200);
+  const init = await rpc(writer.access_token, "initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "t", version: "1" },
+  });
+  expect(init.body.result.instructions).toContain("Destructive actions run right away");
+
+  // Off: it runs at once, with no approval, and the activity log has it.
+  const temp = await createProject("Temp");
+  const ran = await deleteProject(writer.access_token, temp, "Temp");
+  expect(ran.body.result.isError).toBe(false);
+  expect(panel.deps.db.select().from(projects).where(eq(projects.id, temp)).get()).toBeUndefined();
+  expect(pendingApprovals()).toHaveLength(1);
+  const audit = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "projects.delete")).all();
+  expect(audit.at(-1)).toMatchObject({ actorType: "mcp", outcome: "ok", approvalId: null, targetId: temp });
+
+  // The same token over the REST API: MCP tokens skip the approval on any transport.
+  const viaRest = await createProject("Rest");
+  const rest = await callOp(panel, projectOps.remove, { projectId: viaRest, confirmName: "Rest" }, { bearer: writer.access_token });
+  expect(rest.status).toBe(200);
+
+  // A read-only token is still refused, and asks for no approval.
+  const refused = await deleteProject(reader.access_token, kept, "Kept");
+  expect(refused.body.result).toMatchObject({ isError: true });
+  expect(refused.body.result.content[0].text).toContain("FORBIDDEN");
+  expect(pendingApprovals()).toHaveLength(1);
+
+  // The assistant's calls (transport "ai", as the person) still need a person's approval.
+  const viaAi = await runOpAs(panel.deps, {
+    op: projectOps.remove,
+    input: { projectId: kept, confirmName: "Kept" },
+    userId: owner.user.id,
+    transport: "ai",
+  });
+  expect(viaAi).toMatchObject({ ok: false, error: { code: "APPROVAL_REQUIRED" } });
+  expect(panel.deps.db.select().from(projects).where(eq(projects.id, kept)).get()).toBeDefined();
+
+  // Back on: approvals again.
+  await callOp(panel, mcp.update, { askBeforeDestructive: true }, { cookie: owner.cookie });
+  expect((await deleteProject(writer.access_token, kept, "Kept")).body.result.content[0].text).toContain("needs a person's approval");
+  expect(pendingApprovals()).toHaveLength(2);
+  expect(panel.deps.db.select().from(projects).where(eq(projects.id, kept)).get()).toBeDefined();
+});
+
+test("New AI tools start read-only off: the consent page preselects Read and change, and either choice still works", async () => {
+  setSetting(panel.deps.db, "mcpEnabled", true);
+  setSetting(panel.deps.db, "mcpReadOnlyByDefault", false);
+  const { cookie } = await createUser(panel, "owner");
+  const registered = await send("/oauth/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "Agent", redirect_uris: ["https://agent.example/callback"] }),
+  });
+  const client = (await registered.json()) as { client_id: string };
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: client.client_id,
+    redirect_uri: "https://agent.example/callback",
+    code_challenge: createHash("sha256").update("x".repeat(43)).digest("base64url"),
+    code_challenge_method: "S256",
+    // Asking for read only does not change what the panel preselects.
+    scope: "mcp:read",
+  });
+  const html = await (await review(query, cookie)).text();
+  expect(html).toContain('<input type="radio" name="access" value="read" />');
+  expect(html).toContain('<input type="radio" name="access" value="write" checked />');
+  expect(html).toContain("It asked for read only access.");
+  expect(html).toContain("Deleting anything still waits for your approval.");
+
+  // The person can still pick read only, and an Allow without a choice stays read only.
+  const allow = async (access: "read" | "write" | null) => {
+    const form = consentForm(html);
+    if (access) form.set("access", access);
+    form.set("decision", "allow");
+    expect((await send("/oauth/authorize", { method: "POST", headers: { ...formHeaders, cookie }, body: form.toString() })).status).toBe(
+      302,
+    );
+  };
+  await allow("read");
+  await allow(null);
+  await allow("write");
+  expect(
+    panel.deps.db
+      .select()
+      .from(mcpAuthCodes)
+      .all()
+      .map((row) => row.readOnly),
+  ).toEqual([true, true, false]);
+
+  // The Read and change line says what a change token can do when nothing waits.
+  setSetting(panel.deps.db, "mcpAskBeforeDestructive", false);
+  const open = await (await review(query, cookie)).text();
+  expect(open).toContain("Also deploy, restart, edit and delete, without asking you first.");
+  // Back on: read only is preselected again.
+  setSetting(panel.deps.db, "mcpReadOnlyByDefault", true);
+  const safe = await (await review(query, cookie)).text();
+  expect(safe).toContain('<input type="radio" name="access" value="read" checked />');
+  expect(safe).toContain('<input type="radio" name="access" value="write" />');
 });
 
 test("tool results are redacted like the assistant's: env values and file contents never reach the model host", async () => {
