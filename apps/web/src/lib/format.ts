@@ -62,6 +62,11 @@ export function formatPointTime(ms: number, longRange: boolean): string {
     : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+/** Live chart tooltip labels: the time with seconds. */
+export function formatSampleTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 /** 41000 -> "41s", 125000 -> "2m 5s". */
 export function formatDuration(ms: number): string {
   const total = Math.round(ms / 1000);

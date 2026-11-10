@@ -17,6 +17,7 @@ export function maySubscribe(access: Access, topic: LiveTopic, db: PanelDb): boo
     case "service":
       return access.can("services.view", { type: "service", id });
     case "node":
+    case "node-live":
       return access.can("nodes.view");
     case "deployment": {
       const row = db.select({ serviceId: deployments.serviceId }).from(deployments).where(eq(deployments.id, id)).get();

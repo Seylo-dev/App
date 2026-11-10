@@ -22,8 +22,24 @@ type Collector interface {
 	// latest periodic sample is retained: the panel keeps its own live
 	// window and rollups, and nothing reads a longer history from a node.
 	History(since time.Time, serviceIDs []string) []*agentv1.MetricsReport
-	// Watch streams fresh samples at interval until ctx ends.
-	Watch(ctx context.Context, interval time.Duration, serviceIDs []string, fn func(*agentv1.MetricsReport) error) error
+	// Watch streams fresh samples until ctx ends or its lease runs out
+	// (then it returns nil).
+	Watch(ctx context.Context, o WatchOptions, fn func(*agentv1.MetricsReport) error) error
+}
+
+// WatchOptions say what one WatchMetrics stream sends.
+type WatchOptions struct {
+	// Interval between samples: DefaultWatchInterval when 0, at least
+	// MinWatchInterval.
+	Interval time.Duration
+	// ServiceIDs to include; empty = node usage only.
+	ServiceIDs []string
+	// Light samples the node's CPU, memory and network counters only
+	// (Host.SampleLight); ServiceIDs is ignored.
+	Light bool
+	// Lease ends the watch (nil error) this long after it started, at least
+	// MinWatchLease; 0 = until ctx ends.
+	Lease time.Duration
 }
 
 // Defaults.
@@ -32,6 +48,9 @@ const (
 	// MinWatchInterval and DefaultWatchInterval bound WatchMetrics.
 	MinWatchInterval     = time.Second
 	DefaultWatchInterval = 2 * time.Second
+	// MinWatchLease keeps a short lease from turning into a stream of
+	// reopened watches.
+	MinWatchLease = 10 * time.Second
 )
 
 // DockerCollector is the Collector of a node: /proc for the node, Docker
@@ -139,19 +158,25 @@ func filterReport(r *agentv1.MetricsReport, serviceIDs []string) *agentv1.Metric
 var nodeOnly = []string{"\x00"}
 
 // Watch implements Collector. It samples on its own (not the 10s loop) so
-// an open chart moves every couple of seconds.
-func (c *DockerCollector) Watch(ctx context.Context, interval time.Duration, serviceIDs []string, fn func(*agentv1.MetricsReport) error) error {
+// an open chart moves every couple of seconds, with its own Host (CPU
+// percent is against its own previous read). Nothing of it runs once it
+// returns: the panel's cancel, a dropped connection and the lease all end
+// it, and a panel that stops reading leaves it blocked in fn.
+func (c *DockerCollector) Watch(ctx context.Context, o WatchOptions, fn func(*agentv1.MetricsReport) error) error {
+	interval := o.Interval
 	if interval == 0 {
 		interval = DefaultWatchInterval
 	}
 	interval = max(interval, MinWatchInterval)
-	host := c.newHost()
-	s := newSampler(c.src, host)
-	only := serviceIDs
-	if len(only) == 0 {
-		only = nodeOnly
+	var leaseEnd <-chan time.Time
+	if o.Lease > 0 {
+		lease := time.NewTimer(max(o.Lease, MinWatchLease))
+		defer lease.Stop()
+		leaseEnd = lease.C
 	}
-	if _, err := c.sample(ctx, host, s, only); err != nil {
+	take := c.watchSampler(o)
+	// Prime the CPU counters so the first sample sent is meaningful.
+	if _, err := take(ctx); err != nil {
 		return err
 	}
 	t := time.NewTicker(interval)
@@ -160,14 +185,43 @@ func (c *DockerCollector) Watch(ctx context.Context, interval time.Duration, ser
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-leaseEnd:
+			return nil
 		case <-t.C:
 		}
-		r, err := c.sample(ctx, host, s, only)
+		r, err := take(ctx)
 		if err != nil {
 			return err
 		}
-		if err := fn(filterReport(r, serviceIDs)); err != nil {
+		if err := fn(r); err != nil {
 			return err
 		}
+	}
+}
+
+// watchSampler returns what one watch samples with: the light node read,
+// or the node plus the listed services (none when the list is empty).
+func (c *DockerCollector) watchSampler(o WatchOptions) func(context.Context) (*agentv1.MetricsReport, error) {
+	host := c.newHost()
+	if o.Light {
+		return func(context.Context) (*agentv1.MetricsReport, error) {
+			node, err := host.SampleLight()
+			if err != nil {
+				return nil, err
+			}
+			return &agentv1.MetricsReport{Time: timestamppb.New(c.now()), Node: node}, nil
+		}
+	}
+	s := newSampler(c.src, host)
+	only := o.ServiceIDs
+	if len(only) == 0 {
+		only = nodeOnly
+	}
+	return func(ctx context.Context) (*agentv1.MetricsReport, error) {
+		r, err := c.sample(ctx, host, s, only)
+		if err != nil {
+			return nil, err
+		}
+		return filterReport(r, o.ServiceIDs), nil
 	}
 }

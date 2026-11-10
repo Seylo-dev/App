@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { authenticate } from "../src/auth/authenticate";
 import { aiConversations, sessions } from "../src/db/schema";
 import { liveFloodCloseCode, liveMessageRule, maxTopicsPerSocket } from "../src/live/endpoint";
+import { createLiveHub } from "../src/live/hub";
 import { callOp, createUser, grant, sessionKeyOf, type TestPanel, testPanel } from "./helpers";
 
 let panel: TestPanel;
@@ -209,4 +210,27 @@ test("an open tab's socket checks do not slide its session; only requests do", a
   const slid = panel.deps.db.select().from(sessions).where(eq(sessions.userId, other.user.id)).get();
   expect(slid?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * day);
   live.ws.close();
+});
+
+test("the hub tells when a topic gets its first follower and loses its last, however they leave", () => {
+  const hub = createLiveHub();
+  const seen: string[] = [];
+  const remove = hub.onTopicActive((topic, active) => seen.push(`${topic} ${active ? "on" : "off"}`));
+  const a = { id: "a", send: () => {} };
+  const b = { id: "b", send: () => {} };
+  const topic = "node-live:nodedefsn1000001" as const;
+  hub.subscribe(a, topic);
+  hub.subscribe(a, topic);
+  hub.subscribe(b, topic);
+  expect(hub.subscribers(topic)).toBe(2);
+  hub.unsubscribe(a, topic);
+  hub.unsubscribe(a, topic);
+  hub.drop(b);
+  hub.subscribe(a, topic);
+  hub.unsubscribe(a, "panel");
+  hub.drop(a);
+  remove();
+  hub.subscribe(a, topic);
+  expect(seen).toEqual([`${topic} on`, `${topic} off`, `${topic} on`, `${topic} off`]);
+  expect(hub.subscribers("panel")).toBe(0);
 });

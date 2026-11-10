@@ -7,6 +7,7 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { AiStreamEvent } from "./ops/ai";
 import { Deployment, LogLine } from "./ops/deployments";
+import { NodeLiveSample } from "./ops/metrics";
 import { NodeUsage } from "./ops/nodes";
 
 export const livePath = "/api/live";
@@ -19,13 +20,21 @@ export const liveSessionKeyParam = "key";
 
 /**
  * Topics: "panel" (dashboard-wide: projects, nodes), "project:<id>",
- * "service:<id>", "node:<id>" (also the node's usage samples), "deployment:<id>" (build and deploy log
+ * "service:<id>", "node:<id>" (also the node's usage samples), "node-live:<id>" (the node's live samples every
+ * 2 s, which flow only while some tab follows the topic: see metrics.nodeLive), "deployment:<id>" (build and deploy log
  * lines of one deployment, and its status as it changes) and "ai:<conversationId>" (assistant replies, owner only).
  * Access is checked per topic on subscribe (apps/panel/src/live/topics.ts).
  */
-export type LiveTopic = "panel" | `project:${string}` | `service:${string}` | `node:${string}` | `deployment:${string}` | `ai:${string}`;
+export type LiveTopic =
+  | "panel"
+  | `project:${string}`
+  | `service:${string}`
+  | `node:${string}`
+  | `node-live:${string}`
+  | `deployment:${string}`
+  | `ai:${string}`;
 
-export const liveTopicPattern = "^(panel|(project|service|node|deployment|ai):[a-z0-9]{16})$";
+export const liveTopicPattern = "^(panel|(project|service|node|node-live|deployment|ai):[a-z0-9]{16})$";
 
 export const LiveClientMessage = Type.Union([
   Type.Object({ type: Type.Literal("subscribe"), topic: Type.String({ pattern: liveTopicPattern }) }),
@@ -57,6 +66,8 @@ export const LiveEvent = Type.Union([
    * place instead of refetching every node's series.
    */
   Type.Object({ type: Type.Literal("nodeUsage"), nodeId: Type.String(), usage: NodeUsage }),
+  /** One live sample of a node, on "node-live:<id>" (every 2 s while followed; nothing is stored). */
+  Type.Object({ type: Type.Literal("nodeLive"), nodeId: Type.String(), sample: NodeLiveSample }),
 ]);
 export type LiveEvent = Static<typeof LiveEvent>;
 

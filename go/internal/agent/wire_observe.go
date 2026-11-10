@@ -150,8 +150,16 @@ func registerMetrics(reg *Registry, d *Deps) {
 		}
 		return &agentv1.GetMetricsResponse{Samples: d.Metrics.History(since, req.GetServiceIds())}, nil
 	})
+	// The dashboard's live graphs ask for light samples with a lease; a
+	// lease that runs out closes the stream with OK.
 	rpc.HandleStream(reg, "WatchMetrics", func(ctx context.Context, first *agentv1.WatchMetricsRequest, s *rpc.TypedStream[*agentv1.WatchMetricsRequest, *agentv1.WatchMetricsResponse]) error {
-		return observeStatus(d.Metrics.Watch(ctx, first.GetInterval().AsDuration(), first.GetServiceIds(), func(r *agentv1.MetricsReport) error {
+		o := metrics.WatchOptions{
+			Interval:   first.GetInterval().AsDuration(),
+			ServiceIDs: first.GetServiceIds(),
+			Light:      first.GetLight(),
+			Lease:      first.GetLease().AsDuration(),
+		}
+		return observeStatus(d.Metrics.Watch(ctx, o, func(r *agentv1.MetricsReport) error {
 			return s.Send(&agentv1.WatchMetricsResponse{Sample: r})
 		}))
 	})

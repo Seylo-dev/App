@@ -143,15 +143,55 @@ function wave(seed: number, base: number, swing: number, count: number): number[
   });
 }
 
+/** Per node: wave seed, CPU %, CPU swing, memory in use, network bytes per second. */
+const shapes: Record<string, [number, number, number, number, number]> = {
+  [ids.de]: [1, 23, 3, 6.2 * gb, 4.1 * mb],
+  [ids.us]: [2, 12, 2, 2.4 * gb, 0.8 * mb],
+  [ids.il]: [3, 61, 4, 47 * gb, 12.6 * mb],
+};
+
+/**
+ * One node's usage at a moment of the Live graphs, a smooth function of
+ * the time (a swing about every two minutes): the panel's 10-second
+ * points (range live) and the 2-second samples on node-live:<id> both
+ * come from it, so they join up.
+ */
+export function liveUsage(nodeId: string, t: number) {
+  const node = nodes.find((n) => n.id === nodeId) ?? (nodes[0] as (typeof nodes)[number]);
+  const [seed, cpu, cpuSwing, mem, net] = shapes[node.id] as [number, number, number, number, number];
+  const x = t / 20_000;
+  const w = (s: number, base: number, swing: number) =>
+    Math.max(0, base + swing * (Math.sin(x + s) * 0.6 + Math.sin(x * 2.3 + s * 2) * 0.3 + Math.sin(x * 0.7 + s) * 0.4));
+  const network = w(seed + 2, net, net * 0.35);
+  return {
+    t,
+    cpuPercent: w(seed, cpu, cpuSwing * 2),
+    memoryUsedBytes: Math.round(w(seed + 1, mem, mem * 0.03)),
+    memoryTotalBytes: node.usage.memoryTotalBytes,
+    networkRxBytesPerSec: network * 0.6,
+    networkTxBytesPerSec: network * 0.4,
+  };
+}
+
 export function metricsNodes(range = "1h") {
+  if (range === "live") {
+    // The last 5 minutes at 10 s, up to now (not the module's load time: a run takes minutes).
+    const end = Math.floor(Date.now() / 10_000) * 10_000;
+    return {
+      range,
+      stepSeconds: 10,
+      nodes: nodes.map((node) => ({
+        nodeId: node.id,
+        name: node.name,
+        online: true,
+        latest: node.usage,
+        points: Array.from({ length: 30 }, (_, i) => ({ ...liveUsage(node.id, end - (29 - i) * 10_000), diskUsedBytes: node.usage.diskUsedBytes })),
+      })),
+    };
+  }
   const count = 60;
   const step = range === "1h" ? 60 : range === "24h" ? 1440 : 10080;
   const start = Math.floor(now / 60_000) * 60_000 - count * step * 1000;
-  const shapes: Record<string, [number, number, number, number, number]> = {
-    [ids.de]: [1, 23, 3, 6.2 * gb, 4.1 * mb],
-    [ids.us]: [2, 12, 2, 2.4 * gb, 0.8 * mb],
-    [ids.il]: [3, 61, 4, 47 * gb, 12.6 * mb],
-  };
   return {
     range,
     stepSeconds: step,

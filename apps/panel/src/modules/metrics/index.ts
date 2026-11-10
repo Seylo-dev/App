@@ -12,6 +12,7 @@ import { defineModule } from "../module";
 import { readSpec } from "../services/spec";
 import { metricsFor, type NodePointNow } from "./ingest";
 import { createMetricsLive } from "./live";
+import { createNodeLive } from "./node-live";
 import { nodePoints, type Range, ranges, servicePoints } from "./query";
 
 const iso = (t: number) => new Date(t).toISOString();
@@ -109,7 +110,11 @@ const summaryOp = implement(metrics.summary, (_input, ctx) => {
   };
 });
 
-/** Feeds samples into the ingest and tells the web app which graphs changed (live.ts). */
+/**
+ * Feeds samples into the ingest and tells the web app which graphs changed
+ * (live.ts); keeps a light agent watch open per node that a tab shows live
+ * (node-live.ts).
+ */
 function start(deps: Deps) {
   const ingest = metricsFor(deps);
   const live = createMetricsLive(deps.live);
@@ -119,6 +124,12 @@ function start(deps: Deps) {
   });
   deps.agents.onConnection((nodeId, online) => {
     if (!online) ingest.flushNode(nodeId);
+  });
+  createNodeLive({
+    agents: deps.agents,
+    live: deps.live,
+    logger: deps.logger.child({ component: "node-live" }),
+    counters: (nodeId) => ingest.networkCounter(nodeId),
   });
 }
 

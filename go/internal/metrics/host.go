@@ -14,7 +14,7 @@ import (
 )
 
 // Host reads node-wide usage from /proc and /sys. The roots are fields so
-// tests can point them at fixtures.
+// tests can point them at fixtures. One Host belongs to one goroutine.
 type Host struct {
 	Proc string
 	Sys  string
@@ -24,6 +24,10 @@ type Host struct {
 	Statfs func(path string) (used, total uint64, err error)
 
 	prev cpuTimes
+	// physical remembers which interfaces of the last /proc/net/dev read
+	// have a device in /sys, so a sample stats only interfaces it has not
+	// seen (veths come and go with containers).
+	physical map[string]bool
 }
 
 // NewHost reads the real /proc and /sys.
@@ -39,6 +43,21 @@ type cpuTimes struct {
 // Sample fills node usage. CPU percent is relative to the previous call
 // (0 on the first).
 func (h *Host) Sample() (*agentv1.NodeUsage, error) {
+	u, err := h.SampleLight()
+	if err != nil {
+		return nil, err
+	}
+	h.readLoad(u)
+	h.readDisks(u)
+	return u, nil
+}
+
+// SampleLight fills only what the live graphs draw, from three /proc
+// files: CPU (percent relative to the previous Sample or SampleLight),
+// memory and swap, and the network counters. No load and no disks (the
+// mount table and a statfs per filesystem), so a watch every two seconds
+// stays cheap.
+func (h *Host) SampleLight() (*agentv1.NodeUsage, error) {
 	u := &agentv1.NodeUsage{}
 	cpu, n, err := h.readCPU()
 	if err != nil {
@@ -50,9 +69,7 @@ func (h *Host) Sample() (*agentv1.NodeUsage, error) {
 	if err := h.readMemory(u); err != nil {
 		return nil, err
 	}
-	h.readLoad(u)
 	h.readNetwork(u)
-	h.readDisks(u)
 	return u, nil
 }
 
@@ -178,14 +195,24 @@ func (h *Host) readNetwork(u *agentv1.NodeUsage) {
 		tx, _ := strconv.ParseUint(f[8], 10, 64)
 		all[strings.TrimSpace(name)] = counters{rx, tx}
 	}
+	// Whether an interface is physical never changes while it exists, so
+	// only names the last read did not have are looked up in /sys.
+	seen := make(map[string]bool, len(all))
 	physical := false
 	for name, c := range all {
-		if _, err := os.Stat(filepath.Join(h.Sys, "class", "net", name, "device")); err == nil {
+		isPhysical, known := h.physical[name]
+		if !known {
+			_, err := os.Stat(filepath.Join(h.Sys, "class", "net", name, "device"))
+			isPhysical = err == nil
+		}
+		seen[name] = isPhysical
+		if isPhysical {
 			physical = true
 			u.NetworkRxBytes += c.rx
 			u.NetworkTxBytes += c.tx
 		}
 	}
+	h.physical = seen
 	if physical {
 		return
 	}

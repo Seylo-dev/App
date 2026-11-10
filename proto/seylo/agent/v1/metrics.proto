@@ -80,6 +80,18 @@ message WatchMetricsRequest {
   repeated string service_ids = 1;
   // Minimum 1s, default 2s.
   google.protobuf.Duration interval = 2;
+  // Node usage only, and only what the dashboard's live graphs draw: CPU,
+  // memory and the network counters (no disks, load or services;
+  // service_ids is ignored), read from /proc/stat, /proc/meminfo and
+  // /proc/net/dev. false = full samples. Agents that do not know it send
+  // full node samples, which carry the same fields.
+  bool light = 3;
+  // The watch ends by itself (status OK) this long after it started, so a
+  // watch the panel forgets costs one lease at most; while somebody still
+  // watches, the panel opens the next one before this one ends. Unset or
+  // 0 = until the panel cancels it; at least 10s otherwise. Agents that do
+  // not know it stream until cancelled.
+  google.protobuf.Duration lease = 4;
 }
 
 message WatchMetricsResponse {

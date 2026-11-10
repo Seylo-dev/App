@@ -81,7 +81,7 @@ packages use. "Built" means implemented and tested.
 | `registry` | 127.0.0.1:5755 relay over RegistryTunnel (`TCPRelay`), `Tunnel` handler (registry and service-port targets; a `RegistryTarget.scope` makes it an HTTP-aware gate: only the node's pull/push repositories, never DELETE of content, the catalog or foreign blob mounts), the registry container on the panel's node (`Server`, GC) | Built (push/pull through the relay, and scoped push/pull/refusals with the real Docker and registry, verified in the VM) |
 | `compose` | `Parse` for ParseCompose: compose-go normalized project JSON + unsupported-feature warnings; never reads node files | Built |
 | `logs` | Per-service log store on disk (text segments, size and age retention), capture from Docker across generations with a restart cursor, follow, search, build logs | Built (capture, follow and restarts verified in the VM) |
-| `metrics` | Node usage from /proc, per-service Docker stats (memory = usage - inactive_file), the latest periodic sample for GetMetrics (no history on the node since 0.2.0-rc.2; the panel keeps the live window and rollups), live watch | Built (verified in the VM) |
+| `metrics` | Node usage from /proc, per-service Docker stats (memory = usage - inactive_file), the latest periodic sample for GetMetrics (no history on the node since 0.2.0-rc.2; the panel keeps the live window and rollups), live watch (`WatchOptions`: light node samples from /proc/stat, /proc/meminfo and /proc/net/dev with no Docker, `Host.SampleLight`; a lease that ends the watch by itself; the /sys device check per interface is remembered while the interface exists) | Built (verified in the VM; light watches and leases unit tested in a synctest bubble, not yet in the VM) |
 | `console`, `shell` | Attach to the main process with history replay; PTY shells, database clients (via `dbtools`) and one-shot Exec through docker exec, with a marker-based process sweep; `ConsoleInfo` and the first `ShellResponse.info` carry user and working directory; `console/dockerapi` is the small Docker client the observe area shares (kept apart from `docker.Engine` on purpose, see Not built yet) | Built (verified in the VM) |
 | `fs` | Volume file access through `os.Root` (no `..` or symlink escape), atomic uploads, tar.gz/zip archive and extract. No write, chmod or extract leaves setuid/setgid (FsChmod and FsWrite keep the permission and sticky bits only; replacing or appending to a setuid file drops the bits first). New files and folders take their folder's owner, except that a root-owned (or unreadable) folder gives them to nobody (65534:65534), so the file manager never makes a root-owned entry; a replaced file keeps its owner. `VolumeRoots.Open` never creates folders: the agent's resolver makes a missing volume folder with `datadir.MakeServiceVolume` (service folders 0700) | Built (escape fuzzing run as root in the VM) |
 | `cron` | On-node scheduler (`Local`): ServiceSpec.cron_jobs and SERVICE_KIND_CRON in one-off containers (service image, env, volumes, project network), 5-field schedules in IANA time zones, timeout, forbid/allow/replace, `RunNow`, CronRun results with the last 100 lines (secrets redacted) through the outbox; a job whose schedule it cannot read is reported once as a failed CronRun (`unreadable-<hash>`) instead of being skipped silently | Built (runs, failure, timeout, skip verified in the VM) |
@@ -340,6 +340,15 @@ Summary; the full rules are in `proto/README.md` and the comments of
   node's config.yml path, and for the source's own host the admin's
   allowance too. A 0.2 agent behind a panel that never sends the field
   clones from public addresses only.
+- `WatchMetricsRequest.light` and `lease` (added after 0.2.4, no new
+  capability: WatchMetrics is `metrics.read.v1`): `light` asks for node
+  samples with only CPU, memory and the network counters (no disks, load
+  or services; `service_ids` is ignored), `lease` ends the watch by itself
+  with OK that long after it started (at least 10 s; 0 = until
+  cancelled). The panel sends both for the dashboard's Live graphs
+  (`modules/metrics/node-live.ts`, below). Older agents ignore them and
+  send full node samples (the same fields) until the panel cancels, which
+  every renewal does, so they keep working.
 - `go/internal/conn/testdata/frames.json` is the Go <-> TypeScript golden
   fixture for the frame codec; both test suites read it.
   `go/internal/rpc/testdata/envelopes.json` does the same for the hello
@@ -991,7 +1000,12 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   `project:<id>`, `service:<id>`, `node:<id>`. The web app
   (`lib/live-invalidate.ts`) refetches an op at most once a second however
   many events name it, and nothing while its tab is hidden: what waited
-  runs once when the tab is shown.
+  runs once when the tab is shown. `node-live:<id>` (`nodes.view`, like
+  `node:<id>`) carries data, not invalidations: the node's `nodeLive`
+  samples every 2 s, which cost agent work only while some tab follows it
+  (`live.onTopicActive(listener)` on the hub hears a topic's first follower
+  arrive and its last one leave, by unsubscribe, a closed socket or a
+  dropped grant; `live.subscribers(topic)`).
 - Permissions: see "Permission model" below.
 
 #### Permission model
@@ -3149,6 +3163,27 @@ only when it starts, after a restart, or when a minute comes again), and
 the hourly prune deletes through `(resolution, bucket_start)` indexes
 (metrics migration 0001).
 
+Live node samples (`modules/metrics/node-live.ts`, the dashboard's Live
+graphs; `metrics.nodeLive` in `@seylo/ops`: one sample every 2 s, a
+5-minute window). The 10 s reports above are too coarse for them, so
+while at least one tab follows `node-live:<id>` the panel keeps one
+WatchMetrics stream open to that node's agent with `light: true`,
+`interval` 2 s and `lease` 60 s, and publishes every sample to the topic
+as `nodeLive { nodeId, sample }` (`t` on the node's clock, CPU, memory used
+and total, network rates from the stream's own consecutive counters; the
+first sample's rate comes from the ingest's latest periodic counters,
+`MetricsIngest.networkCounter`). The hub fans one stream out to every tab.
+Nothing is stored: metrics.db and the 5-minute live window still take the
+10 s reports only. Each watch is renewed 5 s before its lease ends (the
+next one opens; at its first sample the old one is cancelled, and older
+samples than one already sent are dropped); when the last tab leaves, the
+watch lingers 10 s (a reload, a quick tab switch) and is cancelled; an
+offline node gets its watch when it connects; a failed watch, or one that
+ends on its own before half its lease, is opened again after 2 s, doubling
+to 30 s; a node without `metrics.read.v1` gets none. A sample costs the
+agent three small /proc reads and about 40 bytes on the wire, plus about
+200 bytes of JSON per tab.
+
 ## Placeholders
 
 `oauthClientId` and `minisignPublicKey` in `brand/brand.json` may be
@@ -3846,8 +3881,37 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and toasts sit above it (`--toast-lift`), so it never covers a page's
   last buttons. The Approvals page shows each request's source as chips
   (Assistant and the chat, linking to it for its owner; MCP and the token).
+- Dashboard Nodes card, Live (`components/dashboard/node-usage.tsx`): the
+  Live chip in the header is a toggle and on by default; picking 1h, 24h
+  or 7d turns it off (the range picker shows no choice while Live is on),
+  and the chip again goes back to the last range. Each person's choice is
+  kept per browser (localStorage `<slug>.dashboard.nodesRange`, every
+  access in try/catch: `lib/dashboard-range.ts`). Live shows the last 5
+  minutes: `metrics.nodes` range `live` (the panel's 10-second points) as
+  the seed, then the 2-second `nodeLive` samples of every shown node's
+  `node-live:<id>` topic (`lib/node-live.ts` `useNodeLive`), followed only
+  while Live is on and the tab is visible, so a hidden tab lets the
+  panel's watches lapse. Samples go into a `NodeLiveBuffer`
+  (`lib/node-live-buffer.ts`: a ring of 192 points per node outside React,
+  subscribers told once per frame, each node's times moved onto the
+  browser's clock by the smallest arrival delay of its last 30 samples);
+  the graphs re-render from it at most once a second. `SmoothChart`'s
+  `window` (`{ now, spanMs, lagMs, follow, maxGapMs }`, series with their
+  own `times`) draws them on a time axis in a wider layer that a Web
+  Animations transform slides left at real speed between renders (no
+  work per frame; the right edge runs 3 s behind now so a new point slides
+  in), with a y maximum that stays on a nice round number until the data
+  outgrows it or shrinks well under it (`stickyNiceMax`), and gaps over
+  25 s break the line; with reduced motion nothing slides and each render
+  shows the window up to now. The values under the graphs follow the
+  newest sample, the tooltip names the sample's time with seconds. No
+  sample for 8 s (`liveStaleMs`): the chip turns amber and the card shows
+  `metrics.nodes` 1h with a note ("Live updates paused: the connection to
+  the panel dropped." while the socket is down, "No live samples from the
+  nodes right now." otherwise), and the hour also stands in while there is
+  nothing at all to draw.
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
-  (deployment logs, assistant replies), `useLiveUp()` to poll only while the socket is down.
+  (deployment logs, assistant replies, node-live samples), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the
   same string).
 - Re-auth: `lib/api.ts` wraps the one op client in `withReauth`
@@ -3961,7 +4025,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   approved from the chat and resolved on the Approvals page with its
   source chips, the auto switch, the chats menu, search, the bubble hidden
   on the page and back elsewhere with the same chat, room under the page,
-  who sees it, a phone; screenshots in `$SHOTS_DIR/assistant/`) and
+  who sees it, a phone; screenshots in `$SHOTS_DIR/assistant/`),
+  `node-live.spec.ts` (the
+  dashboard's Nodes card in Live on the demo world, whose live socket
+  streams `nodeLive` samples on `node-live:<id>`: `installDemo`'s
+  `nodeLive` "stream", "silent" or "refuse": Live by default with no range
+  picked, sliding graphs (one animation per layer, none with reduced
+  motion), values following the newest sample, the tooltip, a hidden tab
+  unfollowing, a range turning Live off and the choice after a reload, the
+  hour with a note without samples or without the socket) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar (one row
   at 1440 px, two wrapped rows with their lines at 1280 and 1024, a swipe
