@@ -2,6 +2,8 @@
 // of projects the person can see are kept; deleted projects and projects
 // the person lost access to drop out on read. Hiding changes nothing else:
 // projects.list and projects.get still answer for a hidden project.
+// auth.preferences.showHiddenInSidebar, also per person, turns the
+// sidebar's "Hidden (N)" group off; only false is stored.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { auth, projects as projectOps } from "@seylo/ops";
@@ -19,6 +21,8 @@ afterEach(() => panel.close());
 const hide = (cookie: string, hiddenProjectIds: string[] | null) =>
   call(panel, auth.updatePreferences, { preferences: { hiddenProjectIds } }, { cookie });
 const read = async (cookie: string) => (await ok(panel, auth.preferences, {}, { cookie })).body.preferences as Record<string, unknown>;
+const showGroup = (cookie: string, showHiddenInSidebar: boolean | null) =>
+  call(panel, auth.updatePreferences, { preferences: { showHiddenInSidebar } }, { cookie });
 
 function seedPanelProject() {
   return panel.deps.db.insert(projects).values({ name: "Panel", nameKey: "panel", protected: true }).returning().get();
@@ -127,5 +131,73 @@ describe("hidden projects", () => {
       const expected = Array.isArray(stored) ? { colorMode: "dark", hiddenProjectIds: [shop.id] } : { colorMode: "dark" };
       expect(await read(cookie)).toEqual(expected);
     }
+  });
+});
+
+describe("the sidebar's Hidden group", () => {
+  test("on by default; off is stored next to the hidden list, and on again leaves nothing behind", async () => {
+    const { cookie } = await createUser(panel, "owner");
+    const shop = seedProject(panel, "shop");
+    await hide(cookie, [shop.id]);
+    // Never chosen: the key is missing, which means on.
+    expect(await read(cookie)).toEqual({ hiddenProjectIds: [shop.id] });
+
+    const off = await showGroup(cookie, false);
+    expect(off.status).toBe(200);
+    expect(off.body.preferences).toEqual({ hiddenProjectIds: [shop.id], showHiddenInSidebar: false });
+    expect(await read(cookie)).toEqual({ hiddenProjectIds: [shop.id], showHiddenInSidebar: false });
+
+    // Each key changes alone: hiding more keeps the choice, and the choice keeps the list.
+    const blog = seedProject(panel, "blog");
+    expect((await hide(cookie, [shop.id, blog.id])).body.preferences).toEqual({
+      hiddenProjectIds: [shop.id, blog.id],
+      showHiddenInSidebar: false,
+    });
+    expect((await hide(cookie, null)).body.preferences).toEqual({ showHiddenInSidebar: false });
+    await hide(cookie, [shop.id]);
+
+    // On is the default, so true and null both leave the key out.
+    expect((await showGroup(cookie, true)).body.preferences).toEqual({ hiddenProjectIds: [shop.id] });
+    expect(await read(cookie)).toEqual({ hiddenProjectIds: [shop.id] });
+    await showGroup(cookie, false);
+    expect((await showGroup(cookie, null)).body.preferences).toEqual({ hiddenProjectIds: [shop.id] });
+    expect(await read(cookie)).toEqual({ hiddenProjectIds: [shop.id] });
+  });
+
+  test("the choice is per person", async () => {
+    const owner = await createUser(panel, "owner");
+    const member = await createUser(panel, "member");
+    await showGroup(member.cookie, false);
+    expect(await read(member.cookie)).toEqual({ showHiddenInSidebar: false });
+    expect(await read(owner.cookie)).toEqual({});
+  });
+
+  test("only true, false or null is taken", async () => {
+    const { cookie } = await createUser(panel, "owner");
+    // Shapes the contract does not allow, sent the way any HTTP client could.
+    for (const bad of ["false", 0, 1, [], {}] as unknown as boolean[]) {
+      const answer = await call(panel, auth.updatePreferences, { preferences: { showHiddenInSidebar: bad } }, { cookie });
+      expect(answer.status).toBe(400);
+      expect(answer.body.error.details.field).toStartWith("preferences.showHiddenInSidebar");
+    }
+    expect(await read(cookie)).toEqual({});
+  });
+
+  test("a stored value other than false is left out on read instead of failing the call", async () => {
+    const { user, cookie } = await createUser(panel, "owner");
+    // Preferences were free-form before the key had a shape, so anything may be stored under it.
+    for (const stored of [true, "false", 0, { a: 1 }, null]) {
+      panel.deps.db
+        .update(users)
+        .set({ preferences: { colorMode: "dark", showHiddenInSidebar: stored } })
+        .where(eq(users.id, user.id))
+        .run();
+      expect(await read(cookie)).toEqual({ colorMode: "dark" });
+    }
+    // Changing another key stores it cleaned too.
+    await ok(panel, auth.updatePreferences, { preferences: { colorMode: "light" } }, { cookie });
+    expect(panel.deps.db.select({ preferences: users.preferences }).from(users).where(eq(users.id, user.id)).get()?.preferences).toEqual({
+      colorMode: "light",
+    });
   });
 });

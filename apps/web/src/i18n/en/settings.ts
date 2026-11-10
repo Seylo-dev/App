@@ -23,6 +23,7 @@ export default {
     ai: "AI assistant",
     telemetry: "Telemetry",
     security: "Security",
+    preferences: "Preferences",
   },
   save: "Save",
   saving: "Saving",

@@ -1,8 +1,9 @@
 // The sidebar from the design (Sidebar.dc.html): brand and version,
-// command palette trigger, main navigation, the projects tree, the nodes
+// command palette trigger, main navigation (less the items the person
+// turned off under Settings > Preferences), the projects tree, the nodes
 // card and the signed-in person. Under the md breakpoint only the brand
-// row and a menu button show; the rest opens below them and closes again
-// on navigation. The selected item's background is one shared element
+// row and a menu button show; the rest, the same list, opens below them
+// and closes again on navigation. The selected item's background is one shared element
 // (layoutId "sidebar-nav", also used by the service rows in the projects
 // tree) that slides to the item you click.
 
@@ -12,7 +13,7 @@ import { useOp } from "@seylo/ops/react";
 import { Chip } from "@seylo/ui/components/chip";
 import { Kbd } from "@seylo/ui/components/kbd";
 import { ActiveIndicator } from "@seylo/ui/components/motion";
-import { Skeleton } from "@seylo/ui/components/skeleton";
+import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconMenu2, IconSearch, IconX } from "@tabler/icons-react";
 import { Link, useRouterState } from "@tanstack/react-router";
@@ -23,7 +24,7 @@ import { BrandMark } from "../brand-mark";
 import { NodesCard } from "./nodes-card";
 import { ProjectsTree } from "./projects-tree";
 import { useShell } from "./shell-context";
-import { useMainNav } from "./use-main-nav";
+import { useSidebarNav } from "./use-main-nav";
 import { UserRow } from "./user-row";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -31,8 +32,6 @@ const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigat
 export function Sidebar() {
   const shell = useShell();
   const info = useOp(system.info, {});
-  // Approvals shows only while MCP or the assistant can ask for one, or one waits (use-main-nav.ts).
-  const { items: navItems, pendingCount } = useMainNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const path = useRouterState({ select: (state) => state.location.pathname });
 
@@ -93,34 +92,7 @@ export function Sidebar() {
           <Kbd className="ml-auto">{isMac ? "⌘K" : "Ctrl K"}</Kbd>
         </button>
 
-        <div className="flex flex-col gap-0.5">
-          {navItems.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              activeOptions={{ exact: item.exact }}
-              className="relative isolate flex items-center gap-[11px] rounded-control px-2.5 py-2 text-[13.5px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
-            >
-              {({ isActive }) => (
-                <>
-                  {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-                  <item.icon size={17} stroke={1.8} aria-hidden="true" />
-                  {t(item.label)}
-                  {item.to === "/nodes" && info.data && (
-                    <span className="ml-auto rounded-chip bg-muted px-[7px] py-px text-[11.5px] font-medium text-ink-strong">
-                      {info.data.nodes.total}
-                    </span>
-                  )}
-                  {item.to === "/approvals" && pendingCount > 0 && (
-                    <span className="ml-auto rounded-chip bg-chip-amber-bg px-[7px] py-px text-[11.5px] font-medium text-chip-amber-fg">
-                      {pendingCount}
-                    </span>
-                  )}
-                </>
-              )}
-            </Link>
-          ))}
-        </div>
+        <MainNavLinks nodeCount={info.data?.nodes.total} />
 
         <ProjectsTree />
 
@@ -129,5 +101,54 @@ export function Sidebar() {
         <UserRow />
       </div>
     </m.nav>
+  );
+}
+
+/**
+ * The main navigation links with the node count and the approvals waiting
+ * for the viewer. Approvals shows only while MCP or the assistant can ask
+ * for one, or one waits; items the person turned off stay out
+ * (use-main-nav.ts useSidebarNav).
+ */
+export function MainNavLinks({ nodeCount }: { nodeCount: number | undefined }) {
+  const { items, all, pendingCount } = useSidebarNav();
+  return (
+    <div className="flex flex-col gap-0.5">
+      {/* Until the person's preferences answer, a placeholder per item, so an item they turned off never shows for a moment. */}
+      {!items && (
+        <LoadingRegion label={t("common.loading")} className="flex flex-col gap-0.5">
+          {all.map((item) => (
+            <div key={item.id} className="flex items-center gap-[11px] px-2.5 py-2">
+              <Skeleton className="size-[17px] shrink-0 rounded-[5px]" />
+              <SkeletonText className="w-20 text-[13.5px]" />
+            </div>
+          ))}
+        </LoadingRegion>
+      )}
+      {items?.map((item) => (
+        <Link
+          key={item.id}
+          to={item.to}
+          activeOptions={{ exact: item.exact }}
+          className="relative isolate flex items-center gap-[11px] rounded-control px-2.5 py-2 text-[13.5px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
+        >
+          {({ isActive }) => (
+            <>
+              {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+              <item.icon size={17} stroke={1.8} aria-hidden="true" />
+              {t(item.label)}
+              {item.id === "nodes" && nodeCount !== undefined && (
+                <span className="ml-auto rounded-chip bg-muted px-[7px] py-px text-[11.5px] font-medium text-ink-strong">{nodeCount}</span>
+              )}
+              {item.id === "approvals" && pendingCount > 0 && (
+                <span className="ml-auto rounded-chip bg-chip-amber-bg px-[7px] py-px text-[11.5px] font-medium text-chip-amber-fg">
+                  {pendingCount}
+                </span>
+              )}
+            </>
+          )}
+        </Link>
+      ))}
+    </div>
   );
 }

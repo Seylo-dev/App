@@ -26,13 +26,21 @@ export function FieldSkeleton({
   );
 }
 
-/** SettingRow: title and description on the left, a switch (or a small button) on the right. */
-export function SettingRowSkeleton({ titleWidth = "w-40", control = "switch" }: { titleWidth?: string; control?: "switch" | "button" }) {
+/** SettingRow: title and (unless `description` is false) description on the left, a switch (or a small button) on the right. */
+export function SettingRowSkeleton({
+  titleWidth = "w-40",
+  control = "switch",
+  description = true,
+}: {
+  titleWidth?: string;
+  control?: "switch" | "button";
+  description?: boolean;
+}) {
   return (
     <div className="flex items-center gap-4 border-t border-divider py-3 first:border-t-0 first:pt-0">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <SkeletonText className={cn("text-[13.5px]", titleWidth)} />
-        <SkeletonText className="w-80 text-[12.5px]" />
+        {description && <SkeletonText className="w-80 text-[12.5px]" />}
       </div>
       {control === "switch" ? <Skeleton className="h-5 w-9 shrink-0 rounded-full" /> : <ButtonSkeleton size="sm" className="shrink-0" />}
     </div>

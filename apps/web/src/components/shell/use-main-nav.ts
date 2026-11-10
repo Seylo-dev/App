@@ -1,12 +1,15 @@
 // The main navigation as this panel shows it: every item, except Approvals
-// while nothing can ask for one (nav-items.ts showApprovals). Shared by the
-// sidebar and the command palette; both read the same cached queries.
+// while nothing can ask for one (nav-items.ts showApprovals). The command
+// palette lists all of it; the sidebar (useSidebarNav) also leaves out the
+// items the person turned off under Settings > Preferences. Both read the
+// same cached queries.
 
-import { approvals, system } from "@seylo/ops";
+import { approvals, auth, system } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { useRouterState } from "@tanstack/react-router";
 import { useLiveUp } from "../../lib/live";
-import { type MainNavItem, mainNav, showApprovals } from "./nav-items";
+import { hiddenSidebarItems } from "../../lib/use-sidebar-items";
+import { inSidebar, type MainNavItem, mainNav, showApprovals } from "./nav-items";
 
 export function useMainNav(): { items: MainNavItem[]; pendingCount: number } {
   const features = useOp(system.features, {});
@@ -22,5 +25,18 @@ export function useMainNav(): { items: MainNavItem[]; pendingCount: number } {
     pendingCount,
     onApprovals,
   });
-  return { items: mainNav.filter((item) => item.to !== "/approvals" || approvalsShown), pendingCount };
+  return { items: mainNav.filter((item) => item.id !== "approvals" || approvalsShown), pendingCount };
+}
+
+/**
+ * What the sidebar lists (nav-items.ts inSidebar): `all` is useMainNav's
+ * list, for placeholders of the same count, and `items` is undefined until
+ * the person's preferences answer, so an item they turned off never shows
+ * for a moment. A failed read hides nothing.
+ */
+export function useSidebarNav(): { items: MainNavItem[] | undefined; all: MainNavItem[]; pendingCount: number } {
+  const { items: all, pendingCount } = useMainNav();
+  const preferences = useOp(auth.preferences, {});
+  const hidden = hiddenSidebarItems(preferences.data?.preferences);
+  return { items: preferences.isPending ? undefined : inSidebar(all, hidden, pendingCount), all, pendingCount };
 }
