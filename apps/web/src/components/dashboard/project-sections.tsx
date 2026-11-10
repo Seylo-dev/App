@@ -13,10 +13,12 @@ import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import { useLiveTopic } from "../../lib/live";
 import type { Project, ServiceSummary } from "../../lib/types";
+import { useProjectPrefs } from "../../lib/use-project-prefs";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ServiceCard, ServiceCardSkeleton, useMemoryTotals } from "../project/service-card";
 import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
+import { draggingClass, SortableCard, SortableGrip, SortableGroup, useSortableItem } from "../sortable";
 
 /**
  * Columns by the width the sections get (a container query, so the sidebar
@@ -44,19 +46,24 @@ export function ProjectSections({
 }) {
   // One nodes.list for every card's memory bar.
   const memoryTotals = useMemoryTotals();
+  const prefs = useProjectPrefs();
   return (
     <div className="@container flex flex-col gap-6">
-      {projects.map((project) => (
-        <ProjectSection
-          key={project.id}
-          project={project}
-          services={services.get(project.id)}
-          hidden={hidden.has(project.id)}
-          memoryTotals={memoryTotals}
-          onToggle={() => onToggle(project)}
-          onHiddenChange={(hide) => onHiddenChange(project, hide)}
-        />
-      ))}
+      {/* Drag a project by its title row, a service by its card: the same order as the sidebar's. */}
+      <SortableGroup ids={projects.map((project) => project.id)} onMove={prefs.setProjectOrder}>
+        {projects.map((project) => (
+          <ProjectSection
+            key={project.id}
+            project={project}
+            services={services.get(project.id)}
+            hidden={hidden.has(project.id)}
+            memoryTotals={memoryTotals}
+            onToggle={() => onToggle(project)}
+            onHiddenChange={(hide) => onHiddenChange(project, hide)}
+            onServiceOrder={(ids) => prefs.setServiceOrder(project.id, ids)}
+          />
+        ))}
+      </SortableGroup>
     </div>
   );
 }
@@ -68,6 +75,7 @@ function ProjectSection({
   memoryTotals,
   onToggle,
   onHiddenChange,
+  onServiceOrder,
 }: {
   project: Project;
   services: ServiceSummary[] | undefined;
@@ -75,14 +83,24 @@ function ProjectSection({
   memoryTotals: ReadonlyMap<string, number>;
   onToggle: () => void;
   onHiddenChange: (hidden: boolean) => void;
+  onServiceOrder: (ids: string[]) => void;
 }) {
   const open = !project.collapsed;
+  const item = useSortableItem(project.id);
   // Service changes are published on the project topic.
   useLiveTopic(`project:${project.id}`);
   const cards = services?.filter((service) => service.parentId === null) ?? [];
   return (
-    <article className="group/card flex min-w-0 flex-col gap-3">
-      <div className="flex min-h-8 items-center gap-2.5">
+    <article ref={item.ref} style={item.style} className={cn("group/card flex min-w-0 flex-col gap-3", item.dragging && "z-20")}>
+      <div
+        {...item.handle}
+        className={cn(
+          "relative flex min-h-8 items-center gap-2.5 rounded-control",
+          draggingClass(item.dragging),
+          item.dragging && "bg-background",
+        )}
+      >
+        {item.enabled && <SortableGrip grip={item.grip} name={project.name} />}
         <ProjectTile id={project.id} name={project.name} isProtected={project.protected} size="md" />
         <Link
           to="/p/$projectId"
@@ -148,16 +166,15 @@ function ProjectSection({
         </div>
       </div>
       {open && (
-        <SectionBody project={project} loaded={services !== undefined}>
-          {cards.map((service) => (
-            <ServiceCard
-              key={service.id}
-              service={service}
-              memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0}
-              compact
-            />
-          ))}
-        </SectionBody>
+        <SortableGroup ids={cards.map((service) => service.id)} onMove={onServiceOrder} layout="grid">
+          <SectionBody project={project} loaded={services !== undefined}>
+            {cards.map((service) => (
+              <SortableCard key={service.id} id={service.id} name={service.name}>
+                <ServiceCard service={service} memoryTotal={memoryTotals.get(service.placements[0]?.nodeId ?? "") ?? 0} compact />
+              </SortableCard>
+            ))}
+          </SectionBody>
+        </SortableGroup>
       )}
     </article>
   );

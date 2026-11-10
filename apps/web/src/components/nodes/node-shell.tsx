@@ -16,7 +16,6 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
-import { ButtonSkeleton, LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { toast } from "@seylo/ui/components/toast";
 import { IconLock, IconTerminal2, IconX } from "@tabler/icons-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";

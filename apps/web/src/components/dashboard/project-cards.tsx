@@ -30,6 +30,7 @@ import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { QueryError } from "../query-error";
 import { useShell } from "../shell/shell-context";
+import { draggingClass, SortableGrip, SortableGroup, useSortableItem } from "../sortable";
 import { ProjectSections, ProjectSectionsSkeleton } from "./project-sections";
 import { ServiceTable } from "./service-table";
 
@@ -171,6 +172,7 @@ function ProjectList({
   onToggle: (project: Project) => void;
   onHiddenChange: (project: Project, hide: boolean) => void;
 }) {
+  const prefs = useProjectPrefs();
   if (loading)
     return (
       <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -181,16 +183,20 @@ function ProjectList({
     );
   return (
     <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
-      {projects.map((project) => (
-        <ProjectCard
-          key={project.id}
-          project={project}
-          services={services.get(project.id)}
-          hidden={hidden.has(project.id)}
-          onToggle={() => onToggle(project)}
-          onHiddenChange={(hide) => onHiddenChange(project, hide)}
-        />
-      ))}
+      {/* Drag a card by its header, a service by its row: the same order as the sidebar's. */}
+      <SortableGroup ids={projects.map((project) => project.id)} onMove={prefs.setProjectOrder} layout="grid">
+        {projects.map((project) => (
+          <ProjectCard
+            key={project.id}
+            project={project}
+            services={services.get(project.id)}
+            hidden={hidden.has(project.id)}
+            onToggle={() => onToggle(project)}
+            onHiddenChange={(hide) => onHiddenChange(project, hide)}
+            onServiceOrder={(ids) => prefs.setServiceOrder(project.id, ids)}
+          />
+        ))}
+      </SortableGroup>
     </div>
   );
 }
@@ -201,20 +207,28 @@ function ProjectCard({
   hidden,
   onToggle,
   onHiddenChange,
+  onServiceOrder,
 }: {
   project: Project;
   services: ServiceSummary[] | undefined;
   hidden: boolean;
   onToggle: () => void;
   onHiddenChange: (hidden: boolean) => void;
+  onServiceOrder: (ids: string[]) => void;
 }) {
   const open = !project.collapsed;
+  const item = useSortableItem(project.id);
   // Service changes are published on the project topic.
   useLiveTopic(`project:${project.id}`);
   const rows = services?.filter((service) => service.parentId === null) ?? [];
   return (
-    <article className="group/card min-w-0 overflow-hidden rounded-card bg-card shadow-card">
-      <div className="flex items-center gap-2.5 px-4 py-[15px]">
+    <article
+      ref={item.ref}
+      style={item.style}
+      className={cn("group/card min-w-0 overflow-hidden rounded-card bg-card shadow-card", draggingClass(item.dragging))}
+    >
+      <div {...item.handle} className="relative flex items-center gap-2.5 px-4 py-[15px]">
+        {item.enabled && <SortableGrip grip={item.grip} name={project.name} className="focus-visible:left-1" />}
         <ProjectTile id={project.id} name={project.name} isProtected={project.protected} size="md" />
         <Link
           to="/p/$projectId"
@@ -265,9 +279,13 @@ function ProjectCard({
               ))}
             </LoadingRegion>
           )}
-          {rows.map((service) => (
-            <ServiceRow key={service.id} service={service} />
-          ))}
+          <SortableGroup ids={rows.map((service) => service.id)} onMove={onServiceOrder}>
+            {rows.map((service) => (
+              <SortableRow key={service.id} id={service.id} name={service.name}>
+                <ServiceRow service={service} />
+              </SortableRow>
+            ))}
+          </SortableGroup>
         </div>
       )}
     </article>
@@ -370,5 +388,16 @@ function TrackButton({
       {active && <SegmentPill layoutId={layoutId} />}
       {children}
     </button>
+  );
+}
+
+/** A service row of the List view in its project's order; the whole row drags (a click still opens it). */
+function SortableRow({ id, name, children }: { id: string; name: string; children: ReactNode }) {
+  const item = useSortableItem(id);
+  return (
+    <div ref={item.ref} style={item.style} {...item.handle} className={cn("relative flex flex-col bg-card", draggingClass(item.dragging))}>
+      {item.enabled && <SortableGrip grip={item.grip} name={name} />}
+      {children}
+    </div>
   );
 }

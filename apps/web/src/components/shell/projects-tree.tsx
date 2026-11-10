@@ -15,7 +15,7 @@ import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skel
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { t } from "../../i18n/t";
 import { useLiveTopic } from "../../lib/live";
 import { isBusy, statusDisplay } from "../../lib/service-display";
@@ -25,6 +25,7 @@ import { useProjectPrefs } from "../../lib/use-project-prefs";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
+import { draggingClass, SortableGrip, SortableGroup, useSortableItem } from "../sortable";
 import { useShell } from "./shell-context";
 
 export function ProjectsTree() {
@@ -32,8 +33,6 @@ export function ProjectsTree() {
   const { data, isPending } = useOp(projects.list, {});
   const prefs = useProjectPrefs();
   const hiding = useHiddenProjects();
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [over, setOver] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   // The project of the page that is open, if any (the sidebar sits outside the project routes).
   const currentProjectId = useParams({ strict: false, select: (params) => params.projectId });
@@ -78,37 +77,15 @@ export function ProjectsTree() {
             </LoadingRegion>
           </li>
         )}
-        {shown.map((project) => (
-          <li
-            key={project.id}
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "move";
-              setDragging(project.id);
-            }}
-            onDragOver={(event) => {
-              if (!dragging) return;
-              event.preventDefault();
-              setOver(project.id);
-            }}
-            onDragLeave={() => setOver((id) => (id === project.id ? null : id))}
-            onDrop={(event) => {
-              event.preventDefault();
-              if (dragging) prefs.moveBefore(dragging, project.id);
-              setOver(null);
-            }}
-            onDragEnd={() => {
-              setDragging(null);
-              setOver(null);
-            }}
-            className={cn(
-              "flex flex-col rounded-control",
-              over === project.id && dragging !== project.id && "shadow-[inset_0_2px_0_var(--primary)]",
-            )}
-          >
-            <ProjectRow project={project} hidden={false} onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
-          </li>
-        ))}
+        <SortableGroup ids={shown.map((project) => project.id)} onMove={prefs.setProjectOrder}>
+          {shown.map((project) => (
+            <SortableProject key={project.id} id={project.id}>
+              {(item) => (
+                <ProjectRow project={project} hidden={false} onToggle={prefs.setCollapsed} onHiddenChange={setHidden} sortable={item} />
+              )}
+            </SortableProject>
+          ))}
+        </SortableGroup>
         {/* Hidden projects wait at the end, folded; opening the row shows them without unhiding them. */}
         {group.length > 0 && (
           <li className="flex flex-col">
@@ -154,18 +131,25 @@ function ProjectRow({
   hidden,
   onToggle,
   onHiddenChange,
+  sortable,
 }: {
   project: Project;
   hidden: boolean;
   onToggle: (projectId: string, collapsed: boolean) => void;
   onHiddenChange: (project: Project, hidden: boolean) => void;
+  /** Drag to reorder (the row, not the services under it). Hidden projects have none. */
+  sortable?: SortableItem;
 }) {
   const open = !project.collapsed;
   const Chevron = open ? IconChevronDown : IconChevronRight;
   return (
     <>
       {/* The row is the indicator's box: it covers the chevron too. */}
-      <div className="group/row relative isolate flex items-center rounded-control transition-interactive hover:bg-muted">
+      <div
+        {...sortable?.handle}
+        className="group/row relative isolate flex items-center rounded-control transition-interactive hover:bg-muted"
+      >
+        {sortable?.enabled && <SortableGrip grip={sortable.grip} name={project.name} />}
         <button
           type="button"
           onClick={() => onToggle(project.id, open)}
@@ -214,14 +198,15 @@ function ProjectRow({
           <ProjectMenu name={project.name} hidden={hidden} onHiddenChange={(hide) => onHiddenChange(project, hide)} />
         </div>
       </div>
-      {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} />}
+      {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} sortable={!hidden} />}
     </>
   );
 }
 
 /** Service rows under an expanded project: status dot, name, and a chip while it is busy. */
-function ProjectServices({ projectId, count }: { projectId: string; count: number }) {
+function ProjectServices({ projectId, count, sortable }: { projectId: string; count: number; sortable: boolean }) {
   const list = useOp(services.list, { projectId });
+  const prefs = useProjectPrefs();
   useLiveTopic(`project:${projectId}`);
   if (list.isError) return <p className="m-0 py-1 pr-2.5 pl-[43px] text-xs text-ink-ghost">{t("sidebar.servicesUnavailable")}</p>;
   if (list.isPending)
@@ -239,33 +224,63 @@ function ProjectServices({ projectId, count }: { projectId: string; count: numbe
   // Compose members are reached through their stack, so only top-level services are listed.
   const rows = list.data?.services.filter((service) => service.parentId === null) ?? [];
   return (
-    <ul className="m-0 flex list-none flex-col gap-px p-0">
-      {rows.map((service) => {
-        const status = statusDisplay(service.status);
-        return (
-          <li key={service.id}>
-            <Link
-              to="/p/$projectId/s/$serviceId"
-              params={{ projectId, serviceId: service.id }}
-              className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
-            >
-              {({ isActive }) => (
-                <>
-                  {/* The same sliding background as the main navigation (sidebar.tsx). */}
-                  {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-                  <StatusDot status={status.dot} />
-                  <span className="truncate">{service.name}</span>
-                  {isBusy(service.status) && (
-                    <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
-                      {status.label.toLowerCase()}
-                    </span>
-                  )}
-                </>
-              )}
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <SortableGroup ids={rows.map((service) => service.id)} onMove={(ids) => prefs.setServiceOrder(projectId, ids)} disabled={!sortable}>
+      <ul className="m-0 flex list-none flex-col gap-px p-0">
+        {rows.map((service) => {
+          const status = statusDisplay(service.status);
+          return (
+            <SortableService key={service.id} id={service.id} name={service.name}>
+              <Link
+                to="/p/$projectId/s/$serviceId"
+                params={{ projectId, serviceId: service.id }}
+                className="relative isolate flex items-center gap-[9px] rounded-control py-1.5 pr-2.5 pl-[43px] text-[13px] text-ink-strong hover:bg-muted hover:text-foreground data-[status=active]:text-accent-foreground"
+              >
+                {({ isActive }) => (
+                  <>
+                    {/* The same sliding background as the main navigation (sidebar.tsx). */}
+                    {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
+                    <StatusDot status={status.dot} />
+                    <span className="truncate">{service.name}</span>
+                    {isBusy(service.status) && (
+                      <span className="ml-auto rounded-[5px] bg-chip-amber-bg px-1.5 py-px text-[11px] font-medium text-chip-amber-fg">
+                        {status.label.toLowerCase()}
+                      </span>
+                    )}
+                  </>
+                )}
+              </Link>
+            </SortableService>
+          );
+        })}
+      </ul>
+    </SortableGroup>
+  );
+}
+
+type SortableItem = ReturnType<typeof useSortableItem>;
+
+/** A project in the sidebar's order: it drags by its row, so its services can be dragged on their own. */
+function SortableProject({ id, children }: { id: string; children: (item: SortableItem) => ReactNode }) {
+  const item = useSortableItem(id);
+  return (
+    <li ref={item.ref} style={item.style} className={cn("flex flex-col rounded-control bg-sidebar", draggingClass(item.dragging))}>
+      {children(item)}
+    </li>
+  );
+}
+
+/** A service row in its project's order. */
+function SortableService({ id, name, children }: { id: string; name: string; children: ReactNode }) {
+  const item = useSortableItem(id);
+  return (
+    <li
+      ref={item.ref}
+      style={item.style}
+      {...item.handle}
+      className={cn("relative rounded-control bg-sidebar", draggingClass(item.dragging))}
+    >
+      {item.enabled && <SortableGrip grip={item.grip} name={name} />}
+      {children}
+    </li>
   );
 }

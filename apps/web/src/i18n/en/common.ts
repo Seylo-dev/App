@@ -2,6 +2,8 @@
 
 export default {
   loading: "Loading",
+  /** The keyboard handle of a project or service you can drag into your own order. */
+  move: "Move {name}. Space to pick up, arrow keys to move, Space to drop.",
   retry: "Try again",
   cancel: "Cancel",
   create: "Create",
