@@ -347,6 +347,7 @@ export interface ApplyOptions {
  */
 export function applyPanelIpAccess(deps: Deps, reason: string, options: ApplyOptions = {}): PanelIpAccessApplied {
   const now = options.now ?? Date.now();
+  settlePrivatePaths(deps, now);
   let applied = readIpAccessApplied(deps);
   // Any new choice ends a failed roll's hold; only a close past the guards ends the anti-flap wait.
   const forgetHold = (options.resetHold === true || options.closeNow === true) && applied.holdUntil !== undefined;
@@ -393,6 +394,25 @@ export function applyPanelIpAccess(deps: Deps, reason: string, options: ApplyOpt
     "IP access changed",
   );
   return next;
+}
+
+/** True while settlePrivatePaths runs: a path that stops applies IP access itself, which must not settle again. */
+let settling = false;
+
+/**
+ * Every path saves a debounce that ran out before IP access is decided, from
+ * every caller (the 1-minute check, the domain check, a person's change).
+ * A path that stops this way applies IP access itself, with its own reason
+ * and alert; the caller's apply then finds nothing left to change.
+ */
+function settlePrivatePaths(deps: Deps, now: number): void {
+  if (settling) return;
+  settling = true;
+  try {
+    for (const source of privatePathSources()) source.settle?.(deps, now);
+  } finally {
+    settling = false;
+  }
 }
 
 /**

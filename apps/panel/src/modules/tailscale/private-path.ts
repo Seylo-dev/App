@@ -7,12 +7,13 @@
 // adapter sets (http/ops-http.ts): a request on IP:port cannot claim it.
 
 import { type PrivatePathSource, registerPrivatePath } from "../settings/private-paths";
-import { tailnetPathState } from "./status";
+import { settleRunOut, tailnetPathState } from "./status";
 
 export const tailnetPath: PrivatePathSource = {
   kind: "tailnet",
   state: (deps) => tailnetPathState(deps),
   provenBy: (ctx) => ctx.via === "tailnet",
+  settle: (deps, now) => settleRunOut(deps, now),
 };
 
 registerPrivatePath(tailnetPath);

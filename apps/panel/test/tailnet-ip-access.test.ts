@@ -161,6 +161,22 @@ test("the 1-minute IP access check ends the tailnet's debounce first, so the res
   expect(anyPrivatePathWorking(panel.deps)).toBe(false);
 });
 
+test("any IP access apply saves the tailnet's run-out debounce first, not just the 1-minute check", () => {
+  // The domain check, the domain op and a person's change call applyPanelIpAccess too.
+  closeOverTheTailnet();
+  report(stopped(), Date.now() - tailnetDownMs - 60_000);
+  const reopened = applyPanelIpAccess(panel.deps, "the panel domain stopped working");
+  expect(reopened).toMatchObject({ closed: false, by: "system" });
+  expect(reopened.reason).toContain("stopped working");
+  expect(openAlerts("tailnet-stopped:")[0]?.message).toContain("reopen");
+  agent.disconnect();
+  agent = fakeAgent(panel, panelNode, {}, [], [panelPublishBindCapability, tailnetServeCapability]);
+  report(stopped());
+  expect(tailnetPathState(panel.deps).working).toBe(false);
+  // Nothing left to change: a second apply is a no-op.
+  expect(applyPanelIpAccess(panel.deps, "a scheduled check")).toEqual(readIpAccessApplied(panel.deps));
+});
+
 test("keep-closed: the tailnet stopping leaves IP access closed", () => {
   closeOverTheTailnet("stayClosed");
   report(stopped(), Date.now() - tailnetDownMs - 60_000);

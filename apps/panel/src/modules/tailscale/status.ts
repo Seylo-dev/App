@@ -176,6 +176,16 @@ export function settle(deps: Deps, now = Date.now()): void {
   save(deps, before, next, readServeWanted(deps.db), now);
 }
 
+/**
+ * Saves the stop only when the 5 minutes ran out and no job saved it yet
+ * (the private path's settle, which applyPanelIpAccess runs before it
+ * decides). Otherwise nothing: no alerts, no writes.
+ */
+export function settleRunOut(deps: Deps, now = Date.now()): void {
+  const seen = readSeen(deps.db);
+  if (seen.working && downLongEnough(deps, seen, now)) settle(deps, now);
+}
+
 /** The panel node's agent disconnected: an agent restart must not count toward the 5 minutes. */
 export function agentDisconnected(deps: Deps): void {
   const seen = getSetting(deps.db, "tailscaleSeen");

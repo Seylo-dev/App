@@ -31,6 +31,13 @@ export interface PrivatePathSource {
    * cannot choose counts (ctx.origin through a trusted proxy, ctx.via).
    */
   provenBy(ctx: OpContext): boolean;
+  /**
+   * Saves a debounce that ran out at read time (state() already says not
+   * working) before IP access acts on it. Without it a reopen could restart
+   * the panel while the path still counted as working in panel.db, and the
+   * restart would start the debounce over (0.2.6, the tailnet).
+   */
+  settle?(deps: Deps, now: number): void;
 }
 
 /** Display and evaluation order. */
