@@ -25,7 +25,8 @@ test("dashboard, services, tabs and console", async ({ page }) => {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+  // The dashboard greets by the time of day (0.2.5): "Good morning, ...".
+  await expect(page.getByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening|night)/ })).toBeVisible();
 
   const { nodes } = await api<{ nodes: { name: string; status: string }[] }>(page, "nodes.list");
   expect(nodes.filter((node) => node.status === "online").length).toBeGreaterThanOrEqual(3);
