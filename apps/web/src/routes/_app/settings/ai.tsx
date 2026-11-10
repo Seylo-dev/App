@@ -26,6 +26,10 @@ import { Field, FormActions, SettingRow, SettingsPage } from "../../../component
 import { FieldSkeleton, FormActionsSkeleton, SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 
+/** The Claude Console, where Anthropic API keys and API credits live. */
+const anthropicConsoleUrl = "https://platform.claude.com";
+const anthropicKeysUrl = "https://platform.claude.com/settings/keys";
+const anthropicBillingUrl = "https://platform.claude.com/settings/billing";
 export const Route = createFileRoute("/_app/settings/ai")({
   component: AiPage,
 });
@@ -159,7 +163,18 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
         >
           <Field
             label={saved.keySet ? t("settingsAi.replaceKey") : t("settingsAi.key")}
-            hint={saved.keySet ? t("settingsAi.keyStored", { hint: saved.keyHint }) : t("settingsAi.keyHint")}
+            hint={
+              saved.keySet ? (
+                t("settingsAi.keyStored", { hint: saved.keyHint })
+              ) : (
+                <>
+                  {t("settingsAi.keyHint")}{" "}
+                  <a href={anthropicKeysUrl} target="_blank" rel="noreferrer" className="font-medium">
+                    {t("settingsAi.keyHintLink")}
+                  </a>
+                </>
+              )
+            }
             error={keyInvalid ? t("settingsAi.keyInvalid") : null}
             htmlFor="ai-key"
           >
@@ -184,6 +199,34 @@ function AiSettingsForm({ saved }: { saved: Settings }) {
               )}
             </div>
           </Field>
+          {/* Where the key comes from, step by step, until one is stored. */}
+          {!saved.keySet && (
+            <ol
+              aria-label={t("settingsAi.howTitle")}
+              className="m-0 flex list-decimal flex-col gap-1.5 rounded-control bg-raised py-3 pr-3 pl-8 text-[12.5px] leading-normal"
+            >
+              <li>
+                {t("settingsAi.how.signIn")}{" "}
+                <a href={anthropicConsoleUrl} target="_blank" rel="noreferrer" className="font-medium">
+                  platform.claude.com
+                </a>
+                {t("settingsAi.how.signInAfter")}
+              </li>
+              <li>
+                {t("settingsAi.how.credits")}{" "}
+                <a href={anthropicBillingUrl} target="_blank" rel="noreferrer" className="font-medium">
+                  {t("settingsAi.how.creditsLink")}
+                </a>
+              </li>
+              <li>
+                {t("settingsAi.how.create")}{" "}
+                <a href={anthropicKeysUrl} target="_blank" rel="noreferrer" className="font-medium">
+                  {t("settingsAi.how.createLink")}
+                </a>
+              </li>
+              <li>{t("settingsAi.how.paste")}</li>
+            </ol>
+          )}
           <FormActions>
             <Button type="submit" variant="primary" disabled={!key.trim() || keyInvalid || saveKey.isPending}>
               {saveKey.isPending ? t("settings.saving") : t("settings.save")}
