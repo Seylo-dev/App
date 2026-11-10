@@ -7,7 +7,7 @@ import type { Locator, Page } from "@playwright/test";
 import { hostShellStatus, ids, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { expect, stateFile, test, dashboardHeading } from "./helpers";
+import { dashboardHeading, expect, stateFile, test, withDashboardView } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
 
@@ -95,18 +95,22 @@ test.describe("loading placeholders", () => {
     expectClose(after[1]?.y ?? 0, before[1]?.y ?? 0, "second card y");
   });
 
-  test("dashboard: placeholder service rows are as tall as running services", async ({ page }) => {
-    // Projects come in first, their services later: the second project (two running services) keeps its height.
-    await slowDemo(page, 2000, (opId) => opId === "services.list");
-    await page.goto("/");
-    const projects = page.getByRole("region", { name: "Projects" });
-    const card = projects.locator("article").nth(1);
-    await expect(card.getByRole("status")).toBeVisible();
-    const before = await box(card);
-    await loaded(page);
-    // Layout is exact here: the old rows were a quarter pixel short each.
-    expectClose((await box(card)).height, before.height, "project card height", 0.2);
-  });
+  for (const view of ["cards", "list", "table"] as const) {
+    test(`dashboard ${view}: placeholder services are as tall as running services`, async ({ page }) => {
+      await withDashboardView(page, view);
+      // Projects come in first, their services later: the second project (two running services) keeps its
+      // height, as cards or as rows; the table keeps its height with a placeholder row per service.
+      await slowDemo(page, 2000, (opId) => opId === "services.list");
+      await page.goto("/");
+      const projects = page.getByRole("region", { name: "Projects" });
+      const part = view === "table" ? projects.getByRole("region", { name: "Every service" }) : projects.locator("article").nth(1);
+      await expect(part.locator('[data-slot="skeleton"]').first()).toBeVisible();
+      const before = await box(part);
+      await loaded(page);
+      // Layout is exact here: the old rows were a quarter pixel short each.
+      expectClose((await box(part)).height, before.height, `${view}: project height`, 0.2);
+    });
+  }
 
   test("dashboard without nodes: the nodes card is its empty state from the start, so Projects stays put", async ({ page }) => {
     // A first-run panel: no nodes yet, and the metrics answer comes late.

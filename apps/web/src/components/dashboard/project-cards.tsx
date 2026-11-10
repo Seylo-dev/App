@@ -1,18 +1,23 @@
-// The dashboard's project grid (Main.dc.html): one collapsible card per
-// project with its services, their status and current usage. Collapsing
-// and hiding are the same per-person preferences the sidebar uses; hidden
+// The dashboard's projects, in the view the person picked (remembered in
+// this browser, lib/dashboard-view.ts): Cards (project-sections.tsx: each
+// project's services as a grid of compact service cards), List (one
+// collapsible card per project with its services as rows, below) or Table
+// (service-table.tsx: every service in one sortable table). Collapsing and
+// hiding are the same per-person preferences the sidebar uses; hidden
 // projects come back with "Show hidden" without being unhidden.
 
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { EmptyState } from "@seylo/ui/components/empty-state";
-import { SegmentPill } from "@seylo/ui/components/segmented";
+import { EnterOnChange } from "@seylo/ui/components/motion";
+import { Segmented, SegmentedItem, SegmentPill } from "@seylo/ui/components/segmented";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
-import { IconChevronDown, IconFolder } from "@tabler/icons-react";
+import { type Icon, IconChevronDown, IconFolder, IconLayoutGrid, IconLayoutList, IconTable } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { t } from "../../i18n/t";
+import { type DashboardView, dashboardViews, isDashboardView, useDashboardView } from "../../lib/dashboard-view";
 import { formatUsage } from "../../lib/format";
 import { useLiveTopic } from "../../lib/live";
 import { kindTag, placementLine, statusDisplay } from "../../lib/service-display";
@@ -25,11 +30,16 @@ import { ProjectMenu } from "../project-menu";
 import { ProjectTile } from "../project-tile";
 import { QueryError } from "../query-error";
 import { useShell } from "../shell/shell-context";
+import { ProjectSections, ProjectSectionsSkeleton } from "./project-sections";
+import { ServiceTable } from "./service-table";
+
+const viewIcons: Record<DashboardView, Icon> = { cards: IconLayoutGrid, list: IconLayoutList, table: IconTable };
 
 export function ProjectCards({ data }: { data: ServicesByProject }) {
   const prefs = useProjectPrefs();
   const hiding = useHiddenProjects();
   const shell = useShell();
+  const [view, setView] = useDashboardView();
   const [showHidden, setShowHidden] = useState(false);
   const { shown, hidden } = splitHidden(data.projects, hiding.hidden);
   const cards = showHidden ? data.projects : shown;
@@ -42,39 +52,53 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
     if (!hide && hidden.length === 1) setShowHidden(false);
     hiding.setHidden(project, hide);
   };
+  const toggle = (project: Project) => prefs.setCollapsed(project.id, !project.collapsed);
 
   return (
     <section aria-label={t("nav.projects")} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2.5">
         <h2 className="m-0 text-[15px] font-semibold">{t("nav.projects")}</h2>
-        {/* Two actions, not a choice: with some projects open and some closed neither is "selected". */}
-        <fieldset
-          aria-label={t("dashboard.expandCollapse")}
-          className="m-0 ml-auto inline-flex min-w-0 border-0 gap-0.5 rounded-control bg-track p-[3px]"
-        >
-          <TrackButton active={allOpen} onClick={() => prefs.setAllCollapsed(false, cards)}>
-            {t("dashboard.expandAll")}
-          </TrackButton>
-          <TrackButton active={allClosed} onClick={() => prefs.setAllCollapsed(true, cards)}>
-            {t("dashboard.collapseAll")}
-          </TrackButton>
-        </fieldset>
-        {hidden.length > 0 && (
-          <div className="inline-flex rounded-control bg-track p-[3px]">
-            <TrackButton active={showHidden} onClick={() => setShowHidden((on) => !on)} layoutId="dashboard-hidden">
-              {t("dashboard.showHidden", { count: hidden.length })}
-            </TrackButton>
-          </div>
-        )}
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2.5">
+          {hidden.length > 0 && (
+            <div className="inline-flex rounded-control bg-track p-[3px]">
+              <TrackButton active={showHidden} onClick={() => setShowHidden((on) => !on)} layoutId="dashboard-hidden">
+                {t("dashboard.showHidden", { count: hidden.length })}
+              </TrackButton>
+            </div>
+          )}
+          {/* Two actions, not a choice: with some projects open and some closed neither is "selected". The table has no projects to fold. */}
+          {view !== "table" && (
+            <fieldset
+              aria-label={t("dashboard.expandCollapse")}
+              className="m-0 inline-flex min-w-0 border-0 gap-0.5 rounded-control bg-track p-[3px]"
+            >
+              <TrackButton active={allOpen} onClick={() => prefs.setAllCollapsed(false, cards)}>
+                {t("dashboard.expandAll")}
+              </TrackButton>
+              <TrackButton active={allClosed} onClick={() => prefs.setAllCollapsed(true, cards)}>
+                {t("dashboard.collapseAll")}
+              </TrackButton>
+            </fieldset>
+          )}
+          <Segmented
+            tone="track"
+            aria-label={t("dashboard.view")}
+            value={view}
+            onValueChange={(next) => isDashboardView(next) && setView(next)}
+          >
+            {dashboardViews.map((item) => {
+              const ViewIcon = viewIcons[item];
+              return (
+                <SegmentedItem key={item} value={item} aria-label={t(`dashboard.views.${item}`)} className="text-ink-strong max-sm:px-2">
+                  <ViewIcon size={14} stroke={1.8} aria-hidden="true" />
+                  <span className="max-sm:hidden">{t(`dashboard.views.${item}`)}</span>
+                </SegmentedItem>
+              );
+            })}
+          </Segmented>
+        </div>
       </div>
 
-      {loading && (
-        <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          <ProjectCardSkeleton rows={3} />
-          <ProjectCardSkeleton rows={2} />
-          <ProjectCardSkeleton rows={0} />
-        </LoadingRegion>
-      )}
       {!data.pending && data.projects.length === 0 && (
         <div className="rounded-card bg-card shadow-card">
           <EmptyState
@@ -95,20 +119,77 @@ export function ProjectCards({ data }: { data: ServicesByProject }) {
         <p className="m-0 rounded-card bg-card px-4 py-3 text-[12.5px] text-muted-foreground shadow-card">{t("dashboard.allHidden")}</p>
       )}
 
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {!loading &&
-          cards.map((project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              services={data.services.get(project.id)}
-              hidden={hiding.hidden.has(project.id)}
-              onToggle={() => prefs.setCollapsed(project.id, !project.collapsed)}
-              onHiddenChange={(hide) => setHidden(project, hide)}
+      {/* A new view fades in; projects keep their own placeholders while their services load. No empty box under the notes above. */}
+      {(loading || cards.length > 0) && (
+        <EnterOnChange motionKey={view} subtle className="min-w-0">
+          {view === "cards" &&
+            (loading ? (
+              <ProjectSectionsSkeleton />
+            ) : (
+              <ProjectSections
+                projects={cards}
+                services={data.services}
+                hidden={hiding.hidden}
+                onToggle={toggle}
+                onHiddenChange={setHidden}
+              />
+            ))}
+          {view === "list" && (
+            <ProjectList
+              loading={loading}
+              projects={cards}
+              services={data.services}
+              hidden={hiding.hidden}
+              onToggle={toggle}
+              onHiddenChange={setHidden}
             />
-          ))}
-      </div>
+          )}
+          {view === "table" && (
+            <ServiceTable projects={loading ? [] : cards} services={data.services} hidden={hiding.hidden} loading={loading} />
+          )}
+        </EnterOnChange>
+      )}
     </section>
+  );
+}
+
+/** The List view: one card per project, three to a row on a wide screen. */
+function ProjectList({
+  loading,
+  projects,
+  services,
+  hidden,
+  onToggle,
+  onHiddenChange,
+}: {
+  loading: boolean;
+  projects: readonly Project[];
+  services: ReadonlyMap<string, ServiceSummary[]>;
+  hidden: ReadonlySet<string>;
+  onToggle: (project: Project) => void;
+  onHiddenChange: (project: Project, hide: boolean) => void;
+}) {
+  if (loading)
+    return (
+      <LoadingRegion label={t("common.loading")} className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <ProjectCardSkeleton rows={3} />
+        <ProjectCardSkeleton rows={2} />
+        <ProjectCardSkeleton rows={0} />
+      </LoadingRegion>
+    );
+  return (
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      {projects.map((project) => (
+        <ProjectCard
+          key={project.id}
+          project={project}
+          services={services.get(project.id)}
+          hidden={hidden.has(project.id)}
+          onToggle={() => onToggle(project)}
+          onHiddenChange={(hide) => onHiddenChange(project, hide)}
+        />
+      ))}
+    </div>
   );
 }
 

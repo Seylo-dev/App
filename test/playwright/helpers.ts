@@ -128,6 +128,23 @@ export const sessionKey = { storage: `${slug}.sessionKey`, header: `x-${slug}-se
 /** Where the app shell remembers a dismissed plain-HTTP notice (apps/web/src/lib/plain-http.ts). */
 export const plainHttpNoticeStorage = `${slug}.plainHttpNoticeDismissed`;
 
+/** Where the dashboard remembers its projects view: cards, list or table (apps/web/src/lib/dashboard-view.ts). */
+export const dashboardViewStorage = `${slug}.dashboardView`;
+
+/** Opens every page of the test with this dashboard view saved, as if the viewer had picked it before. */
+export async function withDashboardView(page: Page, view: "cards" | "list" | "table"): Promise<void> {
+  await page.addInitScript(
+    ([key, value]) => {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {
+        // A document without storage (about:blank) has no dashboard.
+      }
+    },
+    [dashboardViewStorage, view] as const,
+  );
+}
+
 /** Something that posts like page.request: api(page) or a bare request context. */
 interface Poster {
   post(path: string, options: { data: unknown }): Promise<APIResponse>;

@@ -14,10 +14,10 @@ import { NodeUsage } from "../../components/dashboard/node-usage";
 import { ProjectCards } from "../../components/dashboard/project-cards";
 import { NewServiceMenu } from "../../components/new-service/new-service-menu";
 import { PageHeader } from "../../components/page-header";
+import { useNow } from "../../components/service/use-now";
 import { useShell } from "../../components/shell/shell-context";
 import { t } from "../../i18n/t";
 import { greeting } from "../../lib/greeting";
-import { useNow } from "../../components/service/use-now";
 import { isBusy } from "../../lib/service-display";
 import { type ServicesByProject, useAllServices } from "../../lib/use-all-services";
 
@@ -55,6 +55,12 @@ function Dashboard() {
       />
       <NodeUsage />
       <ProjectCards data={everything} />
+      {/*
+        Projects are the page's main list; deploys and alerts are a separate, quieter part under a line.
+        On the page ground the line is the border token (the tab underline's): the divider token is for
+        rows inside a card and vanishes on the light ground.
+      */}
+      <hr className="my-2 h-px shrink-0 border-0 bg-border" />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <RecentDeploys />
         <AlertsCard />

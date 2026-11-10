@@ -20,11 +20,12 @@ import { toast } from "@seylo/ui/components/toast";
 import { Tip } from "@seylo/ui/components/tooltip";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconHeart, IconServer2 } from "@tabler/icons-react";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import { formatPercent, formatUsedOfTotal } from "../../lib/format";
 import type { NodeRow } from "../../lib/types";
+import { useTableFits } from "../../lib/use-table-fits";
 import { QueryError } from "../query-error";
 import type { NodeView } from "./node-sheet";
 
@@ -38,51 +39,6 @@ const healthTone = { pass: "text-status-ok", warn: "text-status-busy", fail: "te
 
 /** The list's width from which the table can fit without squeezing its columns. */
 const tableWidth = 1000;
-
-type RefCallback<T> = (el: T | null) => (() => void) | undefined;
-
-/**
- * Whether the table fits the list: the list is at least `min` px wide and
- * the table, once drawn, is no wider than the list (its cells keep long
- * addresses and Update now with a warning on one line). A table that does
- * not fit records the width it needs, so the list stays stacked until it
- * is that wide. Both ref callbacks measure before the first paint, so the
- * list never flashes the other layout, and again as either resizes.
- */
-function useTableFits(min: number): [RefCallback<HTMLElement>, RefCallback<HTMLTableElement>, boolean] {
-  const section = useRef<HTMLElement | null>(null);
-  const table = useRef<HTMLTableElement | null>(null);
-  const [size, setSize] = useState({ width: Number.POSITIVE_INFINITY, need: min });
-  const check = useCallback(() => {
-    const el = section.current;
-    if (!el) return;
-    const width = el.clientWidth;
-    const drawn = table.current?.offsetWidth ?? 0;
-    setSize((s) => {
-      const need = drawn > width + 1 ? Math.max(s.need, Math.ceil(drawn)) : s.need;
-      return s.width === width && s.need === need ? s : { width, need };
-    });
-  }, []);
-  const observe = useCallback(
-    <T extends HTMLElement>(holder: { current: T | null }) =>
-      (el: T | null) => {
-        holder.current = el;
-        if (!el) return undefined;
-        check();
-        if (typeof ResizeObserver === "undefined") return undefined;
-        const observer = new ResizeObserver(check);
-        observer.observe(el);
-        return () => {
-          observer.disconnect();
-          if (holder.current === el) holder.current = null;
-        };
-      },
-    [check],
-  );
-  const sectionRef = useMemo(() => observe(section), [observe]);
-  const tableRef = useMemo(() => observe(table), [observe]);
-  return [sectionRef, tableRef, size.width >= size.need];
-}
 
 interface RowProps {
   node: NodeRow;
