@@ -49,3 +49,39 @@ the upstream commit and what was changed; the license text is
 templates/LICENSE.dashboard-icons. The logos are trademarks of their owners.
 
 Copyright (c) 2024 Bjorn Lammers, Meier Lukas, Thomas Camlong and Homarr Labs
+
+-------------------------------------------------------------------------------
+DiceBear (https://www.dicebear.com): @dicebear/core and @dicebear/collection,
+MIT License, Copyright (c) 2024 Florian Körner (the license text is the
+same as above)
+
+The panel draws people's generated avatars with DiceBear
+(apps/panel/src/modules/avatars). Only the styles below are offered; each
+image also carries its license in its SVG metadata. The faces are drawn from
+these designs as published, with parts chosen by a seed and a plain
+background color added behind them.
+
+Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/):
+  Adventurer: "Adventurer" by Lisa Wischofsky
+    https://www.figma.com/community/file/1184595184137881796
+  Big Smile: "Custom Avatar" by Ashley Seo
+    https://www.figma.com/community/file/881358461963645496
+  Fun Emoji: "Fun Emoji Set" by Davis Uche
+    https://www.figma.com/community/file/968125295144990435
+  Micah: "Avatar Illustration System" by Micah Lanier
+    https://www.figma.com/community/file/829741575478342595
+  Personas: "Personas by Draftbit" by Draftbit
+    https://personas.draftbit.com/
+
+Dedicated to the public domain under CC0 1.0
+(https://creativecommons.org/publicdomain/zero/1.0/), credited anyway:
+  Notionists: "Notionists" by Zoish
+    https://heyzoish.gumroad.com/l/notionists
+  Lorelei: "Lorelei" by Lisa Wischofsky
+    https://www.figma.com/community/file/1198749693280469639
+  Open Peeps: "Open Peeps" by Pablo Stanley
+    https://www.openpeeps.com/
+  Pixel Art: "Pixel Art" by DiceBear
+    https://www.figma.com/community/file/1198754108850888330
+  Thumbs: "Thumbs" by DiceBear
+    https://www.dicebear.com

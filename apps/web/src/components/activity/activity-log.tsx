@@ -6,6 +6,7 @@
 // action as a second line, so nothing is cut off or scrolled away.
 
 import { type audit, isOpErrorCode, type OpOutput } from "@seylo/ops";
+import { Avatar } from "@seylo/ui/components/avatar";
 import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { CodeBlock } from "@seylo/ui/components/code-block";
@@ -67,6 +68,7 @@ function activityColumns(target: boolean): DataTableColumn<ActivityEntry>[] {
       hideOnMobile: true,
       cell: (e) => (
         <span className="flex min-w-0 items-center gap-2">
+          {e.actor.id && <Avatar name={e.actor.label} src={e.actor.avatarUrl} size="sm" decorative />}
           <Chip tone={actorTones[e.actor.type]}>{t(`activity.actors.${e.actor.type}`)}</Chip>
           <span className="min-w-0 [overflow-wrap:anywhere]">{e.actor.label}</span>
         </span>

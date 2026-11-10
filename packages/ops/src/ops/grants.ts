@@ -7,6 +7,7 @@
 // resource kind and the pipeline checks it before the handler runs.
 
 import { Type } from "@sinclair/typebox";
+import { AvatarUrl } from "../avatars";
 import { defineOp } from "../define";
 import { ActionList, Grant } from "../people";
 import { permission } from "../permission";
@@ -15,7 +16,7 @@ import { Empty, Id } from "../schemas";
 /** A grant with the person it belongs to, for the project and service sharing lists. */
 export const GrantWithUser = Type.Object({
   grant: Grant,
-  user: Type.Object({ id: Id, email: Type.String(), name: Type.String() }),
+  user: Type.Object({ id: Id, email: Type.String(), name: Type.String(), avatarUrl: Type.Optional(AvatarUrl) }),
 });
 
 export const listByProject = defineOp({

@@ -81,7 +81,7 @@ test("audit rows for a typical session (snapshot)", async () => {
 });
 
 test("people op contracts: permission, audit, MCP and redaction (snapshot)", () => {
-  const people = new Set(["auth", "setup", "users", "invites", "grants", "apiKeys", "audit"]);
+  const people = new Set(["auth", "avatars", "setup", "users", "invites", "grants", "apiKeys", "audit"]);
   const table = allOps
     .filter((op) => people.has(op.id.slice(0, op.id.indexOf("."))))
     .map((op) => ({

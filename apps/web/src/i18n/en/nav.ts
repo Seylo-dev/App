@@ -13,7 +13,7 @@ export default {
   // Short so it fits the 248px sidebar beside the shortcut; the palette's placeholder says the rest.
   search: "Search",
   logout: "Log out",
-  yourAccount: "Your sign-in methods and sessions",
+  yourAccount: "Your personal details and sign-in methods",
   breadcrumb: "Breadcrumb",
   openMenu: "Open menu",
   home: "{name} home",

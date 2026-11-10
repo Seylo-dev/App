@@ -1,6 +1,6 @@
 // The settings sections, in the order of the design (Notifications and
 // Appearance boards), plus Updates next to General and the signed-in
-// person's own Security and Preferences pages in a group of their own.
+// person's own pages (Personal details, Security, Preferences) in a group of their own.
 
 import type { MessageKey } from "../i18n/t";
 
@@ -29,6 +29,7 @@ export const settingsNav = [
 
 /** Settings about the signed-in person rather than the panel. */
 export const accountNav = [
+  { to: "/settings/profile", label: "settings.sections.profile" },
   { to: "/settings/security", label: "settings.sections.security" },
   { to: "/settings/preferences", label: "settings.sections.preferences" },
 ] as const satisfies readonly SettingsNavItem[];

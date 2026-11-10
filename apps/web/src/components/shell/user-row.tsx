@@ -1,16 +1,10 @@
 import { auth } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
+import { Avatar } from "@seylo/ui/components/avatar";
 import { IconLogout } from "@tabler/icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { t } from "../../i18n/t";
 import { queryClient } from "../../lib/api";
-
-function initials(email: string): string {
-  return email
-    .replace(/[^a-z0-9]/gi, "")
-    .slice(0, 2)
-    .toUpperCase();
-}
 
 export function UserRow() {
   const navigate = useNavigate();
@@ -26,14 +20,10 @@ export function UserRow() {
 
   return (
     <div className="flex items-center gap-2.5 rounded-card bg-raised p-2.5">
-      <span
-        aria-hidden="true"
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
-      >
-        {initials(viewer.email)}
-      </span>
+      {/* The name is right next to it, so screen readers skip the picture. */}
+      <Avatar name={viewer.name || viewer.email} src={viewer.avatarUrl} decorative />
       <Link
-        to="/settings/security"
+        to="/settings/profile"
         title={t("nav.yourAccount")}
         className="flex min-w-0 flex-col text-foreground hover:text-foreground [&:hover_.email]:underline"
       >

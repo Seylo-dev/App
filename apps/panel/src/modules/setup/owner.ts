@@ -2,6 +2,7 @@
 
 import { OpError, setup } from "@seylo/ops";
 import { eq } from "drizzle-orm";
+import { randomPresetAvatar } from "../../auth/avatar";
 import { deleteChallenge, findChallenge } from "../../auth/challenges";
 import { saveGithubAccount } from "../../auth/github-accounts";
 import { githubPrimaryEmail, githubUser, pollDeviceFlow } from "../../auth/github-device";
@@ -34,7 +35,7 @@ function insertOwner(ctx: OpContext, token: string, values: { email: string; nam
     burnSetupToken(tx as unknown as PanelDb, link.id);
     return tx
       .insert(users)
-      .values({ ...values, role: "owner" })
+      .values({ ...values, role: "owner", avatar: randomPresetAvatar() })
       .returning()
       .get();
   });

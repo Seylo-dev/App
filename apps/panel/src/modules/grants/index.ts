@@ -4,6 +4,7 @@
 
 import { grants as grantOps, OpError, type ScopeKind } from "@seylo/ops";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { avatarField } from "../../auth/avatar";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { grants, services, users } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
@@ -14,7 +15,7 @@ function withUsers(ctx: OpContext, rows: GrantRow[]) {
   const people = new Map(
     rows.length
       ? ctx.db
-          .select({ id: users.id, email: users.email, name: users.name })
+          .select({ id: users.id, email: users.email, name: users.name, avatar: users.avatar })
           .from(users)
           .where(
             inArray(
@@ -23,7 +24,7 @@ function withUsers(ctx: OpContext, rows: GrantRow[]) {
             ),
           )
           .all()
-          .map((u) => [u.id, u])
+          .map(({ avatar, ...u }) => [u.id, { ...u, ...avatarField(u.id, avatar) }])
       : [],
   );
   return toGrants(ctx.db, rows).map((grant) => ({ grant, user: people.get(grant.userId) ?? { id: grant.userId, email: "", name: "" } }));

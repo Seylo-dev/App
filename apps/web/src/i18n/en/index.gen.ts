@@ -53,6 +53,7 @@ import settingsKeys from "./settingsKeys";
 import settingsNotifications from "./settingsNotifications";
 import settingsPeople from "./settingsPeople";
 import settingsPreferences from "./settingsPreferences";
+import settingsProfile from "./settingsProfile";
 import settingsSecurity from "./settingsSecurity";
 import settingsTailscale from "./settingsTailscale";
 import setup from "./setup";
@@ -60,4 +61,4 @@ import sidebar from "./sidebar";
 import templates from "./templates";
 
 /** The English catalog: one section per file in this folder, keyed by file name. */
-export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, gitCredentials, gitHosts, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, plainHttp, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCopy, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsPreferences, settingsSecurity, settingsTailscale, setup, sidebar, templates } as const;
+export const en = { activity, approvals, auth, cliLogin, common, dashboard, devkit, dockerHub, format, gitCredentials, gitHosts, invite, kit, nav, newService, nodeCleanup, nodeShell, nodes, palette, pickers, placeholder, plainHttp, project, roles, service, serviceAdvanced, serviceAlerts, serviceBackups, serviceCopy, serviceCron, serviceDatabase, serviceDeploys, serviceDomains, serviceEnv, serviceLogs, serviceMetrics, serviceOverview, servicePreviews, serviceSettings, serviceSource, serviceStorage, serviceTerminal, settings, settingsActions, settingsAi, settingsAppearance, settingsBackups, settingsGitProviders, settingsGithub, settingsKeys, settingsNotifications, settingsPeople, settingsPreferences, settingsProfile, settingsSecurity, settingsTailscale, setup, sidebar, templates } as const;

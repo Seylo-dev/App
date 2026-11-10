@@ -22,6 +22,7 @@ export default {
     appearance: "Appearance",
     ai: "AI assistant",
     telemetry: "Telemetry",
+    profile: "Personal details",
     security: "Security",
     preferences: "Preferences",
   },

@@ -81,7 +81,7 @@ export function ProjectPeople({ projectId, onShare }: { projectId: string; onSha
           header: t("project.people.person"),
           cell: (row) => (
             <span className="flex items-center gap-2.5">
-              <Avatar name={row.user.name || row.user.email} size="sm" />
+              <Avatar name={row.user.name || row.user.email} src={row.user.avatarUrl} size="sm" decorative />
               <span className="flex min-w-0 flex-col [overflow-wrap:anywhere]">
                 <span className="font-medium">{row.user.name || row.user.email}</span>
                 {row.user.name && <span className="text-xs text-muted-foreground">{row.user.email}</span>}

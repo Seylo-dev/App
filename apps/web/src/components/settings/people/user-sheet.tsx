@@ -101,7 +101,7 @@ function UserBody({
     <>
       <SheetHeader>
         <div className="flex items-center gap-3">
-          <Avatar name={user.name || user.email} size="lg" />
+          <Avatar name={user.name || user.email} src={user.avatarUrl} size="lg" decorative />
           <div className="flex min-w-0 flex-col gap-0.5">
             <SheetTitle className="truncate">{user.name || user.email}</SheetTitle>
             <SheetDescription className="truncate">{user.email}</SheetDescription>

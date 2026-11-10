@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isNull } from "drizzle-orm";
+import { randomPresetAvatar } from "../src/auth/avatar";
 import { ownerExists, removeSetupTokenFile } from "../src/auth/setup-token";
 import { loadConfig } from "../src/config";
 import { openDatabases } from "../src/db/client";
@@ -70,7 +71,7 @@ if (ownerExists(db)) {
   process.exit(1);
 }
 db.insert(users)
-  .values({ email: normalized, name: "", role: "owner", passwordHash: await hashPassword(password) })
+  .values({ email: normalized, name: "", role: "owner", passwordHash: await hashPassword(password), avatar: randomPresetAvatar() })
   .run();
 // The setup link has no job left.
 db.update(setupTokens).set({ usedAt: new Date() }).where(isNull(setupTokens.usedAt)).run();

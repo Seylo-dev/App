@@ -25,27 +25,50 @@ function tintFor(name: string): string {
   return tints[h % tints.length] as string;
 }
 
-const sizes = { sm: "size-6 text-[10px]", default: "size-8 text-[12px]", lg: "size-10 text-[14px]" } as const;
+const sizes = {
+  xs: "size-5 text-[9px]",
+  sm: "size-6 text-[10px]",
+  default: "size-8 text-[12px]",
+  lg: "size-10 text-[14px]",
+  xl: "size-20 text-[26px]",
+} as const;
 
-/** A round avatar: the image when it loads, otherwise tinted initials (the tint is stable per name). */
+/** How long a loading image may take before the initials show (a cached avatar is there sooner, so they never flash). */
+const fallbackDelayMs = 400;
+
+/**
+ * A round avatar: the image when it loads, otherwise tinted initials (the
+ * tint is stable per name), also when the image fails. `decorative` hides
+ * it from screen readers where the name is written right next to it.
+ */
 export function Avatar({
   name,
   src,
+  alt = name,
+  decorative = false,
   size = "default",
   className,
 }: {
   name: string;
   src?: string | null;
+  /** The image's alt text; the name by default. */
+  alt?: string;
+  decorative?: boolean;
   size?: keyof typeof sizes;
   className?: string;
 }) {
   return (
     <AvatarPrimitive.Root
       data-slot="avatar"
-      className={cn("relative inline-flex shrink-0 overflow-hidden rounded-full", sizes[size], className)}
+      aria-hidden={decorative || undefined}
+      className={cn("relative inline-flex shrink-0 overflow-hidden rounded-full bg-muted", sizes[size], className)}
     >
-      {src && <AvatarPrimitive.Image src={src} alt={name} className="size-full object-cover" />}
-      <AvatarPrimitive.Fallback className={cn("flex size-full items-center justify-center font-semibold", tintFor(name))} aria-label={name}>
+      {src && <AvatarPrimitive.Image src={src} alt={decorative ? "" : alt} className="size-full object-cover" />}
+      <AvatarPrimitive.Fallback
+        delayMs={src ? fallbackDelayMs : undefined}
+        className={cn("flex size-full items-center justify-center font-semibold", tintFor(name))}
+        aria-label={decorative ? undefined : alt}
+      >
         {initials(name)}
       </AvatarPrimitive.Fallback>
     </AvatarPrimitive.Root>

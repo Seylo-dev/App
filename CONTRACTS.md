@@ -153,7 +153,7 @@ migration (`0001_features` for 0.2, shipped in 0.2.0-rc.1, so frozen too;
 their reconnect retry; `0003_perf_indexes` for 0.2.0; `0004_join_token_can_build`
 for 0.2.1: `join_tokens.can_build`, default false, so tokens made before
 the update and the direct-insert test helpers keep making nodes that do
-not build), which the panel applies at start, also
+not build; `0008_user_avatars`: `users.avatar` and `user_avatars`), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -1063,8 +1063,8 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   `audit.list`/`get` only with `audit.view` in its action list and only
   its projects' entries. Read-only alone does not narrow.
   Bearer wins over the cookie. Only sessions create keys, and account
-  security ops (password, 2FA, passkeys, GitHub link, sessions, profile)
-  refuse keys (`requireSession` in `src/auth/sign-in.ts`). A session lives
+  security ops (password, 2FA, passkeys, GitHub link, sessions, profile,
+  email, avatar) refuse keys (`requireSession` in `src/auth/sign-in.ts`). A session lives
   at most 90 days from sign-in and its token and key rotate on password and
   2FA changes. Ops that add a way in (`auth.passkeyRegisterBegin`,
   `auth.githubLinkStart`, `auth.totpEnroll`, `apiKeys.create`,
@@ -1076,7 +1076,13 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   device flow with the sign-in scopes; only a GitHub user id equal to the
   account's linked one counts, and the token is kept as after a GitHub
   sign-in) in the last 15 minutes (`requireFreshSignIn`
-  in `src/auth/fresh.ts`, `sessions.reauth_at`); otherwise FORBIDDEN with
+  in `src/auth/fresh.ts`, `sessions.reauth_at`). So does changing the
+  email one signs in with: `auth.changeEmail` (asked before the address is
+  even checked, so a session left open learns nothing about other
+  accounts; a taken address is CONFLICT `field: email`; it raises a
+  `security_change` alert and emails the old address when the panel has an
+  SMTP channel, `oldAddressNotified`), and `users.update` on one's own account with a new email
+  (`requireFreshIfSession`, so People is no way around it). Otherwise FORBIDDEN with
   `details.reason: "reauth"`, which the web turns into a re-auth dialog
   and a retry. Wrong answers (another GitHub login too, `details.field:
   "github"`) count toward the per-address lock. Nothing in the web app
@@ -1202,6 +1208,31 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
 - Links the panel hands out: invites are `<origin>/invite?t=<token>`
   (panel domain when set, else `OpCall.origin`, else a path the web app
   completes with its own origin).
+- Avatars (`modules/avatars`, `src/auth/avatar.ts`; contracts in
+  `ops/avatars.ts`, the style catalog and URL builders in
+  `packages/ops/src/avatars.ts`): `users.avatar` is
+  `{ kind: "preset", style, seed }` or `{ kind: "upload", style, seed,
+  hash, contentType }` (the face stays under an upload), the upload's
+  bytes are in `user_avatars` (gone with the account). Every way to create
+  an account sets a random face in `defaultAvatarStyle` (setup with a
+  password or GitHub, an accepted invite, `scripts/create-owner.ts`:
+  `randomPresetAvatar`), and the module's `start` gives one to every row
+  without (accounts from before 0008_user_avatars). Outputs carry the
+  optional `avatarUrl` (`Viewer`, `User`, grants' people, audit actors,
+  approval requesters; `avatarField`, `avatarUrlsOf`). Faces are drawn by
+  the panel with the pinned `@dicebear/core` and `@dicebear/collection`
+  (never api.dicebear.com) at `GET /api/avatars/<style>/<seed>.svg` (style
+  from `avatarStyles` else 404, seed `avatarSeedPattern` else 400, cached
+  in memory, a year immutable, compressed); uploads at
+  `GET /api/avatars/user/<id>?v=<hash>`, answered only with the current
+  hash (the URL is as private as the lists that show it; `<img>` cannot
+  send the session key). Uploads are PNG, JPEG or WebP whose first bytes
+  say so, at most `avatarMaxBytes` (1 MiB) after the web app cut the middle
+  square and scaled it to 256 px (`lib/avatar-image.ts`); never SVG; served
+  with nosniff and a sandboxing CSP; the data URL is sensitive (not in the
+  audit log). Only styles whose artwork is CC0 1.0 or CC BY 4.0 are
+  offered (a test checks each against its package's own license); NOTICE
+  and the picker's credit line name the artwork, creator and license.
 
 Panel:
 
@@ -3032,7 +3063,7 @@ unless noted.
 | Area | Modules (ops + panel) | Other paths | Schema files |
 |---|---|---|---|
 | Agent hub and nodes: PanelService handlers, calls and streams to agents, in-memory node state, the desired-state compiler (DB rows to `DesiredState`/`ServiceSpec`), nodes (join tokens, can-build, wildcard, games-first, health checks, reboot, Docker updates), fleet updates, cleanup runs and schedules, relays for logs, metrics (rollups into metrics.db), console, shell, host shells and files | `nodes`, `updates`, `cleanup`, `logs`, `metrics`, `terminals`, `hostShell`, `files` | `src/agent-hub/`, `src/desired/`, `src/db/metrics/`, `drizzle.metrics.config.ts`, `drizzle/metrics/` | `infra.ts`, `runtime.ts` |
-| People and access: setup link, email and password, GitHub device flow, sessions, TOTP and recovery codes, passkeys, API keys; users, invites and grants; the audit log; the op pipeline, permission checks and the op framework | `auth`, `setup`, `users`, `invites`, `grants`, `apiKeys`, `audit` | `src/auth/`, `src/security/`, `src/ops/`, `scripts/create-owner.ts`, `scripts/setup-link.ts` | `identity.ts`, `audit.ts` |
+| People and access: setup link, email and password, GitHub device flow, sessions, TOTP and recovery codes, passkeys, API keys; users, invites and grants; avatars; the audit log; the op pipeline, permission checks and the op framework | `auth`, `avatars`, `setup`, `users`, `invites`, `grants`, `apiKeys`, `audit` | `src/auth/`, `src/security/`, `src/ops/`, `scripts/create-owner.ts`, `scripts/setup-link.ts` | `identity.ts`, `audit.ts` |
 | Services and deploys: projects, services (all kinds, compose stacks split into members), deploys, builds, releases and rollback, PR previews, push-to-deploy webhooks and deploy triggers, watch paths, the per-panel GitHub App, GitLab/Gitea/Bitbucket connections, git and registry credentials, templates (QuickJS runner) and the template catalog, Docker Hub as a template source | `projects`, `services`, `compose`, `deployments`, `builds`, `previews`, `webhooks`, `github`, `gitProviders`, `git`, `registries`, `templates`, `dockerHub` | `src/template-runner/`, `templates/` (repository root) | `projects.ts`, `deploys.ts`, `git.ts`, `templates.ts` |
 | Networking, env and data: domains, DNS checks and the Cloudflare DNS link, middlewares, first-run IP:port access and redirect-then-close, the env editor backend and `${{svc.VAR}}` references, databases (engines, credentials, web UIs, exposure with TLS), backups and restores, dev access (timed expose, Cloudflare tunnels), Boxes, maintenance pages, signing edge tickets (with the key from `security/edge-ticket-key.ts`) | `domains`, `env`, `databases`, `backups`, `exposures`, `tunnels`, `boxes`, `maintenance` | `packages/env-analyzer/` | `env.ts`, `networking.ts`, `backups.ts` |
 | System and automation: notification channels, alert rules and delivery, uptime checks, the job runner and recurring schedules, cron jobs (panel side), approvals, the MCP server and its OAuth, the AI assistant (routing, budget, usage), settings (branding, white label, themes, custom CSS, telemetry), and the panel core around them | `system`, `settings`, `notifications`, `alerts`, `uptime`, `cron`, `approvals`, `mcp`, `ai`, `telemetry` | `src/{jobs,live,http}/`, `src/{main,panel,deps,config,settings,logger,ids}.ts`, `src/modules/module.ts`, `src/db/client.ts`, `packages/ops/src/generators/{mcp,ai-tools}.ts` | `automation.ts`, `ops.ts`, `mcp.ts`, `settings.ts`, `columns.ts` |
@@ -3622,6 +3653,21 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   sideways row): one row at 1440 px, wrapping below with a track line per
   40 px row. Unknown paths go to `routes/_app/$.tsx` (the 404 next to
   the sidebar); the root's not-found and error screens sit in `AuthFrame`.
+- Your account (Settings, `settings-nav.ts` `accountNav`): Personal
+  details (`/settings/profile`, `components/settings/profile/`) above
+  Security. Personal details holds the avatar (the one in use, Upload
+  image, Remove image while an upload shows, and the generated faces after
+  Clipnest's picker: a style, six faces, Randomize; a pick saves at once;
+  the credit line names the style's artwork and license) and the Profile
+  card (name and email saved together; a new email goes through
+  `auth.changeEmail`, so the re-auth dialog may open, and a taken one shows
+  under the field). Security keeps the password, authenticator app,
+  passkeys, GitHub and sessions. The sidebar's account chip links to
+  Personal details. People are drawn with the kit's one `Avatar` (image
+  with alt, or `decorative` next to the written name; tinted initials
+  while it loads past 400 ms and when it fails): the sidebar chip, People
+  and the person sheet, a project's People tab, Activity rows (actors with
+  an id) and the Approvals requester.
 - Hiding projects (0.2.1, per person, not global): the person's
   preferences (`auth.preferences` / `auth.updatePreferences`, the
   free-form `Preferences` record) gain `hiddenProjectIds` (`HiddenProjectIds`
@@ -3746,7 +3792,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   handler answers an error by throwing `demo/refusal.ts` `DemoRefusal`),
   `sidebar-new-service.spec.ts` (the + on a project row and the form with
   that project, none on the Panel project, the logo link home, Approvals
-  hidden until MCP or the assistant is on) and
+  hidden until MCP or the assistant is on), `personal-details.spec.ts`
+  (Settings > Personal details above Security: the name, a taken email
+  under its field, the generated faces with Randomize, another style and a
+  pick, an upload cut to 256 px in the browser and removed again, the
+  sidebar chip following; screenshots in a light and a dark preset) and
   `screens.spec.ts` (every screen with the demo data in `demo/`, in all
   four theme presets, plus the phone width, the service tab bar (one row
   at 1440 px, two wrapped rows with their lines at 1280 and 1024, a swipe

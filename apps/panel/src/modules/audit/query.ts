@@ -69,7 +69,8 @@ export function parseCursor(cursor: string | undefined): number | undefined {
   return Number(cursor);
 }
 
-export function toEntry(row: AuditRow) {
+/** One entry as the API returns it; avatarUrl is the actor's avatar now (list and get pass it, exports do not). */
+export function toEntry(row: AuditRow, avatarUrl?: string) {
   const input =
     row.input !== null && typeof row.input === "object" && !Array.isArray(row.input)
       ? (row.input as Record<string, unknown>)
@@ -77,7 +78,13 @@ export function toEntry(row: AuditRow) {
   return {
     id: String(row.id),
     at: row.at.toISOString(),
-    actor: { type: row.actorType, id: row.actorId, label: row.actorLabel, credentialId: row.credentialId },
+    actor: {
+      type: row.actorType,
+      id: row.actorId,
+      label: row.actorLabel,
+      ...(avatarUrl ? { avatarUrl } : {}),
+      credentialId: row.credentialId,
+    },
     opId: row.opId,
     target: row.targetType && row.targetId ? { type: row.targetType, id: row.targetId, label: row.targetLabel } : null,
     projectId: row.projectId,

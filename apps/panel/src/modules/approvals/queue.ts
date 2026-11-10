@@ -7,6 +7,7 @@
 import { type AnyOpContract, actionAllowed, allOps, OpError, redact } from "@seylo/ops";
 import { and, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { createAccess, isNarrowedKey, type Target } from "../../auth/access";
+import { avatarField } from "../../auth/avatar";
 import type { Principal } from "../../auth/principal";
 import type { PanelDb } from "../../db/client";
 import { apiKeys, approvals, projects, services, users } from "../../db/schema";
@@ -290,7 +291,11 @@ export function deny(deps: Deps, approvalId: string, decider: Principal, note: s
 export function toApproval(db: PanelDb, row: ApprovalRow) {
   const op = opById(row.opId);
   const requester = row.requestedById
-    ? db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, row.requestedById)).get()
+    ? db
+        .select({ id: users.id, name: users.name, email: users.email, avatar: users.avatar })
+        .from(users)
+        .where(eq(users.id, row.requestedById))
+        .get()
     : undefined;
   const key =
     row.requestedByType === "mcp" && row.requestedVia
@@ -315,6 +320,7 @@ export function toApproval(db: PanelDb, row: ApprovalRow) {
     requestedBy: {
       userId: row.requestedById,
       userName: requester ? requester.name || requester.email : "",
+      ...(requester ? avatarField(requester.id, requester.avatar) : {}),
       clientName: row.requestedByType === "ai" ? "AI assistant" : (key?.name ?? "MCP client"),
     },
     reason: row.reason,

@@ -3123,6 +3123,11 @@
                         "userName": {
                           "type": "string"
                         },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
                         "clientName": {
                           "type": "string"
                         }
@@ -3388,6 +3393,11 @@
                         "userName": {
                           "type": "string"
                         },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
                         "clientName": {
                           "type": "string"
                         }
@@ -3639,6 +3649,11 @@
                           ]
                         },
                         "userName": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
                           "type": "string"
                         },
                         "clientName": {
@@ -3953,6 +3968,11 @@
                                 ]
                               },
                               "userName": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "maxLength": 200,
+                                "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
                                 "type": "string"
                               },
                               "clientName": {
@@ -4440,6 +4460,11 @@
                         "label": {
                           "type": "string"
                         },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
                         "credentialId": {
                           "anyOf": [
                             {
@@ -4841,6 +4866,11 @@
                               "label": {
                                 "type": "string"
                               },
+                              "avatarUrl": {
+                                "maxLength": 200,
+                                "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                                "type": "string"
+                              },
                               "credentialId": {
                                 "anyOf": [
                                   {
@@ -4989,6 +5019,118 @@
         "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": true
+      }
+    },
+    "/api/v1/auth.changeEmail": {
+      "post": {
+        "operationId": "auth.changeEmail",
+        "summary": "Change your email",
+        "description": "Changes the signed-in person's email, which they sign in with. Needs a sign-in or auth.reauth from the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise). CONFLICT with details.field \"email\" when another account uses it. When the panel has an SMTP channel the old address is told (oldAddressNotified). Browser sessions only.",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "format": "email",
+                    "maxLength": 254,
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "viewer",
+                    "oldAddressNotified"
+                  ],
+                  "properties": {
+                    "viewer": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "email",
+                        "name",
+                        "role"
+                      ],
+                      "properties": {
+                        "id": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "email": {
+                          "format": "email",
+                          "maxLength": 254,
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "description": "owner and admin may do everything; members only what their grants allow.",
+                          "anyOf": [
+                            {
+                              "const": "owner",
+                              "type": "string"
+                            },
+                            {
+                              "const": "admin",
+                              "type": "string"
+                            },
+                            {
+                              "const": "member",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "oldAddressNotified": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
       }
     },
     "/api/v1/auth.changePassword": {
@@ -5374,6 +5516,11 @@
                                   "type": "string"
                                 }
                               ]
+                            },
+                            "avatarUrl": {
+                              "maxLength": 200,
+                              "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                              "type": "string"
                             }
                           }
                         },
@@ -5741,6 +5888,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     },
@@ -5998,6 +6150,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     },
@@ -7391,7 +7548,7 @@
       "post": {
         "operationId": "auth.updateProfile",
         "summary": "Change your name",
-        "description": "Changes the display name of the signed-in person. Email changes go through an owner or admin (users.update).",
+        "description": "Changes the display name of the signed-in person. The email changes with auth.changeEmail.",
         "tags": [
           "auth"
         ],
@@ -7472,6 +7629,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     }
@@ -7587,6 +7749,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     },
@@ -7676,6 +7843,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     },
@@ -7703,6 +7875,609 @@
         "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": true
+      }
+    },
+    "/api/v1/avatars.mine": {
+      "get": {
+        "operationId": "avatars.mine",
+        "summary": "Get your avatar",
+        "description": "Returns the signed-in person's avatar: an uploaded image or a generated face (style and seed), with the URLs to show. An account without one gets a random face now.",
+        "tags": [
+          "avatars"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "avatar"
+                  ],
+                  "properties": {
+                    "avatar": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "style",
+                        "seed",
+                        "url",
+                        "presetUrl"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "const": "preset",
+                              "type": "string"
+                            },
+                            {
+                              "const": "upload",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "style": {
+                          "description": "A generated avatar style (see avatarStyles for the list and each style's license).",
+                          "anyOf": [
+                            {
+                              "const": "notionists",
+                              "type": "string"
+                            },
+                            {
+                              "const": "adventurer",
+                              "type": "string"
+                            },
+                            {
+                              "const": "big-smile",
+                              "type": "string"
+                            },
+                            {
+                              "const": "fun-emoji",
+                              "type": "string"
+                            },
+                            {
+                              "const": "lorelei",
+                              "type": "string"
+                            },
+                            {
+                              "const": "micah",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open-peeps",
+                              "type": "string"
+                            },
+                            {
+                              "const": "personas",
+                              "type": "string"
+                            },
+                            {
+                              "const": "pixel-art",
+                              "type": "string"
+                            },
+                            {
+                              "const": "thumbs",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "seed": {
+                          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                          "description": "Letters, digits, - and _ (1 to 64).",
+                          "type": "string"
+                        },
+                        "url": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
+                        "presetUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/avatars.removeUpload": {
+      "post": {
+        "operationId": "avatars.removeUpload",
+        "summary": "Remove your uploaded avatar",
+        "description": "Deletes the signed-in person's uploaded image, so their generated face shows again. Browser sessions only.",
+        "tags": [
+          "avatars"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "avatar"
+                  ],
+                  "properties": {
+                    "avatar": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "style",
+                        "seed",
+                        "url",
+                        "presetUrl"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "const": "preset",
+                              "type": "string"
+                            },
+                            {
+                              "const": "upload",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "style": {
+                          "description": "A generated avatar style (see avatarStyles for the list and each style's license).",
+                          "anyOf": [
+                            {
+                              "const": "notionists",
+                              "type": "string"
+                            },
+                            {
+                              "const": "adventurer",
+                              "type": "string"
+                            },
+                            {
+                              "const": "big-smile",
+                              "type": "string"
+                            },
+                            {
+                              "const": "fun-emoji",
+                              "type": "string"
+                            },
+                            {
+                              "const": "lorelei",
+                              "type": "string"
+                            },
+                            {
+                              "const": "micah",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open-peeps",
+                              "type": "string"
+                            },
+                            {
+                              "const": "personas",
+                              "type": "string"
+                            },
+                            {
+                              "const": "pixel-art",
+                              "type": "string"
+                            },
+                            {
+                              "const": "thumbs",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "seed": {
+                          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                          "description": "Letters, digits, - and _ (1 to 64).",
+                          "type": "string"
+                        },
+                        "url": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
+                        "presetUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/avatars.setPreset": {
+      "post": {
+        "operationId": "avatars.setPreset",
+        "summary": "Pick a generated avatar",
+        "description": "Makes a generated face (style and seed) the signed-in person's avatar. An uploaded image is removed, so the face shows. Browser sessions only.",
+        "tags": [
+          "avatars"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "style",
+                  "seed"
+                ],
+                "properties": {
+                  "style": {
+                    "description": "A generated avatar style (see avatarStyles for the list and each style's license).",
+                    "anyOf": [
+                      {
+                        "const": "notionists",
+                        "type": "string"
+                      },
+                      {
+                        "const": "adventurer",
+                        "type": "string"
+                      },
+                      {
+                        "const": "big-smile",
+                        "type": "string"
+                      },
+                      {
+                        "const": "fun-emoji",
+                        "type": "string"
+                      },
+                      {
+                        "const": "lorelei",
+                        "type": "string"
+                      },
+                      {
+                        "const": "micah",
+                        "type": "string"
+                      },
+                      {
+                        "const": "open-peeps",
+                        "type": "string"
+                      },
+                      {
+                        "const": "personas",
+                        "type": "string"
+                      },
+                      {
+                        "const": "pixel-art",
+                        "type": "string"
+                      },
+                      {
+                        "const": "thumbs",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "seed": {
+                    "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                    "description": "Letters, digits, - and _ (1 to 64).",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "avatar"
+                  ],
+                  "properties": {
+                    "avatar": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "style",
+                        "seed",
+                        "url",
+                        "presetUrl"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "const": "preset",
+                              "type": "string"
+                            },
+                            {
+                              "const": "upload",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "style": {
+                          "description": "A generated avatar style (see avatarStyles for the list and each style's license).",
+                          "anyOf": [
+                            {
+                              "const": "notionists",
+                              "type": "string"
+                            },
+                            {
+                              "const": "adventurer",
+                              "type": "string"
+                            },
+                            {
+                              "const": "big-smile",
+                              "type": "string"
+                            },
+                            {
+                              "const": "fun-emoji",
+                              "type": "string"
+                            },
+                            {
+                              "const": "lorelei",
+                              "type": "string"
+                            },
+                            {
+                              "const": "micah",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open-peeps",
+                              "type": "string"
+                            },
+                            {
+                              "const": "personas",
+                              "type": "string"
+                            },
+                            {
+                              "const": "pixel-art",
+                              "type": "string"
+                            },
+                            {
+                              "const": "thumbs",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "seed": {
+                          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                          "description": "Letters, digits, - and _ (1 to 64).",
+                          "type": "string"
+                        },
+                        "url": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
+                        "presetUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/avatars.upload": {
+      "post": {
+        "operationId": "avatars.upload",
+        "summary": "Upload an avatar image",
+        "description": "Makes an uploaded image the signed-in person's avatar. The file travels as a base64 data URL: PNG, JPEG or WebP, at most 1 MiB (the web app crops it to a square of 256 pixels first). SVG is refused. The generated face stays underneath. Browser sessions only.",
+        "tags": [
+          "avatars"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "dataUrl"
+                ],
+                "properties": {
+                  "dataUrl": {
+                    "maxLength": 1398166,
+                    "pattern": "^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$",
+                    "errorMessage": "must be a PNG, JPEG or WebP image as a base64 data URL",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "avatar"
+                  ],
+                  "properties": {
+                    "avatar": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "style",
+                        "seed",
+                        "url",
+                        "presetUrl"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "const": "preset",
+                              "type": "string"
+                            },
+                            {
+                              "const": "upload",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "style": {
+                          "description": "A generated avatar style (see avatarStyles for the list and each style's license).",
+                          "anyOf": [
+                            {
+                              "const": "notionists",
+                              "type": "string"
+                            },
+                            {
+                              "const": "adventurer",
+                              "type": "string"
+                            },
+                            {
+                              "const": "big-smile",
+                              "type": "string"
+                            },
+                            {
+                              "const": "fun-emoji",
+                              "type": "string"
+                            },
+                            {
+                              "const": "lorelei",
+                              "type": "string"
+                            },
+                            {
+                              "const": "micah",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open-peeps",
+                              "type": "string"
+                            },
+                            {
+                              "const": "personas",
+                              "type": "string"
+                            },
+                            {
+                              "const": "pixel-art",
+                              "type": "string"
+                            },
+                            {
+                              "const": "thumbs",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "seed": {
+                          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                          "description": "Letters, digits, - and _ (1 to 64).",
+                          "type": "string"
+                        },
+                        "url": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        },
+                        "presetUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in",
+        "x-mcp": false
       }
     },
     "/api/v1/backups.createDestination": {
@@ -39325,6 +40100,11 @@
                               },
                               "name": {
                                 "type": "string"
+                              },
+                              "avatarUrl": {
+                                "maxLength": 200,
+                                "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                                "type": "string"
                               }
                             }
                           }
@@ -39499,6 +40279,11 @@
                                 "type": "string"
                               },
                               "name": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "maxLength": 200,
+                                "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
                                 "type": "string"
                               }
                             }
@@ -40647,6 +41432,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     },
@@ -65695,6 +66485,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     }
@@ -65907,6 +66702,11 @@
                               "type": "string"
                             }
                           ]
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                          "type": "string"
                         }
                       }
                     }
@@ -74437,6 +75237,11 @@
                     "name": {
                       "type": "string"
                     },
+                    "avatarUrl": {
+                      "maxLength": 200,
+                      "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                      "type": "string"
+                    },
                     "role": {
                       "description": "owner and admin may do everything; members only what their grants allow.",
                       "anyOf": [
@@ -74587,6 +75392,11 @@
                     "name": {
                       "type": "string"
                     },
+                    "avatarUrl": {
+                      "maxLength": 200,
+                      "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                      "type": "string"
+                    },
                     "role": {
                       "description": "owner and admin may do everything; members only what their grants allow.",
                       "anyOf": [
@@ -74734,6 +75544,11 @@
                           "type": "string"
                         },
                         "name": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "maxLength": 200,
+                          "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
                           "type": "string"
                         },
                         "role": {
@@ -75017,6 +75832,11 @@
                           "name": {
                             "type": "string"
                           },
+                          "avatarUrl": {
+                            "maxLength": 200,
+                            "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
+                            "type": "string"
+                          },
                           "role": {
                             "description": "owner and admin may do everything; members only what their grants allow.",
                             "anyOf": [
@@ -75167,7 +75987,7 @@
       "post": {
         "operationId": "users.update",
         "summary": "Change a person's name or email",
-        "description": "Changes another account's display name or email. CONFLICT when the email is taken.",
+        "description": "Changes an account's display name or email (people change their own email with auth.changeEmail). CONFLICT when the email is taken.",
         "tags": [
           "users"
         ],
@@ -75241,6 +76061,11 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "avatarUrl": {
+                      "maxLength": 200,
+                      "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
                       "type": "string"
                     },
                     "role": {
@@ -75409,6 +76234,11 @@
                       "type": "string"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "avatarUrl": {
+                      "maxLength": 200,
+                      "description": "Path of the person's avatar image on the panel (/api/avatars/...); show initials when it fails to load.",
                       "type": "string"
                     },
                     "role": {

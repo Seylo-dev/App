@@ -1,12 +1,11 @@
 // "Fresh sign-in" (sudo mode): ops that add a way into an account (a
 // passkey, a GitHub link, an authenticator app, an API key, a CLI approval,
-// a first password) need proof that the person is at the keyboard now, not
-// only a session that may have been left open somewhere. So do the ops that
-// hand lasting access to someone else (any invite, a grant that adds
-// actions, a promotion to admin or owner, a node join token) when a browser
-// session runs them. A
-// session is fresh for 15 minutes after it signed in or after auth.reauth
-// confirmed it.
+// a first password) or change the email it signs in with need proof that
+// the person is at the keyboard now, not only a session that may have been
+// left open somewhere. So do the ops that hand lasting access to someone
+// else (any invite, a grant that adds actions, a promotion to admin or
+// owner, a node join token) when a browser session runs them. A session is
+// fresh for 15 minutes after it signed in or after auth.reauth confirmed it.
 
 import { OpError } from "@seylo/ops";
 import { eq } from "drizzle-orm";

@@ -14,10 +14,10 @@ import { NodeUsage } from "../../components/dashboard/node-usage";
 import { ProjectCards } from "../../components/dashboard/project-cards";
 import { NewServiceMenu } from "../../components/new-service/new-service-menu";
 import { PageHeader } from "../../components/page-header";
+import { useNow } from "../../components/service/use-now";
 import { useShell } from "../../components/shell/shell-context";
 import { t } from "../../i18n/t";
 import { greeting } from "../../lib/greeting";
-import { useNow } from "../../components/service/use-now";
 import { isBusy } from "../../lib/service-display";
 import { type ServicesByProject, useAllServices } from "../../lib/use-all-services";
 

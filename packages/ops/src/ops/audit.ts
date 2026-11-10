@@ -4,6 +4,7 @@
 // own entries.
 
 import { Type } from "@sinclair/typebox";
+import { AvatarUrl } from "../avatars";
 import { defineOp } from "../define";
 import { Cursor } from "../people";
 import { permission } from "../permission";
@@ -31,6 +32,8 @@ export const AuditEntry = Type.Object({
     id: Type.Union([Id, Type.Null()]),
     /** As it was then, for example "you@example.com via key ci". */
     label: Type.String(),
+    /** The person's avatar now, while the account exists. */
+    avatarUrl: Type.Optional(AvatarUrl),
     /** Key, token or session id used. */
     credentialId: Type.Union([Type.String(), Type.Null()]),
   }),

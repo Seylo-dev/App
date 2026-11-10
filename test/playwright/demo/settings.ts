@@ -3,7 +3,7 @@
 // acme-shop and personal). Shaped like the op contracts and loosely typed:
 // Playwright transpiles this file without type checks.
 
-import { viewer, ids as world } from "./fixtures";
+import { avatars, viewer, ids as world } from "./fixtures";
 
 type Input = Record<string, any>;
 const now = Date.now();
@@ -65,10 +65,10 @@ export const fixtures: Record<string, unknown> = {
   // The People page lists everyone; the Share dialog asks for active people only, like the real panel.
   "users.list": (input: Input) => {
     const users = [
-      { id: "user000000000001", email: "owner@example.com", name: "Owner", role: "owner", status: "active", twoFactor: true, passkeyCount: 2, githubLogin: "acme-ops", grantCount: 0, lastLoginAt: ago(3), createdAt: ago(60 * 24 * 90) },
-      { id: "user000000000002", email: "lee@acme.dev", name: "Lee Park", role: "admin", status: "active", twoFactor: true, passkeyCount: 0, githubLogin: null, grantCount: 0, lastLoginAt: ago(60 * 5), createdAt: ago(60 * 24 * 40) },
+      { id: "user000000000001", email: "owner@example.com", name: "Owner", avatarUrl: avatars.owner, role: "owner", status: "active", twoFactor: true, passkeyCount: 2, githubLogin: "acme-ops", grantCount: 0, lastLoginAt: ago(3), createdAt: ago(60 * 24 * 90) },
+      { id: "user000000000002", email: "lee@acme.dev", name: "Lee Park", avatarUrl: avatars.lee, role: "admin", status: "active", twoFactor: true, passkeyCount: 0, githubLogin: null, grantCount: 0, lastLoginAt: ago(60 * 5), createdAt: ago(60 * 24 * 40) },
       { id: "user000000000003", email: "contractor@studio.io", name: "", role: "member", status: "active", twoFactor: false, passkeyCount: 0, githubLogin: null, grantCount: 2, lastLoginAt: ago(60 * 24 * 2), createdAt: ago(60 * 24 * 10) },
-      { id: "user000000000004", email: "old@acme.dev", name: "Former intern", role: "member", status: "disabled", twoFactor: false, passkeyCount: 0, githubLogin: null, grantCount: 1, lastLoginAt: null, createdAt: ago(60 * 24 * 200) },
+      { id: "user000000000004", email: "old@acme.dev", name: "Former intern", avatarUrl: avatars.intern, role: "member", status: "disabled", twoFactor: false, passkeyCount: 0, githubLogin: null, grantCount: 1, lastLoginAt: null, createdAt: ago(60 * 24 * 200) },
     ];
     return { users: input.status ? users.filter((user) => user.status === input.status) : users };
   },
@@ -81,7 +81,7 @@ export const fixtures: Record<string, unknown> = {
       },
       {
         grant: { id: "grant00000000002", userId: "user000000000004", scopeType: "service", scopeId: world.web, scopeName: "web", projectId: input.projectId, actions: ["*"], createdBy: "user000000000001", createdAt: ago(60 * 24 * 120), updatedAt: ago(60 * 24 * 60) },
-        user: { id: "user000000000004", email: "old@acme.dev", name: "Former intern" },
+        user: { id: "user000000000004", email: "old@acme.dev", name: "Former intern", avatarUrl: avatars.intern },
       },
     ],
   }),
@@ -219,6 +219,10 @@ export const fixtures: Record<string, unknown> = {
     nextSendAt: null,
     payload: { installId: "7f3c2a9e-1b44-4f0a-9c1e-5d2b8a6f0c11", panelVersion: "0.9.3", agentVersions: { "0.9.3": 3 }, nodes: 3, projects: 2, services: { app: 4, postgres: 1 }, users: 4, features: ["mcp", "ai"], platforms: { "linux/amd64": 2, "linux/arm64": 1 }, wingsNodes: 1 },
   },
+  // Settings > Personal details: the viewer's generated face (fixtures.ts avatars.owner).
+  "avatars.mine": {
+    avatar: { kind: "preset", style: "notionists", seed: "acme-owner", url: avatars.owner, presetUrl: avatars.owner },
+  },
   "auth.security": {
     passwordSet: true,
     totp: { enabled: true, confirmedAt: ago(60 * 24 * 30) },
@@ -239,18 +243,18 @@ export const fixtures: Record<string, unknown> = {
   },
   "audit.list": {
     entries: [
-      { id: "1042", at: ago(2), actor: { type: "user", id: "user000000000001", label: "owner@example.com", credentialId: "sess000000000001" }, opId: "deployments.deploy", target: { type: "service", id: "svc0000000000001", label: "web" }, input: { serviceId: "svc0000000000001" }, outcome: "ok", errorCode: null, durationMs: 42, ip: "203.0.113.7", userAgent: "Mozilla/5.0 (Macintosh) Chrome/130.0", approvalId: null },
-      { id: "1041", at: ago(15), actor: { type: "mcp", id: "user000000000001", label: "owner@example.com via Claude Code on laptop", credentialId: "key0000000000003" }, opId: "projects.delete", target: { type: "project", id: world.personal, label: "docs" }, input: { projectId: world.personal }, outcome: "error", errorCode: "APPROVAL_REQUIRED", durationMs: 3, ip: "203.0.113.7", userAgent: null, approvalId: null },
-      { id: "1040", at: ago(60), actor: { type: "apiKey", id: "user000000000001", label: "owner@example.com via key github-actions", credentialId: "key0000000000001" }, opId: "deployments.deploy", target: { type: "service", id: "svc0000000000002", label: "api" }, input: { serviceId: "svc0000000000002" }, outcome: "ok", errorCode: null, durationMs: 51, ip: "140.82.112.4", userAgent: "curl/8.4.0", approvalId: null },
-      { id: "1039", at: ago(60 * 3), actor: { type: "user", id: "user000000000002", label: "lee@acme.dev", credentialId: "sess0000000000x2" }, opId: "notifications.createChannel", target: null, input: { name: "#alerts", config: { kind: "discord", webhookUrl: "[redacted]" } }, outcome: "ok", errorCode: null, durationMs: 220, ip: "198.51.100.23", userAgent: "Mozilla/5.0 Firefox/132.0", approvalId: null },
+      { id: "1042", at: ago(2), actor: { type: "user", id: "user000000000001", label: "owner@example.com", avatarUrl: avatars.owner, credentialId: "sess000000000001" }, opId: "deployments.deploy", target: { type: "service", id: "svc0000000000001", label: "web" }, input: { serviceId: "svc0000000000001" }, outcome: "ok", errorCode: null, durationMs: 42, ip: "203.0.113.7", userAgent: "Mozilla/5.0 (Macintosh) Chrome/130.0", approvalId: null },
+      { id: "1041", at: ago(15), actor: { type: "mcp", id: "user000000000001", label: "owner@example.com via Claude Code on laptop", avatarUrl: avatars.owner, credentialId: "key0000000000003" }, opId: "projects.delete", target: { type: "project", id: world.personal, label: "docs" }, input: { projectId: world.personal }, outcome: "error", errorCode: "APPROVAL_REQUIRED", durationMs: 3, ip: "203.0.113.7", userAgent: null, approvalId: null },
+      { id: "1040", at: ago(60), actor: { type: "apiKey", id: "user000000000001", label: "owner@example.com via key github-actions", avatarUrl: avatars.owner, credentialId: "key0000000000001" }, opId: "deployments.deploy", target: { type: "service", id: "svc0000000000002", label: "api" }, input: { serviceId: "svc0000000000002" }, outcome: "ok", errorCode: null, durationMs: 51, ip: "140.82.112.4", userAgent: "curl/8.4.0", approvalId: null },
+      { id: "1039", at: ago(60 * 3), actor: { type: "user", id: "user000000000002", label: "lee@acme.dev", avatarUrl: avatars.lee, credentialId: "sess0000000000x2" }, opId: "notifications.createChannel", target: null, input: { name: "#alerts", config: { kind: "discord", webhookUrl: "[redacted]" } }, outcome: "ok", errorCode: null, durationMs: 220, ip: "198.51.100.23", userAgent: "Mozilla/5.0 Firefox/132.0", approvalId: null },
       { id: "1038", at: ago(60 * 26), actor: { type: "anonymous", id: null, label: "anonymous", credentialId: null }, opId: "auth.login", target: null, input: { email: "admin@acme.dev", password: "[redacted]" }, outcome: "error", errorCode: "UNAUTHENTICATED", durationMs: 310, ip: "45.33.12.9", userAgent: "python-requests/2.32", approvalId: null },
     ],
     nextCursor: "1038",
   },
   "approvals.list": {
     approvals: [
-      { id: "appr000000000001", opId: "projects.delete", opSummary: "Delete a project", opKind: "destructive", inputPreview: { projectId: world.personal }, via: "mcp", requestedBy: { userId: "user000000000001", userName: "Owner", clientName: "Claude Code on laptop" }, reason: "You asked me to clean up the unused docs project; it has no deploys in 90 days.", target: { type: "project", id: world.personal, name: "docs" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 23), createdAt: ago(15) },
-      { id: "appr000000000002", opId: "services.restart", opSummary: "Restart a service", opKind: "mutation", inputPreview: { serviceId: "svc0000000000002" }, via: "ai", requestedBy: { userId: "user000000000002", userName: "Lee Park", clientName: "AI assistant" }, reason: "The api service is answering 502 and its memory is at the limit.", target: { type: "service", id: "svc0000000000002", name: "api" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 20), createdAt: ago(40) },
+      { id: "appr000000000001", opId: "projects.delete", opSummary: "Delete a project", opKind: "destructive", inputPreview: { projectId: world.personal }, via: "mcp", requestedBy: { userId: "user000000000001", userName: "Owner", avatarUrl: avatars.owner, clientName: "Claude Code on laptop" }, reason: "You asked me to clean up the unused docs project; it has no deploys in 90 days.", target: { type: "project", id: world.personal, name: "docs" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 23), createdAt: ago(15) },
+      { id: "appr000000000002", opId: "services.restart", opSummary: "Restart a service", opKind: "mutation", inputPreview: { serviceId: "svc0000000000002" }, via: "ai", requestedBy: { userId: "user000000000002", userName: "Lee Park", avatarUrl: avatars.lee, clientName: "AI assistant" }, reason: "The api service is answering 502 and its memory is at the limit.", target: { type: "service", id: "svc0000000000002", name: "api" }, status: "pending", decidedBy: null, decidedAt: null, error: null, expiresAt: ahead(60 * 20), createdAt: ago(40) },
     ],
     nextCursor: null,
     pendingCount: 2,

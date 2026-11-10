@@ -9,6 +9,15 @@ import { createdAt, id, json, sealed, timestamp, updatedAt } from "./columns";
 
 export type Role = "owner" | "admin" | "member";
 
+/**
+ * A person's avatar: a generated face (a DiceBear style and a seed, see
+ * avatarStyles in @seylo/ops) or an uploaded image (its bytes in
+ * user_avatars) shown over the face, which it keeps for when the upload goes.
+ */
+export type StoredAvatar =
+  | { kind: "preset"; style: string; seed: string }
+  | { kind: "upload"; style: string; seed: string; hash: string; contentType: string };
+
 export const users = sqliteTable(
   "users",
   {
@@ -27,11 +36,25 @@ export const users = sqliteTable(
     lockedUntil: timestamp("locked_until"),
     /** Per-person UI choices that follow them across browsers (collapsed projects, color mode). */
     preferences: json<Record<string, unknown>>("preferences").notNull().default(sql`'{}'`),
+    /** A random face from the moment the account is created; null only on rows from before avatars, until the panel starts. */
+    avatar: json<StoredAvatar>("avatar"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex("users_email_unique").on(t.email)],
 );
+
+/** The bytes of an uploaded avatar (PNG, JPEG or WebP, at most 1 MiB): one per person, gone with the account. */
+export const userAvatars = sqliteTable("user_avatars", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  contentType: text("content_type").notNull(),
+  /** First 32 hex characters of the bytes' SHA-256: the version in the image's URL. */
+  hash: text("hash").notNull(),
+  bytes: blob("bytes", { mode: "buffer" }).notNull(),
+  createdAt: createdAt(),
+});
 
 export const sessions = sqliteTable(
   "sessions",

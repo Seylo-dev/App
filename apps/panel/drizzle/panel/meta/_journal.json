@@ -57,6 +57,13 @@
       "when": 1794290474579,
       "tag": "0007_domain_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794293004266,
+      "tag": "0008_user_avatars",
+      "breakpoints": true
     }
   ]
 }

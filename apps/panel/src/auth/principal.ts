@@ -1,13 +1,15 @@
 // Who is calling. Every op runs with exactly one principal; API keys and
 // MCP tokens act as the person who created them, narrowed by their scope.
 
-import type { Role } from "../db/schema";
+import type { Role, StoredAvatar } from "../db/schema";
 
 export interface PrincipalUser {
   id: string;
   email: string;
   name: string;
   role: Role;
+  /** For the viewer's avatarUrl; absent where a test builds a principal by hand. */
+  avatar?: StoredAvatar | null;
 }
 
 export type Principal =

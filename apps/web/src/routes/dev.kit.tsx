@@ -2,7 +2,7 @@
 // screenshots. Outside the signed-in layout so it renders with no panel.
 // The theme switch here is temporary (not saved).
 
-import { settings } from "@seylo/ops";
+import { presetAvatarPath, settings } from "@seylo/ops";
 import { Alert } from "@seylo/ui/components/alert";
 import { Avatar } from "@seylo/ui/components/avatar";
 import { Button } from "@seylo/ui/components/button";
@@ -226,6 +226,8 @@ function KitPage() {
             <Avatar name="ops@example.com" size="sm" />
             <Avatar name="Dana Levi" />
             <Avatar name="build bot" size="lg" />
+            <Avatar name="Lee Park" src={presetAvatarPath("lorelei", "lee-park")} size="lg" />
+            <Avatar name="Broken image" src="/api/avatars/user/none?v=0" size="lg" />
           </span>
         </div>
       </SectionCard>

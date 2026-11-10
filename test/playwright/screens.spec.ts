@@ -84,6 +84,7 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
       "appearance",
       "ai",
       "telemetry",
+      "profile",
       "security",
       "preferences",
     ] as const
