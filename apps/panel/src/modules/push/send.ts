@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { slug } from "@seylo/brand";
 import { type alerts as alertOps, push as pushOps } from "@seylo/ops";
-import { eq, gt, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { createAccess } from "../../auth/access";
 import type { Principal } from "../../auth/principal";
 import { alerts, approvals, pushDevices, users } from "../../db/schema";
@@ -28,7 +28,7 @@ import { deleteSetting, getSetting } from "../../settings";
 import { alertVisibility } from "../alerts/feed";
 import { canSee, opById, openInput } from "../approvals/queue";
 import { checkTarget, type TargetCheck } from "../uptime/targets";
-import { eventsOf, forgetStaleDevices, openTarget, type PushDeviceRow } from "./devices";
+import { eventsOf, forgetStaleDevices, notAwaitingRevoke, openTarget, type PushDeviceRow } from "./devices";
 import { ensureVapidKeys, pushFanoutJobType, pushRevokeJobType, pushSendJobType, revokedVapidKeys } from "./keys";
 import { appPushActive, domainOrigin } from "./state";
 import { maxPushPayloadBytes, type PushTarget, type PushUrgency, pushRequest, type VapidKeys } from "./web-push";
@@ -330,7 +330,12 @@ export const sendJob = defineJob<SendPayload>({
   maxAttempts: sendAttempts,
   async run(payload, ctx) {
     if (!appPushActive(ctx)) return;
-    const device = ctx.db.select().from(pushDevices).where(eq(pushDevices.id, payload.deviceId)).get();
+    // A send queued before a key rotation does not touch a device awaiting its revoke push.
+    const device = ctx.db
+      .select()
+      .from(pushDevices)
+      .where(and(eq(pushDevices.id, payload.deviceId), notAwaitingRevoke(ctx)))
+      .get();
     const alert = ctx.db.select().from(alerts).where(eq(alerts.id, payload.alertId)).get();
     if (!device || !alert) return;
     const target = openTarget(ctx, device);

@@ -3,13 +3,23 @@
 // setEvents, test). Contracts: packages/ops/src/ops/push.ts.
 
 import { OpError, push as pushOps } from "@seylo/ops";
-import { eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { requireSession } from "../../auth/sign-in";
 import { pushDevices, pushPrefs } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { getSetting, setSetting } from "../../settings";
-import { devicesOf, endpointHash, eventsOf, forgetStaleDevices, openTarget, removeDeviceOf, sealTarget, toDevice } from "./devices";
+import {
+  devicesOf,
+  endpointHash,
+  eventsOf,
+  forgetStaleDevices,
+  notAwaitingRevoke,
+  openTarget,
+  removeDeviceOf,
+  sealTarget,
+  toDevice,
+} from "./devices";
 import { ensureVapidKeys, readAppPush } from "./keys";
 import { eventChoicesFor, recordSend, sendToDevice } from "./send";
 import { appPushActive, domainOrigin, onDomainNow, turnOnBlocks, unavailableReason } from "./state";
@@ -58,8 +68,8 @@ const updateSettings = implement(pushOps.updateSettings, (input, ctx) => {
     // The key browsers bind their subscriptions to, made now so the first device can use it.
     ensureVapidKeys(ctx.db, ctx.secrets);
   } else {
-    // Off for everyone: no device keeps a subscription that nothing sends to.
-    removed = ctx.db.delete(pushDevices).returning({ id: pushDevices.id }).all().length;
+    // Off for everyone: no device keeps a subscription that nothing sends to (devices awaiting a revoke still get it).
+    removed = ctx.db.delete(pushDevices).where(notAwaitingRevoke(ctx)).returning({ id: pushDevices.id }).all().length;
   }
   const by = userOf(ctx.principal)?.email ?? null;
   setSetting(ctx.db, "appPush", { enabled: input.enabled, changedAt: Date.now(), by });
@@ -133,10 +143,11 @@ const subscribe = implement(pushOps.subscribe, (input, ctx) => {
       })
       .returning()
       .get();
+    // The cap counts and prunes only devices in use: ones awaiting a revoke are the revoke job's.
     const all = tx
       .select({ id: pushDevices.id, createdAt: pushDevices.createdAt })
       .from(pushDevices)
-      .where(eq(pushDevices.userId, userId))
+      .where(and(eq(pushDevices.userId, userId), notAwaitingRevoke(ctx)))
       .all();
     const extra = all.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(maxDevicesPerPerson);
     for (const old of extra) tx.delete(pushDevices).where(eq(pushDevices.id, old.id)).run();

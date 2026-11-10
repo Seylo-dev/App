@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { push as pushOps } from "@seylo/ops";
-import { and, eq, inArray, lte, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { pushDevices, pushPrefs, sessions } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting } from "../../settings";
@@ -35,24 +35,48 @@ export function openTarget(deps: Pick<Deps, "secrets">, row: PushDeviceRow): Pus
   return { endpoint: parsed.endpoint, p256dh: parsed.p256dh, auth: parsed.auth };
 }
 
+/**
+ * Devices from before a --new-panel-identity rotation wait for their revoke
+ * push (send.ts revokeJob), which is the only thing that removes them: a
+ * row deleted any other way is never told to drop its subscription. This
+ * is the condition every other delete adds. Without a pending revoke it
+ * matches every row.
+ */
+export function notAwaitingRevoke(deps: Pick<Deps, "db">) {
+  return gt(pushDevices.createdAt, new Date(getSetting(deps.db, "pushVapidRevoked")?.at ?? 0));
+}
+
 /** Removes devices added on another origin than the current panel domain (all of them without a domain); returns how many. */
 export function forgetOtherOrigins(deps: Pick<Deps, "db">): number {
   const origin = domainOrigin(deps);
+  const keep = notAwaitingRevoke(deps);
   const removed = origin
-    ? deps.db.delete(pushDevices).where(ne(pushDevices.origin, origin)).returning({ id: pushDevices.id }).all()
-    : deps.db.delete(pushDevices).returning({ id: pushDevices.id }).all();
+    ? deps.db
+        .delete(pushDevices)
+        .where(and(ne(pushDevices.origin, origin), keep))
+        .returning({ id: pushDevices.id })
+        .all()
+    : deps.db.delete(pushDevices).where(keep).returning({ id: pushDevices.id }).all();
   return removed.length;
 }
 
 /**
- * Removes devices whose session ended without a sign-out: it expired (idle
- * for its lifetime, or past the hard cap, which expiresAt already holds).
- * Expired session rows linger until their person signs in again, so the
- * cascade alone would keep pushing to a browser nobody is signed in on.
+ * Removes devices whose session ended: signed out or revoked (the foreign
+ * key set it null), or expired (idle for its lifetime, or past the hard
+ * cap, which expiresAt already holds); expired rows linger until their
+ * person signs in again, so they are checked here. Runs before every
+ * fan-out, so an ended session's browser gets nothing more.
  */
 export function forgetEndedSessions(deps: Pick<Deps, "db">, now = new Date()): number {
   const ended = deps.db.select({ id: sessions.id }).from(sessions).where(lte(sessions.expiresAt, now));
-  return deps.db.delete(pushDevices).where(inArray(pushDevices.sessionId, ended)).returning({ id: pushDevices.id }).all().length;
+  return (
+    deps.db
+      .delete(pushDevices)
+      // A null session is one signed out, revoked or swept (the foreign key sets it null).
+      .where(and(or(isNull(pushDevices.sessionId), inArray(pushDevices.sessionId, ended)), notAwaitingRevoke(deps)))
+      .returning({ id: pushDevices.id })
+      .all().length
+  );
 }
 
 /** Devices of another origin or an ended session, gone; returns how many. */
@@ -90,7 +114,7 @@ export function removeDeviceOf(deps: Pick<Deps, "db">, userId: string, deviceId:
   return (
     deps.db
       .delete(pushDevices)
-      .where(and(eq(pushDevices.id, deviceId), eq(pushDevices.userId, userId)))
+      .where(and(eq(pushDevices.id, deviceId), eq(pushDevices.userId, userId), notAwaitingRevoke(deps)))
       .returning({ id: pushDevices.id })
       .all().length > 0
   );

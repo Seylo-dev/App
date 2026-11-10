@@ -1,8 +1,9 @@
 // Push notifications to people's own devices (0.2.7, modules/push). A
 // device is one browser's push subscription, added from a browser session
 // on the panel domain: it belongs to that person and that session (signing
-// out or revoking the session removes it) and to the domain origin it was
-// added from (a new domain makes it useless, so it is removed then too).
+// out or revoking the session ends it, and it is removed before the next
+// push) and to the domain origin it was added from (a new domain makes it
+// useless, so it is removed then too).
 
 import type { push as pushOps } from "@seylo/ops";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
@@ -16,9 +17,13 @@ export const pushDevices = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => sessions.id, { onDelete: "cascade" }),
+    /**
+     * The session it was added from. Null once that session is gone (signed
+     * out, revoked, or swept after it expired): the device counts as ended
+     * and modules/push/devices.ts removes it, unless it awaits a revoke push.
+     * Not a cascade, which would skip that revoke.
+     */
+    sessionId: text("session_id").references(() => sessions.id, { onDelete: "set null" }),
     /** SHA-256 of the endpoint, hex: one row per browser subscription, found without opening the sealed part. */
     endpointHash: text("endpoint_hash").notNull(),
     /** {endpoint, p256dh, auth} sealed with purpose "push.subscription": whoever has them can push to the device. */

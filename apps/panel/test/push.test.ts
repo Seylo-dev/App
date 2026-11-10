@@ -15,7 +15,7 @@ import { push, system } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { alertMutes, pushDevices, sessions, settings } from "../src/db/schema";
 import { createProxyTrust } from "../src/http/proxy-trust";
-import { endpointHash, forgetOtherOrigins } from "../src/modules/push/devices";
+import { endpointHash, forgetOtherOrigins, forgetStaleDevices } from "../src/modules/push/devices";
 import { pngSize, shortName } from "../src/modules/push/http";
 import { burstLimit, incidentOf, recordSend, resetPushIo, revokeOnStart, setPushIo, topicOf } from "../src/modules/push/send";
 import { turnOnBlocks } from "../src/modules/push/state";
@@ -357,10 +357,12 @@ test("a new domain removes the old domain's devices; a revoked session removes i
   await addDevice(owner);
   await addDevice(owner);
   const [first] = panel.deps.db.select().from(pushDevices).all();
+  // Signing out (the session row goes) ends both devices of that session; they are removed before anything is pushed.
   panel.deps.db
     .delete(sessions)
     .where(eq(sessions.id, first?.sessionId as string))
     .run();
+  expect(forgetStaleDevices(panel.deps)).toBe(2);
   expect(panel.deps.db.select().from(pushDevices).all()).toHaveLength(0);
 
   const fresh = await createUser(panel, "owner");
@@ -425,7 +427,7 @@ test("a throttled device (WNS 406) is retried and not counted as failing; a devi
   panel.deps.db
     .update(sessions)
     .set({ expiresAt: new Date(Date.now() - 1000) })
-    .where(eq(sessions.id, stale.sessionId))
+    .where(eq(sessions.id, stale.sessionId as string))
     .run();
   sent = [];
   status = () => 201;
@@ -476,4 +478,34 @@ test("after a --new-panel-identity rotation the old devices get a revoke push wi
       .map((d) => d.id),
   ).toEqual([fresh.device.id]);
   expect(getSetting(panel.deps.db, "pushVapidRevoked")).toBeUndefined();
+});
+
+test("a device awaiting its revoke push is not removed any other way: an expired or gone session, push off", async () => {
+  activeDomain();
+  const owner = await createUser(panel, "owner");
+  await turnOn(owner);
+  const old = await addDevice(owner);
+  const oldKey = getSetting(panel.deps.db, "pushVapid");
+  await Bun.sleep(5);
+  setSetting(panel.deps.db, "pushVapidRevoked", { ...(oldKey as NonNullable<typeof oldKey>), at: Date.now() });
+  panel.deps.db.delete(settings).where(eq(settings.key, "pushVapid")).run();
+  // Its session expires and later goes (a sign-in sweeps expired sessions); push is turned off meanwhile.
+  const sessionId = panel.deps.db.select().from(pushDevices).get()?.sessionId as string;
+  panel.deps.db
+    .update(sessions)
+    .set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(sessions.id, sessionId))
+    .run();
+  expect(forgetStaleDevices(panel.deps)).toBe(0);
+  panel.deps.db.delete(sessions).where(eq(sessions.id, sessionId)).run();
+  expect(forgetStaleDevices(panel.deps)).toBe(0);
+  await callOp(panel, push.updateSettings, { enabled: false }, { cookie: owner.cookie, headers: overDomain });
+  expect(panel.deps.db.select().from(pushDevices).all()).toHaveLength(1);
+
+  // The start's revoke still reaches it, and only then is it gone.
+  revokeOnStart(panel.deps);
+  await runJobs();
+  expect(sent).toHaveLength(1);
+  expect(openAsBrowser(old.sub.endpoint, sent[0]?.body as Buffer)).toMatchObject({ type: "revoke" });
+  expect(panel.deps.db.select().from(pushDevices).all()).toEqual([]);
 });
