@@ -5,10 +5,11 @@ import { prefetchEnvironment } from "../../../../../../components/service/tab-pr
 import { withService } from "../../../../../../components/service/with-service";
 
 export const Route = createFileRoute("/_app/p/$projectId/s/$serviceId/environment")({
-  loader: ({ context, params }) => {
+  loader: ({ context, params, preload }) => {
     prefetchEnvironment(context, params);
-    // The editor (Monaco) downloads alongside the variables, not after them.
-    void loadMonaco().catch(() => {});
+    // The editor (Monaco, 3.4 MB of code) downloads alongside the variables once you open the tab;
+    // a hover only starts the variables, since evaluating Monaco would stall the pointer for a moment.
+    if (!preload) void loadMonaco().catch(() => {});
   },
   component: withService(EnvironmentPage, EnvironmentSkeleton),
 });

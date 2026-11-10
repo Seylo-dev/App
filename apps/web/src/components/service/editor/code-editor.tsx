@@ -32,6 +32,14 @@ import { loadMonaco } from "./load-monaco";
 
 export { loadMonaco };
 
+/** Resolves in the browser's next idle moment, or after `timeout` ms. */
+function afterIdle(timeout: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout });
+    else setTimeout(resolve, Math.min(timeout, 50));
+  });
+}
+
 export function CodeEditor({
   value,
   language,
@@ -57,39 +65,45 @@ export function CodeEditor({
     let disposed = false;
     let cleanup: undefined | (() => void);
     let editor: CodeEditorInstance | null = null;
-    loadMonaco().then(
-      ({ monaco }) => {
-        if (disposed || !host.current) return;
-        editor = monaco.editor.create(host.current, {
-          value,
-          language,
-          theme: pickTheme(),
-          readOnly,
-          automaticLayout: true,
-          minimap: { enabled: false },
-          fontFamily: "'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace",
-          fontSize: 13,
-          lineHeight: 26,
-          lineNumbersMinChars: 3,
-          padding: { top: 12, bottom: 18 },
-          scrollBeyondLastLine: false,
-          renderLineHighlight: "line",
-          overviewRulerLanes: 0,
-          hideCursorInOverviewRuler: true,
-          scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8, useShadows: false },
-          fixedOverflowWidgets: true,
-          tabSize: 2,
-          ariaLabel: rest["aria-label"],
-          ...options,
-        });
-        editorRef.current = editor;
-        editor.onDidChangeModelContent(() => latest.current.onChange?.(editor?.getValue() ?? ""));
-        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave?.());
-        cleanup = onReady?.(editor, monaco);
-        setReady(true);
-      },
-      () => !disposed && setFailed(true),
-    );
+    loadMonaco()
+      .then(async (loaded) => {
+        // Creating an editor takes a long frame: let the page finish easing in first (idle, or 250 ms at most).
+        await afterIdle(250);
+        return loaded;
+      })
+      .then(
+        ({ monaco }) => {
+          if (disposed || !host.current) return;
+          editor = monaco.editor.create(host.current, {
+            value,
+            language,
+            theme: pickTheme(),
+            readOnly,
+            automaticLayout: true,
+            minimap: { enabled: false },
+            fontFamily: "'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace",
+            fontSize: 13,
+            lineHeight: 26,
+            lineNumbersMinChars: 3,
+            padding: { top: 12, bottom: 18 },
+            scrollBeyondLastLine: false,
+            renderLineHighlight: "line",
+            overviewRulerLanes: 0,
+            hideCursorInOverviewRuler: true,
+            scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8, useShadows: false },
+            fixedOverflowWidgets: true,
+            tabSize: 2,
+            ariaLabel: rest["aria-label"],
+            ...options,
+          });
+          editorRef.current = editor;
+          editor.onDidChangeModelContent(() => latest.current.onChange?.(editor?.getValue() ?? ""));
+          editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave?.());
+          cleanup = onReady?.(editor, monaco);
+          setReady(true);
+        },
+        () => !disposed && setFailed(true),
+      );
     return () => {
       disposed = true;
       cleanup?.();
