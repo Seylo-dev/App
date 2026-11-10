@@ -12,7 +12,7 @@ import { clientIp } from "../../http/client-ip";
 import { jsonResponse } from "../../http/compress";
 import { requestOrigin } from "../../http/request-origin";
 import { readPanelName } from "../settings/keys";
-import { readMcpEnabled } from "./keys";
+import { readMcpEnabled, readMcpSafety } from "./keys";
 import { callTool, toolsFor } from "./tools";
 
 export const mcpPath = "/mcp";
@@ -115,14 +115,16 @@ async function handleMessage(ctx: MessageContext, message: unknown) {
     case "initialize": {
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
       const panelName = readPanelName(ctx.deps.db);
+      const destructive = readMcpSafety(ctx.deps.db).askBeforeDestructive
+        ? "Destructive actions are queued for a person to approve; use approvals_get to follow them."
+        : "Destructive actions run right away on this panel, without a person's approval: confirm with the user before you call one.";
       return rpcResult(id, {
         protocolVersion: supportedProtocolVersions.includes(asked) ? asked : supportedProtocolVersions[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: slug, title: panelName, version: ctx.deps.config.version },
         instructions:
           `Tools of the ${panelName} deploy panel (${displayName}): projects, services, deployments, domains, logs and more. ` +
-          "Tools that change things may be refused for this token (read-only by default). Destructive actions are queued for a person to approve; " +
-          "use approvals_get to follow them.",
+          `Tools that change things may be refused for this token (read-only by default). ${destructive}`,
       });
     }
     case "ping":

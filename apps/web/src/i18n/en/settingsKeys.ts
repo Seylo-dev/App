@@ -40,6 +40,8 @@ export default {
     },
     mcpWrites:
       "Deploys, restarts and edits (env, domains, files) run right away. Deleting something or changing it for good, such as a backup restore, waits in Approvals until a person approves it.",
+    mcpWritesNoAsk:
+      "Deploys, restarts, edits and deletes all run right away: Ask before destructive actions is off in the MCP server settings. Every call is in the activity log.",
     projects: "Projects",
     allProjects: "All projects",
     allProjectsHint: "Everything you can reach, including panel settings if you can change them.",
@@ -62,15 +64,57 @@ export default {
     description: "Lets AI tools such as Claude Code use this panel through the Model Context Protocol.",
     enabled: "MCP server on",
     enabledHint: "Off refuses every token and sign-in from AI tools but keeps them, so turning it back on restores access.",
-    safetyTitle: "Read-only by default",
-    safety:
-      "AI tools see the same actions as you, but tokens start read-only, and anything that deletes something or changes it for good waits until a person approves it.",
+    askBeforeDestructive: "Ask before destructive actions",
+    askBeforeDestructiveHint:
+      "Deleting something or changing it for good waits in Approvals until a person approves it. Off, AI tools allowed to change things do it right away. It is still in the activity log.",
+    readOnlyByDefault: "New AI tools start read-only",
+    readOnlyByDefaultHint:
+      "What the sign-in page picks when an AI tool connects. Off, it picks Read and change. The person signing in can still pick either.",
+    safetyTitle: { readOnly: "Read-only by default", write: "Changes allowed by default" },
+    safety: {
+      readOnlyAsk:
+        "AI tools see the same actions as you, but tokens start read-only, and anything that deletes something or changes it for good waits until a person approves it.",
+      readOnlyNoAsk:
+        "AI tools see the same actions as you, but tokens start read-only. Tools you let change things can also delete them right away, without asking. Every call is in the activity log.",
+      writeAsk:
+        "New AI tools get read and change access unless you pick Read only when they connect. Anything that deletes something or changes it for good still waits until a person approves it.",
+      writeNoAsk:
+        "New AI tools get read and change access unless you pick Read only when they connect, and they can delete things right away, without asking. Every call is in the activity log.",
+    },
     approvalsLink: "Open Approvals",
+    activityLink: "Open the activity log",
     url: "Server URL",
     oauth: "OAuth metadata",
     tools: "{total} tools: {readOnly} read-only, {destructive} that delete something.",
     host: "AI tool",
-    hosts: { "claude-code": "Claude Code", "claude-desktop": "Claude Desktop", cursor: "Cursor" },
+    hosts: {
+      "claude-code": "Claude Code",
+      "claude-desktop": "Claude Desktop",
+      cursor: "Cursor",
+      vscode: "VS Code",
+      codex: "Codex",
+      "gemini-cli": "Gemini CLI",
+      goose: "goose",
+    },
+    install: {
+      "claude-desktop": "Open Claude connectors",
+      cursor: "Add to Cursor",
+      vscode: "Install in VS Code",
+      goose: "Add to goose",
+    },
+    installIn: "Install in {host}",
+    hostHints: {
+      "claude-code": "Run it in a terminal, then run /mcp in Claude Code and pick {name} to sign in.",
+      "claude-desktop":
+        "In Claude (the desktop app or claude.ai), open Customize > Connectors, click Add custom connector and paste this URL. If it asks how Claude signs in, pick Register automatically. Claude connects from Anthropic's servers, so the panel must be reachable from the internet.",
+      cursor: "Or paste this into ~/.cursor/mcp.json, or .cursor/mcp.json in a project. Cursor signs in through your browser.",
+      vscode: "Or run this in a terminal. VS Code opens your browser to sign in the first time it starts the server.",
+      codex: "Run it in a terminal. Codex opens your browser to sign in; codex mcp login {name} signs in again later.",
+      "gemini-cli":
+        "Run it in your project folder, or add --scope user for every folder. Gemini CLI opens your browser to sign in; /mcp auth {name} signs in again.",
+      goose:
+        "Add to goose opens goose Desktop. In the goose CLI this starts one session with the panel; to keep it, run goose configure, then Add Extension > Remote Extension (Streamable HTTP).",
+    },
     tokensTitle: "MCP tokens",
     tokensDescription: "Tokens you made for AI tools, and the ones tools got by signing in through OAuth.",
     createToken: "Create token",

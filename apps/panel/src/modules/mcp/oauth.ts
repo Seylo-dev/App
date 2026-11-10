@@ -3,7 +3,8 @@
 // (RFC 9728), dynamic client registration (RFC 7591), the consent page
 // served by the panel, the token endpoint with rotating refresh tokens, and
 // revocation (RFC 7009). Tokens are api_keys rows of kind "mcp", read-only
-// unless the person allows changes on the consent page.
+// unless the person allows changes on the consent page (which preselects
+// read only unless "New AI tools start read-only" is off).
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { slug } from "@seylo/brand";
@@ -23,7 +24,7 @@ import { writeAuditEvent } from "../../ops/audit";
 import { createRateLimiter, type RateLimiter } from "../../ops/rate-limit";
 import { hashToken, prefixedToken, randomToken } from "../../security/tokens";
 import { readPanelName } from "../settings/keys";
-import { readMcpEnabled } from "./keys";
+import { readMcpEnabled, readMcpSafety } from "./keys";
 import { bridgePage, consentPage, messagePage, sessionKeyField } from "./pages";
 import { mcpPath } from "./server";
 
@@ -320,6 +321,7 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
     // A token acting as this person is a new way in: a session left open
     // confirms it's them on the web app's /reauth page first.
     if (!isFresh(deps, principal.sessionId)) return Response.redirect(`${origin}/reauth?redirect=${back}`, 303);
+    const safety = readMcpSafety(deps.db);
     return consentPage({
       panelName,
       clientName: read.clientName,
@@ -327,6 +329,8 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
       userLabel: principal.user.email,
       fields: authorizeFields(read.value),
       requestedScope: read.value.scope,
+      preselect: safety.readOnlyByDefault ? "read" : "write",
+      askBeforeDestructive: safety.askBeforeDestructive,
       csrf: consentToken(deps, principal.sessionId, read.value),
       sessionKey: form.get(sessionKeyField) ?? "",
     });
@@ -357,7 +361,8 @@ export async function authorizeDecision(deps: Deps, request: Request, ip: string
     target.searchParams.set("error_description", "The person declined.");
     return Response.redirect(target.toString(), 302);
   }
-  // Changes only when the person picked them: a missing choice is read only.
+  // Changes only when the person picked them: a missing choice is read only,
+  // whatever the page preselected.
   const readOnly = form.get("access") !== "write";
   const code = randomToken();
   deps.db

@@ -1,7 +1,8 @@
 // Create an API key or an MCP token: a name, what it may do, optionally
 // which projects, read-only or not, and when it expires. The token is shown
-// once at the end. MCP tokens start read-only; anything else they ask for
-// waits for a person in Approvals.
+// once at the end. MCP tokens start read-only; a destructive call from one
+// waits for a person in Approvals while the MCP server's "Ask before
+// destructive actions" is on.
 
 import { apiKeys, type OpOutput, projects } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -27,10 +28,23 @@ type Created = OpOutput<typeof apiKeys.create>;
 
 const expiryChoices = ["never", "7", "30", "90", "365"] as const;
 
-export function KeySheet({ kind, open, onOpenChange }: { kind: Kind; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function KeySheet({
+  kind,
+  open,
+  onOpenChange,
+  askBeforeDestructive = true,
+}: {
+  kind: Kind;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** MCP tokens: whether destructive calls wait in Approvals (mcp.info), for the note under Read-only. */
+  askBeforeDestructive?: boolean;
+}) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="max-w-xl">{open && <KeyForm kind={kind} onDone={() => onOpenChange(false)} />}</SheetContent>
+      <SheetContent className="max-w-xl">
+        {open && <KeyForm kind={kind} askBeforeDestructive={askBeforeDestructive} onDone={() => onOpenChange(false)} />}
+      </SheetContent>
     </Sheet>
   );
 }
@@ -40,7 +54,7 @@ function availableFor(projectScoped: boolean) {
   return projectScoped ? allActions.filter((info) => info.scope !== "global") : allActions;
 }
 
-function KeyForm({ kind, onDone }: { kind: Kind; onDone: () => void }) {
+function KeyForm({ kind, askBeforeDestructive, onDone }: { kind: Kind; askBeforeDestructive: boolean; onDone: () => void }) {
   const [name, setName] = useState("");
   const [readOnly, setReadOnly] = useState(kind === "mcp");
   const [projectMode, setProjectMode] = useState<"all" | "some">("all");
@@ -110,7 +124,11 @@ function KeyForm({ kind, onDone }: { kind: Kind; onDone: () => void }) {
           </div>
           <Switch checked={readOnly} onCheckedChange={setReadOnly} aria-label={t("settingsKeys.create.readOnly")} />
         </div>
-        {kind === "mcp" && !readOnly && <Alert tone="info">{t("settingsKeys.create.mcpWrites")}</Alert>}
+        {kind === "mcp" && !readOnly && (
+          <Alert tone={askBeforeDestructive ? "info" : "warning"}>
+            {t(askBeforeDestructive ? "settingsKeys.create.mcpWrites" : "settingsKeys.create.mcpWritesNoAsk")}
+          </Alert>
+        )}
 
         <Field label={t("settingsKeys.create.projects")}>
           <RadioGroup

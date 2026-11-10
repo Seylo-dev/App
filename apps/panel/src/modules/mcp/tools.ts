@@ -3,7 +3,9 @@
 // tokens: queries only; narrowed tokens: their actions, and no account-wide
 // ops). Calls run through
 // the op pipeline with transport "mcp", so permissions, rate limits and
-// audit apply; a destructive op becomes an approval for a person.
+// audit apply; a destructive op becomes an approval for a person while
+// "Ask before destructive actions" is on (keys.ts), and runs right away
+// when it is off (the pipeline decides, ops/pipeline.ts).
 
 import { type AnyOpContract, actionAllowed, allOps, OpError, redact } from "@seylo/ops";
 import { buildMcpTools, type McpTool, mcpToolName } from "@seylo/ops/generators";

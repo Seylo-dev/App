@@ -1109,6 +1109,12 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   (403) unless the call carries
   `approvalId`, which only the approvals module sets when it replays a call
   a person approved (the approvals module checks that the approval matches the op and input).
+  The one exception: `mcp` tokens (on any transport) while the MCP setting
+  "Ask before destructive actions" is off (`mcp.update`
+  `askBeforeDestructive: false`, settings key `mcpAskBeforeDestructive`,
+  on when missing) run it right away, still audited and still refused for
+  read-only tokens. The assistant (transport `ai`, a session) never skips
+  it, and queues every change itself anyway.
 - Second factor: sign-in ops return a `LoginResult`; with 2FA there is no
   session yet, only a 5-minute ticket (`auth_challenges`) that
   `auth.verifySecondFactor` exchanges for one. The challenge says whether
@@ -1398,13 +1404,19 @@ types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
   for a signed-in, fresh session (else 303 to `/login` or `/reauth`). The
   consent page names the app by the host its answer goes to ("Connect an
   app at <host>?"), marks the name the client registered as not verified
-  (anyone can register any name), shows the scope it asked for, and always
-  preselects read only: an Allow without a choice is read only, whatever
-  scope was requested; the Allow form carries the key back),
+  (anyone can register any name), shows the scope it asked for, and
+  preselects read only unless the MCP setting "New AI tools start
+  read-only" is off (`mcp.update` `readOnlyByDefault: false`, settings key
+  `mcpReadOnlyByDefault`, on when missing), then read and change; never
+  what the scope asked for. An Allow without a choice is read only either
+  way; the Allow form carries the key back),
   `POST /oauth/token` (code + S256 PKCE,
   rotating refresh tokens, access tokens 24 h, a grant lives 90 days),
   `POST /oauth/revoke`. A token sees only the tools it could use;
-  destructive calls become approvals.
+  destructive calls become approvals while "Ask before destructive
+  actions" is on. `mcp.info` also answers a snippet per AI tool and
+  one-click install links (`modules/mcp/hosts.ts`, each tool's documented
+  format, the server named after the brand slug).
 
 #### Panel service, CLI login, uptime targets and more
 

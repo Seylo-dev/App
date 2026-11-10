@@ -1,9 +1,9 @@
 // The MCP server: the Streamable HTTP endpoint (server.ts), its OAuth 2.1
-// routes (oauth.ts) and the settings ops. MCP tokens themselves are
-// api_keys of kind "mcp" (apiKeys.* ops, or the OAuth flow).
-// Contracts: packages/ops/src/ops/mcp.ts.
+// routes (oauth.ts) and the settings ops: on or off, and the two safety
+// switches (keys.ts), with setup snippets and install links per AI tool
+// (hosts.ts). MCP tokens themselves are api_keys of kind "mcp" (apiKeys.*
+// ops, or the OAuth flow). Contracts: packages/ops/src/ops/mcp.ts.
 
-import { slug } from "@seylo/brand";
 import { mcp, OpError } from "@seylo/ops";
 import { and, eq, isNull } from "drizzle-orm";
 import { Elysia } from "elysia";
@@ -14,7 +14,8 @@ import { implement } from "../../ops/implement";
 import { setSetting } from "../../settings";
 import { defineModule } from "../module";
 import { panelPublicUrl } from "../settings/public-url";
-import { readMcpEnabled } from "./keys";
+import { mcpInstallLinks, mcpSnippets } from "./hosts";
+import { readMcpEnabled, readMcpSafety } from "./keys";
 import {
   authorizationServerMetadata,
   authorizeDecision,
@@ -35,21 +36,22 @@ function info(deps: Pick<Deps, "db" | "config">) {
   const url = `${base}${mcpPath}`;
   return {
     enabled: readMcpEnabled(deps.db),
+    ...readMcpSafety(deps.db),
     url,
     oauthMetadataUrl: `${base}/.well-known/oauth-authorization-server`,
-    snippets: {
-      "claude-code": `claude mcp add --transport http ${slug} ${url}`,
-      "claude-desktop": JSON.stringify({ mcpServers: { [slug]: { command: "npx", args: ["-y", "mcp-remote", url] } } }, null, 2),
-      cursor: JSON.stringify({ mcpServers: { [slug]: { url } } }, null, 2),
-    },
+    snippets: mcpSnippets(url),
+    installLinks: mcpInstallLinks(url),
     tools: toolCounts(),
   };
 }
 
 const infoOp = implement(mcp.info, (_input, ctx) => info(ctx));
 
+// Each field is stored only when sent; the audit entry holds what was sent.
 const update = implement(mcp.update, (input, ctx) => {
-  setSetting(ctx.db, "mcpEnabled", input.enabled);
+  if (input.enabled !== undefined) setSetting(ctx.db, "mcpEnabled", input.enabled);
+  if (input.askBeforeDestructive !== undefined) setSetting(ctx.db, "mcpAskBeforeDestructive", input.askBeforeDestructive);
+  if (input.readOnlyByDefault !== undefined) setSetting(ctx.db, "mcpReadOnlyByDefault", input.readOnlyByDefault);
   ctx.live.publish("panel", { type: "invalidate", ops: ["mcp.info", "system.features"] });
   return info(ctx);
 });
