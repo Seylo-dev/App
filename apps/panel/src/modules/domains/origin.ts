@@ -29,8 +29,11 @@
 //              agent, one without the route yet, one offline).
 //
 // It runs for custom domains (not automatic, not redirect-only) whose DNS
-// is ok or proxied: in domains.checkDns, and a few seconds after
-// domains.add as the domains.checkOrigin job, once the nodes have the route.
+// is ok or proxied: in domains.checkDns, a few seconds after domains.add as
+// the domains.checkOrigin job once the nodes have the route, and before
+// domains.retryCertificate. Requests go only to public addresses or a
+// node's own (vettedFetch): a name that resolves into the panel's network
+// gets no request and reads as unknown.
 
 import { randomBytes } from "node:crypto";
 import { slug } from "@seylo/brand";
@@ -39,9 +42,11 @@ import { eq } from "drizzle-orm";
 import { verifyEd25519 } from "../../agent-hub/signature";
 import { type DnsStatus, domains, nodes, type OriginStatus, servicePlacements } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { pinRequest } from "../../http/pinned-fetch";
 import { defineJob } from "../../jobs/queue";
 import { nodeHasCapability } from "../databases/capability";
 import { enqueueNext } from "../nodes/recurring";
+import { blockedTarget, checkTarget } from "../uptime/targets";
 import { invalidateService } from "./lookup";
 import type { DomainRow } from "./rows";
 
@@ -61,17 +66,37 @@ export function originApplies(row: Pick<DomainRow, "auto" | "forward">, dnsStatu
   return !row.auto && !row.forward && (dnsStatus === "ok" || dnsStatus === "proxied");
 }
 
-/** The fetch the check goes through (the public network, like the panel domain's probe); tests swap in a fake. */
+/** The fetch the check goes through; tests swap in a fake. */
 export type OriginFetch = (
   url: string,
   init: { signal: AbortSignal; redirect: "manual"; headers: Record<string, string> },
 ) => Promise<Response>;
 
-const publicFetch: OriginFetch = (url, init) => fetch(url, init);
-let originFetch: OriginFetch = publicFetch;
+let fetchOverride: OriginFetch | null = null;
 
 export function setOriginFetch(next: OriginFetch | null): void {
-  originFetch = next ?? publicFetch;
+  fetchOverride = next;
+}
+
+/**
+ * The public network: a member adds the domain, so its name may resolve to
+ * anything, the panel's own network included. Each request (redirect hops
+ * too) goes only to a public address or a node's admin-set address, vetted
+ * like an uptime target (uptime/targets.ts, the "allow internal targets"
+ * setting does not apply) and pinned to that address, so DNS cannot answer
+ * the check one thing and the request another.
+ */
+export function vettedFetch(deps: Pick<Deps, "db">): OriginFetch {
+  return async (url, init) => {
+    const target = await checkTarget(deps, url, { allowInternal: false });
+    if (!target.ok || !target.address) throw new Error(`origin check refused: ${target.ok ? "unpinned" : blockedTarget(target)}`);
+    const pinned = pinRequest(url, target.address);
+    return fetch(pinned.url, { ...init, headers: { ...init.headers, ...pinned.headers }, ...(pinned.tls ? { tls: pinned.tls } : {}) });
+  };
+}
+
+function originFetchFor(deps: Pick<Deps, "db">): OriginFetch {
+  return fetchOverride ?? vettedFetch(deps);
 }
 
 /** The whole check, redirects included. Cloudflare answers an origin it cannot reach with a 52x well within it. */
@@ -92,7 +117,7 @@ export type OriginAnswer = { kind: "proof"; nodeId: string } | { kind: "other" }
 export async function probeOrigin(
   host: string,
   keys: readonly { id: string; publicKey: Uint8Array }[],
-  fetcher: OriginFetch = originFetch,
+  fetcher: OriginFetch,
 ): Promise<OriginAnswer> {
   const challenge = randomBytes(24).toString("base64url");
   const path = `${originPath}${challenge}`;
@@ -160,7 +185,7 @@ export interface OriginCheck {
 export async function checkOrigin(
   deps: Pick<Deps, "db" | "agents">,
   row: Pick<DomainRow, "id" | "serviceId" | "host">,
-  fetcher: OriginFetch = originFetch,
+  fetcher: OriginFetch = originFetchFor(deps),
 ): Promise<OriginCheck> {
   const placed = deps.db
     .select({ id: nodes.id, publicKey: nodes.publicKey })

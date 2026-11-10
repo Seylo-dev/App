@@ -355,8 +355,9 @@ export function DomainsPanel({ service }: { service: ServiceDetail }) {
                 >
                   {t("serviceDomains.originElsewhereShort")}
                 </Chip>
-              ) : (
-                d.dnsStatus !== "ok" && !d.auto && !d.forward && <Chip tone="amber">{t(`serviceDomains.dns.${d.dnsStatus}`)}</Chip>
+              ) : d.dnsStatus === "ok" || d.auto || d.forward ? null : (
+                // Behind Cloudflare's proxy is how it is set up, not a problem: gray, not amber.
+                <Chip tone={d.dnsStatus === "proxied" ? "gray" : "amber"}>{t(`serviceDomains.dns.${d.dnsStatus}`)}</Chip>
               )}
             </li>
           ))}

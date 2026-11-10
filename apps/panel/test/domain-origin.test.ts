@@ -20,8 +20,10 @@ import {
   originSignedBytes,
   probeOrigin,
   setOriginFetch,
+  vettedFetch,
 } from "../src/modules/domains/origin";
 import { applyRouteStatus } from "../src/modules/domains/tracking";
+import { setTargetResolver } from "../src/modules/uptime/targets";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 import { type FakeAgent, fakeAgent, seedNode, seedProject, seedService } from "./seed-helpers";
 
@@ -38,6 +40,7 @@ afterEach(() => {
   agents = [];
   setDnsLookups(null);
   setOriginFetch(null);
+  setTargetResolver(null);
   panel.close();
 });
 
@@ -75,7 +78,7 @@ function fakeFetch(answer: (url: string) => Response | Promise<Response>): Origi
 const text = (body: string, status = 200) => new Response(body, { status, headers: { "content-type": "text/plain" } });
 
 /** shop.example.com behind Cloudflare's proxy, on a service placed on one node whose agent answers the check. */
-async function proxiedDomain(options: { capable?: boolean; routed?: boolean } = {}) {
+async function proxiedDomain(options: { capable?: boolean; routed?: boolean; handlers?: Parameters<typeof fakeAgent>[2] } = {}) {
   const key = nodeKey();
   const project = seedProject(panel);
   const node = seedNode(panel, { name: "de-fsn-1", ipv4: "203.0.113.10" });
@@ -92,7 +95,7 @@ async function proxiedDomain(options: { capable?: boolean; routed?: boolean } = 
   setOriginFetch(() => Promise.reject(new Error("no network in tests")));
   const added = await callOp(panel, domainOps.add, { serviceId: service.id, host: "shop.example.com" }, { cookie });
   const domainId: string = added.body.domain.id;
-  const agent = fakeAgent(panel, node.id, {}, ["getNodeFacts"], options.capable === false ? [] : [originCapability]);
+  const agent = fakeAgent(panel, node.id, options.handlers ?? {}, ["getNodeFacts"], options.capable === false ? [] : [originCapability]);
   agents.push(agent);
   agent.snapshot({
     epoch: 1n,
@@ -222,6 +225,72 @@ describe("origin proofs", () => {
     } finally {
       server.stop(true);
     }
+  });
+});
+
+describe("where the check connects", () => {
+  const init = () => ({ signal: AbortSignal.timeout(2000), redirect: "manual" as const, headers: { accept: "text/plain" } });
+
+  test("a name that resolves into the panel's network gets no request", async () => {
+    for (const address of ["10.0.0.5", "127.0.0.1", "169.254.169.254", "fd00::1"]) {
+      setTargetResolver(async () => [address]);
+      await expect(vettedFetch(panel.deps)("http://shop.example.com/.well-known/seylo-origin/x", init())).rejects.toThrow(
+        /origin check refused/,
+      );
+    }
+    // Through domains.checkDns with the real fetch: no answer, so unknown.
+    const { ref } = await proxiedDomain();
+    setOriginFetch(null);
+    setTargetResolver(async () => ["10.0.0.5"]);
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.origin).toBe("unknown");
+  });
+
+  test("a node's own address is allowed, and the request goes to the vetted address with the domain as Host", async () => {
+    let host = "";
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        host = request.headers.get("host") ?? "";
+        return text("ok");
+      },
+    });
+    try {
+      const node = seedNode(panel, { name: "lan-1" });
+      panel.deps.db.update(nodes).set({ publicAddress: "127.0.0.1" }).where(eq(nodes.id, node.id)).run();
+      let asked = 0;
+      setTargetResolver(async () => {
+        asked++;
+        return ["127.0.0.1"];
+      });
+      const response = await vettedFetch(panel.deps)(`http://shop.example.com:${server.port}/.well-known/seylo-origin/x`, init());
+      expect(await response.text()).toBe("ok");
+      expect(host).toBe(`shop.example.com:${server.port}`);
+      expect(asked).toBe(1);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
+describe("domains.retryCertificate and the origin", () => {
+  test("refused while something else answers behind the proxy, allowed once the node proves itself", async () => {
+    const { key, ref } = await proxiedDomain({
+      handlers: {
+        retryCertificate: (request: { serviceId: string; routeId: string }) => ({
+          status: { routeId: request.routeId, state: RouteState.CERTIFICATE_PENDING, message: "waiting" },
+          hosts: ["shop.example.com"],
+        }),
+      },
+    });
+    setOriginFetch(fakeFetch(() => text("<!doctype html><title>Old host</title>")));
+    const refused = await callOp(panel, domainOps.retryCertificate, ref, { cookie });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.details.reason).toBe("originElsewhere");
+    expect(refused.body.error.message).toContain("203.0.113.10");
+    setOriginFetch(fakeFetch((url) => text(proofFor(key.privateKey, url))));
+    const retried = await callOp(panel, domainOps.retryCertificate, ref, { cookie });
+    expect(retried.status).toBe(200);
   });
 });
 

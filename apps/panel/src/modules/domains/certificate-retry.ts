@@ -4,7 +4,9 @@
 // restart. Guarded so a retry has a chance: Let's Encrypt only validates a
 // host whose record points at the node, and counts every failed
 // validation against 5 per host name per hour, so retries are allowed
-// once a minute per domain and refused while DNS points elsewhere.
+// once a minute per domain and refused while DNS points elsewhere, or,
+// behind Cloudflare's proxy, while the origin check says the record there
+// points elsewhere.
 
 import { domains as domainOps, OpError, type OpOutput } from "@seylo/ops";
 import { eq } from "drizzle-orm";
@@ -14,7 +16,14 @@ import { implement, type OpContext } from "../../ops/implement";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, type PlacedNode, serviceNodes } from "./lookup";
 import { requireDomain } from "./ops";
+import { checkOrigin, originApplies, saveOrigin } from "./origin";
 import { toDomain } from "./rows";
+
+/** "203.0.113.10" or "203.0.113.10 or 198.51.100.4": where the record should point. */
+function nodeAddressText(nodes: PlacedNode[]): string {
+  const addresses = [...new Set(nodes.flatMap((n) => [n.publicAddress ?? n.ipv4 ?? n.ipv6].filter((a): a is string => !!a)))];
+  return addresses.length ? addresses.join(" or ") : "the node";
+}
 
 /** One retry per domain per minute. */
 export const certificateRetryWindowMs = 60_000;
@@ -102,6 +111,18 @@ async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): P
       `${dns.message} Let's Encrypt checks the domain through that record, so a new certificate cannot be issued until it points at the node.`,
       { reason: "dnsNotPointing", dnsStatus: dns.status },
     );
+  }
+  // Behind Cloudflare's proxy the DNS answer hides where the record points; the origin check sees through it (origin.ts).
+  if (originApplies(row, dns.status)) {
+    const { origin } = await checkOrigin(ctx, row);
+    saveOrigin(ctx, row, origin);
+    if (origin === "elsewhere") {
+      throw new OpError(
+        "CONFLICT",
+        `${row.host} is behind Cloudflare's proxy, and the record there does not point at the service's node: something else answered. Let's Encrypt reaches the domain the same way, so a new certificate cannot be issued until that record points at ${nodeAddressText(nodes)}.`,
+        { reason: "originElsewhere" },
+      );
+    }
   }
 
   const targets = nodesInDns(nodes, dns).filter((n) => ctx.agents.isOnline(n.id));
