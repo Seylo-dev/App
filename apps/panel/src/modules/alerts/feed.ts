@@ -20,8 +20,12 @@ function cursorOf(row: AlertRow): string {
   return `${row.createdAt.getTime()}_${row.id}`;
 }
 
-/** Whether the caller may see one alert; caches per service, project and node. */
-function visibility(access: Access) {
+/**
+ * Whether the caller may see one alert; caches per service, project and
+ * node. The feed, and the push fan-out (modules/push/send.ts) for each
+ * person with a device, use the same rule.
+ */
+export function alertVisibility(access: Access) {
   const cache = new Map<string, boolean>();
   const cached = (key: string, check: () => boolean) => {
     let value = cache.get(key);
@@ -73,7 +77,7 @@ export const list = implement(alertOps.list, (input, ctx) => {
   if (input.serviceId) filters.push(eq(alerts.serviceId, input.serviceId));
   if (input.nodeId) filters.push(eq(alerts.nodeId, input.nodeId));
   if (input.unresolvedOnly) filters.push(isNull(alerts.resolvedAt));
-  const visible = visibility(ctx.access);
+  const visible = alertVisibility(ctx.access);
 
   const out: AlertRow[] = [];
   let after = parseCursor(input.cursor);

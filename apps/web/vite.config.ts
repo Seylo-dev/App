@@ -21,6 +21,8 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": { target: panel, ws: true, changeOrigin: false },
+      // The panel generates the app manifest from its branding (modules/push/http.ts).
+      "/manifest.webmanifest": { target: panel, changeOrigin: false },
     },
   },
   build: {

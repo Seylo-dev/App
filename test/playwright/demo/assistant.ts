@@ -327,6 +327,7 @@ export const assistantHandlers: Record<string, (input: Input) => unknown> = {
     ai: { enabled: true, reason: "" },
     telemetry: { enabled: false, reason: "off" },
     notifications: { enabled: true, reason: "" },
+    appPush: { enabled: false, reason: "An admin has not turned on the app and push notifications (Settings > Notifications)." },
   }),
   "ai.me": () => me,
   "ai.setAutoMode": (input) => {

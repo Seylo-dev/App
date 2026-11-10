@@ -6,6 +6,7 @@ import { implement } from "../../ops/implement";
 import { getSetting } from "../../settings";
 import { readAiSettings } from "../ai/keys";
 import { readMcpEnabled } from "../mcp/keys";
+import { appPushActive, unavailableReason } from "../push/state";
 import "../settings/keys";
 
 const on = { enabled: true, reason: "" };
@@ -40,5 +41,6 @@ export const features = implement(system.features, (_input, ctx) => {
               : "Telemetry is turned off. Turn it on in Settings > Telemetry.",
           ),
     notifications: channel ? on : off("Add a notification channel in Settings > Notifications."),
+    appPush: appPushActive(ctx) ? on : off(unavailableReason(ctx)),
   };
 });

@@ -10,7 +10,7 @@
 // same subject gets a new row; resolve() and isOpen() take the prefix
 // without the start.
 
-import type { alerts as alertOps } from "@seylo/ops";
+import { type alerts as alertOps, push as pushOps } from "@seylo/ops";
 import { and, eq, gt, gte, isNull, lt, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { alertMutes, alerts, notificationChannels, services } from "../../db/schema";
@@ -18,6 +18,7 @@ import type { JobQueue } from "../../jobs/queue";
 import type { LiveHub } from "../../live/hub";
 import type { Logger } from "../../logger";
 import { effectiveRule } from "../notifications/rules";
+import { pushFanoutJobType, readAppPush } from "../push/keys";
 
 export type AlertEventName = alertOps.AlertEventName;
 export type AlertSeverity = alertOps.AlertSeverity;
@@ -174,6 +175,12 @@ export function createAlertSink(parts: { db: PanelDb; jobs: JobQueue; live: Live
       .get();
     if (!row) return null;
     publish(serviceId, projectId);
+    // People's own devices (modules/push), feed-only good news such as node_online included; the
+    // fan-out job decides who may get it. A mute silences pushes as it silences channels.
+    if (readAppPush(db).enabled && (pushOps.pushEvents as readonly string[]).includes(alert.event)) {
+      const pushMuted = notify ? isMuted : muted(alert.event, { projectId, serviceId, nodeId });
+      if (!pushMuted) jobs.enqueue(pushFanoutJobType, { alertId: row.id }, { dedupeKey: `push:${row.id}`, maxAttempts: 3 });
+    }
     if (!notify || isMuted || feedOnly.has(alert.event)) return row.id;
 
     const rule = effectiveRule(db, alert.event as alertOps.AlertRuleEventName, serviceId);

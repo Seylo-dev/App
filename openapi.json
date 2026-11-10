@@ -54739,6 +54739,1118 @@
         "x-mcp": true
       }
     },
+    "/api/v1/push.mine": {
+      "get": {
+        "operationId": "push.mine",
+        "summary": "Get your push notification devices and events",
+        "description": "Returns whether push notifications are available, the signed-in person's devices and which alert events reach them. Browser sessions and full API keys of that person only.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "available",
+                    "reason",
+                    "domainUrl",
+                    "onDomainNow",
+                    "publicKey",
+                    "devices",
+                    "events",
+                    "eventChoices"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "domainUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "onDomainNow": {
+                      "type": "boolean"
+                    },
+                    "publicKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "devices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "label",
+                          "service",
+                          "endpointHash",
+                          "createdAt",
+                          "lastSentAt",
+                          "failing",
+                          "lastError"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "service": {
+                            "type": "string"
+                          },
+                          "endpointHash": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "lastSentAt": {
+                            "anyOf": [
+                              {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "failing": {
+                            "type": "boolean"
+                          },
+                          "lastError": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "const": "crash",
+                            "type": "string"
+                          },
+                          {
+                            "const": "crash_limit",
+                            "type": "string"
+                          },
+                          {
+                            "const": "deploy_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "deploy_succeeded",
+                            "type": "string"
+                          },
+                          {
+                            "const": "build_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "health_unhealthy",
+                            "type": "string"
+                          },
+                          {
+                            "const": "certificate_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "uptime_down",
+                            "type": "string"
+                          },
+                          {
+                            "const": "backup_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cron_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_offline",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_online",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_health_check_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "disk_low",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cleanup_ran",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cleanup_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "update_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "approval_requested",
+                            "type": "string"
+                          },
+                          {
+                            "const": "security_change",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "eventChoices": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "const": "crash",
+                            "type": "string"
+                          },
+                          {
+                            "const": "crash_limit",
+                            "type": "string"
+                          },
+                          {
+                            "const": "deploy_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "deploy_succeeded",
+                            "type": "string"
+                          },
+                          {
+                            "const": "build_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "health_unhealthy",
+                            "type": "string"
+                          },
+                          {
+                            "const": "certificate_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "uptime_down",
+                            "type": "string"
+                          },
+                          {
+                            "const": "backup_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cron_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_offline",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_online",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_health_check_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "disk_low",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cleanup_ran",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cleanup_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "update_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "approval_requested",
+                            "type": "string"
+                          },
+                          {
+                            "const": "security_change",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/push.removeDevice": {
+      "post": {
+        "operationId": "push.removeDevice",
+        "summary": "Remove a push notification device",
+        "description": "Removes one of the signed-in person's devices; it gets no more pushes.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "deviceId"
+                ],
+                "properties": {
+                  "deviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "removed"
+                  ],
+                  "properties": {
+                    "removed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/push.setEvents": {
+      "post": {
+        "operationId": "push.setEvents",
+        "summary": "Choose which alerts reach your devices",
+        "description": "Sets the alert events that reach the signed-in person's devices. Events the person cannot receive (see eventChoices in push.mine) are refused.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "events"
+                ],
+                "properties": {
+                  "events": {
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "const": "crash",
+                          "type": "string"
+                        },
+                        {
+                          "const": "crash_limit",
+                          "type": "string"
+                        },
+                        {
+                          "const": "deploy_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "deploy_succeeded",
+                          "type": "string"
+                        },
+                        {
+                          "const": "build_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "health_unhealthy",
+                          "type": "string"
+                        },
+                        {
+                          "const": "certificate_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "uptime_down",
+                          "type": "string"
+                        },
+                        {
+                          "const": "backup_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cron_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "node_offline",
+                          "type": "string"
+                        },
+                        {
+                          "const": "node_online",
+                          "type": "string"
+                        },
+                        {
+                          "const": "node_health_check_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "disk_low",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cleanup_ran",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cleanup_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "update_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "approval_requested",
+                          "type": "string"
+                        },
+                        {
+                          "const": "security_change",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "events"
+                  ],
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "const": "crash",
+                            "type": "string"
+                          },
+                          {
+                            "const": "crash_limit",
+                            "type": "string"
+                          },
+                          {
+                            "const": "deploy_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "deploy_succeeded",
+                            "type": "string"
+                          },
+                          {
+                            "const": "build_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "health_unhealthy",
+                            "type": "string"
+                          },
+                          {
+                            "const": "certificate_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "uptime_down",
+                            "type": "string"
+                          },
+                          {
+                            "const": "backup_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cron_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_offline",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_online",
+                            "type": "string"
+                          },
+                          {
+                            "const": "node_health_check_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "disk_low",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cleanup_ran",
+                            "type": "string"
+                          },
+                          {
+                            "const": "cleanup_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "update_failed",
+                            "type": "string"
+                          },
+                          {
+                            "const": "approval_requested",
+                            "type": "string"
+                          },
+                          {
+                            "const": "security_change",
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/push.settings": {
+      "get": {
+        "operationId": "push.settings",
+        "summary": "Get the app and push notifications setting",
+        "description": "Returns whether the installable app and push notifications are on, whether they work now (the panel domain must work over HTTPS), what refuses turning them on, and how many people and devices use them.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "active",
+                    "domainUrl",
+                    "onDomainNow",
+                    "blocks",
+                    "people",
+                    "devices",
+                    "changedAt",
+                    "changedBy"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "domainUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "onDomainNow": {
+                      "type": "boolean"
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "noDomain",
+                                "type": "string"
+                              },
+                              {
+                                "const": "domainNotActive",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notOnDomain",
+                                "type": "string"
+                              },
+                              {
+                                "const": "viaTailnet",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowser",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "people": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "devices": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "changedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "changedBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "notifications.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/push.subscribe": {
+      "post": {
+        "operationId": "push.subscribe",
+        "summary": "Add this device for push notifications",
+        "description": "Adds a browser's push subscription (subscription.toJSON()) to the signed-in person's devices. Only from a browser session on the panel domain over HTTPS while push is on. The endpoint must be a known push service (Google, Mozilla, Apple, Microsoft). A subscription already on another account moves to this one.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "endpoint",
+                  "p256dh",
+                  "auth",
+                  "label"
+                ],
+                "properties": {
+                  "endpoint": {
+                    "minLength": 12,
+                    "maxLength": 2048,
+                    "pattern": "^https://",
+                    "type": "string"
+                  },
+                  "p256dh": {
+                    "minLength": 80,
+                    "maxLength": 120,
+                    "pattern": "^[A-Za-z0-9_-]+={0,2}$",
+                    "type": "string"
+                  },
+                  "auth": {
+                    "minLength": 16,
+                    "maxLength": 32,
+                    "pattern": "^[A-Za-z0-9_-]+={0,2}$",
+                    "type": "string"
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "label",
+                    "service",
+                    "endpointHash",
+                    "createdAt",
+                    "lastSentAt",
+                    "failing",
+                    "lastError"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "endpointHash": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "lastSentAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "failing": {
+                      "type": "boolean"
+                    },
+                    "lastError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/push.test": {
+      "post": {
+        "operationId": "push.test",
+        "summary": "Send a test push to your devices",
+        "description": "Sends a test notification to each of the signed-in person's devices and says which ones took it.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "results"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "deviceId",
+                          "label",
+                          "ok",
+                          "error"
+                        ],
+                        "properties": {
+                          "deviceId": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "signed-in, whole account",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/push.updateSettings": {
+      "post": {
+        "operationId": "push.updateSettings",
+        "summary": "Turn the app and push notifications on or off",
+        "description": "Turns the installable app and push notifications on or off for everyone. Turning them on works only from a browser on the panel domain over HTTPS (CONFLICT with reason noDomain, domainNotActive, notOnDomain, viaTailnet or notBrowser otherwise). Turning them off removes every person's devices; they turn push on again on each device.",
+        "tags": [
+          "push"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "active",
+                    "domainUrl",
+                    "onDomainNow",
+                    "blocks",
+                    "people",
+                    "devices",
+                    "changedAt",
+                    "changedBy"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "domainUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "onDomainNow": {
+                      "type": "boolean"
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "noDomain",
+                                "type": "string"
+                              },
+                              {
+                                "const": "domainNotActive",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notOnDomain",
+                                "type": "string"
+                              },
+                              {
+                                "const": "viaTailnet",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowser",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "people": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "devices": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "changedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "changedBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "notifications.manage",
+        "x-mcp": false
+      }
+    },
     "/api/v1/registries.create": {
       "post": {
         "operationId": "registries.create",
@@ -69030,7 +70142,7 @@
       "get": {
         "operationId": "system.features",
         "summary": "List optional features",
-        "description": "Says which optional features are usable on this panel (GitHub sign-in, passkeys, MCP, AI assistant, telemetry, notification channels) and, for each one that is off, why.",
+        "description": "Says which optional features are usable on this panel (GitHub sign-in, passkeys, MCP, AI assistant, telemetry, notification channels, the installable app and push notifications) and, for each one that is off, why.",
         "tags": [
           "system"
         ],
@@ -69057,7 +70169,8 @@
                     "mcp",
                     "ai",
                     "telemetry",
-                    "notifications"
+                    "notifications",
+                    "appPush"
                   ],
                   "properties": {
                     "githubSignIn": {
@@ -69136,6 +70249,21 @@
                       }
                     },
                     "notifications": {
+                      "type": "object",
+                      "required": [
+                        "enabled",
+                        "reason"
+                      ],
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "appPush": {
                       "type": "object",
                       "required": [
                         "enabled",

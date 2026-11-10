@@ -14,9 +14,12 @@ import { join, resolve } from "node:path";
 import { githubOrg, githubRepo, installUrl } from "@seylo/brand";
 import { eq } from "drizzle-orm";
 import { issueRecoveryCodes } from "../src/auth/second-factor";
+import { createSession } from "../src/auth/sessions";
 import { loadConfig } from "../src/config";
 import { openDatabases } from "../src/db/client";
-import { gitCredentials, nodes, recoveryCodes, settings, users } from "../src/db/schema";
+import { gitCredentials, nodes, pushDevices, recoveryCodes, settings, users } from "../src/db/schema";
+import { openTarget, sealTarget } from "../src/modules/push/devices";
+import { ensureVapidKeys } from "../src/modules/push/keys";
 import { ensureAgentTls } from "../src/security/agent-tls";
 import { ensureEdgeTicketKey } from "../src/security/edge-ticket-key";
 import { loadMasterKey } from "../src/security/master-key";
@@ -425,4 +428,49 @@ describe("the script", () => {
     expect(out.stdout).toContain("Delete old copies of the data dir");
     expect(run("--from-cli").code).toBe(2);
   });
+});
+
+/** A push device (0.2.7) for the seeded owner, sealed with the old key, and the panel's push key. */
+function seedPush(oldBox: ReturnType<typeof createSecretBox>) {
+  const dbs = open();
+  const owner = dbs.db.select().from(users).get() as { id: string };
+  const { sessionId } = createSession(dbs.db, owner.id, { ip: null, userAgent: null });
+  const target = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", p256dh: "x".repeat(87), auth: "y".repeat(22) };
+  dbs.db
+    .insert(pushDevices)
+    .values({
+      userId: owner.id,
+      sessionId,
+      endpointHash: "h",
+      subscriptionSealed: sealTarget({ secrets: oldBox }, target),
+      service: "fcm.googleapis.com",
+      origin: "https://panel.example.com",
+      label: "Chrome on Android",
+    })
+    .run();
+  const vapid = ensureVapidKeys(dbs.db, oldBox);
+  dbs.close();
+  return { target, vapid };
+}
+
+test("--keep-panel-identity: push devices and the push key are sealed again and keep working", () => {
+  const { secrets: oldBox } = seed();
+  const { target, vapid } = seedPush(oldBox);
+  rotateMasterKey(dir, { panelIdentity: "keep" });
+  const newBox = createSecretBox(loadMasterKey(join(dir, "master.key"), false));
+  const after = open();
+  const device = after.db.select().from(pushDevices).get();
+  expect(device && openTarget({ secrets: newBox }, device)).toEqual(target);
+  expect(ensureVapidKeys(after.db, newBox)).toEqual(vapid);
+  after.close();
+});
+
+test("--new-panel-identity: push devices and the push key are dropped (a leaked panel.db must not push to phones)", () => {
+  const { secrets: oldBox } = seed();
+  seedPush(oldBox);
+  rotateMasterKey(dir, { panelIdentity: "new" });
+  const after = open();
+  expect(after.db.select().from(pushDevices).all()).toEqual([]);
+  expect(after.db.select().from(settings).where(eq(settings.key, "pushVapid")).get()).toBeUndefined();
+  after.close();
 });

@@ -30,6 +30,8 @@ export const sealPurposes = [
   "github.app",
   "notification.channel",
   "project.env",
+  "push.subscription",
+  "push.vapid-key",
   "registry.credential",
   "service.env",
   "service.secret",

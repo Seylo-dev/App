@@ -113,6 +113,7 @@ test.describe("sidebar items", () => {
           ai: feature(false),
           telemetry: feature(false),
           notifications: feature(false),
+          appPush: feature(false),
         }),
         "approvals.list": () => ({ approvals: [], nextCursor: null, pendingCount: waiting }),
       },

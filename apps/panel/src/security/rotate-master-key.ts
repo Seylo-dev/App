@@ -48,8 +48,18 @@ import { createSecretBox, type SealPurpose, type SecretBox, sealPurposes } from 
 
 /** `v1.<12-byte iv>.<16-byte tag>.<ciphertext>`, all base64url (secret-box.ts). */
 const sealedPattern = /^v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]*$/;
-/** Settings that hold the panel's identity keys; with "new" the panel makes new ones on start. */
-const identitySettings = ["edgeTicketKey", "lbTlsCa", "lbTlsNodes"];
+/**
+ * Settings that hold the panel's identity keys; with "new" the panel makes
+ * new ones on start (the push key when push is next used).
+ */
+const identitySettings = ["edgeTicketKey", "lbTlsCa", "lbTlsNodes", "pushVapid"];
+/**
+ * Rows a leaked panel.db makes dangerous to keep, dropped with "new": push
+ * devices hold each browser's endpoint and secret, which with the old push
+ * key would let whoever has the copy send notifications to people's phones.
+ * People turn push on again on each device.
+ */
+const identityTables = ["push_devices"];
 /** How long a rotation waits for panel.db's write lock (a panel's start check may hold it). */
 const rotationLockWaitMs = 5_000;
 /** How long the panel's start waits for a rotation still running to commit. */
@@ -186,6 +196,9 @@ function resealAndCommit(sqlite: Database, paths: Paths, oldKey: Uint8Array, opt
     }
     // Dropped first, so the count only has what the panel keeps.
     if (fresh) for (const key of identitySettings) sqlite.query("DELETE FROM settings WHERE key = ?").run(key);
+    // A panel.db from before the table existed has nothing to drop.
+    const hasTable = (table: string) => sqlite.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== null;
+    if (fresh) for (const table of identityTables) if (hasTable(table)) sqlite.query(`DELETE FROM "${table}"`).run();
     for (const { table, column } of textColumns(sqlite)) {
       const rows = sqlite
         .query<{ id: number; value: string }, []>(

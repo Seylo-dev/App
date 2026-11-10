@@ -7,6 +7,7 @@ import { EnterOnChange } from "@seylo/ui/components/motion";
 import { cn } from "@seylo/ui/lib/utils";
 import { createFileRoute, Outlet, redirect, useChildMatches, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { AppPushSync } from "../components/app-push-sync";
 import { AssistantProvider, useBubbleShown } from "../components/assistant/assistant-context";
 import { AssistantBubble } from "../components/assistant/bubble";
 import { ErrorPage, NotFound } from "../components/not-found";
@@ -42,6 +43,7 @@ function AppLayout() {
     <ShellProvider>
       <AssistantProvider>
         <PanelTopic />
+        <AppPushSync />
         <div className="flex min-h-dvh flex-col md:flex-row">
           <Sidebar />
           <Main />

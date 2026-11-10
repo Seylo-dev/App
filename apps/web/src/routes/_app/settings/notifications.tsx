@@ -1,6 +1,7 @@
-// Settings > Notifications (Notifications board): channels defined once as
-// cards, the add/edit channel card with a test send, and the default alert
-// rules every service uses unless it sets its own.
+// Settings > Notifications (Notifications board): the switch for the
+// installable app and push notifications (admins, 0.2.7), channels defined
+// once as cards, the add/edit channel card with a test send, and the
+// default alert rules every service uses unless it sets its own.
 
 import { auth, notifications } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -16,6 +17,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { formatDuration, formatRelative } from "../../../components/settings/format";
 import { useSettingsMutation } from "../../../components/settings/mutation";
+import { AppPushCard } from "../../../components/settings/notifications/app-push-card";
 import { ChannelForm } from "../../../components/settings/notifications/channel-form";
 import { DefaultAlerts } from "../../../components/settings/notifications/default-alerts";
 import { OpErrorCallout } from "../../../components/settings/op-state";
@@ -57,6 +59,7 @@ function NotificationsPage() {
 
   return (
     <SettingsPage title={t("settingsNotifications.title")} subtitle={t("settingsNotifications.subtitle")}>
+      {canEdit && <AppPushCard />}
       {list.error ? (
         <OpErrorCallout error={list.error} onRetry={() => void list.refetch()} />
       ) : (

@@ -57,7 +57,7 @@ export const version = defineOp({
  * Optional features the web app shows or hides. Each says whether it is
  * usable now and, when it is not, why (shown next to the disabled control).
  */
-export const featureNames = ["githubSignIn", "passkeys", "mcp", "ai", "telemetry", "notifications"] as const;
+export const featureNames = ["githubSignIn", "passkeys", "mcp", "ai", "telemetry", "notifications", "appPush"] as const;
 export type FeatureName = (typeof featureNames)[number];
 
 export const FeatureState = Type.Object({
@@ -74,6 +74,8 @@ export const SystemFeatures = Type.Object({
   telemetry: FeatureState,
   /** At least one enabled notification channel exists. */
   notifications: FeatureState,
+  /** The installable app and push notifications: an admin turned them on and the panel domain works (0.2.7). */
+  appPush: FeatureState,
 });
 
 export const features = defineOp({
@@ -81,7 +83,7 @@ export const features = defineOp({
   kind: "query",
   summary: "List optional features",
   description:
-    "Says which optional features are usable on this panel (GitHub sign-in, passkeys, MCP, AI assistant, telemetry, notification channels) and, for each one that is off, why.",
+    "Says which optional features are usable on this panel (GitHub sign-in, passkeys, MCP, AI assistant, telemetry, notification channels, the installable app and push notifications) and, for each one that is off, why.",
   input: Empty,
   output: SystemFeatures,
   permission: permission.signedIn(),

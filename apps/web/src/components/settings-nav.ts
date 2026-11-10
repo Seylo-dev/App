@@ -32,4 +32,5 @@ export const accountNav = [
   { to: "/settings/profile", label: "settings.sections.profile" },
   { to: "/settings/security", label: "settings.sections.security" },
   { to: "/settings/preferences", label: "settings.sections.preferences" },
+  { to: "/settings/push", label: "settings.sections.push" },
 ] as const satisfies readonly SettingsNavItem[];

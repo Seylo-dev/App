@@ -46,6 +46,7 @@ test.describe("sidebar new service", () => {
       ai: feature(false),
       telemetry: feature(false),
       notifications: feature(false),
+      appPush: feature(false),
     });
     const none = { approvals: [], nextCursor: null, pendingCount: 0 };
     const sidebar = page.getByRole("navigation", { name: "Main" });

@@ -25,6 +25,7 @@ export default {
     profile: "Personal details",
     security: "Security",
     preferences: "Preferences",
+    push: "Push notifications",
   },
   save: "Save",
   saving: "Saving",

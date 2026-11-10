@@ -160,7 +160,11 @@ existing rows), `0010_docker_update` (`nodes.docker_update`, the newest
 Docker version check) and `0011_assistant_chat` (`users.ai_auto_mode`,
 default false, and `approvals.source_label`, default ''); for 0.2.6
 `0012_service_order` (`project_prefs.service_order`, a person's order of a
-project's services, services.reorder)), which the panel applies at start, also
+project's services, services.reorder) and `0013_project_images`
+(`project_images`, projects.setImage); for 0.2.7 `0014_push_devices`
+(`push_devices`, a person's browser push subscriptions, sealed, removed
+with their session, and `push_prefs`, the alert events each person
+pushes)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
