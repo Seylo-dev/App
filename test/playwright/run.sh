@@ -6,8 +6,8 @@
 #                                              panel), flows (settings and CLI sign-in
 #                                              on the real panel), databases (the engine
 #                                              form and connection tabs) and screens
-#                                              (every screen with demo data, four presets)
-#   PRESETS=seylo test/playwright/run.sh       screens in one preset only
+#                                              (every screen with demo data, every preset light and dark)
+#   PRESETS=seylo MODES=dark test/playwright/run.sh  screens in one preset and half only
 #   test/playwright/run.sh --project smoke     extra arguments go to `playwright test`
 #
 # Environment: PANEL_PORT (3151), WEB_PORT (5251), DATA_DIR (a new temp dir,

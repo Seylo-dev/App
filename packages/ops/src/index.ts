@@ -7,6 +7,7 @@ import "./formats";
 import { opModules } from "./ops/index.gen";
 import { collectOps } from "./registry";
 
+export * from "./accent";
 export * from "./actions";
 export * from "./avatars";
 export * from "./define";

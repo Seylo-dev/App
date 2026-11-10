@@ -150,6 +150,29 @@ test("appearance: admins change the theme; only the owner changes custom CSS", a
   expect(boot.body).toMatchObject({ preset: "midnight", colorMode: "dark", customCss: "body{color:red}" });
 });
 
+test("appearance: every preset takes every mode; an older client's seylo-night is saved as seylo", async () => {
+  const admin = await createUser(panel, "admin");
+  const classicDark = await callOp(panel, settings.updateAppearance, { preset: "classic", colorMode: "dark" }, { cookie: admin.cookie });
+  expect(classicDark.body).toMatchObject({ preset: "classic", colorMode: "dark" });
+  // Saved rows are marked, so a light classic or a system midnight is not read as the old one-look preset.
+  expect(getSetting(panel.deps.db, "appearance")).toMatchObject({ preset: "classic", colorMode: "dark", themeVersion: 2 });
+  expect((await callOp(panel, settings.appearance, {}, { cookie: admin.cookie })).body).toMatchObject({
+    preset: "classic",
+    colorMode: "dark",
+  });
+
+  const night = await callOp(panel, settings.updateAppearance, { preset: "seylo-night" }, { cookie: admin.cookie });
+  expect(night.status).toBe(200);
+  expect(night.body).toMatchObject({ preset: "seylo", colorMode: "dark" });
+  const unknown = await callOp(panel, settings.updateAppearance, { preset: "nord" } as never, { cookie: admin.cookie });
+  expect(unknown.status).toBe(400);
+
+  for (const preset of settings.themePresets) {
+    const saved = await callOp(panel, settings.updateAppearance, { preset, colorMode: "system" }, { cookie: admin.cookie });
+    expect(saved.body).toMatchObject({ preset, colorMode: "system" });
+  }
+});
+
 test("telemetry: off by default, a daily schedule once on, and exactly the collector's four fields", async () => {
   const { cookie } = await createUser(panel, "owner");
   const off = await callOp(panel, settings.telemetry, {}, { cookie });

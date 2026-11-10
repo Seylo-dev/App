@@ -72,7 +72,7 @@ function account() {
   return { state, overrides };
 }
 
-async function openPage(page: Page, options: { preset?: Preset } = {}) {
+async function openPage(page: Page, options: { preset?: Preset; mode?: "light" | "dark" } = {}) {
   const demo = account();
   await installDemo(page, { overrides: demo.overrides, ...options });
   // The uploaded image, served the way the panel would (the demo keeps it in the test).
@@ -224,10 +224,11 @@ test("an uploaded image is cropped to a 256 px square in the browser, shows, and
   await expect(chipImage(page)).toHaveAttribute("src", face("notionists", "dana"));
 });
 
-for (const preset of ["seylo", "seylo-night"] as const) {
+for (const mode of ["light", "dark"] as const) {
+  const preset = mode === "light" ? "seylo" : "seylo-dark";
   test(`screenshots in ${preset}`, async ({ page }) => {
     mkdirSync(shots, { recursive: true });
-    await openPage(page, { preset });
+    await openPage(page, { preset: "seylo", mode });
     await loaded(page, page.getByRole("img", { name: "Your avatar" }));
     for (const img of await faces(page).locator("img").all()) await loaded(page, img);
     await loaded(page, chipImage(page));

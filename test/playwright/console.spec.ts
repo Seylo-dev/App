@@ -172,12 +172,12 @@ test.describe("console and shell", () => {
     }
   });
 
-  test("in a dark preset the switch's current item has no ring", async ({ page }) => {
-    await installDemo(page, { preset: "seylo-night" });
+  test("in a dark half the switch's current item has no ring", async ({ page }) => {
+    await installDemo(page, { preset: "seylo", mode: "dark" });
     await page.goto(`${api}/console`);
     await expect(page.getByRole("region", { name: "Console" }).getByText(consoleLine)).toBeVisible();
     const pill = modeSwitch(page).getByRole("radio", { name: "Console" }).locator('[data-slot="active-indicator"]');
-    // shadow-segment is an inset 1px ring in seylo-night and midnight; the terminal's pill is a flat fill
+    // shadow-segment used to be an inset 1px ring in the dark presets; the terminal's pill is a flat fill
     // (Tailwind's shadow-none leaves transparent layers, so count the ones with a color).
     const shadow = await pill.evaluate((el) => getComputedStyle(el).boxShadow);
     const drawn = shadow === "none" ? [] : shadow.split(/,(?![^(]*\))/).filter((layer) => !layer.includes("rgba(0, 0, 0, 0)"));

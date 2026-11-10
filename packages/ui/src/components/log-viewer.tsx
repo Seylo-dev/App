@@ -244,7 +244,7 @@ export function LogViewer({
         <button
           type="button"
           onClick={() => setFollow(true)}
-          className="absolute right-4 bottom-4 flex h-8 cursor-pointer items-center gap-1.5 rounded-control border-0 bg-primary px-3 text-[12.5px] font-medium text-primary-foreground shadow-primary transition-interactive animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out hover:brightness-110"
+          className="absolute right-4 bottom-4 flex h-8 cursor-pointer items-center gap-1.5 rounded-control border-0 bg-primary px-3 text-[12.5px] font-medium text-primary-foreground shadow-primary transition-interactive animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out hover:bg-primary-hover"
         >
           <IconChevronsDown size={14} />
           {labels.jumpToLatest}

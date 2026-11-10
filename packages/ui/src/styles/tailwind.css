@@ -6,7 +6,8 @@
 
 @import "./theme.css";
 
-@custom-variant dark (&:is([data-theme="seylo-night"] *, [data-theme="midnight"] *));
+/* Dark mode is the `dark` class on <html> (theme.css), in every preset. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /*
  * Hover that skips disabled controls, at the specificity of one class
@@ -40,6 +41,7 @@
   --color-ink-ghost: var(--ink-ghost);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
   --color-link: var(--link);
   --color-link-hover: var(--link-hover);
   --color-muted: var(--muted);
@@ -124,7 +126,7 @@
  * the control shadow; on a white card, dialog, sheet or menu it takes the
  * quiet on-card fill without a shadow, so it never vanishes into the card.
  * The nearest surface wins, so a gray footer strip or a tinted callout
- * inside a card goes back to the white button. Dark presets fill their
+ * inside a card goes back to the white button. Dark halves fill their
  * strips with --secondary itself, so there the strips (and the highlight
  * panel) take --secondary-on-raised, a step lighter, to keep an edge.
  */

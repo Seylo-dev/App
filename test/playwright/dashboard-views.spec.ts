@@ -30,8 +30,8 @@ function foldableProjects(): Record<string, Handler> {
   };
 }
 
-async function openDashboard(page: Page, preset?: Preset): Promise<void> {
-  await installDemo(page, { preset, overrides: foldableProjects() });
+async function openDashboard(page: Page, preset?: Preset, mode?: "light" | "dark"): Promise<void> {
+  await installDemo(page, { preset, mode, overrides: foldableProjects() });
   await page.goto("/");
   await expect(dashboardHeading(page)).toBeVisible();
 }
@@ -207,12 +207,13 @@ test.describe("dashboard views", () => {
     }
   });
 
-  for (const preset of ["seylo", "seylo-night"] as const) {
+  for (const mode of ["light", "dark"] as const) {
+    const preset = mode === "light" ? "seylo" : "seylo-dark";
     test(`screenshots of every view in ${preset}`, async ({ page }) => {
       mkdirSync(shots, { recursive: true });
       for (const view of views) {
         await withDashboardView(page, view);
-        await openDashboard(page, preset);
+        await openDashboard(page, "seylo", mode);
         await expect(viewOption(page, view)).toHaveAttribute("aria-checked", "true");
         await expect(page.locator('main [data-slot="skeleton"]')).toHaveCount(0, { timeout: 15_000 });
         // The page fades in and the charts draw.

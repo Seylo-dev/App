@@ -1,21 +1,24 @@
-// Every screen of the web app with the demo data (demo/*.ts), in each of
-// the four theme presets, plus a few open dialogs and the phone width. Each
-// screen must render without a page error, an error page or a "not built
-// yet" note, and is screenshotted to $SHOTS_DIR/screens/<preset>/<name>.png
-// for comparing with the approved boards in design/project.
+// Every screen of the web app with the demo data (demo/*.ts), in every
+// theme preset and both of its halves (light and dark), plus a few open
+// dialogs and the phone width. Each screen must render without a page
+// error, an error page or a "not built yet" note, and is screenshotted to
+// $SHOTS_DIR/screens/<preset>/<mode>/<name>.png for comparing with the
+// approved boards in design/project.
 //
-//   PRESETS=seylo,midnight  limits the presets (default: all four)
+//   PRESETS=seylo,midnight  limits the presets (default: all of them)
+//   MODES=dark              limits the halves (default: light,dark)
 //   SCREENS=deployments     only screens whose name contains one of these
 
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids, nodes as demoNodes } from "./demo/fixtures";
-import { installDemo, type Preset, presets } from "./demo/routes";
+import { installDemo, modes, type Preset, presets } from "./demo/routes";
 import { ids as svc } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/screens`;
 const wanted = (process.env.PRESETS?.split(",") ?? presets) as Preset[];
+const wantedModes = (process.env.MODES?.split(",") ?? modes) as (typeof modes)[number][];
 const only = process.env.SCREENS?.split(",");
 
 const service = (id: string, tab = "") => `/p/${ids.acme}/s/${id}${tab ? `/${tab}` : ""}`;
@@ -109,13 +112,14 @@ async function expectRendered(page: Page, name: string): Promise<void> {
 test.describe("screens", () => {
   test.use({ storageState: stateFile });
 
-  for (const preset of wanted) {
-    test(`every screen in ${preset}`, async ({ page }) => {
+  for (const [preset, mode] of wanted.flatMap((preset) => wantedModes.map((mode) => [preset, mode] as const))) {
+    test(`every screen in ${preset} ${mode}`, async ({ page }) => {
       test.setTimeout(10 * 60_000);
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(`${page.url()}: ${error.message}`));
-      await installDemo(page, { preset });
-      mkdirSync(`${shots}/${preset}`, { recursive: true });
+      await installDemo(page, { preset, mode });
+      const dir = `${shots}/${preset}/${mode}`;
+      mkdirSync(dir, { recursive: true });
 
       for (const [name, path, kind] of screens) {
         if (only && !only.some((part) => name.includes(part))) continue;
@@ -123,7 +127,27 @@ test.describe("screens", () => {
           await page.goto(path);
           await settle(page, kind);
           await expectRendered(page, name);
-          await page.screenshot({ path: `${shots}/${preset}/${name}.png`, fullPage: kind !== "dialog" });
+          await page.screenshot({ path: `${dir}/${name}.png`, fullPage: kind !== "dialog" });
+        });
+      }
+
+      if (!only || only.some((part) => "sign-in".includes(part))) {
+        await test.step("sign-in", async () => {
+          // Signed out for this one page: whoami refuses, so /login shows its form.
+          const signedOut = /\/api\/v1\/auth\.whoami/;
+          await page.route(signedOut, (route) =>
+            route.fulfill({
+              status: 401,
+              contentType: "application/json",
+              body: JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "Sign in first" } }),
+            }),
+          );
+          await page.goto("/login");
+          await expect(page.getByRole("heading", { level: 1, name: /^Sign in to / })).toBeVisible();
+          await page.waitForTimeout(400);
+          await expectRendered(page, "sign-in");
+          await page.screenshot({ path: `${dir}/sign-in.png`, fullPage: true });
+          await page.unroute(signedOut);
         });
       }
 
@@ -134,7 +158,7 @@ test.describe("screens", () => {
           await expect(page.getByRole("link", { name: /Approvals\s*2/ })).toBeVisible();
           await page.getByRole("button", { name: "New service", exact: true }).click();
           await page.waitForTimeout(400);
-          await page.screenshot({ path: `${shots}/${preset}/new-service-menu.png` });
+          await page.screenshot({ path: `${dir}/new-service-menu.png` });
           await page.keyboard.press("Escape");
 
           // New app > GitHub with the Browse list open (repo-picker.spec.ts covers the flows).
@@ -145,7 +169,7 @@ test.describe("screens", () => {
           await newApp.getByRole("button", { name: "Browse" }).click();
           await expect(page.locator('[data-slot="popover"]').getByRole("option").first()).toBeVisible();
           await page.waitForTimeout(400);
-          await page.screenshot({ path: `${shots}/${preset}/new-app-repo-browse.png` });
+          await page.screenshot({ path: `${dir}/new-app-repo-browse.png` });
           // One Escape per layer: the list first (once its fade is over), then the dialog.
           await page.keyboard.press("Escape");
           await expect(page.locator('[data-slot="popover"]')).toHaveCount(0);
@@ -156,34 +180,34 @@ test.describe("screens", () => {
           await page.getByRole("button", { name: /n8n/ }).first().click();
           await expect(page.getByRole("dialog")).toBeVisible();
           await page.waitForTimeout(1200);
-          await page.screenshot({ path: `${shots}/${preset}/template-install.png` });
+          await page.screenshot({ path: `${dir}/template-install.png` });
           await page.keyboard.press("Escape");
 
           await page.goto(`/templates?project=${ids.acme}&tab=docker-hub&q=gitea`);
           await page.getByRole("button", { name: /^gitea\/gitea / }).click();
           await expect(page.getByRole("dialog").locator(".monaco-editor")).toBeVisible({ timeout: 15_000 });
           await page.waitForTimeout(800);
-          await page.screenshot({ path: `${shots}/${preset}/docker-hub-image.png` });
+          await page.screenshot({ path: `${dir}/docker-hub-image.png` });
           await page.keyboard.press("Escape");
 
           await page.keyboard.press("ControlOrMeta+k");
           await page.getByPlaceholder("Type a command or search").fill("api");
           await page.waitForTimeout(400);
-          await page.screenshot({ path: `${shots}/${preset}/palette.png` });
+          await page.screenshot({ path: `${dir}/palette.png` });
           await page.keyboard.press("Escape");
 
           await page.goto(service(svc.worker, "deployments"));
           await page.getByRole("button", { name: /Full logs|Logs/ }).first().click();
           await expect(page.getByRole("dialog")).toBeVisible();
           await page.waitForTimeout(1200);
-          await page.screenshot({ path: `${shots}/${preset}/deploy-log-modal.png` });
+          await page.screenshot({ path: `${dir}/deploy-log-modal.png` });
           await page.keyboard.press("Escape");
 
           await page.goto(service(svc.api, "storage"));
           await page.getByRole("button", { name: "Files" }).first().click();
           await expect(page.getByRole("dialog")).toBeVisible();
           await page.waitForTimeout(800);
-          await page.screenshot({ path: `${shots}/${preset}/files.png` });
+          await page.screenshot({ path: `${dir}/files.png` });
           await page.keyboard.press("Escape");
         });
       }
@@ -192,11 +216,12 @@ test.describe("screens", () => {
     });
   }
 
-  test("a saved accent repaints every preset", async ({ context }) => {
+  test("a saved accent repaints every preset in both halves", async ({ context }) => {
+    test.setTimeout(3 * 60_000);
     const accent = "#0F8A6A";
-    for (const preset of presets) {
+    for (const [preset, mode] of presets.flatMap((preset) => modes.map((mode) => [preset, mode] as const))) {
       const page = await context.newPage();
-      await installDemo(page, { preset, accent });
+      await installDemo(page, { preset, mode, accent });
       await page.goto("/");
       await settle(page);
       const colors = await page.evaluate(() => {
@@ -218,11 +243,11 @@ test.describe("screens", () => {
           button: button ? rgb(getComputedStyle(button).backgroundColor) : "",
         };
       });
-      expect(colors.primary.toUpperCase(), `${preset} --primary`).toBe(accent);
+      expect(colors.primary.toUpperCase(), `${preset} ${mode} --primary`).toBe(accent);
       // Green wins over blue in the selected nav item and the primary button.
       for (const [what, color] of [["nav", colors.nav], ["button", colors.button]] as const) {
         const [r = 0, g = 0, b = 0] = (color.match(/[\d.]+/g) ?? []).map(Number);
-        expect(g > b && g > r, `${preset} ${what} is green (${color})`).toBe(true);
+        expect(g > b && g > r, `${preset} ${mode} ${what} is green (${color})`).toBe(true);
       }
       await page.close();
     }

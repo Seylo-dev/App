@@ -21,8 +21,12 @@ const shots = `${process.env.SHOTS_DIR ?? "shots"}/assistant`;
 mkdirSync(shots, { recursive: true });
 const servicePage = `/p/${ids.acme}/s/${ids.api}`;
 
-async function open(page: Page, path: string, options: { preset?: Preset; overrides?: Record<string, (input: any) => unknown> } = {}) {
-  await installDemo(page, { preset: options.preset, overrides: { ...assistantHandlers, ...options.overrides } });
+async function open(
+  page: Page,
+  path: string,
+  options: { preset?: Preset; mode?: "light" | "dark"; overrides?: Record<string, (input: any) => unknown> } = {},
+) {
+  await installDemo(page, { preset: options.preset, mode: options.mode, overrides: { ...assistantHandlers, ...options.overrides } });
   await page.goto(path);
   await expect(page.locator("main").first()).toBeVisible();
 }
@@ -87,9 +91,10 @@ test.describe("assistant", () => {
     await expect(panelOf(page).getByText(/commit the new lock file/)).toBeVisible();
   });
 
-  for (const preset of ["seylo", "seylo-night"] as const) {
+  for (const mode of ["light", "dark"] as const) {
+    const preset = mode === "light" ? "seylo" : "seylo-dark";
     test(`an approval card in the chat, approved there, is resolved on the Approvals page with its source (${preset})`, async ({ page }) => {
-      await open(page, "/", { preset });
+      await open(page, "/", { preset: "seylo", mode });
       const panel = await openBubble(page);
       await ask(panel, "The api is slow, restart it please");
       const card = panel.getByRole("region", { name: "Restart api?" });
@@ -184,9 +189,10 @@ test.describe("assistant", () => {
     await expect(page.getByRole("menuitem", { name: /Worker memory/ })).toHaveCount(0);
   });
 
-  for (const preset of ["seylo", "seylo-night"] as const) {
+  for (const mode of ["light", "dark"] as const) {
+    const preset = mode === "light" ? "seylo" : "seylo-dark";
     test(`the Assistant page: the same chats, search, a reply, and the bubble only elsewhere (${preset})`, async ({ page }) => {
-      await open(page, "/", { preset });
+      await open(page, "/", { preset: "seylo", mode });
       const sidebar = page.getByRole("navigation", { name: "Main" });
       await sidebar.getByRole("link", { name: "Assistant" }).click();
       await expect(page).toHaveURL(/\/assistant/);

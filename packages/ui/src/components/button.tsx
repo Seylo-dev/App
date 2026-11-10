@@ -9,7 +9,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         // hover-enabled (tailwind.css): disabled buttons never look hovered, and a caller's hover: class still wins.
-        primary: "bg-primary text-primary-foreground shadow-primary hover-enabled:brightness-110",
+        primary: "bg-primary text-primary-foreground shadow-primary hover-enabled:bg-primary-hover",
         // The fill follows the surface (tailwind.css): white with a shadow on the page, a quiet gray on a card or dialog.
         secondary: "bg-button text-secondary-foreground shadow-button hover-enabled:bg-button-hover",
         ghost: "bg-transparent text-muted-foreground hover-enabled:bg-muted hover-enabled:text-foreground",

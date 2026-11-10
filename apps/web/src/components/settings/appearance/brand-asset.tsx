@@ -1,7 +1,9 @@
 // One branding image tile (logo for light, logo for dark, favicon): click
 // to pick a file, it uploads at once; the current image shows inside the
-// tile with a remove button. The dark-logo tile sits on a dark ground, as
-// in the Appearance board.
+// tile with a remove button. With nothing uploaded the tile shows what the
+// panel uses instead, marked "Default": the product mark in the accent
+// color (components/brand-mark.tsx) or the built-in favicon. The dark-logo
+// tile sits on a dark ground, as in the Appearance board.
 
 import { settings } from "@seylo/ops";
 import { Button } from "@seylo/ui/components/button";
@@ -10,10 +12,14 @@ import { cn } from "@seylo/ui/lib/utils";
 import { IconLoader2, IconX } from "@tabler/icons-react";
 import { useRef } from "react";
 import { t } from "../../../i18n/t";
+import { ProductMark } from "../../brand-mark";
 import { useSettingsMutation } from "../mutation";
 import { brandFileProblem, brandTypes } from "./presets";
 
 type Kind = settings.BrandAssetKind;
+
+/** The favicon index.html links to while none is uploaded (apps/web/public). */
+export const defaultFavicon = "/favicon.svg";
 
 const refresh = [settings.branding, settings.boot];
 
@@ -72,7 +78,11 @@ export function BrandAssetTile({
         ) : url ? (
           <img src={url} alt="" className={cn("max-h-10 max-w-full object-contain", kind === "favicon" && "size-8")} />
         ) : (
-          t(`settingsAppearance.branding.kinds.${kind}`)
+          // Nothing uploaded: what the panel shows instead, marked as the default.
+          <span className="flex flex-col items-center gap-1">
+            {kind === "favicon" ? <img src={defaultFavicon} alt="" className="size-7" /> : <ProductMark size={28} />}
+            <span className="text-[11px] leading-none">{t("settingsAppearance.branding.default")}</span>
+          </span>
         )}
       </button>
       {url && !disabled && (

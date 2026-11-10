@@ -1,9 +1,11 @@
 // The custom CSS editor (Monaco, CSS highlighting, dark like the board's
 // card). Monaco loads on first use; until then a skeleton keeps the space.
+// The card's "Insert example" button adds text through the handle (insert),
+// as one edit that Undo takes back.
 
 import { Skeleton } from "@seylo/ui/components/skeleton";
 import type * as MonacoApi from "monaco-editor/editor/editor.api";
-import { useEffect, useRef, useState } from "react";
+import { type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 let loading: Promise<typeof import("./monaco-css")> | null = null;
 
@@ -12,25 +14,60 @@ function loadCssMonaco() {
   return loading;
 }
 
+export interface CssEditorHandle {
+  /** Adds text after what is there (a blank line between), shows it and puts the cursor at its end. */
+  insert: (text: string) => void;
+}
+
+/** The editor's text with `text` added at the end, a blank line apart. */
+export function appendCss(current: string, text: string): string {
+  const trimmed = current.replace(/\s+$/, "");
+  return trimmed ? `${trimmed}\n\n${text}` : text;
+}
+
 export function CssEditor({
   value,
   onChange,
   readOnly,
   height = 320,
   "aria-label": label,
+  ref,
 }: {
   value: string;
   onChange: (value: string) => void;
   readOnly: boolean;
   height?: number;
   "aria-label": string;
+  ref?: Ref<CssEditorHandle>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editorRef = useRef<MonacoApi.editor.IStandaloneCodeEditor | null>(null);
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    insert(text) {
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      if (!editor || !model) {
+        changeRef.current(appendCss(valueRef.current, text));
+        return;
+      }
+      const next = appendCss(model.getValue(), text);
+      const full = model.getFullModelRange();
+      editor.pushUndoStop();
+      editor.executeEdits("insert-example", [{ range: full, text: next }]);
+      editor.pushUndoStop();
+      const end = model.getFullModelRange().getEndPosition();
+      editor.setPosition(end);
+      editor.revealLine(end.lineNumber);
+      editor.focus();
+    },
+  }));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: value and readOnly seed the editor on mount; later changes go through the effects below.
   useEffect(() => {

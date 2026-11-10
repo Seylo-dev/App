@@ -24,9 +24,12 @@ import { fixtures as settingsFixtures } from "./settings";
 type Input = Record<string, any>;
 export type Handler = (input: Input) => unknown;
 
-/** The four theme presets of Settings > Appearance (packages/ui/src/styles/theme.css). */
-export const presets = ["seylo", "seylo-night", "classic", "midnight"] as const;
+/** The theme presets of Settings > Appearance (settings.themePresets, packages/ui/src/styles/theme.css). */
+export const presets = ["seylo", "classic", "midnight", "graphite", "clay", "harbor", "orchid", "steel", "marigold", "meadow"] as const;
 export type Preset = (typeof presets)[number];
+/** Every preset has both halves; "system" follows the page's emulated prefers-color-scheme. */
+export const modes = ["light", "dark"] as const;
+export type ColorMode = (typeof modes)[number] | "system";
 
 const worldHandlers: Record<string, Handler> = {
   "auth.whoami": () => ({ viewer: world.viewer, via: "session" }),
@@ -206,7 +209,7 @@ const settingsHandlers: Record<string, Handler> = Object.fromEntries(
 );
 
 /** The boot data the web app reads from settings.boot when Vite serves it. */
-export function bootFor(preset: Preset, accent: string | null = null) {
+export function bootFor(preset: Preset, accent: string | null = null, colorMode: ColorMode = "light") {
   return {
     name: "Seylo",
     productName: "Seylo",
@@ -216,10 +219,10 @@ export function bootFor(preset: Preset, accent: string | null = null) {
     logoDark: null,
     favicon: null,
     preset,
-    colorMode: preset === "seylo-night" || preset === "midnight" ? "dark" : "light",
+    colorMode,
     accent,
     customCss: "",
-    revision: `demo-${preset}-${accent ?? "none"}`,
+    revision: `demo-${preset}-${colorMode}-${accent ?? "none"}`,
   };
 }
 
@@ -240,6 +243,8 @@ function inputOf(route: Route): Input {
 export interface DemoOptions {
   /** Theme preset in settings.boot (the dev server has no injected boot data). */
   preset?: Preset;
+  /** Its color mode; light unless set. */
+  mode?: ColorMode;
   accent?: string | null;
   /** Answers that win over the demo data, for one test. */
   overrides?: Record<string, Handler>;
@@ -265,10 +270,10 @@ export async function installDemo(page: Page, options: DemoOptions = {}): Promis
     options.overrides ?? {},
     options.preset
       ? {
-          "settings.boot": () => bootFor(options.preset as Preset, options.accent ?? null),
+          "settings.boot": () => bootFor(options.preset as Preset, options.accent ?? null, options.mode),
           // Appearance previews what is saved: keep it the same as the boot data.
           "settings.appearance": () => {
-            const boot = bootFor(options.preset as Preset, options.accent ?? null);
+            const boot = bootFor(options.preset as Preset, options.accent ?? null, options.mode);
             return { preset: boot.preset, colorMode: boot.colorMode, accent: boot.accent, customCss: "" };
           },
         }

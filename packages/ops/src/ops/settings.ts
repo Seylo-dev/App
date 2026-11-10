@@ -384,13 +384,69 @@ export const removeBrandAsset = defineOp({
 
 // ---------------------------------------------------------------- appearance
 
-/** The four presets of the Appearance screen; their tokens are in packages/ui/src/styles/theme.css. */
-export const themePresets = ["seylo", "seylo-night", "classic", "midnight"] as const;
+/**
+ * The theme presets of the Appearance screen. Every preset has a light and
+ * a dark half, and the color mode picks the half for all of them. Their
+ * tokens are in packages/ui/src/styles/theme.css: "seylo" on :root and
+ * :root.dark, the others under [data-theme="<id>"].
+ */
+export const themePresets = [
+  "seylo",
+  "classic",
+  "midnight",
+  "graphite",
+  "clay",
+  "harbor",
+  "orchid",
+  "steel",
+  "marigold",
+  "meadow",
+] as const;
 export type ThemePreset = (typeof themePresets)[number];
 export const ThemePreset = Type.Union(themePresets.map((preset) => Type.Literal(preset)));
 
-export const ColorMode = Type.Union([Type.Literal("light"), Type.Literal("dark"), Type.Literal("system")]);
+/**
+ * Preset ids that are gone, with the preset each became (since 0.2.5).
+ * "seylo-night" was the dark half of "seylo": the color mode switched
+ * between the two, so it reads as "seylo" with the mode as it was.
+ */
+export const themePresetAliases = { "seylo-night": "seylo" } as const satisfies Record<string, ThemePreset>;
+
+/** A preset as updateAppearance takes it: a current id, or an old one from themePresetAliases for older clients. */
+export const ThemePresetInput = Type.Union(
+  [...themePresets, ...Object.keys(themePresetAliases)].map((preset) => Type.Literal(preset)),
+  { description: 'A theme preset. "seylo-night" (from before 0.2.5) is taken as "seylo".' },
+);
+
+/**
+ * Before 0.2.5 these presets had one look whatever the color mode said:
+ * "classic" was light only and "midnight" dark only. Appearance settings
+ * saved then are read with this mode (apps/panel settings keys.ts), so
+ * they keep looking the way they did.
+ */
+export const legacyPresetModes = { classic: "light", midnight: "dark" } as const satisfies Partial<Record<ThemePreset, "light" | "dark">>;
+
+/** The current id for a stored or sent preset: old ids map to their preset, anything unknown to "seylo". */
+export function normalizeThemePreset(preset: string): ThemePreset {
+  if ((themePresets as readonly string[]).includes(preset)) return preset as ThemePreset;
+  return themePresetAliases[preset as keyof typeof themePresetAliases] ?? "seylo";
+}
+
+export const ColorMode = Type.Union([Type.Literal("light"), Type.Literal("dark"), Type.Literal("system")], {
+  description: 'Which half of the preset shows: "light", "dark", or "system" to follow each viewer\'s device.',
+});
 export type ColorMode = Static<typeof ColorMode>;
+
+/**
+ * Light or dark for a color mode; "system" follows the viewer's
+ * prefers-color-scheme. The panel's inline script resolves "system" the
+ * same way before the first paint, and the web app again whenever the
+ * device switches.
+ */
+export function resolveColorScheme(colorMode: ColorMode, prefersDark: boolean): "light" | "dark" {
+  if (colorMode === "system") return prefersDark ? "dark" : "light";
+  return colorMode;
+}
 
 export const HexColor = Type.String({ pattern: "^#[0-9a-fA-F]{6}$", description: "Color as #RRGGBB." });
 
@@ -400,9 +456,9 @@ export const customCssMaxLength = 65_536;
 export const AppearanceSettings = Type.Object({
   preset: ThemePreset,
   colorMode: ColorMode,
-  /** Overrides the preset's primary color; null keeps the preset's own. */
+  /** Overrides the preset's primary color in both halves; null keeps the preset's own. */
   accent: Type.Union([HexColor, Type.Null()]),
-  /** Applied after the theme for everyone. Only the owner may change it. */
+  /** Applied after the theme and the accent, for everyone. Only the owner may change it. */
   customCss: Type.String({ maxLength: customCssMaxLength }),
 });
 export type AppearanceSettings = Static<typeof AppearanceSettings>;
@@ -424,9 +480,9 @@ export const updateAppearance = defineOp({
   kind: "mutation",
   summary: "Update appearance settings",
   description:
-    "Changes the theme preset, color mode, accent color or custom CSS. Omitted fields keep their value. Changing customCss needs the owner role (FORBIDDEN otherwise), because CSS can restyle every screen for everyone.",
+    'Changes the theme preset, color mode, accent color or custom CSS. Omitted fields keep their value. Every preset has a light and a dark half and the color mode picks one; the old preset id "seylo-night" is taken as "seylo". Changing customCss needs the owner role (FORBIDDEN otherwise), because CSS can restyle every screen for everyone.',
   input: Type.Object({
-    preset: Type.Optional(ThemePreset),
+    preset: Type.Optional(ThemePresetInput),
     colorMode: Type.Optional(ColorMode),
     accent: Type.Optional(Type.Union([HexColor, Type.Null()])),
     customCss: Type.Optional(Type.String({ maxLength: customCssMaxLength })),
@@ -436,18 +492,6 @@ export const updateAppearance = defineOp({
   mcp: false,
   audit: true,
 });
-
-/**
- * The preset to paint with. "seylo" and "seylo-night" are the light and
- * dark halves of the default theme, so the color mode moves between them;
- * "classic" (light) and "midnight" (dark) are fixed. The server uses this
- * for the first paint and the web app again when the system mode changes.
- */
-export function resolveThemePreset(settings: Pick<AppearanceSettings, "preset" | "colorMode">, prefersDark: boolean): ThemePreset {
-  if (settings.preset !== "seylo" && settings.preset !== "seylo-night") return settings.preset;
-  const dark = settings.colorMode === "system" ? prefersDark : settings.colorMode === "dark";
-  return dark ? "seylo-night" : "seylo";
-}
 
 // ---------------------------------------------------------------- boot
 
@@ -476,20 +520,23 @@ export const PanelBoot = Type.Object({
 export type PanelBoot = Static<typeof PanelBoot>;
 
 /**
- * Element ids and attributes of the injection, shared by the panel (writer)
- * and the web app (reader). See CONTRACTS.md "Theme and branding injection".
+ * Element ids, attributes and the class of the injection, shared by the
+ * panel (writer) and the web app (reader). See CONTRACTS.md "Theme and
+ * branding injection".
  */
 export const bootDom = {
   /** <script type="application/json" id=...> holding PanelBoot as JSON. */
   dataId: "panel-boot",
-  /** <style id=...> with the accent overrides (--primary, --ring, --link). */
+  /** <style id=...> with the accent (accentCss); after the app stylesheet, before the custom CSS. */
   accentStyleId: "panel-accent",
-  /** <style id=...> with the custom CSS; last in <head>, after the app stylesheet. */
+  /** <style id=...> with the custom CSS; last in <head>, so it wins. */
   customCssStyleId: "panel-custom-css",
-  /** <html data-theme> holds the resolved preset; absent for "seylo" (the :root tokens). */
+  /** <html data-theme> holds the preset id, "seylo" included. */
   themeAttribute: "data-theme",
   /** <html data-color-mode> holds the configured mode, including "system". */
   colorModeAttribute: "data-color-mode",
+  /** Class on <html> while the dark half shows: from the panel for "dark", from the inline script and the app for "system". */
+  darkClass: "dark",
 } as const;
 
 export const boot = defineOp({

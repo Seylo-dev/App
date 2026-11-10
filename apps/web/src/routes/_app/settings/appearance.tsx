@@ -1,8 +1,10 @@
 // Settings > Appearance (Appearance board): theme preset with previews,
 // color mode and accent; branding (name, logos, favicon, sign-in message,
-// powered-by line); custom CSS in Monaco (owner only). Edits preview live
-// on this page; Save stores them for everyone, and leaving without saving
-// puts the saved look back.
+// powered-by line); custom CSS in Monaco (owner only) with a short guide
+// and an example to insert. Every preset has a light and a dark half; the
+// color mode picks one for all of them, and the preview tiles show the
+// half it picks. Edits preview live on this page; Save stores them for
+// everyone, and leaving without saving puts the saved look back.
 
 import { displayName } from "@seylo/brand";
 import { auth, type OpOutput, settings } from "@seylo/ops";
@@ -16,16 +18,15 @@ import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skel
 import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { applyAppearance } from "../../../components/settings/appearance/apply-theme";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { BrandAssetTile } from "../../../components/settings/appearance/brand-asset";
-import { CssEditor } from "../../../components/settings/appearance/css-editor";
-import { accentChoices, normalizeHex, presetSwatches } from "../../../components/settings/appearance/presets";
+import { CssEditor, type CssEditorHandle } from "../../../components/settings/appearance/css-editor";
+import { accentChoices, customCssExample, normalizeHex, presetSwatches } from "../../../components/settings/appearance/presets";
 import { invalidateOps } from "../../../components/settings/mutation";
 import { OpErrorCallout, toastError } from "../../../components/settings/op-state";
 import { t } from "../../../i18n/t";
 import { opClient } from "../../../lib/api";
-import { refreshBoot as refreshSharedBoot } from "../../../lib/theme";
+import { paintAppearance, prefersDark, refreshBoot as refreshSharedBoot } from "../../../lib/theme";
 
 export const Route = createFileRoute("/_app/settings/appearance")({
   component: AppearancePage,
@@ -66,9 +67,9 @@ function AppearanceSkeleton() {
           <h2 className="m-0 text-[15px] font-semibold">{t("settingsAppearance.theme")}</h2>
           <Skeleton className="ml-auto h-8 w-[184px]" />
         </div>
-        <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-[169px] rounded-card" />
+        <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-5">
+          {settings.themePresets.map((preset) => (
+            <Skeleton key={preset} className="h-[169px] rounded-card" />
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2.5 border-t border-divider pt-3.5 text-[13px]">
@@ -136,11 +137,12 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
   const [loginMessage, setLoginMessage] = useState(savedBranding.loginMessage);
   const [hidePoweredBy, setHidePoweredBy] = useState(savedBranding.hidePoweredBy);
   const [saving, setSaving] = useState(false);
+  const cssEditor = useRef<CssEditorHandle>(null);
 
   // The look to restore when leaving without saving.
   const savedRef = useRef(saved);
   savedRef.current = saved;
-  useEffect(() => () => applyAppearance(savedRef.current), []);
+  useEffect(() => () => paintAppearance(savedRef.current), []);
 
   // Live preview: everything but custom CSS at once, custom CSS after a short pause in typing.
   const [previewCss, setPreviewCss] = useState(customCss);
@@ -148,15 +150,20 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
     const timer = setTimeout(() => setPreviewCss(customCss), 300);
     return () => clearTimeout(timer);
   }, [customCss]);
+  // The half the tiles show: the one the draft color mode paints right now.
+  const [deviceDark, setDeviceDark] = useState(prefersDark);
   useEffect(() => {
     const draft = { preset, colorMode, accent, customCss: previewCss };
-    applyAppearance(draft);
-    if (colorMode !== "system") return;
+    paintAppearance(draft);
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const follow = () => applyAppearance(draft);
+    const follow = () => {
+      setDeviceDark(media.matches);
+      if (colorMode === "system") paintAppearance(draft);
+    };
     media.addEventListener("change", follow);
     return () => media.removeEventListener("change", follow);
   }, [preset, colorMode, accent, previewCss]);
+  const half = settings.resolveColorScheme(colorMode, deviceDark);
 
   const appearancePatch = {
     ...(preset !== saved.preset ? { preset } : {}),
@@ -212,14 +219,11 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
             ))}
           </Segmented>
         </div>
-        <div role="radiogroup" aria-label={t("settingsAppearance.preset")} className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+        <div role="radiogroup" aria-label={t("settingsAppearance.preset")} className="grid grid-cols-2 gap-3.5 lg:grid-cols-5">
           {settings.themePresets.map((p) => (
-            <PresetTile key={p} preset={p} selected={preset === p} onSelect={() => setPreset(p)} />
+            <PresetTile key={p} preset={p} half={half} selected={preset === p} onSelect={() => setPreset(p)} />
           ))}
         </div>
-        {(preset === "classic" || preset === "midnight") && colorMode !== (preset === "classic" ? "light" : "dark") && (
-          <p className="m-0 text-xs text-muted-foreground">{t("settingsAppearance.fixedMode")}</p>
-        )}
         <div className="flex flex-wrap items-center gap-2.5 border-t border-divider pt-3.5 text-[13px]">
           <span className="mr-0.5 font-medium text-ink-strong">{t("settingsAppearance.accent")}</span>
           <span className="flex flex-nowrap items-center gap-2">
@@ -294,6 +298,8 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
               id="brand-login"
               value={loginMessage}
               maxLength={280}
+              // The sign-in page has no message of its own: say what shows without one.
+              placeholder={t("settingsAppearance.branding.loginMessagePlaceholder", { name: name.trim() || savedBranding.name })}
               onChange={(e) => setLoginMessage(e.target.value)}
               className="font-normal"
             />
@@ -311,19 +317,50 @@ function AppearanceEditor({ saved, savedBranding, isOwner }: { saved: Appearance
           <div className="flex flex-wrap items-center gap-2.5 bg-terminal-bar px-[18px] py-3.5">
             <h2 className="m-0 text-[15px] font-semibold text-terminal-foreground">{t("settingsAppearance.css.title")}</h2>
             <span className="text-xs text-terminal-muted">{t("settingsAppearance.css.hint")}</span>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => cssEditor.current?.insert(customCssExample)}
+                className="ml-auto h-7 cursor-pointer rounded-control border-0 bg-terminal-field px-2.5 text-xs font-medium text-terminal-foreground transition-interactive hover:brightness-125"
+              >
+                {t("settingsAppearance.css.insertExample")}
+              </button>
+            )}
           </div>
-          <CssEditor value={customCss} onChange={setCustomCss} readOnly={!isOwner} aria-label={t("settingsAppearance.css.title")} />
+          <CssEditor
+            ref={cssEditor}
+            value={customCss}
+            onChange={setCustomCss}
+            readOnly={!isOwner}
+            aria-label={t("settingsAppearance.css.title")}
+          />
           {!isOwner && <p className="m-0 px-[18px] pb-3 text-xs text-terminal-muted">{t("settingsAppearance.css.ownerOnly")}</p>}
+          <CssGuide />
         </section>
       </div>
     </Shell>
   );
 }
 
-function PresetTile({ preset, selected, onSelect }: { preset: settings.ThemePreset; selected: boolean; onSelect: () => void }) {
-  const s = presetSwatches[preset];
-  const sideShadow = s.soft ? "1px 0 0 #EEF0F4, 3px 0 10px rgba(15,23,42,0.04)" : `1px 0 0 ${s.line}`;
-  const cardShadow = s.soft ? "0 1px 2px rgba(15,23,42,0.05), 0 3px 8px rgba(15,23,42,0.06)" : `inset 0 0 0 1px ${s.line}`;
+function PresetTile({
+  preset,
+  half,
+  selected,
+  onSelect,
+}: {
+  preset: settings.ThemePreset;
+  half: "light" | "dark";
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const s = presetSwatches[preset][half];
+  const soft = s.edge === "shadow";
+  const sideShadow = soft ? `1px 0 0 ${s.line}, 3px 0 10px rgba(15,23,42,0.04)` : s.edge === "line" ? `1px 0 0 ${s.line}` : "none";
+  const cardShadow = soft
+    ? "0 1px 2px rgba(15,23,42,0.05), 0 3px 8px rgba(15,23,42,0.06)"
+    : s.edge === "line"
+      ? `inset 0 0 0 1px ${s.line}`
+      : "none";
   return (
     // biome-ignore lint/a11y/useSemanticElements: a picture card acting as a radio, as in the board.
     <button
@@ -333,7 +370,7 @@ function PresetTile({ preset, selected, onSelect }: { preset: settings.ThemePres
       onClick={onSelect}
       className={cn(
         "cursor-pointer overflow-hidden rounded-card border-0 bg-card p-0 text-left",
-        selected ? "shadow-[0_0_0_2px_var(--primary),0_4px_14px_rgb(37_99_235/0.14)]" : "shadow-control",
+        selected ? "shadow-[0_0_0_2px_var(--primary),0_4px_14px_color-mix(in_srgb,var(--primary)_14%,transparent)]" : "shadow-control",
       )}
     >
       {/* The preview paints the preset's own colors, not the page's tokens. */}
@@ -350,9 +387,9 @@ function PresetTile({ preset, selected, onSelect }: { preset: settings.ThemePres
           <span
             className="h-3.5 w-2/5"
             style={{
-              borderRadius: s.soft ? "4px" : s.radius,
+              borderRadius: s.radius,
               background: s.accent,
-              boxShadow: s.soft ? "0 2px 6px rgba(37,99,235,0.28)" : "none",
+              boxShadow: soft ? `0 2px 6px color-mix(in srgb, ${s.accent} 28%, transparent)` : "none",
             }}
           />
         </span>
@@ -367,15 +404,73 @@ function PresetTile({ preset, selected, onSelect }: { preset: settings.ThemePres
 
 /**
  * After a save: the shared boot state (lib/theme.ts) refetches settings.boot
- * and repaints title, favicon and theme. Then the appearance is painted once
- * more with this screen's accent rule, which also wins over the non-default
- * presets (lib/accent.ts and the panel's boot.ts use the same rule).
+ * and repaints title, favicon and theme. Then the saved appearance is
+ * painted once more, in case the shared state already had that revision.
  */
 async function refreshBoot(): Promise<void> {
   await refreshSharedBoot();
   try {
-    applyAppearance(await opClient.call(settings.boot, {}));
+    paintAppearance(await opClient.call(settings.boot, {}));
   } catch {
     // The settings themselves were saved; the next page load paints them.
   }
+}
+
+const guideTokens = [
+  "--primary",
+  "--primary-foreground",
+  "--background",
+  "--card",
+  "--foreground",
+  "--muted-foreground",
+  "--border",
+  "--radius",
+];
+
+/** The custom CSS guide under the editor: the tokens, the dark class, one preset, and the order. */
+function CssGuide() {
+  const code = (text: string) => (
+    <code
+      key={text}
+      className="rounded-chip bg-terminal-field px-1 py-px font-mono text-[11.5px] whitespace-nowrap text-terminal-foreground"
+    >
+      {text}
+    </code>
+  );
+  const items: [string, Record<string, React.ReactNode>][] = [
+    [t("settingsAppearance.css.guide.tokens"), { tokens: joined(guideTokens.map(code)) }],
+    [t("settingsAppearance.css.guide.accent"), { primary: code("--primary") }],
+    [t("settingsAppearance.css.guide.dark"), { root: code(":root"), dark: code(":root.dark") }],
+    [t("settingsAppearance.css.guide.preset"), { preset: code(':root[data-theme="clay"]'), ids: joined(settings.themePresets.map(code)) }],
+    [t("settingsAppearance.css.guide.order"), { root: code(":root") }],
+  ];
+  return (
+    <div className="flex flex-col gap-1.5 bg-terminal-bar px-[18px] py-3.5 text-xs leading-relaxed text-terminal-muted">
+      <h3 className="m-0 text-[12.5px] font-semibold text-terminal-foreground">{t("settingsAppearance.css.guide.title")}</h3>
+      <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        {items.map(([text, values]) => (
+          <li key={text}>{fill(text, values)}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Code chips with ", " between them. */
+function joined(nodes: React.ReactElement[]): React.ReactNode {
+  return nodes.map((node, i) => (
+    <Fragment key={node.key}>
+      {i > 0 && ", "}
+      {node}
+    </Fragment>
+  ));
+}
+
+/** A translated sentence with its {placeholders} replaced by nodes (code chips). */
+function fill(text: string, values: Record<string, React.ReactNode>): React.ReactNode {
+  return text.split(/(\{\w+\})/).map((part, i) => {
+    const name = part.match(/^\{(\w+)\}$/)?.[1];
+    // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed sentence, which never reorder.
+    return <Fragment key={i}>{name && name in values ? values[name] : part}</Fragment>;
+  });
 }

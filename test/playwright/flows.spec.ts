@@ -145,17 +145,22 @@ test("two-factor is set up with a QR code and turned off", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("Appearance saves a dark preset with an accent that wins", async ({ page }) => {
+test("Appearance saves a preset in its dark half with an accent that wins", async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto("/settings/appearance");
   await page.getByRole("radio", { name: /Midnight/ }).click();
-  expect(await page.evaluate(() => document.documentElement.getAttribute("data-theme"))).toBe("midnight");
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  const html = page.locator("html");
+  await expect(html).toHaveAttribute("data-theme", "midnight");
+  await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
   await page.getByRole("button", { name: "#0F8A6A" }).click();
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Saved").first()).toBeVisible();
   // After a reload the panel's boot data and the app agree.
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Appearance" })).toBeVisible();
+  await expect(html).toHaveAttribute("data-theme", "midnight");
+  await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
   const primary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--primary").trim());
   expect(primary.toUpperCase()).toBe("#0F8A6A");
   await page.screenshot({ path: `${shots}/appearance-midnight.png`, fullPage: true });
