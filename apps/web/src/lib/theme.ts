@@ -5,12 +5,12 @@
 // save (refreshBoot), without a reload. The Vite dev server has no
 // injection, so there the public settings.boot op is the source.
 
-import { settings } from "@seylo/ops";
+import { accentCss, settings } from "@seylo/ops";
 import { useSyncExternalStore } from "react";
-import { accentCss } from "./accent";
 import { opClient } from "./api";
 
 type PanelBoot = settings.PanelBoot;
+type Appearance = Pick<PanelBoot, "preset" | "colorMode" | "accent" | "customCss">;
 
 const dom = settings.bootDom;
 const darkQuery = typeof window === "undefined" ? undefined : window.matchMedia("(prefers-color-scheme: dark)");
@@ -24,7 +24,7 @@ export function startTheme(): void {
   if (injected) applyBoot(injected);
   else void refreshBoot();
   darkQuery?.addEventListener("change", () => {
-    if (current) applyTheme(current);
+    if (current) paintTheme(current);
   });
 }
 
@@ -43,22 +43,45 @@ export function useBoot(): PanelBoot | null {
   return useSyncExternalStore(subscribe, () => current);
 }
 
+/** Whether the dark half shows right now (the dark class on <html>), following every switch. */
+export function useDarkMode(): boolean {
+  return useSyncExternalStore(subscribeDarkClass, isDark, () => false);
+}
+
 export function applyBoot(boot: PanelBoot): void {
   current = boot;
-  applyTheme(boot);
-  styleElement(dom.accentStyleId).textContent = accentCss(boot.accent);
-  styleElement(dom.customCssStyleId).textContent = boot.customCss;
+  paintAppearance(boot);
   document.title = boot.name;
   faviconLink().href = boot.favicon ?? "/favicon.svg";
   for (const listener of listeners) listener();
 }
 
-function applyTheme(boot: PanelBoot): void {
+/** Whether the device asks for dark ("system" follows it). */
+export function prefersDark(): boolean {
+  return darkQuery?.matches ?? false;
+}
+
+/** data-theme, data-color-mode and the dark class on <html>, as the panel writes them. */
+export function paintTheme(appearance: Pick<Appearance, "preset" | "colorMode">): void {
   const root = document.documentElement;
-  const preset = settings.resolveThemePreset(boot, darkQuery?.matches ?? false);
-  root.setAttribute(dom.colorModeAttribute, boot.colorMode);
-  if (preset === "seylo") root.removeAttribute(dom.themeAttribute);
-  else root.setAttribute(dom.themeAttribute, preset);
+  root.setAttribute(dom.themeAttribute, appearance.preset);
+  root.setAttribute(dom.colorModeAttribute, appearance.colorMode);
+  root.classList.toggle(dom.darkClass, settings.resolveColorScheme(appearance.colorMode, prefersDark()) === "dark");
+}
+
+/**
+ * The theme plus the accent and custom CSS <style> elements. Both stay at
+ * the end of <head> in that order: the theme's rules weigh :root, so the
+ * accent wins by coming after the app stylesheet and the custom CSS by
+ * coming last.
+ */
+export function paintAppearance(appearance: Appearance): void {
+  paintTheme(appearance);
+  const accent = styleElement(dom.accentStyleId);
+  accent.textContent = accentCss(appearance.accent);
+  const custom = styleElement(dom.customCssStyleId);
+  custom.textContent = appearance.customCss;
+  if (custom !== document.head.lastElementChild || accent.nextElementSibling !== custom) document.head.append(accent, custom);
 }
 
 function readInjectedBoot(): PanelBoot | null {
@@ -75,6 +98,7 @@ function readInjectedBoot(): PanelBoot | null {
 function styleElement(id: string): HTMLStyleElement {
   const existing = document.getElementById(id);
   if (existing instanceof HTMLStyleElement) return existing;
+  existing?.remove();
   const element = document.createElement("style");
   element.id = id;
   document.head.append(element);
@@ -93,4 +117,14 @@ function faviconLink(): HTMLLinkElement {
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+function isDark(): boolean {
+  return document.documentElement.classList.contains(dom.darkClass);
+}
+
+function subscribeDarkClass(listener: () => void): () => void {
+  const observer = new MutationObserver(listener);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
 }

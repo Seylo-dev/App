@@ -1,15 +1,19 @@
 // The product mark from the design, or the panel's own logo when one is
-// uploaded (Settings > Appearance). The dark logo is used on dark presets.
+// uploaded (Settings > Appearance). The dark logo shows while the dark half
+// of the theme does, and switches with it.
 
-import { useBoot } from "../lib/theme";
-
-const darkPresets = new Set(["seylo-night", "midnight"]);
+import { useBoot, useDarkMode } from "../lib/theme";
 
 export function BrandMark({ size = 28 }: { size?: number }) {
   const boot = useBoot();
-  const dark = darkPresets.has(document.documentElement.dataset.theme ?? "");
+  const dark = useDarkMode();
   const logo = (dark ? boot?.logoDark : boot?.logoLight) ?? boot?.logoLight ?? null;
   if (logo) return <img src={logo} alt="" height={size} className="max-w-[120px] shrink-0 object-contain" style={{ height: size }} />;
+  return <ProductMark size={size} />;
+}
+
+/** The built-in mark, in the accent color: what the panel shows while no logo is uploaded. */
+export function ProductMark({ size = 28 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden="true" className="shrink-0">
       <rect width="28" height="28" rx="7" className="fill-primary" />

@@ -1,10 +1,10 @@
 // Monaco themes that match the panel's look (Environment.dc.html): white
-// editor, muted line numbers, blue keys, violet references. The dark theme
-// is painted from the active preset's tokens (card, text, link, chips), so
-// Night and Midnight each get an editor that sits in their cards; the
-// cursor follows the accent. pickTheme() reads the page's --card color,
-// and followPageTheme() repaints open editors when the preset or accent
-// changes.
+// editor, muted line numbers, blue keys, violet references. Both themes
+// are painted from the active preset's tokens (card, text, link, chips),
+// so every preset and both of its halves get an editor that sits in their
+// cards; keys and the cursor follow the accent. pickTheme() reads the
+// page's --card color, and followPageTheme() repaints open editors when the
+// preset, color mode or accent changes.
 
 import type * as Monaco from "monaco-editor/editor/editor.api";
 
@@ -12,43 +12,44 @@ export const lightTheme = "seylo-light";
 export const darkTheme = "seylo-dark";
 
 export function defineSeyloThemes(monaco: typeof Monaco): void {
+  const token = cssTokens();
+  // The fallbacks are the default preset's light half (the board's colors).
   monaco.editor.defineTheme(lightTheme, {
     base: "vs",
     inherit: true,
     rules: [
-      { token: "comment", foreground: "64748B", fontStyle: "italic" },
-      { token: "env.key", foreground: "1D4ED8" },
-      { token: "keyword", foreground: "5B3FC4" },
-      { token: "delimiter", foreground: "556072" },
-      { token: "env.value", foreground: "0F172A" },
-      { token: "env.reference", foreground: "5B3FC4" },
-      { token: "env.reference.invalid", foreground: "B42318" },
-      { token: "string", foreground: "0F172A" },
-      { token: "string.quote", foreground: "556072" },
-      { token: "invalid", foreground: "B42318" },
+      { token: "comment", foreground: hex(token("--ink-faint", "#64748B")), fontStyle: "italic" },
+      { token: "env.key", foreground: hex(token("--link", "#1D4ED8")) },
+      { token: "keyword", foreground: hex(token("--chip-violet-fg", "#5B3FC4")) },
+      { token: "delimiter", foreground: hex(token("--muted-foreground", "#556072")) },
+      { token: "env.value", foreground: hex(token("--card-foreground", "#0F172A")) },
+      { token: "env.reference", foreground: hex(token("--chip-violet-fg", "#5B3FC4")) },
+      { token: "env.reference.invalid", foreground: hex(token("--chip-red-fg", "#B42318")) },
+      { token: "string", foreground: hex(token("--card-foreground", "#0F172A")) },
+      { token: "string.quote", foreground: hex(token("--muted-foreground", "#556072")) },
+      { token: "invalid", foreground: hex(token("--chip-red-fg", "#B42318")) },
     ],
     colors: {
-      "editor.background": "#FFFFFF",
-      "editor.foreground": "#0F172A",
-      "editorLineNumber.foreground": "#8B94A7",
-      "editorLineNumber.activeForeground": "#3B4556",
-      "editor.lineHighlightBackground": "#F6F8FB",
+      "editor.background": token("--card", "#FFFFFF"),
+      "editor.foreground": token("--card-foreground", "#0F172A"),
+      "editorLineNumber.foreground": token("--ink-ghost", "#8B94A7"),
+      "editorLineNumber.activeForeground": token("--ink-strong", "#3B4556"),
+      "editor.lineHighlightBackground": token("--raised", "#F6F8FB"),
       "editor.lineHighlightBorder": "#00000000",
-      "editor.selectionBackground": "#DCE6FF",
-      "editorCursor.foreground": cssTokens()("--primary", "#2563EB"),
-      "editorIndentGuide.background1": "#EEF0F4",
-      "editorWidget.background": "#FFFFFF",
-      "editorHoverWidget.background": "#FFFFFF",
-      "editorHoverWidget.border": "#E3E7EE",
-      "editorSuggestWidget.background": "#FFFFFF",
-      "editorSuggestWidget.border": "#E3E7EE",
-      "editorSuggestWidget.selectedBackground": "#EEF3FF",
+      "editor.selectionBackground": token("--accent", "#DCE6FF"),
+      "editorCursor.foreground": token("--primary", "#2563EB"),
+      "editorIndentGuide.background1": token("--grid-line", "#EEF0F4"),
+      "editorWidget.background": token("--popover", "#FFFFFF"),
+      "editorHoverWidget.background": token("--popover", "#FFFFFF"),
+      "editorHoverWidget.border": token("--border", "#E3E7EE"),
+      "editorSuggestWidget.background": token("--popover", "#FFFFFF"),
+      "editorSuggestWidget.border": token("--border", "#E3E7EE"),
+      "editorSuggestWidget.selectedBackground": token("--accent", "#EEF3FF"),
       "editorError.foreground": "#DC2626",
       "editorWarning.foreground": "#D97706",
-      "scrollbarSlider.background": "#CBD2DC80",
+      "scrollbarSlider.background": `${token("--status-off", "#CBD2DC")}80`,
     },
   });
-  const token = cssTokens();
   monaco.editor.defineTheme(darkTheme, {
     base: "vs-dark",
     inherit: true,
@@ -85,14 +86,34 @@ export function defineSeyloThemes(monaco: typeof Monaco): void {
   });
 }
 
-/** Reads the page's color tokens as #rrggbb (Monaco takes nothing else). */
+/**
+ * Reads the page's color tokens as #rrggbb (Monaco takes nothing else).
+ * Tokens mixed from the accent (--link, --accent) are color-mix()
+ * expressions, so each value is painted on a 1x1 canvas and read back.
+ */
 function cssTokens(): (name: string, fallback: string) => string {
   if (typeof document === "undefined") return (_name, fallback) => fallback;
   const style = getComputedStyle(document.documentElement);
-  return (name, fallback) => {
+  const probe = document.createElement("span");
+  document.body.append(probe);
+  const canvas = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  const read = (name: string, fallback: string) => {
     const value = style.getPropertyValue(name).trim();
-    return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+    if (/^#[0-9a-f]{6}$/i.test(value)) return value;
+    if (!value || !canvas) return fallback;
+    probe.style.color = "";
+    probe.style.color = `var(${name})`;
+    const color = getComputedStyle(probe).color;
+    canvas.clearRect(0, 0, 1, 1);
+    canvas.fillStyle = color;
+    canvas.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0, a = 0] = canvas.getImageData(0, 0, 1, 1).data;
+    if (a === 0) return fallback;
+    return `#${[r, g, b].map((part) => part.toString(16).padStart(2, "0")).join("")}`;
   };
+  // The reads happen right away (defineSeyloThemes); the probe goes once they are done.
+  queueMicrotask(() => probe.remove());
+  return read;
 }
 
 /** Token rules take colors without the "#". */
@@ -119,7 +140,7 @@ export function followPageTheme(monaco: typeof Monaco): void {
     });
   };
   const observer = new MutationObserver(repaint);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-color-mode"] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-color-mode", "class"] });
   observer.observe(document.head, { childList: true, subtree: true, characterData: true });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", repaint);
 }

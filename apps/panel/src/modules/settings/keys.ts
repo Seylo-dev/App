@@ -3,7 +3,7 @@
 // Defaults live in the readers below, so a fresh panel needs no rows.
 
 import { displayName } from "@seylo/brand";
-import type { settings as settingOps } from "@seylo/ops";
+import { settings as settingOps } from "@seylo/ops";
 import type { PanelDb } from "../../db/client";
 import { getSetting } from "../../settings";
 
@@ -18,6 +18,16 @@ export interface StoredBranding {
   hidePoweredBy: boolean;
   /** Files live in <dataDir>/branding/<kind>; this only records what is there. */
   assets: Partial<Record<settingOps.BrandAssetKind, StoredBrandAsset>>;
+}
+
+/**
+ * The appearance row. themeVersion 2 marks rows saved since every preset
+ * has a light and a dark half (0.2.5); older rows can hold "seylo-night"
+ * and a mode that "classic" or "midnight" ignored (readAppearance).
+ */
+export interface StoredAppearance extends Omit<settingOps.AppearanceSettings, "preset"> {
+  preset: string;
+  themeVersion?: 2;
 }
 
 export interface StoredTelemetry {
@@ -35,7 +45,7 @@ declare module "../../settings" {
     panelDomain: string | null;
     defaultNodeId: string | null;
     branding: StoredBranding;
-    appearance: settingOps.AppearanceSettings;
+    appearance: StoredAppearance;
     telemetry: StoredTelemetry;
   }
 }
@@ -47,8 +57,16 @@ export function readPanelName(db: PanelDb): string {
   return getSetting(db, "panelName") ?? displayName;
 }
 
+/**
+ * The appearance in today's terms. A row from before 0.2.5 keeps how it
+ * looked: "seylo-night" reads as "seylo" (whose halves it was one of), and
+ * the light-only "classic" and dark-only "midnight" read with that mode.
+ */
 export function readAppearance(db: PanelDb): settingOps.AppearanceSettings {
-  return { ...defaultAppearance, ...getSetting(db, "appearance") };
+  const { themeVersion, ...stored } = { ...defaultAppearance, ...getSetting(db, "appearance") };
+  const legacyMode =
+    themeVersion === 2 ? undefined : settingOps.legacyPresetModes[stored.preset as keyof typeof settingOps.legacyPresetModes];
+  return { ...stored, preset: settingOps.normalizeThemePreset(stored.preset), colorMode: legacyMode ?? stored.colorMode };
 }
 
 export function readBranding(db: PanelDb): StoredBranding {

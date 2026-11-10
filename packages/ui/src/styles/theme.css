@@ -8,9 +8,20 @@
  * (--background, --primary, ...) are kept so upstream components drop in;
  * the rest are additions the design needs.
  *
- * Presets: the default ("seylo") on :root, the others selected with
- * <html data-theme="...">. Keep the preset list in sync with
- * apps/web/src/lib/theme.ts.
+ * Presets and modes: <html data-theme="<preset>"> picks the preset
+ * (settings.themePresets in @seylo/ops) and the `dark` class on <html>
+ * picks its dark look, so every preset has a light and a dark half. The
+ * default ("seylo") is :root and :root.dark, which every other preset
+ * builds on: each one sets its corners once, its light colors under
+ * :not(.dark) and its dark colors under .dark. Every selector here is
+ * wrapped in :where() so it weighs exactly :root: later rules win, which
+ * keeps the accent (accentCss in @seylo/ops) and the owner's custom CSS,
+ * written after this sheet, on top without any specificity games.
+ *
+ * Tokens that carry the primary color (links, the focus ring, the
+ * selected nav item, the first chart series, the node card, the primary
+ * glow and hover) are mixed from --primary, so changing --primary alone
+ * recolors all of them in every preset and mode.
  */
 
 :root {
@@ -21,11 +32,11 @@
 
   /* Surfaces: white cards with soft shadows and no borders. */
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: var(--foreground);
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
+  --popover-foreground: var(--foreground);
   --sidebar: #ffffff;
-  --sidebar-foreground: #0f172a;
+  --sidebar-foreground: var(--foreground);
   --sidebar-shadow: 1px 0 0 #eef0f4, 4px 0 24px rgb(15 23 42 / 0.03);
 
   /* Text shades, darkest to lightest. */
@@ -34,10 +45,14 @@
   --ink-faint: #6b7586; /* chevrons, inactive icons */
   --ink-ghost: #8b94a7; /* placeholders, disabled */
 
+  /* The accent. --primary-foreground is the text on it: white, or near black on a light accent. */
   --primary: #2563eb;
   --primary-foreground: #ffffff;
-  --link: #1f4fd1;
-  --link-hover: #163c9f;
+  /* Hover on a primary fill: a step toward its text color, so it shows on a near-black or a light accent too. */
+  --primary-hover: color-mix(in oklab, var(--primary) 88%, var(--primary-foreground));
+  /* Text in the accent color on a card: links and the selected nav item. */
+  --link: color-mix(in oklab, var(--primary) 90%, #000);
+  --link-hover: color-mix(in oklab, var(--primary) 73%, #000);
 
   /* Quiet fills: search box, segmented tracks, neutral chips. */
   --muted: #f1f3f7;
@@ -54,14 +69,15 @@
   /* On gray strips, fields, tracks, callouts and the highlight panel: the white button with its shadow in light presets. */
   --secondary-on-raised: var(--secondary);
   --secondary-on-raised-hover: var(--secondary-hover);
-  --secondary-foreground: #0f172a;
+  --secondary-foreground: var(--foreground);
   /* The raised pill of a segmented track. */
   --pill: #ffffff;
   /* The "dark" button (GitHub sign-in, Deny): near black on light presets, a raised fill on dark ones. */
   --button-dark: #0f172a;
   --button-dark-foreground: #ffffff;
-  --accent: #e6ecfc; /* selected nav item */
-  --accent-foreground: #1f4fd1;
+  /* The selected nav item: a tint of the accent on the card, with --accent-foreground text. */
+  --accent: color-mix(in oklab, var(--primary) 12%, var(--card));
+  --accent-foreground: var(--link);
   --field: #f3f5f9;
   --track: #e9edf3;
   --raised: #f6f8fb; /* user row */
@@ -70,7 +86,7 @@
   --divider: #f0f2f5; /* rows inside a card */
   --grid-line: #eef0f4; /* chart grid */
   --input: #e3e7ee;
-  --ring: #2563eb;
+  --ring: var(--primary);
   /* Off switches and unticked checkboxes and radios: visible on a card and on a raised row. */
   --control-off: #c5ccd7;
   --switch-thumb: #ffffff;
@@ -103,15 +119,19 @@
   --status-error: #e5484d;
   --status-off: #cbd2dc;
 
-  /* Chart series, in node order. */
-  --chart-1: #2563eb;
+  /* Chart series, in node order; the first is the accent. */
+  --chart-1: var(--primary);
   --chart-2: #f59e0b;
   --chart-3: #475467;
   --chart-4: #16a34a;
   --chart-5: #5b3fc4;
 
-  /* The sidebar's node card. */
-  --highlight: linear-gradient(160deg, #e7eeff 0%, #f3f7ff 100%);
+  /* The sidebar's node card: a wash of the accent on the card. */
+  --highlight: linear-gradient(
+    160deg,
+    color-mix(in oklab, var(--primary) 11%, var(--card)) 0%,
+    color-mix(in oklab, var(--primary) 4%, var(--card)) 100%
+  );
 
   /* The light sweep over loading placeholders. */
   --skeleton-shine: rgb(255 255 255 / 0.6);
@@ -121,14 +141,15 @@
   --radius-control: 8px;
   --radius-chip: 6px;
 
-  /* Shadows replace borders. */
+  /* Shadows replace borders. The primary glow takes the accent's color. */
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.05);
   --shadow-control: 0 1px 2px rgb(15 23 42 / 0.06), 0 2px 8px rgb(15 23 42 / 0.04);
-  --shadow-primary: 0 1px 2px rgb(37 99 235 / 0.3), 0 4px 12px rgb(37 99 235 / 0.18);
+  --shadow-primary:
+    0 1px 2px color-mix(in srgb, var(--primary) 30%, transparent), 0 4px 12px color-mix(in srgb, var(--primary) 18%, transparent);
   --shadow-segment: 0 1px 2px rgb(15 23 42 / 0.08);
   --shadow-popover: 0 1px 2px rgb(15 23 42 / 0.06), 0 12px 32px rgb(15 23 42 / 0.12);
 
-  /* Terminal and log surfaces stay dark in every preset. */
+  /* Terminal and log surfaces stay dark in every preset and mode. */
   --terminal: #0b1020;
   --terminal-bar: #11172a;
   --terminal-foreground: #d6dce8;
@@ -159,17 +180,14 @@
   color-scheme: light;
 }
 
-/* Seylo Night: dark with ink blues. */
-:root[data-theme="seylo-night"] {
+/* Default, dark: ink blues (the former "Night" preset). */
+:root:where(.dark) {
   --background: #0b1020;
   --ground-wash: radial-gradient(900px 420px at 88% -8%, rgb(111 139 255 / 0.12) 0%, rgb(111 139 255 / 0) 70%);
   --foreground: #d6dce8;
   --card: #151c30;
-  --card-foreground: #d6dce8;
   --popover: #151c30;
-  --popover-foreground: #d6dce8;
   --sidebar: #11172a;
-  --sidebar-foreground: #d6dce8;
   --sidebar-shadow: 1px 0 0 #222b42;
   --ink-strong: #b4bdd0;
   --muted-foreground: #8d97ad;
@@ -177,8 +195,9 @@
   --ink-ghost: #56607a;
   --primary: #6f8bff;
   --primary-foreground: #0b1020;
-  --link: #8ea3ff;
-  --link-hover: #b2c0ff;
+  /* On dark ground the accent's text shades go lighter instead of darker. */
+  --link: color-mix(in oklab, var(--primary) 79%, #fff);
+  --link-hover: color-mix(in oklab, var(--primary) 55%, #fff);
   --muted: #1c2440;
   --secondary: #1c2440;
   --secondary-hover: #242d4c;
@@ -187,12 +206,11 @@
   /* --secondary is the strips' own fill here, so a button on them is a step lighter. */
   --secondary-on-raised: #2c3759;
   --secondary-on-raised-hover: #343f63;
-  --secondary-foreground: #d6dce8;
   --pill: #2a3454;
   --button-dark: #2c3657;
   --button-dark-foreground: #eef1f7;
-  --accent: #222b4a;
-  --accent-foreground: #b2c0ff;
+  --accent: color-mix(in oklab, var(--primary) 15%, var(--card));
+  --accent-foreground: color-mix(in oklab, var(--primary) 55%, #fff);
   --field: #1c2440;
   --track: #1c2440;
   --raised: #1a2138;
@@ -200,7 +218,6 @@
   --divider: #222b42;
   --grid-line: #222b42;
   --input: #2a3350;
-  --ring: #6f8bff;
   --control-off: #3d4869;
   --switch-thumb: #c3cad9;
   --scrim: rgb(0 0 0 / 0.55);
@@ -223,10 +240,9 @@
   --terminal: #060914;
   --terminal-bar: #0e1324;
   --terminal-field: #182039;
-  --chart-1: #6f8bff;
   --chart-3: #8b94a7;
-  --highlight: linear-gradient(160deg, #1e2a52 0%, #151c30 100%);
-  /* Fill-only, as in the light preset: fills set surfaces apart, with soft drop shadows and no hairline rings. */
+  --highlight: linear-gradient(160deg, color-mix(in oklab, var(--primary) 16%, var(--card)) 0%, var(--card) 100%);
+  /* Fill-only, as in the light half: fills set surfaces apart, with soft drop shadows and no hairline rings. */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
   --shadow-control: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
   --shadow-primary: none;
@@ -236,110 +252,1264 @@
   color-scheme: dark;
 }
 
-/* Classic: soft gray cards, green accent, hairline borders. */
-:root[data-theme="classic"] {
+/*
+ * The other presets. Each sets every color its light and dark halves use
+ * (theme.test.ts checks both halves name the same tokens), so nothing of
+ * the default leaks into a preset's other half.
+ */
+
+/* Classic: flat neutral grays, hairline outlines instead of shadows, square-ish corners, green. */
+:root:where([data-theme="classic"]) {
+  --radius: 6px;
+  --radius-control: 6px;
+  --radius-chip: 5px;
+}
+
+:root:where([data-theme="classic"]:not(.dark)) {
   --background: #f2f3f5;
   --ground-wash: none;
   --foreground: #2a2b31;
-  --card-foreground: #2a2b31;
-  --popover-foreground: #2a2b31;
+  --card: #ffffff;
+  --popover: #ffffff;
   --sidebar: #f7f8fa;
-  --sidebar-foreground: #2a2b31;
-  --sidebar-shadow: 1px 0 0 #e1e3e8;
+  --sidebar-shadow: 1px 0 0 #f3f4f4;
+  --ink-strong: #47484e;
+  --muted-foreground: #5f6065;
+  --ink-faint: #77787d;
+  --ink-ghost: #939497;
   --primary: #0f8a6a;
-  --link: #0b6e55;
-  --link-hover: #075240;
-  --accent: #e3f2ed;
-  --accent-foreground: #0b6e55;
-  --muted: #eceef1;
-  --track: #dadde3;
-  --ring: #0f8a6a;
-  --chart-1: #0f8a6a;
-  --highlight: linear-gradient(160deg, #e3f2ed 0%, #f7f8fa 100%);
-  --radius: 6px;
-  --radius-control: 6px;
-  --shadow-card: inset 0 0 0 1px #e1e3e8;
-  --shadow-control: inset 0 0 0 1px #dadde3;
+  --primary-foreground: #ffffff;
+  --muted: #e9ebed;
+  --secondary: #ffffff;
+  --secondary-hover: #f9f9f9;
+  --secondary-on-card: #f3f4f4;
+  --secondary-on-card-hover: #ebecec;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #ffffff;
+  --button-dark: #2a2b31;
+  --button-dark-foreground: #ffffff;
+  --field: #f2f3f5;
+  --track: #e1e3e5;
+  --raised: #f9f9f9;
+  --border: #e5e6e6;
+  --divider: #f3f4f4;
+  --grid-line: #f0f0f0;
+  --input: #e5e6e6;
+  --control-off: #cccdce;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(42 43 49 / 0.22);
+  --chip-blue-bg: #e9f1fc;
+  --chip-blue-fg: #295fbf;
+  --chip-sky-bg: #eaf2f8;
+  --chip-sky-fg: #186998;
+  --chip-red-bg: #feedeb;
+  --chip-red-fg: #b73434;
+  --chip-violet-bg: #efeefc;
+  --chip-violet-fg: #674fc2;
+  --chip-green-bg: #ebf5ee;
+  --chip-green-fg: #157343;
+  --chip-amber-bg: #faf3ea;
+  --chip-amber-fg: #8d5b08;
+  --chip-gray-bg: #f3f4f4;
+  --chip-gray-fg: #47484e;
+  --status-off: #d0d2d3;
+  --chart-2: #e09b2d;
+  --chart-3: #5c5f6b;
+  --chart-4: #3f7fd9;
+  --chart-5: #8d5bd6;
+  --terminal: #0c0d0f;
+  --terminal-bar: #16171a;
+  --terminal-field: #222327;
+  --terminal-prompt: #5fd3a9;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: inset 0 0 0 1px #e5e6e6;
+  --shadow-control: inset 0 0 0 1px #dedfe0;
+  --shadow-segment: 0 1px 2px rgb(42 43 49 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(42 43 49 / 0.06), 0 12px 32px rgb(42 43 49 / 0.13);
   --shadow-primary: none;
+  color-scheme: light;
 }
 
-/* Midnight: dense, purple accent, nearly square corners. */
-:root[data-theme="midnight"] {
-  --background: #101014;
+:root:where([data-theme="classic"].dark) {
+  --background: #17181b;
   --ground-wash: none;
-  --foreground: #ececf1;
-  --card: #1a1a20;
-  --card-foreground: #ececf1;
-  --popover: #1a1a20;
-  --popover-foreground: #ececf1;
-  --sidebar: #141418;
-  --sidebar-foreground: #ececf1;
-  --sidebar-shadow: 1px 0 0 #2a2a33;
-  --ink-strong: #c4c4ce;
-  --muted-foreground: #9a9aa6;
-  --ink-faint: #74747f;
-  --ink-ghost: #5a5a64;
-  --primary: #8b6cf6;
-  --primary-foreground: #101014;
-  --link: #a891fa;
-  --link-hover: #c4b5fd;
-  --muted: #22222a;
-  --secondary: #22222a;
-  --secondary-hover: #2a2a33;
-  --secondary-on-card: #24242c;
-  --secondary-on-card-hover: #2d2d37;
-  /* --secondary is the strips' own fill here, so a button on them is a step lighter. */
-  --secondary-on-raised: #30303b;
-  --secondary-on-raised-hover: #383844;
-  --secondary-foreground: #ececf1;
-  --pill: #32323d;
-  --button-dark: #34343f;
-  --button-dark-foreground: #f4f4f7;
-  --accent: #2a2440;
-  --accent-foreground: #c4b5fd;
-  --field: #22222a;
-  --track: #22222a;
-  --raised: #1f1f26;
-  --border: #2e2e38;
-  --divider: #2a2a33;
-  --grid-line: #2a2a33;
-  --input: #2e2e38;
-  --ring: #8b6cf6;
-  --control-off: #43434f;
-  --switch-thumb: #c4c4ce;
-  --scrim: rgb(0 0 0 / 0.6);
-  --chip-blue-bg: #1f2547;
-  --chip-blue-fg: #a9b6ff;
-  --chip-sky-bg: #142c3d;
-  --chip-sky-fg: #8cc4ee;
-  --chip-red-bg: #3a1b22;
-  --chip-red-fg: #ff9b95;
-  --chip-violet-bg: #2c2348;
-  --chip-violet-fg: #c4b5fd;
-  --chip-gray-bg: #26262f;
-  --chip-gray-fg: #c4c4ce;
-  --chip-green-bg: #14322a;
-  --chip-green-fg: #7dd3a8;
-  --chip-amber-bg: #372914;
-  --chip-amber-fg: #f2bd63;
-  --status-off: #4a4a55;
-  /* Neutral terminal to match the preset (the default one is ink blue). */
+  --foreground: #e4e5e9;
+  --card: #202125;
+  --popover: #202125;
+  --sidebar: #1b1c1f;
+  --sidebar-shadow: 1px 0 0 #2c2e32;
+  --ink-strong: #b8b9be;
+  --muted-foreground: #97989c;
+  --ink-faint: #7a7c80;
+  --ink-ghost: #636468;
+  --primary: #2fb58a;
+  --primary-foreground: #10131a;
+  --muted: #2b2c30;
+  --secondary: #2b2c30;
+  --secondary-hover: #313337;
+  --secondary-on-card: #2d2f33;
+  --secondary-on-card-hover: #343539;
+  --secondary-on-raised: #383a3d;
+  --secondary-on-raised-hover: #3d3f42;
+  --pill: #36383c;
+  --button-dark: #393b3f;
+  --button-dark-foreground: #efeff2;
+  --field: #2b2c30;
+  --track: #2b2c30;
+  --raised: #26272b;
+  --border: #34363a;
+  --divider: #2c2e32;
+  --grid-line: #2c2e32;
+  --input: #34363a;
+  --control-off: #4a4d50;
+  --switch-thumb: #c1c2c6;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #242e42;
+  --chip-blue-fg: #7ea6e9;
+  --chip-sky-bg: #25313d;
+  --chip-sky-fg: #79add3;
+  --chip-red-bg: #3f292b;
+  --chip-red-fg: #eb8d85;
+  --chip-violet-bg: #2c2b41;
+  --chip-violet-fg: #a59ce7;
+  --chip-green-bg: #26352f;
+  --chip-green-fg: #73b98d;
+  --chip-amber-bg: #3b322a;
+  --chip-amber-fg: #d8a360;
+  --chip-gray-bg: #2c2e32;
+  --chip-gray-fg: #b8b9be;
+  --status-off: #4a4d50;
+  --chart-2: #e6a845;
+  --chart-3: #8e909b;
+  --chart-4: #5b93e0;
+  --chart-5: #a07ce0;
+  --terminal: #0c0d0f;
+  --terminal-bar: #16171a;
+  --terminal-field: #222327;
+  --terminal-prompt: #5fd3a9;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: inset 0 0 0 1px #34363a;
+  --shadow-control: inset 0 0 0 1px #3b3d41;
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Midnight: violet on cool near-blacks and whites, square corners, flat dense fills. */
+:root:where([data-theme="midnight"]) {
+  --radius: 2px;
+  --radius-control: 2px;
+  --radius-chip: 2px;
+}
+
+:root:where([data-theme="midnight"]:not(.dark)) {
+  --background: #e8e7ef;
+  --ground-wash: none;
+  --foreground: #16141f;
+  --card: #fdfdff;
+  --popover: #fdfdff;
+  --sidebar: #f2f1f7;
+  --sidebar-shadow: 1px 0 0 #f1f1f6;
+  --ink-strong: #34333e;
+  --muted-foreground: #4e4c56;
+  --ink-faint: #686770;
+  --ink-ghost: #86858d;
+  --primary: #6741d9;
+  --primary-foreground: #ffffff;
+  --muted: #e4e3ed;
+  --secondary: #fdfdff;
+  --secondary-hover: #f7f7fa;
+  --secondary-on-card: #f1f1f6;
+  --secondary-on-card-hover: #e9e9ef;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #fdfdff;
+  --button-dark: #16141f;
+  --button-dark-foreground: #fdfdff;
+  --field: #e8e7ef;
+  --track: #d8d7e3;
+  --raised: #f7f7fa;
+  --border: #e3e3eb;
+  --divider: #f1f1f6;
+  --grid-line: #eeedf3;
+  --input: #e3e3eb;
+  --control-off: #c9c9d7;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(22 20 31 / 0.22);
+  --chip-blue-bg: #e8effc;
+  --chip-blue-fg: #295fbf;
+  --chip-sky-bg: #e8f0f8;
+  --chip-sky-fg: #176896;
+  --chip-red-bg: #fcebeb;
+  --chip-red-fg: #b43333;
+  --chip-violet-bg: #efecfe;
+  --chip-violet-fg: #7047cb;
+  --chip-green-bg: #e9f3ee;
+  --chip-green-fg: #147142;
+  --chip-amber-bg: #f8f1ea;
+  --chip-amber-fg: #8b5a07;
+  --chip-gray-bg: #f1f1f6;
+  --chip-gray-fg: #34333e;
+  --status-off: #cecddb;
+  --chart-2: #e89a2c;
+  --chart-3: #76738a;
+  --chart-4: #2f9e78;
+  --chart-5: #d6497f;
   --terminal: #0b0b0e;
   --terminal-bar: #17171c;
   --terminal-field: #24242c;
   --terminal-prompt: #b4a0fb;
-  --chart-1: #8b6cf6;
-  --chart-3: #9a9aa6;
-  --highlight: linear-gradient(160deg, #2a2440 0%, #1a1a20 100%);
-  --radius: 2px;
-  --radius-control: 2px;
-  --radius-chip: 2px;
-  /* Fill-only, like Seylo Night: no hairline rings around cards, buttons or the segmented pill. */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
-  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.2);
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: none;
+  --shadow-control: 0 1px 2px rgb(22 20 31 / 0.08);
+  --shadow-segment: 0 1px 2px rgb(22 20 31 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(22 20 31 / 0.06), 0 12px 32px rgb(22 20 31 / 0.13);
   --shadow-primary: none;
-  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.35);
-  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.4), 0 16px 40px rgb(0 0 0 / 0.55);
+  color-scheme: light;
+}
+
+:root:where([data-theme="midnight"].dark) {
+  --background: #0e0e12;
+  --ground-wash: none;
+  --foreground: #ececf1;
+  --card: #18181e;
+  --popover: #18181e;
+  --sidebar: #121216;
+  --sidebar-shadow: 1px 0 0 #24242c;
+  --ink-strong: #bcbcc2;
+  --muted-foreground: #98989e;
+  --ink-faint: #79797f;
+  --ink-ghost: #606066;
+  --primary: #8b6cf6;
+  --primary-foreground: #10131a;
+  --muted: #22222a;
+  --secondary: #22222a;
+  --secondary-hover: #292832;
+  --secondary-on-card: #25242d;
+  --secondary-on-card-hover: #2b2a35;
+  --secondary-on-raised: #2f2e39;
+  --secondary-on-raised-hover: #34333f;
+  --pill: #2d2d37;
+  --button-dark: #30303b;
+  --button-dark-foreground: #f4f4f7;
+  --field: #22222a;
+  --track: #22222a;
+  --raised: #1e1e25;
+  --border: #2c2b36;
+  --divider: #24242c;
+  --grid-line: #24242c;
+  --input: #2c2b36;
+  --control-off: #41404f;
+  --switch-thumb: #c6c6cb;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #1e263b;
+  --chip-blue-fg: #729de7;
+  --chip-sky-bg: #1e2936;
+  --chip-sky-fg: #6aa5ce;
+  --chip-red-bg: #372225;
+  --chip-red-fg: #e8817a;
+  --chip-violet-bg: #2a273f;
+  --chip-violet-fg: #a893f7;
+  --chip-green-bg: #1f2d29;
+  --chip-green-fg: #66b383;
+  --chip-amber-bg: #342a24;
+  --chip-amber-fg: #d8a360;
+  --chip-gray-bg: #24242c;
+  --chip-gray-fg: #bcbcc2;
+  --status-off: #41404f;
+  --chart-2: #f2a93b;
+  --chart-3: #8c8a99;
+  --chart-4: #3fb68b;
+  --chart-5: #e05d8c;
+  --terminal: #0b0b0e;
+  --terminal-bar: #17171c;
+  --terminal-field: #24242c;
+  --terminal-prompt: #b4a0fb;
   --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: none;
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Graphite: pure grays without a tint, an ink primary, flat cards that stand on fill alone. */
+:root:where([data-theme="graphite"]) {
+  --radius: 8px;
+  --radius-control: 6px;
+  --radius-chip: 4px;
+}
+
+:root:where([data-theme="graphite"]:not(.dark)) {
+  --background: #f1f1f2;
+  --ground-wash: none;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --sidebar: #f1f1f2;
+  --sidebar-shadow: none;
+  --ink-strong: #37373a;
+  --muted-foreground: #505052;
+  --ink-faint: #6a6a6d;
+  --ink-ghost: #88888a;
+  --primary: #18181b;
+  --primary-foreground: #ffffff;
+  --muted: #e2e2e3;
+  --secondary: #ffffff;
+  --secondary-hover: #f8f8f8;
+  --secondary-on-card: #f2f2f2;
+  --secondary-on-card-hover: #e9e9e9;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #ffffff;
+  --button-dark: #18181b;
+  --button-dark-foreground: #ffffff;
+  --field: #f1f1f2;
+  --track: #dedee0;
+  --raised: #f8f8f8;
+  --border: #e2e2e3;
+  --divider: #f2f2f2;
+  --grid-line: #eeeeee;
+  --input: #e2e2e3;
+  --control-off: #c6c6c7;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(24 24 27 / 0.22);
+  --chip-blue-bg: #eaf1fc;
+  --chip-blue-fg: #3260bc;
+  --chip-sky-bg: #ebf3f8;
+  --chip-sky-fg: #206b94;
+  --chip-red-bg: #feedec;
+  --chip-red-fg: #b23838;
+  --chip-violet-bg: #f0effc;
+  --chip-violet-fg: #6d51ba;
+  --chip-green-bg: #ecf5ee;
+  --chip-green-fg: #1f7240;
+  --chip-amber-bg: #faf2ea;
+  --chip-amber-fg: #8c5907;
+  --chip-gray-bg: #f2f2f2;
+  --chip-gray-fg: #37373a;
+  --status-off: #cbcbcc;
+  --chart-2: #71717a;
+  --chart-3: #a1a1aa;
+  --chart-4: #3b6fd8;
+  --chart-5: #d97706;
+  --terminal: #0a0a0b;
+  --terminal-bar: #141416;
+  --terminal-field: #1f1f22;
+  --terminal-prompt: #e4e4e7;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: none;
+  --shadow-control: 0 1px 2px rgb(24 24 27 / 0.08);
+  --shadow-segment: 0 1px 2px rgb(24 24 27 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(24 24 27 / 0.06), 0 12px 32px rgb(24 24 27 / 0.13);
+  --shadow-primary: none;
+  color-scheme: light;
+}
+
+:root:where([data-theme="graphite"].dark) {
+  --background: #0f0f10;
+  --ground-wash: none;
+  --foreground: #f4f4f5;
+  --card: #1a1a1c;
+  --popover: #1a1a1c;
+  --sidebar: #0f0f10;
+  --sidebar-shadow: none;
+  --ink-strong: #c3c3c4;
+  --muted-foreground: #9d9d9f;
+  --ink-faint: #7e7e80;
+  --ink-ghost: #646466;
+  --primary: #f4f4f5;
+  --primary-foreground: #10131a;
+  --muted: #262628;
+  --secondary: #262628;
+  --secondary-hover: #2e2e30;
+  --secondary-on-card: #29292b;
+  --secondary-on-card-hover: #313133;
+  --secondary-on-raised: #353537;
+  --secondary-on-raised-hover: #3b3b3d;
+  --pill: #333335;
+  --button-dark: #373739;
+  --button-dark-foreground: #f8f8f9;
+  --field: #262628;
+  --track: #262628;
+  --raised: #212123;
+  --border: #323234;
+  --divider: #28282a;
+  --grid-line: #28282a;
+  --input: #323234;
+  --control-off: #4b4b4d;
+  --switch-thumb: #cdcdce;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #21293a;
+  --chip-blue-fg: #7aa0e8;
+  --chip-sky-bg: #212c35;
+  --chip-sky-fg: #6da8cd;
+  --chip-red-bg: #392424;
+  --chip-red-fg: #e9837c;
+  --chip-violet-bg: #292639;
+  --chip-violet-fg: #a394e3;
+  --chip-green-bg: #222f27;
+  --chip-green-fg: #6db783;
+  --chip-amber-bg: #352b21;
+  --chip-amber-fg: #d6a15f;
+  --chip-gray-bg: #28282a;
+  --chip-gray-fg: #c3c3c4;
+  --status-off: #4b4b4d;
+  --chart-2: #a1a1aa;
+  --chart-3: #52525b;
+  --chart-4: #5b8def;
+  --chart-5: #f0a33a;
+  --terminal: #09090a;
+  --terminal-bar: #141416;
+  --terminal-field: #1f1f22;
+  --terminal-prompt: #e4e4e7;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: none;
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Clay: warm sand paper, terracotta, round corners and soft warm shadows. */
+:root:where([data-theme="clay"]) {
+  --radius: 14px;
+  --radius-control: 10px;
+  --radius-chip: 8px;
+}
+
+:root:where([data-theme="clay"]:not(.dark)) {
+  --background: #f3ece3;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, #f7dcc6 0%, rgb(247 220 198 / 0) 70%);
+  --foreground: #2d2118;
+  --card: #fffaf4;
+  --popover: #fffaf4;
+  --sidebar: #fbf5ee;
+  --sidebar-shadow: 1px 0 0 #f6efe8, 4px 0 24px rgb(90 58 34 / 0.04);
+  --ink-strong: #4a3f36;
+  --muted-foreground: #62564e;
+  --ink-faint: #7a6f67;
+  --ink-ghost: #958c84;
+  --primary: #b9502a;
+  --primary-foreground: #ffffff;
+  --muted: #f0e8e0;
+  --secondary: #fffaf4;
+  --secondary-hover: #faf4ee;
+  --secondary-on-card: #f6efe8;
+  --secondary-on-card-hover: #f0e7e0;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #fffaf4;
+  --button-dark: #2d2118;
+  --button-dark-foreground: #fffaf4;
+  --field: #f3ece3;
+  --track: #e6ddd3;
+  --raised: #faf4ee;
+  --border: #ebe2da;
+  --divider: #f6efe8;
+  --grid-line: #f3ece5;
+  --input: #ebe2da;
+  --control-off: #d8cac1;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(45 33 24 / 0.22);
+  --chip-blue-bg: #ebecef;
+  --chip-blue-fg: #36619f;
+  --chip-sky-bg: #ebeeec;
+  --chip-sky-fg: #236983;
+  --chip-red-bg: #fbe8e0;
+  --chip-red-fg: #ad3927;
+  --chip-violet-bg: #f3e9ef;
+  --chip-violet-fg: #7b4ba2;
+  --chip-green-bg: #edefe1;
+  --chip-green-fg: #3d6c2e;
+  --chip-amber-bg: #f9ede0;
+  --chip-amber-fg: #8a5709;
+  --chip-gray-bg: #f6efe8;
+  --chip-gray-fg: #4a3f36;
+  --status-off: #dbcec5;
+  --chart-2: #d9a03a;
+  --chart-3: #8a7565;
+  --chart-4: #5b8f4e;
+  --chart-5: #5b7fbf;
+  --terminal: #140f0c;
+  --terminal-bar: #1e1713;
+  --terminal-field: #2a211b;
+  --terminal-prompt: #f0a37f;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: 0 1px 2px rgb(90 58 34 / 0.05), 0 8px 28px rgb(90 58 34 / 0.08);
+  --shadow-control: 0 1px 2px rgb(90 58 34 / 0.07), 0 3px 10px rgb(90 58 34 / 0.05);
+  --shadow-segment: 0 1px 2px rgb(90 58 34 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(90 58 34 / 0.06), 0 12px 32px rgb(90 58 34 / 0.13);
+  --shadow-primary:
+    0 1px 2px color-mix(in srgb, var(--primary) 30%, transparent), 0 4px 14px color-mix(in srgb, var(--primary) 22%, transparent);
+  color-scheme: light;
+}
+
+:root:where([data-theme="clay"].dark) {
+  --background: #1a1410;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, rgb(226 121 79 / 0.1) 0%, rgb(226 121 79 / 0) 70%);
+  --foreground: #f1e6da;
+  --card: #241c17;
+  --popover: #241c17;
+  --sidebar: #1e1713;
+  --sidebar-shadow: 1px 0 0 #322721;
+  --ink-strong: #c4b9ae;
+  --muted-foreground: #a0968d;
+  --ink-faint: #837970;
+  --ink-ghost: #6a6159;
+  --primary: #e2794f;
+  --primary-foreground: #10131a;
+  --muted: #302620;
+  --secondary: #302620;
+  --secondary-hover: #372c25;
+  --secondary-on-card: #332822;
+  --secondary-on-card-hover: #3a2e27;
+  --secondary-on-raised: #3e322b;
+  --secondary-on-raised-hover: #44362f;
+  --pill: #3c3029;
+  --button-dark: #40332c;
+  --button-dark-foreground: #f7f0e9;
+  --field: #302620;
+  --track: #302620;
+  --raised: #2b221c;
+  --border: #3a2f28;
+  --divider: #322721;
+  --grid-line: #322721;
+  --input: #3a2f28;
+  --control-off: #52433a;
+  --switch-thumb: #ccc2b7;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #2f2e34;
+  --chip-blue-fg: #88a8da;
+  --chip-sky-bg: #2d3131;
+  --chip-sky-fg: #75b4cc;
+  --chip-red-bg: #41271f;
+  --chip-red-fg: #e88c7a;
+  --chip-violet-bg: #382b34;
+  --chip-violet-fg: #bb99da;
+  --chip-green-bg: #313222;
+  --chip-green-fg: #8fba80;
+  --chip-amber-bg: #40301e;
+  --chip-amber-fg: #e3b16c;
+  --chip-gray-bg: #322721;
+  --chip-gray-fg: #c4b9ae;
+  --status-off: #52433a;
+  --chart-2: #e0ad52;
+  --chart-3: #a38e7c;
+  --chart-4: #78ab66;
+  --chart-5: #7c9bd1;
+  --terminal: #110c09;
+  --terminal-bar: #1c1511;
+  --terminal-field: #2a211b;
+  --terminal-prompt: #f0a37f;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.18);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 10px rgb(0 0 0 / 0.2);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Harbor: sea grays and teal, a tinted sidebar, crisp edges. */
+:root:where([data-theme="harbor"]) {
+  --radius: 10px;
+  --radius-control: 7px;
+  --radius-chip: 5px;
+}
+
+:root:where([data-theme="harbor"]:not(.dark)) {
+  --background: #e7eef0;
+  --ground-wash: none;
+  --foreground: #10282d;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --sidebar: #dde8ea;
+  --sidebar-shadow: none;
+  --ink-strong: #32464a;
+  --muted-foreground: #4c5e62;
+  --ink-faint: #67767a;
+  --ink-ghost: #869295;
+  --primary: #0b7c86;
+  --primary-foreground: #ffffff;
+  --muted: #f2f5f5;
+  --secondary: #ffffff;
+  --secondary-hover: #f9fafa;
+  --secondary-on-card: #f2f5f5;
+  --secondary-on-card-hover: #e9edee;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #ffffff;
+  --button-dark: #10282d;
+  --button-dark-foreground: #ffffff;
+  --field: #e7eef0;
+  --track: #d6e0e2;
+  --raised: #f9fafa;
+  --border: #e3e8e9;
+  --divider: #f2f5f5;
+  --grid-line: #eff1f2;
+  --input: #e3e8e9;
+  --control-off: #c8d2d3;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(16 40 45 / 0.22);
+  --chip-blue-bg: #e9f1fb;
+  --chip-blue-fg: #2463b4;
+  --chip-sky-bg: #eaf3f7;
+  --chip-sky-fg: #136d8b;
+  --chip-red-bg: #fdedeb;
+  --chip-red-fg: #b23a31;
+  --chip-violet-bg: #eeeefb;
+  --chip-violet-fg: #6152b8;
+  --chip-green-bg: #ebf5ef;
+  --chip-green-fg: #15734f;
+  --chip-amber-bg: #faf3ea;
+  --chip-amber-fg: #885c0a;
+  --chip-gray-bg: #f2f5f5;
+  --chip-gray-fg: #32464a;
+  --status-off: #cdd6d7;
+  --chart-2: #e0a33a;
+  --chart-3: #5d7a80;
+  --chart-4: #4f86d6;
+  --chart-5: #9b6ad1;
+  --terminal: #071216;
+  --terminal-bar: #0e1d21;
+  --terminal-field: #16292e;
+  --terminal-prompt: #6fd6dd;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: 0 1px 0 rgb(16 40 45 / 0.07), 0 1px 3px rgb(16 40 45 / 0.07);
+  --shadow-control: 0 1px 0 rgb(16 40 45 / 0.1), 0 1px 2px rgb(16 40 45 / 0.06);
+  --shadow-segment: 0 1px 2px rgb(16 40 45 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(16 40 45 / 0.06), 0 12px 32px rgb(16 40 45 / 0.13);
+  --shadow-primary: none;
+  color-scheme: light;
+}
+
+:root:where([data-theme="harbor"].dark) {
+  --background: #0a171a;
+  --ground-wash: none;
+  --foreground: #d3e5e7;
+  --card: #112328;
+  --popover: #112328;
+  --sidebar: #0d1d21;
+  --sidebar-shadow: none;
+  --ink-strong: #a8babd;
+  --muted-foreground: #87999c;
+  --ink-faint: #6b7d81;
+  --ink-ghost: #54666a;
+  --primary: #2bb0bb;
+  --primary-foreground: #10131a;
+  --muted: #1a2e33;
+  --secondary: #1a2e33;
+  --secondary-hover: #1f3439;
+  --secondary-on-card: #1c3035;
+  --secondary-on-card-hover: #21363b;
+  --secondary-on-raised: #253a3f;
+  --secondary-on-raised-hover: #293f44;
+  --pill: #23393e;
+  --button-dark: #263c41;
+  --button-dark-foreground: #e5eff1;
+  --field: #1a2e33;
+  --track: #1a2e33;
+  --raised: #16292e;
+  --border: #22373c;
+  --divider: #1b2f34;
+  --grid-line: #1b2f34;
+  --input: #22373c;
+  --control-off: #344c51;
+  --switch-thumb: #b0c2c5;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #1b3445;
+  --chip-blue-fg: #7faceb;
+  --chip-sky-bg: #183842;
+  --chip-sky-fg: #72bcd7;
+  --chip-red-bg: #363032;
+  --chip-red-fg: #ee9088;
+  --chip-violet-bg: #253245;
+  --chip-violet-fg: #a9a1eb;
+  --chip-green-bg: #193a38;
+  --chip-green-fg: #77c7a3;
+  --chip-amber-bg: #333930;
+  --chip-amber-fg: #e5ba74;
+  --chip-gray-bg: #1b2f34;
+  --chip-gray-fg: #a8babd;
+  --status-off: #344c51;
+  --chart-2: #e8b04f;
+  --chart-3: #7f9a9f;
+  --chart-4: #6a9be0;
+  --chart-5: #ad85dd;
+  --terminal: #061013;
+  --terminal-bar: #0d1b1f;
+  --terminal-field: #16292e;
+  --terminal-prompt: #6fd6dd;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-control: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Orchid: rose-tinted surfaces, magenta, extra round corners, pill chips and a soft glow. */
+:root:where([data-theme="orchid"]) {
+  --radius: 16px;
+  --radius-control: 12px;
+  --radius-chip: 999px;
+}
+
+:root:where([data-theme="orchid"]:not(.dark)) {
+  --background: #f7eff5;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, #f5d5ea 0%, rgb(245 213 234 / 0) 70%);
+  --foreground: #2b1327;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --sidebar: #fffafd;
+  --sidebar-shadow: 1px 0 0 #f6f3f5, 4px 0 24px rgb(91 29 76 / 0.04);
+  --ink-strong: #493345;
+  --muted-foreground: #614d5d;
+  --ink-faint: #7a6876;
+  --ink-ghost: #958692;
+  --primary: #b42d86;
+  --primary-foreground: #ffffff;
+  --muted: #f4ebf1;
+  --secondary: #ffffff;
+  --secondary-hover: #fbf9fa;
+  --secondary-on-card: #f6f3f5;
+  --secondary-on-card-hover: #f0eaed;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #ffffff;
+  --button-dark: #2b1327;
+  --button-dark-foreground: #ffffff;
+  --field: #f7eff5;
+  --track: #eadee6;
+  --raised: #fbf9fa;
+  --border: #ebe4e8;
+  --divider: #f6f3f5;
+  --grid-line: #f3eff2;
+  --input: #ebe4e8;
+  --control-off: #d8c9d2;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(43 19 39 / 0.22);
+  --chip-blue-bg: #ecf0fd;
+  --chip-blue-fg: #4759c4;
+  --chip-sky-bg: #ebf4f9;
+  --chip-sky-fg: #216b90;
+  --chip-red-bg: #feeded;
+  --chip-red-fg: #b62f44;
+  --chip-violet-bg: #f3eefc;
+  --chip-violet-fg: #7f46bf;
+  --chip-green-bg: #ecf5ef;
+  --chip-green-fg: #217349;
+  --chip-amber-bg: #fcf3eb;
+  --chip-amber-fg: #90590e;
+  --chip-gray-bg: #f6f3f5;
+  --chip-gray-fg: #493345;
+  --status-off: #dcced6;
+  --chart-2: #f0a63a;
+  --chart-3: #8f7189;
+  --chart-4: #43a37a;
+  --chart-5: #6b7de0;
+  --terminal: #140a13;
+  --terminal-bar: #1f121d;
+  --terminal-field: #2c1a29;
+  --terminal-prompt: #f59ad1;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: 0 1px 2px rgb(91 29 76 / 0.05), 0 8px 28px rgb(91 29 76 / 0.08);
+  --shadow-control: 0 1px 2px rgb(91 29 76 / 0.07), 0 3px 10px rgb(91 29 76 / 0.05);
+  --shadow-segment: 0 1px 2px rgb(91 29 76 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(91 29 76 / 0.06), 0 12px 32px rgb(91 29 76 / 0.13);
+  --shadow-primary:
+    0 1px 2px color-mix(in srgb, var(--primary) 30%, transparent), 0 4px 14px color-mix(in srgb, var(--primary) 22%, transparent);
+  color-scheme: light;
+}
+
+:root:where([data-theme="orchid"].dark) {
+  --background: #190e18;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, rgb(232 106 184 / 0.12) 0%, rgb(232 106 184 / 0) 70%);
+  --foreground: #f4e3ef;
+  --card: #251624;
+  --popover: #251624;
+  --sidebar: #1e111d;
+  --sidebar-shadow: 1px 0 0 #332131;
+  --ink-strong: #c6b5c2;
+  --muted-foreground: #a3929f;
+  --ink-faint: #857482;
+  --ink-ghost: #6c5c6a;
+  --primary: #e86ab8;
+  --primary-foreground: #10131a;
+  --muted: #31202f;
+  --secondary: #31202f;
+  --secondary-hover: #382636;
+  --secondary-on-card: #342231;
+  --secondary-on-card-hover: #3b2838;
+  --secondary-on-raised: #402c3c;
+  --secondary-on-raised-hover: #453041;
+  --pill: #3e2a3a;
+  --button-dark: #412d3e;
+  --button-dark-foreground: #f8eef5;
+  --field: #31202f;
+  --track: #31202f;
+  --raised: #2c1c2a;
+  --border: #3c2939;
+  --divider: #332131;
+  --grid-line: #332131;
+  --input: #3c2939;
+  --control-off: #543d4f;
+  --switch-thumb: #cfbecb;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #332843;
+  --chip-blue-fg: #92a3f1;
+  --chip-sky-bg: #312d40;
+  --chip-sky-fg: #7fbde1;
+  --chip-red-bg: #442332;
+  --chip-red-fg: #f68a95;
+  --chip-violet-bg: #3a2543;
+  --chip-violet-fg: #bd98f1;
+  --chip-green-bg: #312f34;
+  --chip-green-fg: #80c69d;
+  --chip-amber-bg: #422c2d;
+  --chip-amber-fg: #eab876;
+  --chip-gray-bg: #332131;
+  --chip-gray-fg: #c6b5c2;
+  --status-off: #543d4f;
+  --chart-2: #f2b257;
+  --chart-3: #a88aa2;
+  --chart-4: #5fb88f;
+  --chart-5: #8796ea;
+  --terminal: #12080f;
+  --terminal-bar: #1d101b;
+  --terminal-field: #2c1a29;
+  --terminal-prompt: #f59ad1;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.18);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 10px rgb(0 0 0 / 0.2);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Steel: cool blue-gray metal, near-square corners and machined edges. */
+:root:where([data-theme="steel"]) {
+  --radius: 4px;
+  --radius-control: 3px;
+  --radius-chip: 3px;
+}
+
+:root:where([data-theme="steel"]:not(.dark)) {
+  --background: #e1e5ea;
+  --ground-wash: none;
+  --foreground: #18212d;
+  --card: #fafbfc;
+  --popover: #fafbfc;
+  --sidebar: #ebeef2;
+  --sidebar-shadow: 1px 0 0 #eef0f2;
+  --ink-strong: #363f4a;
+  --muted-foreground: #4f5761;
+  --ink-faint: #697079;
+  --ink-ghost: #868c94;
+  --primary: #3a5d8c;
+  --primary-foreground: #ffffff;
+  --muted: #dee2e7;
+  --secondary: #fafbfc;
+  --secondary-hover: #f4f5f7;
+  --secondary-on-card: #eef0f2;
+  --secondary-on-card-hover: #e5e8ec;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #fafbfc;
+  --button-dark: #18212d;
+  --button-dark-foreground: #fafbfc;
+  --field: #e1e5ea;
+  --track: #d1d6dd;
+  --raised: #f4f5f7;
+  --border: #dfe3e7;
+  --divider: #eef0f2;
+  --grid-line: #eaedef;
+  --input: #dfe3e7;
+  --control-off: #c6cbd2;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(24 33 45 / 0.22);
+  --chip-blue-bg: #e6edf8;
+  --chip-blue-fg: #325eb4;
+  --chip-sky-bg: #e6eff5;
+  --chip-sky-fg: #20678d;
+  --chip-red-bg: #f8eae9;
+  --chip-red-fg: #a93d36;
+  --chip-violet-bg: #eaebf7;
+  --chip-violet-fg: #6253b0;
+  --chip-green-bg: #e7f0eb;
+  --chip-green-fg: #2c6e48;
+  --chip-amber-bg: #f5efe8;
+  --chip-amber-fg: #865b0d;
+  --chip-gray-bg: #eef0f2;
+  --chip-gray-fg: #363f4a;
+  --status-off: #cacfd5;
+  --chart-2: #d99a3d;
+  --chart-3: #6b7686;
+  --chart-4: #4b9a6d;
+  --chart-5: #8a6bbf;
+  --terminal: #0b0d11;
+  --terminal-bar: #151a20;
+  --terminal-field: #1f252d;
+  --terminal-prompt: #9fbbe0;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: 0 1px 0 rgb(24 33 45 / 0.07), 0 1px 3px rgb(24 33 45 / 0.07);
+  --shadow-control: 0 1px 0 rgb(24 33 45 / 0.1), 0 1px 2px rgb(24 33 45 / 0.06);
+  --shadow-segment: 0 1px 2px rgb(24 33 45 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(24 33 45 / 0.06), 0 12px 32px rgb(24 33 45 / 0.13);
+  --shadow-primary: none;
+  color-scheme: light;
+}
+
+:root:where([data-theme="steel"].dark) {
+  --background: #111419;
+  --ground-wash: none;
+  --foreground: #d9dfe7;
+  --card: #1a1f26;
+  --popover: #1a1f26;
+  --sidebar: #14181e;
+  --sidebar-shadow: 1px 0 0 #252b33;
+  --ink-strong: #aeb4bc;
+  --muted-foreground: #8e939b;
+  --ink-faint: #727880;
+  --ink-ghost: #5b6169;
+  --primary: #7f9fca;
+  --primary-foreground: #10131a;
+  --muted: #242931;
+  --secondary: #242931;
+  --secondary-hover: #292f37;
+  --secondary-on-card: #262b33;
+  --secondary-on-card-hover: #2b313a;
+  --secondary-on-raised: #2f353e;
+  --secondary-on-raised-hover: #333a43;
+  --pill: #2e343c;
+  --button-dark: #313740;
+  --button-dark-foreground: #e8ecf1;
+  --field: #242931;
+  --track: #242931;
+  --raised: #1f252c;
+  --border: #2c323b;
+  --divider: #252b33;
+  --grid-line: #252b33;
+  --input: #2c323b;
+  --control-off: #404751;
+  --switch-thumb: #b7bdc5;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #253143;
+  --chip-blue-fg: #84a9ea;
+  --chip-sky-bg: #243440;
+  --chip-sky-fg: #7bb7d9;
+  --chip-red-bg: #3a2d31;
+  --chip-red-fg: #ea9188;
+  --chip-violet-bg: #2c2e42;
+  --chip-violet-fg: #a89fe3;
+  --chip-green-bg: #253535;
+  --chip-green-fg: #84bf9b;
+  --chip-amber-bg: #37342f;
+  --chip-amber-fg: #dfb775;
+  --chip-gray-bg: #252b33;
+  --chip-gray-fg: #aeb4bc;
+  --status-off: #404751;
+  --chart-2: #e0aa55;
+  --chart-3: #8a95a5;
+  --chart-4: #62b083;
+  --chart-5: #a08ad3;
+  --terminal: #0a0c10;
+  --terminal-bar: #141920;
+  --terminal-field: #1f252d;
+  --terminal-prompt: #9fbbe0;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-control: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Marigold: cream paper and a golden primary with dark text on it. */
+:root:where([data-theme="marigold"]) {
+  --radius: 10px;
+  --radius-control: 8px;
+  --radius-chip: 6px;
+}
+
+:root:where([data-theme="marigold"]:not(.dark)) {
+  --background: #f6f0de;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, #fbe7a9 0%, rgb(251 231 169 / 0) 70%);
+  --foreground: #29230f;
+  --card: #fffcf3;
+  --popover: #fffcf3;
+  --sidebar: #faf5e6;
+  --sidebar-shadow: 1px 0 0 #f6f2e7, 4px 0 24px rgb(92 74 18 / 0.04);
+  --ink-strong: #46412e;
+  --muted-foreground: #5e5947;
+  --ink-faint: #777261;
+  --ink-ghost: #938e7f;
+  --primary: #e0a10b;
+  --primary-foreground: #10131a;
+  --link: #8a6204;
+  --link-hover: #5c4002;
+  --accent-foreground: #8a6204;
+  --muted: #f0ead9;
+  --secondary: #fffcf3;
+  --secondary-hover: #fbf7ed;
+  --secondary-on-card: #f6f2e7;
+  --secondary-on-card-hover: #f0ebdf;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #fffcf3;
+  --button-dark: #29230f;
+  --button-dark-foreground: #fffcf3;
+  --field: #f6f0de;
+  --track: #eae2ce;
+  --raised: #fbf7ed;
+  --border: #ece6d9;
+  --divider: #f6f2e7;
+  --grid-line: #f4efe4;
+  --input: #ece6d9;
+  --control-off: #d9d1c0;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(41 35 15 / 0.22);
+  --chip-blue-bg: #ebeeef;
+  --chip-blue-fg: #3760ac;
+  --chip-sky-bg: #ebf0ec;
+  --chip-sky-fg: #236984;
+  --chip-red-bg: #fceadf;
+  --chip-red-fg: #ae3a27;
+  --chip-violet-bg: #f1ebee;
+  --chip-violet-fg: #714fa7;
+  --chip-green-bg: #edf0df;
+  --chip-green-fg: #3b6e26;
+  --chip-amber-bg: #f8efdf;
+  --chip-amber-fg: #895807;
+  --chip-gray-bg: #f6f2e7;
+  --chip-gray-fg: #46412e;
+  --status-off: #dcd5c4;
+  --chart-2: #4f7fc4;
+  --chart-3: #8a7f5f;
+  --chart-4: #5a9a46;
+  --chart-5: #c2603c;
+  --terminal: #12100a;
+  --terminal-bar: #1c1a11;
+  --terminal-field: #282418;
+  --terminal-prompt: #f5c95a;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: 0 1px 2px rgb(92 74 18 / 0.04), 0 4px 16px rgb(92 74 18 / 0.05);
+  --shadow-control: 0 1px 2px rgb(92 74 18 / 0.06), 0 2px 8px rgb(92 74 18 / 0.04);
+  --shadow-segment: 0 1px 2px rgb(92 74 18 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(92 74 18 / 0.06), 0 12px 32px rgb(92 74 18 / 0.13);
+  --shadow-primary: none;
+  color-scheme: light;
+}
+
+:root:where([data-theme="marigold"].dark) {
+  --background: #16140d;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, rgb(240 182 46 / 0.1) 0%, rgb(240 182 46 / 0) 70%);
+  --foreground: #f2ead3;
+  --card: #211e14;
+  --popover: #211e14;
+  --sidebar: #1a1810;
+  --sidebar-shadow: 1px 0 0 #2f2b1e;
+  --ink-strong: #c3bca8;
+  --muted-foreground: #a09987;
+  --ink-faint: #817c6c;
+  --ink-ghost: #686455;
+  --primary: #f0b62e;
+  --primary-foreground: #10131a;
+  --muted: #2d291d;
+  --secondary: #2d291d;
+  --secondary-hover: #343022;
+  --secondary-on-card: #302b1f;
+  --secondary-on-card-hover: #373224;
+  --secondary-on-raised: #3c3627;
+  --secondary-on-raised-hover: #413b2b;
+  --pill: #3a3426;
+  --button-dark: #3d3828;
+  --button-dark-foreground: #f7f2e5;
+  --field: #2d291d;
+  --track: #2d291d;
+  --raised: #282419;
+  --border: #383324;
+  --divider: #2f2b1e;
+  --grid-line: #2f2b1e;
+  --input: #383324;
+  --control-off: #514936;
+  --switch-thumb: #cdc5b1;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #2c3033;
+  --chip-blue-fg: #88a8e1;
+  --chip-sky-bg: #2b332f;
+  --chip-sky-fg: #79b8cf;
+  --chip-red-bg: #3f2b1e;
+  --chip-red-fg: #ea8f7d;
+  --chip-violet-bg: #342e32;
+  --chip-violet-fg: #b49cdb;
+  --chip-green-bg: #2e341e;
+  --chip-green-fg: #8fbc7c;
+  --chip-amber-bg: #3d321b;
+  --chip-amber-fg: #e1b26d;
+  --chip-gray-bg: #2f2b1e;
+  --chip-gray-fg: #c3bca8;
+  --status-off: #514936;
+  --chart-2: #6f9bd8;
+  --chart-3: #a39a7c;
+  --chart-4: #78b264;
+  --chart-5: #d67c58;
+  --terminal: #100e08;
+  --terminal-bar: #1a1810;
+  --terminal-field: #282418;
+  --terminal-prompt: #f5c95a;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
+  color-scheme: dark;
+}
+
+/* Meadow: sage surfaces, leaf green, the roundest corners and soft shadows. */
+:root:where([data-theme="meadow"]) {
+  --radius: 18px;
+  --radius-control: 12px;
+  --radius-chip: 9px;
+}
+
+:root:where([data-theme="meadow"]:not(.dark)) {
+  --background: #ecf0e6;
+  --ground-wash: radial-gradient(900px 420px at 88% -8%, #dcebc8 0%, rgb(220 235 200 / 0) 70%);
+  --foreground: #1b2616;
+  --card: #fcfdfa;
+  --popover: #fcfdfa;
+  --sidebar: #f5f8f1;
+  --sidebar-shadow: 1px 0 0 #f0f3ee, 4px 0 24px rgb(44 61 31 / 0.04);
+  --ink-strong: #394435;
+  --muted-foreground: #525b4e;
+  --ink-faint: #6c7468;
+  --ink-ghost: #899085;
+  --primary: #4d7a17;
+  --primary-foreground: #ffffff;
+  --muted: #e7ece3;
+  --secondary: #fcfdfa;
+  --secondary-hover: #f6f8f4;
+  --secondary-on-card: #f0f3ee;
+  --secondary-on-card-hover: #e8ebe5;
+  --secondary-on-raised: var(--secondary);
+  --secondary-on-raised-hover: var(--secondary-hover);
+  --pill: #fcfdfa;
+  --button-dark: #1b2616;
+  --button-dark-foreground: #fcfdfa;
+  --field: #ecf0e6;
+  --track: #dce1d5;
+  --raised: #f6f8f4;
+  --border: #e2e6df;
+  --divider: #f0f3ee;
+  --grid-line: #edefea;
+  --input: #e2e6df;
+  --control-off: #c9d0c4;
+  --switch-thumb: #ffffff;
+  --scrim: rgb(27 38 22 / 0.22);
+  --chip-blue-bg: #e8eff5;
+  --chip-blue-fg: #3461a8;
+  --chip-sky-bg: #e8f1f1;
+  --chip-sky-fg: #1f6a7e;
+  --chip-red-bg: #f9ebe6;
+  --chip-red-fg: #aa3d31;
+  --chip-violet-bg: #eeecf4;
+  --chip-violet-fg: #6e52a7;
+  --chip-green-bg: #e9f2e6;
+  --chip-green-fg: #2e702c;
+  --chip-amber-bg: #f6f1e6;
+  --chip-amber-fg: #835e0a;
+  --chip-gray-bg: #f0f3ee;
+  --chip-gray-fg: #394435;
+  --status-off: #ced4c9;
+  --chart-2: #d8a03c;
+  --chart-3: #7a8670;
+  --chart-4: #3f86b8;
+  --chart-5: #a5679c;
+  --terminal: #0b0f09;
+  --terminal-bar: #141b11;
+  --terminal-field: #1f281a;
+  --terminal-prompt: #b4dc7c;
+  --skeleton-shine: rgb(255 255 255 / 0.6);
+  --shadow-card: 0 1px 2px rgb(44 61 31 / 0.05), 0 8px 28px rgb(44 61 31 / 0.08);
+  --shadow-control: 0 1px 2px rgb(44 61 31 / 0.07), 0 3px 10px rgb(44 61 31 / 0.05);
+  --shadow-segment: 0 1px 2px rgb(44 61 31 / 0.08);
+  --shadow-popover: 0 1px 2px rgb(44 61 31 / 0.06), 0 12px 32px rgb(44 61 31 / 0.13);
+  --shadow-primary: none;
+  color-scheme: light;
+}
+
+:root:where([data-theme="meadow"].dark) {
+  --background: #10150d;
+  --ground-wash: none;
+  --foreground: #dfe8d5;
+  --card: #182014;
+  --popover: #182014;
+  --sidebar: #131a10;
+  --sidebar-shadow: 1px 0 0 #242d1e;
+  --ink-strong: #b2bbaa;
+  --muted-foreground: #909988;
+  --ink-faint: #737c6c;
+  --ink-ghost: #5c6555;
+  --primary: #93c75a;
+  --primary-foreground: #10131a;
+  --muted: #222b1d;
+  --secondary: #222b1d;
+  --secondary-hover: #283223;
+  --secondary-on-card: #242e1f;
+  --secondary-on-card-hover: #2b3425;
+  --secondary-on-raised: #2e3828;
+  --secondary-on-raised-hover: #333e2c;
+  --pill: #2d3727;
+  --button-dark: #303a29;
+  --button-dark-foreground: #ecf1e6;
+  --field: #222b1d;
+  --track: #222b1d;
+  --raised: #1e2619;
+  --border: #2b3525;
+  --divider: #242d1e;
+  --grid-line: #242d1e;
+  --input: #2b3525;
+  --control-off: #404c38;
+  --switch-thumb: #bbc4b2;
+  --scrim: rgb(0 0 0 / 0.55);
+  --chip-blue-bg: #233233;
+  --chip-blue-fg: #84a9df;
+  --chip-sky-bg: #21352f;
+  --chip-sky-fg: #79bacc;
+  --chip-red-bg: #382d1f;
+  --chip-red-fg: #e68f83;
+  --chip-violet-bg: #2c3032;
+  --chip-violet-fg: #b29cdd;
+  --chip-green-bg: #243720;
+  --chip-green-fg: #89c384;
+  --chip-amber-bg: #36361d;
+  --chip-amber-fg: #e1bc75;
+  --chip-gray-bg: #242d1e;
+  --chip-gray-fg: #b2bbaa;
+  --status-off: #404c38;
+  --chart-2: #e0b055;
+  --chart-3: #94a08a;
+  --chart-4: #5a9fcf;
+  --chart-5: #c085b6;
+  --terminal: #0a0e08;
+  --terminal-bar: #131a10;
+  --terminal-field: #1f281a;
+  --terminal-prompt: #b4dc7c;
+  --skeleton-shine: rgb(255 255 255 / 0.05);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.18);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 10px rgb(0 0 0 / 0.2);
+  --shadow-segment: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-primary: none;
   color-scheme: dark;
 }

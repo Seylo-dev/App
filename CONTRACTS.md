@@ -1270,7 +1270,19 @@ Web:
   file, `src/i18n/en/<section>.ts` (default export); add keys to the
   screen's own section and create a new section file for a new screen.
 - Styling only through tokens (`packages/ui/src/styles/theme.css`) and the
-  utilities mapped from them; theme presets override variables. `cn`
+  utilities mapped from them; theme presets override variables. Every
+  preset has a light and a dark half: `<html data-theme="<preset>">` picks
+  the preset and the `dark` class on `<html>` the half (Tailwind's `dark:`
+  variant is that class). The default (`seylo`) is `:root` and
+  `:root.dark`; every other preset has its corners under
+  `[data-theme="<id>"]`, its light colors under `:not(.dark)` and its dark
+  colors under `.dark`, each setting every color the default's dark half
+  sets (`theme.test.ts`). All theme selectors are wrapped in `:where()` so
+  they weigh `:root`: the accent and the owner's CSS win by coming later.
+  Accent-colored tokens (`--ring`, `--chart-1`, `--link`, `--link-hover`,
+  `--accent`, `--accent-foreground`, `--highlight`, `--shadow-primary`,
+  `--primary-hover`) are mixed from `--primary`, so a new screen uses them
+  and never a literal accent color. `cn`
   (`packages/ui/src/lib/utils.ts`) knows the theme's shadows
   (`shadow-card`, `-control`, `-primary`, `-segment`, `-popover`,
   `-sidebar`), so a later shadow class replaces them; a new shadow token
@@ -1300,31 +1312,51 @@ The panel rewrites `index.html` on every request
 (`apps/panel/src/modules/settings/boot.ts`, wired in `http/static.ts`), so
 the first paint already has the panel's theme, name and favicon. Names and
 types come from `@seylo/ops` (`settings.PanelBoot`, `settings.bootDom`,
-`settings.resolveThemePreset`); never type the ids by hand.
+`settings.themePresets`, `settings.resolveColorScheme`, `accentCss`);
+never type the ids by hand.
 
-- `<html>` gets `data-color-mode="light|dark|system"` and, when the mode is
-  not `system`, `data-theme="<preset>"` (absent for `seylo`, whose tokens
-  are `:root`). For `system`, an inline script resolves the preset with
-  `prefers-color-scheme` before the body paints.
+- Presets (since 0.2.5): `seylo` (Default), `classic`, `midnight`,
+  `graphite`, `clay`, `harbor`, `orchid`, `steel`, `marigold`, `meadow`,
+  each with both halves; the color mode (`light`, `dark`, `system`) picks
+  the half for all of them. Older data: `seylo-night` (the default's dark
+  half) reads as `seylo` with its mode (`settings.themePresetAliases`,
+  still accepted by `settings.updateAppearance` for older clients), and a
+  row saved before 0.2.5 with the light-only `classic` or the dark-only
+  `midnight` reads with that mode (`settings.legacyPresetModes`;
+  `readAppearance` in `modules/settings/keys.ts`). Rows saved since carry
+  `themeVersion: 2` and mean what they say.
+- `<html>` gets `data-theme="<preset>"` (always, `seylo` too),
+  `data-color-mode="light|dark|system"`, and the `dark` class for `dark`.
+  For `system` the server writes no class: an inline script adds it from
+  `prefers-color-scheme` before the body paints, so a dark device never
+  sees a light frame.
 - `<title>` becomes the panel name; `<link rel="icon">` points at
   `/branding/favicon?v=<hash>` when one is uploaded.
 - Last in `<head>`, after the charset meta and the app stylesheet, in this
   order: `<script type="application/json" id="panel-boot">` with the
-  `PanelBoot` JSON, the theme script, `<style id="panel-accent">` (overrides
-  `--primary`, `--ring`, `--link` when an accent is set) and
-  `<style id="panel-custom-css">` (owner's custom CSS, last so it wins).
+  `PanelBoot` JSON, the theme script, `<style id="panel-accent">` (when an
+  accent is set: `--primary`, the text on it in white or near black,
+  whichever reads, and link and selected-item shades checked for contrast
+  in both halves; `accentCss` in `@seylo/ops`, the same string in the panel
+  and the web app) and `<style id="panel-custom-css">` (owner's custom
+  CSS, last so it wins).
   `<` inside them is escaped so nothing can close the element.
 - The web app reads the JSON once at start (`JSON.parse` of
   `document.getElementById(settings.bootDom.dataId).textContent`), and
   falls back to the public `settings.boot` op when the element is missing
   (Vite dev server). It listens to `prefers-color-scheme` changes and
-  re-applies `resolveThemePreset`. After an appearance or branding save it
-  refetches `settings.boot` and rewrites the two `<style>` elements, the
-  `data-theme` / `data-color-mode` attributes, the title and the icon link
-  in place: no reload. Compare `revision` to skip work.
+  toggles the `dark` class with `resolveColorScheme` (`lib/theme.ts`
+  `paintTheme`; `useDarkMode()` for components such as the logo). After an
+  appearance or branding save it refetches `settings.boot` and rewrites the
+  two `<style>` elements (kept last in `<head>`, accent before custom CSS),
+  the `data-theme` / `data-color-mode` attributes, the class, the title and
+  the icon link in place: no reload. Compare `revision` to skip work.
 - Branding files are served at `/branding/<logoLight|logoDark|favicon>`
   (public, immutable with `?v=`, SVG sandboxed by CSP). Logos in the boot
-  data are those paths or null (use the product mark).
+  data are those paths or null (use the product mark,
+  `components/brand-mark.tsx` `ProductMark`; the favicon is then
+  `/favicon.svg`). Settings > Appearance shows those defaults in the empty
+  tiles, marked "Default".
 
 #### Schedules, alerts, email and the live socket
 
@@ -3557,8 +3589,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   shows until the person hides it.
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
-  The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the
-  same string).
+  The saved accent's CSS is `accentCss` from `@seylo/ops` (the panel's
+  boot.ts emits the same string).
 - Re-auth: `lib/api.ts` wraps the one op client in `withReauth`
   (`lib/reauth.ts`), so any mutation refused with
   `details.reason: "reauth"` opens the dialog mounted once in `main.tsx`
@@ -3653,13 +3685,19 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `sidebar-new-service.spec.ts` (the + on a project row and the form with
   that project, none on the Panel project, the logo link home, Approvals
   hidden until MCP or the assistant is on) and
-  `screens.spec.ts` (every screen with the demo data in `demo/`, in all
-  four theme presets, plus the phone width, the service tab bar (one row
+  `appearance.spec.ts` (color mode `system` following the device and
+  every switch, an explicit mode winning, every preset's two halves with
+  readable text and a look of their own, and the Appearance screen: tiles
+  following the mode, default branding images, the sign-in message
+  placeholder, the custom CSS guide and Insert example),
+  `screens.spec.ts` (every screen with the demo data in `demo/`, in every
+  theme preset and both of its halves, the sign-in page among them, plus
+  the phone width, the service tab bar (one row
   at 1440 px, two wrapped rows with their lines at 1280 and 1024, a swipe
   row on a phone), the node list with its widest row at four laptop
   widths and the accent check;
-  screenshots in `$SHOTS_DIR/screens/<preset>/`; `PRESETS=` and `SCREENS=`
-  narrow it).
+  screenshots in `$SHOTS_DIR/screens/<preset>/<light|dark>/`; `PRESETS=`,
+  `MODES=` and `SCREENS=` narrow it).
 
 ## Proto files
 

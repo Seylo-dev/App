@@ -62881,20 +62881,45 @@
                           "type": "string"
                         },
                         {
-                          "const": "seylo-night",
-                          "type": "string"
-                        },
-                        {
                           "const": "classic",
                           "type": "string"
                         },
                         {
                           "const": "midnight",
                           "type": "string"
+                        },
+                        {
+                          "const": "graphite",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clay",
+                          "type": "string"
+                        },
+                        {
+                          "const": "harbor",
+                          "type": "string"
+                        },
+                        {
+                          "const": "orchid",
+                          "type": "string"
+                        },
+                        {
+                          "const": "steel",
+                          "type": "string"
+                        },
+                        {
+                          "const": "marigold",
+                          "type": "string"
+                        },
+                        {
+                          "const": "meadow",
+                          "type": "string"
                         }
                       ]
                     },
                     "colorMode": {
+                      "description": "Which half of the preset shows: \"light\", \"dark\", or \"system\" to follow each viewer's device.",
                       "anyOf": [
                         {
                           "const": "light",
@@ -63027,20 +63052,45 @@
                           "type": "string"
                         },
                         {
-                          "const": "seylo-night",
-                          "type": "string"
-                        },
-                        {
                           "const": "classic",
                           "type": "string"
                         },
                         {
                           "const": "midnight",
                           "type": "string"
+                        },
+                        {
+                          "const": "graphite",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clay",
+                          "type": "string"
+                        },
+                        {
+                          "const": "harbor",
+                          "type": "string"
+                        },
+                        {
+                          "const": "orchid",
+                          "type": "string"
+                        },
+                        {
+                          "const": "steel",
+                          "type": "string"
+                        },
+                        {
+                          "const": "marigold",
+                          "type": "string"
+                        },
+                        {
+                          "const": "meadow",
+                          "type": "string"
                         }
                       ]
                     },
                     "colorMode": {
+                      "description": "Which half of the preset shows: \"light\", \"dark\", or \"system\" to follow each viewer's device.",
                       "anyOf": [
                         {
                           "const": "light",
@@ -64057,7 +64107,7 @@
       "post": {
         "operationId": "settings.updateAppearance",
         "summary": "Update appearance settings",
-        "description": "Changes the theme preset, color mode, accent color or custom CSS. Omitted fields keep their value. Changing customCss needs the owner role (FORBIDDEN otherwise), because CSS can restyle every screen for everyone.",
+        "description": "Changes the theme preset, color mode, accent color or custom CSS. Omitted fields keep their value. Every preset has a light and a dark half and the color mode picks one; the old preset id \"seylo-night\" is taken as \"seylo\". Changing customCss needs the owner role (FORBIDDEN otherwise), because CSS can restyle every screen for everyone.",
         "tags": [
           "settings"
         ],
@@ -64078,13 +64128,10 @@
                 "type": "object",
                 "properties": {
                   "preset": {
+                    "description": "A theme preset. \"seylo-night\" (from before 0.2.5) is taken as \"seylo\".",
                     "anyOf": [
                       {
                         "const": "seylo",
-                        "type": "string"
-                      },
-                      {
-                        "const": "seylo-night",
                         "type": "string"
                       },
                       {
@@ -64094,10 +64141,43 @@
                       {
                         "const": "midnight",
                         "type": "string"
+                      },
+                      {
+                        "const": "graphite",
+                        "type": "string"
+                      },
+                      {
+                        "const": "clay",
+                        "type": "string"
+                      },
+                      {
+                        "const": "harbor",
+                        "type": "string"
+                      },
+                      {
+                        "const": "orchid",
+                        "type": "string"
+                      },
+                      {
+                        "const": "steel",
+                        "type": "string"
+                      },
+                      {
+                        "const": "marigold",
+                        "type": "string"
+                      },
+                      {
+                        "const": "meadow",
+                        "type": "string"
+                      },
+                      {
+                        "const": "seylo-night",
+                        "type": "string"
                       }
                     ]
                   },
                   "colorMode": {
+                    "description": "Which half of the preset shows: \"light\", \"dark\", or \"system\" to follow each viewer's device.",
                     "anyOf": [
                       {
                         "const": "light",
@@ -64155,20 +64235,45 @@
                           "type": "string"
                         },
                         {
-                          "const": "seylo-night",
-                          "type": "string"
-                        },
-                        {
                           "const": "classic",
                           "type": "string"
                         },
                         {
                           "const": "midnight",
                           "type": "string"
+                        },
+                        {
+                          "const": "graphite",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clay",
+                          "type": "string"
+                        },
+                        {
+                          "const": "harbor",
+                          "type": "string"
+                        },
+                        {
+                          "const": "orchid",
+                          "type": "string"
+                        },
+                        {
+                          "const": "steel",
+                          "type": "string"
+                        },
+                        {
+                          "const": "marigold",
+                          "type": "string"
+                        },
+                        {
+                          "const": "meadow",
+                          "type": "string"
                         }
                       ]
                     },
                     "colorMode": {
+                      "description": "Which half of the preset shows: \"light\", \"dark\", or \"system\" to follow each viewer's device.",
                       "anyOf": [
                         {
                           "const": "light",

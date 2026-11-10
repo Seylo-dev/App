@@ -3,8 +3,9 @@
 
 export default {
   title: "UI kit",
-  subtitle: "Every component in @seylo/ui with sample data. Switch the theme preset to check tokens.",
+  subtitle: "Every component in @seylo/ui with sample data. Switch the theme preset and its light or dark look to check tokens.",
   theme: "Theme preset",
+  half: "Light or dark",
   breadcrumbRoot: "Developer",
   sections: {
     buttons: "Buttons, chips and status",

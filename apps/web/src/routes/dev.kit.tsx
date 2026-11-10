@@ -106,6 +106,7 @@ const sampleLog = [
 
 function KitPage() {
   const [theme, setTheme] = useState<string>(document.documentElement.dataset.theme ?? "seylo");
+  const [half, setHalf] = useState(document.documentElement.classList.contains(settings.bootDom.darkClass) ? "dark" : "light");
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [builder, setBuilder] = useState("railpack");
@@ -127,8 +128,12 @@ function KitPage() {
 
   function pickTheme(next: string) {
     setTheme(next);
-    if (next === "seylo") document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.dataset.theme = next;
+    document.documentElement.setAttribute(settings.bootDom.themeAttribute, next);
+  }
+
+  function pickHalf(next: string) {
+    setHalf(next);
+    document.documentElement.classList.toggle(settings.bootDom.darkClass, next === "dark");
   }
 
   const columns: DataTableColumn<NodeRow>[] = [
@@ -181,13 +186,27 @@ function KitPage() {
         title={t("devkit.title")}
         subtitle={t("devkit.subtitle")}
         actions={
-          <Segmented aria-label={t("devkit.theme")} value={theme} onValueChange={pickTheme} tone="track">
-            {settings.themePresets.map((p) => (
-              <SegmentedItem key={p} value={p}>
-                {p}
-              </SegmentedItem>
-            ))}
-          </Segmented>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={theme} onValueChange={pickTheme}>
+              <SelectTrigger aria-label={t("devkit.theme")} className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {settings.themePresets.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Segmented aria-label={t("devkit.half")} value={half} onValueChange={pickHalf} tone="track">
+              {(["light", "dark"] as const).map((mode) => (
+                <SegmentedItem key={mode} value={mode}>
+                  {t(`settingsAppearance.modes.${mode}`)}
+                </SegmentedItem>
+              ))}
+            </Segmented>
+          </div>
         }
       />
 

@@ -366,7 +366,8 @@ test("an account that signs in with GitHub confirms with GitHub, then the change
   // At phone width in the dark theme too.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: "dark" });
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "seylo-night");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "seylo");
+  await expect(page.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/);
   await expect(dialog(page)).toHaveCSS("background-color", "rgb(21, 28, 48)");
   await expect(dialog(page).getByText("WDJB-MJHT")).toBeVisible();
   await page.screenshot({ path: `${shots}/dialog-github-phone-dark.png`, animations: "disabled" });

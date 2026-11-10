@@ -261,12 +261,13 @@ export const updateAppearance = implement(settings.updateAppearance, (input, ctx
     if (role !== "owner") throw new OpError("FORBIDDEN", "Only the owner can change the custom CSS.", { field: "customCss" });
   }
   const next = {
-    preset: input.preset ?? current.preset,
+    // Older clients may still send "seylo-night".
+    preset: input.preset !== undefined ? settings.normalizeThemePreset(input.preset) : current.preset,
     colorMode: input.colorMode ?? current.colorMode,
     accent: input.accent !== undefined ? input.accent : current.accent,
     customCss: input.customCss ?? current.customCss,
   };
-  setSetting(ctx.db, "appearance", next);
+  setSetting(ctx.db, "appearance", { ...next, themeVersion: 2 });
   bootChanged(ctx);
   return next;
 });

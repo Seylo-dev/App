@@ -4,10 +4,14 @@ The panel's UI kit: shadcn/ui-style components (Radix primitives, `cva`
 variants) restyled to the approved design, plus the design tokens.
 
 - `src/styles/theme.css`: every color, radius and shadow as a CSS
-  variable, with the theme presets (`seylo`, `seylo-night`, `classic`,
-  `midnight`) selected by `<html data-theme>`. Restyling means overriding
-  variables, never editing components. Terminal surfaces and the 16 ANSI
-  colors (`--ansi-0` .. `--ansi-15`) stay dark in every preset.
+  variable, with the theme presets (`settings.themePresets` in
+  `@seylo/ops`: `seylo`, `classic`, `midnight`, `graphite`, `clay`,
+  `harbor`, `orchid`, `steel`, `marigold`, `meadow`) selected by
+  `<html data-theme>`, each with a light half and a dark half picked by the
+  `dark` class on `<html>`. Restyling means overriding variables, never
+  editing components. Accent-colored tokens are mixed from `--primary`.
+  Terminal surfaces and the 16 ANSI colors (`--ansi-0` .. `--ansi-15`)
+  stay dark in every preset and half.
 - `src/styles/tailwind.css`: maps the tokens to Tailwind utilities
   (`bg-card`, `shadow-card`, `rounded-control`, `bg-chip-green-bg`, ...).
   Apps import it after `@import "tailwindcss"` and `tw-animate-css`, and add
@@ -26,8 +30,8 @@ Components never use literal colors; add a token first. They hold no
 English either: see "Setup".
 
 Every component renders with sample data at `/dev/kit` in the web app
-(`apps/web/src/routes/dev.kit.tsx`). Check new work there in all four
-presets.
+(`apps/web/src/routes/dev.kit.tsx`). Check new work there in every preset,
+light and dark.
 
 ## Setup (once, at the app root)
 

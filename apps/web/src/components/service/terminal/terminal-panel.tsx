@@ -276,7 +276,7 @@ export function TerminalPanel({
             <button
               type="button"
               onClick={() => void session.connect()}
-              className="cursor-pointer rounded-chip border-0 bg-primary px-3.5 py-[7px] text-[12.5px] font-medium text-primary-foreground transition-interactive hover:brightness-110"
+              className="cursor-pointer rounded-chip border-0 bg-primary px-3.5 py-[7px] text-[12.5px] font-medium text-primary-foreground transition-interactive hover:bg-primary-hover"
             >
               {start}
             </button>
