@@ -3,7 +3,9 @@
 // person and stored by the panel (projects.setCollapsed, projects.reorder,
 // auth.preferences), so they follow the person across browsers. Drag a
 // project to move it; its "..." menu hides it. Hidden projects wait under
-// a folded "Hidden (N)" row at the end.
+// a folded "Hidden (N)" row at the end, unless the person turned that group
+// off (Settings > Preferences): then only the hidden project whose pages
+// are open shows there, so the sidebar still marks where they are.
 
 import { projects, services } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -12,13 +14,13 @@ import { ActiveIndicator } from "@seylo/ui/components/motion";
 import { LoadingRegion, Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../i18n/t";
 import { useLiveTopic } from "../../lib/live";
 import { isBusy, statusDisplay } from "../../lib/service-display";
 import type { Project } from "../../lib/types";
-import { splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
+import { hiddenInSidebar, splitHidden, useHiddenProjects } from "../../lib/use-hidden-projects";
 import { useProjectPrefs } from "../../lib/use-project-prefs";
 import { NewServiceMenu } from "../new-service/new-service-menu";
 import { ProjectMenu } from "../project-menu";
@@ -33,10 +35,13 @@ export function ProjectsTree() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  // The project of the page that is open, if any (the sidebar sits outside the project routes).
+  const currentProjectId = useParams({ strict: false, select: (params) => params.projectId });
   // The list waits for the hidden projects too, so none of them shows for a moment.
   const loading = isPending || hiding.pending;
   const list = loading ? undefined : data?.projects;
   const { shown, hidden } = splitHidden(list ?? [], hiding.hidden);
+  const { group, current } = hiddenInSidebar(hidden, hiding.showInSidebar, currentProjectId);
   const HiddenChevron = showHidden ? IconChevronDown : IconChevronRight;
   const setHidden = (project: Project, hide: boolean) => {
     // Unhiding the last one folds the row, so the next hidden project starts out of sight.
@@ -105,7 +110,7 @@ export function ProjectsTree() {
           </li>
         ))}
         {/* Hidden projects wait at the end, folded; opening the row shows them without unhiding them. */}
-        {hidden.length > 0 && (
+        {group.length > 0 && (
           <li className="flex flex-col">
             <button
               type="button"
@@ -114,17 +119,23 @@ export function ProjectsTree() {
               className="flex cursor-pointer items-center gap-2 rounded-control border-0 bg-transparent py-[7px] pr-2.5 pl-2.5 text-left text-[12.5px] text-muted-foreground transition-interactive hover:bg-muted hover:text-foreground"
             >
               <HiddenChevron size={14} stroke={2} aria-hidden="true" className="text-ink-faint" />
-              {t("sidebar.hidden", { count: hidden.length })}
+              {t("sidebar.hidden", { count: group.length })}
             </button>
             {showHidden && (
-              <ul aria-label={t("sidebar.hidden", { count: hidden.length })} className="m-0 flex list-none flex-col gap-px p-0">
-                {hidden.map((project) => (
+              <ul aria-label={t("sidebar.hidden", { count: group.length })} className="m-0 flex list-none flex-col gap-px p-0">
+                {group.map((project) => (
                   <li key={project.id} className="flex flex-col rounded-control">
                     <ProjectRow project={project} hidden onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
                   </li>
                 ))}
               </ul>
             )}
+          </li>
+        )}
+        {/* Without the group, the hidden project that is open still shows while its pages are. */}
+        {current && (
+          <li className="flex flex-col rounded-control">
+            <ProjectRow project={current} hidden onToggle={prefs.setCollapsed} onHiddenChange={setHidden} />
           </li>
         )}
       </ul>

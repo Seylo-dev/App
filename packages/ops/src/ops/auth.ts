@@ -123,13 +123,25 @@ export const HiddenProjectIds = Type.Array(Id, {
     "Projects hidden from this person's sidebar and home page, by id. Only projects the person can see are kept; deleted projects drop out. The project pages, links and search still show them.",
 });
 
+/**
+ * Whether the sidebar ends with the folded "Hidden (N)" group. On by
+ * default: only false is stored, and a missing key means on.
+ */
+export const ShowHiddenInSidebar = Type.Boolean({
+  description:
+    'Whether this person\'s sidebar shows the folded "Hidden (N)" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under "Show hidden", in search and at their links either way.',
+});
+
 /** Keys without a shape of their own stay free-form, as before 0.2.1. */
 const AnyKeys = Type.Record(Type.String(), Type.Unknown());
 
-export const Preferences = Type.Intersect([Type.Object({ hiddenProjectIds: Type.Optional(HiddenProjectIds) }), AnyKeys], {
-  description:
-    "Per-person UI choices that follow them across browsers, for example hidden projects or color mode. Keys not listed here are free-form.",
-});
+export const Preferences = Type.Intersect(
+  [Type.Object({ hiddenProjectIds: Type.Optional(HiddenProjectIds), showHiddenInSidebar: Type.Optional(ShowHiddenInSidebar) }), AnyKeys],
+  {
+    description:
+      "Per-person UI choices that follow them across browsers, for example hidden projects or color mode. Keys not listed here are free-form.",
+  },
+);
 
 /** What auth.updatePreferences takes: the same keys, each of them null to remove it. */
 const PreferencesChange = Type.Intersect(
@@ -138,6 +150,7 @@ const PreferencesChange = Type.Intersect(
       hiddenProjectIds: Type.Optional(
         Type.Union([HiddenProjectIds, Type.Null()], { errorMessage: "must be a list of distinct project ids (at most 200), or null" }),
       ),
+      showHiddenInSidebar: Type.Optional(Type.Union([ShowHiddenInSidebar, Type.Null()], { errorMessage: "must be true, false or null" })),
     }),
     AnyKeys,
   ],
@@ -148,7 +161,7 @@ export const preferences = defineOp({
   id: "auth.preferences",
   kind: "query",
   summary: "Get your UI preferences",
-  description: "Returns the signed-in person's UI preferences (hidden projects, color mode and similar).",
+  description: "Returns the signed-in person's UI preferences (hidden projects, whether the sidebar shows them, color mode and similar).",
   input: Empty,
   output: Type.Object({ preferences: Preferences }),
   permission: permission.account(),
@@ -161,7 +174,7 @@ export const updatePreferences = defineOp({
   kind: "mutation",
   summary: "Change your UI preferences",
   description:
-    "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. At most 16 KB in total.",
+    "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. showHiddenInSidebar is kept only when false (true is the default). At most 16 KB in total.",
   input: Type.Object({ preferences: PreferencesChange }),
   output: Type.Object({ preferences: Preferences }),
   permission: permission.account(),

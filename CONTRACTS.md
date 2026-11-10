@@ -3111,8 +3111,10 @@ holds `projects.view` on, on every read and write, so deleted projects and
 lost access drop out and the key is left out when nothing is hidden). The
 sidebar and the dashboard grid leave them out (`Hidden (N)` and `Show
 hidden` show them without unhiding); `projects.list`, the command palette
-and the project pages ignore the list. Global `templates.manage` gates custom
-templates.
+and the project pages ignore the list. `auth.preferences.showHiddenInSidebar`
+(per person, on by default) turns the sidebar's `Hidden (N)` group off; the
+panel stores it only as `false` (true, null and non-booleans leave the key
+out). Global `templates.manage` gates custom templates.
 
 APIs for other modules (all in `apps/panel/src/modules/`):
 
@@ -3554,7 +3556,14 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   The sidebar waits for the preferences, so a hidden project never
   flashes. The command palette, direct links and the project pages ignore
   the list. Nothing is hidden by default: the protected Panel project
-  shows until the person hides it.
+  shows until the person hides it. Settings > Preferences (the "Your
+  account" group, `routes/_app/settings/preferences.tsx`) has "Show hidden
+  projects in the sidebar" (`showHiddenInSidebar`, `ShowHiddenInSidebar`
+  in `auth.ts`, on by default, only `false` is stored). Off removes the
+  "Hidden (N)" row; the home page's "Show hidden", the palette and links
+  still reach hidden projects, and a hidden project whose pages are open
+  shows alone at the end of the sidebar list until you leave it
+  (`hiddenInSidebar`), so the sidebar still marks where you are.
 - Live data: `lib/live.ts` `listen(topic, fn)` for topics with payloads
   (deployment logs), `useLiveUp()` to poll only while the socket is down.
   The saved accent's CSS is `lib/accent.ts` (the panel's boot.ts emits the

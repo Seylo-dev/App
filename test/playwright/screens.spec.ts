@@ -85,6 +85,7 @@ export const screens: [string, string, ("dialog" | "page")?][] = [
       "ai",
       "telemetry",
       "security",
+      "preferences",
     ] as const
   ).map((name): [string, string] => [`settings-${name}`, `/settings/${name}`]),
 ];

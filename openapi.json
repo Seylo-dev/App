@@ -6267,7 +6267,7 @@
       "get": {
         "operationId": "auth.preferences",
         "summary": "Get your UI preferences",
-        "description": "Returns the signed-in person's UI preferences (hidden projects, color mode and similar).",
+        "description": "Returns the signed-in person's UI preferences (hidden projects, whether the sidebar shows them, color mode and similar).",
         "tags": [
           "auth"
         ],
@@ -6308,6 +6308,10 @@
                                 "description": "Panel-issued id.",
                                 "type": "string"
                               }
+                            },
+                            "showHiddenInSidebar": {
+                              "description": "Whether this person's sidebar shows the folded \"Hidden (N)\" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under \"Show hidden\", in search and at their links either way.",
+                              "type": "boolean"
                             }
                           }
                         },
@@ -7175,7 +7179,7 @@
       "post": {
         "operationId": "auth.updatePreferences",
         "summary": "Change your UI preferences",
-        "description": "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. At most 16 KB in total.",
+        "description": "Merges the given keys into the signed-in person's preferences; a key set to null is removed. hiddenProjectIds keeps only projects the person can see. showHiddenInSidebar is kept only when false (true is the default). At most 16 KB in total.",
         "tags": [
           "auth"
         ],
@@ -7217,6 +7221,18 @@
                                   "description": "Panel-issued id.",
                                   "type": "string"
                                 }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "showHiddenInSidebar": {
+                            "errorMessage": "must be true, false or null",
+                            "anyOf": [
+                              {
+                                "description": "Whether this person's sidebar shows the folded \"Hidden (N)\" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under \"Show hidden\", in search and at their links either way.",
+                                "type": "boolean"
                               },
                               {
                                 "type": "null"
@@ -7265,6 +7281,10 @@
                                 "description": "Panel-issued id.",
                                 "type": "string"
                               }
+                            },
+                            "showHiddenInSidebar": {
+                              "description": "Whether this person's sidebar shows the folded \"Hidden (N)\" group of hidden projects. Missing means true (the default); only false is stored. Hidden projects still show on the home page under \"Show hidden\", in search and at their links either way.",
+                              "type": "boolean"
                             }
                           }
                         },

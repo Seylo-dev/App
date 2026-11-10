@@ -40,6 +40,22 @@ function withVisibleHidden(ctx: OpContext, preferences: Record<string, unknown>)
   return kept.length > 0 ? { ...rest, hiddenProjectIds: kept } : rest;
 }
 
+/**
+ * showHiddenInSidebar is kept only when it is false: true is the default,
+ * so it leaves the key out, the same as never choosing. Anything that is
+ * not a boolean (free-form preferences from before the key had a shape)
+ * drops out too.
+ */
+function withSidebarChoice(preferences: Record<string, unknown>): Record<string, unknown> {
+  const { showHiddenInSidebar: stored, ...rest } = preferences;
+  return stored === false ? preferences : rest;
+}
+
+/** The preferences as they are stored and answered (see the two helpers above). */
+function cleaned(ctx: OpContext, preferences: Record<string, unknown>): Record<string, unknown> {
+  return withSidebarChoice(withVisibleHidden(ctx, preferences));
+}
+
 export const updateProfile = implement(auth.updateProfile, (input, ctx) => {
   const { userId } = requireSession(ctx);
   const user = ctx.db.update(users).set({ name: input.name.trim() }).where(eq(users.id, userId)).returning().get();
@@ -53,7 +69,7 @@ export const preferences = implement(auth.preferences, (_input, ctx) => {
     .from(users)
     .where(eq(users.id, currentUserId(ctx)))
     .get();
-  return { preferences: withVisibleHidden(ctx, row?.preferences ?? {}) };
+  return { preferences: cleaned(ctx, row?.preferences ?? {}) };
 });
 
 export const updatePreferences = implement(auth.updatePreferences, (input, ctx) => {
@@ -65,8 +81,8 @@ export const updatePreferences = implement(auth.updatePreferences, (input, ctx) 
       if (value === null) delete merged[key];
       else merged[key] = value;
     }
-    // Stored as it is answered: ids of other people's or deleted projects are not kept.
-    merged = withVisibleHidden(ctx, merged);
+    // Stored as it is answered: ids of other people's or deleted projects are not kept, nor a showHiddenInSidebar of true.
+    merged = cleaned(ctx, merged);
     if (new TextEncoder().encode(JSON.stringify(merged)).length > maxPreferencesBytes) {
       throw new OpError("BAD_REQUEST", "Preferences are limited to 16 KB.");
     }

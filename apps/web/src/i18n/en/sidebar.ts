@@ -21,6 +21,7 @@ export default {
   hidden: "Hidden ({count})",
   hiddenToast: "{name} hidden",
   hiddenToastHint: "It stays under Hidden at the end of the sidebar.",
+  hiddenToastHintNoGroup: "It stays on the home page under Show hidden.",
   undo: "Undo",
   hideFailed: "Could not save hidden projects",
   hideLimit: "You can hide up to {count} projects.",

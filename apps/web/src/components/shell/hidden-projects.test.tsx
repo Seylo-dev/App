@@ -1,9 +1,19 @@
 import { expect, test } from "bun:test";
 import { auth, projects } from "@seylo/ops";
+import type { ComponentType } from "react";
 import { t } from "../../i18n/t";
 import type { Project } from "../../lib/types";
 import type { ServicesByProject } from "../../lib/use-all-services";
-import { hiddenChange, maxHiddenProjects, splitHidden, withHidden } from "../../lib/use-hidden-projects";
+import {
+  hiddenChange,
+  hiddenInSidebar,
+  maxHiddenProjects,
+  showsHiddenGroup,
+  splitHidden,
+  withHidden,
+  withSidebarChoice,
+} from "../../lib/use-hidden-projects";
+import { Route as PreferencesRoute } from "../../routes/_app/settings/preferences";
 import { type Answer, renderStatic } from "../../test/render";
 import { ProjectCards } from "../dashboard/project-cards";
 import { ProjectsTree } from "./projects-tree";
@@ -15,13 +25,13 @@ const panel = project("p1", "Panel", { protected: true });
 const shop = project("p2", "shop");
 const blog = project("p3", "blog");
 const list = [panel, shop, blog];
-const prefs = (hiddenProjectIds?: string[]): Answer => [
+const prefs = (hiddenProjectIds?: string[], showHiddenInSidebar?: false): Answer => [
   auth.preferences,
   {},
-  { preferences: hiddenProjectIds ? { hiddenProjectIds } : {} },
+  { preferences: { ...(hiddenProjectIds ? { hiddenProjectIds } : {}), ...(showHiddenInSidebar === false ? { showHiddenInSidebar } : {}) } },
 ];
 
-const sidebar = (answers: Answer[]) =>
+const sidebar = (answers: Answer[], path?: string) =>
   renderStatic(
     () => (
       <ShellProvider>
@@ -29,6 +39,7 @@ const sidebar = (answers: Answer[]) =>
       </ShellProvider>
     ),
     [[projects.list, {}, { projects: list }], ...answers],
+    { path },
   );
 
 const grid = (answers: Answer[], projectsShown = list) => {
@@ -98,6 +109,74 @@ test("ids of projects not in the list (deleted since) do not count in Hidden (N)
   const out = await sidebar([prefs(["p2", "gone000000000001"])]);
   expect(out).toContain(hiddenRow(1));
   expect(out).not.toContain(">shop<");
+});
+
+test("showsHiddenGroup is on unless turned off; withSidebarChoice keeps the key only for off", () => {
+  expect(showsHiddenGroup(undefined)).toBe(true);
+  expect(showsHiddenGroup({})).toBe(true);
+  expect(showsHiddenGroup({ showHiddenInSidebar: true })).toBe(true);
+  expect(showsHiddenGroup({ showHiddenInSidebar: false })).toBe(false);
+  expect(withSidebarChoice({ hiddenProjectIds: ["p1"] }, false)).toEqual({ hiddenProjectIds: ["p1"], showHiddenInSidebar: false });
+  expect(withSidebarChoice({ hiddenProjectIds: ["p1"], showHiddenInSidebar: false }, true)).toEqual({ hiddenProjectIds: ["p1"] });
+  expect(withSidebarChoice({}, true)).toEqual({});
+});
+
+test("hiddenInSidebar: every hidden project while the group is on, else only the one that is open", () => {
+  const hidden = [panel, blog];
+  expect(hiddenInSidebar(hidden, true, "p1")).toEqual({ group: hidden, current: undefined });
+  expect(hiddenInSidebar(hidden, true, undefined)).toEqual({ group: hidden, current: undefined });
+  expect(hiddenInSidebar(hidden, false, "p1")).toEqual({ group: [], current: panel });
+  expect(hiddenInSidebar(hidden, false, "p2")).toEqual({ group: [], current: undefined });
+  expect(hiddenInSidebar(hidden, false, undefined)).toEqual({ group: [], current: undefined });
+  expect(hiddenInSidebar([], false, "p1")).toEqual({ group: [], current: undefined });
+});
+
+test("with the group off the sidebar has no Hidden row and still leaves hidden projects out", async () => {
+  const out = await sidebar([prefs(["p1", "p3"], false)]);
+  expect(out).toContain(">shop<");
+  expect(out).not.toContain(">Panel<");
+  expect(out).not.toContain(">blog<");
+  for (const count of [0, 1, 2, 3]) expect(out).not.toContain(hiddenRow(count));
+});
+
+test("on a hidden project's page: folded under Hidden (N) as before, or alone at the end with the group off", async () => {
+  const on = await sidebar([prefs(["p1", "p3"])], "/p/p1");
+  expect(on).toContain(hiddenRow(2));
+  expect(on).toContain('aria-expanded="false"');
+  expect(on).not.toContain(">Panel<");
+
+  const off = await sidebar([prefs(["p1", "p3"], false)], "/p/p1");
+  for (const count of [0, 1, 2, 3]) expect(off).not.toContain(hiddenRow(count));
+  // The open one shows after the shown projects, muted like a hidden row and marked as the current page.
+  expect(off).toContain('text-muted-foreground">Panel<');
+  expect(off.indexOf(">Panel<")).toBeGreaterThan(off.indexOf(">shop<"));
+  expect(off).toContain('aria-current="page"');
+  expect(off).not.toContain(">blog<");
+  // Its "..." menu is there to unhide it.
+  expect(off).toContain(`aria-label="${t("sidebar.projectMenu", { name: "Panel" })}"`);
+
+  // On a project that is not hidden, no hidden project shows.
+  const shown = await sidebar([prefs(["p1", "p3"], false)], "/p/p2");
+  expect(shown).toContain(">shop<");
+  expect(shown).not.toContain(">Panel<");
+  expect(shown).not.toContain(">blog<");
+});
+
+const PreferencesPage = PreferencesRoute.options.component as ComponentType;
+
+test("Settings > Preferences: the switch is on by default, off once turned off, and says where hidden projects still show", async () => {
+  const on = await renderStatic(() => <PreferencesPage />, [prefs(["p1"])]);
+  expect(on).toContain(t("settingsPreferences.sidebar.showHidden"));
+  expect(on).toContain(t("settingsPreferences.sidebar.showHiddenHint"));
+  expect(on).toMatch(/role="switch" aria-checked="true"/);
+
+  const off = await renderStatic(() => <PreferencesPage />, [prefs(["p1"], false)]);
+  expect(off).toMatch(/role="switch" aria-checked="false"/);
+
+  // While the preferences load, a placeholder instead of a switch that may be wrong.
+  const waiting = await renderStatic(() => <PreferencesPage />, []);
+  expect(waiting).not.toContain('role="switch"');
+  expect(waiting).toContain('data-slot="skeleton"');
 });
 
 test("the home grid leaves hidden projects out and offers Show hidden (N)", async () => {
