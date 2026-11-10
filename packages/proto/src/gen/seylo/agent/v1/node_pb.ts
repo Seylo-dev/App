@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/node.proto.
  */
 export const file_seylo_agent_v1_node: GenFile = /*@__PURE__*/
-  fileDesc("ChlzZXlsby9hZ2VudC92MS9ub2RlLnByb3RvEg5zZXlsby5hZ2VudC52MSLcBAoJTm9kZUZhY3RzEhAKCGhvc3RuYW1lGAEgASgJEgoKAm9zGAIgASgJEg4KBmtlcm5lbBgDIAEoCRIMCgRhcmNoGAQgASgJEhEKCWNwdV9jb3JlcxgFIAEoDRIaChJtZW1vcnlfdG90YWxfYnl0ZXMYBiABKAQSGAoQZGlza190b3RhbF9ieXRlcxgHIAEoBBIXCg9kaXNrX2ZyZWVfYnl0ZXMYCCABKAQSFgoOZG9ja2VyX3ZlcnNpb24YCSABKAkSGgoSZG9ja2VyX2FwaV92ZXJzaW9uGAogASgJEhYKDmNncm91cF92ZXJzaW9uGAsgASgNEhMKC3B1YmxpY19pcHY0GAwgASgJEhMKC3B1YmxpY19pcHY2GA0gASgJEi0KCWJvb3RfdGltZRgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNYWdlbnRfdmVyc2lvbhgPIAEoCRIUCgxjYXBhYmlsaXRpZXMYECADKAkSKAoFd2luZ3MYESABKAsyGS5zZXlsby5hZ2VudC52MS5XaW5nc0luZm8SEQoJY2FuX2J1aWxkGBIgASgIEhQKDHByaXZhdGVfaXB2NBgTIAEoCRIRCgl0aW1lX3pvbmUYFCABKAkSGwoTaW50ZXJmYWNlX2FkZHJlc3NlcxgVIAMoCRIqCgZidWlsZHgYFiABKAsyGi5zZXlsby5hZ2VudC52MS5CdWlsZHhJbmZvEjAKCXRhaWxzY2FsZRgXIAEoCzIdLnNleWxvLmFnZW50LnYxLlRhaWxzY2FsZUluZm8iMAoKQnVpbGR4SW5mbxIRCglpbnN0YWxsZWQYASABKAgSDwoHdmVyc2lvbhgCIAEoCSJ0CglXaW5nc0luZm8SDwoHdmVyc2lvbhgBIAEoCRIbChN0cmFlZmlrX2R5bmFtaWNfZGlyGAIgASgJEiAKGGZvcmVpZ25fcm91dGVzX3N1cHBvcnRlZBgDIAEoCBIXCg9wcm94eV9jb250YWluZXIYBCABKAlCtAEKEmNvbS5zZXlsby5hZ2VudC52MUIJTm9kZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_seylo_agent_v1_tailnet]);
+  fileDesc("ChlzZXlsby9hZ2VudC92MS9ub2RlLnByb3RvEg5zZXlsby5hZ2VudC52MSKVBQoJTm9kZUZhY3RzEhAKCGhvc3RuYW1lGAEgASgJEgoKAm9zGAIgASgJEg4KBmtlcm5lbBgDIAEoCRIMCgRhcmNoGAQgASgJEhEKCWNwdV9jb3JlcxgFIAEoDRIaChJtZW1vcnlfdG90YWxfYnl0ZXMYBiABKAQSGAoQZGlza190b3RhbF9ieXRlcxgHIAEoBBIXCg9kaXNrX2ZyZWVfYnl0ZXMYCCABKAQSFgoOZG9ja2VyX3ZlcnNpb24YCSABKAkSGgoSZG9ja2VyX2FwaV92ZXJzaW9uGAogASgJEhYKDmNncm91cF92ZXJzaW9uGAsgASgNEhMKC3B1YmxpY19pcHY0GAwgASgJEhMKC3B1YmxpY19pcHY2GA0gASgJEi0KCWJvb3RfdGltZRgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNYWdlbnRfdmVyc2lvbhgPIAEoCRIUCgxjYXBhYmlsaXRpZXMYECADKAkSKAoFd2luZ3MYESABKAsyGS5zZXlsby5hZ2VudC52MS5XaW5nc0luZm8SEQoJY2FuX2J1aWxkGBIgASgIEhQKDHByaXZhdGVfaXB2NBgTIAEoCRIRCgl0aW1lX3pvbmUYFCABKAkSGwoTaW50ZXJmYWNlX2FkZHJlc3NlcxgVIAMoCRIqCgZidWlsZHgYFiABKAsyGi5zZXlsby5hZ2VudC52MS5CdWlsZHhJbmZvEjAKCXRhaWxzY2FsZRgXIAEoCzIdLnNleWxvLmFnZW50LnYxLlRhaWxzY2FsZUluZm8SNwoNZG9ja2VyX3VwZGF0ZRgYIAEoCzIgLnNleWxvLmFnZW50LnYxLkRvY2tlclVwZGF0ZUluZm8ipAEKEERvY2tlclVwZGF0ZUluZm8SEQoJaW5zdGFsbGVkGAEgASgJEhEKCWNhbmRpZGF0ZRgCIAEoCRIXCg9wYWNrYWdlX21hbmFnZXIYAyABKAkSLgoKY2hlY2tlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEQoJdXBkYXRhYmxlGAUgASgIEg4KBnJlYXNvbhgGIAEoCSIwCgpCdWlsZHhJbmZvEhEKCWluc3RhbGxlZBgBIAEoCBIPCgd2ZXJzaW9uGAIgASgJInQKCVdpbmdzSW5mbxIPCgd2ZXJzaW9uGAEgASgJEhsKE3RyYWVmaWtfZHluYW1pY19kaXIYAiABKAkSIAoYZm9yZWlnbl9yb3V0ZXNfc3VwcG9ydGVkGAMgASgIEhcKD3Byb3h5X2NvbnRhaW5lchgEIAEoCUK0AQoSY29tLnNleWxvLmFnZW50LnYxQglOb2RlUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_timestamp, file_seylo_agent_v1_tailnet]);
 
 /**
  * NodeFacts describes a node. The agent sends it in ClientHello and
@@ -189,6 +189,16 @@ export type NodeFacts = Message<"seylo.agent.v1.NodeFacts"> & {
    * @generated from field: seylo.agent.v1.TailscaleInfo tailscale = 23;
    */
   tailscale?: TailscaleInfo | undefined;
+
+  /**
+   * The agent's own check for a newer Docker Engine (DockerUpdateInfo).
+   * Agents that make it advertise node.docker-check.v1. Unset until the
+   * first check after an agent start, and from older agents: the panel then
+   * shows no update information. added in 0.2.5 (docker check)
+   *
+   * @generated from field: seylo.agent.v1.DockerUpdateInfo docker_update = 24;
+   */
+  dockerUpdate?: DockerUpdateInfo | undefined;
 };
 
 /**
@@ -197,6 +207,72 @@ export type NodeFacts = Message<"seylo.agent.v1.NodeFacts"> & {
  */
 export const NodeFactsSchema: GenMessage<NodeFacts> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_node, 0);
+
+/**
+ * DockerUpdateInfo is what the agent found when it last looked for a newer
+ * Docker Engine: the plan of UpdateDocker's dry run (apt refreshes its
+ * package lists first), upgrading nothing. It checks shortly after it
+ * starts, then at most once a day, and never while an update holds the
+ * node's update lock; an UpdateDocker dry run or upgrade also refreshes it.
+ * added in 0.2.5 (docker check)
+ *
+ * @generated from message seylo.agent.v1.DockerUpdateInfo
+ */
+export type DockerUpdateInfo = Message<"seylo.agent.v1.DockerUpdateInfo"> & {
+  /**
+   * Upstream version of the installed Docker Engine package, for example
+   * "29.9.3". Empty when updatable is false.
+   *
+   * @generated from field: string installed = 1;
+   */
+  installed: string;
+
+  /**
+   * The newest version the package manager offers; equal to installed when
+   * nothing newer is there. Empty when updatable is false.
+   *
+   * @generated from field: string candidate = 2;
+   */
+  candidate: string;
+
+  /**
+   * "apt", "dnf" or "yum"; empty when there is no package manager the
+   * agent drives.
+   *
+   * @generated from field: string package_manager = 3;
+   */
+  packageManager: string;
+
+  /**
+   * When the check ran, on the agent's clock.
+   *
+   * @generated from field: google.protobuf.Timestamp checked_at = 4;
+   */
+  checkedAt?: Timestamp | undefined;
+
+  /**
+   * UpdateDocker can upgrade Docker here. False when Docker Engine did not
+   * come from a package manager the agent drives (static binaries, snap) or
+   * there is none; reason says why.
+   *
+   * @generated from field: bool updatable = 5;
+   */
+  updatable: boolean;
+
+  /**
+   * Why updatable is false, a sentence for people; empty otherwise.
+   *
+   * @generated from field: string reason = 6;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.DockerUpdateInfo.
+ * Use `create(DockerUpdateInfoSchema)` to create a new message.
+ */
+export const DockerUpdateInfoSchema: GenMessage<DockerUpdateInfo> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_node, 1);
 
 /**
  * BuildxInfo is the result of `docker buildx version` on the node.
@@ -226,7 +302,7 @@ export type BuildxInfo = Message<"seylo.agent.v1.BuildxInfo"> & {
  * Use `create(BuildxInfoSchema)` to create a new message.
  */
 export const BuildxInfoSchema: GenMessage<BuildxInfo> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_node, 1);
+  messageDesc(file_seylo_agent_v1_node, 2);
 
 /**
  * WingsInfo describes a Pelican Wings installation found next to the agent.
@@ -270,5 +346,5 @@ export type WingsInfo = Message<"seylo.agent.v1.WingsInfo"> & {
  * Use `create(WingsInfoSchema)` to create a new message.
  */
 export const WingsInfoSchema: GenMessage<WingsInfo> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_node, 2);
+  messageDesc(file_seylo_agent_v1_node, 3);
 

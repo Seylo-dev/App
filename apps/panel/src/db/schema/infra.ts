@@ -27,6 +27,32 @@ export interface NodeHealthReport {
   results: { id: string; title: string; status: "pass" | "warn" | "fail" | "skipped"; detail: string; fixHint: string }[];
 }
 
+/**
+ * The newest look for a newer Docker Engine on a node (NodeFacts.docker_update
+ * from the agent's own check, or nodes.updateDocker's dry run and result);
+ * modules/nodes/docker-check.ts. Added in 0.2.5 (docker check).
+ */
+export interface DockerUpdateJson {
+  /** Upstream version of the installed package, for example "29.9.3"; "" when not updatable. */
+  installed: string;
+  /** The newest version the package manager offers; "" when not updatable. */
+  candidate: string;
+  /** "apt", "dnf", "yum" or "". */
+  packageManager: string;
+  /** ISO time of the check. */
+  checkedAt: string;
+  /** The agent can upgrade Docker here (UpdateDocker). */
+  updatable: boolean;
+  /** Why it cannot, for people; "" when it can. */
+  reason: string;
+  /**
+   * checkedAt of the newest finding the agent itself sent (its own clock):
+   * one it sends again, or an older one, changes nothing. Null when only the
+   * panel recorded findings.
+   */
+  agentCheckedAt: string | null;
+}
+
 export const nodes = sqliteTable(
   "nodes",
   {
@@ -83,6 +109,11 @@ export const nodes = sqliteTable(
      * refuses them while this is off. Added in 0.2 (nodeops).
      */
     hostShell: integer("host_shell", { mode: "boolean" }).notNull().default(false),
+    /**
+     * The newest look for a newer Docker Engine; null until an agent that
+     * advertises node.docker-check.v1 reported one. Added in 0.2.5 (docker check).
+     */
+    dockerUpdate: json<DockerUpdateJson>("docker_update"),
     disabledAt: timestamp("disabled_at"),
     lastSeenAt: timestamp("last_seen_at"),
     createdAt: createdAt(),

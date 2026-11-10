@@ -26,10 +26,14 @@ func TestNodeWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	caps := reg.Capabilities()
-	for _, c := range []string{"node.update.v1", "node.healthcheck.v1", "node.troubleshoot.v1", "node.reboot.v1", "node.docker-update.v1", "node.panel-update.v1"} {
+	for _, c := range []string{"node.update.v1", "node.healthcheck.v1", "node.troubleshoot.v1", "node.reboot.v1", "node.docker-update.v1", "node.panel-update.v1", "node.docker-check.v1"} {
 		if !slices.Contains(caps, c) {
 			t.Errorf("capability %s not advertised: %v", c, caps)
 		}
+	}
+	// The daily Docker version check runs as a component (node.docker-check.v1).
+	if !slices.ContainsFunc(d.Components.List(), func(c Component) bool { return c.Name == "docker-check" }) {
+		t.Error("no docker-check component")
 	}
 	panel := rpctest.NewPeer(t, reg)
 	ctx := context.Background()

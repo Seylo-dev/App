@@ -177,11 +177,11 @@ describe("report_totals", () => {
       fresh.$client.run("PRAGMA foreign_keys = ON");
       migrate(fresh, { migrationsFolder: before });
       const old = fresh as unknown as PanelDb;
-      const node = old
-        .insert(nodes)
-        .values({ name: "n", publicKey: Buffer.alloc(32, 1) })
-        .returning()
-        .get();
+      // The node as rc.2 wrote it, through SQL: today's schema has columns rc.2 did not (docker_update, 0007).
+      fresh.$client.run(
+        "insert into nodes (id, name, public_key, created_at, updated_at) values ('node0000000000001', 'n', zeroblob(32), 1760000000, 1760000000)",
+      );
+      const node = { id: "node0000000000001" };
       addReports(old, node.id, 7, "cronRun");
       addReports(old, node.id, 3, "nodeAlert");
       expect(old.all(sql`select name from sqlite_master where name = 'report_totals'`)).toEqual([]);

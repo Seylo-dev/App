@@ -71,6 +71,37 @@ message NodeFacts {
   // LocalAPI socket. Unset when there is no tailscaled socket, and from
   // agents before 0.2.1. added in 0.2.1 (tailnet)
   TailscaleInfo tailscale = 23;
+  // The agent's own check for a newer Docker Engine (DockerUpdateInfo).
+  // Agents that make it advertise node.docker-check.v1. Unset until the
+  // first check after an agent start, and from older agents: the panel then
+  // shows no update information. added in 0.2.5 (docker check)
+  DockerUpdateInfo docker_update = 24;
+}
+
+// DockerUpdateInfo is what the agent found when it last looked for a newer
+// Docker Engine: the plan of UpdateDocker's dry run (apt refreshes its
+// package lists first), upgrading nothing. It checks shortly after it
+// starts, then at most once a day, and never while an update holds the
+// node's update lock; an UpdateDocker dry run or upgrade also refreshes it.
+// added in 0.2.5 (docker check)
+message DockerUpdateInfo {
+  // Upstream version of the installed Docker Engine package, for example
+  // "29.9.3". Empty when updatable is false.
+  string installed = 1;
+  // The newest version the package manager offers; equal to installed when
+  // nothing newer is there. Empty when updatable is false.
+  string candidate = 2;
+  // "apt", "dnf" or "yum"; empty when there is no package manager the
+  // agent drives.
+  string package_manager = 3;
+  // When the check ran, on the agent's clock.
+  google.protobuf.Timestamp checked_at = 4;
+  // UpdateDocker can upgrade Docker here. False when Docker Engine did not
+  // come from a package manager the agent drives (static binaries, snap) or
+  // there is none; reason says why.
+  bool updatable = 5;
+  // Why updatable is false, a sentence for people; empty otherwise.
+  string reason = 6;
 }
 
 // BuildxInfo is the result of `docker buildx version` on the node.

@@ -15,6 +15,10 @@
 //     journal on disk lets a restarted agent finish (or undo) a swap.
 //   - UpdateDocker upgrades Docker Engine with the distribution's package
 //     manager; Reboot reboots the machine after a short delay.
+//   - The Docker version check (docker_check.go, node.docker-check.v1)
+//     runs UpdateDocker's dry-run plan by itself, at most daily, upgrading
+//     nothing; it takes the update lock as work that gives way
+//     (Lock.TryAcquireYielding), so updates never wait on it.
 //   - CheckOnConnect: when auto-update is on and the panel runs a newer
 //     release, the node fetches that release's manifest and updates itself.
 //
@@ -29,6 +33,8 @@
 //
 //   - Updater: the UpdateAgent, UpdatePanel, UpdateDocker and Reboot RPC
 //     handlers call it (agent/wire_node.go).
+//   - DockerUpdater.RunChecks: the agent's docker-check component; its
+//     findings reach DockerOptions.Checked (NodeFacts.docker_update).
 //   - PanelRuntime: what the panel swap needs from the runtime; the agent
 //     adapts reconcile and the state store to it.
 package update

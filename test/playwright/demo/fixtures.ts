@@ -85,6 +85,8 @@ export const nodes = [
     canBuild: true,
     wings: { detected: false, version: null, sharedProxy: false },
     facts: facts("de-fsn-1", 8, 16 * gb, 240 * gb),
+    // The agent's own Docker check found nothing newer (added in 0.2.5).
+    docker: { version: "29.0.1", latest: "29.0.1", updateAvailable: false, checkedAt: iso(2 * hour), reason: null },
     usage: usage(23, 6.2 * gb, 16 * gb, 98 * gb, 240 * gb, 4.1 * mb),
     serviceCount: 6,
     health: { checkedAt: iso(2 * hour), worst: "pass" },
@@ -105,6 +107,8 @@ export const nodes = [
     canBuildWarning: "too small",
     wings: { detected: false, version: null, sharedProxy: false },
     facts: facts("us-ash-1", 2, 8 * gb, 80 * gb),
+    // A newer Docker Engine is there; il-tlv-1's older agent reports nothing.
+    docker: { version: "29.0.1", latest: "29.0.2", updateAvailable: true, checkedAt: iso(5 * hour), reason: null },
     usage: usage(12, 2.4 * gb, 8 * gb, 17.6 * gb, 80 * gb, 0.8 * mb),
     serviceCount: 3,
     health: { checkedAt: iso(3 * hour), worst: "warn" },

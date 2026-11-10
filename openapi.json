@@ -43715,6 +43715,59 @@
                         }
                       ]
                     },
+                    "docker": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "latest",
+                        "updateAvailable",
+                        "checkedAt",
+                        "reason"
+                      ],
+                      "properties": {
+                        "version": {
+                          "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                          "type": "string"
+                        },
+                        "latest": {
+                          "anyOf": [
+                            {
+                              "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "anyOf": [
+                            {
+                              "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "checkedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
                     "usage": {
                       "anyOf": [
                         {
@@ -44436,6 +44489,59 @@
                               }
                             ]
                           },
+                          "docker": {
+                            "type": "object",
+                            "required": [
+                              "version",
+                              "latest",
+                              "updateAvailable",
+                              "checkedAt",
+                              "reason"
+                            ],
+                            "properties": {
+                              "version": {
+                                "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                                "type": "string"
+                              },
+                              "latest": {
+                                "anyOf": [
+                                  {
+                                    "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "updateAvailable": {
+                                "anyOf": [
+                                  {
+                                    "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "checkedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "reason": {
+                                "anyOf": [
+                                  {
+                                    "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            }
+                          },
                           "usage": {
                             "anyOf": [
                               {
@@ -45114,6 +45220,59 @@
                         }
                       ]
                     },
+                    "docker": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "latest",
+                        "updateAvailable",
+                        "checkedAt",
+                        "reason"
+                      ],
+                      "properties": {
+                        "version": {
+                          "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                          "type": "string"
+                        },
+                        "latest": {
+                          "anyOf": [
+                            {
+                              "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "anyOf": [
+                            {
+                              "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "checkedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
                     "usage": {
                       "anyOf": [
                         {
@@ -45780,6 +45939,59 @@
                         }
                       ]
                     },
+                    "docker": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "latest",
+                        "updateAvailable",
+                        "checkedAt",
+                        "reason"
+                      ],
+                      "properties": {
+                        "version": {
+                          "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                          "type": "string"
+                        },
+                        "latest": {
+                          "anyOf": [
+                            {
+                              "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "anyOf": [
+                            {
+                              "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "checkedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
                     "usage": {
                       "anyOf": [
                         {
@@ -46230,6 +46442,59 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "docker": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "latest",
+                        "updateAvailable",
+                        "checkedAt",
+                        "reason"
+                      ],
+                      "properties": {
+                        "version": {
+                          "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                          "type": "string"
+                        },
+                        "latest": {
+                          "anyOf": [
+                            {
+                              "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "anyOf": [
+                            {
+                              "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "checkedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
                     },
                     "usage": {
                       "anyOf": [
@@ -46690,6 +46955,59 @@
                         }
                       ]
                     },
+                    "docker": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "latest",
+                        "updateAvailable",
+                        "checkedAt",
+                        "reason"
+                      ],
+                      "properties": {
+                        "version": {
+                          "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                          "type": "string"
+                        },
+                        "latest": {
+                          "anyOf": [
+                            {
+                              "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "anyOf": [
+                            {
+                              "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "checkedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    },
                     "usage": {
                       "anyOf": [
                         {
@@ -46842,7 +47160,7 @@
       "post": {
         "operationId": "nodes.updateDocker",
         "summary": "Update Docker on a node",
-        "description": "Upgrades Docker Engine with the distribution's package manager. Running containers restart with the daemon. With dryRun it only reports the versions.",
+        "description": "Upgrades Docker Engine with the distribution's package manager. Running containers restart with the daemon. With dryRun it only reports the versions. Either way what it found becomes the node's docker (whether a newer version is there) on agents that check by themselves.",
         "tags": [
           "nodes"
         ],
@@ -47293,6 +47611,59 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "docker": {
+                      "type": "object",
+                      "required": [
+                        "version",
+                        "latest",
+                        "updateAvailable",
+                        "checkedAt",
+                        "reason"
+                      ],
+                      "properties": {
+                        "version": {
+                          "description": "The Docker Engine version the node runs, for example \"29.9.3\".",
+                          "type": "string"
+                        },
+                        "latest": {
+                          "anyOf": [
+                            {
+                              "description": "The newest version the node's package manager offers; null when the agent cannot update Docker there.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updateAvailable": {
+                          "anyOf": [
+                            {
+                              "description": "true: latest is newer than version. false: nothing newer, checked in the last two days. null: unknown (the agent cannot update Docker here, or its checks stopped answering).",
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "checkedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "description": "Why the agent cannot update Docker on this node (static binaries, snap, no package manager); null when it can.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
                     },
                     "usage": {
                       "anyOf": [

@@ -95,7 +95,7 @@ packages use. "Built" means implemented and tested.
 | `jobrun` | Docker access of the jobs packages (moby client): one-off runs with streamed stdin/stdout/stderr, helpers by spec hash, on-demand helpers with idle reaping, Exec, cleanup inventory that re-checks `seylo.managed` before every removal; every container removal takes the container's anonymous volumes with it (images with a VOLUME line, such as database images, would leave one per backup, restore or cron run that nothing else removes); `jobrun/itest` is the VM test setup | Built (verified in the VM) |
 | `wings` | Pelican Wings detection (`FileDetector`), re-attaching our networks to the fork's Traefik (`Attacher`), games-first CPU weight (`SliceCPU`) | Built (attach after recreate and cgroupfs weight verified in the VM; no real Wings yet) |
 | `tailnet` | The panel on the owner's tailnet (since 0.2.1), standard library only: `Client` over tailscaled's LocalAPI socket (`/var/run/tailscale/tailscaled.sock`, config.yml `tailscale_socket`; status, prefs, an EditPrefs mask of WantRunning and CorpDNS only, login-interactive, Serve config with ETag/If-Match), `Ensure`/`Remove`/`Find` (pure edits of the Serve config JSON: one handler whose Proxy is exactly our unix target, every other field kept byte for byte, never AllowFunnel), `Manager` (the agent's `tailnet` component, see "Panel access and the tailnet"), `MinVersion` 1.104.4 | Built (unit tests against an httptest LocalAPI with recorded 1.104.x answers; not yet against a real tailnet) |
-| `update` | Signed agent self-update with a systemd rollback guard, panel swap (snapshot, health check, restore), Docker update, reboot, release manifest builder (`releasetool`) | Built; see "Releases and updates" |
+| `update` | Signed agent self-update with a systemd rollback guard, panel swap (snapshot, health check, restore), Docker update and the daily Docker version check (`DockerUpdater.Check`, `RunChecks`, since 0.2.5), reboot, release manifest builder (`releasetool`) | Built; see "Releases and updates" (the version check is unit tested with scripted apt/dnf answers; no real apt run yet) |
 
 Naming note: the node health check package is `nodecheck` (not `doctor`)
 because `health` is the per-service probe package.
@@ -153,7 +153,8 @@ migration (`0001_features` for 0.2, shipped in 0.2.0-rc.1, so frozen too;
 their reconnect retry; `0003_perf_indexes` for 0.2.0; `0004_join_token_can_build`
 for 0.2.1: `join_tokens.can_build`, default false, so tokens made before
 the update and the direct-insert test helpers keep making nodes that do
-not build), which the panel applies at start, also
+not build; `0007_docker_update` for 0.2.5: `nodes.docker_update`, the
+newest Docker version check), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -2217,6 +2218,7 @@ the node is offline (`modules/databases/capability.ts`).
 | `backup.signed.v1` | Backup destinations without keys (`BackupDestination.signing_id`): the agent asks `PanelService.SignBackupRequests` for each S3 step (`backup.SignedStore`). The panel sends backups and restores only to agents that advertised it |
 | `panel.publish-bind.v1` (0.2.1, `reconcile.PanelPublishBindCapability`, `wire_runtime.go`) | The agent publishes the protected panel's ports on `PublicPort.bind_address` (empty = every address; only a loopback address, only on the protected panel service: `validateSpec` refuses anything else), adopts an installer-started panel container only when its actual bindings match the desired list (HostIP included; otherwise it rolls), and reports the bindings in `seylo panel status`. The panel closes IP access only on a panel node that is online and advertised it (`panelNodeState.capable`; else block `agentTooOld` and `decidePanelIpAccess` keeps it open); an older agent ignores the field and keeps every address |
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
+| `node.docker-check.v1` (0.2.5, `update.DockerCheckCapability`, `wire_node.go`) | The agent looks for a newer Docker Engine by itself and reports it in every NodeFacts as `docker_update` (see "Releases and updates", Docker version check). The panel keeps the newest report per node and shows it as the node's `docker` only for agents that advertised it; an older agent's node has no `docker`, so the Machine card and Update Docker stay as before |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
 
 ## Panel access and the tailnet
@@ -2569,6 +2571,47 @@ waits `delay` (default 5s) and refuses while an update runs (ABORTED).
 Errors map to statuses: busy ABORTED, up to date ALREADY_EXISTS, bad
 signature PERMISSION_DENIED, refused INVALID_ARGUMENT, no signing key or no
 runtime FAILED_PRECONDITION, anything else UNAVAILABLE with the message.
+
+Docker version check (since 0.2.5, `update/docker_check.go`, capability
+`node.docker-check.v1`): the agent runs UpdateDocker's dry-run plan by
+itself (apt refreshes its lists the same way; dnf/yum `list --upgrades`)
+and upgrades nothing: 2 minutes after it starts, then a day after the
+newest finding. A person's dry run, and a finished upgrade (installed =
+candidate = the new version), are findings too, so they move the next
+check a day on. Every finding goes to `NodeFacts.docker_update`
+(`DockerUpdateInfo`: installed, candidate, package manager, checked_at,
+updatable, reason); Docker that did not come from a package manager the
+agent drives (static binaries, snap, none of apt/dnf/yum) is a finding
+with `updatable` false and a reason, not an error. A failed check (apt
+could not refresh, say) keeps the last finding and tries again after an
+hour, doubling up to a day. The check takes the node's update lock as work
+that gives way (`Lock.TryAcquireYielding`): it never starts while an
+update, panel swap or reboot holds the lock (it tries again in 15
+minutes), and any of those that comes in while it runs stops it (the
+running apt command is cancelled) and goes ahead after waiting at most 10
+s for the lock, instead of answering busy; the check then tries again in
+15 minutes. The lock is released as soon as the package manager answered.
+The panel stores the newest report per node in `nodes.docker_update`
+(migration 0007; `modules/nodes/docker-check.ts`): from the agent's facts,
+from `nodes.updateDocker` (what its dry run or upgrade answered, checked
+now) and from a successful Docker `UpdateResult` (the new version
+installed, nothing newer). Agent times are compared with agent times only
+(`agentCheckedAt`, the newest `checked_at` or `finished_at` the agent
+sent): a finding no newer than that is ignored, so the facts every connect
+resends change nothing and a clock that is off never hides a newer
+finding; `nodes.updateDocker`'s answers always count as the newest.
+Only for agents that advertised the capability, `Node.docker` is `{
+version, latest, updateAvailable, checkedAt, reason }`: version is
+`NodeFacts.docker_version` (what runs, so an update made by hand counts),
+`updateAvailable` true when the candidate is newer than both the package
+and the running version, false when not and the report is under two days
+old, null otherwise (a stale report, or `reason` set: the agent cannot
+update Docker there). The Machine card shows a newer version amber with a
+question mark (tooltip "Docker X is available. Update it from this node's
+actions.", a button, so the keyboard reaches it), and Update Docker is off
+with a title when `updateAvailable` is false ("Docker is up to date (V,
+checked 2 h ago)") or `reason` is set; nodes without `docker` keep the old
+behaviour. The confirm dialog still runs its own dry run.
 
 Installer contract ("panel + node here"): `seylo panel bootstrap` writes
 `<dataDir>/panel/setup-token` and `<dataDir>/panel/join-token` (one line

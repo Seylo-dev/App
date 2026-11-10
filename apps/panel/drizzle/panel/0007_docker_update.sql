@@ -1,0 +1,1 @@
+ALTER TABLE `nodes` ADD `docker_update` text;
