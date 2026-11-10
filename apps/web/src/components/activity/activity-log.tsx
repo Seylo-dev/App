@@ -64,7 +64,8 @@ function activityColumns(target: boolean): DataTableColumn<ActivityEntry>[] {
     {
       id: "who",
       header: t("activity.who"),
-      skeletonWidth: "38.7%",
+      // With the person's avatar (0.2.5).
+      skeletonWidth: "40.6%",
       hideOnMobile: true,
       cell: (e) => (
         <span className="flex min-w-0 items-center gap-2">
@@ -95,14 +96,14 @@ function activityColumns(target: boolean): DataTableColumn<ActivityEntry>[] {
       id: "from",
       header: t("activity.from"),
       hideOnMobile: true,
-      skeletonWidth: "12.3%",
+      skeletonWidth: "11.8%",
       cell: (e) => <span className="font-mono text-xs whitespace-nowrap text-muted-foreground">{e.ip ?? "-"}</span>,
     },
     {
       id: "outcome",
       header: t("activity.result"),
       align: "right",
-      skeletonWidth: "14.2%",
+      skeletonWidth: "13.7%",
       cell: (e) => <ResultChip entry={e} />,
     },
   ];

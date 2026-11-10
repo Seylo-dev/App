@@ -102,7 +102,8 @@ test("Personal details is the first page under Your account, above Security", as
   await openPage(page);
   const links = page.getByRole("navigation", { name: "Settings" }).getByRole("link");
   const names = await links.allTextContents();
-  expect(names.slice(-2)).toEqual(["Personal details", "Security"]);
+  // Your account: Personal details, Security, then Preferences (0.2.5).
+  expect(names.slice(-3)).toEqual(["Personal details", "Security", "Preferences"]);
   // Security keeps the sign-in methods; the profile moved here.
   await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Security" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Security" })).toBeVisible();

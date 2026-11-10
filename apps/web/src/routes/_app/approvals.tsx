@@ -173,6 +173,8 @@ function ApprovalCard({ approval }: { approval: Approval }) {
               src={approval.requestedBy.avatarUrl}
               size="xs"
               decorative
+              // Inside the 12.5px line without making it taller than its placeholder.
+              className="-my-0.5"
             />
           )}
           {t("approvals.forPerson", { person: approval.requestedBy.userName })}
