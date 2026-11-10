@@ -7,7 +7,7 @@ import type { Locator, Page } from "@playwright/test";
 import { hostShellStatus, ids, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { expect, stateFile, test } from "./helpers";
+import { expect, stateFile, test, dashboardHeading } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
 
@@ -227,7 +227,7 @@ test.describe("loading placeholders", () => {
     const sidebar = page.getByRole("navigation", { name: "Main" });
     const nodesCard = sidebar.getByRole("link", { name: "Nodes and updates" });
     const header = page.locator('[data-slot="page-header"]');
-    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await expect(dashboardHeading(page)).toBeVisible();
     // Read at once, while the answers are held back. Before: "0 nodes online", "not available yet" and "0 projects".
     expect(await nodesCard.textContent()).not.toMatch(/0 nodes online|not available yet/);
     expect(await header.textContent()).not.toContain("0 projects");
@@ -240,7 +240,10 @@ test.describe("loading placeholders", () => {
 
     await expect(nodesCard).toContainText("3 nodes online", { timeout: 15_000 });
     await expect(nodesCard).not.toHaveAttribute("aria-busy");
-    await expect(header).toContainText(/3 nodes · \d+ services/, { timeout: 15_000 });
+    // The counts are chips under the greeting: 3 nodes, then the services once known.
+    const counts = header.getByTestId("dashboard-counts");
+    await expect(counts).toContainText("3 nodes", { timeout: 15_000 });
+    await expect(counts).toContainText(/\d+ services/);
     const chip = await box(brandRow.locator('[data-slot="chip"]'));
     expectClose(chip.height, placeholder.height, "version chip height");
     expectClose(chip.x + chip.width, placeholder.x + placeholder.width, "version chip right edge");

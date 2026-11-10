@@ -2,6 +2,18 @@
 
 export default {
   title: "Dashboard",
+  greeting: {
+    morning: "Good morning, {name} ☀️",
+    afternoon: "Good afternoon, {name} 🌤️",
+    evening: "Good evening, {name} 🌆",
+    night: "Good night, {name} 🌙",
+  },
+  greetingNoName: {
+    morning: "Good morning ☀️",
+    afternoon: "Good afternoon 🌤️",
+    evening: "Good evening 🌆",
+    night: "Good night 🌙",
+  },
   nodeCount: { one: "{count} node", other: "{count} nodes" },
   projectCount: { one: "{count} project", other: "{count} projects" },
   deploying: { one: "{count} deploying", other: "{count} deploying" },

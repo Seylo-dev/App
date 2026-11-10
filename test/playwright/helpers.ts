@@ -14,6 +14,10 @@ import {
   type Page,
 } from "@playwright/test";
 
+/** The dashboard's title: a greeting for the time of day ("Good night, Amir"), so matched by its start. */
+export const dashboardHeading = (page: Page) =>
+  page.getByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening|night)/ });
+
 export { expect };
 
 /** Console errors that fail a test: React's render loop warning (it only logs, the page goes on). */
@@ -168,18 +172,18 @@ export const stateFile = `${process.env.SHOTS_DIR ?? "shots"}/owner-state.json`;
 /** Opens the dashboard with the saved session (the panel rate-limits sign-ins, so tests share one). */
 export async function openDashboard(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+  await expect(dashboardHeading(page)).toBeVisible();
 }
 
 export async function signIn(page: Page, account = credentials): Promise<void> {
   await page.goto("/login");
   // Already signed in: /login sends people to the dashboard (after the app has loaded).
-  const dashboard = page.getByRole("heading", { level: 1, name: "Dashboard" });
+  const dashboard = dashboardHeading(page);
   await expect(dashboard.or(page.getByLabel("Email"))).toBeVisible();
   if (await dashboard.isVisible()) return;
   await page.getByLabel("Email").fill(account.email);
   await page.getByLabel("Password").fill(account.password);
-  await submitPastRateLimit(page, page.getByRole("button", { name: "Sign in", exact: true }), page.getByRole("heading", { level: 1, name: "Dashboard" }));
+  await submitPastRateLimit(page, page.getByRole("button", { name: "Sign in", exact: true }), dashboardHeading(page));
 }
 
 /**

@@ -13,7 +13,7 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { APIRequestContext, Locator, Page, Response } from "@playwright/test";
-import { api, credentials, expect, postPastRateLimit, signIn, stateFile, submitPastRateLimit, test, totp, waitOut } from "./helpers";
+import { api, credentials, expect, postPastRateLimit, signIn, stateFile, submitPastRateLimit, test, totp, waitOut, dashboardHeading } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/reauth`;
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -476,7 +476,7 @@ test("the /reauth page confirms and goes back only to a path on this panel", asy
   await page.goto(`/reauth?redirect=${encodeURIComponent("/\\evil.example/x")}`);
   await page.getByLabel("Password").fill(credentials.password);
   expect((await clickPastRateLimit(page, confirm, "auth.reauth")).ok()).toBe(true);
-  await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+  await expect(dashboardHeading(page)).toBeVisible();
   expect(new URL(page.url()).host).toBe(new URL(test.info().project.use.baseURL as string).host);
   expect(errors).toEqual([]);
 });

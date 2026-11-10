@@ -8,7 +8,7 @@ import type { Locator, Page } from "@playwright/test";
 import { ids, projects, systemInfo } from "./demo/fixtures";
 import { installDemo } from "./demo/routes";
 import { ids as svc } from "./demo/service";
-import { expect, stateFile, test } from "./helpers";
+import { expect, stateFile, test, dashboardHeading } from "./helpers";
 
 test.use({ storageState: stateFile, reducedMotion: "no-preference" });
 
@@ -43,7 +43,7 @@ test.describe("motion", () => {
   test("the sidebar's selected background slides to each clicked item", async ({ page }) => {
     await installDemo(page);
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await expect(dashboardHeading(page)).toBeVisible();
     const dashboard = navLink(page, /^Dashboard$/);
     const nodes = navLink(page, /^Nodes \d+$/);
     const templates = navLink(page, /^Templates$/);
@@ -69,7 +69,7 @@ test.describe("motion", () => {
   test("a project's page gets the same sliding background, and project rows fade on hover", async ({ page }) => {
     await installDemo(page);
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await expect(dashboardHeading(page)).toBeVisible();
     const project = page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /^acme-shop/ });
     // The whole row (chevron and link), what the background covers.
     const row = project.locator("xpath=..");

@@ -4,7 +4,7 @@
 // panel name at the top go to the dashboard. Demo data.
 
 import { installDemo } from "./demo/routes";
-import { expect, stateFile, test } from "./helpers";
+import { expect, stateFile, test, dashboardHeading } from "./helpers";
 
 test.use({ storageState: stateFile });
 
@@ -32,7 +32,7 @@ test.describe("sidebar new service", () => {
     await page.goto("/nodes");
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: / home$/ }).click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await expect(dashboardHeading(page)).toBeVisible();
   });
 
   // Only MCP tools and the AI assistant ask for approvals, so the link waits

@@ -11,7 +11,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { api, credentials, expect, openDashboard, plainHttpNoticeStorage, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, test, totp } from "./helpers";
+import { api, credentials, expect, openDashboard, plainHttpNoticeStorage, postPastRateLimit, sessionKey, signIn, stateFile, submitPastRateLimit, test, totp, dashboardHeading } from "./helpers";
 
 const shots = process.env.SHOTS_DIR ?? "shots";
 const dataDir = process.env.PANEL_DATA_DIR;
@@ -58,7 +58,7 @@ test.describe("signed out", () => {
     await page.getByRole("button", { name: "Create project" }).click();
 
     // setup.finish either lands on the dashboard or, while it is not built, offers the way there.
-    const dashboard = page.getByRole("heading", { level: 1, name: "Dashboard" });
+    const dashboard = dashboardHeading(page);
     const openDashboard = page.getByRole("link", { name: "Open the dashboard" });
     await expect(dashboard.or(openDashboard)).toBeVisible();
     if (await openDashboard.isVisible()) await openDashboard.click();
@@ -205,7 +205,7 @@ test.describe("signed in", () => {
     const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog"));
     await dialog.getByRole("textbox").fill("smoke-temp");
     await dialog.getByRole("button", { name: "Delete project" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await expect(dashboardHeading(page)).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /smoke-temp/ })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
@@ -257,7 +257,7 @@ test.describe("signed in", () => {
     await page.goto("/no-such-page");
     await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
     await page.getByRole("link", { name: "Go to the dashboard" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await expect(dashboardHeading(page)).toBeVisible();
   });
 
   test("an invite link creates a member account", async ({ page, browser }) => {
@@ -287,7 +287,7 @@ test.describe("signed in", () => {
     await submitPastRateLimit(
       other,
       other.getByRole("button", { name: "Create account and accept" }),
-      other.getByRole("heading", { level: 1, name: "Dashboard" }),
+      dashboardHeading(other),
     );
     await fresh.close();
     expect(errors).toEqual([]);
@@ -322,7 +322,7 @@ test.describe("signed in", () => {
     // The owner just got 10 recovery codes, so the screen offers one.
     await expect(other.getByRole("button", { name: "Use a recovery code" })).toBeVisible();
     await other.getByLabel("Code").fill(totp(secret));
-    await submitPastRateLimit(other, other.getByRole("button", { name: "Verify" }), other.getByRole("heading", { level: 1, name: "Dashboard" }));
+    await submitPastRateLimit(other, other.getByRole("button", { name: "Verify" }), dashboardHeading(other));
     // Turn it off again (with the next code) so the specs after this one start from a plain account.
     await other.waitForTimeout(30_000 - (Date.now() % 30_000) + 500);
     const off = await api(other).post("/api/v1/auth.totpDisable", { data: { code: totp(secret) } });
