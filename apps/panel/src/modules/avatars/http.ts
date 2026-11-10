@@ -3,6 +3,7 @@
 //
 //   GET /api/avatars/<style>/<seed>.svg   a generated face; public, the same for everyone
 //   GET /api/avatars/user/<id>?v=<hash>   an uploaded image; only with its current hash
+//   GET /api/avatars/project/<id>?v=<hash> a project's image (0.2.6); the same rule
 //
 // Both cache for a year: a face never changes for its style and seed, and a
 // new upload is a new hash. An upload's URL is as private as the lists that
@@ -12,7 +13,7 @@
 import { avatarPathPrefix, isAvatarSeed, isAvatarStyle } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
-import { userAvatars } from "../../db/schema";
+import { projectImages, userAvatars } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { compressBody, minCompressBytes, pickEncoding } from "../../http/compress";
 import { renderAvatar } from "./render";
@@ -44,6 +45,11 @@ export function avatarRoutes(deps: Deps) {
   return new Elysia({ name: "avatars" })
     .get(`${avatarPathPrefix}/user/:userId`, ({ params, query }) => {
       const row = deps.db.select().from(userAvatars).where(eq(userAvatars.userId, params.userId)).get();
+      if (!row || typeof query.v !== "string" || query.v !== row.hash) return refuse(404);
+      return new Response(row.bytes, { headers: { ...imageHeaders, "content-type": row.contentType } });
+    })
+    .get(`${avatarPathPrefix}/project/:projectId`, ({ params, query }) => {
+      const row = deps.db.select().from(projectImages).where(eq(projectImages.projectId, params.projectId)).get();
       if (!row || typeof query.v !== "string" || query.v !== row.hash) return refuse(404);
       return new Response(row.bytes, { headers: { ...imageHeaders, "content-type": row.contentType } });
     })

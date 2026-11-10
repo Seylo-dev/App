@@ -101,7 +101,7 @@ function ProjectSection({
         )}
       >
         {item.enabled && <SortableGrip grip={item.grip} name={project.name} />}
-        <ProjectTile id={project.id} name={project.name} isProtected={project.protected} size="md" />
+        <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} size="md" />
         <Link
           to="/p/$projectId"
           params={{ projectId: project.id }}

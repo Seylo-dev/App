@@ -19,6 +19,7 @@ import { ProjectPeople, ShareDialog } from "../../../../components/project/proje
 import { ProjectSettings } from "../../../../components/project/project-settings";
 import { ServicesGrid, ServicesGridSkeleton } from "../../../../components/project/services-grid";
 import { SharedEnv } from "../../../../components/project/shared-env";
+import { ProjectTile } from "../../../../components/project-tile";
 import { QueryError } from "../../../../components/query-error";
 import { type MessageKey, t } from "../../../../i18n/t";
 import { useLiveTopic } from "../../../../lib/live";
@@ -75,7 +76,16 @@ function ProjectPage() {
               <span className="text-foreground">{data.name}</span>
             </>
           }
-          title={data.name}
+          title={
+            data.imageUrl ? (
+              <span className="flex items-center gap-3">
+                <ProjectTile id={data.id} name={data.name} imageUrl={data.imageUrl} isProtected={data.protected} size="md" />
+                {data.name}
+              </span>
+            ) : (
+              data.name
+            )
+          }
           subtitle={
             <span className="mt-1 flex flex-wrap gap-1.5 text-xs text-ink-strong">
               <Chip tone="track">{t("sidebar.serviceCount", { count: data.serviceCount })}</Chip>

@@ -229,7 +229,7 @@ function ProjectCard({
     >
       <div {...item.handle} className="relative flex items-center gap-2.5 px-4 py-[15px]">
         {item.enabled && <SortableGrip grip={item.grip} name={project.name} className="focus-visible:left-1" />}
-        <ProjectTile id={project.id} name={project.name} isProtected={project.protected} size="md" />
+        <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} size="md" />
         <Link
           to="/p/$projectId"
           params={{ projectId: project.id }}

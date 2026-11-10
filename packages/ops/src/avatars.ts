@@ -155,6 +155,11 @@ export function uploadedAvatarPath(userId: string, hash: string): string {
   return `${avatarPathPrefix}/user/${userId}?v=${hash}`;
 }
 
+/** A project's uploaded image (0.2.6); like a person's, the version is its content hash. */
+export function projectImagePath(projectId: string, hash: string): string {
+  return `${avatarPathPrefix}/project/${projectId}?v=${hash}`;
+}
+
 /** Images people may upload. Never SVG: an uploaded SVG could carry script. */
 export const avatarUploadTypes = ["image/png", "image/jpeg", "image/webp"] as const;
 export type AvatarUploadType = (typeof avatarUploadTypes)[number];

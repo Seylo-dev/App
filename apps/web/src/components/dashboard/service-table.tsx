@@ -344,7 +344,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 function ProjectName({ project, hidden }: { project: Project; hidden: boolean }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
-      <ProjectTile id={project.id} name={project.name} isProtected={project.protected} />
+      <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} />
       <span className="min-w-0 truncate text-[12.5px] text-ink-strong">{project.name}</span>
       {hidden && (
         <Chip tone="track" className="shrink-0 px-1.5 py-0 text-[11px]">

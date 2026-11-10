@@ -2,9 +2,10 @@
 // rows to the op shape.
 
 import { slug } from "@seylo/brand";
+import { projectImagePath } from "@seylo/ops";
 import { and, countDistinct, eq, inArray, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { grants, projectPrefs, projects, servicePlacements, services } from "../../db/schema";
+import { grants, projectImages, projectPrefs, projects, servicePlacements, services } from "../../db/schema";
 
 type ProjectRow = typeof projects.$inferSelect;
 
@@ -23,6 +24,8 @@ export interface ProjectView {
   project: ProjectRow;
   counts: ProjectCounts;
   prefs: ProjectPrefs;
+  /** The uploaded image's hash; null when the project shows its initial. */
+  imageHash: string | null;
 }
 
 const noPrefs: ProjectPrefs = { collapsed: false, position: null };
@@ -32,7 +35,7 @@ export function projectNetwork(projectId: string): string {
   return `${slug}-p-${projectId}`;
 }
 
-export function toProject({ project, counts, prefs }: ProjectView) {
+export function toProject({ project, counts, prefs, imageHash }: ProjectView) {
   return {
     id: project.id,
     name: project.name,
@@ -42,6 +45,7 @@ export function toProject({ project, counts, prefs }: ProjectView) {
     networkName: projectNetwork(project.id),
     collapsed: prefs.collapsed,
     position: prefs.position,
+    imageUrl: imageHash === null ? null : projectImagePath(project.id, imageHash),
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
   };
@@ -76,6 +80,14 @@ export function selectProjects(db: PanelDb, userId: string | null, projectId?: s
       .map((r) => [r.projectId, r.n]),
   );
   const guestCounts = guestCountsOf(db, ids);
+  const imageHashes = new Map(
+    db
+      .select({ projectId: projectImages.projectId, hash: projectImages.hash })
+      .from(projectImages)
+      .where(inArray(projectImages.projectId, ids))
+      .all()
+      .map((r) => [r.projectId, r.hash]),
+  );
   const prefs = new Map<string, ProjectPrefs>();
   if (userId) {
     const rowsForUser = db
@@ -94,6 +106,7 @@ export function selectProjects(db: PanelDb, userId: string | null, projectId?: s
       guestCount: guestCounts.get(project.id) ?? 0,
     },
     prefs: prefs.get(project.id) ?? noPrefs,
+    imageHash: imageHashes.get(project.id) ?? null,
   }));
   return views.sort(sidebarOrder);
 }

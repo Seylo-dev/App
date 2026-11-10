@@ -231,6 +231,7 @@ function project(id: string, name: string, serviceCount: number, nodeCount: numb
     networkName: `seylo-p-${id}`,
     collapsed: false,
     position: null,
+    imageUrl: null,
     createdAt: iso(30 * day),
     updatedAt: iso(day),
     ...extra,

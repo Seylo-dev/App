@@ -170,7 +170,7 @@ function ProjectRow({
               {/* The same sliding background as the main navigation and the service rows. It
                   follows the link's own active state, so it moves in the same commit as theirs. */}
               {isActive && <ActiveIndicator layoutId="sidebar-nav" className="rounded-control bg-accent" />}
-              <ProjectTile id={project.id} name={project.name} isProtected={project.protected} />
+              <ProjectTile id={project.id} name={project.name} imageUrl={project.imageUrl} isProtected={project.protected} />
               <span className={cn("truncate", hidden && "text-muted-foreground")}>{project.name}</span>
               <span className="ml-auto text-xs font-normal text-muted-foreground transition-opacity group-hover/row:opacity-0 group-has-[[data-project-menu]:focus-visible]/row:opacity-0 group-has-[[data-project-menu][data-state=open]]/row:opacity-0 pointer-coarse:opacity-100!">
                 {project.serviceCount}

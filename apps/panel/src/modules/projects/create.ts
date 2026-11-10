@@ -18,5 +18,10 @@ export const create = implement(projectOps.create, (input, ctx) => {
     .returning()
     .get();
   ctx.live.publish("panel", { type: "invalidate", ops: [projectOps.list.id] });
-  return toProject({ project: row, counts: { serviceCount: 0, nodeCount: 0, guestCount: 0 }, prefs: { collapsed: false, position: null } });
+  return toProject({
+    project: row,
+    counts: { serviceCount: 0, nodeCount: 0, guestCount: 0 },
+    prefs: { collapsed: false, position: null },
+    imageHash: null,
+  });
 });

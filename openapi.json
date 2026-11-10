@@ -53733,6 +53733,7 @@
                     "networkName",
                     "collapsed",
                     "position",
+                    "imageUrl",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -53779,6 +53780,17 @@
                         {
                           "minimum": 0,
                           "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageUrl": {
+                      "anyOf": [
+                        {
+                          "maxLength": 200,
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -53917,6 +53929,7 @@
                     "networkName",
                     "collapsed",
                     "position",
+                    "imageUrl",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -53963,6 +53976,17 @@
                         {
                           "minimum": 0,
                           "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageUrl": {
+                      "anyOf": [
+                        {
+                          "maxLength": 200,
+                          "type": "string"
                         },
                         {
                           "type": "null"
@@ -54035,6 +54059,7 @@
                           "networkName",
                           "collapsed",
                           "position",
+                          "imageUrl",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -54087,6 +54112,17 @@
                               }
                             ]
                           },
+                          "imageUrl": {
+                            "anyOf": [
+                              {
+                                "maxLength": 200,
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "createdAt": {
                             "format": "date-time",
                             "type": "string"
@@ -54110,6 +54146,147 @@
         "x-op-kind": "query",
         "x-permission": "signed-in",
         "x-mcp": true
+      }
+    },
+    "/api/v1/projects.removeImage": {
+      "post": {
+        "operationId": "projects.removeImage",
+        "summary": "Remove a project's image",
+        "description": "Deletes the project's uploaded image, so its initial shows again.",
+        "tags": [
+          "projects"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectId"
+                ],
+                "properties": {
+                  "projectId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "protected",
+                    "serviceCount",
+                    "nodeCount",
+                    "guestCount",
+                    "networkName",
+                    "collapsed",
+                    "position",
+                    "imageUrl",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]*$",
+                      "description": "Shown in the sidebar; unique, case-insensitive.",
+                      "type": "string"
+                    },
+                    "description": {
+                      "maxLength": 500,
+                      "type": "string"
+                    },
+                    "protected": {
+                      "type": "boolean"
+                    },
+                    "serviceCount": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "nodeCount": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "guestCount": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "networkName": {
+                      "type": "string"
+                    },
+                    "collapsed": {
+                      "type": "boolean"
+                    },
+                    "position": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageUrl": {
+                      "anyOf": [
+                        {
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "project:projects.update",
+        "x-mcp": false
       }
     },
     "/api/v1/projects.reorder": {
@@ -54262,6 +54439,154 @@
         "x-mcp": false
       }
     },
+    "/api/v1/projects.setImage": {
+      "post": {
+        "operationId": "projects.setImage",
+        "summary": "Set a project's image",
+        "description": "Shows an image instead of the project's initial, for everyone who sees the project. The file travels as a base64 data URL: PNG, JPEG or WebP, at most 1 MiB (the web app crops it to a square of 256 pixels first). SVG is refused. A new image replaces the old one.",
+        "tags": [
+          "projects"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectId",
+                  "dataUrl"
+                ],
+                "properties": {
+                  "projectId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "dataUrl": {
+                    "maxLength": 1398166,
+                    "pattern": "^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$",
+                    "errorMessage": "must be a PNG, JPEG or WebP image as a base64 data URL",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "protected",
+                    "serviceCount",
+                    "nodeCount",
+                    "guestCount",
+                    "networkName",
+                    "collapsed",
+                    "position",
+                    "imageUrl",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "pattern": "^[a-z0-9]{16}$",
+                      "description": "Panel-issued id.",
+                      "type": "string"
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]*$",
+                      "description": "Shown in the sidebar; unique, case-insensitive.",
+                      "type": "string"
+                    },
+                    "description": {
+                      "maxLength": 500,
+                      "type": "string"
+                    },
+                    "protected": {
+                      "type": "boolean"
+                    },
+                    "serviceCount": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "nodeCount": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "guestCount": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "networkName": {
+                      "type": "string"
+                    },
+                    "collapsed": {
+                      "type": "boolean"
+                    },
+                    "position": {
+                      "anyOf": [
+                        {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageUrl": {
+                      "anyOf": [
+                        {
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "project:projects.update",
+        "x-mcp": false
+      }
+    },
     "/api/v1/projects.update": {
       "post": {
         "operationId": "projects.update",
@@ -54328,6 +54653,7 @@
                     "networkName",
                     "collapsed",
                     "position",
+                    "imageUrl",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -54374,6 +54700,17 @@
                         {
                           "minimum": 0,
                           "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "imageUrl": {
+                      "anyOf": [
+                        {
+                          "maxLength": 200,
+                          "type": "string"
                         },
                         {
                           "type": "null"

@@ -1,4 +1,4 @@
-// Project settings: name and description, the internal git hosts its nodes
+// Project settings: name and description, its image (0.2.6), the internal git hosts its nodes
 // may clone from (admins only), and deleting an empty project. The
 // protected Panel project can be described but not renamed or deleted.
 
@@ -15,6 +15,7 @@ import { t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
 import type { Project } from "../../lib/types";
 import { InternalGitHosts } from "../git/internal-hosts";
+import { ProjectImageCard } from "./project-image-card";
 
 export function ProjectSettings({ project }: { project: Project }) {
   const navigate = useNavigate();
@@ -69,6 +70,8 @@ export function ProjectSettings({ project }: { project: Project }) {
           </div>
         </SectionCard>
       </form>
+
+      <ProjectImageCard project={project} />
 
       <InternalGitHosts projectId={project.id} projectName={project.name} />
 

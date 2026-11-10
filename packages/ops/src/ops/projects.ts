@@ -2,6 +2,7 @@
 // Collapsed state and sidebar order are per person.
 
 import { Type } from "@sinclair/typebox";
+import { avatarMaxBytes } from "../avatars";
 import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Empty, Id, Timestamp } from "../schemas";
@@ -30,6 +31,8 @@ export const Project = Type.Object({
   collapsed: Type.Boolean(),
   /** Place in the caller's sidebar order; null = not ordered yet (sorted by name after the ordered ones). */
   position: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  /** The project's uploaded image (/api/avatars/project/...); null shows its initial. New in 0.2.6. */
+  imageUrl: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -106,6 +109,44 @@ export const update = defineOp({
   output: Project,
   permission: permission.project("projects.update", (input: { projectId: string }) => input.projectId),
   mcp: true,
+  audit: true,
+});
+
+/** About 1 MiB as base64, plus the data URL's head (the same rule as avatars.upload). */
+const imageDataUrlMaxLength = Math.ceil((avatarMaxBytes * 4) / 3) + 64;
+
+export const setImage = defineOp({
+  id: "projects.setImage",
+  kind: "mutation",
+  summary: "Set a project's image",
+  description:
+    "Shows an image instead of the project's initial, for everyone who sees the project. The file travels as a base64 data URL: PNG, JPEG or WebP, at most 1 MiB (the web app crops it to a square of 256 pixels first). SVG is refused. A new image replaces the old one.",
+  input: Type.Object({
+    projectId: Id,
+    dataUrl: Type.String({
+      maxLength: imageDataUrlMaxLength,
+      pattern: "^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$",
+      errorMessage: "must be a PNG, JPEG or WebP image as a base64 data URL",
+    }),
+  }),
+  output: Project,
+  permission: permission.project("projects.update", (input: { projectId: string }) => input.projectId),
+  // The image itself stays out of the audit log; the row says the image changed.
+  sensitive: { input: ["dataUrl"] },
+  mcp: false,
+  audit: true,
+  maxBodyBytes: 2 * 1024 * 1024,
+});
+
+export const removeImage = defineOp({
+  id: "projects.removeImage",
+  kind: "mutation",
+  summary: "Remove a project's image",
+  description: "Deletes the project's uploaded image, so its initial shows again.",
+  input: Type.Object({ projectId: Id }),
+  output: Project,
+  permission: permission.project("projects.update", (input: { projectId: string }) => input.projectId),
+  mcp: false,
   audit: true,
 });
 

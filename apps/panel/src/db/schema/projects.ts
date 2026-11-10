@@ -4,7 +4,7 @@
 // deploys.ts (deployments, builds, previews), env.ts (env and secrets),
 // networking.ts (domains, ports, tunnels), runtime.ts (crash reports).
 
-import { type AnySQLiteColumn, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, blob, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { createdAt, id, json, sealed, timestamp, updatedAt } from "./columns";
 import { users } from "./identity";
 import { nodes } from "./infra";
@@ -48,6 +48,21 @@ export const projectPrefs = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.projectId] }), index("project_prefs_project_idx").on(t.projectId)],
 );
+
+/**
+ * A project's uploaded image (projects.setImage, 0.2.6): PNG, JPEG or WebP
+ * bytes, served at /api/avatars/project/<id>?v=<hash>. No row = its initial.
+ */
+export const projectImages = sqliteTable("project_images", {
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  contentType: text("content_type").notNull(),
+  /** First 32 hex characters of the bytes' SHA-256: the version in the image's URL. */
+  hash: text("hash").notNull(),
+  bytes: blob("bytes", { mode: "buffer" }).notNull(),
+  createdAt: createdAt(),
+});
 
 export type ServiceKind =
   | "app"
