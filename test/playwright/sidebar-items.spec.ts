@@ -31,10 +31,10 @@ test.describe("sidebar items", () => {
       await page.goto("/settings");
       await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Preferences" }).click();
       await expect(page).toHaveURL(/\/settings\/preferences$/);
-      for (const name of ["Dashboard", "Nodes", "Templates", "Activity", "Approvals"]) await expect(toggle(page, name)).toBeChecked();
+      for (const name of ["Dashboard", "Nodes", "Templates", "Activity", "Assistant", "Approvals"]) await expect(toggle(page, name)).toBeChecked();
       // Settings has no switch: it is where the others come back.
       await expect(toggle(page, "Settings")).toHaveCount(0);
-      await expect(page.getByRole("switch")).toHaveCount(6);
+      await expect(page.getByRole("switch")).toHaveCount(7);
       await expect(navLink(page, "Templates")).toBeVisible();
       await expect(navLink(page, "Activity")).toBeVisible();
 
