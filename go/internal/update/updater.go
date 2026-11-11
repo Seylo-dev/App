@@ -65,6 +65,13 @@ func (s *Service) PanelArrived(moveID string) {
 	}
 }
 
+// AwaitsCommit reports whether the moved panel of move id waits on this
+// node for its switch: the connector does not dial the address staged for
+// that move before it.
+func (s *Service) AwaitsCommit(moveID string) bool {
+	return s.Mover != nil && s.Mover.AwaitsCommit(moveID)
+}
+
 // UpdateToLatest self-updates an agent the panel refused as too old.
 func (s *Service) UpdateToLatest(ctx context.Context, minVersion string) error {
 	if s.Agent == nil {

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -225,7 +226,8 @@ func (f *moveFake) panelSpec() *agentv1.ServiceSpec {
 }
 
 // movedPanel is the moved panel answering on 127.0.0.1: the agents' TLS
-// port (an httptest TLS server, its key is the pin) and /api/health.
+// port (an httptest TLS server, its key is the pin) and /api/health, with
+// the move id it names while it waits for the switch.
 type movedPanel struct {
 	tls, http *httptest.Server
 	pin       string
@@ -243,7 +245,7 @@ func startMovedPanel(t *testing.T, version string) *movedPanel {
 			http.NotFound(w, r)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": p.version})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": p.version, "moveId": testMove})
 	}))
 	t.Cleanup(p.http.Close)
 	return p
@@ -930,6 +932,263 @@ func TestAbortRefusedOnceTheMovedPanelIsInUse(t *testing.T) {
 		t.Fatal("the panel in use was stopped")
 	}
 	gone(t, fx.path("update", moveJournal))
+}
+
+// startedTarget is a target whose moved panel of testMove runs healthy and
+// waits for the switch.
+func startedTarget(t *testing.T) *moveFixture {
+	t.Helper()
+	fx := newMoveFixture(t)
+	prepareTarget(t, fx)
+	p := startMovedPanel(t, "0.2.8")
+	if _, err := fx.m.Start(context.Background(), fx.startRequest(t, p)); err != nil {
+		t.Fatal(err)
+	}
+	return fx
+}
+
+func commitReq(id string) *agentv1.CommitMovedPanelRequest {
+	return &agentv1.CommitMovedPanelRequest{MoveId: id}
+}
+
+func journalPhase(t *testing.T, fx *moveFixture) movePhase {
+	t.Helper()
+	var j panelMove
+	if err := readJSON(fx.path("update", moveJournal), &j); err != nil {
+		t.Fatal(err)
+	}
+	return j.Phase
+}
+
+// The switch: recorded in the journal, then the marker the panel waits
+// for; again for the same move is fine, and nothing undoes it after.
+func TestCommitMovedPanel(t *testing.T) {
+	fx := startedTarget(t)
+	ctx := context.Background()
+	if !fx.m.AwaitsCommit(testMove) || fx.m.AwaitsCommit("mv0000000000000f") {
+		t.Fatal("AwaitsCommit before the switch")
+	}
+	if err := fx.m.Commit(ctx, commitReq("mv0000000000000f")); reasonOf(err) != ReasonNotStarted || codeOf(err) != agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION {
+		t.Fatalf("another move's commit = %v", err)
+	}
+	gone(t, fx.path("panel", commitMarker))
+	if os.Geteuid() == 0 {
+		// The panel reads the marker as its own user.
+		if err := os.Chown(fx.path("panel"), 61000, 61000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, fx.path("panel", commitMarker)); got != testMove {
+		t.Fatalf("marker = %q", got)
+	}
+	info, err := os.Stat(fx.path("panel", commitMarker))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("marker mode = %v, %v", info, err)
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); os.Geteuid() == 0 && ok && (st.Uid != 61000 || st.Gid != 61000) {
+		t.Fatalf("marker owned by %d:%d, want the panel user", st.Uid, st.Gid)
+	}
+	if phase := journalPhase(t, fx); phase != moveCommitted {
+		t.Fatalf("journal phase %q", phase)
+	}
+	if fx.m.AwaitsCommit(testMove) {
+		t.Fatal("still waiting for the switch after it")
+	}
+	if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+		t.Fatalf("again: %v", err)
+	}
+
+	// An abort from now on is refused and leaves the panel alone.
+	err = fx.m.Abort(ctx, &agentv1.AbortMovedPanelRequest{MoveId: testMove})
+	if reasonOf(err) != ReasonCommitted || codeOf(err) != agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION {
+		t.Fatalf("abort after the commit = %v", err)
+	}
+	if len(fx.f.running()) != 1 || fx.f.panelSpec() == nil || readFile(t, fx.path("panel", "master.key")) != "moved master key" {
+		t.Fatal("an abort after the commit touched the moved panel")
+	}
+	// A restart keeps it.
+	if err := fx.m.Resume(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if phase := journalPhase(t, fx); phase != moveCommitted || len(fx.f.running()) != 1 {
+		t.Fatalf("after a restart: phase %q, running %v", phase, fx.f.running())
+	}
+
+	// This agent reaches the moved panel: the journal goes, the marker
+	// still answers for the move.
+	fx.m.Arrived(testMove)
+	waitFor(t, "the move over here", func() bool { return !exists(fx.path("update", moveJournal)) })
+	if err := fx.m.Abort(ctx, &agentv1.AbortMovedPanelRequest{MoveId: testMove}); reasonOf(err) != ReasonCommitted {
+		t.Fatalf("abort after the arrival = %v", err)
+	}
+	if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+		t.Fatalf("commit after the arrival = %v", err)
+	}
+	if len(fx.f.running()) != 1 || readFile(t, fx.path("panel", "panel.db")) != sqliteFile("moved panel") {
+		t.Fatal("the moved panel went")
+	}
+}
+
+// No healthy moved panel of that move: refused with notStarted (nothing
+// switched), and the abort still undoes everything.
+func TestCommitRefusedWithoutAMovedPanel(t *testing.T) {
+	ctx := context.Background()
+	t.Run("nothing here", func(t *testing.T) {
+		fx := newMoveFixture(t)
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonNotStarted {
+			t.Fatalf("err = %v", err)
+		}
+		if err := fx.m.Commit(ctx, commitReq("../x")); reasonOf(err) != ReasonBadRequest {
+			t.Fatalf("bad id = %v", err)
+		}
+	})
+	t.Run("only imported", func(t *testing.T) {
+		fx := newMoveFixture(t)
+		prepareTarget(t, fx)
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonNotStarted {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("still starting", func(t *testing.T) {
+		fx := startedTarget(t)
+		var j panelMove
+		if err := readJSON(fx.path("update", moveJournal), &j); err != nil {
+			t.Fatal(err)
+		}
+		j.Phase = moveStarting
+		if err := writeJSON(fx.path("update", moveJournal), &j); err != nil {
+			t.Fatal(err)
+		}
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonNotStarted {
+			t.Fatalf("err = %v", err)
+		}
+		gone(t, fx.path("panel", commitMarker))
+	})
+	t.Run("panel stopped", func(t *testing.T) {
+		fx := startedTarget(t)
+		fx.f.mu.Lock()
+		for _, c := range fx.f.containers {
+			c.Running = false
+		}
+		fx.f.mu.Unlock()
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonNotStarted {
+			t.Fatalf("err = %v", err)
+		}
+		if phase := journalPhase(t, fx); phase != moveHealthy {
+			t.Fatalf("phase %q", phase)
+		}
+		if err := fx.m.Abort(ctx, &agentv1.AbortMovedPanelRequest{MoveId: testMove}); err != nil {
+			t.Fatal(err)
+		}
+		targetIsBack(t, fx)
+	})
+	t.Run("docker does not answer", func(t *testing.T) {
+		fx := startedTarget(t)
+		fx.f.mu.Lock()
+		fx.f.listErr = errors.New("docker is restarting")
+		fx.f.mu.Unlock()
+		// Not a refusal: the old panel tries again.
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonCommit || codeOf(err) != agentv1.StatusCode_STATUS_CODE_UNAVAILABLE {
+			t.Fatalf("err = %v", err)
+		}
+		if phase := journalPhase(t, fx); phase != moveHealthy {
+			t.Fatalf("phase %q", phase)
+		}
+	})
+	t.Run("busy", func(t *testing.T) {
+		saved := moveCommitWait
+		t.Cleanup(func() { moveCommitWait = saved })
+		moveCommitWait = 20 * time.Millisecond
+		fx := startedTarget(t)
+		release, _ := fx.lock.TryAcquire(holdPanelUpdate)
+		defer release()
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonBusy || codeOf(err) != agentv1.StatusCode_STATUS_CODE_ABORTED {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+// A marker that cannot be written switched nothing: the journal goes back
+// to healthy, so an abort still undoes the move; a retry writes it.
+func TestCommitMarkerFailure(t *testing.T) {
+	fx := startedTarget(t)
+	ctx := context.Background()
+	// A folder in the marker's place: the rename onto it fails, as root too.
+	if err := os.Mkdir(fx.path("panel", commitMarker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonCommit || codeOf(err) != agentv1.StatusCode_STATUS_CODE_UNAVAILABLE {
+		t.Fatalf("err = %v", err)
+	}
+	if phase := journalPhase(t, fx); phase != moveHealthy {
+		t.Fatalf("phase %q after a failed marker", phase)
+	}
+	if !fx.m.AwaitsCommit(testMove) {
+		t.Fatal("the failed switch counts as done")
+	}
+	if err := os.Remove(fx.path("panel", commitMarker)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, fx.path("panel", commitMarker)); got != testMove {
+		t.Fatalf("marker = %q", got)
+	}
+}
+
+// The agent stopped between the journal and the marker: the next start
+// writes the marker, keeps the moved panel and never undoes it.
+func TestResumeFinishesACommit(t *testing.T) {
+	fx := startedTarget(t)
+	var j panelMove
+	if err := readJSON(fx.path("update", moveJournal), &j); err != nil {
+		t.Fatal(err)
+	}
+	j.Phase = moveCommitted
+	if err := writeJSON(fx.path("update", moveJournal), &j); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.m.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, fx.path("panel", commitMarker)); got != testMove {
+		t.Fatalf("marker = %q", got)
+	}
+	if phase := journalPhase(t, fx); phase != moveCommitted || len(fx.f.running()) != 1 || fx.f.panelSpec() == nil {
+		t.Fatalf("phase %q, running %v: a committed move was undone", phase, fx.f.running())
+	}
+	// Once this agent dials the moved panel, a restart ends the move here.
+	fx.url = "https://127.0.0.1:" + strconv.Itoa(int(j.AgentTLSPort))
+	if err := fx.m.Resume(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	gone(t, fx.path("update", moveJournal))
+}
+
+// A committed move whose agent has not arrived yet is never undone to make
+// room for another move.
+func TestAnotherMoveNeverUndoesACommittedOne(t *testing.T) {
+	fx := startedTarget(t)
+	ctx := context.Background()
+	if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+		t.Fatal(err)
+	}
+	// Its container stopped (a crash), so nothing refuses the import as a running panel.
+	fx.f.mu.Lock()
+	for _, c := range fx.f.containers {
+		c.Running = false
+	}
+	fx.f.mu.Unlock()
+	if _, err := fx.importData(t, "mv0000000000000f", panelData()); reasonOf(err) != ReasonMoveUnfinished {
+		t.Fatalf("import of another move = %v", err)
+	}
+	if readFile(t, fx.path("panel", "master.key")) != "moved master key" || journalPhase(t, fx) != moveCommitted {
+		t.Fatal("the committed move was undone")
+	}
 }
 
 // Arriving ends the move here; the retired copy of this same panel that

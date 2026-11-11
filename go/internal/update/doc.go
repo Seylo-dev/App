@@ -19,8 +19,10 @@
 //     manifest), swaps them in, starts the panel from the spec the moved
 //     panel will send and proves it is the same panel (the agents' TLS
 //     pin, the version); a journal undoes all of it after a failure, an
-//     abort or a restart. On the old panel node it retires the panel
-//     (stopped, never started again) and later deletes the old copy.
+//     abort or a restart, until CommitMovedPanel switches to it (a marker
+//     file in the panel's data folder), after which nothing undoes it.
+//     On the old panel node it retires the panel (stopped, never started
+//     again) and later deletes the old copy.
 //   - UpdateDocker upgrades Docker Engine with the distribution's package
 //     manager; Reboot reboots the machine after a short delay.
 //   - The Docker version check (docker_check.go, node.docker-check.v1)

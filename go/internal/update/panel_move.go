@@ -40,9 +40,13 @@ import (
 // key nodes pin and answers with the expected version. A journal
 // (update/panel-move.json) records each step before it happens, so a
 // failed start, AbortMovedPanel or an agent restart puts everything back:
-// a half-started panel is never left behind. Once this node's agent
-// reaches the moved panel at its staged address (Arrived), the move is
-// over here and the journal goes.
+// a half-started panel is never left behind. The moved panel then waits
+// on standby (it answers agents with 503) until CommitMovedPanel, the
+// switch: the journal records it, then the marker file move-commit in the
+// panel's data folder tells the panel to take agents. Nothing undoes a
+// committed move, and this node's agent dials the moved panel (its staged
+// loopback address) only after it. Once that agent reaches the moved
+// panel (Arrived), the move is over here and the journal goes.
 //
 // On the old panel node: RetirePanel answers, then stops the panel (its
 // container and data folder stay, stopped); a journal (panel-retire.json)
@@ -67,6 +71,10 @@ const (
 	registryIncoming = "registry-incoming"
 	panelBefore      = "panel-before-"
 	registryBefore   = "registry-before-"
+	// commitMarker is the switch marker in the moved panel's data folder:
+	// it holds the move id once CommitMovedPanel committed that move. The
+	// panel stops refusing agents when it sees it.
+	commitMarker = "move-commit"
 )
 
 // Timing and sizes. Variables so tests can change them.
@@ -82,6 +90,10 @@ var (
 	// moveAbortWait is how long AbortMovedPanel waits for a step of the
 	// move that is still running.
 	moveAbortWait = 2 * time.Minute
+	// moveCommitWait is how long CommitMovedPanel waits for the update
+	// lock, inside the old panel's 30 s call timeout; a busy answer is
+	// tried again.
+	moveCommitWait = 20 * time.Second
 	// moveUndoTimeout bounds putting things back after a failed start.
 	moveUndoTimeout = 2 * time.Minute
 	// moveReserve is the space an import leaves free on top of what it needs.
@@ -119,6 +131,15 @@ const (
 	ReasonVersion        = "version"
 	ReasonUndo           = "undo"
 	ReasonCancelled      = "cancelled"
+	// ReasonNotStarted refuses CommitMovedPanel: no healthy moved panel of
+	// that move runs here, so nothing switched and the move can be aborted.
+	ReasonNotStarted = "notStarted"
+	// ReasonCommitted refuses AbortMovedPanel after CommitMovedPanel.
+	ReasonCommitted = "committed"
+	// ReasonCommit is a CommitMovedPanel that failed for a reason that may
+	// pass (the journal or the marker could not be written, Docker did not
+	// answer): the old panel tries again.
+	ReasonCommit = "commit"
 )
 
 // MoveError is a refused or failed step of a move: the status code the
@@ -288,6 +309,7 @@ func (m *PanelMover) panelAside(id string) string {
 func (m *PanelMover) registryAside(id string) string {
 	return filepath.Join(m.root(), registryBefore+id)
 }
+func (m *PanelMover) marker() string     { return filepath.Join(m.panelDir(), commitMarker) }
 func (m *PanelMover) journal() string    { return filepath.Join(updateDir(m.root()), moveJournal) }
 func (m *PanelMover) retireFile() string { return filepath.Join(updateDir(m.root()), retireJournal) }
 
@@ -328,6 +350,9 @@ const (
 	// moveHealthy: StartMovedPanel succeeded; the panel waits for the
 	// switch (or an abort).
 	moveHealthy movePhase = "healthy"
+	// moveCommitted: CommitMovedPanel switched to the moved panel. Nothing
+	// undoes it; the journal waits for this node's agent to reach it.
+	moveCommitted movePhase = "committed"
 )
 
 func (m *PanelMover) readJournal() (*panelMove, error) {
@@ -411,6 +436,9 @@ func (m *PanelMover) settleOtherMove(ctx context.Context, id string) error {
 		return refusedMove(ReasonMoveUnfinished, "the journal of an earlier panel move cannot be read (%v); remove %s once nothing of that move runs", err, m.journal())
 	case j.MoveID == id:
 		return refusedMove(ReasonMoveUnfinished, "move %s was started on this node already; abort it first", id)
+	case j.Phase == moveCommitted:
+		// The panel switched to that copy: it is the panel now, never undone.
+		return refusedMove(ReasonMoveUnfinished, "move %s switched the panel to this node and this node's agent has not reached it yet", j.MoveID)
 	}
 	m.opts.Logger.Warn("panel move: undoing an earlier move to this node that never finished", "move_id", j.MoveID, "phase", j.Phase)
 	if err := m.undo(ctx, j); err != nil {
@@ -465,7 +493,7 @@ func (m *PanelMover) Start(ctx context.Context, req *agentv1.StartMovedPanelRequ
 	ctx, end := m.beginStep(ctx, id)
 	defer end()
 
-	if j, err := m.readJournal(); err == nil && j.MoveID == id && j.Phase == moveHealthy {
+	if j, err := m.readJournal(); err == nil && j.MoveID == id && (j.Phase == moveHealthy || j.Phase == moveCommitted) {
 		// A retried call: answer again once the panel still runs.
 		if list, err := m.panelContainers(ctx); err == nil && anyRunning(list) {
 			return &agentv1.StartMovedPanelResponse{Version: j.Version}, nil
@@ -645,10 +673,11 @@ func (m *PanelMover) checkStarted(ctx context.Context, j *panelMove, pin []byte,
 	}
 }
 
-// Abort undoes move req.move_id on this node at whatever step it is: the
-// panel it started goes, the folders it set aside come back and the
-// staged copies (master.key and the agents' TLS key among them) are
-// deleted. Without a journal of that move only its staging can exist.
+// Abort undoes move req.move_id on this node at whatever step before the
+// switch it is: the panel it started goes, the folders it set aside come
+// back and the staged copies (master.key and the agents' TLS key among
+// them) are deleted. Without a journal of that move only its staging can
+// exist. A committed move is refused: the moved panel may hold nodes.
 func (m *PanelMover) Abort(ctx context.Context, req *agentv1.AbortMovedPanelRequest) error {
 	id := req.GetMoveId()
 	if err := checkMoveID(id); err != nil {
@@ -663,10 +692,15 @@ func (m *PanelMover) Abort(ctx context.Context, req *agentv1.AbortMovedPanelRequ
 	defer release()
 	j, err := m.readJournal()
 	switch {
+	case err == nil && j.MoveID == id && j.Phase == moveCommitted,
+		errors.Is(err, fs.ErrNotExist) && m.committed(id):
+		// The switch happened (without a journal: and this agent reached
+		// the moved panel since). The moved panel is the panel now.
+		return refusedMove(ReasonCommitted, "move %s was committed: the moved panel on this node is the panel now", id)
 	case err == nil && j.MoveID == id && j.Phase == moveHealthy && m.servesHere(j):
 		// This agent reached the moved panel at its staged address: it is
 		// the panel in use now, and an abort from anywhere must not stop it.
-		m.commit(j)
+		m.finish(j)
 		return refusedMove(ReasonPanelHere, "move %s is over: the moved panel runs on this node and is in use", id)
 	case err == nil && j.MoveID == id:
 		if err := m.undo(ctx, j); err != nil {
@@ -683,6 +717,9 @@ func (m *PanelMover) Abort(ctx context.Context, req *agentv1.AbortMovedPanelRequ
 // so it never deletes a folder a panel may still use, and keeps the
 // journal then; running it again continues from there.
 func (m *PanelMover) undo(ctx context.Context, j *panelMove) error {
+	if j.Phase == moveCommitted {
+		return fmt.Errorf("move %s was committed: the moved panel is the panel and is never undone", j.MoveID)
+	}
 	if j.Phase != moveActivating {
 		// Out of the desired state first, so reconcile does not start it
 		// again, then every panel container here: none ran before the move.
@@ -792,15 +829,131 @@ func (m *PanelMover) Arrived(id string) {
 		}
 		defer release()
 		j, err := m.readJournal()
-		if err != nil || j.MoveID != id || j.Phase != moveHealthy {
+		if err != nil || j.MoveID != id || (j.Phase != moveCommitted && j.Phase != moveHealthy) {
 			return
 		}
-		m.commit(j)
+		m.finish(j)
 	}()
 }
 
-// commit ends a move whose panel this node now serves.
-func (m *PanelMover) commit(j *panelMove) {
+// Commit is the switch of move req.move_id (CommitMovedPanel): the moved
+// panel waiting here takes agents from now on. The journal records it
+// first, then the marker file tells the panel; nothing undoes the move
+// after that. Refused with notStarted when no healthy moved panel of that
+// move runs here, so the old panel knows nothing switched and aborts.
+// Calling it again for the same move succeeds.
+func (m *PanelMover) Commit(ctx context.Context, req *agentv1.CommitMovedPanelRequest) error {
+	id := req.GetMoveId()
+	if err := checkMoveID(id); err != nil {
+		return err
+	}
+	release, holder, ok := m.lock.AcquireWithin(ctx, holdPanelMove, moveCommitWait, panelSwapHolds)
+	if !ok {
+		return busyMove(holder)
+	}
+	defer release()
+	j, err := m.readJournal()
+	switch {
+	case errors.Is(err, fs.ErrNotExist) && m.committed(id):
+		// Committed, and this agent reached the moved panel since.
+		return nil
+	case errors.Is(err, fs.ErrNotExist):
+		return refusedMove(ReasonNotStarted, "no moved panel of move %s waits on this node", id)
+	case err != nil:
+		return refusedMove(ReasonNotStarted, "the panel move journal cannot be read (%v), so no moved panel of move %s is known here", err, id)
+	case j.MoveID != id:
+		return refusedMove(ReasonNotStarted, "no moved panel of move %s waits on this node (the journal is move %s's)", id, j.MoveID)
+	case j.Phase == moveCommitted:
+		// A retried call. An agent that stopped between the journal and
+		// the marker wrote no marker.
+		if err := m.writeMarker(id); err != nil {
+			return failedMove(ReasonCommit, err)
+		}
+		return nil
+	case j.Phase != moveHealthy:
+		return refusedMove(ReasonNotStarted, "the moved panel of move %s has not started (%s)", id, j.Phase)
+	}
+	list, err := m.panelContainers(ctx)
+	if err != nil {
+		return failedMove(ReasonCommit, err)
+	}
+	if !anyRunning(list) {
+		return refusedMove(ReasonNotStarted, "the moved panel of move %s does not run on this node", id)
+	}
+	j.Phase = moveCommitted
+	if err := m.writeJournal(j); err != nil {
+		return failedMove(ReasonCommit, err)
+	}
+	if err := m.writeMarker(id); err != nil {
+		// Without the marker nothing switched: an abort may still undo it.
+		j.Phase = moveHealthy
+		if jerr := m.writeJournal(j); jerr != nil {
+			m.opts.Logger.Error("panel move: the journal stays committed; the next commit writes the marker", "move_id", id, "err", jerr)
+		}
+		return failedMove(ReasonCommit, err)
+	}
+	m.opts.Logger.Warn("panel move: committed; the moved panel on this node takes the nodes from now on", "move_id", id)
+	return nil
+}
+
+// AwaitsCommit reports whether a moved panel of move id waits on this node
+// for the switch. Until then this agent must not dial the address staged
+// for that move (the moved panel on this machine): it would get there
+// before the old panel knows whether the move goes through.
+func (m *PanelMover) AwaitsCommit(id string) bool {
+	j, err := m.readJournal()
+	return err == nil && j.MoveID == id && j.Phase != moveCommitted
+}
+
+// committed reports whether the marker in the panel's data folder names
+// move id: that move was committed on this node.
+func (m *PanelMover) committed(id string) bool {
+	b, err := os.ReadFile(m.marker())
+	return err == nil && string(b) == id
+}
+
+// writeMarker writes the switch marker of move id into the moved panel's
+// data folder: through a temp file and a rename, so the panel never reads
+// half of it, owned like the folder (the panel user) and 0600.
+func (m *PanelMover) writeMarker(id string) error {
+	if m.committed(id) {
+		return nil
+	}
+	dir := m.panelDir()
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("the moved panel's data folder: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a folder", dir)
+	}
+	tmp, err := os.CreateTemp(dir, "."+commitMarker+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("writing the switch marker: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	_, err = tmp.WriteString(id)
+	if err == nil {
+		err = tmp.Chmod(0o600)
+	}
+	if err == nil {
+		chownLike(tmp.Name(), info)
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), m.marker())
+	}
+	if err != nil {
+		return fmt.Errorf("writing the switch marker: %w", err)
+	}
+	return nil
+}
+
+// finish ends a move whose panel this node now serves.
+func (m *PanelMover) finish(j *panelMove) {
 	if j.AsideRetired {
 		if err := secureRemoveAll(m.panelAside(j.MoveID)); err != nil {
 			m.opts.Logger.Error("panel move: deleting the earlier copy of the panel", "err", err)
@@ -832,10 +985,12 @@ func (m *PanelMover) servesHere(j *panelMove) bool {
 // Resume runs once at agent start. A move journal left before the healthy
 // phase is undone: the start never answered, so the panel aborts the move
 // anyway, and a half-started panel must not stay. A healthy one waits for
-// the panel's switch or abort, unless this agent already serves it. A
-// retire still in its first phase is finished, unless a moved panel waits
-// here (the retire journal is then the old copy's, set aside by the move,
-// and the panel that runs is the moved one).
+// the panel's switch or abort, a committed one for this agent to reach it
+// (with its marker written again, should the agent have stopped before
+// that), unless this agent already serves it. A retire still in its first
+// phase is finished, unless a moved panel waits here (the retire journal
+// is then the old copy's, set aside by the move, and the panel that runs
+// is the moved one).
 func (m *PanelMover) Resume(ctx context.Context) error {
 	waiting, err := m.resumeMove(ctx)
 	if err != nil || waiting {
@@ -858,15 +1013,19 @@ func (m *PanelMover) resumeMove(ctx context.Context) (bool, error) {
 		return false, nil
 	case err != nil:
 		return true, fmt.Errorf("reading the panel move journal: %w", err)
-	case j.Phase != moveHealthy:
+	case j.Phase != moveHealthy && j.Phase != moveCommitted:
 		m.opts.Logger.Warn("panel move: the agent restarted while the moved panel started; putting everything back", "move_id", j.MoveID, "phase", j.Phase)
 		if err := m.undo(ctx, j); err != nil {
 			return true, fmt.Errorf("undoing the interrupted panel move: %w", err)
 		}
 		return false, nil
 	case m.servesHere(j):
-		m.commit(j)
+		m.finish(j)
 		return false, nil
+	case j.Phase == moveCommitted:
+		if err := m.writeMarker(j.MoveID); err != nil {
+			return true, fmt.Errorf("the committed panel move %s: %w", j.MoveID, err)
+		}
 	}
 	return true, nil
 }
