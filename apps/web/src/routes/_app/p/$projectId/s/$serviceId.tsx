@@ -1,15 +1,17 @@
 // Layout of every service screen: breadcrumb, header with the run actions,
-// the live usage strip on runtime tabs, and the section tabs for the
+// the live usage strip (on every tab, so the tabs below never move when
+// you switch), and the section tabs for the
 // service's kind. Tabs render even when services.get fails, so a screen
 // whose own ops work is still reachable.
 
-import { projects } from "@seylo/ops";
+import { domains, projects } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { EnterOnChange } from "@seylo/ui/components/motion";
 import { SkeletonText } from "@seylo/ui/components/skeleton";
 import { TabIndicator, TabList, tabClassName } from "@seylo/ui/components/tabs";
-import { createFileRoute, Link, Outlet, useChildMatches, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useChildMatches } from "@tanstack/react-router";
 import { DataCopyNote } from "../../../../../components/service/copy/data-copy-note";
+import { domainsNeedingSetup } from "../../../../../components/service/domains/needs-setup";
 import { OpErrorNote } from "../../../../../components/service/op-state";
 import { ParentCrumb } from "../../../../../components/service/parent-crumb";
 import { ServiceHeader } from "../../../../../components/service/service-header";
@@ -17,7 +19,7 @@ import { ServiceHeaderSkeleton, UsageStripSkeleton } from "../../../../../compon
 import { prefetchServiceLayout } from "../../../../../components/service/tab-prefetch";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
 import { useService } from "../../../../../components/service/use-service";
-import { type TabPath, tabsFor, usageStripTabs } from "../../../../../components/service-tabs";
+import { tabsFor } from "../../../../../components/service-tabs";
 import { t } from "../../../../../i18n/t";
 import { useLiveTopic } from "../../../../../lib/live";
 
@@ -32,10 +34,10 @@ function ServiceLayout() {
   const project = useOp(projects.get, { projectId });
   const service = useService();
   useLiveTopic(`service:${serviceId}`);
-  const tabPath = useRouterState({
-    select: (s) => (s.location.pathname.split(`/s/${serviceId}`)[1] ?? "").replace(/^\//, "").split("/")[0] as TabPath,
-  });
   const tabs = tabsFor(service.data?.kind);
+  // The same query the Domains tab and the overview read: the count costs nothing more.
+  const domainList = useOp(domains.list, { serviceId }, { enabled: tabs.some((tab) => tab.path === "domains") });
+  const domainsToFix = domainsNeedingSetup(domainList.data?.domains);
   const tabMatch = useChildMatches({ select: (matches) => matches[0]?.id ?? "" });
   const parent = service.data?.parentId;
 
@@ -59,8 +61,8 @@ function ServiceLayout() {
         <OpErrorNote error={service.error} />
       )}
       {service.data && <DataCopyNote service={service.data} />}
-      {service.isPending && usageStripTabs.has(tabPath) && <UsageStripSkeleton />}
-      {service.data && usageStripTabs.has(tabPath) && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
+      {service.isPending && <UsageStripSkeleton />}
+      {service.data && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
       {/*
         A phone keeps one swipe row: the tabs scroll sideways (the hidden edge fades) and TabList keeps
         the current tab in view. From md up every tab shows, since a mouse cannot scroll a sideways row:
@@ -85,6 +87,15 @@ function ServiceLayout() {
               <>
                 {isActive && <TabIndicator layoutId="service-tabs" />}
                 {t(tab.label)}
+                {tab.path === "domains" && domainsToFix > 0 && (
+                  <span
+                    title={t("service.tabs.domainsToFix", { count: domainsToFix })}
+                    className="ml-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-chip-red-bg px-1 text-[11px] font-semibold text-chip-red-fg"
+                  >
+                    <span aria-hidden="true">{domainsToFix}</span>
+                    <span className="sr-only">{t("service.tabs.domainsToFix", { count: domainsToFix })}</span>
+                  </span>
+                )}
               </>
             )}
           </Link>

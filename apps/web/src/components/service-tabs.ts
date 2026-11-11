@@ -118,6 +118,3 @@ export function tabsFor(kind: ServiceKind | undefined): readonly ServiceTab[] {
       return appTabs;
   }
 }
-
-/** Tabs that show the live usage strip under the header (Service.dc.html shows it with the console). */
-export const usageStripTabs: ReadonlySet<TabPath> = new Set<TabPath>(["", "console", "logs", "metrics"]);
