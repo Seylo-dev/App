@@ -128,14 +128,16 @@ theme presets). `test/playwright/run.sh --project smoke` runs one suite;
 `make e2e` builds test-signed releases (agents, panel image, installer),
 creates three fresh VMs (two Colima VMs with Docker and one plain Lima
 Ubuntu 24.04 VM without Docker), installs Seylo on them with the real
-installer and runs 40 checks: joins, builds, deploys, zero-downtime
+installer and runs 43 checks: joins, builds, deploys, zero-downtime
 redeploys, crash policy, databases, backups to MinIO, cron, logs, moves,
 replicas, updates with rollback, the CLI, MCP, the panel domain with an
 ACME certificate from Pebble, uninstall, Docker Hub, a Gitea provider with
 watch paths, scheduled cleanup, host shells, clone and move, Valkey,
 ClickHouse and pgvector, an upgrade from the last release (0.1.1,
 built from its tag) through the normal update, the build default and
-closing IP access over the domain, and the panel on a Headscale tailnet. It takes about 50 minutes
+closing IP access over the domain, the panel on a Headscale tailnet, a
+panel move to another node and back, a service export and import with
+volume and database data, and a MongoDB version change in place. It takes about 50 minutes
 on an Apple silicon Mac and needs Colima, Lima, minisign, jq, python3,
 psql and Node.js (check 30 runs Playwright). The results and their evidence go to
 `test/e2e-colima/RESULTS.md`.
@@ -149,7 +151,7 @@ make e2e-down                    # delete the VMs and ~/.cache/seylo-e2e
 
 The scripts only use VM profiles named `seylo-e2e-*` (and
 `test/e2e-colima/extra-installs.sh`, the Debian 12 and ufw installs outside
-the 40, only `seylo-x-deb` and `seylo-x-ufw`). Details:
+the 43, only `seylo-x-deb` and `seylo-x-ufw`). Details:
 [test/e2e-colima/README.md](test/e2e-colima/README.md). After a release is
 published, `.github/workflows/install-smoke.yml` installs it with its own
 install.sh on GitHub's amd64 and arm64 runners and deploys traefik/whoami

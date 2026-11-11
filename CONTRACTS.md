@@ -2282,7 +2282,6 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 |---|---|
 | `seylo panel start` and `seylo panel logs` on a node whose panel is not a managed service | NOT_IMPLEMENTED from `agent.PanelControl` only when nothing set it (`wire_node.go` sets it) |
 | Panel TLS for agents is built: the installer (`--agent-tls-port`, default 3443, 0 = off) and `seylo panel bootstrap` set `SEYLO_AGENT_TLS_PORT`, publish it and open it in ufw/firewalld; the panel serves the agent endpoint there with a self-signed key from the data dir (`agent-tls.key`/`.crt`, made once) and join commands for a panel without a domain use `https://<address>:<port>` with `--pin sha256:<SPKI>`. Agents (and the installer) refuse a plain `http://`/`ws://` join to another host unless `--insecure` (config `insecure_transport`), which the join command carries only when the panel has no TLS port (`insecureTransport: true`, the card warns). Nodes that joined over the TLS port (or a domain) move to the panel domain by themselves once it is live (Protocol section). Not built: moving a node that joined over plain HTTP, to the TLS port or to the domain: a plain-HTTP session cannot prove the address it names comes from the panel, so the agent ignores it (logged once per start) | Nodes joined over plain HTTP keep working on their address and log a warning on every connect; join them again with the https:// command from the Add node card (`seylo join --force`) |
-| Signed releases: `brand.minisignPublicKey` is a placeholder and no release was published (`make release` writes and signs `manifest.json`; tested only as a snapshot with a throwaway key). `make release` refuses to run until the key is set, matches `MINISIGN_SECRET_KEY` and the GitHub repo is pushable (`scripts/release-preflight.sh`) | `updates.check` stores "signing key is not configured"; agents refuse UpdateAgent with FAILED_PRECONDITION; the installer refuses to download without `--allow-unsigned` |
 | An admin opt-in for plain-HTTP git servers: `GitSource.allow_plain_http` exists, but the panel stores no `http://` git source, so it never sets it | Saving an `http://` git URL is BAD_REQUEST; 0.2 agents refuse `http://` without the flag |
 | Signed backups against real providers: presigned PUT/UploadPart/GET/DELETE and the panel's own multipart and list/delete steps match minio-go's signer (vectors in `apps/panel/test/fixtures/s3-presign-vectors.json`) and Bun's, and ran against fake buckets; not yet against AWS S3, R2 or MinIO through a real panel and agent. The multipart steps and retention need the panel to reach the bucket (as the connection test already does) | Unit and fake-bucket tests |
 | `UpdateDocker` (Docker updates from the panel) ran against scripted apt/dnf output only. Panel self-update, node updates through an update run (panel step first, then one agent step per node) and the broken-image rollback ran in `make e2e` (RESULTS.md checks 1, 2, 22), and so did the update from the 0.1.1 release (built from its tag) to this build with real rows (check 38), against a local release mirror with a test key, not a real GitHub release | Unit tests only for Docker updates |
@@ -2314,10 +2313,10 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Disk alert threshold: the agent's DISK_LOW line is fixed at 85% (data dir and Docker root, every 10 minutes); the panel has no setting for it (the scheduled cleanup's own disk line is a setting) | Fixed threshold |
 | Scheduled cleanup: agents before 0.2 ignore `NodeSettings.cleanup` (the Cleanup view says so by the agent version); runs missed while the agent was down are not caught up; the disk trigger's pacing (an hour, 6 hours) is fixed | Behaviour as described |
 | Host shells: the shell runs as the agent's user in the agent's cgroup, so an agent restart or update ends it; processes started in their own session (`setsid`, many daemons) survive closing it, like an SSH logout; there is no session recording (the audit log has who, the node, when and how long); a panel restart ends every open one (the next start writes its close with reason `the panel restarted` and the duration up to the last 30 s check, so the real end can be up to 30 s later) | Behaviour as described |
-| Screens: no Settings screen to add git credentials or registry logins (`git.createCredential`, `git.generateSshKey`, `registries.create` through the API; the Source tab picks stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack) | API only |
+| Screens: no screen to add or edit registry logins (`registries.create`, `registries.update`, `registries.delete`, `registries.test` through the API; the Source tab and the Docker Hub image dialog pick stored ones), none for a compose stack's `${VAR}` values (`env.set` on the stack). Git credentials have screens since 0.2.2 (Settings > Git providers, and Add credential on a git source) | API only |
 | Docker Hub browsing: Docker Hub only (no GHCR, Quay or other registries' catalogs); inspect reads one platform's config (amd64 or arm64; other CPUs are listed only); search shows no publisher logos (letter tiles instead; only the popular images row has app logos, bundled with the web app) and pages stop at 20; private repositories are browsed only by people with `registries.manage`; the popular images row is a list in code (`components/docker-hub/popular.ts`). Nodes pull an image anonymously (their own address's limit) unless the form picked a Docker Hub login; that login is added with `registries.create` (no Settings screen yet, see Screens) | Behaviour as described |
 | Git providers: the GitLab and Bitbucket clients are tested against recorded answers in `apps/panel/test/fixtures/git-providers/` written from the providers' documented responses, not captured from live accounts; no real gitlab.com, self-managed GitLab or Bitbucket Cloud run yet. Gitea ran for real (`scripts/dev/it-gitea.sh`, Gitea 1.24.6). Not built: compose stacks from a provider repository (`compose.ComposeSource` has GitHub and git URLs only), GitLab system hooks (one hook per service instead), Bitbucket Atlassian API tokens (workspace or repository access tokens and app passwords only), provider servers with self-signed certificates (the panel and git use the system roots), "Retry failed" for provider deliveries (GitHub only), watch paths for previews (every push to an open request deploys its preview), a watch paths editor on a stack's Source tab (`services.setWatchPaths` works for stacks), conditional requests in provider branch polling (GitHub's poller sends ETags; providers are read every 5 minutes at most while their webhook exists), "superseded" statuses for GitHub push deploys (GitHub pushes join a queued deploy too, but the panel posts no GitHub commit statuses) | GitLab/Bitbucket: fixture tests only; the rest as described |
-| Panel moves and panel backups: no way to move the panel to another server, no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). A leaked copy is handled on the panel's node by `sudo seylo panel rotate-key --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key, LB CA and agents' TLS key, so every node is joined again with the printed `seylo join --force` command and its new pin; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
+| Panel backups: no built-in backup schedule for `panel.db`/`master.key` (update snapshots only). Moving the panel to another server is built since 0.2.8 (Panel move, under Releases and updates). A leaked copy is handled on the panel's node by `sudo seylo panel rotate-key --new-panel-identity` (new `master.key`, every secret sealed again, new edge ticket key, LB CA and agents' TLS key, so every node is joined again with the printed `seylo join --force` command and its new pin; recovery codes must be made again) or `--keep-panel-identity` when only `master.key` leaked, not by a screen | Docs say to copy `/var/lib/seylo/panel/` |
 | LB mutual TLS across agent versions: an agent from before `NodeSettings.lb_tls` support ignores it, presents no client certificate, and nodes that enforce it refuse its forwarded traffic (GET/HEAD/OPTIONS fall back to the balancing node's own copies) until it updates. Agents from before `lb.tls.peers` keep working with upgraded ones: every certificate carries the shared name and chains to the LB CA through its issuer, upgraded nodes reach them by the shared name and accept their certificate when the panel lists them | During an update run only |
 
 ### Verification
@@ -2327,7 +2326,7 @@ tests that run in a Linux VM (`scripts/dev/vm-gotest.sh`), git providers
 run against a real Gitea in that VM (`scripts/dev/it-gitea.sh`: the panel
 test `gitea.integration.test.ts` and the agent's `TestITGiteaPrivateClone`), the web app has
 Playwright suites (`test/playwright/run.sh`), and `make e2e` runs the real
-installer on three fresh VMs and 40 end-to-end checks against test-signed
+installer on three fresh VMs and 43 end-to-end checks against test-signed
 releases from a local mirror (`test/e2e-colima/README.md`; the evidence of
 the latest run is in `test/e2e-colima/RESULTS.md`). Every op contract has a
 handler.
@@ -2364,9 +2363,12 @@ panel node's agent keep working; `seylo panel ip-access on`; a dead domain
 reopens it and it closes again after the hour). Check 40 serves the panel on
 a Headscale tailnet in HTTP mode (Serve to the panel's socket, Lock to
 Tailscale from the tailnet, `tailscale down` reopening IP access, the
-`seylo panel tailscale` and `ip-access` commands). Outside the checklist,
-`test/e2e-colima/extra-installs.sh` installs on Debian 12 and on Ubuntu with
-ufw, and `.github/workflows/install-smoke.yml` installs each published
+`seylo panel tailscale` and `ip-access` commands). Check 41 moves the
+panel from A to B and back (0.2.8), check 42 exports a service with its
+volume data and a Postgres and imports them on C (0.2.10), and check 43
+changes a MongoDB database from 7.0 to 8.0 in place (0.2.9). Outside the
+checklist, `test/e2e-colima/extra-installs.sh` installs on Debian 12 and on
+Ubuntu with ufw, and `.github/workflows/install-smoke.yml` installs each published
 release on GitHub's amd64 and arm64 runners (`test/install-smoke/smoke.sh`).
 
 ## Capabilities
@@ -2658,7 +2660,15 @@ app), `main.ts` (its socket). Agent: `go/internal/tailnet`,
 Release assets (GitHub release `v<version>` of `<githubOrg>/<githubRepo>`,
 built by the Release workflow: `make build-ts` in the read-only Build and
 test job, `make release-draft` on that build, then `scripts/release-sign.sh`
-in the Sign job; `make release` does all three locally):
+in the Sign job; `make release` does all three locally). Releases are
+published this way, signed with `brand.minisignPublicKey`, since 0.2.0.
+`scripts/release-preflight.sh` refuses a release while that key is the
+placeholder or the e2e test key, `MINISIGN_SECRET_KEY` does not sign for
+it, or the GitHub repo is not pushable. A build that still carries the
+placeholder key (a fork that has not set its own) has updates off:
+`updates.check` stores "signing key is not configured", agents refuse
+UpdateAgent with FAILED_PRECONDITION and the installer refuses to
+download without `--allow-unsigned`. Assets:
 
 - `<slug>_linux_amd64`, `<slug>_linux_arm64`: static agent binaries, and
   the laptop CLI as `<slug>_darwin_amd64`, `<slug>_darwin_arm64`,

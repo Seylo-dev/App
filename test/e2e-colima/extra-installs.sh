@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Extra install checks, outside the 40 checks: install.sh from the e2e
+# Extra install checks, outside the 43 checks: install.sh from the e2e
 # release server as a panel on two more systems, each a fresh plain Lima VM
 # (vz, vzNAT) that is deleted afterwards:
 #

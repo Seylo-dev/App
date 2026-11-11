@@ -116,7 +116,7 @@ refreshed version instead of N.
   refused, that env, cron job, `/marker.txt`, the marker row and the basic auth hash (on C's automatic
   domain) came along, and that a copy with one flipped byte in the volume data fails its sha256 on upload
   and discarding it leaves no service and no `services/<id>` folder on C. It sets C's wildcard domain when
-  C has none and clears it again (written for 0.2.10, not run yet).
+  C has none and clears it again (0.2.10; passed on the VMs on 2026-11-11).
 - Check 40 runs Tailscale against `e2e-headscale` (`headscale/headscale:v0.29.7`, pinned by digest, on A;
   `infra.sh` starts it with a certificate from `serve.sh`'s test CA, so run `serve.sh` first). A's own
   tailscaled is the owner's server (kernel mode, or userspace when A has no `/dev/net/tun`), C's tailscaled

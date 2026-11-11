@@ -15,8 +15,8 @@ Documentation: https://docs.seylo.dev (its source is the docs app in
 
 > Status: early (0.x). The panel, the agent and the installer run end to end
 > on test VMs (`make e2e`: 38 checks passed on 0.2.0, including an update
-> from the 0.1.1 release with real data, and 0.2.1 adds checks 39 and 40;
-> results in [test/e2e-colima/RESULTS.md](test/e2e-colima/RESULTS.md)). Releases start
+> from the 0.1.1 release with real data; 0.2.1 adds checks 39 and 40, and
+> 0.2.8 to 0.2.10 checks 41 to 43; results in [test/e2e-colima/RESULTS.md](test/e2e-colima/RESULTS.md)). Releases start
 > at v0.1.0, and the install command below installs the latest one.
 > [CONTRACTS.md](CONTRACTS.md) ("Not built yet") lists what is missing or
 > only tested against stand-ins (Let's Encrypt, real S3 buckets, the
