@@ -2,11 +2,12 @@
 // the catalog versions it may change to (databases.versionChoices; refused
 // ones are disabled with their reason), another exact tag of the version it
 // runs (customOnCurrent, also when it runs that line's newest pinned image),
-// and the confirm dialog: the restart, no way back, a backup first and
-// MongoDB's compatibility step. While the change deploys the card shows the
-// deploy and its log.
+// and the confirm dialog: the restart, no way back, a backup first,
+// MongoDB's compatibility step and MySQL 8.4's mysql_native_password check
+// (the accounts it would lock out, and keeping their logins working). While
+// the change deploys the card shows the deploy and its log.
 
-import { backups, databases, deployments, type OpOutput, services } from "@seylo/ops";
+import { backups, databases, deployments, OpError, type OpOutput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -98,6 +99,7 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
           items={[
             { label: t("databaseVersion.current"), value: `${engine} ${data.version}${data.variant ? ` + ${data.variant}` : ""}` },
             { label: t("databaseVersion.image"), value: data.image, mono: true },
+            ...(data.nativePassword?.on ? [{ label: t("databaseVersion.logins"), value: t("databaseVersion.nativeOn") }] : []),
           ]}
         />
         {running && data.pendingImage ? (
@@ -184,6 +186,13 @@ function VersionDialog({
   const [custom, setCustom] = useState(tag);
   const [image, setImage] = useState(tag ? data.image : choice.image);
   const [withoutBackup, setWithoutBackup] = useState(false);
+  // MySQL 8.4: mysql_native_password logins. The checkbox shows while they are on, or once the
+  // panel named accounts that would lose them or could not list them (an admin other than root
+  // cannot read MySQL's accounts).
+  const nativeLine = data.nativePassword?.lines.includes(choice.version) ?? false;
+  const [keepNative, setKeepNative] = useState(data.nativePassword?.on ?? false);
+  const [nativeRefused, setNativeRefused] = useState(false);
+  const showNative = nativeLine && (data.nativePassword?.on === true || nativeRefused);
   const [runId, setRunId] = useState<string | null>(null);
   const needsBackup = lineChange && !data.backupFresh;
   const policies = useOp(backups.listPolicies, { serviceId: service.id }, { retry: retryOp, enabled: needsBackup });
@@ -215,7 +224,11 @@ function VersionDialog({
       invalidate(databases.versionChoices, databases.get, deployments.list, services.get);
       onClose();
     },
+    onError: (error) => {
+      if (error instanceof OpError && nativeReasons.includes(error.details?.reason ?? "")) setNativeRefused(true);
+    },
   });
+  const nativeUsers = nativeUsersOf(change.error);
   const engine = t(`service.kind.${data.engine}`);
   const target = custom ? image.trim() : choice.image;
   // The image it runs changes nothing (the panel refuses it), unless a change to
@@ -266,6 +279,7 @@ function VersionDialog({
               version: choice.version,
               ...(tag || (custom && target !== choice.image) ? { image: target } : {}),
               ...(needsBackup && withoutBackup ? { confirmNoBackup: true } : {}),
+              ...(showNative ? { keepNativePassword: keepNative } : {}),
             });
           }}
         >
@@ -281,6 +295,11 @@ function VersionDialog({
           {lineChange && data.engine === "mongo" && (
             <p className="m-0 text-[13px] leading-normal text-ink-strong">
               {t("databaseVersion.confirm.mongoFcv", { version: data.version })}
+            </p>
+          )}
+          {lineChange && nativeLine && !showNative && (
+            <p className="m-0 text-[13px] leading-normal text-ink-strong">
+              {t("databaseVersion.confirm.mysqlNative", { version: choice.version })}
             </p>
           )}
           {tag
@@ -344,7 +363,37 @@ function VersionDialog({
               )}
             </section>
           )}
-          {change.error && <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>}
+          {nativeUsers ? (
+            <Callout tone="warning">
+              <div className="flex flex-col gap-2">
+                <span>{t("databaseVersion.confirm.nativeUsers", { count: nativeUsers.count, version: choice.version })}</span>
+                <ul aria-label={t("databaseVersion.logins")} className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-xs">
+                  {nativeUsers.accounts.map((account) => (
+                    <li key={account}>{account}</li>
+                  ))}
+                  {nativeUsers.count > nativeUsers.accounts.length && (
+                    <li className="font-sans">
+                      {t("databaseVersion.confirm.nativeMore", { count: nativeUsers.count - nativeUsers.accounts.length })}
+                    </li>
+                  )}
+                </ul>
+                <span>{t("databaseVersion.confirm.nativeFix")}</span>
+              </div>
+            </Callout>
+          ) : (
+            change.error && <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>
+          )}
+          {showNative && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="dv-native" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
+                <Checkbox id="dv-native" checked={keepNative} onCheckedChange={(v) => setKeepNative(v === true)} />
+                {t("databaseVersion.confirm.keepNative", { version: choice.version })}
+              </label>
+              <span className="pl-6.5 text-xs text-muted-foreground">
+                {t("databaseVersion.confirm.keepNativeHint", { version: choice.version })}
+              </span>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>{t("service.cancel")}</Button>
             <Button type="submit" variant="primary" disabled={change.isPending || !backupOk || (custom && target === "") || noTag}>
@@ -355,4 +404,14 @@ function VersionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** The refusals that keepNativePassword answers: accounts that would lose their logins, or no list of them. */
+const nativeReasons = ["nativePasswordUsers", "nativePasswordCheckFailed"];
+
+/** The accounts of a nativePasswordUsers refusal (at most 10 named) and how many there are. */
+function nativeUsersOf(error: unknown): { accounts: string[]; count: number } | null {
+  if (!(error instanceof OpError) || error.details?.reason !== "nativePasswordUsers") return null;
+  const accounts = (error.details.accounts ?? "").split("\n").filter(Boolean);
+  return { accounts, count: Math.max(Number(error.details.count) || 0, accounts.length) };
 }

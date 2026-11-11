@@ -3,8 +3,10 @@
 // upgrade that waits for a backup (Back up now) or "Change without a
 // backup", Postgres refusing its next major and every older line, and
 // another exact tag of the version a database runs when it runs the
-// newest pinned image of it, and staying on a custom tag after a change to
-// another one failed.
+// newest pinned image of it, staying on a custom tag after a change to
+// another one failed, and MySQL 8.0 to 8.4 refused for the accounts on
+// mysql_native_password (or when they cannot be listed) until their logins
+// are kept working, which the card then shows and a patch update keeps.
 // Demo data (demo/service.ts versionChoicesOf) stands in for the panel;
 // databases.setVersion is answered here so nothing deploys.
 //
@@ -34,6 +36,7 @@ function mongoChoices(over: Record<string, unknown> = {}) {
     customOnCurrent: true,
     recentBackupAt: new Date(now - 3 * 86_400_000).toISOString(),
     backupFresh: false,
+    nativePassword: null,
     choices: [
       { version: "9.0", image: "mongo:9.0.4", kind: "major", allowed: false, reason: "oneStep", message: "MongoDB upgrades one version at a time: go to 8.0 first." },
       { version: "8.0", image: "mongo:8.0.34", kind: "major", allowed: true },
@@ -44,6 +47,38 @@ function mongoChoices(over: Record<string, unknown> = {}) {
 }
 
 const mongoDb = () => ({ ...databaseOf(svc.db), engine: "mongo", version: "7.0", shellClient: "mongosh" });
+
+/** A MySQL 8.0 (or 8.4, once changed) with a fresh backup; nativeOn: it runs with mysql_native_password logins on. */
+function mysqlChoices(version: "8.0" | "8.4", nativeOn = false) {
+  const current = (image: string) => ({ kind: "current", allowed: false, reason: "current", message: `The database already runs ${image}: nothing to change.` });
+  return {
+    engine: "mysql",
+    version,
+    variant: null,
+    image: version === "8.0" ? "mysql:8.0.43" : "mysql:8.4.6",
+    pendingImage: null,
+    blocked: null,
+    customOnCurrent: true,
+    recentBackupAt: new Date(now - 2 * 3_600_000).toISOString(),
+    backupFresh: true,
+    nativePassword: { on: nativeOn, lines: ["8.4"] },
+    choices:
+      version === "8.0"
+        ? [
+            { version: "8.4", image: "mysql:8.4.6", kind: "upgrade", allowed: true },
+            { version: "8.0", image: "mysql:8.0.43", ...current("mysql:8.0.43") },
+          ]
+        : [
+            { version: "8.4", image: "mysql:8.4.6", ...current("mysql:8.4.6") },
+            { version: "8.0", image: "mysql:8.0.43", kind: "downgrade", allowed: false, reason: "downgrade", message: "MySQL 8.4 data files cannot go back to 8.0. Restore a backup into a new database instead." },
+          ],
+  };
+}
+
+const mysqlDb = (version = "8.0") => ({ ...databaseOf(svc.db), engine: "mysql", version, shellClient: "mysql" });
+
+/** Twelve accounts on mysql_native_password: the panel names the first ten. */
+const nativeAccounts = ["legacy@%", "wordpress@%", ...Array.from({ length: 10 }, (_, i) => `app${i}@10.0.0.%`)];
 
 async function openVersion(page: Page) {
   await page.goto(settings(svc.db));
@@ -308,5 +343,134 @@ test.describe("database version", () => {
     await submit.click();
     await expect(dialog).toHaveCount(0);
     expect(sent).toEqual({ serviceId: svc.db, version: "17", image: "postgres:17.7-alpine" });
+  });
+
+  test("MySQL 8.0 to 8.4 names the accounts on mysql_native_password, then keeps their logins working", async ({ page }) => {
+    const sent: Record<string, unknown>[] = [];
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? mysqlDb() : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => mysqlChoices("8.0"),
+        "databases.setVersion": (input) => {
+          sent.push(input);
+          // As the panel answers when the running 8.0 lists such accounts.
+          if (input.keepNativePassword !== true) {
+            throw new DemoRefusal(
+              409,
+              "CONFLICT",
+              `MySQL 8.4 has the mysql_native_password plugin off, and these 12 accounts sign in with it, so they could not sign in after the change: ${nativeAccounts.slice(0, 10).join(", ")} and 2 more. Nothing changed.`,
+              { reason: "nativePasswordUsers", accounts: nativeAccounts.slice(0, 10).join("\n"), count: "12" },
+            );
+          }
+          return { database: mysqlDb("8.4"), deploymentId: "d0000000000000v5" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await expect(card.getByText("MySQL 8.0", { exact: true })).toBeVisible();
+    await expect(card.getByText("Old mysql_native_password logins are on")).toHaveCount(0);
+    await card.getByRole("combobox", { name: "Change to" }).click();
+    await page.getByRole("option", { name: /^8\.4/ }).click();
+    await card.getByRole("button", { name: "Change version" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Change MySQL to 8.4?" })).toBeVisible();
+    await expect(dialog.getByText("MySQL 8.4 has mysql_native_password logins off.")).toBeVisible();
+    const keep = dialog.getByLabel("Keep mysql_native_password logins working in 8.4");
+    // Nothing to keep until the panel finds such accounts.
+    await expect(keep).toHaveCount(0);
+    const submit = dialog.getByRole("button", { name: "Change version" });
+    await submit.click();
+
+    await expect(dialog.getByText("These 12 accounts sign in with mysql_native_password, which MySQL 8.4 has off")).toBeVisible();
+    const accounts = dialog.getByRole("list", { name: "Logins" });
+    for (const account of nativeAccounts.slice(0, 10)) await expect(accounts.getByText(account, { exact: true })).toBeVisible();
+    await expect(accounts.getByText(nativeAccounts[10] as string, { exact: true })).toHaveCount(0);
+    await expect(accounts.getByText("and 2 more")).toBeVisible();
+    await expect(dialog.getByText("Switch them to caching_sha2_password first")).toBeVisible();
+    await expect(dialog.getByText("MySQL 8.4 has mysql_native_password logins off.")).toHaveCount(0);
+    await expect(keep).not.toBeChecked();
+    await expect(dialog.getByText("starts with --mysql-native-password=ON")).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/version-mysql-native-users.png` });
+
+    await keep.check();
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual([
+      { serviceId: svc.db, version: "8.4" },
+      { serviceId: svc.db, version: "8.4", keepNativePassword: true },
+    ]);
+  });
+
+  test("a MySQL 8.4 with mysql_native_password logins on says so, and another tag of 8.4 keeps them", async ({ page }) => {
+    let sent: Record<string, unknown> | null = null;
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? mysqlDb("8.4") : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => mysqlChoices("8.4", true),
+        "databases.setVersion": (input) => {
+          sent = input;
+          return { database: mysqlDb("8.4"), deploymentId: "d0000000000000v6" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await expect(card.getByText("MySQL 8.4", { exact: true })).toBeVisible();
+    await expect(card.getByText("Old mysql_native_password logins are on")).toBeVisible();
+    await page.screenshot({ path: `${shots}/version-mysql-native-on.png` });
+    await card.getByRole("button", { name: "Another tag of MySQL 8.4" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Run another tag of MySQL 8.4?" })).toBeVisible();
+    const keep = dialog.getByLabel("Keep mysql_native_password logins working in 8.4");
+    await expect(keep).toBeChecked();
+    await dialog.getByLabel("Image").fill("mysql:8.4.7");
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual({ serviceId: svc.db, version: "8.4", image: "mysql:8.4.7", keepNativePassword: true });
+  });
+
+  test("a MySQL whose accounts cannot be listed upgrades by keeping the old logins working", async ({ page }) => {
+    const sent: Record<string, unknown>[] = [];
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? mysqlDb() : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => mysqlChoices("8.0"),
+        "databases.setVersion": (input) => {
+          sent.push(input);
+          // As the panel answers for an admin other than root, which cannot read mysql.user.
+          if (input.keepNativePassword !== true) {
+            throw new DemoRefusal(
+              409,
+              "CONFLICT",
+              "Could not list the MySQL accounts that sign in with mysql_native_password, which MySQL 8.4 has off, so nothing changed. MySQL said: ERROR 1142 (42000): SELECT command denied to user 'shop'@'127.0.0.1' for table 'user'",
+              { reason: "nativePasswordCheckFailed" },
+            );
+          }
+          return { database: mysqlDb("8.4"), deploymentId: "d0000000000000v7" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await card.getByRole("combobox", { name: "Change to" }).click();
+    await page.getByRole("option", { name: /^8\.4/ }).click();
+    await card.getByRole("button", { name: "Change version" }).click();
+    const dialog = page.getByRole("dialog");
+    const keep = dialog.getByLabel("Keep mysql_native_password logins working in 8.4");
+    await expect(keep).toHaveCount(0);
+    const submit = dialog.getByRole("button", { name: "Change version" });
+    await submit.click();
+    await expect(dialog.getByText("SELECT command denied to user 'shop'@'127.0.0.1'")).toBeVisible();
+    await keep.check();
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual([
+      { serviceId: svc.db, version: "8.4" },
+      { serviceId: svc.db, version: "8.4", keepNativePassword: true },
+    ]);
   });
 });

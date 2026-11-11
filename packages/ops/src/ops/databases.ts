@@ -265,7 +265,7 @@ export const versionChoices = defineOp({
   kind: "query",
   summary: "List the versions a database can change to",
   description:
-    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
+    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup; nativePassword (MySQL only) says whether the database runs with mysql_native_password logins on and which lines take setVersion's keepNativePassword.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     engine: DatabaseEngine,
@@ -290,6 +290,21 @@ export const versionChoices = defineOp({
     recentBackupAt: Type.Union([Timestamp, Type.Null()]),
     /** That backup is from the last 24 hours: a change of version line needs no confirmNoBackup. */
     backupFresh: Type.Boolean(),
+    /**
+     * MySQL only, null for the other engines (0.2.11). MySQL 8.4 ships the
+     * mysql_native_password plugin off, so accounts made with it cannot
+     * sign in there unless the database runs with
+     * --mysql-native-password=ON (setVersion keepNativePassword).
+     */
+    nativePassword: Type.Union([
+      Type.Object({
+        /** The database is set to run with mysql_native_password on; later deploys and patch updates keep it. */
+        on: Type.Boolean(),
+        /** The catalog lines whose setVersion takes keepNativePassword: "8.4". */
+        lines: Type.Array(Type.String()),
+      }),
+      Type.Null(),
+    ]),
   }),
   permission: serviceScope("services.view"),
   mcp: true,
@@ -302,7 +317,7 @@ export const setVersion = defineOp({
   kind: "destructive",
   summary: "Change a database's version",
   description:
-    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
+    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie). MySQL 8.4 ships mysql_native_password off: before a change from 8.0 the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check).",
   input: Type.Object({
     serviceId: Id,
     /** A catalog version of the database's engine, for example "8.0". */
@@ -311,6 +326,13 @@ export const setVersion = defineOp({
     image: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     /** Change the version line without a backup from the last 24 hours. */
     confirmNoBackup: Type.Optional(Type.Boolean()),
+    /**
+     * MySQL 8.4 only (versionChoices nativePassword.lines, 0.2.11): true
+     * runs it with --mysql-native-password=ON, so accounts made with
+     * mysql_native_password keep signing in; false runs it without. Left
+     * out, the database keeps what it runs with.
+     */
+    keepNativePassword: Type.Optional(Type.Boolean()),
   }),
   output: Type.Object({
     database: Database,

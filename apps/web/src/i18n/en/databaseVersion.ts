@@ -6,6 +6,8 @@ export default {
   description: "The engine version and pinned image this database runs. A change deploys it on the same data.",
   current: "Runs",
   image: "Image",
+  logins: "Logins",
+  nativeOn: "Old mysql_native_password logins are on",
   changeTo: "Change to",
   pick: "Pick a version",
   noChoice: "No other version is available for this database.",
@@ -34,6 +36,19 @@ export default {
     restart: "The database restarts on {image}: a short outage while it starts.",
     undo: "This cannot be undone. Older versions cannot read the upgraded data files; going back means restoring a backup into a new database.",
     mongoFcv: "MongoDB's feature compatibility version is set to {version} on the running database first. If that fails, nothing changes.",
+    mysqlNative:
+      "MySQL {version} has mysql_native_password logins off. The running database is checked for accounts that sign in with it first: if there are any, nothing changes until you pick what to do with them.",
+    nativeUsers: {
+      one: "This account signs in with mysql_native_password, which MySQL {version} has off, so it could not sign in after the change:",
+      other:
+        "These {count} accounts sign in with mysql_native_password, which MySQL {version} has off, so they could not sign in after the change:",
+    },
+    nativeMore: "and {count} more",
+    nativeFix:
+      "Switch them to caching_sha2_password first (ALTER USER 'user'@'host' IDENTIFIED WITH caching_sha2_password BY '…', which needs each account's password), or keep their logins working.",
+    keepNative: "Keep mysql_native_password logins working in {version}",
+    keepNativeHint:
+      "MySQL {version} starts with --mysql-native-password=ON, and later updates keep it. Switching the accounts is the lasting fix: MySQL 9 has no mysql_native_password.",
     backupTitle: "Backup",
     backupFresh: "Last backup {when}.",
     backupMissing: "No successful backup from the last 24 hours.",

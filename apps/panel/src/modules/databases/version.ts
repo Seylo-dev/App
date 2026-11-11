@@ -1,7 +1,8 @@
 // Version changes of a database: which catalog versions it may move to
 // (judgeVersion, the engines' upgrade rules in one pure function), custom
 // images of the engine's own official repository, MongoDB's
-// featureCompatibilityVersion step, and the databases.versionChoices and
+// featureCompatibilityVersion step, MySQL 8.4's mysql_native_password
+// check and opt-in, and the databases.versionChoices and
 // databases.setVersion ops. A change writes service_databases.version and
 // the spec's image (the variant stays) and deploys; databases deploy in
 // recreate mode on the same data volume.
@@ -18,7 +19,7 @@ import { writeSpec } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
-import { engines, engineVersions } from "./engines";
+import { engines, engineVersion, engineVersions, hasNativePassword, withNativePassword } from "./engines";
 import { type DatabaseInfo, loadDatabase } from "./info";
 import { toDatabase } from "./ops";
 
@@ -230,6 +231,87 @@ export function mongoFcvExec(user: string, password: string, version: string): {
   return { command: ["mongosh", "--quiet", "--norc", "mongodb://127.0.0.1:27017/admin"], stdin: `${script}\n` };
 }
 
+/** MySQL's own accounts, which no one signs in with. */
+const mysqlSystemAccounts = ["mysql.sys", "mysql.session", "mysql.infoschema"];
+
+/**
+ * Exec call that lists the accounts of a running MySQL whose plugin is
+ * mysql_native_password, one user@host a line, MySQL's own system accounts
+ * left out: MySQL 8.4 ships that plugin off, so they could not sign in
+ * there. The admin signs in over TCP; the shell's read (a builtin) takes
+ * the password from stdin's first line into MYSQL_PWD, so it never is an
+ * argument, and mysql reads the query from the rest of stdin.
+ */
+export function mysqlNativeUsersExec(user: string, password: string): { command: string[]; stdin: string } {
+  const query = `SELECT CONCAT(user, '@', host) FROM mysql.user WHERE plugin = 'mysql_native_password' AND user NOT IN (${mysqlSystemAccounts.map((a) => `'${a}'`).join(", ")}) ORDER BY user, host;`;
+  return {
+    command: ["sh", "-c", 'IFS= read -r MYSQL_PWD || exit 2; export MYSQL_PWD; exec mysql -h127.0.0.1 -u"$1" -N -B', "sh", user],
+    stdin: `${password}\n${query}\n`,
+  };
+}
+
+/** At most this many accounts are named in a nativePasswordUsers refusal. */
+const namedAccounts = 10;
+
+/** The refusal of a MySQL change that would lock out accounts signing in with mysql_native_password. */
+export function nativePasswordRefusal(accounts: readonly string[], version: string): OpError {
+  const named = accounts.slice(0, namedAccounts);
+  const more = accounts.length - named.length;
+  const list = `${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+  const which =
+    accounts.length === 1 ? "this account signs in with it, so it" : `these ${accounts.length} accounts sign in with it, so they`;
+  return new OpError(
+    "CONFLICT",
+    `MySQL ${version} has the mysql_native_password plugin off, and ${which} could not sign in after the change: ${list}. Nothing changed. Switch them to caching_sha2_password first (ALTER USER 'user'@'host' IDENTIFIED WITH caching_sha2_password BY '<password>', which needs each account's password), or keep mysql_native_password logins on in MySQL ${version} (keepNativePassword).`,
+    { reason: "nativePasswordUsers", accounts: named.join("\n"), count: String(accounts.length) },
+  );
+}
+
+/**
+ * What a version change does with MySQL's mysql_native_password logins,
+ * from the container command the database is set to run and setVersion's
+ * keepNativePassword (left out: as it is). command is the new container
+ * command, null to leave it; check means the running database's accounts
+ * with the plugin are listed first, since the change turns it off for
+ * them: from 8.0 (on by itself) to 8.4 without the opt-in, or 8.4 with it
+ * on to 8.4 without. A line without the option (8.0, staying after a
+ * failed change) runs without it: the plugin is on there anyway.
+ */
+export function nativePasswordPlan(
+  engine: DatabaseEngine,
+  command: readonly string[],
+  from: string,
+  to: string,
+  keep: boolean | undefined,
+): { on: boolean; check: boolean; command: string[] | null } {
+  const optionLine = (version: string) => engineVersion("mysql", version)?.nativePasswordOption === true;
+  const takes = engine === "mysql" && optionLine(to);
+  if (keep === true && !takes) {
+    const lines = engines.mysql.versions.filter((v) => v.nativePasswordOption).map((v) => v.version);
+    throw new OpError(
+      "BAD_REQUEST",
+      engine === "mysql"
+        ? `MySQL ${to} has mysql_native_password on by itself: keepNativePassword is for MySQL ${lines.join(", ")}.`
+        : `keepNativePassword is for MySQL ${lines.join(", ")} only.`,
+      { field: "keepNativePassword" },
+    );
+  }
+  if (engine !== "mysql") return { on: false, check: false, command: null };
+  const was = hasNativePassword(command);
+  const on = takes && (keep ?? was);
+  const check = takes && !on && (was || !optionLine(from));
+  if (on === was) return { on, check, command: null };
+  const next = withNativePassword(command, on);
+  if (!next) {
+    throw new OpError(
+      "CONFLICT",
+      `The database runs its own command (${command.join(" ")}), which is not mysqld's: add or take out --mysql-native-password=ON there, then change the version.`,
+      { reason: "customCommand" },
+    );
+  }
+  return { on, check, command: next };
+}
+
 /**
  * The version line an image belongs to: the catalog line with that very
  * image, else the line its tag starts with ("mongo:8.0.40" is 8.0; pgvector
@@ -255,6 +337,8 @@ interface VersionState {
   lines: string[];
   blocked: { reason: string; message: string } | null;
   recentBackupAt: Date | null;
+  /** The container command it is set to run (MySQL's mysql_native_password option). */
+  command: string[];
 }
 
 function versionState(ctx: OpContext, serviceId: string): VersionState {
@@ -308,6 +392,7 @@ function versionState(ctx: OpContext, serviceId: string): VersionState {
     lines: catalog.map((v) => v.version),
     blocked,
     recentBackupAt: backup?.finishedAt ?? null,
+    command: spec.container.command,
   };
 }
 
@@ -345,6 +430,13 @@ export const versionChoices = implement(dbOps.versionChoices, (input, ctx) => {
       catalog.some((v) => v.version === state.from.version),
     recentBackupAt: state.recentBackupAt?.toISOString() ?? null,
     backupFresh: backupFresh(state, new Date()),
+    nativePassword:
+      state.info.row.engine === "mysql"
+        ? {
+            on: hasNativePassword(state.command),
+            lines: catalog.filter((v) => v.nativePasswordOption).map((v) => v.version),
+          }
+        : null,
   };
 });
 
@@ -363,6 +455,7 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   }
   const image = input.image ? customImage(info.row.engine, info.row.variant, input.version, input.image) : line.image;
   const to = { version: input.version, image, dataPath: line.dataPath };
+  const native = nativePasswordPlan(info.row.engine, state.command, state.from.version, to.version, input.keepNativePassword);
   const verdict = judge(state, to);
   if (!verdict.allowed)
     throw new OpError("CONFLICT", verdict.message ?? "This version change is not allowed.", { reason: verdict.reason ?? "" });
@@ -376,16 +469,19 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   }
   const node = info.node;
   if (lineChange && info.row.engine === "mongo" && node) await raiseFeatureCompatibility(ctx, info, node.id, state.from.version);
-  // Another change may have queued its deploy while the MongoDB step ran.
+  if (native.check && node) await assertNoNativePasswordUsers(ctx, info, node.id, to.version);
+  // Another change may have queued its deploy while the MongoDB or MySQL step ran.
   assertNoActiveDeploy(ctx, info.service.id);
 
   ctx.db.transaction((tx) => {
     tx.update(serviceDatabases).set({ version: to.version }).where(eq(serviceDatabases.serviceId, info.service.id)).run();
-    // Read again: other settings may have changed while the MongoDB step ran.
+    // Read again: other settings may have changed while the MongoDB or MySQL step ran.
     const spec = readSpec(tx.select({ spec: services.spec }).from(services).where(eq(services.id, info.service.id)).get()?.spec);
+    const command = native.command ? withNativePassword(spec.container.command, native.on) : null;
     writeSpec(tx, info.service.id, {
       ...spec,
       source: { type: "image", image, registryId: spec.source.type === "image" ? spec.source.registryId : null },
+      ...(command ? { container: { ...spec.container, command } } : {}),
     });
   });
   const user = userOf(ctx.principal);
@@ -394,7 +490,10 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
     trigger: "manual",
     actor: actorOf(ctx),
     triggeredBy: user?.id ?? null,
-    notes: [`Version change: ${state.from.image || state.from.version} to ${image}.`],
+    notes: [
+      `Version change: ${state.from.image || state.from.version} to ${image}.`,
+      ...(native.command ? [`mysql_native_password logins ${native.on ? "on (--mysql-native-password=ON)" : "off"}.`] : []),
+    ],
   });
   publishService(ctx, info.service);
   invalidateService(ctx, info.service.id, [dbOps.get.id, dbOps.versionChoices.id]);
@@ -409,6 +508,45 @@ async function raiseFeatureCompatibility(ctx: OpContext, info: DatabaseInfo, nod
       `Could not set MongoDB's featureCompatibilityVersion to ${version} before the upgrade, so nothing changed. Check that the database is running and healthy, then try again. ${detail}`.trim(),
       { reason: "fcvFailed" },
     );
+  await execStep(ctx, info, nodeId, exec, refuse, "mongo featureCompatibilityVersion change failed");
+}
+
+/**
+ * Lists the running MySQL's accounts that sign in with mysql_native_password
+ * (mysqlNativeUsersExec) and refuses the change when there are any
+ * (nativePasswordUsers), or when the list cannot be read
+ * (nativePasswordCheckFailed): either way nothing changed.
+ */
+async function assertNoNativePasswordUsers(ctx: OpContext, info: DatabaseInfo, nodeId: string, version: string): Promise<void> {
+  const exec = mysqlNativeUsersExec(info.admin.user, info.admin.password);
+  const refuse = (detail: string) =>
+    new OpError(
+      "CONFLICT",
+      `Could not list the MySQL accounts that sign in with mysql_native_password, which MySQL ${version} has off, so nothing changed. Check that the database is running and healthy, then try again, or keep mysql_native_password logins on in MySQL ${version} (keepNativePassword), which needs no list. ${detail}`.trim(),
+      { reason: "nativePasswordCheckFailed" },
+    );
+  const stdout = await execStep(ctx, info, nodeId, exec, refuse, "mysql native password check failed");
+  const accounts = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (accounts.length > 0) throw nativePasswordRefusal(accounts, version);
+}
+
+/**
+ * Runs a step of a version change in the running database through the
+ * agent's Exec (the secret on stdin) and returns its stdout; refuse makes
+ * the error when the agent cannot run it or it exits non-zero, with the
+ * database's last line of output.
+ */
+async function execStep(
+  ctx: OpContext,
+  info: DatabaseInfo,
+  nodeId: string,
+  exec: { command: string[]; stdin: string },
+  refuse: (detail: string) => OpError,
+  failure: string,
+): Promise<string> {
   let result: { exitCode: number; stdout: Uint8Array; stderr: Uint8Array };
   try {
     result = await ctx.agents.call(
@@ -420,9 +558,13 @@ async function raiseFeatureCompatibility(ctx: OpContext, info: DatabaseInfo, nod
   } catch (error) {
     throw refuse(error instanceof Error ? error.message : "");
   }
+  const stdout = new TextDecoder().decode(result.stdout);
   if (result.exitCode !== 0) {
-    const output = new TextDecoder().decode(result.stdout).trim().split("\n").at(-1)?.slice(0, 300) ?? "";
-    ctx.logger.warn({ serviceId: info.service.id, exitCode: result.exitCode, output }, "mongo featureCompatibilityVersion change failed");
-    throw refuse(output ? `MongoDB said: ${output}` : "");
+    // mongosh prints its errors on stdout, mysql on stderr.
+    const lastLine = (bytes: Uint8Array) => new TextDecoder().decode(bytes).trim().split("\n").at(-1) ?? "";
+    const output = (lastLine(result.stdout) || lastLine(result.stderr)).slice(0, 300);
+    ctx.logger.warn({ serviceId: info.service.id, exitCode: result.exitCode, output }, failure);
+    throw refuse(output ? `${info.engine.label} said: ${output}` : "");
   }
+  return stdout;
 }

@@ -21229,7 +21229,7 @@
       "post": {
         "operationId": "databases.setVersion",
         "summary": "Change a database's version",
-        "description": "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
+        "description": "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie). MySQL 8.4 ships mysql_native_password off: before a change from 8.0 the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check).",
         "tags": [
           "databases"
         ],
@@ -21269,6 +21269,9 @@
                     "type": "string"
                   },
                   "confirmNoBackup": {
+                    "type": "boolean"
+                  },
+                  "keepNativePassword": {
                     "type": "boolean"
                   }
                 }
@@ -21624,7 +21627,7 @@
       "get": {
         "operationId": "databases.versionChoices",
         "summary": "List the versions a database can change to",
-        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
+        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup; nativePassword (MySQL only) says whether the database runs with mysql_native_password logins on and which lines take setVersion's keepNativePassword.",
         "tags": [
           "databases"
         ],
@@ -21666,7 +21669,8 @@
                     "blocked",
                     "customOnCurrent",
                     "recentBackupAt",
-                    "backupFresh"
+                    "backupFresh",
+                    "nativePassword"
                   ],
                   "properties": {
                     "engine": {
@@ -21829,6 +21833,31 @@
                     },
                     "backupFresh": {
                       "type": "boolean"
+                    },
+                    "nativePassword": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "on",
+                            "lines"
+                          ],
+                          "properties": {
+                            "on": {
+                              "type": "boolean"
+                            },
+                            "lines": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }

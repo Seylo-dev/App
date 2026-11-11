@@ -371,6 +371,97 @@ create procedure p() select concat(v, '!') from t;`); code != 0 {
 	}
 }
 
+// mysqlNativeUsers is the exec databases.setVersion runs in the running
+// 8.0 before a change to 8.4 (mysqlNativeUsersExec in
+// apps/panel/src/modules/databases/version.ts): the accounts whose plugin
+// is mysql_native_password, MySQL's own left out, one user@host a line.
+// The password is stdin's first line, read into MYSQL_PWD; the query follows.
+func mysqlNativeUsers(user, password string) ([]string, string) {
+	query := "SELECT CONCAT(user, '@', host) FROM mysql.user WHERE plugin = 'mysql_native_password' AND user NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema') ORDER BY user, host;"
+	return []string{"sh", "-c", `IFS= read -r MYSQL_PWD || exit 2; export MYSQL_PWD; exec mysql -h127.0.0.1 -u"$1" -N -B`, "sh", user},
+		password + "\n" + query + "\n"
+}
+
+// mysqlNativeCommand is MySQL 8.4's command with databases.setVersion
+// keepNativePassword (containerCommand in engines.ts).
+var mysqlNativeCommand = []string{"mysqld", "--mysql-native-password=ON"}
+
+// TestITMySQLNativePasswordUpgrade: MySQL 8.4 ships mysql_native_password
+// off. An account made with it on 8.0 is found by the panel's check (a
+// wrong admin password fails it with a non-zero exit, and so does an admin
+// other than root, which cannot read MySQL's accounts), cannot sign in over
+// TCP after a plain upgrade to 8.4 while the data and the other logins are
+// fine, and signs in again once 8.4 runs with --mysql-native-password=ON
+// (a redeploy with the option, as keepNativePassword on a patch update).
+// A second database goes from 8.0 straight to 8.4 with the option, as
+// keepNativePassword on the upgrade does: its account never stops working.
+func TestITMySQLNativePasswordUpgrade(t *testing.T) {
+	e := newIT(t)
+	e.pull(mysql80, mysql84)
+	const root, app, legacy = "UpgradePassword123", "AppPassword456", "LegacyPassword789"
+	health := []string{"sh", "-c", `mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent`}
+	setup := func(name string) (*dbIT, string) {
+		t.Helper()
+		d := e.database(name, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, 3306, "/var/lib/mysql", nil, health,
+			"MYSQL_ROOT_PASSWORD="+root, "MYSQL_DATABASE=app", "MYSQL_USER=app", "MYSQL_PASSWORD="+app)
+		c := d.deploy(mysql80)
+		if out, code := execStdin(t, e, c, []string{"mysql", "-h127.0.0.1", "-uroot", "-N", "-B", "app"}, `create table t (v varchar(20));
+insert into t values ('kept');
+create user 'legacy'@'%' identified with mysql_native_password by '`+legacy+`';
+grant select on app.* to 'legacy'@'%';`, "MYSQL_PWD="+root); code != 0 {
+			t.Fatalf("write on 8.0: %q (%d)", out, code)
+		}
+		argv, stdin := mysqlNativeUsers("root", root)
+		if out, code := execStdin(t, e, c, argv, stdin); code != 0 || out != "legacy@%" {
+			t.Fatalf("the panel's check on 8.0: %q (%d), want legacy@%%", out, code)
+		}
+		// A failed check must refuse the change.
+		argv, stdin = mysqlNativeUsers("root", "WrongPassword999")
+		if out, code := execStdin(t, e, c, argv, stdin); code == 0 {
+			t.Fatalf("the check with a wrong password exited 0: %q", out)
+		}
+		// An admin other than root (MYSQL_USER) has its database only: it cannot read the accounts.
+		argv, stdin = mysqlNativeUsers("app", app)
+		if out, code := execStdin(t, e, c, argv, stdin); code == 0 || !strings.Contains(out, "denied") {
+			t.Fatalf("the check as the app user: %q (%d), want a refusal", out, code)
+		}
+		return d, c
+	}
+	login := func(container, user, pw string) (string, int) {
+		return execStdin(t, e, container, []string{"mysql", "-h127.0.0.1", "-u" + user, "-N", "-B", "app"}, "select v from t", "MYSQL_PWD="+pw)
+	}
+
+	// Without the option: the data is there, root signs in, the old account does not.
+	d, _ := setup("mysqlnative")
+	c := d.deploy(mysql84)
+	if out, code := login(c, "root", root); code != 0 || out != "kept" {
+		t.Fatalf("root on 8.4: %q (%d)", out, code)
+	}
+	if out, code := login(c, "legacy", legacy); code == 0 || !strings.Contains(out, "mysql_native_password") {
+		t.Fatalf("the mysql_native_password account on 8.4 without the option: %q (%d), want a refused login", out, code)
+	}
+	// With it (the same image again): the old account signs in to the same data.
+	d.spec.Container.Command = mysqlNativeCommand
+	c = d.deploy(mysql84)
+	if out, code := login(c, "legacy", legacy); code != 0 || out != "kept" {
+		t.Fatalf("the mysql_native_password account on 8.4 with the option: %q (%d)", out, code)
+	}
+	if out, code := login(c, "root", root); code != 0 || out != "kept" {
+		t.Fatalf("root on 8.4 with the option: %q (%d)", out, code)
+	}
+
+	// 8.0 straight to 8.4 with the option.
+	d, _ = setup("mysqlkeep")
+	d.spec.Container.Command = mysqlNativeCommand
+	c = d.deploy(mysql84)
+	if out, _ := execStdin(t, e, c, []string{"mysql", "-h127.0.0.1", "-uroot", "-N", "-B"}, "select version()", "MYSQL_PWD="+root); out != release(mysql84) {
+		t.Fatalf("version after the upgrade with the option = %q", out)
+	}
+	if out, code := login(c, "legacy", legacy); code != 0 || out != "kept" {
+		t.Fatalf("the mysql_native_password account after the upgrade with the option: %q (%d)", out, code)
+	}
+}
+
 // mysqlID is the version as MySQL's upgrade log writes it: 8.0.43 is 80043.
 func mysqlID(release string) string {
 	var a, b, c int

@@ -682,10 +682,18 @@ const refused = (kind: string, reason: string, message: string) => ({ kind, allo
  * answer them: Postgres refuses its next major and older ones, Redis
  * takes the newer line. Both run the newest pinned image of their line, so
  * only another exact tag of it (customOnCurrent) stays on the line.
- * database-version.spec.ts adds a MongoDB.
+ * database-version.spec.ts adds a MongoDB and MySQL.
  */
 export function versionChoicesOf(serviceId: string) {
-  const base = { variant: null, pendingImage: null, blocked: null, customOnCurrent: true, recentBackupAt: ago(15 * hour), backupFresh: true };
+  const base = {
+    variant: null,
+    pendingImage: null,
+    blocked: null,
+    customOnCurrent: true,
+    recentBackupAt: ago(15 * hour),
+    backupFresh: true,
+    nativePassword: null,
+  };
   if (serviceId === ids.redis)
     return {
       ...base,

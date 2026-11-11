@@ -24,6 +24,12 @@ export interface EngineVersion {
    * this, and an exposure from before 0.2.9 reads as closed (loadDatabase).
    */
   noExposure?: string;
+  /**
+   * MySQL 8.4: mysql_native_password ships off, and mysqlNativePasswordFlag
+   * turns it on (databases.setVersion keepNativePassword). Lines before it
+   * have it on; 9.0 removed it.
+   */
+  nativePasswordOption?: boolean;
 }
 
 /** The engine with extensions in its image, on the same majors. */
@@ -149,7 +155,7 @@ export const engines: Record<DatabaseEngine, Engine> = {
     port: 3306,
     httpPort: null,
     versions: [
-      { version: "8.4", image: "mysql:8.4.6", dataPath: "/var/lib/mysql" },
+      { version: "8.4", image: "mysql:8.4.6", dataPath: "/var/lib/mysql", nativePasswordOption: true },
       { version: "8.0", image: "mysql:8.0.43", dataPath: "/var/lib/mysql" },
     ],
     variants: [],
@@ -438,10 +444,16 @@ export function containerEnv(engine: DatabaseEngine, creds: Credentials): { name
  * image's entrypoint so the server drops root like it does by default;
  * Dragonfly's entrypoint does that for "dragonfly" itself. Dragonfly writes
  * RDB snapshots as dump.rdb (what backups restore), on shutdown and every
- * five minutes, since it has no append-only file.
+ * five minutes, since it has no append-only file. MySQL runs the image's
+ * own command, except with `nativePassword` (databases.setVersion
+ * keepNativePassword, MySQL 8.4 only): mysqld through the image's
+ * entrypoint with the mysql_native_password plugin on, which 8.4 ships off.
+ * New databases never get it.
  */
-export function containerCommand(engine: DatabaseEngine): string[] {
+export function containerCommand(engine: DatabaseEngine, options: { nativePassword?: boolean } = {}): string[] {
   switch (engine) {
+    case "mysql":
+      return options.nativePassword ? ["mysqld", mysqlNativePasswordFlag] : [];
     case "redis":
       return ["sh", "-c", 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes'];
     case "valkey":
@@ -463,6 +475,34 @@ export function containerCommand(engine: DatabaseEngine): string[] {
     default:
       return [];
   }
+}
+
+/**
+ * mysqld's option that turns the mysql_native_password plugin on. MySQL 8.4
+ * ships it off, so accounts made with it cannot sign in there without this;
+ * MySQL 9.0 removed the plugin.
+ */
+export const mysqlNativePasswordFlag = "--mysql-native-password=ON";
+
+/** Whether a MySQL database's container command turns mysql_native_password on. */
+export function hasNativePassword(command: readonly string[]): boolean {
+  return command.includes(mysqlNativePasswordFlag);
+}
+
+/**
+ * A MySQL container command with mysql_native_password on or off. On adds
+ * the option to the panel's command (containerCommand) or to a mysqld
+ * command set by hand; off takes it out again, back to the image's own
+ * command when nothing else is left. Null when the command is not mysqld's,
+ * so the option has nowhere to go.
+ */
+export function withNativePassword(command: readonly string[], on: boolean): string[] | null {
+  const rest = command.filter((arg) => arg !== mysqlNativePasswordFlag);
+  if (!on) return rest.length === 1 && rest[0] === "mysqld" ? [] : rest;
+  if (rest.length === 0) return containerCommand("mysql", { nativePassword: true });
+  // The image's entrypoint runs mysqld for a command that starts with an option.
+  if (rest[0] !== "mysqld" && !rest[0]?.startsWith("-")) return null;
+  return [...rest, mysqlNativePasswordFlag];
 }
 
 /**
