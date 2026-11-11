@@ -24,8 +24,10 @@ packages/proto/           generated protocol + frame codec for TypeScript (@seyl
 packages/ops/             operation registry: contracts, generators, typed client (@seylo/ops)
 packages/ui/              UI kit (shadcn-style components) and design tokens (@seylo/ui)
 packages/env-analyzer/    .env parser with source ranges, ${{svc.VAR}} references, cross-node diagnostics, literal host names (`hostMentions`) (@seylo/env-analyzer)
+packages/zip/             streaming zip writer (store, deflate, data descriptors, zip64) and a strict zip reader that runs in browsers (@seylo/zip/write, @seylo/zip/read)
 installer/                install.sh.tmpl + generated brand.env and install.sh (scripts/render-installer.sh)
 openapi.json              generated from the op registry (scripts/gen-openapi.ts)
+service-export.schema.json  JSON Schema of the service export file format, generated with openapi.json
 biome.json                TypeScript/CSS formatting and lint rules
 scripts/                  codegen helpers and the generated-code check
 deploy/panel.Dockerfile   panel image: Bun runtime + the built panel and web app (`make panel-image`)
@@ -143,7 +145,7 @@ The generated indexes let features land without touching a shared list:
 | `apps/web/src/i18n/en/index.gen.ts` | every `apps/web/src/i18n/en/<section>.ts` |
 | `apps/web/src/routeTree.gen.ts` | the route files in `apps/web/src/routes` |
 | `go/gen/pb`, `packages/proto/src/gen` | `proto/` |
-| `openapi.json` | the op contracts |
+| `openapi.json`, `service-export.schema.json` | the op contracts, the export format (`ops/serviceTransfer.ts`) |
 
 Migrations: `apps/panel/drizzle/panel` starts with `0000_init.sql`, frozen
 since the first release (0.1.0): installs out there have it applied, so it
@@ -166,7 +168,9 @@ project's services, services.reorder) and `0013_project_images`
 with their session, and `push_prefs`, the alert events each person
 pushes); for 0.2.8 `0015_domain_acme_hold` (`domains.acme_released_at`,
 set on existing domains whose DNS was not missing or pointing elsewhere,
-so the update holds back none of their certificates)), which the panel applies at start, also
+so the update holds back none of their certificates); for 0.2.10
+`0016_service_transfers` (`service_exports` and `service_imports`,
+service export and import)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -1031,6 +1035,13 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
 - Action lists (grants and keys) hold `*` (everything), `<area>.*` (every
   action of one area, for example `services.*`) or exact actions; match
   them with `actionAllowed(list, action)` from `@seylo/ops`.
+- Admin-only scoped actions (`permission.project|service(action, resource,
+  { adminOnly: true })`, since 0.2.9 `services.export` and
+  `services.import`): checked on the resource like any scoped action, so an
+  admin's key limited to some projects holds them there only, but members
+  never hold them whatever a grant lists (`access.ts` `isAdminOnly`, also in
+  `canSomewhere` and ticket checks), they are in `actionCatalog` with
+  `adminOnly: true` and never in `grantableActions`.
 - `services.create` makes a service; what the new service gets beyond that
   is its own permission in the project, whichever op makes it
   (`services/create-rights.ts` `assertCreateRights`, FORBIDDEN with
@@ -2285,6 +2296,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificate revocation holds only on agents with `lb.tls.peers.v1`, only once they got their settings (a node cut off from the panel keeps its last list), and only for new connections (Traefik keeps a TLS connection it already accepted across reloads); while the panel lists a `legacy` peer (a node holding a certificate from before 0.2 that has not connected since, at most 30 days) every certificate of the LB CA is accepted; an older agent is reached by the shared name, which any node's certificate carries; a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
 | GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling, and the connected account (the token check, its repository list, repository webhooks and polling, 0.2.2) are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
+| Service export and import gaps (0.2.9 is settings only): volume data in the file (the agent's ImportVolume limits, `volume.import-limits.v1`, the stopped-while-streaming database export and its watchdog), compose stacks and their members and several services in one file, the CLI (`seylo export`, `seylo import`, `seylo export decrypt`; until then the API takes what `unzip -p` prints), encrypting the uploaded archive, falling back to the branch head when the exported commit is gone, and e2e check 42. The zip was checked with `unzip -t` and Python's `zipfile`, not with Finder, Archive Utility, `ditto` or Windows Explorer | Volumes arrive empty, compose is CONFLICT `reason: compose`, a first deploy of a commit that is gone fails like any deploy |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`; the chat bubble and the Assistant page against the demo world's scripted replies only) | Works as tested |
@@ -3395,7 +3407,10 @@ service scope), global `github.manage`, `git.manage`, `registries.manage`.
 
 Clones (`services.clonePreview`, `services.clone`, `services/clone.ts`):
 `services.view` on the source and `services.create` in the target project
-(checked in the handler, `move-project.ts` `requireTargetProject`). A clone
+(checked in the handler, `move-project.ts` `requireTargetProject`). Clones
+and imports write the new service's rows through `services/portable.ts`
+`materializeService` in one transaction (the spec through
+`portableSpecOf`). A clone
 copies the spec (source, build, container, ports, health check, crash
 policy, resources, deploy strategy, cron schedule), notes, template slug,
 replicas, volumes (names and paths) and a Box's or database's settings
@@ -3487,6 +3502,163 @@ moves the containers ahead of their deployment. Success logs "runs on its new pr
 puts the project, grants and invite entries back (`project-move-restore.ts`
 from the engine's `finish`) unless the old project is gone or took the name.
 A stopped or never-deployed service just changes project (no deployment).
+
+Service export and import (`modules/serviceTransfer`, contracts and the
+file format in `packages/ops/src/ops/serviceTransfer.ts`, published as
+`service-export.schema.json`; added in 0.2.9 without volume data). Owners
+and admins only: `services.export` on the service and `services.import` on
+the project are scoped actions with `adminOnly` (see Permission model), so
+an admin key limited to some projects works there and nowhere else, and
+members never hold them. Every op is `mcp: false`.
+
+- The file (format `service-export`, `formatVersion` 1; the string is
+  fixed, not the brand): `README.txt`; `manifest.json` (panel version and
+  `panelId`, `exportedAt`, the secrets mode, `requires` (feature names an
+  importer refuses when it does not know them; none in version 1), the
+  services with counts, and every other entry's size and sha256);
+  `manifest.sig` (HMAC of the manifest's exact bytes) and `secrets.enc`
+  when encrypted; `services/<name>/service.json` (`PortableServiceV1`)
+  only when secret values were left out; `services/<name>/source/upload.tar.gz`,
+  the newest uploaded archive of an upload app, stored. Entry names are an
+  allowlist (`isExportEntryName`). With a passphrase the whole service
+  document is inside `secrets.enc` (commands, URLs, host names and notes are
+  private too); left out, service.json is in clear and holds no secret value
+  (`.env` values, file mount contents, database logins, certificates, basic
+  auth hashes, the tunnel token, shared variables' lines stay out). The
+  uploaded archive is never encrypted; the dialog and README say so.
+- Crypto (`crypto.ts`): scrypt (N 2^16, r 8, p 1 for new files; a file may
+  ask for N 2^14 to 2^20, r 8 to 16, p up to 4, at most 256 MiB, checked
+  before anything runs; 2 at a time, 8 waiting, then RATE_LIMITED, the
+  shared `security/limiter.ts`), HKDF-SHA256 keys for the secrets, the
+  manifest MAC and a 16-byte passphrase check, AES-256-GCM with the AAD
+  `service-export/1` plus `<name> <kind>` per service. A wrong passphrase is
+  FORBIDDEN `reason: passphrase`; an edited or damaged file BAD_REQUEST
+  `reason: tampered`. The MAC proves the file against people who do not
+  know the passphrase only: the UI never calls a file signed.
+- `serviceTransfer.exportPreview` lists what goes in, what stays out
+  (`leftOut`, also everything the caller may not read: `.env` and file
+  mounts need `env.view`, logins `databases.credentials`, domains
+  `domains.view`, the archive `files.read`, backups `backups.view`,
+  listeners `exposures.view`, the tunnel `tunnels.view`) and blockers:
+  `compose` (stacks and members), `protected`, `panel`, `preview`,
+  `copying`, `moving`; `tooLarge` from the export op (service.json over
+  2 MiB, secrets.enc over 3 MiB). `serviceTransfer.export` needs a fresh
+  sign-in for every export (`requireFreshIfSession`), builds the document
+  (`snapshot.ts`: panel-local ids replaced by names: an App installation by
+  its account, the connected GitHub account by login, a git credential by
+  name, host, user and fingerprint, a provider by kind, address and
+  workspace, a registry login by server and user, nodes, channels and
+  backup destinations by name; git URLs without credentials; the live
+  commit, and for image sources the digest, never a panel-built image
+  reference), `includeSourceLogin` adds the git credential or registry
+  login (encrypted only, needs `git.manage`/`registries.manage`), seals the
+  small entries, the manifest's fields and the MAC key on a
+  `service_exports` row (`service.export`) and returns a one-minute ticket
+  link. `GET /api/transfer/export?t=` (`http.ts`) takes the row from
+  `ready` to `streaming` in one transaction and wipes the payload then (a
+  second request gets 410), reads the archive's size, CRC-32 and sha256
+  first (it must still match `source_uploads.sha256`), and writes the zip
+  through `@seylo/zip` with the manifest last; the row records bytes, the
+  zip's sha256 and the entries, and `serviceTransfer.exportFinished` is
+  audited. `serviceTransfer.exportLink` issues a new link while the row is
+  `ready` (2 minutes, same person, fresh sign-in). File name:
+  `<service>-<yyyymmdd-hhmm>.<slug>.zip` (UTC).
+- `serviceTransfer.importBegin` (strict rate limit, 4 MiB body, every
+  input field sensitive) takes the text of the small entries the browser
+  read: the manifest is checked (`document.ts`: clean relative paths
+  through `@seylo/zip` `cleanName`, the allowlist, no duplicates, no
+  entries for services not listed, at most 200 entries and 20 volumes per
+  service, archive at most 512 MiB, secrets.enc listed if and only if
+  encrypted, a newer `formatVersion` is "update this panel first"), every
+  sent entry must match its size and sha256, secrets.enc is opened (KDF
+  bounds, passphrase, MAC, AAD) and the document checked against
+  `PortableServiceV1`: an item of `domains`, `exposures`, `cronJobs`,
+  `uptimeChecks`, `alerts` or `backups` that does not fit (an unknown
+  middleware, a new alert event: domain middlewares, listeners and access
+  are strict objects) is left out with a note, never imported weaker;
+  `access`, `tunnel` and `maintenance` fall back to none; anything else
+  refuses the file with the path and the rule, never the value; keys this
+  panel does not know are listed as `unknownSettings`. Compose documents
+  are refused. A `service_imports` row (`previewing`, the opened file
+  sealed as `service.import`, 24 h) holds it; nothing is created.
+- `serviceTransfer.setChoices` saves the review page's choices on the row
+  (normalised, never a password) and returns the preview;
+  `serviceTransfer.importPreview` is the same answer as a scalar query. The
+  plan (`plan.ts`) runs the create ops' checks on everything: name free and
+  no planted references (else `<name>-2`), node, `checkEnvReferences`
+  (hidden references are a blocker), `cronSettings`, `checkWatchPaths`,
+  cron `checkSchedule`, uptime `assertTimeout` (and `assertTarget` at
+  import), `checkRedirects`, `normalizeCidrs`, basic auth hashes only
+  bcrypt `$2a/$2b/$2y` cost 4 to 12, certificates through
+  `checkCertificate` and `assertCertificateNames` (a failing one drops to
+  Let's Encrypt), hosts through the unique (host, path) and `hostConflict`
+  (`usedHere`, `usedHidden`: skipped), the primary recomputed after skips
+  (the file's, else the first that is not a redirect). Database and Box
+  specs are built from the engine (`databaseSpec`, `boxSpec`), never taken
+  from the file; a version the panel does not offer blocks
+  (`engineVersion`); exposed users are derived; database logins come from
+  the file when it has them, else new ones. What reads the source
+  (`mapping.ts`) is the row the file's names point at, else a `needs`
+  choice: another row, `createFromFile` (the included login, needs
+  `git.manage`/`registries.manage`), or none (a repository source becomes
+  no source). Shared variables: missing ones are added from the file's
+  lines (`overwrite` replaces ones that differ, `skip` leaves them); every
+  existing service a reference reads from is listed (`readsFrom`).
+  Defaults: push deploys off, the tunnel off, deploy when ready from the
+  file's `stopped`; from the same panel (`manifest.panel.id`) cron jobs,
+  uptime checks and backups arrive switched off; channels and backup
+  destinations (by name, kind and bucket) are used on the same panel and
+  skipped from another one; database listeners open to anyone are skipped.
+  Sections the caller may not write here (`env.edit`, `files.write`,
+  `domains.edit`, `services.cron`, `services.alerts`, `services.edit`,
+  `backups.edit`, `databases.expose`, `tunnels.edit`, `services.update`)
+  are left behind and listed.
+- `serviceTransfer.import` (fresh sign-in; `passwords` is sensitive and the
+  only way basic auth passwords arrive, bcrypt cost 10) refuses while a
+  blocker or a `needs` choice is open, then writes everything in one
+  transaction (credential from the file, shared variables,
+  `services/portable.ts` `materializeService`, the import row to
+  `receiving` or `done` with the sealed file wiped). The service is created
+  stopped and never deployed (parked on its node); repository webhooks are
+  made like the connect ops do (`ensureRepoHook`, `ensureHook`); a new
+  deploy trigger URL is answered once. Nothing is left when the
+  transaction throws.
+- The archive goes up after: `serviceTransfer.uploadTicket { entry, offset }`
+  then `PUT /api/transfer/import?t=` with one part of at most 32 MiB
+  (`uploadPartBytes`, under Bun's 128 MiB body default and Cloudflare's
+  100 MiB): Content-Length required (411), no part past the entry (413),
+  the offset must be what the panel has; parts append to
+  `<dataDir>/uploads/import-<id>.part`; the last one goes through
+  `services/upload.ts` `storeUpload` with the manifest's size and sha256
+  (a mismatch keeps nothing and starts the entry over). Each finished or
+  failed entry is audited (`serviceTransfer.importData`). When the last
+  entry is in the row is `done` and, with deploy when ready, the service
+  deploys (at the exported commit when chosen). While a row is `receiving`,
+  `queueDeploy`, `services.start` and `boxes.open` refuse the service
+  (CONFLICT `reason: importing`, `copies.ts` `activeImport`).
+- `serviceTransfer.getImport` tells a reloaded page the status and each
+  entry's received bytes; `serviceTransfer.discardImport` deletes the row
+  and, while it is not done, the service (`deleteServiceTree`); it waits
+  while a part is uploading (`reason: uploading`). Only the person who
+  began an import goes on with it (`reason: notYours`).
+- The hourly `serviceTransfer.sweep`: `ready` exports past 2 minutes lose
+  their payload, exports go after 7 days, `previewing` imports at their
+  expiry, `receiving` ones 48 h after their last part turn `failed` (the
+  service stays, without its archive, and is no longer held back), done
+  and failed rows go after 30 days. At start, `streaming` exports are
+  marked failed (the panel restarted during the download).
+- Limits (`transferLimits`): 200 entries and 1 MiB of central directory
+  (the reader), 20 volumes per service, manifest.json 256 KiB, service.json
+  2 MiB, secrets.enc 3 MiB, the browser inflates a JSON entry to at most
+  4 MiB, the uploaded archive 512 MiB in parts of 32 MiB, a passphrase 12
+  to 1024 characters (NFC), one service per file in format version 1, the
+  scrypt bounds above, download links 2 minutes, files in review 24 h,
+  imports waiting for their archive 48 h.
+- `test/service-transfer-columns.test.ts` lists every column of every
+  table with a foreign key to `services` (and the scope-id tables) and
+  every key of `ServiceSpecJson` as exported or left out with a reason: a
+  migration that adds one fails until someone decides.
+
 `compose.preview` and `templates.preview` are POST mutations (bodies too
 large for a query string) that change nothing. Project collapse and order
 are per person (`project_prefs`). Hidden projects (0.2.1) are per person
@@ -3912,6 +4084,17 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
+- Service export and import (0.2.9): the Export card on the Settings tab
+  (owners and admins, `auth.whoami`; compose and protected services show
+  why instead) opens `components/service/transfer/export-dialog.tsx`; New
+  service > Import from a file opens `/import?project=`
+  (`routes/_app/import.tsx`, `components/import/`): `read-export.ts` reads
+  only the zip's central directory and small entries in the browser
+  (`@seylo/zip/read` over the File, so a damaged file is refused before
+  anything is sent and a re-zip by macOS still reads), the review page
+  saves every choice with `serviceTransfer.setChoices`, basic auth
+  passwords stay in the page until `serviceTransfer.import`, and the
+  uploaded archive goes up in 32 MiB parts with progress and Retry.
 - Sidebar (0.2.2, `components/shell/`): the mark and the panel name are
   one link to the dashboard (`/`, active only there). Each project row
   but the protected Panel project has a + next to its "..." menu (shown
