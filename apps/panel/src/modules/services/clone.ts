@@ -47,22 +47,22 @@ import { defineJob } from "../../jobs/queue";
 import { implement, type OpContext } from "../../ops/implement";
 import { assertEngineRunsOn } from "../databases/capability";
 import { generatePassword } from "../databases/engines";
-import { findDatabase, retiredExposedPasswordSecret, writeSecret } from "../databases/info";
+import { findDatabase, retiredExposedPasswordSecret } from "../databases/info";
 import { appPort } from "../domains/lookup";
-import { insertDomain } from "../domains/ops";
 import { primaryDomain } from "../domains/rows";
 import { buildEnvGraph } from "../env/graph";
 import { checkEnvReferences } from "../env/ops";
-import { readServiceEnv, writeServiceEnv } from "../env/store";
+import { readServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { activeMove, copyRunning, toDataCopy } from "./copies";
 import { withoutCredentials } from "./git-url";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
-import { assertNode, insertService, writeSpec } from "./insert";
+import { assertNode, writeSpec } from "./insert";
 import { relayVolume, waitStopped } from "./move";
 import { requireTargetProject } from "./move-project";
 import { publishService } from "./ops";
+import { materializeService, portableSpecOf } from "./portable";
 import { loadService, nameKey, nodeNames, type ServiceRow, toDetail } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
 import { readSpec, type ServiceSpecJson } from "./spec";
@@ -127,6 +127,13 @@ interface ClonePlan {
   references: ReferenceEffect[];
   /** References in the target project already waiting for the clone's name (they would read its values). */
   planted: ReturnType<typeof plantedReferences>;
+}
+
+/** `row` without `keys`. */
+function omitKeys<T extends object, K extends keyof T>(row: T, keys: readonly K[]): Omit<T, K> {
+  const out = { ...row };
+  for (const key of keys) delete out[key];
+  return out;
 }
 
 function hasMiddlewares(m: DomainMiddlewares | null | undefined): m is DomainMiddlewares {
@@ -258,22 +265,7 @@ const autoDomainErrors: Record<AutoDomainBlock, [code: "CONFLICT" | "FORBIDDEN" 
 
 /** What the clone's spec keeps: everything but its place in a stack, previews, a preview's identity and push deploys. */
 export function cloneSpecOf(spec: ServiceSpecJson): ServiceSpecJson {
-  const source: ServiceSpecJson["source"] =
-    spec.source.type === "github" || spec.source.type === "git" || spec.source.type === "provider"
-      ? // A clone must not deploy itself (and start) on the next push.
-        { ...spec.source, deployOnPush: false }
-      : spec.source.type === "upload"
-        ? { type: "upload", fileName: null }
-        : spec.source;
-  return {
-    ...spec,
-    source,
-    entryNodeId: null,
-    previews: { ...spec.previews, enabled: false },
-    member: null,
-    stack: null,
-    preview: null,
-  };
+  return portableSpecOf(spec, "clone");
 }
 
 /** The source's newest upload, so an upload app's clone can deploy the same archive. */
@@ -360,7 +352,9 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
   const copyLogins = plan.isDatabase && data === "copy";
   const middlewares = input.autoDomain && plan.middlewares ? structuredClone(plan.middlewares) : null;
   const created = ctx.db.transaction((tx) => {
-    const { id } = insertService(tx, {
+    const database = tx.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, svc.id)).get();
+    const box = tx.select().from(serviceBoxes).where(eq(serviceBoxes.serviceId, svc.id)).get();
+    const made = materializeService(ctx, tx, {
       projectId: plan.projectId,
       name: plan.name,
       kind: svc.kind,
@@ -371,66 +365,59 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
       notes: svc.notes,
       createdBy: user?.id ?? null,
       volumes: plan.dataVolumes.map((v) => ({ name: v.name, mountPath: v.mountPath, readOnly: v.readOnly })),
-    });
-    tx.update(services).set({ stopped: true }).where(eq(services.id, id)).run();
-    if (plan.envCopied) {
-      for (const f of plan.fileMounts) {
-        const content = f.contentSealed ? ctx.secrets.open(f.contentSealed, "volume.file") : null;
-        tx.insert(volumes)
-          .values({
-            serviceId: id,
+      fileMounts: plan.envCopied
+        ? plan.fileMounts.map((f) => ({
             name: f.name,
             mountPath: f.mountPath,
-            kind: "file",
             readOnly: f.readOnly,
-            contentSealed: content === null ? null : ctx.secrets.seal(content, "volume.file"),
-          })
-          .run();
-      }
-      if (plan.envText.trim()) writeServiceEnv(tx, ctx.secrets, id, plan.envText, user?.id ?? null);
-    }
-    const database = tx.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, svc.id)).get();
-    if (database) {
-      // The separate exposed user of a database from before 0.2.9 lives on in copied data, so the
-      // clone's agent retires it there too; an empty data folder never had it.
-      tx.insert(serviceDatabases)
-        .values({
-          ...database,
-          serviceId: id,
-          tlsHostname: null,
-          exposedUser: copyLogins ? database.exposedUser : "",
-          createdAt: new Date(),
-        })
-        .run();
-      // A copied data folder only opens with the source's logins; an empty one gets new ones.
-      for (const secret of tx.select().from(serviceSecrets).where(eq(serviceSecrets.serviceId, svc.id)).all()) {
-        if (secret.name === retiredExposedPasswordSecret) continue;
-        const value = copyLogins ? ctx.secrets.open(secret.valueSealed, "service.secret") : null;
-        writeSecret(tx, ctx.secrets, id, secret.name, value ?? generatePassword());
-      }
-    }
-    const box = tx.select().from(serviceBoxes).where(eq(serviceBoxes.serviceId, svc.id)).get();
-    // A token in an older Box's URL stays with that Box.
-    if (box)
-      tx.insert(serviceBoxes)
-        .values({ serviceId: id, repository: box.repository ? withoutCredentials(box.repository) : null, idleMinutes: box.idleMinutes })
-        .run();
-    let domain: string | null = null;
-    if (input.autoDomain && plan.autoDomain) {
-      domain = insertDomain(ctx, tx, {
-        serviceId: id,
-        host: plan.autoDomain,
-        pathPrefix: "/",
-        targetPort: appPort(ctx.db, svc) ?? 80,
-        https: "acme",
-        auto: true,
-        dnsStatus: "ok",
-        dnsCheckedAt: new Date(),
-        certStatus: "pending",
-        isPrimary: true,
-        middlewares: middlewares ?? {},
-      }).host;
-    }
+            content: f.contentSealed ? ctx.secrets.open(f.contentSealed, "volume.file") : null,
+          }))
+        : [],
+      env: plan.envCopied ? plan.envText : null,
+      database: database
+        ? {
+            // The separate exposed user of a database from before 0.2.9 lives on in copied data, so the
+            // clone's agent retires it there too; an empty data folder never had it.
+            facts: {
+              ...omitKeys(database, ["serviceId", "createdAt"]),
+              tlsHostname: null,
+              exposedUser: copyLogins ? database.exposedUser : "",
+            },
+            // A copied data folder only opens with the source's logins; an empty one gets new ones.
+            secrets: tx
+              .select()
+              .from(serviceSecrets)
+              .where(eq(serviceSecrets.serviceId, svc.id))
+              .all()
+              .filter((secret) => secret.name !== retiredExposedPasswordSecret)
+              .map((secret) => ({
+                name: secret.name,
+                value: (copyLogins ? ctx.secrets.open(secret.valueSealed, "service.secret") : null) ?? generatePassword(),
+              })),
+          }
+        : null,
+      // A token in an older Box's URL stays with that Box.
+      box: box ? { repository: box.repository ? withoutCredentials(box.repository) : null, idleMinutes: box.idleMinutes } : null,
+      domains:
+        input.autoDomain && plan.autoDomain
+          ? [
+              {
+                host: plan.autoDomain,
+                pathPrefix: "/",
+                targetPort: appPort(ctx.db, svc) ?? 80,
+                https: "acme",
+                auto: true,
+                dnsStatus: "ok",
+                dnsCheckedAt: new Date(),
+                certStatus: "pending",
+                isPrimary: true,
+                middlewares: middlewares ?? {},
+              },
+            ]
+          : [],
+    });
+    const id = made.id;
+    const domain = made.domains[0]?.host ?? null;
     const copy =
       data === "copy" && plan.fromNodeId
         ? tx
