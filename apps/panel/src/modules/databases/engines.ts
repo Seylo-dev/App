@@ -16,6 +16,13 @@ export interface EngineVersion {
   image: string;
   /** Where the data volume is mounted. */
   dataPath: string;
+  /**
+   * Why the version cannot be exposed, when it has no TLS of its own and the
+   * agent installs none (MariaDB 10.11; MariaDB makes its own certificate
+   * from 11.4): the exposed port is TLS only, so setExposure refuses it with
+   * this, and an exposure from before 0.2.9 reads as closed (loadDatabase).
+   */
+  noExposure?: string;
 }
 
 /** The engine with extensions in its image, on the same majors. */
@@ -166,7 +173,12 @@ export const engines: Record<DatabaseEngine, Engine> = {
     versions: [
       { version: "11.8", image: "mariadb:11.8.2", dataPath: "/var/lib/mysql" },
       { version: "11.4", image: "mariadb:11.4.7", dataPath: "/var/lib/mysql" },
-      { version: "10.11", image: "mariadb:10.11.13", dataPath: "/var/lib/mysql" },
+      {
+        version: "10.11",
+        image: "mariadb:10.11.13",
+        dataPath: "/var/lib/mysql",
+        noExposure: "MariaDB 10.11 has no TLS, so it cannot be exposed: the exposed port only takes TLS connections. MariaDB 11.4 and later can.",
+      },
     ],
     variants: [],
     defaultUser: "root",
@@ -338,6 +350,11 @@ export function engineVersion(engine: DatabaseEngine, version: string | undefine
   if (!list) return null;
   if (version === undefined) return list[0] ?? null;
   return list.find((v) => v.version === version) ?? null;
+}
+
+/** Why the database's version cannot be exposed (EngineVersion.noExposure); null when it can. */
+export function exposureRefusal(row: { engine: DatabaseEngine; version: string; variant: string | null }): string | null {
+  return engineVersion(row.engine, row.version, row.variant)?.noExposure ?? null;
 }
 
 export interface Credentials {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
 import { DatabaseEngine } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { nodes, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
+import { nodes, portExposures, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
 import { databaseRuntime } from "../src/modules/databases/desired";
 import { edgeSubject, verifyEdgeTicket } from "../src/modules/databases/edge-ticket";
 import {
@@ -653,6 +653,41 @@ describe("more engines", () => {
       agent.disconnect();
       await settleDeploys(panel);
     }
+  });
+
+  test("MariaDB 10.11 has no TLS: it is never exposed", async () => {
+    const { res, node, project } = await createDb("mariadb", { version: "10.11" });
+    expect(res.status).toBe(200);
+    const serviceId = res.body.serviceId;
+    const refused = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.details.reason).toBe("noTls");
+    expect(refused.body.error.message).toContain("MariaDB 10.11 has no TLS");
+    expect(panel.deps.db.select().from(portExposures).where(eq(portExposures.serviceId, serviceId)).all()).toEqual([]);
+    // Exposed before 0.2.9 (its old user could not sign in without TLS either): it reads as closed everywhere.
+    panel.deps.db
+      .insert(portExposures)
+      .values({ serviceId, nodeId: node.id, kind: "database", listenPort: 43306, targetPort: 3306, tls: true })
+      .run();
+    expect((await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure).toMatchObject({ enabled: false, port: null });
+    expect((await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body.exposed).toBeNull();
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toEqual({ enabled: false });
+    const { seedService } = await import("./seed-helpers");
+    const app = seedService(panel, { projectId: project.id, name: "api", nodeIds: [node.id] });
+    await callOp(panel, (await import("@seylo/ops")).env.set, { serviceId: app.id, text: "OUT=${{shop-db.EXPOSED_URL}}\n" }, { cookie });
+    expect(resolveServiceEnv(panel.deps, app.id).find((v) => v.name === "OUT")?.value).toBe("");
+    // Turning it off still clears the old row.
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: false }, { cookie })).status).toBe(200);
+    expect(panel.deps.db.select().from(portExposures).where(eq(portExposures.serviceId, serviceId)).all()).toEqual([]);
+    // MariaDB 11.4 and later make their own certificate.
+    await settleDeploys(panel);
+    const newer = await callOp(
+      panel,
+      dbOps.create,
+      { projectId: project.id, name: "newer", engine: "mariadb", version: "11.4", nodeId: node.id },
+      { cookie },
+    );
+    expect((await callOp(panel, dbOps.setExposure, { serviceId: newer.body.serviceId, enabled: true }, { cookie })).status).toBe(200);
   });
 
   test("Postgres, MySQL and MariaDB are exposed only through agents with database.exposure.v2", async () => {

@@ -11,7 +11,7 @@ import { portExposures, serviceDatabases, serviceSecrets } from "../../db/schema
 import type { Deps } from "../../deps";
 import type { SecretBox } from "../../security/secret-box";
 import { getService, nodeAddress, type PlacedNode, type ServiceRow, serviceNodes } from "../domains/lookup";
-import { type Credentials, connectionUrl, type Engine, engines, httpUrl } from "./engines";
+import { type Credentials, connectionUrl, type Engine, engines, exposureRefusal, httpUrl } from "./engines";
 
 type Tx = Parameters<Parameters<PanelDb["transaction"]>[0]>[0];
 
@@ -63,12 +63,15 @@ export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: stri
   if (!row) throw new OpError("NOT_FOUND", `${service.name} is not a database.`, { serviceId });
   const engine = engines[row.engine];
   const adminPassword = readSecret(deps, serviceId, adminPasswordSecret) ?? "";
+  // A version without TLS (MariaDB 10.11) is never exposed: a row from before 0.2.9 reads as closed.
   const exposure =
-    deps.db
-      .select()
-      .from(portExposures)
-      .where(and(eq(portExposures.serviceId, serviceId), eq(portExposures.kind, "database")))
-      .get() ?? null;
+    exposureRefusal(row) === null
+      ? (deps.db
+          .select()
+          .from(portExposures)
+          .where(and(eq(portExposures.serviceId, serviceId), eq(portExposures.kind, "database")))
+          .get() ?? null)
+      : null;
   return {
     service,
     row,

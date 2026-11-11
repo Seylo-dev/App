@@ -35,6 +35,7 @@ import {
   engineVersion,
   engineVersions,
   exposureCapability,
+  exposureRefusal,
   generatePassword,
   generateUserName,
   healthProbe,
@@ -297,6 +298,8 @@ export const setExposure = implement(dbOps.setExposure, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);
   if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
   const node = info.node;
+  const noTls = input.enabled ? exposureRefusal(info.row) : null;
+  if (noTls) throw new OpError("CONFLICT", noTls, { reason: "noTls" });
   // An older agent would relay the port without TLS (or without checking that clients ask for it); the
   // desired state leaves it closed there anyway.
   const missing = input.enabled ? missingExposureCapability(ctx.db, ctx.agents, info.engine, node.id) : null;
