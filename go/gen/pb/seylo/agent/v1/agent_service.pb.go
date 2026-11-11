@@ -24,7 +24,7 @@ var File_seylo_agent_v1_agent_service_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_agent_service_proto_rawDesc = "" +
 	"\n" +
-	"\"seylo/agent/v1/agent_service.proto\x12\x0eseylo.agent.v1\x1a\x1bseylo/agent/v1/backup.proto\x1a\x1aseylo/agent/v1/build.proto\x1a seylo/agent/v1/certificate.proto\x1a\x1cseylo/agent/v1/compose.proto\x1a\x19seylo/agent/v1/cron.proto\x1a\x1cseylo/agent/v1/desired.proto\x1a\x19seylo/agent/v1/exec.proto\x1a\x17seylo/agent/v1/fs.proto\x1a\x19seylo/agent/v1/logs.proto\x1a\x1cseylo/agent/v1/metrics.proto\x1a\x1dseylo/agent/v1/node_ops.proto\x1a\x1cseylo/agent/v1/options.proto\x1a\x1aseylo/agent/v1/state.proto\x1a\x1cseylo/agent/v1/tailnet.proto\x1a\x1dseylo/agent/v1/terminal.proto\x1a\x1dseylo/agent/v1/transfer.proto\x1a\x1bseylo/agent/v1/tunnel.proto2\xba&\n" +
+	"\"seylo/agent/v1/agent_service.proto\x12\x0eseylo.agent.v1\x1a\x1bseylo/agent/v1/backup.proto\x1a\x1aseylo/agent/v1/build.proto\x1a seylo/agent/v1/certificate.proto\x1a\x1cseylo/agent/v1/compose.proto\x1a\x19seylo/agent/v1/cron.proto\x1a\x1cseylo/agent/v1/desired.proto\x1a\x19seylo/agent/v1/exec.proto\x1a\x17seylo/agent/v1/fs.proto\x1a\x19seylo/agent/v1/logs.proto\x1a\x1cseylo/agent/v1/metrics.proto\x1a\x1dseylo/agent/v1/node_ops.proto\x1a\x1cseylo/agent/v1/options.proto\x1a\x1aseylo/agent/v1/state.proto\x1a\x1cseylo/agent/v1/tailnet.proto\x1a\x1dseylo/agent/v1/terminal.proto\x1a\x1dseylo/agent/v1/transfer.proto\x1a\x1bseylo/agent/v1/tunnel.proto\x1a\x1fseylo/agent/v1/panel_move.proto2\x90/\n" +
 	"\fAgentService\x12l\n" +
 	"\fGetNodeFacts\x12#.seylo.agent.v1.GetNodeFactsRequest\x1a$.seylo.agent.v1.GetNodeFactsResponse\"\x11\xca\xf3\x18\rstate.sync.v1\x12x\n" +
 	"\x10GetStateSnapshot\x12'.seylo.agent.v1.GetStateSnapshotRequest\x1a(.seylo.agent.v1.GetStateSnapshotResponse\"\x11\xca\xf3\x18\rstate.sync.v1\x12i\n" +
@@ -75,7 +75,16 @@ const file_seylo_agent_v1_agent_service_proto_rawDesc = "" +
 	"\tHostShell\x12 .seylo.agent.v1.HostShellRequest\x1a!.seylo.agent.v1.HostShellResponse\"\x16\xca\xf3\x18\x12node.host-shell.v1(\x010\x01\x12\x87\x01\n" +
 	"\x10RetryCertificate\x12'.seylo.agent.v1.RetryCertificateRequest\x1a(.seylo.agent.v1.RetryCertificateResponse\" \xca\xf3\x18\x1crouting.certificate-retry.v1\x12u\n" +
 	"\x0eTailscaleLogin\x12%.seylo.agent.v1.TailscaleLoginRequest\x1a&.seylo.agent.v1.TailscaleLoginResponse\"\x14\xca\xf3\x18\x10tailnet.login.v1\x12x\n" +
-	"\x0fTailscaleSetDns\x12&.seylo.agent.v1.TailscaleSetDnsRequest\x1a'.seylo.agent.v1.TailscaleSetDnsResponse\"\x14\xca\xf3\x18\x10tailnet.login.v1B\xbc\x01\n" +
+	"\x0fTailscaleSetDns\x12&.seylo.agent.v1.TailscaleSetDnsRequest\x1a'.seylo.agent.v1.TailscaleSetDnsResponse\"\x14\xca\xf3\x18\x10tailnet.login.v1\x12\x7f\n" +
+	"\x11StagePanelAddress\x12(.seylo.agent.v1.StagePanelAddressRequest\x1a).seylo.agent.v1.StagePanelAddressResponse\"\x15\xca\xf3\x18\x11panel.relocate.v1\x12\x7f\n" +
+	"\x11ClearPanelAddress\x12(.seylo.agent.v1.ClearPanelAddressRequest\x1a).seylo.agent.v1.ClearPanelAddressResponse\"\x15\xca\xf3\x18\x11panel.relocate.v1\x12}\n" +
+	"\x0fImportPanelData\x12&.seylo.agent.v1.ImportPanelDataRequest\x1a'.seylo.agent.v1.ImportPanelDataResponse\"\x19\xc0\xf3\x18\x02\xca\xf3\x18\x11panel.relocate.v1\x12z\n" +
+	"\x0eExportRegistry\x12%.seylo.agent.v1.ExportRegistryRequest\x1a&.seylo.agent.v1.ExportRegistryResponse\"\x19\xc0\xf3\x18\x01\xca\xf3\x18\x11panel.relocate.v1\x12z\n" +
+	"\x0eImportRegistry\x12%.seylo.agent.v1.ImportRegistryRequest\x1a&.seylo.agent.v1.ImportRegistryResponse\"\x19\xc0\xf3\x18\x02\xca\xf3\x18\x11panel.relocate.v1\x12y\n" +
+	"\x0fStartMovedPanel\x12&.seylo.agent.v1.StartMovedPanelRequest\x1a'.seylo.agent.v1.StartMovedPanelResponse\"\x15\xca\xf3\x18\x11panel.relocate.v1\x12y\n" +
+	"\x0fAbortMovedPanel\x12&.seylo.agent.v1.AbortMovedPanelRequest\x1a'.seylo.agent.v1.AbortMovedPanelResponse\"\x15\xca\xf3\x18\x11panel.relocate.v1\x12m\n" +
+	"\vRetirePanel\x12\".seylo.agent.v1.RetirePanelRequest\x1a#.seylo.agent.v1.RetirePanelResponse\"\x15\xca\xf3\x18\x11panel.relocate.v1\x12v\n" +
+	"\x0eRemoveOldPanel\x12%.seylo.agent.v1.RemoveOldPanelRequest\x1a&.seylo.agent.v1.RemoveOldPanelResponse\"\x15\xca\xf3\x18\x11panel.relocate.v1B\xbc\x01\n" +
 	"\x12com.seylo.agent.v1B\x11AgentServiceProtoP\x01Z9github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1;agentv1\xa2\x02\x03SAX\xaa\x02\x0eSeylo.Agent.V1\xca\x02\x0eSeylo\\Agent\\V1\xe2\x02\x1aSeylo\\Agent\\V1\\GPBMetadata\xea\x02\x10Seylo::Agent::V1b\x06proto3"
 
 var file_seylo_agent_v1_agent_service_proto_goTypes = []any{
@@ -125,151 +134,187 @@ var file_seylo_agent_v1_agent_service_proto_goTypes = []any{
 	(*RetryCertificateRequest)(nil),    // 43: seylo.agent.v1.RetryCertificateRequest
 	(*TailscaleLoginRequest)(nil),      // 44: seylo.agent.v1.TailscaleLoginRequest
 	(*TailscaleSetDnsRequest)(nil),     // 45: seylo.agent.v1.TailscaleSetDnsRequest
-	(*GetNodeFactsResponse)(nil),       // 46: seylo.agent.v1.GetNodeFactsResponse
-	(*GetStateSnapshotResponse)(nil),   // 47: seylo.agent.v1.GetStateSnapshotResponse
-	(*SyncDesiredResponse)(nil),        // 48: seylo.agent.v1.SyncDesiredResponse
-	(*ApplyServiceResponse)(nil),       // 49: seylo.agent.v1.ApplyServiceResponse
-	(*RemoveServiceResponse)(nil),      // 50: seylo.agent.v1.RemoveServiceResponse
-	(*RestartServiceResponse)(nil),     // 51: seylo.agent.v1.RestartServiceResponse
-	(*BuildResponse)(nil),              // 52: seylo.agent.v1.BuildResponse
-	(*CancelBuildResponse)(nil),        // 53: seylo.agent.v1.CancelBuildResponse
-	(*UploadBuildContextResponse)(nil), // 54: seylo.agent.v1.UploadBuildContextResponse
-	(*ExecResponse)(nil),               // 55: seylo.agent.v1.ExecResponse
-	(*ConsoleResponse)(nil),            // 56: seylo.agent.v1.ConsoleResponse
-	(*ShellResponse)(nil),              // 57: seylo.agent.v1.ShellResponse
-	(*FsListResponse)(nil),             // 58: seylo.agent.v1.FsListResponse
-	(*FsStatResponse)(nil),             // 59: seylo.agent.v1.FsStatResponse
-	(*FsReadResponse)(nil),             // 60: seylo.agent.v1.FsReadResponse
-	(*FsWriteResponse)(nil),            // 61: seylo.agent.v1.FsWriteResponse
-	(*FsMkdirResponse)(nil),            // 62: seylo.agent.v1.FsMkdirResponse
-	(*FsRenameResponse)(nil),           // 63: seylo.agent.v1.FsRenameResponse
-	(*FsDeleteResponse)(nil),           // 64: seylo.agent.v1.FsDeleteResponse
-	(*FsChmodResponse)(nil),            // 65: seylo.agent.v1.FsChmodResponse
-	(*FsArchiveResponse)(nil),          // 66: seylo.agent.v1.FsArchiveResponse
-	(*FsExtractResponse)(nil),          // 67: seylo.agent.v1.FsExtractResponse
-	(*LogsFollowResponse)(nil),         // 68: seylo.agent.v1.LogsFollowResponse
-	(*LogsSearchResponse)(nil),         // 69: seylo.agent.v1.LogsSearchResponse
-	(*GetMetricsResponse)(nil),         // 70: seylo.agent.v1.GetMetricsResponse
-	(*WatchMetricsResponse)(nil),       // 71: seylo.agent.v1.WatchMetricsResponse
-	(*TunnelResponse)(nil),             // 72: seylo.agent.v1.TunnelResponse
-	(*RunBackupResponse)(nil),          // 73: seylo.agent.v1.RunBackupResponse
-	(*RestoreBackupResponse)(nil),      // 74: seylo.agent.v1.RestoreBackupResponse
-	(*PruneResponse)(nil),              // 75: seylo.agent.v1.PruneResponse
-	(*UpdateAgentResponse)(nil),        // 76: seylo.agent.v1.UpdateAgentResponse
-	(*RunHealthCheckResponse)(nil),     // 77: seylo.agent.v1.RunHealthCheckResponse
-	(*TroubleshootResponse)(nil),       // 78: seylo.agent.v1.TroubleshootResponse
-	(*RebootResponse)(nil),             // 79: seylo.agent.v1.RebootResponse
-	(*UpdateDockerResponse)(nil),       // 80: seylo.agent.v1.UpdateDockerResponse
-	(*UpdatePanelResponse)(nil),        // 81: seylo.agent.v1.UpdatePanelResponse
-	(*AgentLogsResponse)(nil),          // 82: seylo.agent.v1.AgentLogsResponse
-	(*FetchGitFileResponse)(nil),       // 83: seylo.agent.v1.FetchGitFileResponse
-	(*ParseComposeResponse)(nil),       // 84: seylo.agent.v1.ParseComposeResponse
-	(*RunCronNowResponse)(nil),         // 85: seylo.agent.v1.RunCronNowResponse
-	(*ExportVolumeResponse)(nil),       // 86: seylo.agent.v1.ExportVolumeResponse
-	(*ImportVolumeResponse)(nil),       // 87: seylo.agent.v1.ImportVolumeResponse
-	(*HostShellResponse)(nil),          // 88: seylo.agent.v1.HostShellResponse
-	(*RetryCertificateResponse)(nil),   // 89: seylo.agent.v1.RetryCertificateResponse
-	(*TailscaleLoginResponse)(nil),     // 90: seylo.agent.v1.TailscaleLoginResponse
-	(*TailscaleSetDnsResponse)(nil),    // 91: seylo.agent.v1.TailscaleSetDnsResponse
+	(*StagePanelAddressRequest)(nil),   // 46: seylo.agent.v1.StagePanelAddressRequest
+	(*ClearPanelAddressRequest)(nil),   // 47: seylo.agent.v1.ClearPanelAddressRequest
+	(*ImportPanelDataRequest)(nil),     // 48: seylo.agent.v1.ImportPanelDataRequest
+	(*ExportRegistryRequest)(nil),      // 49: seylo.agent.v1.ExportRegistryRequest
+	(*ImportRegistryRequest)(nil),      // 50: seylo.agent.v1.ImportRegistryRequest
+	(*StartMovedPanelRequest)(nil),     // 51: seylo.agent.v1.StartMovedPanelRequest
+	(*AbortMovedPanelRequest)(nil),     // 52: seylo.agent.v1.AbortMovedPanelRequest
+	(*RetirePanelRequest)(nil),         // 53: seylo.agent.v1.RetirePanelRequest
+	(*RemoveOldPanelRequest)(nil),      // 54: seylo.agent.v1.RemoveOldPanelRequest
+	(*GetNodeFactsResponse)(nil),       // 55: seylo.agent.v1.GetNodeFactsResponse
+	(*GetStateSnapshotResponse)(nil),   // 56: seylo.agent.v1.GetStateSnapshotResponse
+	(*SyncDesiredResponse)(nil),        // 57: seylo.agent.v1.SyncDesiredResponse
+	(*ApplyServiceResponse)(nil),       // 58: seylo.agent.v1.ApplyServiceResponse
+	(*RemoveServiceResponse)(nil),      // 59: seylo.agent.v1.RemoveServiceResponse
+	(*RestartServiceResponse)(nil),     // 60: seylo.agent.v1.RestartServiceResponse
+	(*BuildResponse)(nil),              // 61: seylo.agent.v1.BuildResponse
+	(*CancelBuildResponse)(nil),        // 62: seylo.agent.v1.CancelBuildResponse
+	(*UploadBuildContextResponse)(nil), // 63: seylo.agent.v1.UploadBuildContextResponse
+	(*ExecResponse)(nil),               // 64: seylo.agent.v1.ExecResponse
+	(*ConsoleResponse)(nil),            // 65: seylo.agent.v1.ConsoleResponse
+	(*ShellResponse)(nil),              // 66: seylo.agent.v1.ShellResponse
+	(*FsListResponse)(nil),             // 67: seylo.agent.v1.FsListResponse
+	(*FsStatResponse)(nil),             // 68: seylo.agent.v1.FsStatResponse
+	(*FsReadResponse)(nil),             // 69: seylo.agent.v1.FsReadResponse
+	(*FsWriteResponse)(nil),            // 70: seylo.agent.v1.FsWriteResponse
+	(*FsMkdirResponse)(nil),            // 71: seylo.agent.v1.FsMkdirResponse
+	(*FsRenameResponse)(nil),           // 72: seylo.agent.v1.FsRenameResponse
+	(*FsDeleteResponse)(nil),           // 73: seylo.agent.v1.FsDeleteResponse
+	(*FsChmodResponse)(nil),            // 74: seylo.agent.v1.FsChmodResponse
+	(*FsArchiveResponse)(nil),          // 75: seylo.agent.v1.FsArchiveResponse
+	(*FsExtractResponse)(nil),          // 76: seylo.agent.v1.FsExtractResponse
+	(*LogsFollowResponse)(nil),         // 77: seylo.agent.v1.LogsFollowResponse
+	(*LogsSearchResponse)(nil),         // 78: seylo.agent.v1.LogsSearchResponse
+	(*GetMetricsResponse)(nil),         // 79: seylo.agent.v1.GetMetricsResponse
+	(*WatchMetricsResponse)(nil),       // 80: seylo.agent.v1.WatchMetricsResponse
+	(*TunnelResponse)(nil),             // 81: seylo.agent.v1.TunnelResponse
+	(*RunBackupResponse)(nil),          // 82: seylo.agent.v1.RunBackupResponse
+	(*RestoreBackupResponse)(nil),      // 83: seylo.agent.v1.RestoreBackupResponse
+	(*PruneResponse)(nil),              // 84: seylo.agent.v1.PruneResponse
+	(*UpdateAgentResponse)(nil),        // 85: seylo.agent.v1.UpdateAgentResponse
+	(*RunHealthCheckResponse)(nil),     // 86: seylo.agent.v1.RunHealthCheckResponse
+	(*TroubleshootResponse)(nil),       // 87: seylo.agent.v1.TroubleshootResponse
+	(*RebootResponse)(nil),             // 88: seylo.agent.v1.RebootResponse
+	(*UpdateDockerResponse)(nil),       // 89: seylo.agent.v1.UpdateDockerResponse
+	(*UpdatePanelResponse)(nil),        // 90: seylo.agent.v1.UpdatePanelResponse
+	(*AgentLogsResponse)(nil),          // 91: seylo.agent.v1.AgentLogsResponse
+	(*FetchGitFileResponse)(nil),       // 92: seylo.agent.v1.FetchGitFileResponse
+	(*ParseComposeResponse)(nil),       // 93: seylo.agent.v1.ParseComposeResponse
+	(*RunCronNowResponse)(nil),         // 94: seylo.agent.v1.RunCronNowResponse
+	(*ExportVolumeResponse)(nil),       // 95: seylo.agent.v1.ExportVolumeResponse
+	(*ImportVolumeResponse)(nil),       // 96: seylo.agent.v1.ImportVolumeResponse
+	(*HostShellResponse)(nil),          // 97: seylo.agent.v1.HostShellResponse
+	(*RetryCertificateResponse)(nil),   // 98: seylo.agent.v1.RetryCertificateResponse
+	(*TailscaleLoginResponse)(nil),     // 99: seylo.agent.v1.TailscaleLoginResponse
+	(*TailscaleSetDnsResponse)(nil),    // 100: seylo.agent.v1.TailscaleSetDnsResponse
+	(*StagePanelAddressResponse)(nil),  // 101: seylo.agent.v1.StagePanelAddressResponse
+	(*ClearPanelAddressResponse)(nil),  // 102: seylo.agent.v1.ClearPanelAddressResponse
+	(*ImportPanelDataResponse)(nil),    // 103: seylo.agent.v1.ImportPanelDataResponse
+	(*ExportRegistryResponse)(nil),     // 104: seylo.agent.v1.ExportRegistryResponse
+	(*ImportRegistryResponse)(nil),     // 105: seylo.agent.v1.ImportRegistryResponse
+	(*StartMovedPanelResponse)(nil),    // 106: seylo.agent.v1.StartMovedPanelResponse
+	(*AbortMovedPanelResponse)(nil),    // 107: seylo.agent.v1.AbortMovedPanelResponse
+	(*RetirePanelResponse)(nil),        // 108: seylo.agent.v1.RetirePanelResponse
+	(*RemoveOldPanelResponse)(nil),     // 109: seylo.agent.v1.RemoveOldPanelResponse
 }
 var file_seylo_agent_v1_agent_service_proto_depIdxs = []int32{
-	0,  // 0: seylo.agent.v1.AgentService.GetNodeFacts:input_type -> seylo.agent.v1.GetNodeFactsRequest
-	1,  // 1: seylo.agent.v1.AgentService.GetStateSnapshot:input_type -> seylo.agent.v1.GetStateSnapshotRequest
-	2,  // 2: seylo.agent.v1.AgentService.SyncDesired:input_type -> seylo.agent.v1.SyncDesiredRequest
-	3,  // 3: seylo.agent.v1.AgentService.ApplyService:input_type -> seylo.agent.v1.ApplyServiceRequest
-	4,  // 4: seylo.agent.v1.AgentService.RemoveService:input_type -> seylo.agent.v1.RemoveServiceRequest
-	5,  // 5: seylo.agent.v1.AgentService.RestartService:input_type -> seylo.agent.v1.RestartServiceRequest
-	6,  // 6: seylo.agent.v1.AgentService.Build:input_type -> seylo.agent.v1.BuildRequest
-	7,  // 7: seylo.agent.v1.AgentService.CancelBuild:input_type -> seylo.agent.v1.CancelBuildRequest
-	8,  // 8: seylo.agent.v1.AgentService.UploadBuildContext:input_type -> seylo.agent.v1.UploadBuildContextRequest
-	9,  // 9: seylo.agent.v1.AgentService.Exec:input_type -> seylo.agent.v1.ExecRequest
-	10, // 10: seylo.agent.v1.AgentService.Console:input_type -> seylo.agent.v1.ConsoleRequest
-	11, // 11: seylo.agent.v1.AgentService.Shell:input_type -> seylo.agent.v1.ShellRequest
-	12, // 12: seylo.agent.v1.AgentService.FsList:input_type -> seylo.agent.v1.FsListRequest
-	13, // 13: seylo.agent.v1.AgentService.FsStat:input_type -> seylo.agent.v1.FsStatRequest
-	14, // 14: seylo.agent.v1.AgentService.FsRead:input_type -> seylo.agent.v1.FsReadRequest
-	15, // 15: seylo.agent.v1.AgentService.FsWrite:input_type -> seylo.agent.v1.FsWriteRequest
-	16, // 16: seylo.agent.v1.AgentService.FsMkdir:input_type -> seylo.agent.v1.FsMkdirRequest
-	17, // 17: seylo.agent.v1.AgentService.FsRename:input_type -> seylo.agent.v1.FsRenameRequest
-	18, // 18: seylo.agent.v1.AgentService.FsDelete:input_type -> seylo.agent.v1.FsDeleteRequest
-	19, // 19: seylo.agent.v1.AgentService.FsChmod:input_type -> seylo.agent.v1.FsChmodRequest
-	20, // 20: seylo.agent.v1.AgentService.FsArchive:input_type -> seylo.agent.v1.FsArchiveRequest
-	21, // 21: seylo.agent.v1.AgentService.FsExtract:input_type -> seylo.agent.v1.FsExtractRequest
-	22, // 22: seylo.agent.v1.AgentService.LogsFollow:input_type -> seylo.agent.v1.LogsFollowRequest
-	23, // 23: seylo.agent.v1.AgentService.LogsSearch:input_type -> seylo.agent.v1.LogsSearchRequest
-	24, // 24: seylo.agent.v1.AgentService.GetMetrics:input_type -> seylo.agent.v1.GetMetricsRequest
-	25, // 25: seylo.agent.v1.AgentService.WatchMetrics:input_type -> seylo.agent.v1.WatchMetricsRequest
-	26, // 26: seylo.agent.v1.AgentService.Tunnel:input_type -> seylo.agent.v1.TunnelRequest
-	27, // 27: seylo.agent.v1.AgentService.RunBackup:input_type -> seylo.agent.v1.RunBackupRequest
-	28, // 28: seylo.agent.v1.AgentService.RestoreBackup:input_type -> seylo.agent.v1.RestoreBackupRequest
-	29, // 29: seylo.agent.v1.AgentService.Prune:input_type -> seylo.agent.v1.PruneRequest
-	30, // 30: seylo.agent.v1.AgentService.UpdateAgent:input_type -> seylo.agent.v1.UpdateAgentRequest
-	31, // 31: seylo.agent.v1.AgentService.RunHealthCheck:input_type -> seylo.agent.v1.RunHealthCheckRequest
-	32, // 32: seylo.agent.v1.AgentService.Troubleshoot:input_type -> seylo.agent.v1.TroubleshootRequest
-	33, // 33: seylo.agent.v1.AgentService.Reboot:input_type -> seylo.agent.v1.RebootRequest
-	34, // 34: seylo.agent.v1.AgentService.UpdateDocker:input_type -> seylo.agent.v1.UpdateDockerRequest
-	35, // 35: seylo.agent.v1.AgentService.UpdatePanel:input_type -> seylo.agent.v1.UpdatePanelRequest
-	36, // 36: seylo.agent.v1.AgentService.AgentLogs:input_type -> seylo.agent.v1.AgentLogsRequest
-	37, // 37: seylo.agent.v1.AgentService.FetchGitFile:input_type -> seylo.agent.v1.FetchGitFileRequest
-	38, // 38: seylo.agent.v1.AgentService.ParseCompose:input_type -> seylo.agent.v1.ParseComposeRequest
-	39, // 39: seylo.agent.v1.AgentService.RunCronNow:input_type -> seylo.agent.v1.RunCronNowRequest
-	40, // 40: seylo.agent.v1.AgentService.ExportVolume:input_type -> seylo.agent.v1.ExportVolumeRequest
-	41, // 41: seylo.agent.v1.AgentService.ImportVolume:input_type -> seylo.agent.v1.ImportVolumeRequest
-	42, // 42: seylo.agent.v1.AgentService.HostShell:input_type -> seylo.agent.v1.HostShellRequest
-	43, // 43: seylo.agent.v1.AgentService.RetryCertificate:input_type -> seylo.agent.v1.RetryCertificateRequest
-	44, // 44: seylo.agent.v1.AgentService.TailscaleLogin:input_type -> seylo.agent.v1.TailscaleLoginRequest
-	45, // 45: seylo.agent.v1.AgentService.TailscaleSetDns:input_type -> seylo.agent.v1.TailscaleSetDnsRequest
-	46, // 46: seylo.agent.v1.AgentService.GetNodeFacts:output_type -> seylo.agent.v1.GetNodeFactsResponse
-	47, // 47: seylo.agent.v1.AgentService.GetStateSnapshot:output_type -> seylo.agent.v1.GetStateSnapshotResponse
-	48, // 48: seylo.agent.v1.AgentService.SyncDesired:output_type -> seylo.agent.v1.SyncDesiredResponse
-	49, // 49: seylo.agent.v1.AgentService.ApplyService:output_type -> seylo.agent.v1.ApplyServiceResponse
-	50, // 50: seylo.agent.v1.AgentService.RemoveService:output_type -> seylo.agent.v1.RemoveServiceResponse
-	51, // 51: seylo.agent.v1.AgentService.RestartService:output_type -> seylo.agent.v1.RestartServiceResponse
-	52, // 52: seylo.agent.v1.AgentService.Build:output_type -> seylo.agent.v1.BuildResponse
-	53, // 53: seylo.agent.v1.AgentService.CancelBuild:output_type -> seylo.agent.v1.CancelBuildResponse
-	54, // 54: seylo.agent.v1.AgentService.UploadBuildContext:output_type -> seylo.agent.v1.UploadBuildContextResponse
-	55, // 55: seylo.agent.v1.AgentService.Exec:output_type -> seylo.agent.v1.ExecResponse
-	56, // 56: seylo.agent.v1.AgentService.Console:output_type -> seylo.agent.v1.ConsoleResponse
-	57, // 57: seylo.agent.v1.AgentService.Shell:output_type -> seylo.agent.v1.ShellResponse
-	58, // 58: seylo.agent.v1.AgentService.FsList:output_type -> seylo.agent.v1.FsListResponse
-	59, // 59: seylo.agent.v1.AgentService.FsStat:output_type -> seylo.agent.v1.FsStatResponse
-	60, // 60: seylo.agent.v1.AgentService.FsRead:output_type -> seylo.agent.v1.FsReadResponse
-	61, // 61: seylo.agent.v1.AgentService.FsWrite:output_type -> seylo.agent.v1.FsWriteResponse
-	62, // 62: seylo.agent.v1.AgentService.FsMkdir:output_type -> seylo.agent.v1.FsMkdirResponse
-	63, // 63: seylo.agent.v1.AgentService.FsRename:output_type -> seylo.agent.v1.FsRenameResponse
-	64, // 64: seylo.agent.v1.AgentService.FsDelete:output_type -> seylo.agent.v1.FsDeleteResponse
-	65, // 65: seylo.agent.v1.AgentService.FsChmod:output_type -> seylo.agent.v1.FsChmodResponse
-	66, // 66: seylo.agent.v1.AgentService.FsArchive:output_type -> seylo.agent.v1.FsArchiveResponse
-	67, // 67: seylo.agent.v1.AgentService.FsExtract:output_type -> seylo.agent.v1.FsExtractResponse
-	68, // 68: seylo.agent.v1.AgentService.LogsFollow:output_type -> seylo.agent.v1.LogsFollowResponse
-	69, // 69: seylo.agent.v1.AgentService.LogsSearch:output_type -> seylo.agent.v1.LogsSearchResponse
-	70, // 70: seylo.agent.v1.AgentService.GetMetrics:output_type -> seylo.agent.v1.GetMetricsResponse
-	71, // 71: seylo.agent.v1.AgentService.WatchMetrics:output_type -> seylo.agent.v1.WatchMetricsResponse
-	72, // 72: seylo.agent.v1.AgentService.Tunnel:output_type -> seylo.agent.v1.TunnelResponse
-	73, // 73: seylo.agent.v1.AgentService.RunBackup:output_type -> seylo.agent.v1.RunBackupResponse
-	74, // 74: seylo.agent.v1.AgentService.RestoreBackup:output_type -> seylo.agent.v1.RestoreBackupResponse
-	75, // 75: seylo.agent.v1.AgentService.Prune:output_type -> seylo.agent.v1.PruneResponse
-	76, // 76: seylo.agent.v1.AgentService.UpdateAgent:output_type -> seylo.agent.v1.UpdateAgentResponse
-	77, // 77: seylo.agent.v1.AgentService.RunHealthCheck:output_type -> seylo.agent.v1.RunHealthCheckResponse
-	78, // 78: seylo.agent.v1.AgentService.Troubleshoot:output_type -> seylo.agent.v1.TroubleshootResponse
-	79, // 79: seylo.agent.v1.AgentService.Reboot:output_type -> seylo.agent.v1.RebootResponse
-	80, // 80: seylo.agent.v1.AgentService.UpdateDocker:output_type -> seylo.agent.v1.UpdateDockerResponse
-	81, // 81: seylo.agent.v1.AgentService.UpdatePanel:output_type -> seylo.agent.v1.UpdatePanelResponse
-	82, // 82: seylo.agent.v1.AgentService.AgentLogs:output_type -> seylo.agent.v1.AgentLogsResponse
-	83, // 83: seylo.agent.v1.AgentService.FetchGitFile:output_type -> seylo.agent.v1.FetchGitFileResponse
-	84, // 84: seylo.agent.v1.AgentService.ParseCompose:output_type -> seylo.agent.v1.ParseComposeResponse
-	85, // 85: seylo.agent.v1.AgentService.RunCronNow:output_type -> seylo.agent.v1.RunCronNowResponse
-	86, // 86: seylo.agent.v1.AgentService.ExportVolume:output_type -> seylo.agent.v1.ExportVolumeResponse
-	87, // 87: seylo.agent.v1.AgentService.ImportVolume:output_type -> seylo.agent.v1.ImportVolumeResponse
-	88, // 88: seylo.agent.v1.AgentService.HostShell:output_type -> seylo.agent.v1.HostShellResponse
-	89, // 89: seylo.agent.v1.AgentService.RetryCertificate:output_type -> seylo.agent.v1.RetryCertificateResponse
-	90, // 90: seylo.agent.v1.AgentService.TailscaleLogin:output_type -> seylo.agent.v1.TailscaleLoginResponse
-	91, // 91: seylo.agent.v1.AgentService.TailscaleSetDns:output_type -> seylo.agent.v1.TailscaleSetDnsResponse
-	46, // [46:92] is the sub-list for method output_type
-	0,  // [0:46] is the sub-list for method input_type
-	0,  // [0:0] is the sub-list for extension type_name
-	0,  // [0:0] is the sub-list for extension extendee
-	0,  // [0:0] is the sub-list for field type_name
+	0,   // 0: seylo.agent.v1.AgentService.GetNodeFacts:input_type -> seylo.agent.v1.GetNodeFactsRequest
+	1,   // 1: seylo.agent.v1.AgentService.GetStateSnapshot:input_type -> seylo.agent.v1.GetStateSnapshotRequest
+	2,   // 2: seylo.agent.v1.AgentService.SyncDesired:input_type -> seylo.agent.v1.SyncDesiredRequest
+	3,   // 3: seylo.agent.v1.AgentService.ApplyService:input_type -> seylo.agent.v1.ApplyServiceRequest
+	4,   // 4: seylo.agent.v1.AgentService.RemoveService:input_type -> seylo.agent.v1.RemoveServiceRequest
+	5,   // 5: seylo.agent.v1.AgentService.RestartService:input_type -> seylo.agent.v1.RestartServiceRequest
+	6,   // 6: seylo.agent.v1.AgentService.Build:input_type -> seylo.agent.v1.BuildRequest
+	7,   // 7: seylo.agent.v1.AgentService.CancelBuild:input_type -> seylo.agent.v1.CancelBuildRequest
+	8,   // 8: seylo.agent.v1.AgentService.UploadBuildContext:input_type -> seylo.agent.v1.UploadBuildContextRequest
+	9,   // 9: seylo.agent.v1.AgentService.Exec:input_type -> seylo.agent.v1.ExecRequest
+	10,  // 10: seylo.agent.v1.AgentService.Console:input_type -> seylo.agent.v1.ConsoleRequest
+	11,  // 11: seylo.agent.v1.AgentService.Shell:input_type -> seylo.agent.v1.ShellRequest
+	12,  // 12: seylo.agent.v1.AgentService.FsList:input_type -> seylo.agent.v1.FsListRequest
+	13,  // 13: seylo.agent.v1.AgentService.FsStat:input_type -> seylo.agent.v1.FsStatRequest
+	14,  // 14: seylo.agent.v1.AgentService.FsRead:input_type -> seylo.agent.v1.FsReadRequest
+	15,  // 15: seylo.agent.v1.AgentService.FsWrite:input_type -> seylo.agent.v1.FsWriteRequest
+	16,  // 16: seylo.agent.v1.AgentService.FsMkdir:input_type -> seylo.agent.v1.FsMkdirRequest
+	17,  // 17: seylo.agent.v1.AgentService.FsRename:input_type -> seylo.agent.v1.FsRenameRequest
+	18,  // 18: seylo.agent.v1.AgentService.FsDelete:input_type -> seylo.agent.v1.FsDeleteRequest
+	19,  // 19: seylo.agent.v1.AgentService.FsChmod:input_type -> seylo.agent.v1.FsChmodRequest
+	20,  // 20: seylo.agent.v1.AgentService.FsArchive:input_type -> seylo.agent.v1.FsArchiveRequest
+	21,  // 21: seylo.agent.v1.AgentService.FsExtract:input_type -> seylo.agent.v1.FsExtractRequest
+	22,  // 22: seylo.agent.v1.AgentService.LogsFollow:input_type -> seylo.agent.v1.LogsFollowRequest
+	23,  // 23: seylo.agent.v1.AgentService.LogsSearch:input_type -> seylo.agent.v1.LogsSearchRequest
+	24,  // 24: seylo.agent.v1.AgentService.GetMetrics:input_type -> seylo.agent.v1.GetMetricsRequest
+	25,  // 25: seylo.agent.v1.AgentService.WatchMetrics:input_type -> seylo.agent.v1.WatchMetricsRequest
+	26,  // 26: seylo.agent.v1.AgentService.Tunnel:input_type -> seylo.agent.v1.TunnelRequest
+	27,  // 27: seylo.agent.v1.AgentService.RunBackup:input_type -> seylo.agent.v1.RunBackupRequest
+	28,  // 28: seylo.agent.v1.AgentService.RestoreBackup:input_type -> seylo.agent.v1.RestoreBackupRequest
+	29,  // 29: seylo.agent.v1.AgentService.Prune:input_type -> seylo.agent.v1.PruneRequest
+	30,  // 30: seylo.agent.v1.AgentService.UpdateAgent:input_type -> seylo.agent.v1.UpdateAgentRequest
+	31,  // 31: seylo.agent.v1.AgentService.RunHealthCheck:input_type -> seylo.agent.v1.RunHealthCheckRequest
+	32,  // 32: seylo.agent.v1.AgentService.Troubleshoot:input_type -> seylo.agent.v1.TroubleshootRequest
+	33,  // 33: seylo.agent.v1.AgentService.Reboot:input_type -> seylo.agent.v1.RebootRequest
+	34,  // 34: seylo.agent.v1.AgentService.UpdateDocker:input_type -> seylo.agent.v1.UpdateDockerRequest
+	35,  // 35: seylo.agent.v1.AgentService.UpdatePanel:input_type -> seylo.agent.v1.UpdatePanelRequest
+	36,  // 36: seylo.agent.v1.AgentService.AgentLogs:input_type -> seylo.agent.v1.AgentLogsRequest
+	37,  // 37: seylo.agent.v1.AgentService.FetchGitFile:input_type -> seylo.agent.v1.FetchGitFileRequest
+	38,  // 38: seylo.agent.v1.AgentService.ParseCompose:input_type -> seylo.agent.v1.ParseComposeRequest
+	39,  // 39: seylo.agent.v1.AgentService.RunCronNow:input_type -> seylo.agent.v1.RunCronNowRequest
+	40,  // 40: seylo.agent.v1.AgentService.ExportVolume:input_type -> seylo.agent.v1.ExportVolumeRequest
+	41,  // 41: seylo.agent.v1.AgentService.ImportVolume:input_type -> seylo.agent.v1.ImportVolumeRequest
+	42,  // 42: seylo.agent.v1.AgentService.HostShell:input_type -> seylo.agent.v1.HostShellRequest
+	43,  // 43: seylo.agent.v1.AgentService.RetryCertificate:input_type -> seylo.agent.v1.RetryCertificateRequest
+	44,  // 44: seylo.agent.v1.AgentService.TailscaleLogin:input_type -> seylo.agent.v1.TailscaleLoginRequest
+	45,  // 45: seylo.agent.v1.AgentService.TailscaleSetDns:input_type -> seylo.agent.v1.TailscaleSetDnsRequest
+	46,  // 46: seylo.agent.v1.AgentService.StagePanelAddress:input_type -> seylo.agent.v1.StagePanelAddressRequest
+	47,  // 47: seylo.agent.v1.AgentService.ClearPanelAddress:input_type -> seylo.agent.v1.ClearPanelAddressRequest
+	48,  // 48: seylo.agent.v1.AgentService.ImportPanelData:input_type -> seylo.agent.v1.ImportPanelDataRequest
+	49,  // 49: seylo.agent.v1.AgentService.ExportRegistry:input_type -> seylo.agent.v1.ExportRegistryRequest
+	50,  // 50: seylo.agent.v1.AgentService.ImportRegistry:input_type -> seylo.agent.v1.ImportRegistryRequest
+	51,  // 51: seylo.agent.v1.AgentService.StartMovedPanel:input_type -> seylo.agent.v1.StartMovedPanelRequest
+	52,  // 52: seylo.agent.v1.AgentService.AbortMovedPanel:input_type -> seylo.agent.v1.AbortMovedPanelRequest
+	53,  // 53: seylo.agent.v1.AgentService.RetirePanel:input_type -> seylo.agent.v1.RetirePanelRequest
+	54,  // 54: seylo.agent.v1.AgentService.RemoveOldPanel:input_type -> seylo.agent.v1.RemoveOldPanelRequest
+	55,  // 55: seylo.agent.v1.AgentService.GetNodeFacts:output_type -> seylo.agent.v1.GetNodeFactsResponse
+	56,  // 56: seylo.agent.v1.AgentService.GetStateSnapshot:output_type -> seylo.agent.v1.GetStateSnapshotResponse
+	57,  // 57: seylo.agent.v1.AgentService.SyncDesired:output_type -> seylo.agent.v1.SyncDesiredResponse
+	58,  // 58: seylo.agent.v1.AgentService.ApplyService:output_type -> seylo.agent.v1.ApplyServiceResponse
+	59,  // 59: seylo.agent.v1.AgentService.RemoveService:output_type -> seylo.agent.v1.RemoveServiceResponse
+	60,  // 60: seylo.agent.v1.AgentService.RestartService:output_type -> seylo.agent.v1.RestartServiceResponse
+	61,  // 61: seylo.agent.v1.AgentService.Build:output_type -> seylo.agent.v1.BuildResponse
+	62,  // 62: seylo.agent.v1.AgentService.CancelBuild:output_type -> seylo.agent.v1.CancelBuildResponse
+	63,  // 63: seylo.agent.v1.AgentService.UploadBuildContext:output_type -> seylo.agent.v1.UploadBuildContextResponse
+	64,  // 64: seylo.agent.v1.AgentService.Exec:output_type -> seylo.agent.v1.ExecResponse
+	65,  // 65: seylo.agent.v1.AgentService.Console:output_type -> seylo.agent.v1.ConsoleResponse
+	66,  // 66: seylo.agent.v1.AgentService.Shell:output_type -> seylo.agent.v1.ShellResponse
+	67,  // 67: seylo.agent.v1.AgentService.FsList:output_type -> seylo.agent.v1.FsListResponse
+	68,  // 68: seylo.agent.v1.AgentService.FsStat:output_type -> seylo.agent.v1.FsStatResponse
+	69,  // 69: seylo.agent.v1.AgentService.FsRead:output_type -> seylo.agent.v1.FsReadResponse
+	70,  // 70: seylo.agent.v1.AgentService.FsWrite:output_type -> seylo.agent.v1.FsWriteResponse
+	71,  // 71: seylo.agent.v1.AgentService.FsMkdir:output_type -> seylo.agent.v1.FsMkdirResponse
+	72,  // 72: seylo.agent.v1.AgentService.FsRename:output_type -> seylo.agent.v1.FsRenameResponse
+	73,  // 73: seylo.agent.v1.AgentService.FsDelete:output_type -> seylo.agent.v1.FsDeleteResponse
+	74,  // 74: seylo.agent.v1.AgentService.FsChmod:output_type -> seylo.agent.v1.FsChmodResponse
+	75,  // 75: seylo.agent.v1.AgentService.FsArchive:output_type -> seylo.agent.v1.FsArchiveResponse
+	76,  // 76: seylo.agent.v1.AgentService.FsExtract:output_type -> seylo.agent.v1.FsExtractResponse
+	77,  // 77: seylo.agent.v1.AgentService.LogsFollow:output_type -> seylo.agent.v1.LogsFollowResponse
+	78,  // 78: seylo.agent.v1.AgentService.LogsSearch:output_type -> seylo.agent.v1.LogsSearchResponse
+	79,  // 79: seylo.agent.v1.AgentService.GetMetrics:output_type -> seylo.agent.v1.GetMetricsResponse
+	80,  // 80: seylo.agent.v1.AgentService.WatchMetrics:output_type -> seylo.agent.v1.WatchMetricsResponse
+	81,  // 81: seylo.agent.v1.AgentService.Tunnel:output_type -> seylo.agent.v1.TunnelResponse
+	82,  // 82: seylo.agent.v1.AgentService.RunBackup:output_type -> seylo.agent.v1.RunBackupResponse
+	83,  // 83: seylo.agent.v1.AgentService.RestoreBackup:output_type -> seylo.agent.v1.RestoreBackupResponse
+	84,  // 84: seylo.agent.v1.AgentService.Prune:output_type -> seylo.agent.v1.PruneResponse
+	85,  // 85: seylo.agent.v1.AgentService.UpdateAgent:output_type -> seylo.agent.v1.UpdateAgentResponse
+	86,  // 86: seylo.agent.v1.AgentService.RunHealthCheck:output_type -> seylo.agent.v1.RunHealthCheckResponse
+	87,  // 87: seylo.agent.v1.AgentService.Troubleshoot:output_type -> seylo.agent.v1.TroubleshootResponse
+	88,  // 88: seylo.agent.v1.AgentService.Reboot:output_type -> seylo.agent.v1.RebootResponse
+	89,  // 89: seylo.agent.v1.AgentService.UpdateDocker:output_type -> seylo.agent.v1.UpdateDockerResponse
+	90,  // 90: seylo.agent.v1.AgentService.UpdatePanel:output_type -> seylo.agent.v1.UpdatePanelResponse
+	91,  // 91: seylo.agent.v1.AgentService.AgentLogs:output_type -> seylo.agent.v1.AgentLogsResponse
+	92,  // 92: seylo.agent.v1.AgentService.FetchGitFile:output_type -> seylo.agent.v1.FetchGitFileResponse
+	93,  // 93: seylo.agent.v1.AgentService.ParseCompose:output_type -> seylo.agent.v1.ParseComposeResponse
+	94,  // 94: seylo.agent.v1.AgentService.RunCronNow:output_type -> seylo.agent.v1.RunCronNowResponse
+	95,  // 95: seylo.agent.v1.AgentService.ExportVolume:output_type -> seylo.agent.v1.ExportVolumeResponse
+	96,  // 96: seylo.agent.v1.AgentService.ImportVolume:output_type -> seylo.agent.v1.ImportVolumeResponse
+	97,  // 97: seylo.agent.v1.AgentService.HostShell:output_type -> seylo.agent.v1.HostShellResponse
+	98,  // 98: seylo.agent.v1.AgentService.RetryCertificate:output_type -> seylo.agent.v1.RetryCertificateResponse
+	99,  // 99: seylo.agent.v1.AgentService.TailscaleLogin:output_type -> seylo.agent.v1.TailscaleLoginResponse
+	100, // 100: seylo.agent.v1.AgentService.TailscaleSetDns:output_type -> seylo.agent.v1.TailscaleSetDnsResponse
+	101, // 101: seylo.agent.v1.AgentService.StagePanelAddress:output_type -> seylo.agent.v1.StagePanelAddressResponse
+	102, // 102: seylo.agent.v1.AgentService.ClearPanelAddress:output_type -> seylo.agent.v1.ClearPanelAddressResponse
+	103, // 103: seylo.agent.v1.AgentService.ImportPanelData:output_type -> seylo.agent.v1.ImportPanelDataResponse
+	104, // 104: seylo.agent.v1.AgentService.ExportRegistry:output_type -> seylo.agent.v1.ExportRegistryResponse
+	105, // 105: seylo.agent.v1.AgentService.ImportRegistry:output_type -> seylo.agent.v1.ImportRegistryResponse
+	106, // 106: seylo.agent.v1.AgentService.StartMovedPanel:output_type -> seylo.agent.v1.StartMovedPanelResponse
+	107, // 107: seylo.agent.v1.AgentService.AbortMovedPanel:output_type -> seylo.agent.v1.AbortMovedPanelResponse
+	108, // 108: seylo.agent.v1.AgentService.RetirePanel:output_type -> seylo.agent.v1.RetirePanelResponse
+	109, // 109: seylo.agent.v1.AgentService.RemoveOldPanel:output_type -> seylo.agent.v1.RemoveOldPanelResponse
+	55,  // [55:110] is the sub-list for method output_type
+	0,   // [0:55] is the sub-list for method input_type
+	0,   // [0:0] is the sub-list for extension type_name
+	0,   // [0:0] is the sub-list for extension extendee
+	0,   // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_seylo_agent_v1_agent_service_proto_init() }
@@ -294,6 +339,7 @@ func file_seylo_agent_v1_agent_service_proto_init() {
 	file_seylo_agent_v1_terminal_proto_init()
 	file_seylo_agent_v1_transfer_proto_init()
 	file_seylo_agent_v1_tunnel_proto_init()
+	file_seylo_agent_v1_panel_move_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

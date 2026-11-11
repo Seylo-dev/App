@@ -19,6 +19,7 @@ import "seylo/agent/v1/tailnet.proto";
 import "seylo/agent/v1/terminal.proto";
 import "seylo/agent/v1/transfer.proto";
 import "seylo/agent/v1/tunnel.proto";
+import "seylo/agent/v1/panel_move.proto";
 
 // AgentService is implemented by the agent and called by the panel over the
 // agent's WebSocket. This is not gRPC: the RPC layers in go/internal/rpc and
@@ -206,5 +207,37 @@ service AgentService {
   }
   rpc TailscaleSetDns(TailscaleSetDnsRequest) returns (TailscaleSetDnsResponse) {
     option (capability) = "tailnet.login.v1";
+  }
+
+  // Moving the panel to another node (panel_move.proto).
+  rpc StagePanelAddress(StagePanelAddressRequest) returns (StagePanelAddressResponse) {
+    option (capability) = "panel.relocate.v1";
+  }
+  rpc ClearPanelAddress(ClearPanelAddressRequest) returns (ClearPanelAddressResponse) {
+    option (capability) = "panel.relocate.v1";
+  }
+  rpc ImportPanelData(ImportPanelDataRequest) returns (ImportPanelDataResponse) {
+    option (capability) = "panel.relocate.v1";
+    option (stream_mode) = STREAM_MODE_RAW_UPLOAD;
+  }
+  rpc ExportRegistry(ExportRegistryRequest) returns (ExportRegistryResponse) {
+    option (capability) = "panel.relocate.v1";
+    option (stream_mode) = STREAM_MODE_RAW_DOWNLOAD;
+  }
+  rpc ImportRegistry(ImportRegistryRequest) returns (ImportRegistryResponse) {
+    option (capability) = "panel.relocate.v1";
+    option (stream_mode) = STREAM_MODE_RAW_UPLOAD;
+  }
+  rpc StartMovedPanel(StartMovedPanelRequest) returns (StartMovedPanelResponse) {
+    option (capability) = "panel.relocate.v1";
+  }
+  rpc AbortMovedPanel(AbortMovedPanelRequest) returns (AbortMovedPanelResponse) {
+    option (capability) = "panel.relocate.v1";
+  }
+  rpc RetirePanel(RetirePanelRequest) returns (RetirePanelResponse) {
+    option (capability) = "panel.relocate.v1";
+  }
+  rpc RemoveOldPanel(RemoveOldPanelRequest) returns (RemoveOldPanelResponse) {
+    option (capability) = "panel.relocate.v1";
   }
 }

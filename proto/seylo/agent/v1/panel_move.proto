@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package seylo.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "seylo/agent/v1/service.proto";
+
+// Moving the panel to another node (0.2.8, capability panel.relocate.v1).
+// The old panel coordinates while it still runs, with writes paused:
+//
+//   1. ExportRegistry on the old panel node, piped into ImportRegistry on
+//      the target (staged, not live yet).
+//   2. ImportPanelData on the target: a consistent snapshot of the panel's
+//      data folder, with a checksum per file (staged).
+//   3. StartMovedPanel on the target: activate both, start the panel
+//      container from the spec given, wait until it is healthy and check
+//      it presents the agents' TLS key nodes pin.
+//   4. StagePanelAddress on every node: the new address, checked by a TLS
+//      dial with the pin, that a node switches to when its panel goes away.
+//   5. RetirePanel on the old panel node: it stops the old panel after
+//      answering; every node then fails over to its staged address.
+//
+// AbortMovedPanel and ClearPanelAddress undo 1 to 4 when any step fails;
+// the old panel then carries on as if nothing happened. RemoveOldPanel
+// deletes the old node's stopped copy once the owner confirms the move.
+
+// StagePanelAddressRequest records the address this node switches to when
+// its panel goes away (connections fail, not a refusal). It is kept apart
+// from the fallback address and survives reconnects to the old panel.
+// Refused over a plain-HTTP session from another host.
+message StagePanelAddressRequest {
+  string move_id = 1;
+  // https://<host>:<agents' TLS port>; https://127.0.0.1:<port> on the
+  // target itself.
+  string panel_url = 2;
+  // "sha256:<hex>" of the agents' TLS key. Required: the moved panel
+  // presents the same key at its new address.
+  string panel_pin = 3;
+  // Dial the address first (TLS with the pin, no WebSocket) and refuse to
+  // stage it when it cannot be reached from this node.
+  bool probe = 4;
+}
+
+message StagePanelAddressResponse {
+  // How long the probe took; 0 without a probe.
+  uint32 probe_millis = 1;
+}
+
+// ClearPanelAddressRequest drops the staged address of that move (an
+// aborted move); a staged address of another move stays.
+message ClearPanelAddressRequest {
+  string move_id = 1;
+}
+
+message ClearPanelAddressResponse {}
+
+// ImportPanelDataRequest opens a raw upload of a .tar.gz of the panel's
+// data folder into a staging folder on this node, never into the live one.
+// Every file must match the manifest after the unpack, or the staging
+// folder is deleted and the call fails.
+message ImportPanelDataRequest {
+  string move_id = 1;
+  // Compressed size, for the free space check.
+  uint64 size_bytes = 2;
+  repeated PanelDataFile manifest = 3;
+}
+
+message PanelDataFile {
+  // Relative to the data folder, for example "panel.db" or "branding/favicon".
+  string path = 1;
+  uint64 size = 2;
+  // Lower-case hex.
+  string sha256 = 3;
+}
+
+message ImportPanelDataResponse {
+  // Compressed bytes received.
+  uint64 size_bytes = 1;
+  uint32 files = 2;
+}
+
+// ExportRegistryRequest opens a raw download of this node's image registry
+// storage as a .tar.gz. The panel refuses builds while it moves, so
+// nothing pushes meanwhile.
+message ExportRegistryRequest {
+  string move_id = 1;
+}
+
+message ExportRegistryResponse {
+  // Uncompressed bytes archived; 0 when the node has no registry storage.
+  uint64 size_bytes = 1;
+}
+
+// ImportRegistryRequest opens a raw upload of ExportRegistry's stream into
+// a staging folder for the registry on this node.
+message ImportRegistryRequest {
+  string move_id = 1;
+  // Compressed size, for the free space check; 0 if unknown.
+  uint64 size_bytes = 2;
+}
+
+message ImportRegistryResponse {
+  uint64 size_bytes = 1;
+}
+
+// StartMovedPanelRequest starts the staged panel on this node. The agent
+// refuses while a panel container runs here; it sets the live panel and
+// registry folders aside (restored by AbortMovedPanel), moves the staged
+// ones in, pulls the image, records the spec in its desired state as the
+// panel's moved panel will send it, starts it and waits until it is
+// healthy. It then dials https://127.0.0.1:<agent_tls_port> and checks the
+// certificate's key against panel_pin, and reads /api/health for the
+// version. The call answers once all of that is done.
+message StartMovedPanelRequest {
+  string move_id = 1;
+  // The protected panel service exactly as the moved panel's desired state
+  // will send it to this node (generation, env, ports, route), so the agent
+  // adopts the container instead of rolling it.
+  ServiceSpec spec = 2;
+  string panel_pin = 3;
+  uint32 agent_tls_port = 4;
+  uint32 host_port = 5;
+  // The panel version that must answer /api/health.
+  string expected_version = 6;
+  // Default 3m.
+  google.protobuf.Duration health_timeout = 7;
+}
+
+message StartMovedPanelResponse {
+  string version = 1;
+}
+
+// AbortMovedPanelRequest stops a panel StartMovedPanel started for that
+// move, restores the folders it set aside and deletes the staged copies
+// (master.key and the agents' TLS key included). Safe to call at any step
+// and more than once.
+message AbortMovedPanelRequest {
+  string move_id = 1;
+}
+
+message AbortMovedPanelResponse {}
+
+// RetirePanelRequest is sent to the old panel node: the agent answers, then
+// stops the panel container running here (it stays, stopped, with its data
+// folder, until RemoveOldPanel). Its own connection to the panel fails then
+// and the staged address takes over.
+message RetirePanelRequest {
+  string move_id = 1;
+  // The protected panel service.
+  string service_id = 2;
+}
+
+message RetirePanelResponse {}
+
+// RemoveOldPanelRequest deletes the stopped panel container a move left on
+// this node, its data folder (master.key, panel.db and the agents' TLS key
+// among it), the panel update snapshots and the registry storage. Refused
+// on the node the panel runs on.
+message RemoveOldPanelRequest {
+  string service_id = 1;
+}
+
+message RemoveOldPanelResponse {
+  uint64 freed_bytes = 1;
+}

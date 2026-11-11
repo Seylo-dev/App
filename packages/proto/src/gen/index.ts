@@ -19,6 +19,7 @@ export * from "./seylo/agent/v1/metrics_pb";
 export * from "./seylo/agent/v1/node_ops_pb";
 export * from "./seylo/agent/v1/node_pb";
 export * from "./seylo/agent/v1/options_pb";
+export * from "./seylo/agent/v1/panel_move_pb";
 export * from "./seylo/agent/v1/panel_service_pb";
 export * from "./seylo/agent/v1/routing_pb";
 export * from "./seylo/agent/v1/service_pb";
