@@ -9,7 +9,6 @@ import { describePrincipal, userOf } from "../../auth/principal";
 import { deployments, services } from "../../db/schema";
 import { defineJob } from "../../jobs/queue";
 import { implement } from "../../ops/implement";
-import { databaseKinds } from "../domains/lookup";
 import { defineModule } from "../module";
 import { loadService } from "../services/rows";
 import {
@@ -24,7 +23,7 @@ import {
 import { readLog } from "./logs";
 import { assertNoActiveDeploy, hasActiveDeploy, queueDeploy } from "./queue";
 import { registryGcJob, registryGcSweepJob, registryGcSweepJobType } from "./registry-gc";
-import { activeStatuses, isFinal, keptImages, loadDeployment, toDeployment, toDeployments } from "./store";
+import { activeStatuses, databaseRollbackImage, isFinal, keptImages, loadDeployment, toDeployment, toDeployments } from "./store";
 
 export const tickJobType = "deployments.tick";
 const tickEverySeconds = 15;
@@ -144,15 +143,12 @@ const cancel = implement(deploymentOps.cancel, async (input, ctx) => {
 /**
  * A database's deployments run other images only after a version change
  * (databases.setVersion), whose files an older version may not read: a
- * rollback of a database takes only a deployment of the image it runs.
+ * rollback of a database takes only a deployment of the image it runs
+ * (the same rule makes canRollback false for the others).
  */
 function assertSameDatabaseImage(ctx: Parameters<typeof deploy.run>[1], target: ReturnType<typeof mustLoad>) {
-  const svc = loadService(ctx.db, target.serviceId);
-  if (!databaseKinds.has(svc.kind)) return;
-  const live = svc.liveDeploymentId
-    ? ctx.db.select({ imageRef: deployments.imageRef }).from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get()
-    : undefined;
-  const running = live?.imageRef ?? null;
+  const running = databaseRollbackImage(ctx.db, target.serviceId);
+  if (running === undefined) return;
   if (target.imageRef !== running) {
     throw new OpError(
       "CONFLICT",
@@ -166,8 +162,9 @@ const rollback = implement(deploymentOps.rollback, (input, ctx) => {
   const target = mustLoad(ctx, input.serviceId, input.deploymentId);
   const view = toDeployment(ctx.db, target);
   if (target.status === "live") throw new OpError("CONFLICT", "This deployment is already live.");
-  if (!view.canRollback) throw new OpError("CONFLICT", `Only the last ${keptImages} successful deployments can be rolled back to.`);
+  // Before the kept-images check: canRollback is false for these too, and the reason is the version.
   assertSameDatabaseImage(ctx, target);
+  if (!view.canRollback) throw new OpError("CONFLICT", `Only the last ${keptImages} successful deployments can be rolled back to.`);
   assertNoActiveDeploy(ctx, target.serviceId);
   const row = queueDeploy(ctx, {
     serviceId: target.serviceId,

@@ -4152,7 +4152,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   stay on it, also a custom tag the line's catalog image is older than.
   `deployments.rollback` of a database takes only a
   deployment of the image it runs (CONFLICT, reason `databaseVersion`):
-  the deployments from before a version change ran the older version. The
+  the deployments from before a version change ran the older version.
+  `deployments.list` and `deployments.get` say `canRollback: false` for
+  those (0.2.11; before, they were offered and then refused). The
   web app's Version card is on the database's Settings tab; the header's
   version chip links to it (`#version`).
 - DNS checks use public resolvers (1.1.1.1, 8.8.8.8);

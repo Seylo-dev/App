@@ -570,8 +570,14 @@ describe("databases.versionChoices and setVersion", () => {
       .set({ liveDeploymentId: res.body.deploymentId, targetDeploymentId: res.body.deploymentId })
       .where(eq(services.id, serviceId))
       .run();
-    const view = await callOp(panel, deploymentOps.get, { serviceId, deploymentId: old.id }, { cookie });
-    expect(view.body.deployment.canRollback).toBe(true);
+    // The 8.0 image is kept, but list and get do not offer what rollback refuses.
+    const rollbackFlags = async () => {
+      const view = await callOp(panel, deploymentOps.get, { serviceId, deploymentId: old.id }, { cookie });
+      const listed = await callOp(panel, deploymentOps.list, { serviceId }, { cookie });
+      const row = listed.body.deployments.find((d: { id: string }) => d.id === old.id);
+      return { get: view.body.deployment.canRollback, list: row?.canRollback };
+    };
+    expect(await rollbackFlags()).toEqual({ get: false, list: false });
 
     const rb = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: old.id }, { cookie });
     expect(rb.status).toBe(409);
@@ -581,8 +587,23 @@ describe("databases.versionChoices and setVersion", () => {
 
     // A deployment of the image it runs only restarts it.
     panel.deps.db.update(deployments).set({ imageRef: "mysql:8.4.6" }).where(eq(deployments.id, old.id)).run();
+    expect(await rollbackFlags()).toEqual({ get: true, list: true });
     const same = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: old.id }, { cookie });
     expect(same.status).toBe(200);
+  });
+
+  test("a database with no live deployment offers no rollback, and refuses one for its version", async () => {
+    const { serviceId } = await createDb("mysql", "8.0");
+    await settleDeploys(panel);
+    const row = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, serviceId)).get();
+    if (!row) throw new Error("no deployment");
+    // Nothing is live: only a superseded deployment of 8.0 is left.
+    panel.deps.db.update(deployments).set({ status: "superseded", imageRef: "mysql:8.0.43" }).where(eq(deployments.id, row.id)).run();
+    panel.deps.db.update(services).set({ liveDeploymentId: null }).where(eq(services.id, serviceId)).run();
+    const view = await callOp(panel, deploymentOps.get, { serviceId, deploymentId: row.id }, { cookie });
+    expect(view.body.deployment.canRollback).toBe(false);
+    const rb = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: row.id }, { cookie });
+    expect({ status: rb.status, reason: rb.body.error.details.reason }).toEqual({ status: 409, reason: "databaseVersion" });
   });
 
   test("after a failed change the database is judged by what still runs: retry or stay", async () => {

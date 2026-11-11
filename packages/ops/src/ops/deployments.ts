@@ -102,7 +102,11 @@ export const Deployment = Type.Object({
   steps: Type.Array(DeploymentStep),
   /** Whole deploy, from queued to switched or failed; null while running. */
   durationMs: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
-  /** The image is still kept and this is not the live deployment. */
+  /**
+   * The image is still kept and this is not the live deployment. For a
+   * database also only a deployment of the image it runs: rollback refuses
+   * the others (reason databaseVersion).
+   */
   canRollback: Type.Boolean(),
   /** For rollbacks: the deployment whose image runs again. */
   rollbackOf: Type.Union([Id, Type.Null()]),

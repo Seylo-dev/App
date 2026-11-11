@@ -7,6 +7,7 @@ import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { builds, type DeployStep, type DeployStepKey, type DeployStepStatus, deployments, services, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
+import { databaseKinds } from "../domains/lookup";
 import { nodeNames } from "../services/rows";
 
 export type DeploymentRow = typeof deployments.$inferSelect;
@@ -84,6 +85,26 @@ function keptIds(db: PanelDb, serviceId: string): Set<string> {
 }
 
 /**
+ * For a database: the image its live deployment runs (null without one).
+ * Its other deployments ran an image from before a version change, whose
+ * files the newer version may have changed: a rollback takes only a
+ * deployment of this image (deployments.rollback, reason databaseVersion),
+ * and canRollback is false for the others. undefined for every other kind.
+ */
+export function databaseRollbackImage(db: PanelDb, serviceId: string): string | null | undefined {
+  const svc = db
+    .select({ kind: services.kind, liveDeploymentId: services.liveDeploymentId })
+    .from(services)
+    .where(eq(services.id, serviceId))
+    .get();
+  if (!svc || !databaseKinds.has(svc.kind)) return undefined;
+  if (!svc.liveDeploymentId) return null;
+  return (
+    db.select({ imageRef: deployments.imageRef }).from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get()?.imageRef ?? null
+  );
+}
+
+/**
  * The digest a deployment runs: the pushed digest of a build, or for an
  * image pulled by tag the digest its node reported (kept in nodeResults so
  * recording it never changes the running spec). Rollbacks pin to it.
@@ -103,6 +124,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
   const names = nodeNames(db, [...nodeIds]);
   const ref = (id: string | null) => (id ? { id, name: names.get(id) ?? "removed node" } : null);
   const kept = new Map<string, Set<string>>();
+  const databaseImages = new Map<string, string | null | undefined>();
   const now = Date.now();
   const builders = new Map(
     db
@@ -135,6 +157,8 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
       keep = keptIds(db, r.serviceId);
       kept.set(r.serviceId, keep);
     }
+    if (!databaseImages.has(r.serviceId)) databaseImages.set(r.serviceId, databaseRollbackImage(db, r.serviceId));
+    const databaseImage = databaseImages.get(r.serviceId);
     return {
       id: r.id,
       serviceId: r.serviceId,
@@ -163,7 +187,7 @@ export function toDeployments(db: PanelDb, rows: readonly DeploymentRow[]): Depl
           s.durationMs === null ? null : s.durationMs >= 0 ? s.durationMs : s.status === "running" ? Math.max(0, now + s.durationMs) : 0,
       })),
       durationMs: r.finishedAt && r.startedAt ? Math.max(0, r.finishedAt.getTime() - r.startedAt.getTime()) : null,
-      canRollback: r.status === "superseded" && keep.has(r.id),
+      canRollback: r.status === "superseded" && keep.has(r.id) && (databaseImage === undefined || r.imageRef === databaseImage),
       rollbackOf: r.rollbackOf,
       error: r.error,
       createdAt: r.createdAt.toISOString(),

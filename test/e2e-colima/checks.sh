@@ -4639,11 +4639,16 @@ check_43() {
   ev "database: $(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '{engine, version}'), choices now: $(api databases.versionChoices "{\"serviceId\":\"$db\"}" | jq -c '{image, choices: [.choices[] | {version, allowed, reason}]}')"
 
   expect "going back to 7.0 is refused (downgrade)" refused_with downgrade api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"7.0\",\"confirmNoBackup\":true}"
-  dep=$(api deployments.list "{\"serviceId\":\"$db\"}" | jq -r '[.deployments[] | select(.canRollback)][0].id // empty')
+  # The 7.0 images are kept, but a database's deployment of another image is not offered for a rollback.
+  out=$(api deployments.list "{\"serviceId\":\"$db\"}")
+  dep=$(printf '%s' "$out" | jq -r '([.deployments[] | select(.live)][0].image.reference // "") as $live
+    | [.deployments[] | select(.status == "superseded" and .image != null and .image.reference != $live)][0].id // empty')
   if [ -n "$dep" ]; then
+    expect "a 7.0 deployment does not offer a rollback (canRollback false)" jq_ok "$out" \
+      "[.deployments[] | select(.id == \"$dep\" and .canRollback == false)] | length == 1"
     expect "a rollback to a 7.0 deployment is refused (databaseVersion)" refused_with databaseVersion api deployments.rollback "{\"serviceId\":\"$db\",\"deploymentId\":\"$dep\"}"
   else
-    bad "no 7.0 deployment is kept for a rollback"
+    bad "no 7.0 deployment is kept"
   fi
   api services.delete "{\"serviceId\":\"$db\",\"confirmName\":\"mongo-ver\"}" >/dev/null || true
 }
