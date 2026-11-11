@@ -71,15 +71,16 @@ describe("engines", () => {
 
   test("password changes go on stdin, never in the command", () => {
     for (const engine of ["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb"] as const) {
-      const exec = changePasswordExec(engine, "admin", "NewSecret123");
+      const exec = changePasswordExec(engine, "admin", "NewSecret123", "OldSecret456");
       expect(exec?.command.join(" ")).not.toContain("NewSecret123");
+      expect(exec?.command.join(" ")).not.toContain("OldSecret456");
       expect(exec?.stdin).toContain("NewSecret123");
       // The old password signs in from the environment, not the command line.
       expect(exec?.command.join(" ")).not.toContain(" -a ");
     }
     // These read the password from their environment at start: the new env restarts them.
-    expect(changePasswordExec("dragonfly", "default", "x")).toBeNull();
-    expect(changePasswordExec("clickhouse", "admin", "x")).toBeNull();
+    expect(changePasswordExec("dragonfly", "default", "x", "y")).toBeNull();
+    expect(changePasswordExec("clickhouse", "admin", "x", "y")).toBeNull();
   });
 });
 

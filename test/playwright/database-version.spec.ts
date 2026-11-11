@@ -6,7 +6,8 @@
 // newest pinned image of it, staying on a custom tag after a change to
 // another one failed, and MySQL 8.0 to 8.4 refused for the accounts on
 // mysql_native_password (or when they cannot be listed) until their logins
-// are kept working, which the card then shows and a patch update keeps.
+// are kept working, which the card then shows and a patch update keeps, and
+// a MySQL 8.4 turning those logins on and off on the image it runs.
 // Demo data (demo/service.ts versionChoicesOf) stands in for the panel;
 // databases.setVersion is answered here so nothing deploys.
 //
@@ -370,6 +371,8 @@ test.describe("database version", () => {
     const card = page.getByRole("region", { name: "Version" });
     await expect(card.getByText("MySQL 8.0", { exact: true })).toBeVisible();
     await expect(card.getByText("Old mysql_native_password logins are on")).toHaveCount(0);
+    // 8.0 has them on by itself: no switch.
+    await expect(card.getByLabel("Keep old mysql_native_password logins working")).toHaveCount(0);
     await card.getByRole("combobox", { name: "Change to" }).click();
     await page.getByRole("option", { name: /^8\.4/ }).click();
     await card.getByRole("button", { name: "Change version" }).click();
@@ -472,5 +475,110 @@ test.describe("database version", () => {
       { serviceId: svc.db, version: "8.4" },
       { serviceId: svc.db, version: "8.4", keepNativePassword: true },
     ]);
+  });
+
+  test("a MySQL 8.4 turns mysql_native_password logins on and off on the image it runs", async ({ page }) => {
+    const sent: Record<string, unknown>[] = [];
+    let on = false;
+    let accountsLeft = ["legacy@%"];
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? mysqlDb("8.4") : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => mysqlChoices("8.4", on),
+        "databases.setVersion": (input) => {
+          sent.push(input);
+          // As the panel answers turning it off while an account still signs in with mysql_native_password.
+          if (input.keepNativePassword === false && accountsLeft.length > 0) {
+            throw new DemoRefusal(
+              409,
+              "CONFLICT",
+              "MySQL 8.4 has the mysql_native_password plugin off, and this account signs in with it, so it could not sign in after the change: legacy@%. Nothing changed.",
+              { reason: "nativePasswordUsers", accounts: accountsLeft.join("\n"), count: String(accountsLeft.length) },
+            );
+          }
+          on = input.keepNativePassword === true;
+          return { database: mysqlDb("8.4"), deploymentId: "d0000000000000v8" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await expect(card.getByText("MySQL 8.4", { exact: true })).toBeVisible();
+    const toggle = card.getByLabel("Keep old mysql_native_password logins working");
+    const apply = card.getByRole("button", { name: "Apply" });
+    await expect(toggle).not.toBeChecked();
+    // Nothing to apply until the switch differs from what the database runs with.
+    await expect(apply).toBeDisabled();
+    await toggle.click();
+    await expect(apply).toBeEnabled();
+    await page.screenshot({ path: `${shots}/version-mysql-native-switch.png` });
+    await apply.click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Turn old mysql_native_password logins on?" })).toBeVisible();
+    await expect(dialog.getByText("The database restarts on mysql:8.4.6")).toBeVisible();
+    await expect(dialog.getByText("starts with --mysql-native-password=ON")).toBeVisible();
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(dialog).toHaveCount(0);
+    // The image it runs, with the option alone: no image, no backup, no version change.
+    expect(sent).toEqual([{ serviceId: svc.db, version: "8.4", keepNativePassword: true }]);
+    await expect(card.getByText("Old mysql_native_password logins are on")).toBeVisible();
+    await expect(toggle).toBeChecked();
+    await expect(apply).toBeDisabled();
+
+    // Off is checked first: an account that needs it refuses the change, with its name.
+    await toggle.click();
+    await apply.click();
+    await expect(dialog.getByRole("heading", { name: "Turn old mysql_native_password logins off?" })).toBeVisible();
+    await expect(dialog.getByText("checked for accounts that sign in with mysql_native_password first")).toBeVisible();
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(dialog.getByText("This account signs in with mysql_native_password, which MySQL 8.4 has off")).toBeVisible();
+    await expect(dialog.getByRole("list", { name: "Logins" }).getByText("legacy@%", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Switch them to caching_sha2_password first")).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/version-mysql-native-off-refused.png` });
+    // Once the account is switched, off goes through.
+    accountsLeft = [];
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent.slice(1)).toEqual([
+      { serviceId: svc.db, version: "8.4", keepNativePassword: false },
+      { serviceId: svc.db, version: "8.4", keepNativePassword: false },
+    ]);
+    await expect(card.getByText("Old mysql_native_password logins are on")).toHaveCount(0);
+    await expect(toggle).not.toBeChecked();
+  });
+
+  test("the mysql_native_password switch sends a custom tag that runs as itself, and waits while a change is pending", async ({ page }) => {
+    let sent: Record<string, unknown> | null = null;
+    let choices: Record<string, unknown> = { ...mysqlChoices("8.4", true), image: "mysql:8.4.7" };
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? mysqlDb("8.4") : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => choices,
+        "databases.setVersion": (input) => {
+          sent = input;
+          return { database: mysqlDb("8.4"), deploymentId: "d0000000000000v9" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    const toggle = card.getByLabel("Keep old mysql_native_password logins working");
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await card.getByRole("button", { name: "Apply" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("The database restarts on mysql:8.4.7")).toBeVisible();
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual({ serviceId: svc.db, version: "8.4", image: "mysql:8.4.7", keepNativePassword: false });
+
+    // After a change that did not finish, the switch waits: the Version card's way out is to retry or stay.
+    choices = { ...mysqlChoices("8.4", true), pendingImage: "mysql:8.4.9" };
+    await page.reload();
+    await expect(card.getByText("The change to mysql:8.4.9 did not finish")).toBeVisible();
+    await expect(toggle).toBeDisabled();
+    await expect(card.getByRole("button", { name: "Apply" })).toBeDisabled();
   });
 });

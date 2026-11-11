@@ -19,7 +19,7 @@ import { writeSpec } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
 import { loadService } from "../services/rows";
 import { readSpec } from "../services/spec";
-import { engines, engineVersion, engineVersions, hasNativePassword, withNativePassword } from "./engines";
+import { engines, engineVersion, engineVersions, hasNativePassword, rootPasswordVariable, withNativePassword } from "./engines";
 import { type DatabaseInfo, loadDatabase } from "./info";
 import { toDatabase } from "./ops";
 
@@ -279,8 +279,8 @@ const mysqlSystemAccounts = ["mysql.sys", "mysql.session", "mysql.infoschema"];
 const mysqlNativeUsersScript = [
   "IFS= read -r pw || exit 2",
   'q=$(cat); [ -n "$q" ] || exit 2',
-  'if [ -n "$MYSQL_ROOT_PASSWORD" ]; then',
-  '  { err=$(MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1',
+  `if [ -n "$${rootPasswordVariable("mysql")}" ]; then`,
+  `  { err=$(MYSQL_PWD="$${rootPasswordVariable("mysql")}" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1`,
   "  code=$?",
   '  [ "$code" -eq 0 ] && exit 0',
   '  [ -z "$err" ] || printf \'%s\\n\' "$err" >&2',
@@ -508,7 +508,9 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   const to = { version: input.version, image, dataPath: line.dataPath };
   const native = nativePasswordPlan(info.row.engine, state.command, state.from.version, to.version, input.keepNativePassword);
   const verdict = judge(state, to);
-  if (!verdict.allowed)
+  // The image that runs with mysql_native_password turned on or off (keepNativePassword): the command is the change.
+  const flagOnly = !verdict.allowed && verdict.reason === "current" && native.command !== null;
+  if (!verdict.allowed && !flagOnly)
     throw new OpError("CONFLICT", verdict.message ?? "This version change is not allowed.", { reason: verdict.reason ?? "" });
   const lineChange = to.version !== state.from.version;
   if (lineChange && !input.confirmNoBackup && !backupFresh(state, new Date())) {
@@ -542,8 +544,12 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
     actor: actorOf(ctx),
     triggeredBy: user?.id ?? null,
     notes: [
-      `Version change: ${state.from.image || state.from.version} to ${image}.`,
-      ...(native.command ? [`mysql_native_password logins ${native.on ? "on (--mysql-native-password=ON)" : "off"}.`] : []),
+      ...(flagOnly ? [] : [`Version change: ${state.from.image || state.from.version} to ${image}.`]),
+      ...(native.command
+        ? [
+            `mysql_native_password logins ${native.on ? "on (--mysql-native-password=ON)" : "off"}${flagOnly ? `, on the image it runs (${image})` : ""}.`,
+          ]
+        : []),
     ],
   });
   publishService(ctx, info.service);

@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { databases as dbOps, deployments as deploymentOps, services as serviceOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { backupRuns, type DatabaseEngine, deployments, nodes, serviceDatabases, services } from "../src/db/schema";
+import { backupRuns, type DatabaseEngine, deploymentLogs, deployments, nodes, serviceDatabases, services } from "../src/db/schema";
 import {
   containerCommand,
   containerEnv,
   databaseSpec,
+  type EngineVersion,
   engines,
   enginesCapability,
   engineVersions,
@@ -374,6 +375,11 @@ describe("version rules", () => {
   test("mysql_native_password: new databases and other engines never get the option; 8.4 takes it on and off", () => {
     const flag = "--mysql-native-password=ON";
     for (const version of engines.mysql.versions) expect(databaseSpec("mysql", version).container.command).toEqual([]);
+    // An import asks for it (its file ran with it): only a line with the option takes it.
+    const [mysql84, mysql80] = engines.mysql.versions;
+    expect(databaseSpec("mysql", mysql84 as EngineVersion, { nativePassword: true }).container.command).toEqual(["mysqld", flag]);
+    expect(databaseSpec("mysql", mysql80 as EngineVersion, { nativePassword: true }).container.command).toEqual([]);
+    expect(databaseSpec("postgres", engines.postgres.versions[0] as EngineVersion, { nativePassword: true }).container.command).toEqual([]);
     expect(containerCommand("mysql", { nativePassword: true })).toEqual(["mysqld", flag]);
     expect(containerCommand("redis", { nativePassword: true })).toEqual(containerCommand("redis"));
     expect(engines.mysql.versions.filter((v) => v.nativePasswordOption).map((v) => v.version)).toEqual(["8.4"]);
@@ -722,6 +728,80 @@ describe("databases.versionChoices and setVersion", () => {
     expect(done.status).toBe(200);
     expect(specCommand(serviceId)).toEqual([]);
     expect(specImage(serviceId)).toBe("mysql:8.4.8");
+    agent.disconnect();
+  });
+
+  test("MySQL 8.4 on the image it runs: keepNativePassword alone turns the option on or off and deploys that image again", async () => {
+    const { serviceId, node } = await createDb("mysql", "8.4");
+    const sent: ExecRequest[] = [];
+    let agent = mysqlAccounts(node.id, ["legacy@%"], sent);
+    const logOf = (deploymentId: string) =>
+      panel.deps.db
+        .select({ text: deploymentLogs.text })
+        .from(deploymentLogs)
+        .where(eq(deploymentLogs.deploymentId, deploymentId))
+        .all()
+        .map((r) => r.text);
+    const set = (input: { keepNativePassword?: boolean; image?: string }) =>
+      callOp(panel, dbOps.setVersion, { serviceId, version: "8.4", ...input }, { cookie });
+    // The same image as it runs, as it runs: nothing to change.
+    for (const input of [{}, { keepNativePassword: false }]) {
+      const same = await set(input);
+      expect(same.status).toBe(409);
+      expect(same.body.error.details.reason).toBe("current");
+    }
+    const before = deployCount(serviceId);
+
+    const on = await set({ keepNativePassword: true });
+    expect(on.status).toBe(200);
+    // Turning it on locks no one out: nothing to list.
+    expect(sent).toHaveLength(0);
+    expect(dbVersion(serviceId)).toBe("8.4");
+    expect(specImage(serviceId)).toBe("mysql:8.4.6");
+    expect(specCommand(serviceId)).toEqual(["mysqld", nativeFlag]);
+    expect(deployCount(serviceId)).toBe(before + 1);
+    const onLog = logOf(on.body.deploymentId);
+    expect(onLog).toContain("mysql_native_password logins on (--mysql-native-password=ON), on the image it runs (mysql:8.4.6).");
+    expect(onLog.some((line) => line.startsWith("Version change"))).toBe(false);
+    await settleDeploys(panel);
+    goLive(serviceId);
+    expect((await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie })).body.nativePassword).toEqual({
+      on: true,
+      lines: ["8.4"],
+    });
+    const again = await set({ keepNativePassword: true });
+    expect([again.status, again.body.error.details.reason]).toEqual([409, "current"]);
+
+    // Off lists the running database's accounts first, like the upgrade: refused while one needs it...
+    const refused = await set({ keepNativePassword: false });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.details.reason).toBe("nativePasswordUsers");
+    expect(sent).toHaveLength(1);
+    expect(specCommand(serviceId)).toEqual(["mysqld", nativeFlag]);
+    expect(deployCount(serviceId)).toBe(before + 1);
+    agent.disconnect();
+    // ...and deploys the image without it once none does.
+    agent = mysqlAccounts(node.id, [], sent);
+    const off = await set({ keepNativePassword: false });
+    expect(off.status).toBe(200);
+    expect(sent).toHaveLength(2);
+    expect(specCommand(serviceId)).toEqual([]);
+    expect(specImage(serviceId)).toBe("mysql:8.4.6");
+    expect(logOf(off.body.deploymentId)).toContain("mysql_native_password logins off, on the image it runs (mysql:8.4.6).");
+    await settleDeploys(panel);
+    goLive(serviceId);
+
+    // A custom tag that runs takes it the same way.
+    expect((await set({ image: "mysql:8.4.7" })).status).toBe(200);
+    await settleDeploys(panel);
+    goLive(serviceId);
+    const custom = await set({ image: "mysql:8.4.7", keepNativePassword: true });
+    expect(custom.status).toBe(200);
+    expect(specImage(serviceId)).toBe("mysql:8.4.7");
+    expect(specCommand(serviceId)).toEqual(["mysqld", nativeFlag]);
+    expect(logOf(custom.body.deploymentId)).toContain(
+      "mysql_native_password logins on (--mysql-native-password=ON), on the image it runs (mysql:8.4.7).",
+    );
     agent.disconnect();
   });
 

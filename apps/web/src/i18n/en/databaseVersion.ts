@@ -8,6 +8,17 @@ export default {
   image: "Image",
   logins: "Logins",
   nativeOn: "Old mysql_native_password logins are on",
+  nativeSwitch: "Keep old mysql_native_password logins working",
+  nativeSwitchHint: "Runs MySQL {version} with --mysql-native-password=ON. Applying restarts the database on the image it runs.",
+  nativeApply: "Apply",
+  native: {
+    titleOn: "Turn old mysql_native_password logins on?",
+    titleOff: "Turn old mysql_native_password logins off?",
+    bodyOn:
+      "MySQL {version} starts with --mysql-native-password=ON, so accounts made with mysql_native_password sign in again. Later deploys and updates keep it.",
+    bodyOff:
+      "MySQL {version} starts without --mysql-native-password=ON. The running database is checked for accounts that sign in with mysql_native_password first: if there are any, nothing changes.",
+  },
   changeTo: "Change to",
   pick: "Pick a version",
   noChoice: "No other version is available for this database.",

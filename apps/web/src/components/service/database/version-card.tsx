@@ -4,8 +4,10 @@
 // runs (customOnCurrent, also when it runs that line's newest pinned image),
 // and the confirm dialog: the restart, no way back, a backup first,
 // MongoDB's compatibility step and MySQL 8.4's mysql_native_password check
-// (the accounts it would lock out, and keeping their logins working). While
-// the change deploys the card shows the deploy and its log.
+// (the accounts it would lock out, and keeping their logins working). A
+// MySQL 8.4 also turns those logins on or off on the image it runs (a
+// switch and Apply, then a confirm dialog). While the change deploys the
+// card shows the deploy and its log.
 
 import { backups, databases, deployments, OpError, type OpOutput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -17,6 +19,7 @@ import { Input } from "@seylo/ui/components/input";
 import { KeyValue } from "@seylo/ui/components/key-value";
 import { SectionCard, SectionCardSkeleton } from "@seylo/ui/components/section-card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@seylo/ui/components/select";
+import { Switch } from "@seylo/ui/components/switch";
 import { toast } from "@seylo/ui/components/toast";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -60,6 +63,12 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
   /** tag: another exact tag of the line it runs, typed in the dialog. */
   const [confirming, setConfirming] = useState<{ choice: Choice; tag: boolean } | null>(null);
   const [log, setLog] = useState(false);
+  /** MySQL 8.4's mysql_native_password logins on the image it runs: what the switch asks for, and its dialog. */
+  const nativeOn = choices.data?.nativePassword?.on ?? false;
+  const [nativeWanted, setNativeWanted] = useState(nativeOn);
+  const [nativeConfirm, setNativeConfirm] = useState(false);
+  // What it is set to run changed (an applied change, another tab): the switch follows.
+  useEffect(() => setNativeWanted(nativeOn), [nativeOn]);
   const refetch = choices.refetch;
   const activeId = active?.id ?? null;
   // A deploy that starts or ends changes what may be picked.
@@ -84,6 +93,9 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
   const engine = t(`service.kind.${data.engine}`);
   // The line it runs takes another exact tag even when none of its catalog choices can be picked.
   const ownLine = data.customOnCurrent ? (data.choices.find((c) => c.version === data.version) ?? null) : null;
+  // MySQL 8.4 turns mysql_native_password logins on or off on the image it runs; not while a change is pending.
+  const nativeHere = data.nativePassword?.lines.includes(data.version) ?? false;
+  const nativeLocked = data.blocked !== null || data.pendingImage !== null;
 
   return (
     <SectionCard
@@ -102,6 +114,26 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
             ...(data.nativePassword?.on ? [{ label: t("databaseVersion.logins"), value: t("databaseVersion.nativeOn") }] : []),
           ]}
         />
+        {nativeHere && (
+          <div className="flex max-w-[520px] flex-wrap items-center gap-3">
+            <label htmlFor="dv-native-switch" className="flex min-w-0 flex-[1_1_280px] cursor-pointer items-start gap-3">
+              <Switch
+                id="dv-native-switch"
+                checked={nativeWanted}
+                disabled={nativeLocked}
+                onCheckedChange={setNativeWanted}
+                className="mt-0.5"
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[13px] font-medium">{t("databaseVersion.nativeSwitch")}</span>
+                <span className="text-xs text-muted-foreground">{t("databaseVersion.nativeSwitchHint", { version: data.version })}</span>
+              </span>
+            </label>
+            <Button size="sm" disabled={nativeLocked || nativeWanted === nativeOn} onClick={() => setNativeConfirm(true)}>
+              {t("databaseVersion.nativeApply")}
+            </Button>
+          </div>
+        )}
         {running && data.pendingImage ? (
           <div className="flex flex-wrap items-center gap-2.5 text-[13px]">
             {active && <DeploymentStatusChip status={active.status} />}
@@ -162,6 +194,7 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
       {confirming && (
         <VersionDialog service={service} data={data} choice={confirming.choice} tag={confirming.tag} onClose={() => setConfirming(null)} />
       )}
+      {nativeConfirm && <NativePasswordDialog service={service} data={data} on={nativeWanted} onClose={() => setNativeConfirm(false)} />}
       <DeployLogModal serviceId={service.id} deployment={log ? active : null} onClose={() => setLog(false)} />
     </SectionCard>
   );
@@ -364,22 +397,7 @@ function VersionDialog({
             </section>
           )}
           {nativeUsers ? (
-            <Callout tone="warning">
-              <div className="flex flex-col gap-2">
-                <span>{t("databaseVersion.confirm.nativeUsers", { count: nativeUsers.count, version: choice.version })}</span>
-                <ul aria-label={t("databaseVersion.logins")} className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-xs">
-                  {nativeUsers.accounts.map((account) => (
-                    <li key={account}>{account}</li>
-                  ))}
-                  {nativeUsers.count > nativeUsers.accounts.length && (
-                    <li className="font-sans">
-                      {t("databaseVersion.confirm.nativeMore", { count: nativeUsers.count - nativeUsers.accounts.length })}
-                    </li>
-                  )}
-                </ul>
-                <span>{t("databaseVersion.confirm.nativeFix")}</span>
-              </div>
-            </Callout>
+            <NativeUsersCallout users={nativeUsers} version={choice.version} />
           ) : (
             change.error && <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>
           )}
@@ -403,6 +421,85 @@ function VersionDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * mysql_native_password logins on or off on the image a MySQL 8.4 runs:
+ * setVersion with that image and keepNativePassword alone, which deploys it
+ * again with the new command. Off is checked like an upgrade: the accounts
+ * that would lose their logins refuse it.
+ */
+function NativePasswordDialog({ service, data, on, onClose }: { service: ServiceDetail; data: Choices; on: boolean; onClose: () => void }) {
+  const invalidate = useInvalidate();
+  const change = useOpMutation(databases.setVersion, {
+    onSuccess: () => {
+      toast.success(t("databaseVersion.confirm.done", { image: data.image }));
+      invalidate(databases.versionChoices, databases.get, deployments.list, services.get);
+      onClose();
+    },
+  });
+  const nativeUsers = nativeUsersOf(change.error);
+  // The catalog's image of the line needs no image; a custom tag that runs is sent as itself.
+  const catalogImage = data.choices.find((c) => c.version === data.version)?.image;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="top-[12%]">
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            change.mutate({
+              serviceId: service.id,
+              version: data.version,
+              ...(data.image !== catalogImage ? { image: data.image } : {}),
+              keepNativePassword: on,
+            });
+          }}
+        >
+          <div className="flex flex-col gap-1">
+            <DialogTitle>{on ? t("databaseVersion.native.titleOn") : t("databaseVersion.native.titleOff")}</DialogTitle>
+            <DialogDescription>{t("databaseVersion.confirm.restart", { image: data.image })}</DialogDescription>
+          </div>
+          <p className="m-0 text-[13px] leading-normal text-ink-strong">
+            {on
+              ? t("databaseVersion.native.bodyOn", { version: data.version })
+              : t("databaseVersion.native.bodyOff", { version: data.version })}
+          </p>
+          {nativeUsers ? (
+            <NativeUsersCallout users={nativeUsers} version={data.version} />
+          ) : (
+            change.error && <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button onClick={onClose}>{t("service.cancel")}</Button>
+            <Button type="submit" variant="primary" disabled={change.isPending}>
+              {t("databaseVersion.confirm.buttonPatch")}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A nativePasswordUsers refusal: the accounts that would lose their logins and how to fix them. */
+function NativeUsersCallout({ users, version }: { users: { accounts: string[]; count: number }; version: string }) {
+  return (
+    <Callout tone="warning">
+      <div className="flex flex-col gap-2">
+        <span>{t("databaseVersion.confirm.nativeUsers", { count: users.count, version })}</span>
+        <ul aria-label={t("databaseVersion.logins")} className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-xs">
+          {users.accounts.map((account) => (
+            <li key={account}>{account}</li>
+          ))}
+          {users.count > users.accounts.length && (
+            <li className="font-sans">{t("databaseVersion.confirm.nativeMore", { count: users.count - users.accounts.length })}</li>
+          )}
+        </ul>
+        <span>{t("databaseVersion.confirm.nativeFix")}</span>
+      </div>
+    </Callout>
   );
 }
 

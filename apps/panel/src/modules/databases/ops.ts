@@ -37,6 +37,8 @@ import {
   exposureRefusal,
   generatePassword,
   generateUserName,
+  rootPasswordVariable,
+  rootUnchangedMarker,
 } from "./engines";
 import {
   adminPasswordSecret,
@@ -241,7 +243,8 @@ export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) =
   const password = input.password ?? generatePassword();
   // One user inside and through the exposed port: user "exposed" (kept for older callers) changes it too.
   // Engines that read the password from their environment take it with the restart the new env causes.
-  const exec = changePasswordExec(info.row.engine, info.admin.user, password);
+  const exec = changePasswordExec(info.row.engine, info.admin.user, password, info.admin.password);
+  let warning: string | null = null;
   if (exec) {
     if (!info.node) throw new OpError("CONFLICT", "The database is not placed on a node.", { reason: "noNode" });
     // Change it inside the running database first; only store it once that worked.
@@ -258,13 +261,29 @@ export const resetPassword = implement(dbOps.resetPassword, async (input, ctx) =
         exitCode: String(result.exitCode),
       });
     }
+    if (new TextDecoder().decode(result.stdout).includes(rootUnchangedMarker)) {
+      ctx.logger.warn({ serviceId: info.service.id }, "database root password left out of step");
+      warning = rootUnchangedWarning(info);
+    }
   }
   ctx.db.transaction((tx) => {
     writeSecret(tx, ctx.secrets, info.service.id, adminPasswordSecret, password);
   });
   afterChange(ctx, info);
-  return { password, affectedServiceIds: servicesUsingCredentials(ctx, info) };
+  return { password, affectedServiceIds: servicesUsingCredentials(ctx, info), warning };
 });
+
+/**
+ * What resetPassword says when a MySQL or MariaDB admin other than root
+ * changed its own password but root could not sign in to get the same one
+ * (changePasswordExec printed rootUnchangedMarker): root is out of step
+ * with the password the container gives it.
+ */
+function rootUnchangedWarning(info: DatabaseInfo): string {
+  const variable = rootPasswordVariable(info.row.engine === "mariadb" ? "mariadb" : "mysql");
+  const label = info.engine.label;
+  return `The password of ${info.admin.user} changed, but ${label}'s root user kept an older password, which the panel does not know: root no longer signs in with the one the database's container gives it (${variable}), as after a password reset before 0.2.11 or a change made by hand, and ${info.admin.user} cannot change root's. Root sign-ins with ${variable} fail until root has the new password: sign in as root with its older password and run ALTER USER 'root'@'%' IDENTIFIED BY '<new password>' and the same for 'root'@'localhost'. Later resets then change both.`;
+}
 
 export const openWebUi = implement(dbOps.openWebUi, (input, ctx) => {
   const info = loadDatabase(ctx, input.serviceId);

@@ -317,7 +317,7 @@ export const setVersion = defineOp({
   kind: "destructive",
   summary: "Change a database's version",
   description:
-    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie). MySQL 8.4 ships mysql_native_password off: before a change from 8.0 the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check).",
+    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie). MySQL 8.4 ships mysql_native_password off: before a change from 8.0 the panel lists the running database's accounts that sign in with it, and refuses (reason nativePasswordUsers, details.accounts and details.count) when there are any, unless keepNativePassword: true, which runs 8.4 with --mysql-native-password=ON (kept by later deploys and patch updates; false turns it off, after the same check). On an 8.4 database, version 8.4 with the image it runs and keepNativePassword turns the option on or off alone: the same image deploys again with the new command.",
   input: Type.Object({
     serviceId: Id,
     /** A catalog version of the database's engine, for example "8.0". */
@@ -330,7 +330,8 @@ export const setVersion = defineOp({
      * MySQL 8.4 only (versionChoices nativePassword.lines, 0.2.11): true
      * runs it with --mysql-native-password=ON, so accounts made with
      * mysql_native_password keep signing in; false runs it without. Left
-     * out, the database keeps what it runs with.
+     * out, the database keeps what it runs with. With the image that runs,
+     * a change of this alone is allowed (not refused as current).
      */
     keepNativePassword: Type.Optional(Type.Boolean()),
   }),
@@ -375,7 +376,7 @@ export const resetPassword = defineOp({
   kind: "destructive",
   summary: "Reset a database password",
   description:
-    "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them.",
+    "Sets a new password for the database's user, the one used inside and through the exposed port alike. The user value exposed is still accepted for older callers and changes the same password as internal: there is no separate exposed user. Services that reference the password (PASSWORD, INTERNAL_URL, INTERNAL_HTTP_URL or EXPOSED_URL) get it on their next deploy or restart; anything else using the old password stops connecting. ClickHouse and Dragonfly read the admin password from their environment at start, so a new one restarts them. MySQL and MariaDB give root the same password as the admin, also an admin other than root (MYSQL_ROOT_PASSWORD, MARIADB_ROOT_PASSWORD); warning says when root kept an older password because it could not sign in to change it.",
   input: Type.Object({
     serviceId: Id,
     /** Both mean the database's one user; "exposed" is kept for older callers. */
@@ -387,6 +388,12 @@ export const resetPassword = defineOp({
     password: Type.String(),
     /** Services that reference this database and need a restart to pick it up. */
     affectedServiceIds: Type.Array(Id),
+    /**
+     * Set when the password changed but not everywhere (0.2.11): a MySQL or
+     * MariaDB root user that kept an older password, with how to fix it.
+     * Null otherwise.
+     */
+    warning: Type.Union([Type.String(), Type.Null()]),
   }),
   sensitive: { input: ["password"], output: ["password"] },
   permission: serviceScope("databases.credentials"),

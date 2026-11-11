@@ -3665,7 +3665,15 @@ members never hold them. Every op is `mcp: false`.
   blocks the data (`databaseImage`, field `volumes`: leave it out or
   update the panel). Without the data an empty database starts on the
   catalog image, and a newer custom one is set again on the Version card
-  once it runs. `pinDigest` only pins a source from the file: a database's
+  once it runs. Of the file's container command only MySQL 8.4's
+  `--mysql-native-password=ON` is kept (0.2.11, `databaseSpec(engine,
+  version, { nativePassword })` with `hasNativePassword` of the file's
+  command): when the file's command has that very argument and the
+  version's `nativePasswordOption` takes it, the database runs `mysqld
+  --mysql-native-password=ON`, so its accounts made with
+  mysql_native_password keep signing in; no other argument of the file's
+  command comes along, and other versions and engines run the engine's
+  command. `pinDigest` only pins a source from the file: a database's
   or Box's image is never pinned to the file's digest (their
   `source.imageDigest` is null). One user inside and through the exposed port (0.2.9):
   the export never carries the `exposed_password` of a database from
@@ -4115,6 +4123,34 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   one password for `user` "internal" and "exposed" alike (the latter kept
   for API compatibility) and lists the services whose env references
   `PASSWORD`, `INTERNAL_URL`, `INTERNAL_HTTP_URL` or `EXPOSED_URL`.
+  MySQL and MariaDB give root the admin's password, also for an admin
+  other than root (`containerEnv` sets `rootPasswordVariable`,
+  `MYSQL_ROOT_PASSWORD` or `MARIADB_ROOT_PASSWORD`, to it), and since
+  0.2.11 a reset keeps them equal (`changePasswordExec`, script
+  `mysqlPasswordScript`; before, an admin other than root got the new
+  password and root kept the old one, so root sign-ins with the
+  container's root password failed with ERROR 1045 after the next
+  deploy). Root signs in on the socket with `MYSQL_PWD` (never an
+  argument; the SQL goes on the client's stdin through the shell's
+  `printf`), first with the container's root password, then with the
+  admin's current one (stdin's first line; the container keeps the old
+  environment until its next deploy), and changes the admin's account,
+  then `ALTER USER IF EXISTS 'root'@'%'` and `'root'@'localhost'` (for root
+  as the admin, both of root's in one go). When root cannot sign in
+  either way (ERROR 1045: a reset before 0.2.11, or a change by hand), an
+  admin other than root signs in over TCP and changes its own password
+  (MySQL `ALTER USER USER()`, MariaDB `SET PASSWORD = PASSWORD(...)`);
+  that, or root's change failing after the admin's, prints
+  `rootUnchangedMarker` with exit 0, and `resetPassword` stores the new
+  password and returns `warning`: root kept an older password the panel
+  does not know, and how to set it by hand. `warning` is null otherwise.
+  Any other failure (the server down) refuses with `execFailed` and
+  stores nothing. Tested with the script under sh and dash against a fake
+  client (`database-password.test.ts`) and on MySQL 8.4 and MariaDB 11.8
+  in the VM (`TestITPasswordResetKeepsRoot`: reset, redeploy, root with
+  the container's password and the admin with the new one; two resets
+  before a deploy; an out-of-step database), not yet through a real
+  panel.
 - Version changes (`modules/databases/version.ts`, 0.2.9):
   `databases.versionChoices` lists the catalog lines of the database's
   engine and variant with `kind` (current, patch, upgrade, major,
@@ -4166,11 +4202,23 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the command alone unless `keepNativePassword` is given; `false` takes
   it out again after the same list on the running 8.4. A line without the
   option (8.0, staying on it after a failed change) runs without it. New
-  databases and other engines never get it, and an import builds its
-  command from the engine (`databaseSpec`), so an imported 8.4 runs
-  without it. `versionChoices.nativePassword` is null for other engines
+  databases and other engines never get it; an import keeps it only from
+  a file whose MySQL 8.4 ran with it (see Service export and import). On
+  the image that runs, `keepNativePassword` that changes the option is a
+  change of its own (0.2.11): not refused as `current`, it writes the
+  command alone and deploys the same image again (off after the same
+  list), with the deploy note "mysql_native_password logins on
+  (--mysql-native-password=ON), on the image it runs (<image>)." (or
+  "off") and no "Version change" line; the same image with the option as
+  it is stays `current`. `versionChoices.nativePassword` is null for other engines
   and `{ on, lines }` for MySQL; the Version card shows "Old
-  mysql_native_password logins are on", and its confirm dialog shows a
+  mysql_native_password logins are on" and, on a line in `lines`, the
+  switch "Keep old mysql_native_password logins working" with Apply
+  (disabled while `blocked` or `pendingImage`), whose dialog ("Turn old
+  mysql_native_password logins on?" or "off?", Update) sends the version
+  it runs, its image only when it is not the catalog's, and
+  `keepNativePassword`, and shows a `nativePasswordUsers` refusal's
+  accounts; a version change's confirm dialog shows a
   `nativePasswordUsers` refusal with the accounts and the checkbox "Keep
   mysql_native_password logins working in 8.4" (after a
   `nativePasswordCheckFailed` too, and checked for patch updates while it

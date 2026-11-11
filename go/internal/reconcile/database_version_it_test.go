@@ -487,6 +487,199 @@ grant select on app.* to 'legacy'@'%';`, "MYSQL_PWD="+root); code != 0 {
 	}
 }
 
+// rootUnchanged is what the password change prints when the admin's
+// password changed and root's could not (rootUnchangedMarker in engines.ts).
+const rootUnchanged = "seylo: root password unchanged"
+
+// changePassword is the exec databases.resetPassword runs in a running
+// MySQL or MariaDB (changePasswordExec in
+// apps/panel/src/modules/databases/engines.ts) to change user's password
+// from current to password. Root signs in on the socket with the
+// container's root password, then with the admin's current one, and
+// changes the admin's password and its own; when root cannot sign in, an
+// admin other than root changes its own over TCP and the script prints
+// rootUnchanged. Passwords go in MYSQL_PWD or on the client's stdin only.
+func changePassword(engine, user, current, password string) ([]string, string) {
+	client, root := "mysql", "MYSQL_ROOT_PASSWORD"
+	if engine == "mariadb" {
+		client, root = "mariadb", "MARIADB_ROOT_PASSWORD"
+	}
+	script := strings.Join([]string{
+		"IFS= read -r pw || exit 2",
+		"IFS= read -r for_admin || exit 2",
+		"IFS= read -r for_root || exit 2",
+		"IFS= read -r for_self || exit 2",
+		`run() { rp=$1; rs=$2; shift 2; { err=$(printf '%s\n' "$rs" | MYSQL_PWD="$rp" ` + client + ` "$@" 2>&1 >&3); } 3>&1; }`,
+		"tried=",
+		`for p in "$` + root + `" "$pw"; do`,
+		`  [ -n "$p" ] && [ "$p" != "$tried" ] || continue`,
+		"  tried=$p",
+		`  run "$p" "$for_admin" -uroot; code=$?`,
+		`  if [ "$code" -eq 0 ]; then`,
+		`    [ -n "$for_root" ] || exit 0`,
+		`    run "$p" "$for_root" -uroot && exit 0`,
+		`    printf '%s\n' "$err" >&2; echo '` + rootUnchanged + `'; exit 0`,
+		"  fi",
+		`  [ -z "$err" ] || printf '%s\n' "$err" >&2`,
+		`  case "$err" in *"ERROR 1045"*) ;; *) exit "$code" ;; esac`,
+		"done",
+		`[ -n "$for_self" ] || exit 1`,
+		`run "$pw" "$for_self" -h127.0.0.1 -u"$1"; code=$?`,
+		`[ "$code" -eq 0 ] || { printf '%s\n' "$err" >&2; exit "$code"; }`,
+		`echo '` + rootUnchanged + `'`,
+	}, "\n")
+	alter := func(account, ifExists string) string {
+		return "ALTER USER " + ifExists + account + " IDENTIFIED BY '" + password + "';"
+	}
+	var forAdmin, forRoot, forSelf string
+	if user == "root" {
+		forAdmin = alter("'root'@'%'", "") + " " + alter("'root'@'localhost'", "") + " FLUSH PRIVILEGES;"
+	} else {
+		forAdmin = alter("'"+user+"'@'%'", "")
+		forRoot = alter("'root'@'%'", "IF EXISTS ") + " " + alter("'root'@'localhost'", "IF EXISTS ") + " FLUSH PRIVILEGES;"
+		forSelf = "ALTER USER USER() IDENTIFIED BY '" + password + "';"
+		if engine == "mariadb" {
+			forSelf = "SET PASSWORD = PASSWORD('" + password + "');"
+		}
+	}
+	return []string{"sh", "-c", script, "sh", user}, current + "\n" + forAdmin + "\n" + forRoot + "\n" + forSelf + "\n"
+}
+
+// TestITPasswordResetKeepsRoot: a MySQL 8.4 and a MariaDB 11.8 database
+// whose admin is not root, with the panel's environment (containerEnv: the
+// image's root password is the admin's). databases.resetPassword's exec
+// changes root's password with the admin's, so after the redeploy the new
+// environment brings, root signs in with the container's root password and
+// the admin with the new one; a second reset before that redeploy finds
+// root on the newer password. A database an older panel left out of step
+// (its reset changed the admin's password only, so root kept the first
+// one) still takes a reset: the admin changes its own password, the script
+// says root kept its older one, and once root has the new password by hand
+// the next reset keeps both in step. No password is ever an argument.
+func TestITPasswordResetKeepsRoot(t *testing.T) {
+	e := newIT(t)
+	e.pull(mysql84, mariadb118)
+	const p0, p1, p2, p3, p4, p5, p6 = "ResetPassword0", "ResetPassword1", "ResetPassword2", "ResetPassword3", "ResetPassword4", "ResetPassword5", "ResetPassword6"
+	for _, c := range []struct {
+		engine, client, prefix, image string
+		kind                          agentv1.DatabaseEngine
+		health                        []string
+	}{
+		{"mysql", "mysql", "MYSQL", mysql84, agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL,
+			[]string{"sh", "-c", `mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent`}},
+		{"mariadb", "mariadb", "MARIADB", mariadb118, agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB,
+			[]string{"healthcheck.sh", "--connect", "--innodb_initialized"}},
+	} {
+		t.Run(c.engine, func(t *testing.T) {
+			// containerEnv for the admin "shop" with password pw.
+			envFor := func(pw string) []string {
+				env := []string{c.prefix + "_ROOT_PASSWORD=" + pw, c.prefix + "_DATABASE=app", c.prefix + "_USER=shop", c.prefix + "_PASSWORD=" + pw}
+				if c.engine == "mariadb" {
+					env = append(env, "MARIADB_AUTO_UPGRADE=1")
+				}
+				return env
+			}
+			d := e.database(c.engine+"reset", c.kind, 3306, "/var/lib/mysql", nil, c.health, envFor(p0)...)
+			redeploy := func(pw string) string {
+				t.Helper()
+				d.spec.Env = nil
+				for _, kv := range envFor(pw) {
+					k, v, _ := strings.Cut(kv, "=")
+					d.spec.Env = append(d.spec.Env, &agentv1.EnvVar{Name: k, Value: v})
+				}
+				return d.deploy(c.image)
+			}
+			reset := func(container, current, password string) string {
+				t.Helper()
+				argv, stdin := changePassword(c.engine, "shop", current, password)
+				for _, a := range argv {
+					if strings.Contains(a, "ResetPassword") {
+						t.Fatalf("a password in the command: %q", a)
+					}
+				}
+				out, code := execStdin(t, e, container, argv, stdin)
+				if code != 0 {
+					t.Fatalf("reset from %s to %s: %q (%d)", current, password, out, code)
+				}
+				return out
+			}
+			// As a person or a tool reading the container's environment signs root in.
+			rootSignsIn := func(container string) bool {
+				out, code := d.run(container, []string{"sh", "-c", `MYSQL_PWD="$` + c.prefix + `_ROOT_PASSWORD" exec ` + c.client + ` -uroot -N -B -e "select 1"`})
+				return code == 0 && out == "1"
+			}
+			signsIn := func(container, user, pw string) bool {
+				host := "-h127.0.0.1"
+				if user == "root" {
+					host = "--protocol=socket"
+				}
+				out, code := execStdin(t, e, container, []string{c.client, host, "-u" + user, "-N", "-B"}, "select 1", "MYSQL_PWD="+pw)
+				return code == 0 && out == "1"
+			}
+			mustSignIn := func(container, what string, ok bool) {
+				t.Helper()
+				if !ok {
+					t.Fatalf("%s: could not sign in", what)
+				}
+			}
+
+			ct := d.deploy(c.image)
+			mustSignIn(ct, "root with the first password", rootSignsIn(ct))
+			// A reset: root gets the admin's new password with it, and the next deploy's environment signs root in.
+			if out := reset(ct, p0, p1); strings.Contains(out, rootUnchanged) {
+				t.Fatalf("root left out of step: %q", out)
+			}
+			ct = redeploy(p1)
+			mustSignIn(ct, "root with the container's root password after the reset", rootSignsIn(ct))
+			mustSignIn(ct, "the admin with the new password", signsIn(ct, "shop", p1))
+			if signsIn(ct, "shop", p0) || signsIn(ct, "root", p0) {
+				t.Fatal("the old password still signs in")
+			}
+
+			// Two resets before the deploy: the container still says p1, root is on p2 for the second.
+			reset(ct, p1, p2)
+			if out := reset(ct, p2, p3); strings.Contains(out, rootUnchanged) {
+				t.Fatalf("the second reset before the deploy left root out of step: %q", out)
+			}
+			ct = redeploy(p3)
+			mustSignIn(ct, "root after two resets", rootSignsIn(ct))
+			mustSignIn(ct, "the admin after two resets", signsIn(ct, "shop", p3))
+
+			// Out of step as an older panel's reset left it: the admin's password changed, root's did not.
+			if out, code := execStdin(t, e, ct, []string{c.client, "-uroot"}, "ALTER USER 'shop'@'%' IDENTIFIED BY '"+p4+"'; FLUSH PRIVILEGES;", "MYSQL_PWD="+p3); code != 0 {
+				t.Fatalf("the old reset: %q (%d)", out, code)
+			}
+			ct = redeploy(p4)
+			if rootSignsIn(ct) {
+				t.Fatal("root signs in with the container's password while out of step")
+			}
+			// The reset still works, for the admin, and says root kept its older password.
+			if out := reset(ct, p4, p5); !strings.Contains(out, rootUnchanged) {
+				t.Fatalf("no word that root kept its older password: %q", out)
+			}
+			mustSignIn(ct, "the admin with the new password while root is out of step", signsIn(ct, "shop", p5))
+			mustSignIn(ct, "root with its older password", signsIn(ct, "root", p3))
+			ct = redeploy(p5)
+			mustSignIn(ct, "the admin after the redeploy", signsIn(ct, "shop", p5))
+			if rootSignsIn(ct) {
+				t.Fatal("root signs in with the container's password although the reset said it could not change it")
+			}
+			// Root set to the new password by hand: the next reset keeps both in step again.
+			if out, code := execStdin(t, e, ct, []string{c.client, "-uroot"},
+				"ALTER USER 'root'@'%' IDENTIFIED BY '"+p5+"'; ALTER USER 'root'@'localhost' IDENTIFIED BY '"+p5+"';", "MYSQL_PWD="+p3); code != 0 {
+				t.Fatalf("root's password by hand: %q (%d)", out, code)
+			}
+			mustSignIn(ct, "root with the container's password once set by hand", rootSignsIn(ct))
+			if out := reset(ct, p5, p6); strings.Contains(out, rootUnchanged) {
+				t.Fatalf("root left out of step after the fix: %q", out)
+			}
+			ct = redeploy(p6)
+			mustSignIn(ct, "root after the fix", rootSignsIn(ct))
+			mustSignIn(ct, "the admin after the fix", signsIn(ct, "shop", p6))
+		})
+	}
+}
+
 // mysqlID is the version as MySQL's upgrade log writes it: 8.0.43 is 80043.
 func mysqlID(release string) string {
 	var a, b, c int

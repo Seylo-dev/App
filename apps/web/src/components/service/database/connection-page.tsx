@@ -6,6 +6,7 @@
 
 import { backups, databases, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
+import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { Chip, StatusDot } from "@seylo/ui/components/chip";
 import { CopyCode } from "@seylo/ui/components/code-block";
@@ -446,6 +447,8 @@ function ResetPassword({ service, onClose }: { service: ServiceDetail; onClose: 
           <DialogTitle>{t("serviceDatabase.reset.doneTitle")}</DialogTitle>
           <DialogDescription>{t("serviceDatabase.reset.doneBody", { count: result.affectedServiceIds.length })}</DialogDescription>
           <CopyField value={result.password} aria-label={t("serviceDatabase.password")} />
+          {/* A MySQL or MariaDB root user that kept an older password: the panel says how to fix it. */}
+          {result.warning && <Callout tone="warning">{result.warning}</Callout>}
           <Button variant="primary" className="self-end" onClick={onClose}>
             {t("service.close")}
           </Button>

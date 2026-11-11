@@ -475,6 +475,70 @@ describe("databases", () => {
     ).toEqual([]);
   });
 
+  test("an imported MySQL 8.4 keeps --mysql-native-password=ON from its file, and nothing else of the file's command", async () => {
+    const flag = "--mysql-native-password=ON";
+    const a = await side();
+    const b = await side("node-b");
+    const created = await callOp(
+      a.panel,
+      dbOps.create,
+      { projectId: a.projectId, name: "my", engine: "mysql", nodeId: a.nodeId, version: "8.4" },
+      { cookie: a.cookie },
+    );
+    expect(created.status).toBe(200);
+    const id = created.body.serviceId as string;
+    // As databases.setVersion keepNativePassword leaves it.
+    const spec = readSpec(a.panel.deps.db.select().from(services).where(eq(services.id, id)).get()?.spec);
+    a.panel.deps.db
+      .update(services)
+      .set({ spec: { ...spec, container: { ...spec.container, command: ["mysqld", flag] } } })
+      .where(eq(services.id, id))
+      .run();
+    const zip = (await exportZip(a, id)).bytes;
+    /** The container command of the database an import of the file (edited) makes. */
+    const imported = async (edit: (doc: Record<string, any>) => void = () => {}) => {
+      const begun = await callOp(b.panel, transferOps.importBegin, await craft(zip, b.projectId, (p) => edit(p.services.my.doc)), {
+        cookie: b.cookie,
+      });
+      expect(begun.status).toBe(200);
+      expect(begun.body.blockers).toEqual([]);
+      const done = await callOp(
+        b.panel,
+        transferOps.importService,
+        { projectId: b.projectId, importId: begun.body.importId },
+        { cookie: b.cookie },
+      );
+      expect(done.status).toBe(200);
+      return readSpec(b.panel.deps.db.select().from(services).where(eq(services.id, done.body.service.id)).get()?.spec).container.command;
+    };
+
+    // Its accounts made with mysql_native_password keep signing in after the move.
+    expect(await imported()).toEqual(["mysqld", flag]);
+    // Other options of the file's command stay behind, and so does anything that is not the option itself.
+    expect(
+      await imported((doc) => {
+        doc.spec.container.command = ["mysqld", "--max-connections=5", "--init-file=/tmp/x.sql", flag];
+      }),
+    ).toEqual(["mysqld", flag]);
+    expect(
+      await imported((doc) => {
+        doc.spec.container.command = ["sh", "-c", `curl evil; exec mysqld ${flag}`];
+      }),
+    ).toEqual([]);
+    expect(
+      await imported((doc) => {
+        doc.spec.container.command = [];
+      }),
+    ).toEqual([]);
+    // MySQL 8.0 has the plugin on by itself: the option is not for it.
+    expect(
+      await imported((doc) => {
+        doc.database.version = "8.0";
+        doc.spec.source.image = "mysql:8.0.43";
+      }),
+    ).toEqual([]);
+  });
+
   test("the login from the file only when databases.create would take it; else a new one is made", async () => {
     const a = await side();
     const b = await side("node-b");

@@ -4,7 +4,8 @@
 // the rows serviceTransfer.import writes (services/portable.ts
 // materializeService). Every setting from the file goes through the checks
 // the ops that set it run; database and Box specs are built from their
-// engine, never taken from the file.
+// engine, never taken from the file (but for MySQL 8.4's
+// mysql_native_password option).
 
 import { type EnvEntry, parseEnv } from "@seylo/env-analyzer";
 import { boxes as boxOps, databases as dbOps, env as envOps, OpError, serviceTransfer as transferOps } from "@seylo/ops";
@@ -39,6 +40,7 @@ import {
   exposureCapability,
   exposureRefusal,
   generatePassword,
+  hasNativePassword,
 } from "../databases/engines";
 import { adminPasswordSecret } from "../databases/info";
 import { compareVersions, customImage, imageRelease } from "../databases/version";
@@ -265,8 +267,10 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     else {
       // This panel's image of the version, as databases.create runs it; the image once the data is known
       // (importedDatabaseImage): a file names the one it ran, which may be older (a panel that was not updated),
-      // newer, or a custom one from databases.setVersion.
-      databaseSpecOf = databaseSpec(engineName, version);
+      // newer, or a custom one from databases.setVersion. Of the file's command only MySQL 8.4's
+      // mysql_native_password option is kept (databases.setVersion keepNativePassword): without it the
+      // accounts made with that plugin could not sign in. Nothing else of it is.
+      databaseSpecOf = databaseSpec(engineName, version, { nativePassword: hasNativePassword(doc.spec.container.command) });
       databaseVersion = version;
       dataPath = version.dataPath;
       if (

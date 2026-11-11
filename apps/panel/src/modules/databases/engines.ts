@@ -351,13 +351,17 @@ export const engines: Record<DatabaseEngine, Engine> = {
  * What a database service runs, derived from its engine and version only:
  * the image, command, port, health probe and the recreate strategy (two
  * copies must never share one data folder). databases.create and imports
- * build it here; nothing of it comes from a person or a file.
+ * build it here; nothing of it comes from a person or a file. An import
+ * may only ask for `nativePassword` (its file's MySQL 8.4 ran with
+ * mysql_native_password on), which a version without nativePasswordOption
+ * ignores.
  */
-export function databaseSpec(engine: DatabaseEngine, version: EngineVersion) {
+export function databaseSpec(engine: DatabaseEngine, version: EngineVersion, options: { nativePassword?: boolean } = {}) {
   const e = engines[engine];
+  const nativePassword = options.nativePassword === true && version.nativePasswordOption === true;
   return {
     source: { type: "image" as const, image: version.image, registryId: null },
-    container: { ...defaultContainer, command: containerCommand(engine), entrypoint: [], stopGraceSeconds: 30 },
+    container: { ...defaultContainer, command: containerCommand(engine, { nativePassword }), entrypoint: [], stopGraceSeconds: 30 },
     ports: [{ containerPort: e.port, protocol: "tcp" as const }],
     healthCheck: {
       probe: healthProbe(engine),
@@ -405,7 +409,8 @@ export function containerEnv(engine: DatabaseEngine, creds: Credentials): { name
     case "mysql":
     case "mariadb": {
       const p = engine === "mysql" ? "MYSQL" : "MARIADB";
-      const out = [env(`${p}_ROOT_PASSWORD`, creds.password, true), env(`${p}_DATABASE`, creds.database)];
+      // Root's password is the admin's, by design: changePasswordExec changes both.
+      const out = [env(rootPasswordVariable(engine), creds.password, true), env(`${p}_DATABASE`, creds.database)];
       if (creds.user !== "root") out.push(env(`${p}_USER`, creds.user), env(`${p}_PASSWORD`, creds.password, true));
       // MariaDB upgrades its system tables on the first start of a newer version (databases.setVersion); MySQL does by itself.
       if (engine === "mariadb") out.push(env("MARIADB_AUTO_UPGRADE", "1"));
@@ -569,13 +574,84 @@ export function httpUrl(engine: DatabaseEngine, creds: Credentials, host: string
 }
 
 /**
- * Exec call that changes the password of `user` in a running database. The
- * new password goes on stdin, so it never shows in a process list. The
- * container's environment still holds the old password, which is what
- * these commands sign in with. Null for engines whose password changes by
+ * The variable that gives MySQL's or MariaDB's image root's password
+ * (containerEnv). It always holds the admin's password, also for an admin
+ * other than root, and changePasswordExec changes root's with the
+ * admin's, so the two stay in step. The panel's scripts sign root in with
+ * it (changePasswordExec, the mysql_native_password check).
+ */
+export function rootPasswordVariable(engine: "mysql" | "mariadb"): string {
+  return engine === "mysql" ? "MYSQL_ROOT_PASSWORD" : "MARIADB_ROOT_PASSWORD";
+}
+
+/** What changePasswordExec prints when the admin's password changed and root's could not. */
+export const rootUnchangedMarker = "seylo: root password unchanged";
+
+/**
+ * The script of changePasswordExec for MySQL and MariaDB. $1 is the admin
+ * user; stdin is the admin's current password, then three lines of SQL:
+ * the admin's change, root's change (empty when the admin is root) and
+ * the admin's change of its own password. Every password goes in
+ * MYSQL_PWD or on the client's stdin (printf is the shell's builtin),
+ * never in an argument. Root signs in on the socket with the container's
+ * root password (rootPasswordVariable), then with the admin's current
+ * one: the container keeps the old environment until its next deploy, so
+ * a second reset before it finds root on the newer password. Root runs
+ * the admin's change, then root's; root's failing after the admin's
+ * worked prints rootUnchangedMarker and still exits 0, since the admin's
+ * password did change. When root cannot sign in either way (ERROR 1045)
+ * and the admin is not root, which happens when root is out of step (a
+ * reset before 0.2.11 changed the admin's password only), the admin signs
+ * in over TCP and changes its own password, and the marker says root kept
+ * its older one. Any other failure (the server down) is the result.
+ */
+function mysqlPasswordScript(engine: "mysql" | "mariadb"): string {
+  const client = engine === "mysql" ? "mysql" : "mariadb";
+  return [
+    "IFS= read -r pw || exit 2",
+    "IFS= read -r for_admin || exit 2",
+    "IFS= read -r for_root || exit 2",
+    "IFS= read -r for_self || exit 2",
+    // run <password> <sql> <client arguments>: the SQL on the client's stdin, its errors in $err.
+    `run() { rp=$1; rs=$2; shift 2; { err=$(printf '%s\\n' "$rs" | MYSQL_PWD="$rp" ${client} "$@" 2>&1 >&3); } 3>&1; }`,
+    "tried=",
+    `for p in "$${rootPasswordVariable(engine)}" "$pw"; do`,
+    '  [ -n "$p" ] && [ "$p" != "$tried" ] || continue',
+    "  tried=$p",
+    '  run "$p" "$for_admin" -uroot; code=$?',
+    '  if [ "$code" -eq 0 ]; then',
+    '    [ -n "$for_root" ] || exit 0',
+    '    run "$p" "$for_root" -uroot && exit 0',
+    `    printf '%s\\n' "$err" >&2; echo '${rootUnchangedMarker}'; exit 0`,
+    "  fi",
+    `  [ -z "$err" ] || printf '%s\\n' "$err" >&2`,
+    '  case "$err" in *"ERROR 1045"*) ;; *) exit "$code" ;; esac',
+    "done",
+    '[ -n "$for_self" ] || exit 1',
+    'run "$pw" "$for_self" -h127.0.0.1 -u"$1"; code=$?',
+    `[ "$code" -eq 0 ] || { printf '%s\\n' "$err" >&2; exit "$code"; }`,
+    `echo '${rootUnchangedMarker}'`,
+  ].join("\n");
+}
+
+/**
+ * Exec call that changes the password of `user` in a running database to
+ * `password`. The new password goes on stdin, so it never shows in a
+ * process list. The container's environment still holds the old password,
+ * which is what these commands sign in with. MySQL and MariaDB
+ * (mysqlPasswordScript) sign in as root and change root's password with
+ * the admin's, also for an admin other than root, since the container
+ * gives root the admin's password (rootPasswordVariable); `current` is the
+ * admin's password before the change, for when the container's root
+ * password does not sign in. Null for engines whose password changes by
  * restarting with the new environment (passwordChange "restart").
  */
-export function changePasswordExec(engine: DatabaseEngine, user: string, password: string): { command: string[]; stdin: string } | null {
+export function changePasswordExec(
+  engine: DatabaseEngine,
+  user: string,
+  password: string,
+  current: string,
+): { command: string[]; stdin: string } | null {
   switch (engine) {
     case "postgres":
       return {
@@ -584,12 +660,21 @@ export function changePasswordExec(engine: DatabaseEngine, user: string, passwor
       };
     case "mysql":
     case "mariadb": {
-      const p = engine === "mysql" ? "MYSQL" : "MARIADB";
-      const client = engine === "mysql" ? "mysql" : "mariadb";
-      const hosts = user === "root" ? ["%", "localhost"] : ["%"];
+      const alter = (account: string, ifExists = false) =>
+        `ALTER USER ${ifExists ? "IF EXISTS " : ""}${account} IDENTIFIED BY '${password}';`;
+      const root = ["'root'@'%'", "'root'@'localhost'"];
+      const forAdmin = user === "root" ? [...root.map((a) => alter(a)), "FLUSH PRIVILEGES;"] : [alter(`'${user}'@'%'`)];
+      const forRoot = user === "root" ? [] : [...root.map((a) => alter(a, true)), "FLUSH PRIVILEGES;"];
+      // An account may always change its own password: ALTER USER USER() on MySQL, SET PASSWORD on MariaDB.
+      const forSelf =
+        user === "root"
+          ? ""
+          : engine === "mysql"
+            ? `ALTER USER USER() IDENTIFIED BY '${password}';`
+            : `SET PASSWORD = PASSWORD('${password}');`;
       return {
-        command: ["sh", "-c", `${client} -uroot -p"$${p}_ROOT_PASSWORD"`],
-        stdin: `${hosts.map((h) => `ALTER USER '${user}'@'${h}' IDENTIFIED BY '${password}';`).join("\n")}\nFLUSH PRIVILEGES;\n`,
+        command: ["sh", "-c", mysqlPasswordScript(engine), "sh", user],
+        stdin: `${current}\n${forAdmin.join(" ")}\n${forRoot.join(" ")}\n${forSelf}\n`,
       };
     }
     case "mongo":

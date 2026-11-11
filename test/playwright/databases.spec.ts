@@ -3,7 +3,8 @@
 // KeyDB, Dragonfly and ClickHouse are hidden from it for now), KeyDB's exposure asking
 // for allowed IPs first, an exposure closed until its node is updated, and
 // the Connection tab of a ClickHouse database (native and HTTP URLs) and of
-// a pgvector one. Demo data (demo/*.ts) stands in for the fleet;
+// a pgvector one, and a password reset that says a MySQL root user kept an
+// older password. Demo data (demo/*.ts) stands in for the fleet;
 // databases.create is answered here so nothing is deployed.
 //
 // Screenshots: $SHOTS_DIR/databases/*.png.
@@ -239,7 +240,7 @@ test.describe("database engines", () => {
       overrides: {
         "databases.resetPassword": (input) => {
           reset = input;
-          return { password: "Nw7pQ2xVb9Lk4Rt6", affectedServiceIds: [svc.web] };
+          return { password: "Nw7pQ2xVb9Lk4Rt6", affectedServiceIds: [svc.web], warning: null };
         },
       },
     });
@@ -266,6 +267,28 @@ test.describe("database engines", () => {
     await expect.poll(() => reset).not.toBeNull();
     expect(reset).toMatchObject({ serviceId: svc.db, user: "internal" });
     await expect(page.getByRole("dialog")).toContainText("1 service needs a restart");
+    await expect(page.getByRole("dialog").getByRole("note")).toHaveCount(0);
+  });
+
+  test("a reset that could not change a MySQL root user's password says so with the new password", async ({ page }) => {
+    // As the panel answers for an admin other than root whose root user an older reset left on another password.
+    const warning =
+      "The password of shop changed, but MySQL's root user kept an older password, which the panel does not know: root no longer signs in with the one the database's container gives it (MYSQL_ROOT_PASSWORD).";
+    await installDemo(page, {
+      overrides: {
+        "databases.resetPassword": () => ({ password: "Nw7pQ2xVb9Lk4Rt6", affectedServiceIds: [], warning }),
+      },
+    });
+    await page.goto(connection(svc.db));
+    await page.getByRole("region", { name: "Internal connection" }).getByRole("button", { name: "Reset password" }).click();
+    const confirm = page.getByRole("alertdialog");
+    await confirm.getByRole("textbox").fill("db");
+    await confirm.getByRole("button", { name: "Reset" }).click();
+    const done = page.getByRole("dialog");
+    await expect(done.getByRole("heading", { name: "New password" })).toBeVisible();
+    await expect(done.getByRole("note")).toHaveText(warning);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/reset-root-kept.png` });
   });
 
   test("the password shows with the eye, and the database's console is on its main tab", async ({ page }) => {
