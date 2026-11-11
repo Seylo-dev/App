@@ -27,6 +27,9 @@ type ReconcileRuntime struct {
 	Load func(ctx context.Context) (*agentv1.DesiredState, error)
 	// Apply applies one spec at a revision (reconcile.Engine.Apply).
 	Apply func(ctx context.Context, revision uint64, spec *agentv1.ServiceSpec) (uint64, error)
+	// Remove drops one service at a revision, keeping its data
+	// (reconcile.Engine.Remove). Only a panel move uses it (Uninstall).
+	Remove func(ctx context.Context, revision uint64, serviceID string) (uint64, error)
 	// Status returns the service's actual status, or nil (from
 	// state.Store.Snapshot).
 	Status func(serviceID string) *agentv1.ServiceStatus
@@ -168,6 +171,79 @@ func (r *ReconcileRuntime) WaitHealthy(ctx context.Context, serviceID string, ti
 		}
 		return false, nil
 	})
+}
+
+// installAttempts is how often Install and Uninstall try while the panel
+// replaces the desired state under them.
+const installAttempts = 3
+
+// Install records spec in the desired state exactly as given (generation,
+// image, ports), at the current revision, so reconcile runs it and the
+// panel that later sends the same spec finds its container adopted. A
+// panel moving here uses it: the spec is the one the moved panel will
+// describe. It checks the spec is there afterwards, since a sync from the
+// panel may replace the state in between.
+func (r *ReconcileRuntime) Install(ctx context.Context, spec *agentv1.ServiceSpec) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	for range installAttempts {
+		desired, err := r.Load(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := r.Apply(ctx, desired.GetRevision(), spec); err != nil {
+			return err
+		}
+		if desired, err = r.Load(ctx); err != nil {
+			return err
+		}
+		if cur := findSpec(desired, spec.GetId()); cur != nil && proto.Equal(cur, spec) {
+			return nil
+		}
+	}
+	return fmt.Errorf("the desired state kept changing while %s was recorded in it", spec.GetId())
+}
+
+// Uninstall drops the service from the desired state (its data stays).
+// Reconcile never removes a protected container for being missing, so the
+// caller removes those itself.
+func (r *ReconcileRuntime) Uninstall(ctx context.Context, serviceID string) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	if r.Remove == nil {
+		return ErrRuntimeNotReady
+	}
+	for range installAttempts {
+		desired, err := r.Load(ctx)
+		if err != nil {
+			return err
+		}
+		if findSpec(desired, serviceID) == nil {
+			return nil
+		}
+		if _, err := r.Remove(ctx, desired.GetRevision(), serviceID); err != nil {
+			return err
+		}
+	}
+	desired, err := r.Load(ctx)
+	if err != nil {
+		return err
+	}
+	if findSpec(desired, serviceID) != nil {
+		return fmt.Errorf("the desired state kept changing while %s was removed from it", serviceID)
+	}
+	return nil
+}
+
+func findSpec(d *agentv1.DesiredState, id string) *agentv1.ServiceSpec {
+	for _, s := range d.GetServices() {
+		if s.GetId() == id {
+			return s
+		}
+	}
+	return nil
 }
 
 // wait polls the service status until done reports true, fails, or the

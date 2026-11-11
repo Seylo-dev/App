@@ -13,6 +13,14 @@
 //     panel.db and metrics.db, starts the new image, waits for health, and
 //     on failure restores the snapshot and starts the old image again. A
 //     journal on disk lets a restarted agent finish (or undo) a swap.
+//   - PanelMover is this node's part of moving the panel to another node
+//     (panel.relocate.v1, panel_move.go): on the target it stages the
+//     panel's data folder and registry storage (checked against a sha256
+//     manifest), swaps them in, starts the panel from the spec the moved
+//     panel will send and proves it is the same panel (the agents' TLS
+//     pin, the version); a journal undoes all of it after a failure, an
+//     abort or a restart. On the old panel node it retires the panel
+//     (stopped, never started again) and later deletes the old copy.
 //   - UpdateDocker upgrades Docker Engine with the distribution's package
 //     manager; Reboot reboots the machine after a short delay.
 //   - The Docker version check (docker_check.go, node.docker-check.v1)

@@ -34,6 +34,8 @@ type Service struct {
 	Agent  *AgentUpdater
 	Panel  *PanelSwapper
 	Docker *DockerUpdater
+	// Mover runs this node's part of moving the panel to another node.
+	Mover  *PanelMover
 	System System
 	Lock   *Lock
 	Logger *slog.Logger
@@ -54,6 +56,14 @@ func (s *Service) UpdateDocker(ctx context.Context, req *agentv1.UpdateDockerReq
 }
 
 func (s *Service) Busy() string { return s.Lock.Holder() }
+
+// PanelArrived tells the mover this agent reached the panel at the address
+// staged for move id (the connector calls it).
+func (s *Service) PanelArrived(moveID string) {
+	if s.Mover != nil {
+		s.Mover.Arrived(moveID)
+	}
+}
 
 // UpdateToLatest self-updates an agent the panel refused as too old.
 func (s *Service) UpdateToLatest(ctx context.Context, minVersion string) error {

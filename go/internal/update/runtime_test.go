@@ -15,12 +15,14 @@ import (
 
 // fakeReconcile stores the desired state and turns each applied spec into a
 // status at once: stopped specs stop, others run (or crash-loop when the
-// image is marked bad).
+// image is marked bad). A spec for a new service is added; onApply, when
+// set, sees every applied spec (a panel move's fake containers).
 type fakeReconcile struct {
 	mu      sync.Mutex
 	desired *agentv1.DesiredState
 	status  map[string]*agentv1.ServiceStatus
 	applied []*agentv1.ServiceSpec
+	onApply func(spec *agentv1.ServiceSpec)
 }
 
 func (f *fakeReconcile) runtime() *ReconcileRuntime {
@@ -37,10 +39,18 @@ func (f *fakeReconcile) runtime() *ReconcileRuntime {
 				return 0, errors.New("stale revision")
 			}
 			f.applied = append(f.applied, proto.Clone(spec).(*agentv1.ServiceSpec))
+			found := false
 			for i, s := range f.desired.Services {
 				if s.GetId() == spec.GetId() {
 					f.desired.Services[i] = proto.Clone(spec).(*agentv1.ServiceSpec)
+					found = true
 				}
+			}
+			if !found {
+				f.desired.Services = append(f.desired.Services, proto.Clone(spec).(*agentv1.ServiceSpec))
+			}
+			if f.onApply != nil {
+				f.onApply(spec)
 			}
 			st := &agentv1.ServiceStatus{ServiceId: spec.GetId(), Generation: spec.GetGeneration()}
 			switch {
@@ -53,6 +63,22 @@ func (f *fakeReconcile) runtime() *ReconcileRuntime {
 				st.Instances = []*agentv1.Instance{{State: agentv1.InstanceState_INSTANCE_STATE_RUNNING, Generation: spec.GetGeneration()}}
 			}
 			f.status[spec.GetId()] = st
+			return rev, nil
+		},
+		Remove: func(_ context.Context, rev uint64, id string) (uint64, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if rev != f.desired.GetRevision() {
+				return 0, errors.New("stale revision")
+			}
+			kept := f.desired.Services[:0]
+			for _, s := range f.desired.Services {
+				if s.GetId() != id {
+					kept = append(kept, s)
+				}
+			}
+			f.desired.Services = kept
+			delete(f.status, id)
 			return rev, nil
 		},
 		Status: func(id string) *agentv1.ServiceStatus {
