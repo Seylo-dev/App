@@ -121,7 +121,7 @@ async function connect(cookie: string, access: "read" | "write") {
     send("/oauth/authorize", {
       method: "POST",
       headers: { ...formHeaders, cookie, origin: "null", ...(site ? { "sec-fetch-site": site } : {}) },
-      body: new URLSearchParams([...form].map(([k, v]) => [k, k === "decision" ? "deny" : v])).toString(),
+      body: new URLSearchParams([...form].map(([k, v]): [string, string] => [k, k === "decision" ? "deny" : v])).toString(),
     });
   expect((await nullOrigin("cross-site")).status).toBe(403);
   expect((await nullOrigin(null)).status).toBe(403);
