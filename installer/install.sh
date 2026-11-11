@@ -1327,14 +1327,10 @@ earlier_join_refused() {
 	[ -z "$DRY_RUN" ] || return 1
 	waited=0
 	while :; do
-		status=$(seylo status 2>&1) || true
-		case $status in
-		*"(connected"*) return 1 ;;
-		*AGENT_TOO_OLD*) ;;
-		*"(rejected"*)
-			reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
-			return 0
-			;;
+		read_status
+		case $state in
+		connected) return 1 ;;
+		rejected) too_old || return 0 ;;
 		esac
 		[ "$waited" -lt "$KNOWN_WAIT" ] || return 1
 		sleep 2
@@ -1342,6 +1338,28 @@ earlier_join_refused() {
 	done
 }
 KNOWN_WAIT=${INSTALLER_TEST_KNOWN_WAIT:-20}
+
+# read_status runs seylo status and sets $status (all it printed), $state
+# (the panel connection: connected, connecting, waiting, rejected; empty
+# when it printed none) and $reason (the error, empty for none). The state
+# is only the word in parentheses right after the URL on the first Panel:
+# line, and the error only the first Error: line, which seylo status prints
+# after it: the error can quote what whoever answers at the panel's address
+# chose (a certificate's issuer), so a match anywhere else could be faked.
+read_status() {
+	status=$(seylo status 2>&1) || true
+	state=$(printf '%s\n' "$status" | sed -n '/^Panel:/p' | head -1 | sed -n 's/^Panel: *[^ ]* (\([a-z]*\)[,)].*/\1/p')
+	reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
+}
+
+# too_old: $reason (read_status) is the panel asking for a newer agent
+# (AGENT_TOO_OLD), which the agent puts at the start of the error.
+too_old() {
+	case $reason in
+	"panel rejected the agent: HELLO_REJECT_REASON_AGENT_TOO_OLD:"*) return 0 ;;
+	esac
+	return 1
+}
 
 # How long a join waits for the agent's first connection. Tests shorten it.
 JOIN_WAIT=${INSTALLER_TEST_JOIN_WAIT:-60}
@@ -1386,29 +1404,31 @@ wait_connected() {
 	step "Waiting for the agent to connect to the panel"
 	waited=0
 	while :; do
-		status=$(seylo status 2>&1) || true
-		case $status in
-		*"(connected"*)
+		read_status
+		case $state in
+		connected)
 			ok "Connected: the node shows up in the panel now."
 			return 0
 			;;
-		*AGENT_TOO_OLD*) ;;
-		*"(rejected"*) break ;;
+		rejected) too_old || break ;;
 		esac
 		[ "$waited" -lt "$JOIN_WAIT" ] || break
 		sleep 2
 		waited=$((waited + 2))
 	done
+	outcome=$state
+	if [ "$state" = rejected ] && too_old; then
+		outcome=too-old
+	fi
 	# The status error, else what seylo status itself said (the agent's socket is not up yet).
-	reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
 	[ -n "$reason" ] || reason=$(printf '%s\n' "$status" | sed -n "s/^$SLUG: //p" | head -1)
-	case $status in
-	*AGENT_TOO_OLD*)
+	case $outcome in
+	too-old)
 		NOT_CONNECTED=waiting
 		warn "the panel needs a newer agent than this one${reason:+: $reason}"
 		JOIN_HINT="The agent updates itself to the panel's release and connects after that."
 		;;
-	*"(rejected"*)
+	rejected)
 		NOT_CONNECTED=rejected
 		warn "the panel refused this node${reason:+: $reason}"
 		JOIN_HINT="Make a new join command in the panel's Add node dialog and run it here."

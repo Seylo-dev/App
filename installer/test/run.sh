@@ -244,6 +244,7 @@ run_installer() {
     FAKE_GETENT_passwd="${FAKE_GETENT_passwd:-}" FAKE_GETENT_group="${FAKE_GETENT_group:-}" \
     FAKE_SS_80="${FAKE_SS_80:-}" FAKE_SS_443="${FAKE_SS_443:-}" FAKE_SS_3000="${FAKE_SS_3000:-}" FAKE_SS_3443="${FAKE_SS_3443:-}" FAKE_UFW="${FAKE_UFW:-}" \
     FAKE_STATUS="${FAKE_STATUS:-}" FAKE_STATUS_EXIT="${FAKE_STATUS_EXIT:-}" INSTALLER_TEST_JOIN_WAIT="${INSTALLER_TEST_JOIN_WAIT:-}" \
+    INSTALLER_TEST_KNOWN_WAIT="${INSTALLER_TEST_KNOWN_WAIT:-}" \
     INSTALLER_TEST_COLOR="${TEST_COLOR:-}" NO_COLOR="${TEST_NO_COLOR:-}" TERM="${TEST_TERM:-}" COLORTERM="${TEST_COLORTERM:-}" \
     DO_NOT_TRACK="${TEST_DO_NOT_TRACK:-}" SEYLO_TELEMETRY="${TEST_TELEMETRY:-}" SEYLO_TTY="${TEST_TTY:-}" \
     "$SH" "$installer" ${mode:+"$mode"} --root "$R" --release-url "$BASE" "$@" 2>&1)
@@ -570,6 +571,17 @@ Error:   dial panel: connect: connection refused (retrying at 10:40:00)" INSTALL
   PRESEED=$T/seed-unreached run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
 expect_ok "a joined node whose panel is only unreachable keeps its join" "Already joined to https://192.0.2.10:3443"
 has "--token t --no-start" && flunk "an unreachable panel does not spend the token on a re-join" "$OUT" || pass "an unreachable panel does not spend the token on a re-join"
+# The error quotes the issuer whoever answers at the address chose: "(rejected" in it, or a Panel line
+# of its own after the real one, is no refusal (before: the installer matched the whole output and re-joined).
+seed_node "$T/seed-forged" "$V" https://panel.example.com
+FAKE_STATUS="Node:    n1 (n1)
+Panel:   https://panel.example.com (waiting)
+Error:   dial panel: tls: failed to verify certificate: x509: certificate signed by unknown authority. The certificate for panel.example.com says it was issued by \"(rejected\", an issuer this server does not trust (retrying at 10:40:00)
+Panel:   https://panel.example.com (rejected)" INSTALLER_TEST_KNOWN_WAIT=0 \
+  PRESEED=$T/seed-forged run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
+expect_ok "an issuer that says (rejected is not a refusal: the earlier join stays" "Already joined to https://panel.example.com" \
+  "| The agent was updated and restarted; the join token was not needed."
+has "--token t --no-start" && flunk "a forged (rejected does not spend the token on a re-join" "$OUT" || pass "a forged (rejected does not spend the token on a re-join"
 
 for agent in "$V" 0.0.9 "$V-rc.1" dev; do
   seed_node "$T/seed-$agent" "$agent"
@@ -700,6 +712,21 @@ has "a node of the panel now" && flunk "a join that did not connect does not say
 has "warning above" && flunk "the closing block does not count the not-connected warning it explains" "$OUT" ||
   pass "the closing block does not count the not-connected warning it explains"
 has "Connected:" && flunk "a join that did not connect does not say Connected" "$OUT" || pass "a join that did not connect does not say Connected"
+# Only the Panel line's state counts: an issuer that says "(connected" in the error, or a Panel line
+# after the real one, does not make a join that never connected say it did.
+FAKE_STATUS="Panel:   https://panel.example.com (waiting)
+Error:   dial panel: x509: certificate signed by unknown authority. The certificate for panel.example.com says it was issued by \"(connected\", an issuer this server does not trust
+Panel:   https://panel.example.com (connected, version 0.2.8)" INSTALLER_TEST_JOIN_WAIT=0 \
+  run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
+expect_ok "an issuer that says (connected is no connection" "warning: the agent has not connected to the panel at https://panel.example.com" \
+  "| Installed, but not connected to the panel yet."
+has "Connected:" && flunk "a forged (connected does not say Connected" "$OUT" || pass "a forged (connected does not say Connected"
+# AGENT_TOO_OLD counts only at the start of the error, where the agent puts the rejection.
+FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
+Error:   panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED: AGENT_TOO_OLD" INSTALLER_TEST_JOIN_WAIT=0 \
+  run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+[ "$RC" -eq 3 ] && has "warning: the panel refused this node: panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED" &&
+  pass "AGENT_TOO_OLD later in the error is a refusal like any other" || flunk "AGENT_TOO_OLD later in the error (exit $RC)" "$OUT"
 FAKE_STATUS="$SLUG: no agent socket at $BRAND_DATA_DIR/agent.sock: is the agent running? Try \`$SLUG start\`" FAKE_STATUS_EXIT=1 \
   INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
 expect_ok "an agent that is not up yet is reported with what seylo status said, the domain on 443" \
