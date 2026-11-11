@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { databases as dbOps } from "@seylo/ops";
+import { databases as dbOps, deployments as deploymentOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { backupRuns, type DatabaseEngine, deployments, nodes, serviceDatabases, services } from "../src/db/schema";
 import { containerEnv, engines, enginesCapability, engineVersions } from "../src/modules/databases/engines";
@@ -444,6 +444,42 @@ describe("databases.versionChoices and setVersion", () => {
     const second = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
     expect(second.body.blocked).toMatchObject({ reason: "deployRunning" });
     expect(second.body.pendingImage).toBe("redis:8.2.1-alpine");
+  });
+
+  test("a rollback never takes a database back to the image it ran before a version change", async () => {
+    const { serviceId } = await createDb("mysql", "8.0");
+    const res = await callOp(panel, dbOps.setVersion, { serviceId, version: "8.4", confirmNoBackup: true }, { cookie });
+    expect(res.status).toBe(200);
+    await settleDeploys(panel);
+    // 8.4 went live; the 8.0 deployment is kept for rollbacks.
+    const rows = panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, serviceId)).all();
+    const old = rows.find((d) => d.id !== res.body.deploymentId);
+    if (!old) throw new Error("no earlier deployment");
+    const at = new Date();
+    panel.deps.db.update(deployments).set({ status: "superseded", imageRef: "mysql:8.0.43" }).where(eq(deployments.id, old.id)).run();
+    panel.deps.db
+      .update(deployments)
+      .set({ status: "live", imageRef: "mysql:8.4.6", finishedAt: at })
+      .where(eq(deployments.id, res.body.deploymentId))
+      .run();
+    panel.deps.db
+      .update(services)
+      .set({ liveDeploymentId: res.body.deploymentId, targetDeploymentId: res.body.deploymentId })
+      .where(eq(services.id, serviceId))
+      .run();
+    const view = await callOp(panel, deploymentOps.get, { serviceId, deploymentId: old.id }, { cookie });
+    expect(view.body.deployment.canRollback).toBe(true);
+
+    const rb = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: old.id }, { cookie });
+    expect(rb.status).toBe(409);
+    expect(rb.body.error.details.reason).toBe("databaseVersion");
+    expect(rb.body.error.message).toContain("mysql:8.0.43");
+    expect(deployCount(serviceId)).toBe(2);
+
+    // A deployment of the image it runs only restarts it.
+    panel.deps.db.update(deployments).set({ imageRef: "mysql:8.4.6" }).where(eq(deployments.id, old.id)).run();
+    const same = await callOp(panel, deploymentOps.rollback, { serviceId, deploymentId: old.id }, { cookie });
+    expect(same.status).toBe(200);
   });
 
   test("after a failed change the database is judged by what still runs: retry or stay", async () => {

@@ -9,6 +9,7 @@ import { describePrincipal, userOf } from "../../auth/principal";
 import { deployments, services } from "../../db/schema";
 import { defineJob } from "../../jobs/queue";
 import { implement } from "../../ops/implement";
+import { databaseKinds } from "../domains/lookup";
 import { defineModule } from "../module";
 import { loadService } from "../services/rows";
 import {
@@ -140,11 +141,33 @@ const cancel = implement(deploymentOps.cancel, async (input, ctx) => {
   return toDeployment(ctx.db, mustLoad(ctx, input.serviceId, input.deploymentId));
 });
 
+/**
+ * A database's deployments run other images only after a version change
+ * (databases.setVersion), whose files an older version may not read: a
+ * rollback of a database takes only a deployment of the image it runs.
+ */
+function assertSameDatabaseImage(ctx: Parameters<typeof deploy.run>[1], target: ReturnType<typeof mustLoad>) {
+  const svc = loadService(ctx.db, target.serviceId);
+  if (!databaseKinds.has(svc.kind)) return;
+  const live = svc.liveDeploymentId
+    ? ctx.db.select({ imageRef: deployments.imageRef }).from(deployments).where(eq(deployments.id, svc.liveDeploymentId)).get()
+    : undefined;
+  const running = live?.imageRef ?? null;
+  if (target.imageRef !== running) {
+    throw new OpError(
+      "CONFLICT",
+      `This deployment ran ${target.imageRef ?? "another image"}, not ${running ?? "what the database runs"}: a database cannot go back to an older version, whose files the newer one may have changed. Restore a backup into a new database instead.`,
+      { reason: "databaseVersion" },
+    );
+  }
+}
+
 const rollback = implement(deploymentOps.rollback, (input, ctx) => {
   const target = mustLoad(ctx, input.serviceId, input.deploymentId);
   const view = toDeployment(ctx.db, target);
   if (target.status === "live") throw new OpError("CONFLICT", "This deployment is already live.");
   if (!view.canRollback) throw new OpError("CONFLICT", `Only the last ${keptImages} successful deployments can be rolled back to.`);
+  assertSameDatabaseImage(ctx, target);
   assertNoActiveDeploy(ctx, target.serviceId);
   const row = queueDeploy(ctx, {
     serviceId: target.serviceId,

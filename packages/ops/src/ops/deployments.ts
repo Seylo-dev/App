@@ -221,7 +221,7 @@ export const rollback = defineOp({
   kind: "mutation",
   summary: "Roll back to a deployment",
   description:
-    "Deploys the image of an earlier successful deployment again, by digest, without building. Settings and environment are the current ones. Fails when the image is no longer kept, and (CONFLICT, reason deployRunning) while another deploy of the service is queued or running.",
+    "Deploys the image of an earlier successful deployment again, by digest, without building. Settings and environment are the current ones. Fails when the image is no longer kept, (CONFLICT, reason deployRunning) while another deploy of the service is queued or running, and (CONFLICT, reason databaseVersion) for a database's deployment of another image than the one it runs: an older version may not read the files a newer one wrote.",
   input: Type.Object(DeploymentRef),
   output: Deployment,
   permission: permission.service("services.deploy", serviceScope),
