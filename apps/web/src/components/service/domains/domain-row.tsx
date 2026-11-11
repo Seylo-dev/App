@@ -7,7 +7,7 @@
 // what the panel's origin check found: that requests reach this node, or
 // that something else answers (a red chip and the record to fix, below).
 // Until the panel has seen a custom domain reach the node its certificate
-// waits for DNS (Certificate waits for DNS, plain HTTP meanwhile); every
+// waits for DNS (Certificate waits for DNS, no certificate meanwhile); every
 // note about a pending certificate has Check again, which runs the DNS and
 // origin check at once, and a waiting domain is checked once a minute
 // while the tab is open, so a fixed record starts the certificate.

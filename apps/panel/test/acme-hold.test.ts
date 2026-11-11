@@ -3,7 +3,7 @@
 // domain reach a node of the service. Before, every domain's route asked
 // at once, so a record still pointing elsewhere (behind Cloudflare's
 // proxy too) burned Let's Encrypt's 5 failed validations per host an hour.
-// Held: plain HTTP, no redirect, waitingForDns in domains.list. Released
+// Held: no certificate resolver, no redirect, waitingForDns in domains.list. Released
 // for good by the first check that proves it, which sends the desired
 // state again at once; never held: automatic domains, HTTPS custom and
 // off, a domain that had a certificate, and DNS unknown. A waiting domain
@@ -106,22 +106,29 @@ function setup(options: { capable?: boolean } = {}) {
   return { key, node, service, agent, add, route, listed, dirty };
 }
 
-const plainHttp = { https: HttpsMode.OFF, redirectToHttps: false };
-const acme = { https: HttpsMode.ACME, redirectToHttps: true };
+/**
+ * Held: ACME without asking the CA (Route.acme_hold), so the node serves
+ * plain HTTP without the redirect and HTTPS with Traefik's default
+ * certificate, and the origin check reaches it on either port. Before it
+ * went out as HTTPS off, so behind Cloudflare with Always Use HTTPS on the
+ * check met Traefik's 404 on 443 ("elsewhere") and the hold never ended.
+ */
+const held = { https: HttpsMode.ACME, acmeHold: true, redirectToHttps: false };
+const acme = { https: HttpsMode.ACME, acmeHold: false, redirectToHttps: true };
 
 describe("a domain whose DNS does not reach the node yet", () => {
   test("no record: plain HTTP and waitingForDns, until a check finds the record on the node", async () => {
     const s = setup();
     setDnsLookups(dns({}));
     const { domainId, ref } = await s.add("shop.example.com");
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
     expect((await s.listed(domainId))?.certificate).toMatchObject({ status: "pending", waitingForDns: true });
 
     // Still no record: nothing changes, nothing is sent.
     s.dirty();
     await callOp(panel, domainOps.checkDns, ref, { cookie });
     expect(s.dirty()).toEqual([]);
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
 
     // The record is there: the route asks Let's Encrypt, and the node gets it right away.
     setDnsLookups(dns({ "shop.example.com": [nodeIp] }));
@@ -143,7 +150,7 @@ describe("a domain whose DNS does not reach the node yet", () => {
     const s = setup();
     setDnsLookups(dns({ "shop.example.com": ["104.16.1.1"] }));
     const { domainId, ref } = await s.add("shop.example.com");
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
     expect((await s.listed(domainId))?.certificate.waitingForDns).toBe(true);
 
     // Cloudflare cannot reach an origin (52x), then the record there points at the old host.
@@ -152,7 +159,7 @@ describe("a domain whose DNS does not reach the node yet", () => {
     setOriginFetch(async () => text("<!doctype html><title>Old host</title>"));
     expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.origin).toBe("elsewhere");
     s.dirty();
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
 
     // The record in Cloudflare points at the node now.
     setOriginFetch(proof(s.key.privateKey));
@@ -160,6 +167,25 @@ describe("a domain whose DNS does not reach the node yet", () => {
     expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
     expect(s.route(domainId)).toMatchObject(acme);
     expect((await s.listed(domainId))?.certificate.waitingForDns).toBeUndefined();
+  });
+
+  test("behind Cloudflare with Always Use HTTPS on: the check reaches the held route on 443 and releases it", async () => {
+    const s = setup();
+    setDnsLookups(dns({ "shop.example.com": ["104.16.1.1"] }));
+    const { domainId, ref } = await s.add("shop.example.com");
+    expect(s.route(domainId)).toMatchObject(held);
+    // Cloudflare redirects http:// to https:// and (SSL/TLS Full) connects to the node on 443, where Traefik
+    // answers the origin path only for a route with HTTPS routers (go/internal/proxy addOrigin); HTTPS off has
+    // none there, so Traefik's 404 read as another server and the hold never ended.
+    setOriginFetch(async (url, init) => {
+      if (url.startsWith("http://")) return new Response(null, { status: 301, headers: { location: url.replace("http://", "https://") } });
+      if (s.route(domainId)?.https === HttpsMode.OFF) return text("404 page not found\n", 404);
+      return proof(s.key.privateKey)(url, init);
+    });
+    s.dirty();
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.origin).toBe("node");
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject(acme);
   });
 
   test("the origin check a few seconds after domains.add releases it too", async () => {
@@ -180,7 +206,7 @@ describe("a domain whose DNS does not reach the node yet", () => {
     setDnsLookups(dns({ "shop.example.com": [nodeIp] }));
     setOriginFetch(async () => text("<p>router login</p>"));
     expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body).toMatchObject({ status: "ok", origin: "elsewhere" });
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
   });
 
   test("Regenerate certificate checks again: refused while still held, and starts the certificate once proven", async () => {
@@ -237,16 +263,16 @@ describe("what never waits", () => {
     expect(s.route(www.domainId)).toMatchObject(acme);
     // Held, then a custom certificate: it serves that at once.
     const custom = await s.add("secure.example.com");
-    expect(s.route(custom.domainId)).toMatchObject(plainHttp);
+    expect(s.route(custom.domainId)).toMatchObject(held);
     panel.deps.db.update(domains).set({ https: "custom" }).where(eq(domains.id, custom.domainId)).run();
-    expect(s.route(custom.domainId)?.https).not.toBe(HttpsMode.OFF);
+    expect(s.route(custom.domainId)).toMatchObject({ acmeHold: false, redirectToHttps: true });
   });
 
   test("a domain that had a certificate keeps HTTPS whatever DNS says now", async () => {
     const s = setup();
     setDnsLookups(dns({}));
     const { domainId } = await s.add("shop.example.com");
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
     panel.deps.db
       .update(domains)
       .set({ certStatus: "failed", certExpiresAt: new Date(Date.now() + 5 * 86_400_000) })
@@ -277,7 +303,7 @@ describe("the re-check of waiting domains", () => {
     // Checked a moment ago by domains.add: not due yet.
     await run();
     expect(lookups).toBe(0);
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
 
     setSystemTime(new Date(Date.now() + 3 * 60_000));
     await run();
@@ -342,6 +368,6 @@ describe("route reports of a held domain", () => {
       ],
     } as never);
     expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
-    expect(s.route(domainId)).toMatchObject(plainHttp);
+    expect(s.route(domainId)).toMatchObject(held);
   });
 });

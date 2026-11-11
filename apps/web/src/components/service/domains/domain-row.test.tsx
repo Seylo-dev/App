@@ -42,7 +42,7 @@ const text = (html: string) =>
     .replace(/&#x27;/g, "'")
     .replace(/\s+/g, " ");
 
-test("behind Cloudflare's proxy, waiting for DNS: the record to set, plain HTTP meanwhile, and Check again", async () => {
+test("behind Cloudflare's proxy, waiting for DNS: the record to set, Cloudflare's settings that stop the check, and Check again", async () => {
   const html = await render(
     domain({ certificate: { status: "pending", expiresAt: null, issuer: null, error: null, waitingForDns: true } }),
   );
@@ -50,6 +50,8 @@ test("behind Cloudflare's proxy, waiting for DNS: the record to set, plain HTTP 
   expect(shown).toContain("Certificate waits for DNS");
   expect(shown).not.toContain("Generating SSL certificate");
   expect(shown).toContain("point that record in Cloudflare at 159.195.35.141");
+  // The record may be right already: Full (strict) refuses the node's certificate over Always Use HTTPS's redirect.
+  expect(shown).toContain("If it already does and SSL/TLS is on Full (strict), turn off Always Use HTTPS");
   expect(shown).toContain("Until then verifly.cc is served over plain HTTP.");
   expect(html).toContain('data-testid="certificate-waiting"');
   expect(html).toMatch(/<button[^>]*>.*?Check again<\/button>/);

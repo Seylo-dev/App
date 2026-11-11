@@ -68,7 +68,8 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
       certificate = { certPem: pair.certPem, keyPem: pair.keyPem };
     }
   }
-  // Let's Encrypt waits for DNS (acme-hold.ts): plain HTTP until then, and no redirect to an HTTPS without a certificate.
+  // Let's Encrypt waits for DNS (acme-hold.ts): the node asks the CA nothing and serves plain HTTP without the redirect,
+  // and HTTPS with Traefik's default certificate, so the origin check reaches it on 443 too (Route.acme_hold).
   const held = acmeHeld(row);
   return {
     id: row.id,
@@ -77,8 +78,10 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
     stripPrefix: row.stripPrefix,
     targetPort: row.targetPort,
     // A custom certificate that cannot be opened falls back to ACME rather than breaking the route.
-    https: held ? HttpsMode.OFF : row.https === "custom" && !certificate ? HttpsMode.ACME : httpsModes[row.https],
+    https: row.https === "custom" && !certificate ? HttpsMode.ACME : httpsModes[row.https],
     certificate,
+    // An agent from before 0.2.8 ignores it and asks Let's Encrypt at once, as before the hold.
+    acmeHold: held,
     redirectToHttps: !held && row.https !== "off" && row.redirectToHttps,
     redirects,
     basicAuth: m.basicAuth?.users.length

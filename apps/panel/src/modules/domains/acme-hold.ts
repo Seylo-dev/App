@@ -2,10 +2,14 @@
 // certificate only once the panel has seen that the domain reaches a node
 // of the service; before that every attempt fails and counts against
 // Let's Encrypt's 5 failed validations per host name per hour. While held,
-// desired.ts sends the route as plain HTTP (no certificate resolver, no
-// redirect to HTTPS, since there is no certificate), domains.list marks
-// the certificate waitingForDns, and route reports that say nothing about
-// a certificate are not taken for one (tracking.ts).
+// desired.ts sends the route with acme_hold: the node asks the CA nothing
+// and serves plain HTTP without the redirect to HTTPS (there is no
+// certificate to redirect to), and HTTPS with Traefik's default
+// certificate, so the origin check reaches the node also when Cloudflare's
+// proxy connects to it on 443 (Always Use HTTPS, SSL/TLS Full). An agent
+// from before 0.2.8 ignores acme_hold and asks at once, as before the
+// hold. domains.list marks the certificate waitingForDns, and route reports
+// that say nothing about a certificate are not taken for one (tracking.ts).
 //
 // Held while the last check said the domain does not reach the node yet:
 //

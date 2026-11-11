@@ -2,8 +2,9 @@
 // id) and keeps the domain rows current: certificate state, DNS mismatch,
 // and liveAt, the first time a route served. When the primary domain goes
 // live, first-run IP:port access switches to redirect-then-close. A domain
-// whose certificate waits for DNS (acme-hold.ts) is served over plain
-// HTTP, so its reports count only when they name a certificate.
+// whose certificate waits for DNS (acme-hold.ts) is served without one
+// (plain HTTP, and Traefik's default certificate on HTTPS), so its reports
+// count only when they name a certificate.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { domains as domainOps, exposures as exposureOps } from "@seylo/ops";
@@ -31,7 +32,7 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
     const held = acmeHeld(row);
     switch (route.state) {
       case RouteState.ACTIVE:
-        // A held route is plain HTTP (acme-hold.ts): that it serves says nothing about a
+        // A held route asks the CA nothing (acme-hold.ts): that it serves says nothing about a
         // certificate, unless the report names one (from an ACME route the node had before).
         if (held && !route.certificateExpiresAt) break;
         if (row.https === "acme" && row.certStatus !== "valid") {

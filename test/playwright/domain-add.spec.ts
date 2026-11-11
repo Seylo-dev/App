@@ -181,7 +181,7 @@ test("behind Cloudflare the certificate waits for DNS; Check again runs the chec
   // Not Generating: nothing asks Let's Encrypt until the domain reaches the node.
   await expect(row.getByTestId("certificate-waiting")).toHaveText("Certificate waits for DNS");
   await expect(row.getByText("Generating SSL certificate")).toHaveCount(0);
-  await expect(row.getByText(/point that record in Cloudflare at 203\.0\.113\.10\. Until then verifly\.example\.com is served over plain HTTP\./)).toBeVisible();
+  await expect(row.getByText(/point that record in Cloudflare at 203\.0\.113\.10\. If it already does and SSL\/TLS is on Full \(strict\), turn off Always Use HTTPS/)).toBeVisible();
   // The note checks on opening; the button waits for that check, then runs one at once.
   const again = row.getByRole("button", { name: "Check again" });
   await expect(again).toBeEnabled();

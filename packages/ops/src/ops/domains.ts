@@ -144,9 +144,11 @@ export const Domain = Type.Object({
      * Set (true) while Let's Encrypt waits for DNS: the panel has not seen
      * the custom domain reach a node of the service yet (DNS missing or
      * pointing elsewhere, or behind Cloudflare's proxy without the origin
-     * check reaching the node), so the node serves it over plain HTTP and
-     * asks for no certificate, and failed validations do not use up Let's
-     * Encrypt's limits. The first check that proves it (domains.checkDns)
+     * check reaching the node), so the node asks for no certificate (it
+     * serves the domain over plain HTTP without the redirect, and over
+     * HTTPS only with Traefik's default certificate), and failed
+     * validations do not use up Let's Encrypt's limits. A DNS lookup that
+     * fails leaves a waiting domain waiting. The first check that proves it (domains.checkDns)
      * starts the certificate. Never set for automatic domains, HTTPS modes
      * custom and off, or a domain that has had a certificate.
      */
@@ -242,7 +244,7 @@ export const add = defineOp({
   kind: "mutation",
   summary: "Add a custom domain",
   description:
-    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
+    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
   input: Type.Object({
     serviceId: Id,
     host: Hostname,

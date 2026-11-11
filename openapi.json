@@ -26540,7 +26540,7 @@
       "post": {
         "operationId": "domains.add",
         "summary": "Add a custom domain",
-        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
+        "description": "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP, without the redirect to HTTPS. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
         "tags": [
           "domains"
         ],

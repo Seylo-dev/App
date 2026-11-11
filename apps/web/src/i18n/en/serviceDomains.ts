@@ -44,7 +44,7 @@ export default {
     "Still no certificate, though requests through Cloudflare reach this node. In Cloudflare, set SSL/TLS to Full (strict) and turn off Always Use HTTPS, so Let's Encrypt reaches http://{host}. Regenerate certificate in the menu tries again.",
   certWaiting: "Certificate waits for DNS",
   certWaitsProxiedHint:
-    "{host} is behind Cloudflare's proxy, so the panel cannot see where its record points. The certificate is asked for once requests through Cloudflare reach this node: point that record in Cloudflare at {ip}. Until then {host} is served over plain HTTP.",
+    "{host} is behind Cloudflare's proxy, so the panel cannot see where its record points. The certificate is asked for once requests through Cloudflare reach this node: point that record in Cloudflare at {ip}. If it already does and SSL/TLS is on Full (strict), turn off Always Use HTTPS until the certificate is issued: Cloudflare refuses the node's temporary certificate. Until then {host} is served over plain HTTP.",
   certWaitsHint: "The certificate is asked for once {host} points at {ip}. Until then {host} is served over plain HTTP.",
   certWaitsDnsHint:
     "The certificate is asked for once this record points at the node, so failed attempts do not use up Let's Encrypt's limits. Until then the domain is served over plain HTTP.",
