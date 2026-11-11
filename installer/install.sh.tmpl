@@ -1285,7 +1285,7 @@ install_join() {
 			return
 		fi
 		# Another panel at the same address (a reinstall, a move of the domain) or this node removed
-		# there: the token joins it again, as with --force. Unreachable is not a refusal: that keeps the join.
+		# there: the token joins it again, as with --force. Anything else keeps the join (earlier_join_refused).
 		warn "the panel at $PANEL_URL refuses this node's earlier join${reason:+ ($reason)}: joining it again with the token"
 		FORCE=1
 	fi
@@ -1307,10 +1307,15 @@ install_join() {
 }
 
 # earlier_join_refused: on a node already joined to $PANEL_URL, true when
-# the panel there definitely refuses it (seylo status says rejected: another
-# panel at that address, the node removed there, another pinned key), with
-# the reason in $reason. Connected, or not reached yet, is false: the join
-# stays. Waits up to KNOWN_WAIT seconds for the restarted agent's answer.
+# the panel's answer there proves that join is dead (join_dead), with the
+# reason in $reason: the token joins the node again. That drops the node's
+# id and the panel's identity and pin before the panel checks anything, so
+# any other refusal keeps the earlier join and the token unspent, with a
+# warning: a node disabled in the panel (enabling it brings it back), a pin
+# that does not match (a firewall that decrypts HTTPS, until it exempts the
+# panel), any other reason. Connected, or not reached yet, is false too.
+# Waits up to KNOWN_WAIT seconds for the restarted agent's answer; a panel
+# that needs a newer agent is waited for.
 earlier_join_refused() {
 	reason=
 	[ -z "$DRY_RUN" ] || return 1
@@ -1319,7 +1324,18 @@ earlier_join_refused() {
 		read_status
 		case $state in
 		connected) return 1 ;;
-		rejected) too_old || return 0 ;;
+		rejected)
+			join_dead && return 0
+			if ! too_old; then
+				case $reason in
+				"panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED:"*) next=" Enable it under Nodes in the panel and it connects again." ;;
+				"dial panel"*) next= ;; # a certificate or pin: the error says what to check
+				*) next=" To join it again with the token, re-run with --force." ;;
+				esac
+				warn "the panel at $PANEL_URL refuses this node${reason:+ ($reason)}: the earlier join stays and the token was not used.$next"
+				return 1
+			fi
+			;;
 		esac
 		[ "$waited" -lt "$KNOWN_WAIT" ] || return 1
 		sleep 2
@@ -1327,6 +1343,21 @@ earlier_join_refused() {
 	done
 }
 KNOWN_WAIT=${INSTALLER_TEST_KNOWN_WAIT:-20}
+
+# join_dead: $reason (read_status, the state rejected) says the earlier
+# join cannot work at $PANEL_URL again: the panel there no longer knows
+# the node (UNKNOWN_NODE, a removed node), or another panel answers there
+# (the agent's errOtherPanel: an error that starts with the address and
+# ends with "not the panel this node belongs to"). Each is read where the
+# agent puts it, so text quoted in the error cannot fake it.
+join_dead() {
+	r=${reason%' (retrying at '*')'}
+	case $r in
+	"panel rejected the agent: HELLO_REJECT_REASON_UNKNOWN_NODE:"*) return 0 ;;
+	"$PANEL_URL "*": not the panel this node belongs to" | "$PANEL_URL: "*": not the panel this node belongs to") return 0 ;;
+	esac
+	return 1
+}
 
 # read_status runs seylo status and sets $status (all it printed), $state
 # (the panel connection: connected, connecting, waiting, rejected; empty

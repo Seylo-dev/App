@@ -551,19 +551,60 @@ expect_fail "re-running a join on a node with a newer agent stops" "this node's 
 case $(installed) in *" $NEWER "*) pass "a refused join downgrade keeps the agent" ;; *) flunk "a refused join downgrade replaced the agent" "$(installed)" ;; esac
 PRESEED=$T/seed-newer-join run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
 expect_ok "a --binary is installed as given" "Already joined to https://192.0.2.10:3443"
-# The same address answers as another panel (a reinstall there, the domain moved to a new panel):
-# the token joins it again instead of "Already joined" with the old identity.
-seed_node "$T/seed-other-panel" "$V" https://192.0.2.10:3443
-FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
-Error:   not the panel this node belongs to (retrying at 10:40:00)" INSTALLER_TEST_KNOWN_WAIT=0 INSTALLER_TEST_JOIN_WAIT=0 \
-  PRESEED=$T/seed-other-panel run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+# rerun_join <error>: the join command again on a node joined to https://192.0.2.10:3443 whose
+# seylo status says rejected with this error.
+rerun_join() {
+  seed_node "$T/seed-rerun" "$V" https://192.0.2.10:3443
+  FAKE_STATUS="Node:    n1 (n1)
+Panel:   https://192.0.2.10:3443 (rejected)
+Error:   $1" INSTALLER_TEST_KNOWN_WAIT=0 INSTALLER_TEST_JOIN_WAIT=0 \
+    PRESEED=$T/seed-rerun run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+}
+# expect_rejoin <name> <error>: the re-run joined again with the token, saying why.
 # (The fake status still says rejected after the new join, so the run ends as refused: the calls are what counts.)
-if has "warning: the panel at https://192.0.2.10:3443 refuses this node's earlier join (not the panel this node belongs to" &&
-  has "joining it again with the token" && has "==> Joining https://192.0.2.10:3443" && has "join https://192.0.2.10:3443 --token t --no-start --force"; then
-  pass "a node another panel at its address refuses joins again with the token"
-else
-  flunk "a node another panel at its address refuses joins again with the token" "$OUT"
-fi
+expect_rejoin() {
+  if has "warning: the panel at https://192.0.2.10:3443 refuses this node's earlier join ($2" &&
+    has "joining it again with the token" && has "==> Joining https://192.0.2.10:3443" && has "join https://192.0.2.10:3443 --token t --no-start --force"; then
+    pass "$1"
+  else
+    flunk "$1" "$OUT"
+  fi
+}
+# expect_kept <name> [<output>...]: the re-run kept the earlier join, said why, spent no token and exits 0.
+expect_kept() {
+  local name=$1
+  shift
+  expect_ok "$name" "Already joined to https://192.0.2.10:3443" "the earlier join stays and the token was not used." \
+    "| The agent was updated and restarted; the join token was not needed." "$@"
+  has "--token t --no-start" && flunk "$name: the token is not spent on a re-join" "$OUT" || pass "$name: the token is not spent on a re-join"
+}
+# The same address answers as another panel (a reinstall there, the domain moved to a new panel), or
+# the panel there no longer knows the node: the token joins it again instead of "Already joined".
+other="https://192.0.2.10:3443 answers as another panel (\"p2\", this node belongs to \"p1\"): not the panel this node belongs to"
+rerun_join "$other (retrying at 10:40:00)"
+expect_rejoin "a node another panel at its address refuses joins again with the token" "$other"
+rerun_join "https://192.0.2.10:3443: the panel's signature does not match its identity key: not the panel this node belongs to"
+expect_rejoin "a node another panel identity at its address refuses joins again with the token" "https://192.0.2.10:3443: the panel's signature"
+removed="panel rejected the agent: HELLO_REJECT_REASON_UNKNOWN_NODE: This node was removed from the panel. Join it again."
+rerun_join "$removed (retrying at 10:40:00)"
+expect_rejoin "a node removed from the panel at its address joins again with the token" "$removed"
+# Any other refusal keeps the earlier join: joining again drops the node's id and the panel's
+# identity and pin first, so a disabled node could no longer be enabled back (before: --force with the
+# used token, then INVALID_TOKEN for good), and a pinned node behind a firewall that decrypts HTTPS
+# would lose its pin.
+rerun_join "panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED: This node is disabled in the panel. (retrying at 10:40:00)"
+expect_kept "a disabled node keeps its join" "HELLO_REJECT_REASON_NODE_DISABLED" "Enable it under Nodes in the panel and it connects again."
+rerun_join "dial panel: failed to WebSocket dial: failed to send handshake request: Get \"https://192.0.2.10:3443/api/agent/connect\": conn: panel certificate does not match the pinned key (the certificate presented says it was issued by \"Fortinet, FG800D5818800524\"). 192.0.2.10 did not present the panel's pinned key: a firewall or proxy on this server's network may decrypt HTTPS (TLS inspection), or the address leads to another server (retrying at 10:40:00)"
+expect_kept "a node whose pin does not match keeps its join and pin" "does not match the pinned key"
+has "re-run with --force" && flunk "a pin mismatch is not sent to --force" "$OUT" || pass "a pin mismatch is not sent to --force"
+rerun_join "panel rejected the agent: HELLO_REJECT_REASON_BAD_SIGNATURE: The node's signature does not match its registered key."
+expect_kept "a node the panel refuses for another reason keeps its join" "To join it again with the token, re-run with --force."
+# The other-panel words count only where the agent puts them: after this address, not in the
+# panel's message or for another address (a fallback).
+rerun_join "panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED: https://192.0.2.10:3443 x: not the panel this node belongs to"
+expect_kept "other-panel words in a rejection message are no other panel"
+rerun_join "https://192.0.2.11:3443 answers as another panel (\"p2\", this node belongs to \"p1\"): not the panel this node belongs to"
+expect_kept "another panel at another address (the fallback) keeps the join"
 # Not reached yet is no refusal: the earlier join stays, the token is not spent.
 seed_node "$T/seed-unreached" "$V" https://192.0.2.10:3443
 FAKE_STATUS="Panel:   https://192.0.2.10:3443 (waiting)
