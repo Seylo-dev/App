@@ -1291,8 +1291,14 @@ install_join() {
 		fi
 		step "Already joined to $PANEL_URL"
 		run systemctl restart "$SLUG.service"
-		END=join-updated
-		return
+		if ! earlier_join_refused; then
+			END=join-updated
+			return
+		fi
+		# Another panel at the same address (a reinstall, a move of the domain) or this node removed
+		# there: the token joins it again, as with --force. Unreachable is not a refusal: that keeps the join.
+		warn "the panel at $PANEL_URL refuses this node's earlier join${reason:+ ($reason)}: joining it again with the token"
+		FORCE=1
 	fi
 	step "Joining $PANEL_URL"
 	set -- join "$PANEL_URL" --token "$TOKEN" --no-start
@@ -1310,6 +1316,32 @@ install_join() {
 	wait_connected
 	END=join-new
 }
+
+# earlier_join_refused: on a node already joined to $PANEL_URL, true when
+# the panel there definitely refuses it (seylo status says rejected: another
+# panel at that address, the node removed there, another pinned key), with
+# the reason in $reason. Connected, or not reached yet, is false: the join
+# stays. Waits up to KNOWN_WAIT seconds for the restarted agent's answer.
+earlier_join_refused() {
+	reason=
+	[ -z "$DRY_RUN" ] || return 1
+	waited=0
+	while :; do
+		status=$(seylo status 2>&1) || true
+		case $status in
+		*"(connected"*) return 1 ;;
+		*AGENT_TOO_OLD*) ;;
+		*"(rejected"*)
+			reason=$(printf '%s\n' "$status" | sed -n 's/^Error: *//p' | head -1)
+			return 0
+			;;
+		esac
+		[ "$waited" -lt "$KNOWN_WAIT" ] || return 1
+		sleep 2
+		waited=$((waited + 2))
+	done
+}
+KNOWN_WAIT=${INSTALLER_TEST_KNOWN_WAIT:-20}
 
 # How long a join waits for the agent's first connection. Tests shorten it.
 JOIN_WAIT=${INSTALLER_TEST_JOIN_WAIT:-60}

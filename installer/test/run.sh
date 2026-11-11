@@ -550,6 +550,26 @@ expect_fail "re-running a join on a node with a newer agent stops" "this node's 
 case $(installed) in *" $NEWER "*) pass "a refused join downgrade keeps the agent" ;; *) flunk "a refused join downgrade replaced the agent" "$(installed)" ;; esac
 PRESEED=$T/seed-newer-join run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
 expect_ok "a --binary is installed as given" "Already joined to https://192.0.2.10:3443"
+# The same address answers as another panel (a reinstall there, the domain moved to a new panel):
+# the token joins it again instead of "Already joined" with the old identity.
+seed_node "$T/seed-other-panel" "$V" https://192.0.2.10:3443
+FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
+Error:   not the panel this node belongs to (retrying at 10:40:00)" INSTALLER_TEST_KNOWN_WAIT=0 INSTALLER_TEST_JOIN_WAIT=0 \
+  PRESEED=$T/seed-other-panel run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+# (The fake status still says rejected after the new join, so the run ends as refused: the calls are what counts.)
+if has "warning: the panel at https://192.0.2.10:3443 refuses this node's earlier join (not the panel this node belongs to" &&
+  has "joining it again with the token" && has "==> Joining https://192.0.2.10:3443" && has "join https://192.0.2.10:3443 --token t --no-start --force"; then
+  pass "a node another panel at its address refuses joins again with the token"
+else
+  flunk "a node another panel at its address refuses joins again with the token" "$OUT"
+fi
+# Not reached yet is no refusal: the earlier join stays, the token is not spent.
+seed_node "$T/seed-unreached" "$V" https://192.0.2.10:3443
+FAKE_STATUS="Panel:   https://192.0.2.10:3443 (waiting)
+Error:   dial panel: connect: connection refused (retrying at 10:40:00)" INSTALLER_TEST_KNOWN_WAIT=0 \
+  PRESEED=$T/seed-unreached run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+expect_ok "a joined node whose panel is only unreachable keeps its join" "Already joined to https://192.0.2.10:3443"
+has "--token t --no-start" && flunk "an unreachable panel does not spend the token on a re-join" "$OUT" || pass "an unreachable panel does not spend the token on a re-join"
 
 for agent in "$V" 0.0.9 "$V-rc.1" dev; do
   seed_node "$T/seed-$agent" "$agent"
