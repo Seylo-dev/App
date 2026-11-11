@@ -2422,7 +2422,7 @@ the node is offline (`modules/databases/capability.ts`).
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
 | `routing.origin-proof.v1` (`edge.OriginCapability`, `wire_network.go`, only with the node key) | Every route file sends `GET /.well-known/<slug>-origin/<challenge>` on the route's hosts to the edge (`proxy` `addOrigin`), which answers with the node key's signature (`edge/origin.go`). The panel's origin check (`modules/domains/origin.ts`) asks only when a node of the service advertised it, and calls an answer without the proof "elsewhere" only when every node of the service did and reported the domain's route; otherwise "unknown" |
 | `node.docker-check.v1` (0.2.5, `update.DockerCheckCapability`, `wire_node.go`) | The agent looks for a newer Docker Engine by itself and reports it in every NodeFacts as `docker_update` (see "Releases and updates", Docker version check). The panel keeps the newest report per node and shows it as the node's `docker` only for agents that advertised it; an older agent's node has no `docker`, so the Machine card and Update Docker stay as before |
-| `volume.import-limits.v1` (0.2.9, `volumes.ImportLimitsCapability`, `wire_runtime.go`) | `ImportVolumeRequest.max_bytes`, `max_entries` and `sha256` hold: at most that many file bytes and archive headers, the whole stream hashes to `sha256`, and the data folder keeps `max_bytes` plus a floor (a tenth of the disk, 1 to 5 GiB) free (RESOURCE_EXHAUSTED `reason: noSpace`, `tooLarge`, `tooMany`; INVALID_ARGUMENT `reason: checksum`); with any limit set, a failure after writing started empties the volume and the agent answers at once instead of draining the stream. `ExportVolumeResponse.entries` counts what an export wrote. The panel sends an uploaded export file's volume data only to an agent that advertised it (an older one would ignore the limits); moves and clones send none and work on `volume.transfer.v1` as before |
+| `volume.import-limits.v1` (0.2.9, `volumes.ImportLimitsCapability`, `wire_runtime.go`) | `ImportVolumeRequest.max_bytes`, `max_entries` and `sha256` hold: at most that many file bytes and archive headers, the whole stream hashes to `sha256`, and the data folder keeps `max_bytes` plus a floor (a tenth of the disk, 1 to 5 GiB) free (RESOURCE_EXHAUSTED `reason: noSpace`, `tooLarge`, `tooMany`; INVALID_ARGUMENT `reason: checksum`); with any limit set, a failure after writing started empties the volume and the agent answers at once instead of draining the stream. Imports into one volume run one after another (a second one waits for the first, its cleanup included). `ExportVolumeResponse.entries` counts what an export wrote. The panel sends an uploaded export file's volume data only to an agent that advertised it (an older one would ignore the limits); moves and clones send none and work on `volume.transfer.v1` as before |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
 
 ## Panel access and the tailnet
@@ -3596,9 +3596,11 @@ members never hold them. Every op is `mcp: false`.
   the volumes and how long the service was stopped. `ServiceDetail.transfer`
   shows a download that runs or ended in the last 10 minutes (bytes, stopped,
   the zip's sha256 once done) and an import that still receives data.
-- Guards (`services/copies.ts`): while a download holds a service stopped,
-  `queueDeploy`, `services.start` and `boxes.open` refuse it (CONFLICT
-  `reason: exporting`); while a download reads its data, `services.move`,
+- Guards (`services/copies.ts`): while a download with `stop_service`
+  streams (whether it stopped the service or the service was stopped
+  already; `source_stopped` only decides whether it starts again at the
+  end), `queueDeploy`, `services.start` and `boxes.open` refuse it
+  (CONFLICT `reason: exporting`); while a download reads its data, `services.move`,
   `services.setVolumes`, `services.delete`, `services.clone` with data and
   `backups.restore` refuse it too (`assertNoTransfer`, also `importing` for
   an import that fills it, except delete) and `services.moveProjectImpact`
@@ -3734,8 +3736,16 @@ members never hold them. Every op is `mcp: false`.
   reached the node (400, the next part goes on from `received`); 10
   minutes without a part, a panel restart (`start()` sets `received` to 0)
   or a failure on the node start the volume over (`received` 0, `offset`
-  refused otherwise). `discardImport`, deleting the service and the sweep
-  end an open stream first. The web app (`?resume=<importId>` on the import
+  refused otherwise). Starting over (a part at offset 0, or one after the
+  stream ended) cancels the open stream at once, even while a write waits
+  for the node's window, and opens the next one only after the panel's
+  side of the old one ended. The agent runs one ImportVolume per volume
+  folder at a time (`volumes.Transfer.Import`, `lockVolume`): a second
+  stream waits until the first one ended, its emptying of the volume after
+  a failure included, so that cleanup never deletes what the second
+  unpacks; a waiting stream that is cancelled gives up without touching
+  the volume. `discardImport`, deleting the service and the sweep end an
+  open stream first. The web app (`?resume=<importId>` on the import
   page) goes on after a closed page once the same file's manifest hashes to
   `manifestSha256`.
 - `serviceTransfer.getImport` tells a reloaded page the status and each
