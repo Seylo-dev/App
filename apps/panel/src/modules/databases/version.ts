@@ -266,26 +266,31 @@ export function mongoFcvExec(user: string, password: string, version: string): {
 const mysqlSystemAccounts = ["mysql.sys", "mysql.session", "mysql.infoschema"];
 
 /**
- * The script of mysqlNativeUsersExec. Root signs in on the socket with the
- * container's MYSQL_ROOT_PASSWORD, like changePasswordExec, as MYSQL_PWD
- * (an environment variable, never an argument): an admin other than root
- * (MYSQL_USER) has rights on its own database only and cannot read
- * mysql.user. Only when root's sign-in is refused (ERROR 1045, or no
- * MYSQL_ROOT_PASSWORD) does the admin ($1) sign in over TCP with the
- * password from stdin's first line (the shell's read, a builtin); any other
- * failure of root's (the server down) is the result. The query is the rest
- * of stdin.
+ * The script of mysqlNativeUsersExec. Root signs in on the socket as
+ * MYSQL_PWD (an environment variable, never an argument), like
+ * changePasswordExec: first with the container's MYSQL_ROOT_PASSWORD, then
+ * with the admin's password from stdin's first line (the shell's read, a
+ * builtin), since a password reset gives root the admin's new password at
+ * once while the container keeps the old environment until its next
+ * deploy. An admin other than root (MYSQL_USER) has rights on its own
+ * database only and cannot read mysql.user. Only when root's sign-in is
+ * refused both ways (ERROR 1045) does the admin ($1) sign in over TCP with
+ * that password; any other failure of root's (the server down) is the
+ * result. The query is the rest of stdin.
  */
 const mysqlNativeUsersScript = [
   "IFS= read -r pw || exit 2",
   'q=$(cat); [ -n "$q" ] || exit 2',
-  `if [ -n "$${rootPasswordVariable("mysql")}" ]; then`,
-  `  { err=$(MYSQL_PWD="$${rootPasswordVariable("mysql")}" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1`,
+  "tried=",
+  `for p in "$${rootPasswordVariable("mysql")}" "$pw"; do`,
+  '  [ -n "$p" ] && [ "$p" != "$tried" ] || continue',
+  "  tried=$p",
+  '  { err=$(MYSQL_PWD="$p" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1',
   "  code=$?",
   '  [ "$code" -eq 0 ] && exit 0',
   '  [ -z "$err" ] || printf \'%s\\n\' "$err" >&2',
   '  case "$err" in *"ERROR 1045"*) ;; *) exit "$code" ;; esac',
-  "fi",
+  "done",
   'MYSQL_PWD="$pw" exec mysql -h127.0.0.1 -u"$1" -N -B -e "$q"',
 ].join("\n");
 
@@ -293,8 +298,9 @@ const mysqlNativeUsersScript = [
  * Exec call that lists the accounts of a running MySQL whose plugin is
  * mysql_native_password, one user@host a line, MySQL's own system accounts
  * left out: MySQL 8.4 ships that plugin off, so they could not sign in
- * there. Root reads the list (mysqlNativeUsersScript), the admin only when
- * root cannot sign in; the admin's password and the query go on stdin.
+ * there. Root reads the list (mysqlNativeUsersScript), with the container's
+ * root password or the admin's, the admin only when root cannot sign in;
+ * the admin's password and the query go on stdin.
  */
 export function mysqlNativeUsersExec(user: string, password: string): { command: string[]; stdin: string } {
   const query = `SELECT CONCAT(user, '@', host) FROM mysql.user WHERE plugin = 'mysql_native_password' AND user NOT IN (${mysqlSystemAccounts.map((a) => `'${a}'`).join(", ")}) ORDER BY user, host;`;

@@ -4149,7 +4149,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   client (`database-password.test.ts`) and on MySQL 8.4 and MariaDB 11.8
   in the VM (`TestITPasswordResetKeepsRoot`: reset, redeploy, root with
   the container's password and the admin with the new one; two resets
-  before a deploy; an out-of-step database), not yet through a real
+  before a deploy; MySQL's mysql_native_password check between a reset
+  and its deploy; an out-of-step database), not yet through a real
   panel.
 - Version changes (`modules/databases/version.ts`, 0.2.9):
   `databases.versionChoices` lists the catalog lines of the database's
@@ -4179,13 +4180,18 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   Before a change from 8.0 to 8.4 the panel lists the running 8.0's
   accounts whose plugin is mysql_native_password, MySQL's own (mysql.sys,
   mysql.session, mysql.infoschema) left out, through `Exec`
-  (`mysqlNativeUsersExec`: root signs in on the socket with the
-  container's `MYSQL_ROOT_PASSWORD` as `MYSQL_PWD`, like
-  `changePasswordExec`, since an admin other than root has rights on its
-  own database only and cannot read `mysql.user`; only when root's
-  sign-in is refused (ERROR 1045, or no `MYSQL_ROOT_PASSWORD`) does the
-  admin sign in over TCP, the shell's `read` taking its password from
-  stdin's first line, never an argument; the query follows on stdin). A
+  (`mysqlNativeUsersExec`: root signs in on the socket with `MYSQL_PWD`,
+  like `changePasswordExec`, first with the container's
+  `MYSQL_ROOT_PASSWORD`, then with the admin's stored password, since an
+  admin other than root has rights on its own database only and cannot
+  read `mysql.user`, and a password reset gives root the admin's new
+  password while the container keeps the old environment until its next
+  deploy; only when root's sign-in is refused both ways (ERROR 1045) does
+  the admin sign in over TCP, the shell's `read` taking its password from
+  stdin's first line, never an argument; the query follows on stdin; a
+  database whose root a reset before 0.2.11 left out of step fails the
+  check until root has the admin's password, as the reset's `warning`
+  says). A
   failed list refuses with `nativePasswordCheckFailed`, any account with
   `nativePasswordUsers` (`details.accounts`: at most 10 user@host, one a
   line; `details.count`; the message names them, "and N more", and the

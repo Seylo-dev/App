@@ -275,7 +275,9 @@ describe("version rules", () => {
     expect(exec.command.join(" ")).not.toContain("S3cretPassword1");
     // The admin user is an argument of the script, not part of it.
     expect(exec.command).toEqual(["sh", "-c", expect.stringContaining('-u"$1"'), "sh", "root"]);
-    expect(exec.command[2]).toContain('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot');
+    // Root with the container's root password, then with the admin's (stdin's first line).
+    expect(exec.command[2]).toContain('for p in "$MYSQL_ROOT_PASSWORD" "$pw"; do');
+    expect(exec.command[2]).toContain('MYSQL_PWD="$p" mysql -uroot');
     const [password, query, ...rest] = exec.stdin.split("\n");
     expect(password).toBe("S3cretPassword1");
     expect(query).toContain("plugin = 'mysql_native_password'");
@@ -311,16 +313,19 @@ describe("version rules", () => {
 
     const rootPassword = "RootPassword111";
     const adminPassword = "AdminPassword222";
-    /** Runs the check as the panel sends it, in a container whose MYSQL_ROOT_PASSWORD is rootEnv. */
-    const check = (user: string, password: string, rootEnv: string | null, down = false) => {
+    /**
+     * Runs the check as the panel sends it, in a container whose MYSQL_ROOT_PASSWORD is rootEnv;
+     * root's real password is opts.root (rootPassword when left out).
+     */
+    const check = (user: string, password: string, rootEnv: string | null, opts: { down?: boolean; root?: string } = {}) => {
       const exec = mysqlNativeUsersExec(user, password);
       const result = Bun.spawnSync(exec.command, {
         stdin: new TextEncoder().encode(exec.stdin),
         env: {
           PATH: `${dir}:/usr/bin:/bin`,
-          FAKE_ROOT_PASSWORD: rootPassword,
+          FAKE_ROOT_PASSWORD: opts.root ?? rootPassword,
           FAKE_ADMIN_PASSWORD: adminPassword,
-          FAKE_DOWN: down ? "1" : "",
+          FAKE_DOWN: opts.down ? "1" : "",
           ...(rootEnv === null ? {} : { MYSQL_ROOT_PASSWORD: rootEnv }),
         },
       });
@@ -335,7 +340,7 @@ describe("version rules", () => {
           return { pwd, args };
         });
       // No password is ever an argument of mysql.
-      for (const call of calls) expect(call.args).not.toMatch(/RootPassword|AdminPassword|WrongPassword/);
+      for (const call of calls) expect(call.args).not.toMatch(/RootPassword|AdminPassword|WrongPassword|OldPassword/);
       return { code: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString(), calls };
     };
 
@@ -345,26 +350,44 @@ describe("version rules", () => {
       expect(r.calls).toEqual([{ pwd: rootPassword, args: expect.stringMatching(/^-uroot -N -B -e SELECT /) }]);
     });
 
-    test("root's sign-in refused: the admin signs in over TCP with the password from stdin", () => {
-      // Root as the admin: its stored password still works over TCP.
+    test("after a password reset, before the next deploy: root signs in with the admin's new password", () => {
+      // The reset gave root and the admin the new password; the container's MYSQL_ROOT_PASSWORD is the old one.
+      const r = check("shop", adminPassword, "OldPassword000", { root: adminPassword });
+      expect(r).toMatchObject({ code: 0, stdout: "legacy@%\n" });
+      expect(r.calls).toEqual([
+        { pwd: "OldPassword000", args: expect.stringMatching(/^-uroot -N -B -e SELECT /) },
+        { pwd: adminPassword, args: expect.stringMatching(/^-uroot -N -B -e SELECT /) },
+      ]);
+      // No MYSQL_ROOT_PASSWORD at all: root with the admin's password right away.
+      const noEnv = check("shop", adminPassword, null, { root: adminPassword });
+      expect(noEnv).toMatchObject({ code: 0, stdout: "legacy@%\n" });
+      expect(noEnv.calls).toEqual([{ pwd: adminPassword, args: expect.stringMatching(/^-uroot /) }]);
+    });
+
+    test("root's sign-in refused both ways: the admin signs in over TCP with the password from stdin", () => {
+      // Root as the admin: its stored password works where the container's is wrong, tried once.
       const asRoot = check("root", rootPassword, "WrongPassword333");
       expect(asRoot).toMatchObject({ code: 0, stdout: "legacy@%\n" });
       expect(asRoot.calls.map((c) => c.pwd)).toEqual(["WrongPassword333", rootPassword]);
-      expect(asRoot.calls[1]?.args).toMatch(/^-h127\.0\.0\.1 -uroot -N -B -e SELECT /);
-      // No MYSQL_ROOT_PASSWORD at all: the admin right away.
       const noRoot = check("root", rootPassword, null);
       expect(noRoot).toMatchObject({ code: 0, stdout: "legacy@%\n" });
       expect(noRoot.calls).toHaveLength(1);
-      // An admin other than root cannot read the accounts: the check fails with MySQL's last word.
+      // An admin other than root whose password root does not have (out of step) cannot read the
+      // accounts: the check fails with MySQL's last word.
       const shop = check("shop", adminPassword, "WrongPassword333");
       expect(shop.code).not.toBe(0);
       expect(shop.stdout).toBe("");
       expect(shop.stderr.trim().split("\n").at(-1)).toContain("ERROR 1142 (42000): SELECT command denied to user 'shop'");
-      expect(shop.calls.map((c) => c.pwd)).toEqual(["WrongPassword333", adminPassword]);
+      expect(shop.calls.map((c) => c.pwd)).toEqual(["WrongPassword333", adminPassword, adminPassword]);
+      expect(shop.calls.map((c) => (c.args ?? "").split(" ").slice(0, 2).join(" "))).toEqual([
+        "-uroot -N",
+        "-uroot -N",
+        "-h127.0.0.1 -ushop",
+      ]);
     });
 
     test("any other failure of root's is the result: no second try as the admin", () => {
-      const r = check("root", rootPassword, rootPassword, true);
+      const r = check("root", rootPassword, rootPassword, { down: true });
       expect(r.code).not.toBe(0);
       expect(r.stdout).toBe("");
       expect(r.stderr).toContain("ERROR 2002 (HY000)");

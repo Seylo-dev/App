@@ -375,21 +375,26 @@ create procedure p() select concat(v, '!') from t;`); code != 0 {
 // 8.0 before a change to 8.4 (mysqlNativeUsersExec in
 // apps/panel/src/modules/databases/version.ts): the accounts whose plugin
 // is mysql_native_password, MySQL's own left out, one user@host a line.
-// Root signs in with the container's MYSQL_ROOT_PASSWORD; only when that
-// sign-in is refused does the admin, with the password from stdin's first
-// line. The query follows on stdin.
+// Root signs in on the socket with the container's MYSQL_ROOT_PASSWORD,
+// then with the admin's password from stdin's first line (a reset gives
+// root the admin's new password before the next deploy brings the new
+// environment); only when both are refused does the admin, over TCP. The
+// query follows on stdin.
 func mysqlNativeUsers(user, password string) ([]string, string) {
 	query := "SELECT CONCAT(user, '@', host) FROM mysql.user WHERE plugin = 'mysql_native_password' AND user NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema') ORDER BY user, host;"
 	script := strings.Join([]string{
 		"IFS= read -r pw || exit 2",
 		`q=$(cat); [ -n "$q" ] || exit 2`,
-		`if [ -n "$MYSQL_ROOT_PASSWORD" ]; then`,
-		`  { err=$(MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1`,
+		"tried=",
+		`for p in "$MYSQL_ROOT_PASSWORD" "$pw"; do`,
+		`  [ -n "$p" ] && [ "$p" != "$tried" ] || continue`,
+		"  tried=$p",
+		`  { err=$(MYSQL_PWD="$p" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1`,
 		"  code=$?",
 		`  [ "$code" -eq 0 ] && exit 0`,
 		`  [ -z "$err" ] || printf '%s\n' "$err" >&2`,
 		`  case "$err" in *"ERROR 1045"*) ;; *) exit "$code" ;; esac`,
-		"fi",
+		"done",
 		`MYSQL_PWD="$pw" exec mysql -h127.0.0.1 -u"$1" -N -B -e "$q"`,
 	}, "\n")
 	return []string{"sh", "-c", script, "sh", user}, password + "\n" + query + "\n"
@@ -551,11 +556,13 @@ func changePassword(engine, user, current, password string) ([]string, string) {
 // changes root's password with the admin's, so after the redeploy the new
 // environment brings, root signs in with the container's root password and
 // the admin with the new one; a second reset before that redeploy finds
-// root on the newer password. A database an older panel left out of step
-// (its reset changed the admin's password only, so root kept the first
-// one) still takes a reset: the admin changes its own password, the script
-// says root kept its older one, and once root has the new password by hand
-// the next reset keeps both in step. No password is ever an argument.
+// root on the newer password, and so does MySQL's mysql_native_password
+// check (root with the admin's password). A database an older panel left
+// out of step (its reset changed the admin's password only, so root kept
+// the first one) still takes a reset: the admin changes its own password,
+// the script says root kept its older one (MySQL's check fails then), and
+// once root has the new password by hand the next reset keeps both in
+// step. No password is ever an argument.
 func TestITPasswordResetKeepsRoot(t *testing.T) {
 	e := newIT(t)
 	e.pull(mysql84, mariadb118)
@@ -622,12 +629,25 @@ func TestITPasswordResetKeepsRoot(t *testing.T) {
 					t.Fatalf("%s: could not sign in", what)
 				}
 			}
+			// MySQL's mysql_native_password check (databases.setVersion) as the panel runs it with the admin's
+			// stored password: exit 0 only when root read mysql.user, which the admin cannot.
+			nativeCheck := func(container, pw string) (string, int) {
+				argv, stdin := mysqlNativeUsers("shop", pw)
+				return execStdin(t, e, container, argv, stdin)
+			}
 
 			ct := d.deploy(c.image)
 			mustSignIn(ct, "root with the first password", rootSignsIn(ct))
 			// A reset: root gets the admin's new password with it, and the next deploy's environment signs root in.
 			if out := reset(ct, p0, p1); strings.Contains(out, rootUnchanged) {
 				t.Fatalf("root left out of step: %q", out)
+			}
+			// Before that deploy the container's root password is the old one: the check signs root in with the
+			// admin's new password.
+			if c.engine == "mysql" {
+				if out, code := nativeCheck(ct, p1); code != 0 {
+					t.Fatalf("the mysql_native_password check after a reset, before the deploy: %q (%d)", out, code)
+				}
 			}
 			ct = redeploy(p1)
 			mustSignIn(ct, "root with the container's root password after the reset", rootSignsIn(ct))
@@ -641,9 +661,19 @@ func TestITPasswordResetKeepsRoot(t *testing.T) {
 			if out := reset(ct, p2, p3); strings.Contains(out, rootUnchanged) {
 				t.Fatalf("the second reset before the deploy left root out of step: %q", out)
 			}
+			if c.engine == "mysql" {
+				if out, code := nativeCheck(ct, p3); code != 0 {
+					t.Fatalf("the mysql_native_password check after two resets, before the deploy: %q (%d)", out, code)
+				}
+			}
 			ct = redeploy(p3)
 			mustSignIn(ct, "root after two resets", rootSignsIn(ct))
 			mustSignIn(ct, "the admin after two resets", signsIn(ct, "shop", p3))
+			if c.engine == "mysql" {
+				if out, code := nativeCheck(ct, p3); code != 0 {
+					t.Fatalf("the mysql_native_password check after the deploy: %q (%d)", out, code)
+				}
+			}
 
 			// Out of step as an older panel's reset left it: the admin's password changed, root's did not.
 			if out, code := execStdin(t, e, ct, []string{c.client, "-uroot"}, "ALTER USER 'shop'@'%' IDENTIFIED BY '"+p4+"'; FLUSH PRIVILEGES;", "MYSQL_PWD="+p3); code != 0 {
@@ -659,6 +689,12 @@ func TestITPasswordResetKeepsRoot(t *testing.T) {
 			}
 			mustSignIn(ct, "the admin with the new password while root is out of step", signsIn(ct, "shop", p5))
 			mustSignIn(ct, "root with its older password", signsIn(ct, "root", p3))
+			// Root on a password the panel does not know: the check cannot read the accounts and fails.
+			if c.engine == "mysql" {
+				if out, code := nativeCheck(ct, p5); code == 0 || !strings.Contains(out, "ERROR 1142") {
+					t.Fatalf("the mysql_native_password check while root is out of step: %q (%d), want a refusal", out, code)
+				}
+			}
 			ct = redeploy(p5)
 			mustSignIn(ct, "the admin after the redeploy", signsIn(ct, "shop", p5))
 			if rootSignsIn(ct) {
