@@ -7,7 +7,7 @@
 // engine, never taken from the file.
 
 import { type EnvEntry, parseEnv } from "@seylo/env-analyzer";
-import { boxes as boxOps, databases as dbOps, env as envOps, OpError, type serviceTransfer as transferOps } from "@seylo/ops";
+import { boxes as boxOps, databases as dbOps, env as envOps, OpError, serviceTransfer as transferOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
@@ -38,15 +38,18 @@ import { assertCertificateNames, hostConflict } from "../domains/ownership";
 import { buildEnvGraph } from "../env/graph";
 import { checkEnvReferences } from "../env/ops";
 import { readProjectEnv } from "../env/store";
+import { factsOf } from "../nodes/view";
 import { plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "../services/impact";
 import { checkWatchPaths, cronSettings } from "../services/ops";
 import type { Materialize } from "../services/portable";
 import { gitLabel, nameKey } from "../services/rows";
 import { builtAppPort, defaultSpec, type ServiceSpecJson } from "../services/spec";
+import { importLimitsCapability } from "../services/volume-pipe";
 import { assertTimeout } from "../uptime/index";
 import { type AccessOption, accessPlan, credentialFromFile, type FileCredential, sameName, sourceFor } from "./mapping";
 import { domainKey, type ServiceSecrets } from "./snapshot";
 
+type NodeRow = typeof nodes.$inferSelect;
 type Doc = transferOps.PortableServiceV1;
 type Manifest = transferOps.PortableManifestV1;
 type Choices = transferOps.ImportChoices;
@@ -84,7 +87,17 @@ export interface Plan {
   /** Repository hooks to create after the transaction (sources read through an account or a provider). */
   hooks: boolean;
   pendingUpload: { path: string; size: number; sha256: string; fileName: string } | null;
+  /** Volume data that goes up after the service exists, with the limits its node unpacks it with. */
+  pendingVolumes: { path: string; size: number; sha256: string; volume: string; maxBytes: number; maxEntries: number }[];
 }
+
+/** The space the agent keeps free when it takes data (go/internal/volumes FreeFloor). */
+export function freeFloor(total: number): number {
+  return Math.min(Math.max(Math.floor(total / 10), 1024 ** 3), 5 * 1024 ** 3);
+}
+
+const size = (bytes: number) =>
+  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(0.1, bytes / 1024 ** 2).toFixed(1)} MB`;
 
 /** A shared variable's line from the file, and whether it replaces a different value here. */
 export interface SharedLine {
@@ -712,11 +725,6 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     deployWhenReady = false;
     warnings.push({ reason: "deploy", message: "Deploying here needs the services.deploy permission; it is created stopped." });
   }
-  if (doc.volumes.length)
-    warnings.push({
-      reason: "volumes",
-      message: `Volume data is not in this file: ${doc.volumes.map((v) => v.name).join(", ")} ${doc.volumes.length === 1 ? "arrives" : "arrive"} empty.`,
-    });
   if (manifest.secrets === "omitted")
     warnings.push({
       reason: "unsigned",
@@ -737,6 +745,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
         : doc.volumes.map((v) => ({ name: v.name, mountPath: v.mountPath, readOnly: v.readOnly }));
   // Logins from the file only when databases.create would take them: engines.ts writes them into SQL and shell input as they are.
   const databaseLogins: { name: string; value: string }[] = [];
+  let loginsMade = false;
   if (isDatabase) {
     const refused: string[] = [];
     for (const name of [adminPasswordSecret, exposedPasswordSecret]) {
@@ -744,6 +753,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       const fits = value !== undefined && Value.Check(dbOps.create.input.properties.password, value);
       if (value !== undefined && !fits) refused.push(name === adminPasswordSecret ? "admin" : "exposed");
       databaseLogins.push({ name, value: fits ? (value as string) : generatePassword() });
+      if (!fits) loginsMade = true;
     }
     if (refused.length) {
       const one = refused.length === 1;
@@ -753,6 +763,87 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       });
     }
   }
+  // Volume data in the file: what is picked goes up after the service exists, straight to its node.
+  const room = volumesIn.map((v) => v.name);
+  const inFile = doc.volumes.flatMap((v) => {
+    const entry = v.data ? manifest.entries.find((e) => e.path === v.data) : undefined;
+    return entry && room.includes(v.name) ? [{ volume: v.name, entry }] : [];
+  });
+  let picked = (choicesIn.volumes ?? inFile.map((v) => v.volume)).filter((name) => inFile.some((v) => v.volume === name));
+  // A database's data goes up whole or not at all.
+  if (isDatabase && picked.length > 0) picked = inFile.map((v) => v.volume);
+  if (picked.length > 0 && !can("files.write")) {
+    noPermission("Volume data", "files.write");
+    picked = [];
+  }
+  const confirmData = choicesIn.confirmData === true;
+  const pendingVolumes = inFile
+    .filter((v) => picked.includes(v.volume))
+    .map((v) => ({
+      path: v.entry.path,
+      size: v.entry.size,
+      sha256: v.entry.sha256,
+      volume: v.volume,
+      ...transferOps.volumeImportLimits(v.entry),
+    }));
+  const neededBytes = pendingVolumes.reduce((n, v) => n + v.maxBytes, 0);
+  const facts = node ? factsOf(ctx, ctx.db.select().from(nodes).where(eq(nodes.id, node.id)).get() as NodeRow) : null;
+  const freeBytes = facts && facts.diskTotalBytes > 0n ? Number(facts.diskFreeBytes) : null;
+  const totalBytes = facts && facts.diskTotalBytes > 0n ? Number(facts.diskTotalBytes) : null;
+  if (pendingVolumes.length > 0 && node) {
+    if (!ctx.agents.isOnline(node.id))
+      blockers.push({
+        reason: "offline",
+        message: `${node.name} is offline, so the volume data cannot go up there now. Pick another node or leave the data out.`,
+        field: "nodeId",
+      });
+    else if (!ctx.agents.supports(node.id, "importVolume") || !ctx.agents.capabilities(node.id)?.has(importLimitsCapability))
+      blockers.push({
+        reason: "agentTooOld",
+        message: `The agent on ${node.name} is too old to take volume data from a file. Update the node, or leave the data out.`,
+        field: "nodeId",
+      });
+    if (isDatabase && (!secrets || loginsMade))
+      blockers.push({
+        reason: "databaseLogins",
+        message: secrets
+          ? "The data only opens with the file's database logins, and this panel does not accept them. Leave the data out to start with an empty database."
+          : "The data only opens with the database's logins, which this file left out. Leave the data out to start with an empty database.",
+        field: "volumes",
+      });
+    warnings.push({ reason: "owners", message: "Files in the volumes keep the owners, modes and links they had in the file." });
+    if (freeBytes !== null && totalBytes !== null && neededBytes + freeFloor(totalBytes) > freeBytes)
+      warnings.push({
+        reason: "space",
+        message: `${node.name} last reported ${size(freeBytes)} free. The data may need up to ${size(neededBytes)} and the node keeps ${size(freeFloor(totalBytes))} free, so it may refuse it.`,
+      });
+    if (!confirmData) {
+      if (freeBytes !== null && neededBytes > freeBytes / 2)
+        needs.push({
+          reason: "dataSpace",
+          field: "confirmData",
+          message: `The data may take up to ${size(neededBytes)} of the ${size(freeBytes)} free on ${node.name}. Confirm it on the Data section.`,
+        });
+      for (const v of pendingVolumes) {
+        const unpacked = inFile.find((f) => f.volume === v.volume)?.entry.unpackedBytes ?? 0;
+        if (unpacked > v.size * transferOps.transferLimits.confirmRatio)
+          needs.push({
+            reason: "dataRatio",
+            field: "confirmData",
+            message: `${v.volume} unpacks to ${size(unpacked)} from ${size(v.size)} in the file (more than ${transferOps.transferLimits.confirmRatio} times). Confirm it on the Data section if you expect that.`,
+          });
+      }
+    }
+  }
+  for (const v of inFile.filter((f) => !picked.includes(f.volume)))
+    skipped.push({ what: `The data of volume ${v.volume}`, why: "It was left out, so the volume arrives empty." });
+  const withoutData = doc.volumes.filter((v) => v.data === null).map((v) => v.name);
+  if (withoutData.length)
+    warnings.push({
+      reason: "volumes",
+      message: `This file has no data for ${withoutData.join(", ")}: ${withoutData.length === 1 ? "it arrives" : "they arrive"} empty.`,
+    });
+
   const choices: Choices = {
     name,
     ...(nodeId ? { nodeId } : {}),
@@ -764,6 +855,8 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     domains: domainRows.map((d) => ({ host: d.host, pathPrefix: d.pathPrefix, action: d.action })),
     autoDomain,
     upload: upload !== null,
+    volumes: picked,
+    confirmData,
     sharedVariables: sharedChoice,
     cronJobs: cronChoice,
     uptimeChecks: uptimeChoice,
@@ -821,8 +914,20 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       })),
     },
     data: {
-      volumes: doc.volumes.map((v) => ({ name: v.name, mountPath: v.mountPath })),
+      volumes: volumesIn.map((v) => {
+        const file = inFile.find((f) => f.volume === v.name);
+        return {
+          name: v.name,
+          mountPath: v.mountPath,
+          inFile: file !== undefined,
+          sizeBytes: file?.entry.size ?? null,
+          unpackedBytes: file?.entry.unpackedBytes ?? null,
+          include: picked.includes(v.name),
+        };
+      }),
       upload: upload ? { fileName: upload.fileName, sizeBytes: upload.size } : null,
+      neededBytes,
+      node: { freeBytes, totalBytes },
     },
     skipped,
     expiresAt: row.expiresAt.toISOString(),
@@ -841,6 +946,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     commitSha: commit === "live" && repo ? (live?.commitSha ?? null) : null,
     hooks: !isDatabase && (pick?.kind === "githubAccount" || pick?.kind === "gitProvider"),
     pendingUpload: upload,
+    pendingVolumes,
     materialize: {
       projectId,
       name,

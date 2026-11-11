@@ -39,7 +39,22 @@ export type BuildScript = (build: FakeBuild) => {
   message?: string;
 };
 
-const allCapabilities = new Set(["state.sync.v1", "build.run.v1", "compose.parse.v1", "volume.transfer.v1", "exec.run.v1"]);
+const allCapabilities = new Set([
+  "state.sync.v1",
+  "build.run.v1",
+  "compose.parse.v1",
+  "volume.transfer.v1",
+  "volume.import-limits.v1",
+  "exec.run.v1",
+]);
+
+/** How a fake ExportVolume goes: it hangs after its bytes until cancelled, or fails at the end. */
+export interface VolumeScript {
+  hang?: boolean;
+  fail?: OpError;
+  /** The file bytes it says it archived (default: the stored bytes' length). */
+  unpackedBytes?: number;
+}
 
 export class FakeFleet {
   readonly calls: { nodeId: string; method: string; request: unknown }[] = [];
@@ -55,6 +70,16 @@ export class FakeFleet {
   answers = new Map<string, (nodeId: string, request: any) => unknown>();
   /** Volume contents per node: `${serviceId}/${volume}` -> bytes. */
   readonly volumes = new Map<string, Map<string, Uint8Array>>();
+  /** Capabilities per node, instead of every one. */
+  readonly caps = new Map<string, Set<string>>();
+  /** Methods a node's agent does not support. */
+  readonly unsupported = new Map<string, Set<string>>();
+  /** How the next ExportVolume streams go. */
+  volumeScript: (nodeId: string, request: { serviceId: string; volume: string }) => VolumeScript = () => ({});
+  /** Raw streams the panel cancelled, as `${method} ${serviceId}/${volume}`. */
+  readonly cancelled: string[] = [];
+  /** Called with every chunk an ExportVolume hands out (to look at the panel meanwhile). */
+  onExportChunk: ((nodeId: string, key: string) => void) | null = null;
   private seq = new Map<string, bigint>();
   readonly hub: AgentHub;
 
@@ -65,8 +90,8 @@ export class FakeFleet {
     Object.assign(fake, {
       isOnline: (nodeId: string) => fleet.online.has(nodeId),
       onlineNodeIds: () => [...fleet.online],
-      capabilities: (nodeId: string) => (fleet.online.has(nodeId) ? allCapabilities : null),
-      supports: (nodeId: string) => fleet.online.has(nodeId),
+      capabilities: (nodeId: string) => (fleet.online.has(nodeId) ? (fleet.caps.get(nodeId) ?? allCapabilities) : null),
+      supports: (nodeId: string, method: string) => fleet.online.has(nodeId) && !fleet.unsupported.get(nodeId)?.has(method),
       async call(nodeId: string, method: string, request: unknown) {
         if (!fleet.online.has(nodeId)) throw new OpError("UNAVAILABLE", "The node is offline.", { reason: "offline", nodeId });
         fleet.calls.push({ nodeId, method, request });
@@ -164,39 +189,90 @@ export class FakeFleet {
     const store = this.volumes.get(nodeId) ?? new Map<string, Uint8Array>();
     this.volumes.set(nodeId, store);
     const key = `${request.serviceId}/${request.volume}`;
+    const fleet = this;
     if (method === "exportVolume") {
       const data = store.get(key) ?? new Uint8Array();
+      const script = this.volumeScript(nodeId, request);
+      const step = data.length > 4096 ? 16384 : 4;
+      let cancelled: OpError | null = null;
+      let wake: (() => void) | null = null;
+      let settle!: { ok: (v: unknown) => void; fail: (e: unknown) => void };
+      const response = new Promise((ok, fail) => (settle = { ok, fail }));
+      response.catch(() => undefined);
       return {
         body: (async function* () {
-          for (let i = 0; i < data.length; i += 4) yield data.slice(i, i + 4);
+          for (let i = 0; i < data.length; i += step) {
+            if (cancelled) throw cancelled;
+            fleet.onExportChunk?.(nodeId, key);
+            await Bun.sleep(0);
+            yield data.slice(i, i + step);
+          }
+          if (script.hang && !cancelled) await new Promise<void>((res) => (wake = res));
+          if (cancelled) throw cancelled;
+          if (script.fail) {
+            settle.fail(script.fail);
+            throw script.fail;
+          }
+          settle.ok({ sizeBytes: BigInt(script.unpackedBytes ?? data.length), entries: 3n });
         })(),
         writer: null,
-        response: Promise.resolve({ sizeBytes: BigInt(data.length) }),
-        cancel() {},
+        response,
+        cancel(reason?: string) {
+          if (cancelled) return;
+          fleet.cancelled.push(`exportVolume ${key}`);
+          cancelled = new OpError("UNAVAILABLE", "The request was cancelled.", { reason: "cancelled", ...(reason ? { why: reason } : {}) });
+          settle.fail(cancelled);
+          (wake as (() => void) | null)?.();
+        },
       };
     }
     if (method === "importVolume" || method === "uploadBuildContext") {
       const chunks: Uint8Array[] = [];
       let finish!: () => void;
-      const ended = new Promise<void>((res) => (finish = res));
+      let abort!: (e: unknown) => void;
+      let cancelled: OpError | null = null;
+      const ended = new Promise<void>((res, rej) => {
+        finish = res;
+        abort = rej;
+      });
+      const response = ended.then(() => {
+        const all = Buffer.concat(chunks);
+        // Like the agent: another sha256 fails and leaves the volume empty.
+        if (method === "importVolume" && request.sha256) {
+          const sum = new Bun.CryptoHasher("sha256").update(all).digest("hex");
+          if (sum !== request.sha256) {
+            store.delete(key);
+            throw new OpError("BAD_REQUEST", "the volume archive does not match its checksum", {
+              reason: "agent",
+              agentReason: "checksum",
+            });
+          }
+        }
+        store.set(method === "importVolume" ? key : `upload/${request.uploadId}`, new Uint8Array(all));
+        return { sizeBytes: BigInt(all.length) };
+      });
+      response.catch(() => undefined);
       return {
         body: null,
         writer: {
           async write(chunk: Uint8Array) {
+            if (cancelled) throw cancelled;
             chunks.push(new Uint8Array(chunk));
           },
           end: () => finish(),
         },
-        response: ended.then(() => {
-          const all = Buffer.concat(chunks);
-          store.set(method === "importVolume" ? key : `upload/${request.uploadId}`, new Uint8Array(all));
-          return { sizeBytes: BigInt(all.length) };
-        }),
-        cancel() {},
+        response,
+        cancel(reason?: string) {
+          if (cancelled) return;
+          fleet.cancelled.push(`${method} ${key}`);
+          cancelled = new OpError("UNAVAILABLE", "The request was cancelled.", { reason: "cancelled", ...(reason ? { why: reason } : {}) });
+          // A cancelled import leaves the volume empty (the agent clears data from a file).
+          if (method === "importVolume" && request.sha256) store.delete(key);
+          abort(cancelled);
+        },
       };
     }
     if (method === "tunnel") {
-      const fleet = this;
       let request = "";
       return {
         writer: {

@@ -773,7 +773,9 @@ describe("upload apps: the archive goes up in parts", () => {
     const ref = { projectId: b.projectId, importId: begun.body.importId };
     await callOp(b.panel, transferOps.setChoices, { ...ref, choices: { deployWhenReady: true } }, { cookie: b.cookie });
     const made = await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie });
-    expect(made.body.pending).toEqual([{ entry: "services/site/source/upload.tar.gz", sizeBytes: archive.length }]);
+    expect(made.body.pending).toEqual([
+      { entry: "services/site/source/upload.tar.gz", sizeBytes: archive.length, kind: "upload", volume: null },
+    ]);
     const serviceId = made.body.service.id as string;
     // Deploys wait for the archive.
     const early = await callOp(b.panel, deploymentOps.deploy, { serviceId }, { cookie: b.cookie });

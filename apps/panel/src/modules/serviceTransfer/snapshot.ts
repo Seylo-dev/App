@@ -41,7 +41,7 @@ import type { OpContext } from "../../ops/implement";
 import { readProjectEnv, readServiceEnv } from "../env/store";
 import { accountLogin } from "../github/account";
 import { panelServiceId } from "../nodes/panel-service";
-import { activeCopy, activeMove } from "../services/copies";
+import { activeCopy, activeImport, activeMove } from "../services/copies";
 import { withoutCredentials } from "../services/git-url";
 import { portableSpecOf } from "../services/portable";
 import type { ServiceRow } from "../services/rows";
@@ -63,7 +63,7 @@ export interface Snapshot {
 }
 
 export interface ExportBlocker {
-  reason: "compose" | "protected" | "panel" | "preview" | "copying" | "moving" | "tooLarge";
+  reason: "compose" | "protected" | "panel" | "preview" | "copying" | "moving" | "importing" | "tooLarge";
   message: string;
 }
 
@@ -83,6 +83,8 @@ export function exportBlockers(ctx: Pick<OpContext, "db">, svc: ServiceRow): Exp
   if (activeCopy(ctx.db, svc.id, { anySource: true }))
     out.push({ reason: "copying", message: "Its data is being copied. Export it once the copy ends." });
   if (activeMove(ctx.db, svc.id)) out.push({ reason: "moving", message: "It is moving to another node. Export it once the move ends." });
+  if (activeImport(ctx.db, svc.id))
+    out.push({ reason: "importing", message: "It is still receiving its imported files. Export it once the import ends." });
   return out;
 }
 
@@ -338,7 +340,6 @@ export function snapshotService(ctx: OpContext, svc: ServiceRow, options: { sour
       why: "The new panel uses its own; the import picks one by account or host.",
     },
     { what: "People's access (grants and invites)", why: "Accounts differ between panels." },
-    { what: "Volume data", why: "Volumes arrive empty. Volume data comes with a later version of export." },
   );
   if (spec.previews.enabled || readSpec(svc.spec).previews.enabled)
     leftOut.push({ what: "Previews", why: "Preview services follow pull requests here; the import keeps previews off." });

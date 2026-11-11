@@ -70823,6 +70823,77 @@
         "x-mcp": true
       }
     },
+    "/api/v1/serviceTransfer.cancelExport": {
+      "post": {
+        "operationId": "serviceTransfer.cancelExport",
+        "summary": "Stop an export's download",
+        "description": "Stops the download of an export that runs (or whose link was not used yet) and starts the service again when the download stopped it. Owners and admins only.",
+        "tags": [
+          "serviceTransfer"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "exportId"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "exportId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "cancelled"
+                  ],
+                  "properties": {
+                    "cancelled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "service:services.export (owners and admins)",
+        "x-mcp": false
+      }
+    },
     "/api/v1/serviceTransfer.discardImport": {
       "post": {
         "operationId": "serviceTransfer.discardImport",
@@ -70898,7 +70969,7 @@
       "post": {
         "operationId": "serviceTransfer.export",
         "summary": "Export a service to a .zip file",
-        "description": "Builds an export of a service and returns a one-minute download link for the .zip. With secrets encrypted (a passphrase of 12 to 1024 characters the panel cannot recover) the settings and every secret value are inside secrets.enc; with secrets omitted the settings are in clear (commands and URLs as they are) and secret values are left out. includeSourceLogin adds the git credential or registry login the source uses (needs git.manage or registries.manage). Uploaded archives and volume data are not encrypted. Needs a recent sign-in. Owners and admins only.",
+        "description": "Builds an export of a service and returns a one-minute download link for the .zip. With secrets encrypted (a passphrase of 12 to 1024 characters the panel cannot recover) the settings and every secret value are inside secrets.enc; with secrets omitted the settings are in clear (commands and URLs as they are) and secret values are left out. includeSourceLogin adds the git credential or registry login the source uses (needs git.manage or registries.manage). volumes lists the volumes whose data goes in the file (needs files.read; a database all or none, with a passphrase and databases.credentials): the download reads them from the node as it goes, and with stopService (the default, always for a database) the service is stopped before the first byte and started again when the download ends, fails, stalls for 5 minutes or is stopped with serviceTransfer.cancelExport. Uploaded archives and volume data are not encrypted. Needs a recent sign-in. Owners and admins only.",
         "tags": [
           "serviceTransfer"
         ],
@@ -70947,6 +71018,19 @@
                   },
                   "includeSourceLogin": {
                     "type": "boolean"
+                  },
+                  "volumes": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "maxLength": 60,
+                      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                      "type": "string"
+                    }
+                  },
+                  "stopService": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -70963,7 +71047,8 @@
                   "required": [
                     "exportId",
                     "fileName",
-                    "download"
+                    "download",
+                    "stopsService"
                   ],
                   "properties": {
                     "exportId": {
@@ -70993,6 +71078,9 @@
                           "type": "string"
                         }
                       }
+                    },
+                    "stopsService": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -71142,6 +71230,7 @@
                     "blockers",
                     "includes",
                     "volumes",
+                    "data",
                     "sourceLogin",
                     "leftOut"
                   ],
@@ -71243,6 +71332,10 @@
                               },
                               {
                                 "const": "moving",
+                                "type": "string"
+                              },
+                              {
+                                "const": "importing",
                                 "type": "string"
                               },
                               {
@@ -71395,6 +71488,94 @@
                           "mountPath": {
                             "type": "string"
                           }
+                        }
+                      }
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "blocker",
+                        "database",
+                        "running",
+                        "node"
+                      ],
+                      "properties": {
+                        "blocker": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "reason",
+                                "message"
+                              ],
+                              "properties": {
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "const": "noNode",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "offline",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "agentTooOld",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "permission",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "exporting",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "busy",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "database": {
+                          "type": "boolean"
+                        },
+                        "running": {
+                          "type": "boolean"
+                        },
+                        "node": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       }
                     },
@@ -71564,6 +71745,8 @@
                         "type": "object",
                         "required": [
                           "path",
+                          "kind",
+                          "volume",
                           "size",
                           "sha256",
                           "status",
@@ -71573,6 +71756,28 @@
                         "properties": {
                           "path": {
                             "type": "string"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "upload",
+                                "type": "string"
+                              },
+                              {
+                                "const": "volume",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "volume": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "size": {
                             "minimum": 0,
@@ -71640,7 +71845,7 @@
       "post": {
         "operationId": "serviceTransfer.import",
         "summary": "Create the service from an import",
-        "description": "Creates the service in the project from an import, stopped, with the saved choices, once nothing blocks it and no choice is open. passwords sets new basic auth passwords for domains whose file had none (secret values left out). An uploaded archive in the file goes up next (serviceTransfer.uploadTicket); the service deploys when everything is in and deployWhenReady is on. Needs a recent sign-in. Owners and admins only.",
+        "description": "Creates the service in the project from an import, stopped, with the saved choices, once nothing blocks it and no choice is open. passwords sets new basic auth passwords for domains whose file had none (secret values left out). The uploaded archive and the chosen volumes' data go up next (serviceTransfer.uploadTicket); the service deploys when everything is in and deployWhenReady is on. Needs a recent sign-in. Owners and admins only.",
         "tags": [
           "serviceTransfer"
         ],
@@ -73197,7 +73402,9 @@
                         "type": "object",
                         "required": [
                           "entry",
-                          "sizeBytes"
+                          "sizeBytes",
+                          "kind",
+                          "volume"
                         ],
                         "properties": {
                           "entry": {
@@ -73206,6 +73413,28 @@
                           "sizeBytes": {
                             "minimum": 0,
                             "type": "integer"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "upload",
+                                "type": "string"
+                              },
+                              {
+                                "const": "volume",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "volume": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         }
                       }
@@ -73728,6 +73957,19 @@
                         "upload": {
                           "type": "boolean"
                         },
+                        "volumes": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "minLength": 1,
+                            "maxLength": 60,
+                            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                            "type": "string"
+                          }
+                        },
+                        "confirmData": {
+                          "type": "boolean"
+                        },
                         "sharedVariables": {
                           "anyOf": [
                             {
@@ -74488,7 +74730,9 @@
                       "type": "object",
                       "required": [
                         "volumes",
-                        "upload"
+                        "upload",
+                        "neededBytes",
+                        "node"
                       ],
                       "properties": {
                         "volumes": {
@@ -74497,7 +74741,11 @@
                             "type": "object",
                             "required": [
                               "name",
-                              "mountPath"
+                              "mountPath",
+                              "inFile",
+                              "sizeBytes",
+                              "unpackedBytes",
+                              "include"
                             ],
                             "properties": {
                               "name": {
@@ -74505,6 +74753,34 @@
                               },
                               "mountPath": {
                                 "type": "string"
+                              },
+                              "inFile": {
+                                "type": "boolean"
+                              },
+                              "sizeBytes": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "unpackedBytes": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "include": {
+                                "type": "boolean"
                               }
                             }
                           }
@@ -74531,6 +74807,41 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "neededBytes": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "node": {
+                          "type": "object",
+                          "required": [
+                            "freeBytes",
+                            "totalBytes"
+                          ],
+                          "properties": {
+                            "freeBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
                         }
                       }
                     },
@@ -75001,6 +75312,19 @@
                         "upload": {
                           "type": "boolean"
                         },
+                        "volumes": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "minLength": 1,
+                            "maxLength": 60,
+                            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                            "type": "string"
+                          }
+                        },
+                        "confirmData": {
+                          "type": "boolean"
+                        },
                         "sharedVariables": {
                           "anyOf": [
                             {
@@ -75761,7 +76085,9 @@
                       "type": "object",
                       "required": [
                         "volumes",
-                        "upload"
+                        "upload",
+                        "neededBytes",
+                        "node"
                       ],
                       "properties": {
                         "volumes": {
@@ -75770,7 +76096,11 @@
                             "type": "object",
                             "required": [
                               "name",
-                              "mountPath"
+                              "mountPath",
+                              "inFile",
+                              "sizeBytes",
+                              "unpackedBytes",
+                              "include"
                             ],
                             "properties": {
                               "name": {
@@ -75778,6 +76108,34 @@
                               },
                               "mountPath": {
                                 "type": "string"
+                              },
+                              "inFile": {
+                                "type": "boolean"
+                              },
+                              "sizeBytes": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "unpackedBytes": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "include": {
+                                "type": "boolean"
                               }
                             }
                           }
@@ -75804,6 +76162,41 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "neededBytes": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "node": {
+                          "type": "object",
+                          "required": [
+                            "freeBytes",
+                            "totalBytes"
+                          ],
+                          "properties": {
+                            "freeBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
                         }
                       }
                     },
@@ -76007,6 +76400,19 @@
                         "type": "boolean"
                       },
                       "upload": {
+                        "type": "boolean"
+                      },
+                      "volumes": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "minLength": 1,
+                          "maxLength": 60,
+                          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                          "type": "string"
+                        }
+                      },
+                      "confirmData": {
                         "type": "boolean"
                       },
                       "sharedVariables": {
@@ -76510,6 +76916,19 @@
                         "upload": {
                           "type": "boolean"
                         },
+                        "volumes": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "minLength": 1,
+                            "maxLength": 60,
+                            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                            "type": "string"
+                          }
+                        },
+                        "confirmData": {
+                          "type": "boolean"
+                        },
                         "sharedVariables": {
                           "anyOf": [
                             {
@@ -77270,7 +77689,9 @@
                       "type": "object",
                       "required": [
                         "volumes",
-                        "upload"
+                        "upload",
+                        "neededBytes",
+                        "node"
                       ],
                       "properties": {
                         "volumes": {
@@ -77279,7 +77700,11 @@
                             "type": "object",
                             "required": [
                               "name",
-                              "mountPath"
+                              "mountPath",
+                              "inFile",
+                              "sizeBytes",
+                              "unpackedBytes",
+                              "include"
                             ],
                             "properties": {
                               "name": {
@@ -77287,6 +77712,34 @@
                               },
                               "mountPath": {
                                 "type": "string"
+                              },
+                              "inFile": {
+                                "type": "boolean"
+                              },
+                              "sizeBytes": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "unpackedBytes": {
+                                "anyOf": [
+                                  {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "include": {
+                                "type": "boolean"
                               }
                             }
                           }
@@ -77313,6 +77766,41 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "neededBytes": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "node": {
+                          "type": "object",
+                          "required": [
+                            "freeBytes",
+                            "totalBytes"
+                          ],
+                          "properties": {
+                            "freeBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
                         }
                       }
                     },
@@ -77356,7 +77844,7 @@
       "post": {
         "operationId": "serviceTransfer.uploadTicket",
         "summary": "Get an upload link for a part of an import's archive",
-        "description": "Returns a one-minute link to PUT one part (at most 32 MiB) of a pending entry of an import (the uploaded archive of an upload app), starting at `offset`, which must be the bytes the panel already has (getImport's received; 0 starts over). Once the last part is in, the panel checks the whole entry's size and sha256 against the manifest before it keeps it. Owners and admins only.",
+        "description": "Returns a one-minute link to PUT one part (at most 32 MiB) of a pending entry of an import (the uploaded archive of an upload app, or a volume's data), starting at `offset`, which must be the bytes the panel already has (getImport's received; 0 starts over). The uploaded archive collects on the panel; a volume's parts go straight on to its node while the panel keeps the stream open (10 minutes without a part start it over). Once the last part is in, the panel checks the whole entry's size and sha256 against the manifest (and the node checks the volume's again) before it keeps it. Owners and admins only.",
         "tags": [
           "serviceTransfer"
         ],

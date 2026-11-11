@@ -1,8 +1,9 @@
 // The import ops: importBegin opens and checks the file's small entries
 // (nothing is created), setChoices and importPreview show what would be
 // created, import creates it in one transaction, uploadTicket hands out
-// links for the parts of an uploaded archive (http.ts), getImport tells a
-// reloaded page where it stands and discardImport throws it away.
+// links for the parts of the uploaded archive and the volumes' data
+// (import-data.ts), getImport tells a reloaded page where it stands and
+// discardImport throws it away.
 
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
@@ -46,6 +47,8 @@ import { assertTarget } from "../uptime/index";
 import { deployTriggerPath } from "../webhooks/trigger";
 import { aadFor, assertPassphrase, checkKdf, decryptSecrets, deriveKeys, type SecretsEnvelope, verifyManifest } from "./crypto";
 import { checkDocument, checkManifest, manifestEntry } from "./document";
+import { volumeEntryName } from "./export";
+import { closeSessions, entriesNow } from "./import-data";
 import { sourceFor } from "./mapping";
 import { type ImportRow, mergeSharedLines, type Opened, planImport } from "./plan";
 import type { ServiceSecrets } from "./snapshot";
@@ -74,6 +77,32 @@ function assertOwnImport(ctx: OpContext, row: ImportRow): void {
 /** Where the parts of an imported archive collect until the last one is in. */
 export function partPath(deps: Pick<Deps, "config">, importId: string): string {
   return join(deps.config.dataDir, "uploads", `import-${importId}.part`);
+}
+
+/**
+ * Every volume archive the manifest lists is the data of a volume the
+ * document names (and the other way round), with the counts its import is
+ * limited by; and no archive says it unpacks to more than gzip can reach.
+ */
+function checkVolumeEntries(manifest: transferOps.PortableManifestV1, doc: transferOps.PortableServiceV1): void {
+  const named = new Map(doc.volumes.filter((v) => v.data !== null).map((v) => [v.data as string, v.name]));
+  for (const v of doc.volumes) {
+    if (v.data !== null && v.data !== volumeEntryName(doc.name, v.name))
+      throw new OpError("BAD_REQUEST", `The data of volume ${v.name} has another name in service.json than an export gives it.`, {
+        reason: "badDocument",
+      });
+  }
+  for (const entry of manifest.entries) {
+    if (!transferOps.entryPatterns.volume.test(entry.path)) continue;
+    if (!named.has(entry.path)) throw tampered(`${entry.path} is the data of no volume in service.json.`);
+    if (entry.unpackedBytes === undefined)
+      throw new OpError("BAD_REQUEST", `manifest.json gives no unpacked size for ${entry.path}.`, { reason: "badManifest" });
+    if (entry.unpackedBytes > entry.size * transferOps.transferLimits.maxRatio + 16 * 1024 * 1024)
+      throw new OpError("BAD_REQUEST", `manifest.json says ${entry.path} unpacks to more than gzip can make of it.`, {
+        reason: "badManifest",
+      });
+  }
+  for (const path of named.keys()) manifestEntry(manifest, path);
 }
 
 export const importBegin = implement(transferOps.importBegin, async (input, ctx) => {
@@ -137,6 +166,7 @@ export const importBegin = implement(transferOps.importBegin, async (input, ctx)
       throw new OpError("BAD_REQUEST", "The uploaded archive in service.json does not match the manifest.", { reason: "badDocument" });
     }
   }
+  checkVolumeEntries(manifest, checked.doc);
   const opened: Opened = { manifest, doc: checked.doc, secrets, unknownSettings: checked.unknownSettings, skipped: checked.skipped };
   const now = new Date();
   const row = ctx.db
@@ -247,6 +277,7 @@ export const importService = implement(transferOps.importService, async (input, 
   const user = userOf(ctx.principal);
   const userId = user?.id ?? null;
   const upload = plan.pendingUpload;
+  const pendingVolumes = plan.pendingVolumes;
   const created = ctx.db.transaction((tx) => {
     // Merged into what is stored now, not what the preview read: a save in between is kept.
     if (plan.sharedLines.length) {
@@ -278,19 +309,36 @@ export const importService = implement(transferOps.importService, async (input, 
       assertSourceAllowed({ db: tx, access: ctx.access }, row.projectId, spec.source);
     }
     const made = materializeService(ctx, tx, { ...m, spec, createdBy: userId });
-    const entries: ImportEntry[] = upload
-      ? [
-          {
-            path: upload.path,
-            size: upload.size,
-            sha256: upload.sha256,
-            status: "pending",
-            received: 0,
-            fileName: upload.fileName,
-            error: null,
-          },
-        ]
-      : [];
+    // The archive first: the volumes' data then goes to a node that already parks the service.
+    const entries: ImportEntry[] = [
+      ...(upload
+        ? [
+            {
+              path: upload.path,
+              kind: "upload" as const,
+              size: upload.size,
+              sha256: upload.sha256,
+              status: "pending" as const,
+              received: 0,
+              fileName: upload.fileName,
+              error: null,
+            },
+          ]
+        : []),
+      ...pendingVolumes.map((v) => ({
+        path: v.path,
+        kind: "volume" as const,
+        size: v.size,
+        sha256: v.sha256,
+        status: "pending" as const,
+        received: 0,
+        fileName: "",
+        volume: v.volume,
+        maxBytes: v.maxBytes,
+        maxEntries: v.maxEntries,
+        error: null,
+      })),
+    ];
     const now = new Date();
     tx.update(serviceImports)
       .set({
@@ -348,13 +396,14 @@ export const importService = implement(transferOps.importService, async (input, 
     skipped: skipped.map((s) => s.what),
     credentialCreated: created.credentialCreated,
     upload: upload !== null,
+    volumes: pendingVolumes.map((v) => v.volume),
   });
   const base = panelBaseUrl(ctx.db);
   const triggerPath = created.made.deployTriggerToken ? `${deployTriggerPath}/${created.made.deployTriggerToken}` : null;
   return {
     service: toDetail(ctx.db, ctx.agents, loadService(ctx.db, serviceId)),
     importId: row.id,
-    pending: created.entries.map((e) => ({ entry: e.path, sizeBytes: e.size })),
+    pending: created.entries.map((e) => ({ entry: e.path, sizeBytes: e.size, kind: e.kind ?? "upload", volume: e.volume ?? null })),
     deployTrigger: triggerPath ? { url: base ? `${base}${triggerPath}` : triggerPath } : null,
     skipped,
   };
@@ -382,8 +431,9 @@ export const uploadTicket = implement(transferOps.uploadTicket, (input, ctx) => 
   assertOwnImport(ctx, row);
   if (row.status !== "receiving" || !row.serviceId)
     throw new OpError("CONFLICT", "This import is not waiting for files.", { reason: "notReceiving" });
-  const entry = row.entries.find((e) => e.path === input.entry);
+  const entry = entriesNow(row).find((e) => e.path === input.entry);
   if (!entry || entry.status === "done") throw new OpError("NOT_FOUND", "This import is not waiting for that entry.", { field: "entry" });
+  // A volume's stream lives in the panel's memory: without it (a restart, 10 idle minutes) the entry starts over.
   if (input.offset !== 0 && input.offset !== entry.received) {
     throw new OpError("CONFLICT", `The panel has ${entry.received} bytes of it; go on from there.`, { reason: "offset", field: "offset" });
   }
@@ -402,8 +452,10 @@ export const getImport = implement(transferOps.getImport, (input, ctx) => {
     status: row.status,
     serviceId: row.serviceId,
     manifestSha256: row.manifestSha256,
-    entries: row.entries.map((e) => ({
+    entries: entriesNow(row).map((e) => ({
       path: e.path,
+      kind: e.kind ?? "upload",
+      volume: e.volume ?? null,
       size: e.size,
       sha256: e.sha256,
       status: e.status,
@@ -428,8 +480,8 @@ export const discardImport = implement(transferOps.discardImport, async (input, 
 });
 
 /**
- * Deletes an import and, while it still waits for its archive (receiving),
- * the service it created: nothing ran there yet. A failed import's service
+ * Deletes an import and, while it still waits for its archive or data
+ * (receiving), the service it created: nothing ran there yet. A failed import's service
  * is the owner's to keep (the sweep told them to upload the code on the
  * Source tab), and a done one is in use: for those only the record and the
  * part file go. A protected service, or one that was deployed somehow, is
@@ -437,6 +489,8 @@ export const discardImport = implement(transferOps.discardImport, async (input, 
  */
 export async function discard(deps: Deps, row: ImportRow): Promise<boolean> {
   let deleted = false;
+  // A volume's open stream ends first; its node empties what arrived.
+  closeSessions(row.id, "The import was discarded.");
   if (row.status === "receiving" && row.serviceId) {
     const svc = deps.db.select().from(services).where(eq(services.id, row.serviceId)).get();
     if (svc?.protected)

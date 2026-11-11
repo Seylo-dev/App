@@ -183,7 +183,13 @@ export async function download(s: Side, url: string) {
 export async function exportZip(
   s: Side,
   serviceId: string,
-  input: Partial<{ secrets: "encrypted" | "omitted"; passphrase: string; includeSourceLogin: boolean }> = {},
+  input: Partial<{
+    secrets: "encrypted" | "omitted";
+    passphrase: string;
+    includeSourceLogin: boolean;
+    volumes: string[];
+    stopService: boolean;
+  }> = {},
 ) {
   const res = await callOp(
     s.panel,

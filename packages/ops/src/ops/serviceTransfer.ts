@@ -7,13 +7,15 @@
 //   secrets.enc                          encrypted (passphrase): every setting and secret value
 //   services/<name>/service.json         settings in clear, only when secret values were left out
 //   services/<name>/source/upload.tar.gz the newest uploaded archive of an upload app
+//   services/<name>/volumes/<vol>.tar.gz a volume's data, ExportVolume's stream as it is
 //   manifest.json                        format, versions, every entry's size and sha256
 //   manifest.sig                         HMAC of manifest.json, only when encrypted
 //
 // The zip itself never goes through an op (they are JSON only): exports
 // download from a one-minute link, the browser reads an import's small
-// entries and sends them to importBegin, and an upload archive goes up to a
-// one-minute upload link. Both ops areas are for owners and admins only.
+// entries and sends them to importBegin, and the uploaded archive and
+// volume data go up in parts to one-minute upload links. Both ops areas
+// are for owners and admins only.
 
 import { type Static, Type } from "@sinclair/typebox";
 import { defineOp } from "../define";
@@ -70,7 +72,33 @@ export const transferLimits = {
   uploadBytes: 512 * 1024 * 1024,
   passphraseMin: 12,
   passphraseMax: 1024,
+  /** Downloads with volume data that may run at once on a panel (one per service). */
+  dataExports: 3,
+  /** A download the browser stops reading for this long ends, and the service starts again. */
+  exportIdleMinutes: 5,
+  /** A download never keeps its service stopped longer than this. */
+  exportStoppedHours: 12,
+  /** A volume's upload with no part for this long ends; it starts over. */
+  uploadIdleMinutes: 10,
+  /** Data that unpacks to more than this many times its size asks for a confirmation. */
+  confirmRatio: 200,
+  /** More than gzip can reach: a file saying so is refused. */
+  maxRatio: 1100,
 } as const;
+
+/**
+ * What the agent may unpack from a volume archive the manifest describes:
+ * a little more than the bytes counted at export (a file that shrank while
+ * it was read is padded with zeros), and entries likewise; 2,000,000 when
+ * the exporting agent did not count them.
+ */
+export function volumeImportLimits(entry: { unpackedBytes?: number; files?: number | null }): { maxBytes: number; maxEntries: number } {
+  const bytes = entry.unpackedBytes ?? 0;
+  return {
+    maxBytes: Math.ceil(bytes * 1.01) + 16 * 1024 * 1024,
+    maxEntries: typeof entry.files === "number" && entry.files > 0 ? Math.ceil(entry.files * 1.01) + 1000 : 2_000_000,
+  };
+}
 
 /** Lower-case hex SHA-256. */
 export const Sha256 = Type.String({ pattern: "^[0-9a-f]{64}$" });
@@ -497,7 +525,22 @@ export const ExportBlock = Type.Union([
   Type.Literal("preview"),
   Type.Literal("copying"),
   Type.Literal("moving"),
+  Type.Literal("importing"),
   Type.Literal("tooLarge"),
+]);
+
+/** Why volume data cannot go in an export now (settings still can). */
+export const ExportDataBlock = Type.Union([
+  /** No node holds it, or its node is offline. */
+  Type.Literal("noNode"),
+  Type.Literal("offline"),
+  Type.Literal("agentTooOld"),
+  /** A missing permission (files.read; databases.credentials for a database's logins; services.control to stop it). */
+  Type.Literal("permission"),
+  /** Another download of its data runs. */
+  Type.Literal("exporting"),
+  /** As many downloads with data run on the panel as it allows (transferLimits.dataExports). */
+  Type.Literal("busy"),
 ]);
 
 export const exportPreview = defineOp({
@@ -534,8 +577,17 @@ export const exportPreview = defineOp({
       sharedVariables: Type.Array(Type.String()),
       upload: Type.Union([Type.Object({ fileName: Type.String(), sizeBytes: Type.Integer({ minimum: 0 }) }), Type.Null()]),
     }),
-    /** Volumes go in the file as settings only (their data in a later version); they arrive empty. */
+    /** Volumes; their data goes in the file when export lists them. */
     volumes: Type.Array(Type.Object({ name: Type.String(), mountPath: Type.String() })),
+    data: Type.Object({
+      /** Why volume data cannot go in the file now; null: it can. */
+      blocker: Type.Union([Type.Object({ reason: ExportDataBlock, message: Type.String() }), Type.Null()]),
+      /** A database: all of its data or none, it is always stopped while its data is read, and its logins need a passphrase. */
+      database: Type.Boolean(),
+      /** It runs now, so reading its data stops it until the download ends (unless stopService is off, never for a database). */
+      running: Type.Boolean(),
+      node: Type.Union([Type.Object({ id: Id, name: Type.String() }), Type.Null()]),
+    }),
     /** The git credential or registry login the source uses, which includeSourceLogin adds (encrypted). */
     sourceLogin: Type.Union([
       Type.Object({ kind: Type.Union([Type.Literal("gitCredential"), Type.Literal("registry")]), name: Type.String() }),
@@ -553,19 +605,25 @@ export const exportService = defineOp({
   kind: "mutation",
   summary: "Export a service to a .zip file",
   description:
-    "Builds an export of a service and returns a one-minute download link for the .zip. With secrets encrypted (a passphrase of 12 to 1024 characters the panel cannot recover) the settings and every secret value are inside secrets.enc; with secrets omitted the settings are in clear (commands and URLs as they are) and secret values are left out. includeSourceLogin adds the git credential or registry login the source uses (needs git.manage or registries.manage). Uploaded archives and volume data are not encrypted. Needs a recent sign-in. Owners and admins only.",
+    "Builds an export of a service and returns a one-minute download link for the .zip. With secrets encrypted (a passphrase of 12 to 1024 characters the panel cannot recover) the settings and every secret value are inside secrets.enc; with secrets omitted the settings are in clear (commands and URLs as they are) and secret values are left out. includeSourceLogin adds the git credential or registry login the source uses (needs git.manage or registries.manage). volumes lists the volumes whose data goes in the file (needs files.read; a database all or none, with a passphrase and databases.credentials): the download reads them from the node as it goes, and with stopService (the default, always for a database) the service is stopped before the first byte and started again when the download ends, fails, stalls for 5 minutes or is stopped with serviceTransfer.cancelExport. Uploaded archives and volume data are not encrypted. Needs a recent sign-in. Owners and admins only.",
   input: Type.Object({
     serviceId: Id,
     secrets: SecretsMode,
     passphrase: Type.Optional(Type.String({ minLength: transferLimits.passphraseMin, maxLength: transferLimits.passphraseMax })),
     /** Put the git credential or registry login the source uses in secrets.enc (needs git.manage or registries.manage). */
     includeSourceLogin: Type.Optional(Type.Boolean()),
+    /** Volumes whose data goes in the file; none when left out. */
+    volumes: Type.Optional(Type.Array(VolumeName, { maxItems: transferLimits.volumesPerService })),
+    /** Stop the service while its volumes are read (default on; a database always stops). Needs services.control. */
+    stopService: Type.Optional(Type.Boolean()),
   }),
   output: Type.Object({
     exportId: Id,
     /** "<service>-<yyyymmdd-hhmm>.<slug>.zip". */
     fileName: Type.String(),
     download: StreamTicket,
+    /** The download stops the service until it ends. */
+    stopsService: Type.Boolean(),
   }),
   sensitive: { input: ["passphrase"], output: ["download"] },
   permission: exportPermission,
@@ -582,6 +640,19 @@ export const exportLink = defineOp({
   input: Type.Object({ serviceId: Id, exportId: Id }),
   output: Type.Object({ fileName: Type.String(), download: StreamTicket }),
   sensitive: { output: ["download"] },
+  permission: exportPermission,
+  mcp: false,
+  audit: true,
+});
+
+export const cancelExport = defineOp({
+  id: "serviceTransfer.cancelExport",
+  kind: "mutation",
+  summary: "Stop an export's download",
+  description:
+    "Stops the download of an export that runs (or whose link was not used yet) and starts the service again when the download stopped it. Owners and admins only.",
+  input: Type.Object({ serviceId: Id, exportId: Id }),
+  output: Type.Object({ cancelled: Type.Boolean() }),
   permission: exportPermission,
   mcp: false,
   audit: true,
@@ -629,6 +700,10 @@ export const ImportChoices = Type.Object({
   /** Add an automatic domain from the node's wildcard record. */
   autoDomain: Type.Optional(Type.Boolean()),
   upload: Type.Optional(Type.Boolean()),
+  /** Volumes whose data in the file goes up after the service is created (a database: all or none). */
+  volumes: Type.Optional(Type.Array(VolumeName, { maxItems: transferLimits.volumesPerService })),
+  /** The owner saw how much space the data takes on the node and confirmed it. */
+  confirmData: Type.Optional(Type.Boolean()),
   sharedVariables: Type.Optional(Type.Union([Type.Literal("addMissing"), Type.Literal("overwrite"), Type.Literal("skip")])),
   cronJobs: Type.Optional(Type.Union([Type.Literal("asInFile"), Type.Literal("disabled")])),
   uptimeChecks: Type.Optional(Type.Union([Type.Literal("asInFile"), Type.Literal("disabled"), Type.Literal("skip")])),
@@ -745,8 +820,27 @@ export const ImportPreview = Type.Object({
     ),
   }),
   data: Type.Object({
-    volumes: Type.Array(Type.Object({ name: Type.String(), mountPath: Type.String() })),
+    volumes: Type.Array(
+      Type.Object({
+        name: Type.String(),
+        mountPath: Type.String(),
+        /** The file has its data. */
+        inFile: Type.Boolean(),
+        /** The archive's size in the file. */
+        sizeBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+        /** File bytes it unpacks to, as the exporting agent counted. */
+        unpackedBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+        /** Its data goes up after the import (choices.volumes). */
+        include: Type.Boolean(),
+      }),
+    ),
     upload: Type.Union([Type.Object({ fileName: Type.String(), sizeBytes: Type.Integer({ minimum: 0 }) }), Type.Null()]),
+    /** Room the chosen data may take on the node (the agent's limit), and what the node last reported free. */
+    neededBytes: Type.Integer({ minimum: 0 }),
+    node: Type.Object({
+      freeBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+      totalBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    }),
   }),
   /** What the import leaves behind and why. */
   skipped: Type.Array(Type.Object({ what: Type.String(), why: Type.String() })),
@@ -814,7 +908,7 @@ export const importService = defineOp({
   kind: "mutation",
   summary: "Create the service from an import",
   description:
-    "Creates the service in the project from an import, stopped, with the saved choices, once nothing blocks it and no choice is open. passwords sets new basic auth passwords for domains whose file had none (secret values left out). An uploaded archive in the file goes up next (serviceTransfer.uploadTicket); the service deploys when everything is in and deployWhenReady is on. Needs a recent sign-in. Owners and admins only.",
+    "Creates the service in the project from an import, stopped, with the saved choices, once nothing blocks it and no choice is open. passwords sets new basic auth passwords for domains whose file had none (secret values left out). The uploaded archive and the chosen volumes' data go up next (serviceTransfer.uploadTicket); the service deploys when everything is in and deployWhenReady is on. Needs a recent sign-in. Owners and admins only.",
   input: Type.Object({
     ...ImportRef,
     passwords: Type.Optional(
@@ -833,7 +927,14 @@ export const importService = defineOp({
     service: ServiceDetail,
     importId: Id,
     /** Entries still to upload. */
-    pending: Type.Array(Type.Object({ entry: Type.String(), sizeBytes: Type.Integer({ minimum: 0 }) })),
+    pending: Type.Array(
+      Type.Object({
+        entry: Type.String(),
+        sizeBytes: Type.Integer({ minimum: 0 }),
+        kind: Type.Union([Type.Literal("upload"), Type.Literal("volume")]),
+        volume: Type.Union([Type.String(), Type.Null()]),
+      }),
+    ),
     /** The new deploy trigger URL, shown once. */
     deployTrigger: Type.Union([Type.Object({ url: Type.String() }), Type.Null()]),
     skipped: Type.Array(Type.Object({ what: Type.String(), why: Type.String() })),
@@ -846,6 +947,9 @@ export const importService = defineOp({
 
 export const ImportEntry = Type.Object({
   path: Type.String(),
+  kind: Type.Union([Type.Literal("upload"), Type.Literal("volume")]),
+  /** Volumes: its name. */
+  volume: Type.Union([Type.String(), Type.Null()]),
   size: Type.Integer({ minimum: 0 }),
   sha256: Sha256,
   status: Type.Union([Type.Literal("pending"), Type.Literal("done"), Type.Literal("failed")]),
@@ -862,7 +966,7 @@ export const uploadTicket = defineOp({
   kind: "mutation",
   summary: "Get an upload link for a part of an import's archive",
   description:
-    "Returns a one-minute link to PUT one part (at most 32 MiB) of a pending entry of an import (the uploaded archive of an upload app), starting at `offset`, which must be the bytes the panel already has (getImport's received; 0 starts over). Once the last part is in, the panel checks the whole entry's size and sha256 against the manifest before it keeps it. Owners and admins only.",
+    "Returns a one-minute link to PUT one part (at most 32 MiB) of a pending entry of an import (the uploaded archive of an upload app, or a volume's data), starting at `offset`, which must be the bytes the panel already has (getImport's received; 0 starts over). The uploaded archive collects on the panel; a volume's parts go straight on to its node while the panel keeps the stream open (10 minutes without a part start it over). Once the last part is in, the panel checks the whole entry's size and sha256 against the manifest (and the node checks the volume's again) before it keeps it. Owners and admins only.",
   input: Type.Object({
     ...ImportRef,
     entry: Type.String({ maxLength: 300 }),

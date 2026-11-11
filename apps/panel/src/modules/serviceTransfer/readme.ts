@@ -2,7 +2,13 @@
 
 import { displayName } from "@seylo/brand";
 
-export function readmeText(input: { name: string; secrets: "encrypted" | "omitted"; upload: boolean; panelVersion: string }): string {
+export function readmeText(input: {
+  name: string;
+  secrets: "encrypted" | "omitted";
+  upload: boolean;
+  volumes: readonly string[];
+  panelVersion: string;
+}): string {
   const lines = [
     `${displayName} service export: ${input.name}`,
     "",
@@ -30,6 +36,13 @@ export function readmeText(input: { name: string; secrets: "encrypted" | "omitte
   }
   if (input.upload) {
     lines.push(`  services/${input.name}/source/upload.tar.gz`, "                  the newest archive uploaded as the service's code");
+  }
+  for (const volume of input.volumes) {
+    lines.push(
+      `  services/${input.name}/volumes/${volume}.tar.gz`,
+      `                  the data of volume ${volume}, a gzipped tar (owners, modes and links kept).`,
+      "                  To look inside: unzip -p <this file> <its name> | tar -tzv",
+    );
   }
   lines.push(
     "",
