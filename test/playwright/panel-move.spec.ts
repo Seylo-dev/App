@@ -11,6 +11,7 @@ import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { moveCheck, moveNodes, moveStatus, movingStatus } from "./demo/panel-move";
+import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
 import { expect, stateFile, test } from "./helpers";
 
@@ -18,13 +19,15 @@ type Input = Record<string, any>;
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/panel-move`;
 mkdirSync(shots, { recursive: true });
 
+/** Every op call the page sends, by op id: a mutation's body, a query's search parameters. */
 function recordOps(page: Page) {
   const sent: Record<string, Input[]> = {};
   page.on("request", (request) => {
     const match = /\/api\/v1\/([a-zA-Z]+\.[a-zA-Z]+)/.exec(request.url());
-    if (!match || request.method() !== "POST") return;
+    if (!match) return;
     const id = match[1] as string;
-    (sent[id] ??= []).push((request.postDataJSON() as Input | null) ?? {});
+    if (request.method() === "GET") (sent[id] ??= []).push(Object.fromEntries(new URL(request.url()).searchParams));
+    else if (request.method() === "POST") (sent[id] ??= []).push((request.postDataJSON() as Input | null) ?? {});
   });
   return sent;
 }
@@ -110,6 +113,10 @@ test.describe("panel move", () => {
     await expect(card(page).getByText("Enter only a host name or IP address, without http://, a port or a path.")).toBeVisible();
     await expect(startButton(page)).toBeDisabled();
     await address.fill("panel-2.acme.dev");
+    // The warnings name the typed address, once it parses (the typo never went to the check).
+    await expect(card(page).getByText("Point the DNS record of panel.acme.dev at panel-2.acme.dev")).toBeVisible();
+    expect(sent["panelMove.check"]?.filter((input) => input.address)).toEqual([{ targetNodeId: ids.us, address: "panel-2.acme.dev" }]);
+    await expect(address).toHaveValue("panel-2.acme.dev");
 
     await startButton(page).click();
     const dialog = page.getByRole("alertdialog", { name: "Move the panel to us-ash-1?" });
@@ -264,6 +271,86 @@ test.describe("panel move", () => {
     await expect(card(page).getByText("The move to us-ash-1 stopped")).toBeVisible();
     await expect(card(page).getByText("The second try stopped too.")).toBeVisible();
     await expect(card(page).getByText("At: Starting the panel on us-ash-1.")).toBeVisible();
+  });
+
+  test("the check refreshes while the form shows: a block that cleared, and on focus", async ({ page }) => {
+    let working = true;
+    await installDemo(page, {
+      overrides: {
+        "panelMove.check": (input) =>
+          moveCheck(input, {
+            blocks: working ? [{ code: "workRunning", message: "A backup of db is running. Try again once it finished.", soft: false }] : [],
+          }),
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await pickTarget(page, "us-ash-1");
+    await expect(card(page).getByText("A backup of db is running.")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    // The backup finished: the next refresh (every 10 seconds) lifts the block.
+    working = false;
+    await expect(card(page).getByText("A backup of db is running.")).toHaveCount(0, { timeout: 15_000 });
+    await expect(startButton(page)).toBeEnabled();
+    // Back on the tab: it asks again at once.
+    working = true;
+    const before = sent["panelMove.check"]?.length ?? 0;
+    // What the tab coming back to the front fires (the query cache listens on window).
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => sent["panelMove.check"]?.length ?? 0, { timeout: 3000 }).toBeGreaterThan(before);
+    await expect(card(page).getByText("A backup of db is running.")).toBeVisible({ timeout: 3000 });
+  });
+
+  test("a start refused for a node that went offline meanwhile: the check refreshes and the tick shows", async ({ page }) => {
+    let offline = false;
+    await installDemo(page, {
+      overrides: {
+        "panelMove.check": (input) =>
+          moveCheck(
+            input,
+            offline && input.targetNodeId
+              ? {
+                  nodesToMove: [moveNodes.de, moveNodes.us],
+                  nodesLeftBehind: [{ ...moveNodes.il, reason: "offline" }],
+                  blocks: [{ code: "nodesLeftBehind", message: "il-tlv-1 is offline, so it cannot follow.", nodeIds: [ids.il], soft: true }],
+                }
+              : {},
+          ),
+        "panelMove.start": (input) => {
+          if (!input.leftBehind) {
+            offline = true;
+            throw new DemoRefusal(409, "CONFLICT", "il-tlv-1 is offline, so it cannot follow. Bring it back or tick that you will join it again.", {
+              reason: "nodesLeftBehind",
+              nodeIds: ids.il,
+            });
+          }
+          return movingStatus();
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await pickTarget(page, "us-ash-1");
+    await expect(startButton(page)).toBeEnabled();
+    await startButton(page).click();
+    const dialog = page.getByRole("alertdialog");
+    await dialog.getByRole("button", { name: "Move the panel" }).click();
+    await expect(dialog.getByText("Bring it back or tick that you will join it again.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    // Sooner than the 10 second refresh: the refusal itself asked again.
+    const tick = card(page).getByRole("checkbox", { name: "I will join these again with seylo join --force afterwards" });
+    await expect(tick).toBeVisible({ timeout: 3000 });
+    await expect(card(page).getByText("il-tlv-1: offline")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    await tick.click();
+    await startButton(page).click();
+    await dialog.getByRole("button", { name: "Move the panel" }).click();
+    await expect
+      .poll(() => sent["panelMove.start"])
+      .toEqual([
+        { targetNodeId: ids.us, address: "198.51.100.7" },
+        { targetNodeId: ids.us, address: "198.51.100.7", leftBehind: true },
+      ]);
   });
 
   test("the old panel stops answering at the end of a move the page missed: it says where the panel went, then stops asking", async ({

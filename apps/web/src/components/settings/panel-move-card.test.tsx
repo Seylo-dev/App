@@ -233,6 +233,15 @@ test("a failed move shows until Try again, and the next move's failure shows aga
   expect(showsFailure({ state: "idle", moveId: null }, undefined)).toBe(false);
 });
 
+test("an address the panel refused shows its words under the field and keeps Start off", async () => {
+  const refused = { address: "127.0.0.1", message: "Enter an address other servers can reach, not loopback." };
+  const html = await renderStatic(() => (
+    <MoveFormView check={check({ defaultAddress: "127.0.0.1" })} target={ids.fresh} onTarget={() => {}} refused={refused} />
+  ));
+  expect(text(html)).toContain("Enter an address other servers can reach, not loopback.");
+  expect(startButton(html)).toContain("disabled");
+});
+
 test("the banner: on every page while it moves, on the old copy with a link, never otherwise", async () => {
   const run = text(await renderStatic(() => <PanelMoveBannerView status={moving({ step: "snapshot" })} />));
   expect(run).toContain("The panel is moving to de-fsn-2: read-only for a few minutes.");

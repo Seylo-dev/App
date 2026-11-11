@@ -87,10 +87,11 @@ const targets = () => [
   { ...moveNodes.us, online: true, address: "198.51.100.7", ready: true, blocks: [] },
 ];
 
-/** panelMove.check for the demo panel: nothing refuses a move to us-ash-1. */
+/** panelMove.check for the demo panel: nothing refuses a move to us-ash-1. The warnings name the typed address. */
 export function moveCheck(input: Input = {}, over: Input = {}): Input {
   const picked = typeof input.targetNodeId === "string" ? input.targetNodeId : null;
   const target = targets().find((node) => node.id === picked);
+  const address = typeof input.address === "string" ? input.address : target?.address;
   return {
     blocks: target ? target.blocks : [],
     targets: targets(),
@@ -102,7 +103,7 @@ export function moveCheck(input: Input = {}, over: Input = {}): Input {
       ? [
           {
             code: "domainDns",
-            message: `Point the DNS record of panel.acme.dev at ${target.address} once the move finished. Nodes that connect over the domain use the new address until then, and the domain works again once its record points there.`,
+            message: `Point the DNS record of panel.acme.dev at ${address} once the move finished. Nodes that connect over the domain use the new address until then, and the domain works again once its record points there.`,
           },
         ]
       : [],

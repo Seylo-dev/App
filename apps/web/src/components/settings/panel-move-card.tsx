@@ -17,11 +17,13 @@
 // The panel decides and refuses (panelMove.check, panelMove.start); the
 // card shows its reasons and never guesses. The live socket refreshes the
 // status while the move runs; a 2 second poll covers a dropped socket.
-// When the old panel stops answering at the end of a move the page missed,
-// the card says where the panel went (lib/panel-move.ts).
+// The check refreshes every 10 seconds while the form shows, on focus and
+// after a refused start, and names the typed address in its warnings. When
+// the old panel stops answering at the end of a move the page missed, the
+// card says where the panel went (lib/panel-move.ts).
 
 import { slug } from "@seylo/brand";
-import { auth, type OpOutput, panelMove } from "@seylo/ops";
+import { auth, OpError, type OpOutput, panelMove } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
@@ -35,12 +37,12 @@ import { Skeleton, SkeletonText } from "@seylo/ui/components/skeleton";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconCircleCheck, IconCircleDashed, IconExternalLink, IconLoader2 } from "@tabler/icons-react";
 import { keepPreviousData } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { t } from "../../i18n/t";
 import { formatBytes, formatNames } from "../../lib/format";
 import { followMovePoll, lostMove, movedLinks } from "../../lib/panel-move";
 import { isReauthCancelled } from "../../lib/reauth";
-import { useSettingsMutation } from "./mutation";
+import { invalidateOps, useSettingsMutation } from "./mutation";
 import { QueryView } from "./op-state";
 import { Field } from "./page";
 
@@ -53,6 +55,11 @@ export const moveSteps: readonly Step[] = ["pausing", "registry", "snapshot", "s
 /** The target reasons the node picker shows next to a node that cannot take the panel. */
 const targetCodes = ["targetIsPanel", "targetOffline", "targetDisabled", "targetTooOld"] as const;
 type TargetCode = (typeof targetCodes)[number];
+
+/** How often the form asks panelMove.check again while it shows: work that finished, a node that went offline. */
+const checkRefreshMs = 10_000;
+/** How long the typed address rests before the check names it in its warnings. */
+const addressSettleMs = 400;
 
 const howKeys = ["copies", "nodes", "readOnly", "oldCopy", "domain"] as const;
 
@@ -120,19 +127,43 @@ function HowItWorks() {
   );
 }
 
+/** The panel refused the typed address (BAD_REQUEST on field address): its words, else null. */
+function addressRefusal(error: unknown): string | null {
+  return error instanceof OpError && error.code === "BAD_REQUEST" && error.details?.field === "address" ? error.message : null;
+}
+
 function MoveForm({ compact }: { compact: boolean }) {
   const [target, setTarget] = useState<string | null>(null);
-  const check = useOp(panelMove.check, target ? { targetNodeId: target } : {}, { placeholderData: keepPreviousData });
+  // The typed address the check names in its warnings once it parses; null: the node's default.
+  const [address, setAddress] = useState<string | null>(null);
+  const check = useOp(panelMove.check, target ? { targetNodeId: target, ...(address ? { address } : {}) } : {}, {
+    placeholderData: keepPreviousData,
+    // Blocks clear and nodes drop off while the form shows.
+    refetchInterval: (query) => (addressRefusal(query.state.error) ? false : checkRefreshMs),
+    refetchOnWindowFocus: "always",
+  });
+  // A refused address keeps the form (with the last answer) and shows why under the field.
+  const refused = addressRefusal(check.error);
+  const [last, setLast] = useState<MoveCheck | undefined>(undefined);
+  useEffect(() => {
+    if (check.data && !check.isPlaceholderData) setLast(check.data);
+  }, [check.data, check.isPlaceholderData]);
+  const shown = refused && last ? { ...check, data: last, error: null } : check;
   return (
-    <QueryView query={check} skeleton={<FormSkeleton />}>
+    <QueryView query={shown} skeleton={<FormSkeleton />}>
       {(data) => (
         <MoveFormView
-          // A new target (or its address) starts the address field and the tick over.
-          key={`${data.targetNodeId ?? ""}|${data.defaultAddress ?? ""}`}
+          // A new target starts the address field and the tick over.
+          key={data.targetNodeId ?? ""}
           check={data}
           target={target}
           loading={check.isFetching && data.targetNodeId !== target}
-          onTarget={setTarget}
+          onTarget={(nodeId) => {
+            setTarget(nodeId);
+            setAddress(null);
+          }}
+          onAddress={setAddress}
+          refused={refused && address ? { address, message: refused } : null}
           compact={compact}
         />
       )}
@@ -153,6 +184,8 @@ export function MoveFormView({
   target,
   loading = false,
   onTarget,
+  onAddress,
+  refused = null,
   compact = false,
 }: {
   check: MoveCheck;
@@ -160,22 +193,46 @@ export function MoveFormView({
   /** The check for a newly picked target is on its way. */
   loading?: boolean;
   onTarget: (nodeId: string) => void;
+  /** The typed address once it parses and rested a moment (null: the default), for the check's warnings. */
+  onAddress?: (address: string | null) => void;
+  /** The panel refused this address, in these words. */
+  refused?: { address: string; message: string } | null;
   /** Without the explanation: a result or a failure above says enough. */
   compact?: boolean;
 }) {
   const ready = check.targetNodeId !== null && check.targetNodeId === target && !loading;
-  const [address, setAddress] = useState(check.defaultAddress ?? "");
-  const [leftBehind, setLeftBehind] = useState(false);
+  // What the person typed; untouched, the field follows the node's default address.
+  const [typed, setTyped] = useState<string | null>(null);
+  // The nodes the tick was given for: a node that drops off since needs a new tick.
+  const [tickedFor, setTickedFor] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const tickId = useId();
   const addressId = useId();
-  const start = useSettingsMutation(panelMove.start, { invalidates: [panelMove.status, panelMove.check], failure: false });
+  const start = useSettingsMutation(panelMove.start, {
+    invalidates: [panelMove.status, panelMove.check],
+    failure: false,
+    // A refusal names what changed (work started, a node went offline): show the panel's view of it.
+    onError: () => void invalidateOps([panelMove.check, panelMove.status]),
+  });
   const hard = check.blocks.filter((block) => !block.soft);
   const targetNode = check.targets.find((node) => node.id === check.targetNodeId);
+  const address = typed ?? check.defaultAddress ?? "";
   const trimmed = address.trim();
-  const addressError = trimmed !== "" && !addressShape.test(trimmed) ? t("settingsPanelMove.addressInvalid") : null;
+  const malformed = trimmed !== "" && (trimmed.length > 253 || !addressShape.test(trimmed));
+  const refusedHere = refused?.address === trimmed ? refused.message : null;
+  const addressError = malformed ? t("settingsPanelMove.addressInvalid") : refusedHere;
+  const leftKey = check.nodesLeftBehind.map((node) => node.id).join(",");
+  const leftBehind = tickedFor === leftKey;
   const needsTick = ready && check.nodesLeftBehind.length > 0;
   const canStart = ready && hard.length === 0 && trimmed !== "" && !addressError && (!needsTick || leftBehind) && !start.isPending;
+
+  // The warnings name the typed address, once it parses and the typing paused.
+  const settled = ready && trimmed !== "" && !malformed ? trimmed : null;
+  useEffect(() => {
+    if (!onAddress || settled === null) return;
+    const timer = setTimeout(() => onAddress(settled === check.defaultAddress ? null : settled), addressSettleMs);
+    return () => clearTimeout(timer);
+  }, [settled, check.defaultAddress, onAddress]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -209,7 +266,7 @@ export function MoveFormView({
               className="font-mono text-[12.5px]"
               spellCheck={false}
               autoCapitalize="off"
-              onChange={(event) => setAddress(event.target.value)}
+              onChange={(event) => setTyped(event.target.value)}
             />
           </Field>
         )}
@@ -236,7 +293,7 @@ export function MoveFormView({
             ))}
           </ul>
           <div className="flex items-center gap-2">
-            <Checkbox id={tickId} checked={leftBehind} onCheckedChange={(value) => setLeftBehind(value === true)} />
+            <Checkbox id={tickId} checked={leftBehind} onCheckedChange={(value) => setTickedFor(value === true ? leftKey : null)} />
             <label htmlFor={tickId} className="cursor-pointer text-[13px] text-ink-strong">
               {t("settingsPanelMove.leftBehindTick", { command: `${slug} join --force` })}
             </label>
