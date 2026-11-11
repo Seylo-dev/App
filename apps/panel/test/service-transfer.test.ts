@@ -693,6 +693,17 @@ describe("how the imported app is reached", () => {
     expect(encrypted.preview.autoDomain).toEqual({ host: "xfer.node-b.example.com", reason: null });
     const auto = b.panel.deps.db.select().from(domains).where(eq(domains.serviceId, encrypted.serviceId)).all();
     expect(auto.map((d) => [d.host, d.auto, d.middlewares])).toEqual([["xfer.node-b.example.com", true, rules]]);
+    // Its HTTPS choice came along too: Let's Encrypt with the redirect, as the old one had.
+    expect(auto.map((d) => [d.https, d.redirectToHttps])).toEqual([["acme", true]]);
+
+    // An old automatic domain with HTTPS off: the new one is off too, with no redirect to HTTPS.
+    a.panel.deps.db.update(domains).set({ https: "off", redirectToHttps: false }).where(eq(domains.serviceId, id)).run();
+    const plainNode = await side("node-d");
+    const plainHttp = await importAll(plainNode, (await exportZip(a, id)).bytes, { deployWhenReady: false });
+    const offAuto = plainNode.panel.deps.db.select().from(domains).where(eq(domains.serviceId, plainHttp.serviceId)).all();
+    expect(offAuto.map((d) => [d.host, d.https, d.redirectToHttps, d.certStatus, d.middlewares])).toEqual([
+      ["xfer.node-d.example.com", "off", false, "none", rules],
+    ]);
 
     // Without the hashes it would come up open: no automatic domain, and IP:port stays closed.
     const c = await side("node-c");

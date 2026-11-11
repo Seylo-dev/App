@@ -583,7 +583,9 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     }
   }
 
-  // An automatic domain on this node, like a clone gets, with the old automatic domain's access rules.
+  // An automatic domain on this node, like a clone gets, with the old automatic domain's access rules and its
+  // HTTPS choice: off stays off (and a redirect to HTTPS with it), anything else asks Let's Encrypt, since a
+  // custom certificate belongs to the old host name.
   const fileAuto = doc.domains.find((d) => d.auto);
   const autoRules = fileAuto ? fileMiddlewares(fileAuto, secrets?.domains[domainKey(fileAuto)]?.basicAuth ?? null) : null;
   const port = isDatabase
@@ -608,11 +610,12 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       host: autoHost,
       pathPrefix: "/",
       targetPort: port,
-      https: "acme",
+      https: fileAuto?.https === "off" ? "off" : "acme",
+      redirectToHttps: fileAuto?.https === "off" ? false : (fileAuto?.redirectToHttps ?? true),
       auto: true,
       dnsStatus: "ok",
       dnsCheckedAt: new Date(),
-      certStatus: "pending",
+      certStatus: fileAuto?.https === "off" ? "none" : "pending",
       isPrimary: false,
       middlewares: autoRules?.middlewares ?? {},
     });
