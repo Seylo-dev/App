@@ -27,8 +27,13 @@ import {
 import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
 import { ensurePanelId } from "../../settings";
+import { nodeHasCapability } from "../databases/capability";
 import { queueDeploy } from "../deployments/queue";
+import { releases } from "../domains/acme-hold";
 import { hashBasicAuthPassword } from "../domains/checks";
+import { checkHost, dnsLookups } from "../domains/dns";
+import { getNode, placedNode } from "../domains/lookup";
+import { enqueueOriginCheck, originApplies, originCapability } from "../domains/origin";
 import { readProjectEnv, writeProjectEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
@@ -262,6 +267,22 @@ export const importService = implement(transferOps.importService, async (input, 
       refusedTargets.add(url);
     }
   }
+  // Custom domains get domains.add's DNS check against the import's node: one whose records still point at the old
+  // panel's node waits for them before its route asks Let's Encrypt (domains/acme-hold.ts), and the re-check of
+  // waiting domains (domains/recheck.ts) takes it from there. Automatic ones point at the node by their wildcard.
+  const target = [placedNode(getNode(ctx.db, m.nodeId))];
+  const provable = nodeHasCapability(ctx.db, ctx.agents, m.nodeId, originCapability);
+  const checkedAt = new Date();
+  await Promise.all(
+    m.domains
+      .filter((d) => !d.auto)
+      .map(async (d) => {
+        const dns = await checkHost(d.host, target, dnsLookups());
+        d.dnsStatus = dns.status;
+        d.dnsCheckedAt = checkedAt;
+        d.acmeReleasedAt = releases({ forward: d.forward ?? null }, { dnsStatus: dns.status, origin: null, provable }) ? checkedAt : null;
+      }),
+  );
   const skipped = [...plan.preview.skipped];
   if (refusedTargets.size) {
     m.uptimeChecks = (m.uptimeChecks ?? []).filter((c) => !refusedTargets.has(c.url));
@@ -363,6 +384,8 @@ export const importService = implement(transferOps.importService, async (input, 
   if (plan.firstRun && created.made.domains.length === 0) openFirstRun(ctx.db, serviceId);
   // The node keeps the stopped service's folders until it starts.
   ctx.agents.desired.markDirty({ serviceId });
+  // Behind Cloudflare's proxy only the origin check proves a domain, once the node wrote its route (domains.add's rule).
+  for (const d of created.made.domains) if (originApplies(d, d.dnsStatus)) enqueueOriginCheck(ctx, d.id);
   for (const check of created.made.uptimeChecks) syncSchedule(ctx, check, check.enabled);
   publishService(ctx, svc);
   ctx.live.publish(`project:${row.projectId}`, { type: "invalidate", ops: ["env.references", "env.getShared"] });

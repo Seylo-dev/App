@@ -26,6 +26,7 @@ import {
   uptimeChecks,
   volumes,
 } from "../src/db/schema";
+import { setDnsLookups } from "../src/modules/domains/dns";
 import {
   aadFor,
   decryptSecrets,
@@ -38,6 +39,13 @@ import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
 export const secretValue = "s3cr3t-value-that-must-never-leak";
+
+/**
+ * A records the imports' DNS checks find (domains.add's check, run against
+ * the import's node), by host; every other name has none. side() puts
+ * these lookups in place of the public resolvers, closeSides() clears them.
+ */
+export const dnsRecords = new Map<string, string[]>();
 export const passphrase = "correct horse battery staple";
 
 export interface Side {
@@ -64,6 +72,12 @@ export async function side(nodeName = "node-a"): Promise<Side> {
       },
     }),
   );
+  setDnsLookups({
+    resolve4: async (name) => dnsRecords.get(name) ?? [],
+    resolve6: async () => [],
+    resolveCname: async () => [],
+    resolveNs: async () => [],
+  });
   const dataDir = mkdtempSync(join(tmpdir(), "transfer-"));
   const panel = testPanel({ dataDir, logger });
   const fleet = new FakeFleet(panel);
@@ -92,6 +106,8 @@ export function closeSides() {
     s.panel.close();
     rmSync(s.dataDir, { recursive: true, force: true });
   }
+  dnsRecords.clear();
+  setDnsLookups(null);
 }
 
 export async function makeApp(s: Side, name = "web") {

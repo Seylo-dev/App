@@ -87,6 +87,7 @@ const columns: Record<string, Record<string, Decision>> = {
     dns_checked_at: runtime,
     origin_status: runtime,
     origin_checked_at: runtime,
+    acme_released_at: "out: the import checks the domain's DNS against its node again, as domains.add does",
     live_at: runtime,
     created_at: time,
     updated_at: time,

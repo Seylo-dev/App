@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { deployments as deploymentOps, env, projects, services as serviceOps, serviceTransfer as transferOps } from "@seylo/ops";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
   alertRules,
   auditLog,
@@ -13,6 +13,7 @@ import {
   deployTriggers,
   domains,
   maintenancePages,
+  nodes,
   notificationChannels,
   portExposures,
   serviceExports,
@@ -23,6 +24,7 @@ import {
   uptimeChecks,
   volumes,
 } from "../src/db/schema";
+import { acmeHeld } from "../src/modules/domains/acme-hold";
 import { readProjectEnv, readServiceEnv, writeProjectEnv } from "../src/modules/env/store";
 import { materializeService } from "../src/modules/services/portable";
 import { defaultSpec } from "../src/modules/services/spec";
@@ -35,6 +37,7 @@ import {
   begin,
   closeSides,
   craft,
+  dnsRecords,
   download,
   entriesOf,
   exportZip,
@@ -698,6 +701,36 @@ describe("how the imported app is reached", () => {
     expect(omitted.preview.autoDomain.reason).toContain("left its passwords out");
     expect(c.panel.deps.db.select().from(domains).where(eq(domains.serviceId, omitted.serviceId)).all()).toEqual([]);
     expect(firstRunOf(c, omitted.serviceId)).toEqual([]);
+  });
+
+  test("Let's Encrypt waits until a custom domain reaches the new node, as after domains.add", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    b.panel.deps.db.update(nodes).set({ publicIpv4: "203.0.113.20" }).where(eq(nodes.id, b.nodeId)).run();
+    const id = await plainApp(a, "shop");
+    // Both had their certificates on A; the file says nothing of that.
+    for (const host of ["moved.example.org", "waiting.example.org"])
+      a.panel.deps.db
+        .insert(domains)
+        .values({
+          serviceId: id,
+          host,
+          targetPort: 8080,
+          isPrimary: host === "moved.example.org",
+          dnsStatus: "ok",
+          certStatus: "valid",
+          acmeReleasedAt: new Date(),
+        })
+        .run();
+    // One points at B already, the other still at A's node.
+    dnsRecords.set("moved.example.org", ["203.0.113.20"]);
+    dnsRecords.set("waiting.example.org", ["198.51.100.7"]);
+    const { serviceId } = await importAll(b, (await exportZip(a, id)).bytes, { deployWhenReady: false });
+    const rows = b.panel.deps.db.select().from(domains).where(eq(domains.serviceId, serviceId)).orderBy(asc(domains.host)).all();
+    expect(rows.map((d) => [d.host, d.dnsStatus, d.certStatus, d.acmeReleasedAt !== null, acmeHeld(d)])).toEqual([
+      ["moved.example.org", "ok", "pending", true, false],
+      ["waiting.example.org", "wrongTarget", "pending", false, true],
+    ]);
   });
 });
 
