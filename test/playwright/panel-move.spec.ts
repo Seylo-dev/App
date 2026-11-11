@@ -482,6 +482,55 @@ test.describe("panel move", () => {
     await expect(banner(page)).toHaveCount(0);
   });
 
+  test("a check refresh that fails keeps the form: the typed address and the tick stay", async ({ page }) => {
+    let failing = false;
+    await installDemo(page, {
+      overrides: {
+        "panelMove.check": (input) => {
+          if (failing) throw new DemoRefusal(503, "UNAVAILABLE", "The panel is busy.");
+          return moveCheck(
+            input,
+            input.targetNodeId
+              ? {
+                  nodesToMove: [moveNodes.de, moveNodes.us],
+                  nodesLeftBehind: [{ ...moveNodes.il, reason: "offline" }],
+                  blocks: [{ code: "nodesLeftBehind", message: "il-tlv-1 is offline, so it cannot follow.", nodeIds: [ids.il], soft: true }],
+                }
+              : {},
+          );
+        },
+        "panelMove.start": () => movingStatus(),
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await pickTarget(page, "us-ash-1");
+    const address = card(page).getByRole("textbox", { name: "Address" });
+    await address.fill("panel-2.acme.dev");
+    await expect(card(page).getByText("Point the DNS record of panel.acme.dev at panel-2.acme.dev")).toBeVisible();
+    const tick = card(page).getByRole("checkbox", { name: "I will join these again with seylo join --force afterwards" });
+    await tick.click();
+    await expect(startButton(page)).toBeEnabled();
+    // The next ask fails (a busy panel, after its retries): the form stays as it is.
+    failing = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(card(page).getByText("Could not check again: The panel is busy. This is the last answer")).toBeVisible();
+    await expect(card(page).getByText("Could not load this")).toHaveCount(0);
+    await expect(address).toHaveValue("panel-2.acme.dev");
+    await expect(tick).toBeChecked();
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/check-stale.png`, fullPage: true });
+    // The next ask answers: the note goes, nothing was reset.
+    failing = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(card(page).getByText("Could not check again")).toHaveCount(0);
+    await expect(address).toHaveValue("panel-2.acme.dev");
+    await expect(tick).toBeChecked();
+    await startButton(page).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Move the panel" }).click();
+    await expect.poll(() => sent["panelMove.start"]).toEqual([{ targetNodeId: ids.us, address: "panel-2.acme.dev", leftBehind: true }]);
+  });
+
   test("the switch waits for the target: how long, the banner stays, and Cancel anyway after 10 minutes", async ({ page }) => {
     let status = movingStatus({
       step: "switching",

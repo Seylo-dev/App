@@ -29,6 +29,7 @@ export default {
   addressPlaceholder: "203.0.113.20",
   addressInvalid: "Enter only a host name or IP address, without http://, a port or a path.",
   blockedTitle: "Can't move the panel yet",
+  checkStale: "Could not check again: {reason} This is the last answer; it asks again in a few seconds.",
   leftBehindTitle: "These nodes cannot follow",
   leftBehindReasons: {
     offline: "offline",

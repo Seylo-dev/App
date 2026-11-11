@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import { OpError } from "@seylo/ops";
 import { renderStatic } from "../../test/render";
 import { PanelMoveBannerView } from "../shell/panel-move-banner";
 import {
+  formCheck,
   type MoveCheck,
   MovedAway,
   MoveFailed,
@@ -317,6 +319,46 @@ test("an address the panel refused shows its words under the field and keeps Sta
   ));
   expect(text(html)).toContain("Enter an address other servers can reach, not loopback.");
   expect(startButton(html)).toContain("disabled");
+});
+
+test("a check refresh that failed keeps the form with the last answer: the typed address and the tick stay", async () => {
+  const last = check();
+  const blip = new OpError("UNAVAILABLE", "The panel could not be reached.");
+  /** The check query as the form gets it. */
+  const query = (data: MoveCheck | undefined, error: unknown): { data?: MoveCheck; error: unknown; isPending: boolean } => ({
+    data,
+    error,
+    isPending: false,
+  });
+  // A background refresh failed: react-query keeps its data and sets the error.
+  const failed = formCheck(query(last, blip), last);
+  expect(failed.shown.error).toBeNull();
+  expect(failed.shown.data).toBe(last);
+  expect(failed.stale).toBe(blip);
+  expect(failed.refused).toBeNull();
+  // The check for a typed address failed before it ever answered: still the last answer.
+  const typed = formCheck(query(undefined, new OpError("UNAVAILABLE", "The panel is busy.")), last);
+  expect(typed.shown.data).toBe(last);
+  expect(typed.shown.error).toBeNull();
+  // An address the panel refused: its words for under the field, not a note.
+  const refusal = new OpError("BAD_REQUEST", "127.0.0.1 is an address of de-fsn-1.", { field: "address" });
+  const refused = formCheck(query(undefined, refusal), last);
+  expect(refused.shown.data).toBe(last);
+  expect(refused.refused).toBe("127.0.0.1 is an address of de-fsn-1.");
+  expect(refused.stale).toBeNull();
+  // A good answer goes through as it is; with no answer yet a failure is the card's load error.
+  const good = query(last, null);
+  expect(formCheck(good, last).shown).toBe(good);
+  const first = query(undefined, blip);
+  expect(formCheck(first, undefined).shown).toBe(first);
+  // The form says the answer is the last one.
+  const html = await renderStatic(() => (
+    <MoveFormView check={last} target={ids.fresh} onTarget={() => {}} stale="The panel could not be reached." />
+  ));
+  expect(text(html)).toContain(
+    "Could not check again: The panel could not be reached. This is the last answer; it asks again in a few seconds.",
+  );
+  expect(html).toContain('value="203.0.113.20"');
 });
 
 test("the banner: on every page while it moves, on the old copy with a link, never otherwise", async () => {

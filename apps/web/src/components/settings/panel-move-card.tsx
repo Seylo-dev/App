@@ -46,7 +46,7 @@ import { followMovePoll, lostMove, movedLinks } from "../../lib/panel-move";
 import { isReauthCancelled } from "../../lib/reauth";
 import { useNow } from "../service/use-now";
 import { invalidateOps, useSettingsMutation } from "./mutation";
-import { QueryView } from "./op-state";
+import { errorText, QueryView } from "./op-state";
 import { Field } from "./page";
 
 export type MoveStatus = OpOutput<typeof panelMove.status>;
@@ -137,6 +137,22 @@ function addressRefusal(error: unknown): string | null {
   return error instanceof OpError && error.code === "BAD_REQUEST" && error.details?.field === "address" ? error.message : null;
 }
 
+/**
+ * What the form renders for the check. While its latest ask failed (a
+ * refused address, a network blip, a busy panel) the form keeps the last
+ * answer, so the typed address and the tick stay: `refused` is the panel's
+ * words on the address, `stale` any other failure. Without a last answer
+ * the failure is the card's load error.
+ */
+export function formCheck<Q extends { data?: MoveCheck | undefined; error: unknown }>(
+  check: Q,
+  last: MoveCheck | undefined,
+): { shown: Q; refused: string | null; stale: unknown } {
+  const refused = addressRefusal(check.error);
+  if (!check.error || !last) return { shown: check, refused, stale: null };
+  return { shown: { ...check, data: last, error: null }, refused, stale: refused ? null : check.error };
+}
+
 function MoveForm({ compact }: { compact: boolean }) {
   const [target, setTarget] = useState<string | null>(null);
   // The typed address the check names in its warnings once it parses; null: the node's default.
@@ -147,13 +163,12 @@ function MoveForm({ compact }: { compact: boolean }) {
     refetchInterval: (query) => (addressRefusal(query.state.error) ? false : checkRefreshMs),
     refetchOnWindowFocus: "always",
   });
-  // A refused address keeps the form (with the last answer) and shows why under the field.
-  const refused = addressRefusal(check.error);
   const [last, setLast] = useState<MoveCheck | undefined>(undefined);
   useEffect(() => {
     if (check.data && !check.isPlaceholderData) setLast(check.data);
   }, [check.data, check.isPlaceholderData]);
-  const shown = refused && last ? { ...check, data: last, error: null } : check;
+  // A failed ask keeps the form with the last answer: a refused address shows why under the field.
+  const { shown, refused, stale } = formCheck(check, last);
   return (
     <QueryView query={shown} skeleton={<FormSkeleton />}>
       {(data) => (
@@ -169,6 +184,7 @@ function MoveForm({ compact }: { compact: boolean }) {
           }}
           onAddress={setAddress}
           refused={refused && address ? { address, message: refused } : null}
+          stale={stale ? errorText(stale) : null}
           compact={compact}
         />
       )}
@@ -193,6 +209,7 @@ export function MoveFormView({
   onTarget,
   onAddress,
   refused = null,
+  stale = null,
   compact = false,
 }: {
   check: MoveCheck;
@@ -204,6 +221,8 @@ export function MoveFormView({
   onAddress?: (address: string | null) => void;
   /** The panel refused this address, in these words. */
   refused?: { address: string; message: string } | null;
+  /** Asking the panel again failed, in these words: `check` is its last answer. */
+  stale?: string | null;
   /** Without the explanation: a result or a failure above says enough. */
   compact?: boolean;
 }) {
@@ -322,6 +341,12 @@ export function MoveFormView({
             {warning.message}
           </p>
         ))}
+
+      {stale && (
+        <p role="status" className="m-0 text-[12.5px] text-chip-amber-fg">
+          {t("settingsPanelMove.checkStale", { reason: stale })}
+        </p>
+      )}
 
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="primary" disabled={!canStart} onClick={() => setConfirming(true)}>
