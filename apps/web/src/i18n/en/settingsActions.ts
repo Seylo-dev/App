@@ -71,6 +71,8 @@ export default {
     delete: "Delete",
     deploy: "Deploy",
     edit: "Edit settings",
+    export: "Export to a file (owners and admins)",
+    import: "Import from a file (owners and admins)",
     move: "Move to another node",
     scale: "Scale and place",
     update: "Change source and settings",

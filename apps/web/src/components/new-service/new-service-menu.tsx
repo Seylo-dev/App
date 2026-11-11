@@ -1,6 +1,7 @@
 // The "New service" menu (Project.dc.html): app, database, compose stack,
-// template, Docker Hub image, Box and cron job. Choosing one opens the
-// matching form, or the catalog (its Templates or Docker Hub tab).
+// template, Docker Hub image, Box, cron job and import from a file.
+// Choosing one opens the matching form, the catalog (its Templates or
+// Docker Hub tab) or the import page.
 
 import { Button } from "@seylo/ui/components/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@seylo/ui/components/dropdown-menu";
@@ -16,7 +17,9 @@ export function useStartNewService() {
   const shell = useShell();
   const navigate = useNavigate();
   return (kind: NewServiceKind, projectId?: string) => {
-    if (kind === "template" || kind === "dockerHub") {
+    if (kind === "import") {
+      void navigate({ to: "/import", search: projectId ? { project: projectId } : {} });
+    } else if (kind === "template" || kind === "dockerHub") {
       void navigate({
         to: "/templates",
         search: { ...(projectId ? { project: projectId } : {}), ...(kind === "dockerHub" ? { tab: "docker-hub" as const } : {}) },

@@ -3,10 +3,10 @@
 import { Chip, type ChipProps } from "@seylo/ui/components/chip";
 import type { MessageKey } from "../../i18n/t";
 
-export type NewServiceKind = "app" | "database" | "compose" | "template" | "dockerHub" | "box" | "cron";
+export type NewServiceKind = "app" | "database" | "compose" | "template" | "dockerHub" | "box" | "cron" | "import";
 
-/** Kinds that open a page (the catalog) instead of a create form. */
-export type CatalogKind = "template" | "dockerHub";
+/** Kinds that open a page (the catalog, the import page) instead of a create form. */
+export type CatalogKind = "template" | "dockerHub" | "import";
 
 export const newServiceKinds: readonly {
   kind: NewServiceKind;
@@ -22,6 +22,7 @@ export const newServiceKinds: readonly {
   { kind: "dockerHub", tag: "HUB", tone: "sky", title: "newService.dockerHub", description: "newService.dockerHubHint" },
   { kind: "box", tag: "BOX", tone: "amber", title: "newService.box", description: "newService.boxHint" },
   { kind: "cron", tag: "CRON", tone: "gray", title: "newService.cron", description: "newService.cronHint" },
+  { kind: "import", tag: "ZIP", tone: "gray", title: "newService.import", description: "newService.importHint" },
 ];
 
 /** The mono kind tag used in menus and lists ("APP", "PG"). */

@@ -16,6 +16,8 @@ export default {
   boxHint: "VS Code in the browser with your repo",
   cron: "Cron job",
   cronHint: "Run a command on a schedule",
+  import: "Import from a file",
+  importHint: "A .zip exported from this or another panel",
   titles: {
     app: "New app",
     database: "New database",

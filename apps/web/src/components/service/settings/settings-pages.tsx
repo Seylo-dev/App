@@ -1,8 +1,9 @@
 // The Notes and Settings tabs. Notes are Markdown text for the team (not
-// secret). Settings renames the service and deletes it with type-to-confirm.
+// secret). Settings renames the service, exports it to a .zip (owners and
+// admins) and deletes it with type-to-confirm.
 
-import { services } from "@seylo/ops";
-import { useOpMutation } from "@seylo/ops/react";
+import { auth, services } from "@seylo/ops";
+import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Callout } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
@@ -22,6 +23,7 @@ import { formatRelative } from "../format";
 import { useInvalidate } from "../invalidate";
 import { MutationError } from "../op-state";
 import { isDatabaseKind } from "../status";
+import { ExportDialog } from "../transfer/export-dialog";
 import type { ServiceDetail } from "../use-service";
 
 const namePattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -105,6 +107,10 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
   const invalidate = useInvalidate();
   const [name, setName] = useState(service.name);
   const [confirm, setConfirm] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  // Export is for owners and admins (services.export is never granted to members).
+  const me = useOp(auth.whoami, {});
+  const canExport = me.data !== undefined && me.data.viewer.role !== "member";
   const rename = useOpMutation(services.update, {
     onSuccess: () => {
       invalidate(services.get, services.list);
@@ -151,6 +157,19 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
         {member && <Callout tone="neutral">{t("serviceSettings.member")}</Callout>}
       </SectionCard>
       {isDatabaseKind(service.kind) && <VersionCard service={service} />}
+      {canExport && (
+        <SectionCard title={t("serviceTransfer.card.title")} description={t("serviceTransfer.card.description")}>
+          {service.kind === "compose" || member ? (
+            <Callout tone="neutral">{t("serviceTransfer.card.compose")}</Callout>
+          ) : service.protected ? (
+            <Callout tone="neutral">{t("serviceTransfer.card.protected")}</Callout>
+          ) : (
+            <Button className="self-start" onClick={() => setExporting(true)}>
+              {t("serviceTransfer.card.button")}
+            </Button>
+          )}
+        </SectionCard>
+      )}
       <SectionCard title={t("serviceSettings.delete.title")} description={t("serviceSettings.delete.description")} danger>
         {service.protected ? (
           <Callout tone="neutral">{t("serviceSettings.delete.protected")}</Callout>
@@ -162,6 +181,7 @@ export function SettingsPage({ service }: { service: ServiceDetail }) {
           </Button>
         )}
       </SectionCard>
+      {canExport && <ExportDialog service={service} open={exporting} onOpenChange={setExporting} />}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}

@@ -19,6 +19,7 @@ import { Route as AppSplatRouteImport } from "./routes/_app/$"
 import { Route as AppActivityRouteImport } from "./routes/_app/activity"
 import { Route as AppApprovalsRouteImport } from "./routes/_app/approvals"
 import { Route as AppAssistantRouteImport } from "./routes/_app/assistant"
+import { Route as AppImportRouteImport } from "./routes/_app/import"
 import { Route as AppNodesRouteImport } from "./routes/_app/nodes"
 import { Route as AppSettingsRouteImport } from "./routes/_app/settings"
 import { Route as AppTemplatesRouteImport } from "./routes/_app/templates"
@@ -112,6 +113,11 @@ const AppApprovalsRoute = AppApprovalsRouteImport.update({
 const AppAssistantRoute = AppAssistantRouteImport.update({
   id: "/assistant",
   path: "/assistant",
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImportRoute = AppImportRouteImport.update({
+  id: "/import",
+  path: "/import",
   getParentRoute: () => AppRoute,
 } as any)
 const AppNodesRoute = AppNodesRouteImport.update({
@@ -369,6 +375,7 @@ export interface FileRoutesByFullPath {
   "/activity": typeof AppActivityRoute
   "/approvals": typeof AppApprovalsRoute
   "/assistant": typeof AppAssistantRoute
+  "/import": typeof AppImportRoute
   "/nodes": typeof AppNodesRoute
   "/settings": typeof AppSettingsRouteWithChildren
   "/templates": typeof AppTemplatesRoute
@@ -424,6 +431,7 @@ export interface FileRoutesByTo {
   "/activity": typeof AppActivityRoute
   "/approvals": typeof AppApprovalsRoute
   "/assistant": typeof AppAssistantRoute
+  "/import": typeof AppImportRoute
   "/nodes": typeof AppNodesRoute
   "/templates": typeof AppTemplatesRoute
   "/cli/approve": typeof CliApproveRoute
@@ -480,6 +488,7 @@ export interface FileRoutesById {
   "/_app/activity": typeof AppActivityRoute
   "/_app/approvals": typeof AppApprovalsRoute
   "/_app/assistant": typeof AppAssistantRoute
+  "/_app/import": typeof AppImportRoute
   "/_app/nodes": typeof AppNodesRoute
   "/_app/settings": typeof AppSettingsRouteWithChildren
   "/_app/templates": typeof AppTemplatesRoute
@@ -539,6 +548,7 @@ export interface FileRouteTypes {
     | "/activity"
     | "/approvals"
     | "/assistant"
+    | "/import"
     | "/nodes"
     | "/settings"
     | "/templates"
@@ -594,6 +604,7 @@ export interface FileRouteTypes {
     | "/activity"
     | "/approvals"
     | "/assistant"
+    | "/import"
     | "/nodes"
     | "/templates"
     | "/cli/approve"
@@ -649,6 +660,7 @@ export interface FileRouteTypes {
     | "/_app/activity"
     | "/_app/approvals"
     | "/_app/assistant"
+    | "/_app/import"
     | "/_app/nodes"
     | "/_app/settings"
     | "/_app/templates"
@@ -777,6 +789,13 @@ declare module "@tanstack/react-router" {
       path: "/assistant"
       fullPath: "/assistant"
       preLoaderRoute: typeof AppAssistantRouteImport
+      parentRoute: typeof AppRoute
+    }
+    "/_app/import": {
+      id: "/_app/import"
+      path: "/import"
+      fullPath: "/import"
+      preLoaderRoute: typeof AppImportRouteImport
       parentRoute: typeof AppRoute
     }
     "/_app/nodes": {
@@ -1203,6 +1222,7 @@ interface AppRouteChildren {
   AppActivityRoute: typeof AppActivityRoute
   AppApprovalsRoute: typeof AppApprovalsRoute
   AppAssistantRoute: typeof AppAssistantRoute
+  AppImportRoute: typeof AppImportRoute
   AppNodesRoute: typeof AppNodesRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppTemplatesRoute: typeof AppTemplatesRoute
@@ -1216,6 +1236,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppActivityRoute: AppActivityRoute,
   AppApprovalsRoute: AppApprovalsRoute,
   AppAssistantRoute: AppAssistantRoute,
+  AppImportRoute: AppImportRoute,
   AppNodesRoute: AppNodesRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppTemplatesRoute: AppTemplatesRoute,
