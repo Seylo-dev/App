@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/database.proto.
  */
 export const file_seylo_agent_v1_database: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zZXlsby9hZ2VudC92MS9kYXRhYmFzZS5wcm90bxIOc2V5bG8uYWdlbnQudjEi6wEKDERhdGFiYXNlU3BlYxIuCgZlbmdpbmUYASABKA4yHi5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUVuZ2luZRIPCgd2ZXJzaW9uGAIgASgJEjgKC2NyZWRlbnRpYWxzGAMgASgLMiMuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VDcmVkZW50aWFscxIsCgV0b29scxgEIAEoCzIdLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlVG9vbHMSMgoIZXhwb3N1cmUYBSABKAsyIC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUV4cG9zdXJlIlMKE0RhdGFiYXNlQ3JlZGVudGlhbHMSEgoKYWRtaW5fdXNlchgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIQCghkYXRhYmFzZRgDIAEoCSJXCg1EYXRhYmFzZVRvb2xzEg4KBndlYl91aRgBIAEoCBI2ChN3ZWJfdWlfaWRsZV90aW1lb3V0GAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIooBChBEYXRhYmFzZUV4cG9zdXJlEg8KB2VuYWJsZWQYASABKAgSEQoJaG9zdF9wb3J0GAIgASgNEhwKFGFsbG93ZWRfc291cmNlX2NpZHJzGAMgAygJEhQKDHRsc19ob3N0bmFtZRgEIAEoCRIMCgR1c2VyGAUgASgJEhAKCHBhc3N3b3JkGAYgASgJKrMCCg5EYXRhYmFzZUVuZ2luZRIfChtEQVRBQkFTRV9FTkdJTkVfVU5TUEVDSUZJRUQQABIcChhEQVRBQkFTRV9FTkdJTkVfUE9TVEdSRVMQARIZChVEQVRBQkFTRV9FTkdJTkVfTVlTUUwQAhIbChdEQVRBQkFTRV9FTkdJTkVfTUFSSUFEQhADEhkKFURBVEFCQVNFX0VOR0lORV9NT05HTxAEEhkKFURBVEFCQVNFX0VOR0lORV9SRURJUxAFEhoKFkRBVEFCQVNFX0VOR0lORV9WQUxLRVkQBhIZChVEQVRBQkFTRV9FTkdJTkVfS0VZREIQBxIdChlEQVRBQkFTRV9FTkdJTkVfRFJBR09ORkxZEAgSHgoaREFUQUJBU0VfRU5HSU5FX0NMSUNLSE9VU0UQCUK4AQoSY29tLnNleWxvLmFnZW50LnYxQg1EYXRhYmFzZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_duration]);
+  fileDesc("Ch1zZXlsby9hZ2VudC92MS9kYXRhYmFzZS5wcm90bxIOc2V5bG8uYWdlbnQudjEiiQIKDERhdGFiYXNlU3BlYxIuCgZlbmdpbmUYASABKA4yHi5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUVuZ2luZRIPCgd2ZXJzaW9uGAIgASgJEjgKC2NyZWRlbnRpYWxzGAMgASgLMiMuc2V5bG8uYWdlbnQudjEuRGF0YWJhc2VDcmVkZW50aWFscxIsCgV0b29scxgEIAEoCzIdLnNleWxvLmFnZW50LnYxLkRhdGFiYXNlVG9vbHMSMgoIZXhwb3N1cmUYBSABKAsyIC5zZXlsby5hZ2VudC52MS5EYXRhYmFzZUV4cG9zdXJlEhwKFHJldGlyZWRfZXhwb3NlZF91c2VyGAYgASgJIlMKE0RhdGFiYXNlQ3JlZGVudGlhbHMSEgoKYWRtaW5fdXNlchgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIQCghkYXRhYmFzZRgDIAEoCSJXCg1EYXRhYmFzZVRvb2xzEg4KBndlYl91aRgBIAEoCBI2ChN3ZWJfdWlfaWRsZV90aW1lb3V0GAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIooBChBEYXRhYmFzZUV4cG9zdXJlEg8KB2VuYWJsZWQYASABKAgSEQoJaG9zdF9wb3J0GAIgASgNEhwKFGFsbG93ZWRfc291cmNlX2NpZHJzGAMgAygJEhQKDHRsc19ob3N0bmFtZRgEIAEoCRIMCgR1c2VyGAUgASgJEhAKCHBhc3N3b3JkGAYgASgJKrMCCg5EYXRhYmFzZUVuZ2luZRIfChtEQVRBQkFTRV9FTkdJTkVfVU5TUEVDSUZJRUQQABIcChhEQVRBQkFTRV9FTkdJTkVfUE9TVEdSRVMQARIZChVEQVRBQkFTRV9FTkdJTkVfTVlTUUwQAhIbChdEQVRBQkFTRV9FTkdJTkVfTUFSSUFEQhADEhkKFURBVEFCQVNFX0VOR0lORV9NT05HTxAEEhkKFURBVEFCQVNFX0VOR0lORV9SRURJUxAFEhoKFkRBVEFCQVNFX0VOR0lORV9WQUxLRVkQBhIZChVEQVRBQkFTRV9FTkdJTkVfS0VZREIQBxIdChlEQVRBQkFTRV9FTkdJTkVfRFJBR09ORkxZEAgSHgoaREFUQUJBU0VfRU5HSU5FX0NMSUNLSE9VU0UQCUK4AQoSY29tLnNleWxvLmFnZW50LnYxQg1EYXRhYmFzZVByb3RvUAFaOWdpdGh1Yi5jb20vc2V5bG8tZGV2L2FwcC9nby9nZW4vcGIvc2V5bG8vYWdlbnQvdjE7YWdlbnR2MaICA1NBWKoCDlNleWxvLkFnZW50LlYxygIOU2V5bG9cQWdlbnRcVjHiAhpTZXlsb1xBZ2VudFxWMVxHUEJNZXRhZGF0YeoCEFNleWxvOjpBZ2VudDo6VjFiBnByb3RvMw", [file_google_protobuf_duration]);
 
 /**
  * DatabaseSpec is set on SERVICE_KIND_DATABASE services. The image, env and
@@ -49,6 +49,21 @@ export type DatabaseSpec = Message<"seylo.agent.v1.DatabaseSpec"> & {
    * @generated from field: seylo.agent.v1.DatabaseExposure exposure = 5;
    */
   exposure?: DatabaseExposure | undefined;
+
+  /**
+   * The separate login databases created before 0.2.9 had for their
+   * exposed port ("external"), sent whether or not exposure is on; empty
+   * for newer databases and the Redis-like engines. Agents that advertise
+   * "database.exposure.v2" disable it inside the running database once per
+   * node, never deleting data: Postgres ALTER ROLE ... NOLOGIN, MySQL and
+   * MariaDB ACCOUNT LOCK, Mongo dropUser, ClickHouse DROP USER. Never the
+   * admin user.
+   *
+   * added in 0.2.9 (exposure.v2)
+   *
+   * @generated from field: string retired_exposed_user = 6;
+   */
+  retiredExposedUser: string;
 };
 
 /**
@@ -118,9 +133,14 @@ export const DatabaseToolsSchema: GenMessage<DatabaseTools> = /*@__PURE__*/
   messageDesc(file_seylo_agent_v1_database, 2);
 
 /**
- * DatabaseExposure publishes the database port through the portgate using
- * the database's own TLS (MySQL and friends cannot be routed by host name
- * through Traefik).
+ * DatabaseExposure publishes the database port through the portgate. It
+ * is TLS only, with the database's own credentials (DatabaseCredentials):
+ * the gate terminates TLS for Mongo, ClickHouse and the Redis-like
+ * engines, and for Postgres, MySQL and MariaDB, which negotiate TLS inside
+ * their protocol with their own certificate, it refuses a client that
+ * does not ask for TLS. Agents without "database.exposure.v2" relay
+ * Postgres, MySQL and MariaDB without that check, so the panel sends their
+ * exposure only to agents that advertise it.
  *
  * @generated from message seylo.agent.v1.DatabaseExposure
  */
@@ -151,10 +171,10 @@ export type DatabaseExposure = Message<"seylo.agent.v1.DatabaseExposure"> & {
   tlsHostname: string;
 
   /**
-   * User for connections through the exposed port; the agent creates it
-   * (or updates its password) when exposure is on, requiring TLS for it
-   * where the engine can (Postgres hostssl, MySQL REQUIRE SSL). Empty for
-   * Redis, which keeps its one default user.
+   * A separate user for connections through the exposed port, which agents
+   * before 0.2.9 created (or updated) when exposure was on. Panels from
+   * 0.2.9 leave them empty and agents from 0.2.9 ignore them; the old user
+   * is retired instead (DatabaseSpec.retired_exposed_user).
    *
    * @generated from field: string user = 5;
    */

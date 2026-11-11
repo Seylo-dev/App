@@ -15,6 +15,14 @@ message DatabaseSpec {
   DatabaseCredentials credentials = 3;
   DatabaseTools tools = 4;
   DatabaseExposure exposure = 5;
+  // The separate login databases created before 0.2.9 had for their
+  // exposed port ("external"), sent whether or not exposure is on; empty
+  // for newer databases and the Redis-like engines. Agents that advertise
+  // "database.exposure.v2" disable it inside the running database once per
+  // node, never deleting data: Postgres ALTER ROLE ... NOLOGIN, MySQL and
+  // MariaDB ACCOUNT LOCK, Mongo dropUser, ClickHouse DROP USER. Never the
+  // admin user.
+  string retired_exposed_user = 6; // added in 0.2.9 (exposure.v2)
 }
 
 // The engines from VALKEY on need an agent that advertises the capability
@@ -60,9 +68,14 @@ message DatabaseTools {
   google.protobuf.Duration web_ui_idle_timeout = 2;
 }
 
-// DatabaseExposure publishes the database port through the portgate using
-// the database's own TLS (MySQL and friends cannot be routed by host name
-// through Traefik).
+// DatabaseExposure publishes the database port through the portgate. It
+// is TLS only, with the database's own credentials (DatabaseCredentials):
+// the gate terminates TLS for Mongo, ClickHouse and the Redis-like
+// engines, and for Postgres, MySQL and MariaDB, which negotiate TLS inside
+// their protocol with their own certificate, it refuses a client that
+// does not ask for TLS. Agents without "database.exposure.v2" relay
+// Postgres, MySQL and MariaDB without that check, so the panel sends their
+// exposure only to agents that advertise it.
 message DatabaseExposure {
   bool enabled = 1;
   uint32 host_port = 2;
@@ -71,10 +84,10 @@ message DatabaseExposure {
   // Host name for the ACME certificate the edge obtains for the database.
   // Empty means a self-signed certificate.
   string tls_hostname = 4;
-  // User for connections through the exposed port; the agent creates it
-  // (or updates its password) when exposure is on, requiring TLS for it
-  // where the engine can (Postgres hostssl, MySQL REQUIRE SSL). Empty for
-  // Redis, which keeps its one default user.
+  // A separate user for connections through the exposed port, which agents
+  // before 0.2.9 created (or updated) when exposure was on. Panels from
+  // 0.2.9 leave them empty and agents from 0.2.9 ignore them; the old user
+  // is retired instead (DatabaseSpec.retired_exposed_user).
   string user = 5;
   string password = 6;
 }

@@ -113,12 +113,20 @@ type DatabaseSpec struct {
 	Engine DatabaseEngine         `protobuf:"varint,1,opt,name=engine,proto3,enum=seylo.agent.v1.DatabaseEngine" json:"engine,omitempty"`
 	// Engine version, for example "17" for Postgres. Display and backup
 	// tooling only; the image decides what runs.
-	Version       string               `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	Credentials   *DatabaseCredentials `protobuf:"bytes,3,opt,name=credentials,proto3" json:"credentials,omitempty"`
-	Tools         *DatabaseTools       `protobuf:"bytes,4,opt,name=tools,proto3" json:"tools,omitempty"`
-	Exposure      *DatabaseExposure    `protobuf:"bytes,5,opt,name=exposure,proto3" json:"exposure,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Version     string               `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Credentials *DatabaseCredentials `protobuf:"bytes,3,opt,name=credentials,proto3" json:"credentials,omitempty"`
+	Tools       *DatabaseTools       `protobuf:"bytes,4,opt,name=tools,proto3" json:"tools,omitempty"`
+	Exposure    *DatabaseExposure    `protobuf:"bytes,5,opt,name=exposure,proto3" json:"exposure,omitempty"`
+	// The separate login databases created before 0.2.9 had for their
+	// exposed port ("external"), sent whether or not exposure is on; empty
+	// for newer databases and the Redis-like engines. Agents that advertise
+	// "database.exposure.v2" disable it inside the running database once per
+	// node, never deleting data: Postgres ALTER ROLE ... NOLOGIN, MySQL and
+	// MariaDB ACCOUNT LOCK, Mongo dropUser, ClickHouse DROP USER. Never the
+	// admin user.
+	RetiredExposedUser string `protobuf:"bytes,6,opt,name=retired_exposed_user,json=retiredExposedUser,proto3" json:"retired_exposed_user,omitempty"` // added in 0.2.9 (exposure.v2)
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DatabaseSpec) Reset() {
@@ -184,6 +192,13 @@ func (x *DatabaseSpec) GetExposure() *DatabaseExposure {
 		return x.Exposure
 	}
 	return nil
+}
+
+func (x *DatabaseSpec) GetRetiredExposedUser() string {
+	if x != nil {
+		return x.RetiredExposedUser
+	}
+	return ""
 }
 
 // DatabaseCredentials let the agent open pre-logged-in shells, run dumps
@@ -304,9 +319,14 @@ func (x *DatabaseTools) GetWebUiIdleTimeout() *durationpb.Duration {
 	return nil
 }
 
-// DatabaseExposure publishes the database port through the portgate using
-// the database's own TLS (MySQL and friends cannot be routed by host name
-// through Traefik).
+// DatabaseExposure publishes the database port through the portgate. It
+// is TLS only, with the database's own credentials (DatabaseCredentials):
+// the gate terminates TLS for Mongo, ClickHouse and the Redis-like
+// engines, and for Postgres, MySQL and MariaDB, which negotiate TLS inside
+// their protocol with their own certificate, it refuses a client that
+// does not ask for TLS. Agents without "database.exposure.v2" relay
+// Postgres, MySQL and MariaDB without that check, so the panel sends their
+// exposure only to agents that advertise it.
 type DatabaseExposure struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Enabled  bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
@@ -316,10 +336,10 @@ type DatabaseExposure struct {
 	// Host name for the ACME certificate the edge obtains for the database.
 	// Empty means a self-signed certificate.
 	TlsHostname string `protobuf:"bytes,4,opt,name=tls_hostname,json=tlsHostname,proto3" json:"tls_hostname,omitempty"`
-	// User for connections through the exposed port; the agent creates it
-	// (or updates its password) when exposure is on, requiring TLS for it
-	// where the engine can (Postgres hostssl, MySQL REQUIRE SSL). Empty for
-	// Redis, which keeps its one default user.
+	// A separate user for connections through the exposed port, which agents
+	// before 0.2.9 created (or updated) when exposure was on. Panels from
+	// 0.2.9 leave them empty and agents from 0.2.9 ignore them; the old user
+	// is retired instead (DatabaseSpec.retired_exposed_user).
 	User          string `protobuf:"bytes,5,opt,name=user,proto3" json:"user,omitempty"`
 	Password      string `protobuf:"bytes,6,opt,name=password,proto3" json:"password,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -402,13 +422,14 @@ var File_seylo_agent_v1_database_proto protoreflect.FileDescriptor
 
 const file_seylo_agent_v1_database_proto_rawDesc = "" +
 	"\n" +
-	"\x1dseylo/agent/v1/database.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\"\x9a\x02\n" +
+	"\x1dseylo/agent/v1/database.proto\x12\x0eseylo.agent.v1\x1a\x1egoogle/protobuf/duration.proto\"\xcc\x02\n" +
 	"\fDatabaseSpec\x126\n" +
 	"\x06engine\x18\x01 \x01(\x0e2\x1e.seylo.agent.v1.DatabaseEngineR\x06engine\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12E\n" +
 	"\vcredentials\x18\x03 \x01(\v2#.seylo.agent.v1.DatabaseCredentialsR\vcredentials\x123\n" +
 	"\x05tools\x18\x04 \x01(\v2\x1d.seylo.agent.v1.DatabaseToolsR\x05tools\x12<\n" +
-	"\bexposure\x18\x05 \x01(\v2 .seylo.agent.v1.DatabaseExposureR\bexposure\"w\n" +
+	"\bexposure\x18\x05 \x01(\v2 .seylo.agent.v1.DatabaseExposureR\bexposure\x120\n" +
+	"\x14retired_exposed_user\x18\x06 \x01(\tR\x12retiredExposedUser\"w\n" +
 	"\x13DatabaseCredentials\x12\x1d\n" +
 	"\n" +
 	"admin_user\x18\x01 \x01(\tR\tadminUser\x12%\n" +

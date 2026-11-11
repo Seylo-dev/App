@@ -929,7 +929,8 @@ type OpenPort struct {
 	// the container. Set for exposed Mongo and Redis, which speak TLS from
 	// the first byte (clients use tls=true / rediss://). Postgres, MySQL and
 	// MariaDB negotiate TLS inside their protocol, so their exposed ports
-	// relay raw TCP and the database's own TLS applies (false).
+	// relay raw TCP and the database's own TLS applies (false); agents with
+	// "database.exposure.v2" refuse their clients that do not ask for TLS.
 	Tls bool `protobuf:"varint,4,opt,name=tls,proto3" json:"tls,omitempty"`
 	// Certificate the port serves when tls is set: same rules as
 	// RouteStatus.certificate_*.
