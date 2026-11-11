@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { databases as dbOps, exposures as exposureOps } from "@seylo/ops";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { databases as dbOps, env as envOps, exposures as exposureOps } from "@seylo/ops";
 import { DatabaseEngine } from "@seylo/proto";
 import { eq } from "drizzle-orm";
-import { nodes, portExposures, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
+import { deployments, nodes, portExposures, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
+import { compileMemo } from "../src/desired/contributors";
 import { databaseRuntime } from "../src/modules/databases/desired";
 import { edgeSubject, verifyEdgeTicket } from "../src/modules/databases/edge-ticket";
 import {
@@ -18,7 +19,9 @@ import {
   healthProbe,
   httpUrl,
 } from "../src/modules/databases/engines";
-import { resolveServiceEnv } from "../src/modules/env/desired";
+import { retiredExposedPasswordSecret, writeSecret } from "../src/modules/databases/info";
+import { publishDeploymentChange } from "../src/modules/deployments/store";
+import { deploymentEnv, resolveServiceEnv, sealDeploymentEnv } from "../src/modules/env/desired";
 import { ensureEdgeTicketKey } from "../src/security/edge-ticket-key";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
 import { fakeAgent, seedNode, seedProject, settleDeploys } from "./seed-helpers";
@@ -758,6 +761,45 @@ describe("more engines", () => {
     const valkey = await createDb("valkey");
     oldRow(valkey.res.body.serviceId, "default");
     expect(databaseRuntime(panel.deps, valkey.res.body.serviceId, valkey.node.id)?.database.retiredExposedUser).toBe("");
+  });
+
+  test("the old exposed user stays while a running service still has its URL", async () => {
+    const { res, node, project } = await createDb("postgres");
+    const serviceId = res.body.serviceId;
+    // A database from before 0.2.9: its separate exposed user and that user's password.
+    panel.deps.db.update(serviceDatabases).set({ exposedUser: "external" }).where(eq(serviceDatabases.serviceId, serviceId)).run();
+    writeSecret(panel.deps.db, panel.deps.secrets, serviceId, retiredExposedPasswordSecret, "OldExposed/Pass123");
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie })).status).toBe(200);
+    const { seedService } = await import("./seed-helpers");
+    const worker = seedService(panel, { projectId: project.id, name: "worker", nodeIds: [node.id] });
+    await callOp(panel, envOps.set, { serviceId: worker.id, text: "DATABASE_URL=${{shop-db.EXPOSED_URL}}\n" }, { cookie });
+    const deployment = (envSealed: string, generation: number) =>
+      panel.deps.db
+        .insert(deployments)
+        .values({ serviceId: worker.id, generation, trigger: "manual", status: "live", imageRef: "nginx:1.27", envSealed })
+        .returning()
+        .get();
+    const point = (values: { liveDeploymentId?: string; targetDeploymentId?: string }) =>
+      panel.deps.db.update(services).set(values).where(eq(services.id, worker.id)).run();
+    const retired = () => databaseRuntime(panel.deps, serviceId, node.id, compileMemo())?.database.retiredExposedUser;
+    // The worker's deployment started before the update: the old user's URL is sealed in it (the password percent-encoded).
+    const oldUrl = "postgresql://external:OldExposed%2FPass123@203.0.113.10:45432/shop_db?sslmode=require";
+    const old = deployment(panel.deps.secrets.seal(JSON.stringify([{ name: "DATABASE_URL", value: oldUrl, secret: true }]), "deployment.env"), 1);
+    point({ liveDeploymentId: old.id, targetDeploymentId: old.id });
+    expect(retired()).toBe("");
+    expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.retiredExposedUser).toBe("");
+    // A redeploy seals the database's own user; while the old deployment still serves, the old user stays.
+    const fresh = deployment(sealDeploymentEnv(panel.deps, worker.id), 2);
+    expect(deploymentEnv(panel.deps, fresh.envSealed)?.[0]?.value).not.toContain("external");
+    point({ targetDeploymentId: fresh.id });
+    expect(retired()).toBe("");
+    // Live: the retirement goes out, and the project's databases with an old user get their spec again.
+    const dirty = spyOn(panel.deps.agents.desired, "markDirty");
+    point({ liveDeploymentId: fresh.id });
+    publishDeploymentChange(panel.deps, worker.id, fresh.id);
+    expect(dirty).toHaveBeenCalledWith({ serviceId });
+    dirty.mockRestore();
+    expect(retired()).toBe("external");
   });
 
   test("nodes without database.engines.v2 never get a new engine's exposure", async () => {

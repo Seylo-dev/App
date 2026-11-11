@@ -1,15 +1,17 @@
 // The database part of a ServiceSpec, for the desired-state compiler: the
 // DatabaseSpec (kind_spec "database") the agent uses for tools, backups, TLS
-// exposure and retiring the old exposed user. Image, command, ports, health
-// check, volume and recreate deploys are in the services spec written at
-// create (databases.create via insertService); the engine's environment
-// comes from env/desired.ts.
+// exposure and retiring the old exposed user (retire.ts). Image, command,
+// ports, health check, volume and recreate deploys are in the services spec
+// written at create (databases.create via insertService); the engine's
+// environment comes from env/desired.ts.
 
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { DatabaseEngine, type DatabaseSpecSchema } from "@seylo/proto";
 import type { Deps } from "../../deps";
+import type { CompileMemo } from "../../desired/contributors";
 import { missingExposureCapability } from "./capability";
 import { findDatabase, loadDatabase } from "./info";
+import { retiredExposedUser } from "./retire";
 
 export type DatabaseSpecInit = MessageInitShape<typeof DatabaseSpecSchema>;
 
@@ -30,19 +32,18 @@ const protoEngines = {
  * node), exposure is never sent to an agent that cannot keep the port TLS
  * only (missingExposureCapability): an engine added in 0.2 needs
  * database.engines.v2, Postgres, MySQL and MariaDB need
- * database.exposure.v2.
+ * database.exposure.v2. memo is the compile's (retire.ts scans the
+ * running deployments once per compile).
  */
 export function databaseRuntime(
   deps: Pick<Deps, "db" | "secrets">,
   serviceId: string,
   nodeId?: string,
+  memo?: CompileMemo,
 ): { database: DatabaseSpecInit } | null {
   if (!findDatabase(deps.db, serviceId)) return null;
   const info = loadDatabase(deps, serviceId);
   const exposable = nodeId === undefined || missingExposureCapability(deps.db, null, info.engine, nodeId) === null;
-  // The separate exposed user of a database from before 0.2.9: the agent disables it (never the admin).
-  const retired = info.row.exposedUser;
-  const retiredExposedUser = retired && !info.engine.redisLike && retired !== info.admin.user ? retired : "";
   return {
     database: {
       engine: protoEngines[info.row.engine],
@@ -58,7 +59,8 @@ export function databaseRuntime(
               tlsHostname: info.row.tlsHostname ?? "",
             }
           : { enabled: false },
-      retiredExposedUser,
+      // The separate exposed user of a database from before 0.2.9, once no running service has its URL.
+      retiredExposedUser: retiredExposedUser(deps, info, memo),
     },
   };
 }

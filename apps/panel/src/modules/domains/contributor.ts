@@ -58,7 +58,7 @@ export const networkingContributor: DesiredContributor = {
         memo.get(`env-graph:${service.projectId}`, () => buildEnvGraph(deps, service.projectId)),
       );
     spec.env = env.map((v) => create(EnvVarSchema, v));
-    const database = databaseRuntime(deps, service.id, nodeId);
+    const database = databaseRuntime(deps, service.id, nodeId, memo);
     if (database) spec.kindSpec = { case: "database", value: create(DatabaseSpecSchema, database.database) };
     const box = boxRuntime(deps, service.id);
     if (box) spec.kindSpec = { case: "box", value: create(BoxSpecSchema, box.box) };

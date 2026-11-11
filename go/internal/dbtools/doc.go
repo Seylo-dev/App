@@ -15,11 +15,13 @@
 //   - TLS for the exposed port: connections through it use the
 //     database's own user. ExposedTLS installs the edge's ACME certificate
 //     for tls_hostname (or a self-signed one) and turns TLS on inside
-//     exposed Postgres and MySQL; MariaDB has its own certificate, and the
-//     portgate terminates TLS for the other engines and refuses plain
-//     clients of these three. It also retires the separate exposed user of
-//     databases created before 0.2.9 (DatabaseSpec.retired_exposed_user),
-//     once per node, disabling it without deleting anything.
+//     exposed Postgres and MySQL; MariaDB has its own certificate from
+//     11.4 (10.11 has none and is never exposed), and the portgate
+//     terminates TLS for the other engines and refuses plain clients of
+//     these three. It also retires the separate exposed user of databases
+//     created before 0.2.9 (DatabaseSpec.retired_exposed_user), once per
+//     node, disabling it without deleting anything; the panel sends it
+//     once no running service still has that user's URL.
 //
 // Interfaces used by other packages:
 //
