@@ -128,6 +128,9 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
   const via = chosen?.via ?? null;
   // The repository webhook (or polling) only exists for a source read through the account.
   const viaAccountNow = src !== null && src.installationId === null && chosen?.via.accountId !== undefined && repo === src.repo;
+  // Nothing to connect: the form shows what is connected now.
+  const unchanged =
+    src !== null && chosen?.key === saved && repo === src.repo && branch === src.branch && deployOnPush === src.deployOnPush;
 
   return (
     <form
@@ -192,8 +195,9 @@ export function GithubForm({ service }: { service: ServiceDetail }) {
       />
       {viaAccountNow && <RepoHookNote serviceId={service.id} />}
       <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" disabled={!via || !repo || !branch || connect.isPending}>
-          {t("serviceSource.github.connect")}
+        <Button type="submit" variant="primary" disabled={unchanged || !via || !repo || !branch || connect.isPending}>
+          {unchanged && <IconCheck size={15} stroke={2} aria-hidden="true" />}
+          {t(unchanged ? "serviceSource.github.isConnected" : "serviceSource.github.connect")}
         </Button>
         <MutationError error={connect.error} />
       </div>

@@ -56,6 +56,8 @@ export default {
     branchesFailed: "Branches could not be loaded",
     pickRepoFirst: "Pick a repository first",
     connect: "Connect repository",
+    /** The button while the form shows the connected repository, branch and push setting unchanged. */
+    isConnected: "Connected",
     connected: "Repository connected. The next deploy builds it.",
     readOnly: "Connecting or changing a GitHub repository needs the right to create or update services.",
   },
@@ -79,6 +81,7 @@ export default {
     branchesFailed: "Branches could not be loaded",
     pickRepoFirst: "Pick a repository first",
     connect: "Connect repository",
+    isConnected: "Connected",
     connected: "Repository connected and webhook created. The next deploy builds it.",
     webhook: "Webhook",
     webhookOk: "Pushes and {requests} reach the panel at this address.",

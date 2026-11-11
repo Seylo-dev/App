@@ -86,6 +86,9 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
     );
   }
   const chosen = providerId ?? list[0]?.id ?? null;
+  // Nothing to connect: the form shows what is connected now.
+  const unchanged =
+    src !== null && chosen === src.providerId && repo === src.repo && branch === src.branch && deployOnPush === src.deployOnPush;
 
   return (
     <div className="flex flex-col gap-4">
@@ -144,8 +147,9 @@ export function ProviderForm({ service, kind }: { service: ServiceDetail; kind: 
           control={<Switch checked={deployOnPush} onCheckedChange={setDeployOnPush} aria-label={t("serviceSource.deployOnPush")} />}
         />
         <div className="flex items-center gap-3">
-          <Button type="submit" variant="primary" disabled={!chosen || !repo || !branch || connect.isPending}>
-            {t("serviceSource.provider.connect")}
+          <Button type="submit" variant="primary" disabled={unchanged || !chosen || !repo || !branch || connect.isPending}>
+            {unchanged && <IconCheck size={15} stroke={2} aria-hidden="true" />}
+            {t(unchanged ? "serviceSource.provider.isConnected" : "serviceSource.provider.connect")}
           </Button>
           <MutationError error={connect.error} />
         </div>

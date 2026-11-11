@@ -63,6 +63,15 @@ test("a connected GitHub account is a source too: no 'Connect GitHub first', and
   expect(html).toContain(t("serviceSource.github.connect"));
 });
 
+test("the connected repository, unchanged, shows Connected instead of a Connect button", async () => {
+  // The service's own installation (inst-1): account, repository, branch and push setting all as saved.
+  const installation = { id: "inst-1", accountLogin: "acme", accountType: "Organization", suspended: false };
+  const html = await render({ installations: [installation], installUrl: null, hidden: false });
+  expect(html).toContain(t("serviceSource.github.isConnected"));
+  expect(html).not.toContain(`>${t("serviceSource.github.connect")}<`);
+  expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+});
+
 const branchInput = { projectId: "prj1prj1prj1prj1", installationId: "ghi1ghi1ghi1ghi1", repo: "acme/shop" };
 
 /** The form's BranchSelect with github.branches already answered (or failed) in the cache. */
