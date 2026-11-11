@@ -31,9 +31,10 @@ import (
 // HTTP and never moves otherwise, leaves it this way too. A move that is
 // aborted clears the address again (ClearPanelAddress).
 //
-// Only an authenticated session may stage an address: a remote plain-HTTP
-// session is refused for the same reason it never moves the node
-// (move.go). Loopback is fine (the panel's own node).
+// Only an authenticated session may stage an address, or carry a step that
+// ships the panel's keys or switches to the moved panel: a remote
+// plain-HTTP session is refused for the same reason it never moves the
+// node (move.go). Loopback is fine (the panel's own node).
 
 // Variables so tests can change them.
 var (
@@ -94,12 +95,8 @@ func (c *connector) StagePanelAddress(ctx context.Context, req *agentv1.StagePan
 	if !update.ValidMoveID(req.GetMoveId()) {
 		return nil, stageError(agentv1.StatusCode_STATUS_CODE_INVALID_ARGUMENT, update.ReasonBadRequest, fmt.Sprintf("move_id %q is not a move id", req.GetMoveId()))
 	}
-	c.cfgMu.Lock()
-	session := c.sessionURL
-	c.cfgMu.Unlock()
-	if session == "" || PlainRemote(session) {
-		return nil, stageError(agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, reasonPlainHTTP,
-			"this node connects to the panel over plain HTTP, where anyone on the path could stage an address; join it again with the https:// command (seylo join --force)")
+	if err := c.CheckPrivateSession("anyone on the path could stage an address"); err != nil {
+		return nil, err
 	}
 	target, err := parseStagedTarget(req.GetPanelUrl(), req.GetPanelPin())
 	if err != nil {
@@ -151,6 +148,20 @@ func (c *connector) ClearPanelAddress(_ context.Context, req *agentv1.ClearPanel
 	c.logger.Info("the panel's move was aborted; dropped its staged address", "move_id", req.GetMoveId())
 	if c.cfgUnsaved {
 		return stageError(agentv1.StatusCode_STATUS_CODE_UNAVAILABLE, reasonConfig, "could not write config.yml; the agent tries again")
+	}
+	return nil
+}
+
+// CheckPrivateSession refuses a move step while the session being served
+// is plain HTTP from another host, or there is none (PanelStager). what
+// says what anyone on the path could do then.
+func (c *connector) CheckPrivateSession(what string) error {
+	c.cfgMu.Lock()
+	session := c.sessionURL
+	c.cfgMu.Unlock()
+	if session == "" || PlainRemote(session) {
+		return stageError(agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, reasonPlainHTTP,
+			"this node connects to the panel over plain HTTP, where "+what+"; join it again with the https:// command (seylo join --force)")
 	}
 	return nil
 }

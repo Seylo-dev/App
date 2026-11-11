@@ -84,7 +84,8 @@ type Deps struct {
 	// panelAddress(d).
 	PanelAddress func() (url, pin string)
 	// PanelStage stages and clears the panel's next address while it
-	// moves to another node (panel_stage.go). The connector implements it;
+	// moves to another node, and tells whether the session being served
+	// may carry a move step (panel_stage.go). The connector implements it;
 	// set by the agent after wiring, so read it at call time. Nil in tests
 	// that do not set it.
 	PanelStage PanelStager
@@ -164,6 +165,10 @@ type Deps struct {
 type PanelStager interface {
 	StagePanelAddress(ctx context.Context, req *agentv1.StagePanelAddressRequest) (*agentv1.StagePanelAddressResponse, error)
 	ClearPanelAddress(ctx context.Context, req *agentv1.ClearPanelAddressRequest) error
+	// CheckPrivateSession refuses (FAILED_PRECONDITION plainHttp) while
+	// the session being served is plain HTTP from another host: anyone on
+	// the path reads and writes what crosses it. what names the step.
+	CheckPrivateSession(what string) error
 }
 
 // panelAddress is d.PanelAddress, or Config's values without it.

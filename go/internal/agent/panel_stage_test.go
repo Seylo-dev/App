@@ -188,6 +188,48 @@ func TestStagedAddressOfAnotherPanelIsNotTaken(t *testing.T) {
 	}
 }
 
+// ImportPanelData, ImportRegistry, StartMovedPanel and CommitMovedPanel
+// ship the panel's keys or switch the nodes: refused over a plain-HTTP
+// session from another host, like StagePanelAddress. Loopback is the
+// panel's own node.
+func TestMoveStepsRefusedOverPlainHTTP(t *testing.T) {
+	ctx := context.Background()
+	for session, plain := range map[string]bool{
+		"http://10.0.0.1:3000":   true,
+		"ws://panel.example.com": true,
+		"":                       true,
+		"http://127.0.0.1:3000":  false,
+		"https://10.0.0.1:3443":  false,
+	} {
+		reg := newRegistry()
+		registerPanelMove(reg, &Deps{PanelStage: stageConnector(t, session)}, update.NewPanelMover(update.MoveOptions{DataDir: t.TempDir()}, nil))
+		panel := rpctest.NewPeer(t, reg)
+		calls := map[string]error{
+			"StartMovedPanel":  panel.Call(ctx, "StartMovedPanel", &agentv1.StartMovedPanelRequest{MoveId: stageMove}, &agentv1.StartMovedPanelResponse{}),
+			"CommitMovedPanel": panel.Call(ctx, "CommitMovedPanel", &agentv1.CommitMovedPanelRequest{MoveId: stageMove}, &agentv1.CommitMovedPanelResponse{}),
+		}
+		s, err := panel.Open(ctx, "ImportPanelData", &agentv1.ImportPanelDataRequest{MoveId: stageMove})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = s.CloseSend()
+		calls["ImportPanelData"] = s.Finish(nil)
+		s, err = panel.Open(ctx, "ImportRegistry", &agentv1.ImportRegistryRequest{MoveId: stageMove})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = s.CloseSend()
+		calls["ImportRegistry"] = s.Finish(nil)
+		for method, err := range calls {
+			st := rpc.StatusOf(err)
+			refused := st.GetCode() == agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION && detailsReason(err) == reasonPlainHTTP
+			if refused != plain {
+				t.Errorf("session %q, %s: %v", session, method, st)
+			}
+		}
+	}
+}
+
 // stageConnector is a connector with a config.yml, for the handler rules.
 func stageConnector(t *testing.T, session string) *connector {
 	t.Helper()
@@ -389,10 +431,15 @@ func TestPanelMoveWiring(t *testing.T) {
 	}
 	panel := rpctest.NewPeer(t, reg)
 	ctx := context.Background()
-	// Without the connector the staging is unavailable, not faked.
+	// Without the connector the staging is unavailable, not faked, and so
+	// are the steps that need to know the session.
 	err = panel.Call(ctx, "StagePanelAddress", &agentv1.StagePanelAddressRequest{MoveId: stageMove}, &agentv1.StagePanelAddressResponse{})
 	if s := rpc.StatusOf(err); s.GetCode() != agentv1.StatusCode_STATUS_CODE_UNAVAILABLE {
 		t.Fatalf("StagePanelAddress = %v", s)
+	}
+	err = panel.Call(ctx, "CommitMovedPanel", &agentv1.CommitMovedPanelRequest{MoveId: stageMove}, &agentv1.CommitMovedPanelResponse{})
+	if s := rpc.StatusOf(err); s.GetCode() != agentv1.StatusCode_STATUS_CODE_UNAVAILABLE {
+		t.Fatalf("CommitMovedPanel = %v", s)
 	}
 	// Refusals carry their reason.
 	err = panel.Call(ctx, "RemoveOldPanel", &agentv1.RemoveOldPanelRequest{ServiceId: "app0000000000000"}, &agentv1.RemoveOldPanelResponse{})

@@ -19,7 +19,18 @@ import (
 
 func registerPanelMove(reg *Registry, d *Deps, mover *update.PanelMover) {
 	registerPanelStage(reg, d)
-	registerMover(reg, mover)
+	registerMover(reg, d, mover)
+}
+
+// privateSession refuses a step that ships the panel's data or keys, or
+// switches to the moved panel, over a plain-HTTP session from another
+// host (a node that joined over http://): anyone on the path could read
+// master.key or forge the step.
+func privateSession(d *Deps, what string) error {
+	if d.PanelStage == nil {
+		return rpc.NewError(agentv1.StatusCode_STATUS_CODE_UNAVAILABLE, "the agent's panel connection is not ready")
+	}
+	return d.PanelStage.CheckPrivateSession(what)
 }
 
 // registerPanelStage registers StagePanelAddress and ClearPanelAddress.
@@ -42,8 +53,11 @@ func registerPanelStage(reg *Registry, d *Deps) {
 }
 
 // registerMover registers the methods update.PanelMover serves.
-func registerMover(reg *Registry, mover *update.PanelMover) {
+func registerMover(reg *Registry, d *Deps, mover *update.PanelMover) {
 	rpc.HandleRaw(reg, "ImportPanelData", func(ctx context.Context, req *agentv1.ImportPanelDataRequest, s rpc.RawStream) (*agentv1.ImportPanelDataResponse, error) {
+		if err := privateSession(d, "the panel's keys and database would cross the network unencrypted"); err != nil {
+			return nil, err
+		}
 		res, err := mover.ImportPanelData(ctx, req, s)
 		if err != nil {
 			return nil, moveStatus(err)
@@ -58,6 +72,9 @@ func registerMover(reg *Registry, mover *update.PanelMover) {
 		return res, nil
 	})
 	rpc.HandleRaw(reg, "ImportRegistry", func(ctx context.Context, req *agentv1.ImportRegistryRequest, s rpc.RawStream) (*agentv1.ImportRegistryResponse, error) {
+		if err := privateSession(d, "anyone on the path could replace the panel's images"); err != nil {
+			return nil, err
+		}
 		res, err := mover.ImportRegistry(ctx, req, s)
 		if err != nil {
 			return nil, moveStatus(err)
@@ -65,6 +82,9 @@ func registerMover(reg *Registry, mover *update.PanelMover) {
 		return res, nil
 	})
 	rpc.HandleUnary(reg, "StartMovedPanel", func(ctx context.Context, req *agentv1.StartMovedPanelRequest) (*agentv1.StartMovedPanelResponse, error) {
+		if err := privateSession(d, "anyone on the path could start a panel on this node"); err != nil {
+			return nil, err
+		}
 		res, err := mover.Start(ctx, req)
 		if err != nil {
 			return nil, moveStatus(err)
@@ -76,6 +96,15 @@ func registerMover(reg *Registry, mover *update.PanelMover) {
 			return nil, moveStatus(err)
 		}
 		return &agentv1.AbortMovedPanelResponse{}, nil
+	})
+	rpc.HandleUnary(reg, "CommitMovedPanel", func(ctx context.Context, req *agentv1.CommitMovedPanelRequest) (*agentv1.CommitMovedPanelResponse, error) {
+		if err := privateSession(d, "anyone on the path could switch the nodes to a moved panel"); err != nil {
+			return nil, err
+		}
+		if err := mover.Commit(ctx, req); err != nil {
+			return nil, moveStatus(err)
+		}
+		return &agentv1.CommitMovedPanelResponse{}, nil
 	})
 	rpc.HandleUnary(reg, "RetirePanel", func(ctx context.Context, req *agentv1.RetirePanelRequest) (*agentv1.RetirePanelResponse, error) {
 		if err := mover.Retire(ctx, req); err != nil {
