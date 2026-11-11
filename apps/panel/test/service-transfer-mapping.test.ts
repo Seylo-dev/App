@@ -659,7 +659,7 @@ describe("databases", () => {
     const tooOld = await begin(b, zip);
     expect(tooOld.body.extras.exposures[0]).toMatchObject({ listenPort: 13307, action: "skip" });
     expect(tooOld.body.extras.exposures[0].refusal).toBe(
-      "The agent on node-b cannot expose MariaDB with its own user over TLS yet. Update the node, then expose it on its Connect tab.",
+      "The agent on node-b cannot expose MariaDB with its own user over TLS yet. Update the node, then expose it on its Connection tab.",
     );
     exposingNode(b);
     const updated = await begin(b, zip);

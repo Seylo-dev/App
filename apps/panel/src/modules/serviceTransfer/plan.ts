@@ -656,8 +656,8 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       (missing === null || !node
         ? null
         : missing === exposureCapability
-          ? `The agent on ${node.name} cannot expose ${engine.label} with its own user over TLS yet. Update the node, then expose it on its Connect tab.`
-          : `The agent on ${node.name} cannot expose ${engine.label} with TLS yet. Update the node, then expose it on its Connect tab.`);
+          ? `The agent on ${node.name} cannot expose ${engine.label} with its own user over TLS yet. Update the node, then expose it on its Connection tab.`
+          : `The agent on ${node.name} cannot expose ${engine.label} with TLS yet. Update the node, then expose it on its Connection tab.`);
     for (const e of doc.exposures) {
       let cidrs: string[] = [];
       let valid = true;
@@ -685,7 +685,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     else if (exposureRows.some((e) => e.action === "skip"))
       skipped.push({
         what: "Database listeners open to anyone or on a port in use",
-        why: "Open them again on the database's Connect tab.",
+        why: "Open them again on the database's Connection tab.",
       });
   }
 
@@ -865,7 +865,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       warnings.push({
         reason: "databasePassword",
         message:
-          "The file's admin password does not fit this panel's rule (12 to 128 letters, digits or . _ ~ -), so a new one is made. Apps that connect with the old one need the new one from the database's Connect tab.",
+          "The file's admin password does not fit this panel's rule (12 to 128 letters, digits or . _ ~ -), so a new one is made. Apps that connect with the old one need the new one from the database's Connection tab.",
       });
     }
   }
