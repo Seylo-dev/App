@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/coder/websocket"
 
@@ -149,33 +150,69 @@ func Dial(ctx context.Context, opts DialOptions) (*WebSocket, error) {
 	return ws, nil
 }
 
-// pinMismatchError is ErrPinMismatch with who issued the certificate that
-// came instead (errors.Is(err, ErrPinMismatch) holds).
+// pinMismatchError is ErrPinMismatch with the issuer the certificate that
+// came instead claims, already quoted by claimedIssuer
+// (errors.Is(err, ErrPinMismatch) holds).
 type pinMismatchError struct{ issuer string }
 
 func (e *pinMismatchError) Error() string {
-	return fmt.Sprintf("%s (the certificate presented was issued by %s)", ErrPinMismatch.Error(), e.issuer)
+	return fmt.Sprintf("%s (the certificate presented says it was issued by %s)", ErrPinMismatch.Error(), e.issuer)
 }
 
 func (e *pinMismatchError) Unwrap() error { return ErrPinMismatch }
 
-// IssuerName is a certificate's issuer for people: organization and common
-// name, for example "Fortinet, FG800D5818800524"; "an unnamed issuer" when
-// both are empty.
+// issuerNameMax caps IssuerName, in runes.
+const issuerNameMax = 80
+
+// IssuerName is the issuer a certificate claims, for people: organization
+// and common name, for example "Fortinet, FG800D5818800524"; "" when both
+// are empty. Whoever answers the TLS handshake chooses it, and it ends up
+// in seylo status, the installer's output and the panel's alerts, so it is
+// one line of printable text: control and other unprintable runes dropped,
+// whitespace collapsed, at most issuerNameMax runes.
 func IssuerName(cert *x509.Certificate) string {
 	var parts []string
 	for _, o := range cert.Issuer.Organization {
-		if o = strings.TrimSpace(o); o != "" {
+		if o = PrintableLine(o); o != "" {
 			parts = append(parts, o)
 		}
 	}
-	if cn := strings.TrimSpace(cert.Issuer.CommonName); cn != "" && !slices.Contains(parts, cn) {
+	if cn := PrintableLine(cert.Issuer.CommonName); cn != "" && !slices.Contains(parts, cn) {
 		parts = append(parts, cn)
 	}
-	if len(parts) == 0 {
-		return "an unnamed issuer"
+	name := strings.Join(parts, ", ")
+	if r := []rune(name); len(r) > issuerNameMax {
+		name = strings.TrimRight(string(r[:issuerNameMax-3]), " ,") + "..."
 	}
-	return strings.Join(parts, ", ")
+	return name
+}
+
+// PrintableLine is s as one line of printable text: control and other
+// unprintable runes dropped (terminal escapes lose their ESC), whitespace,
+// line breaks included, collapsed to single spaces. For text a peer may
+// have chosen (a certificate's names, an error that quotes them) on its
+// way to a terminal or an alert.
+func PrintableLine(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r):
+			return ' '
+		case unicode.IsControl(r), !unicode.IsPrint(r):
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// claimedIssuer is IssuerName quoted (%q), so a message shows it as the
+// name the certificate claims, not as a fact; "an unnamed issuer" when it
+// names none.
+func claimedIssuer(cert *x509.Certificate) string {
+	if name := IssuerName(cert); name != "" {
+		return fmt.Sprintf("%q", name)
+	}
+	return "an unnamed issuer"
 }
 
 // certificateHint says what a refused certificate most likely means, for
@@ -205,11 +242,10 @@ func certificateHint(rawURL string, err error) string {
 		return ""
 	}
 	leaf := verify.UnverifiedCertificates[0]
-	issuer := IssuerName(leaf)
 	if strings.EqualFold(leaf.Issuer.CommonName, "TRAEFIK DEFAULT CERT") {
 		return fmt.Sprintf(". %s answers with Traefik's own certificate: the panel's server has no certificate for that name yet (see the panel domain's status)", host)
 	}
-	return fmt.Sprintf(". The certificate for %s was issued by %s, which this server does not trust. If that is not who issued the panel's certificate, a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt %s from it, or join with the panel's IP address and --pin", host, issuer, host)
+	return fmt.Sprintf(". The certificate for %s says it was issued by %s, an issuer this server does not trust. If that is not who issued the panel's certificate, a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt %s from it, or join with the panel's IP address and --pin", host, claimedIssuer(leaf), host)
 }
 
 // SPKIFingerprint returns the SHA-256 of a certificate's public key. Pinning
@@ -234,7 +270,7 @@ func PinnedTLSConfig(pin []byte) *tls.Config {
 				return ErrPinMismatch
 			}
 			if subtle.ConstantTimeCompare(SPKIFingerprint(cs.PeerCertificates[0]), pin) != 1 {
-				return &pinMismatchError{issuer: IssuerName(cs.PeerCertificates[0])}
+				return &pinMismatchError{issuer: claimedIssuer(cs.PeerCertificates[0])}
 			}
 			return nil
 		},

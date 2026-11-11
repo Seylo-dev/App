@@ -10,6 +10,7 @@ import (
 
 	"github.com/seylo-dev/app/go/gen/brand"
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
+	"github.com/seylo-dev/app/go/internal/conn"
 	"github.com/seylo-dev/app/go/internal/docker"
 	"github.com/seylo-dev/app/go/internal/localapi"
 	"github.com/seylo-dev/app/go/internal/rpc"
@@ -65,17 +66,22 @@ func (s *statusTracker) failed(state string, err error, retryIn time.Duration) {
 	s.recordError("connection", err)
 }
 
+// recordError keeps err for seylo status as one line of printable text: a
+// dial error can quote what whoever answers at the panel's address chose
+// (a certificate's names), and a line break in it would print a line of
+// its own, a fake "Panel: ... (connected)" for the installer.
 func (s *statusTracker) recordError(source string, err error) {
 	if err == nil {
 		return
 	}
+	msg := conn.PrintableLine(err.Error())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
 	if source == "connection" {
-		s.conn.LastError, s.conn.LastErrorAt = err.Error(), now
+		s.conn.LastError, s.conn.LastErrorAt = msg, now
 	}
-	s.errors = append(s.errors, localapi.ErrorEntry{At: now, Source: source, Message: err.Error()})
+	s.errors = append(s.errors, localapi.ErrorEntry{At: now, Source: source, Message: msg})
 	if len(s.errors) > recentErrors {
 		s.errors = s.errors[len(s.errors)-recentErrors:]
 	}

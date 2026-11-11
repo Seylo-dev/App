@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // panelBehind serves TLS with a leaf for 127.0.0.1 signed by a CA named
@@ -81,7 +82,7 @@ func TestDialNamesTheIssuerOfAnUntrustedCertificate(t *testing.T) {
 	srv := panelBehind(t, "Fortinet", "FG800D5818800524")
 	err := dialErr(t, DialOptions{URL: wsURL(srv), RootCAs: x509.NewCertPool()})
 	msg := err.Error()
-	for _, want := range []string{"issued by Fortinet, FG800D5818800524", "TLS inspection", "exempt 127.0.0.1", "--pin"} {
+	for _, want := range []string{`says it was issued by "Fortinet, FG800D5818800524"`, "TLS inspection", "exempt 127.0.0.1", "--pin"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q does not say %q", msg, want)
 		}
@@ -108,10 +109,62 @@ func TestDialPinMismatchNamesTheIssuer(t *testing.T) {
 	if !errors.Is(err, ErrPinMismatch) {
 		t.Fatalf("err = %v, want ErrPinMismatch", err)
 	}
-	for _, want := range []string{"issued by Zscaler Inc., Zscaler Intermediate Root CA", "TLS inspection"} {
+	for _, want := range []string{`says it was issued by "Zscaler Inc., Zscaler Intermediate Root CA"`, "TLS inspection"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not say %q", err.Error(), want)
 		}
+	}
+}
+
+// forgedIssuer is an issuer organization a TLS peer could choose: a line
+// break and a fake seylo status line, terminal escapes (erase the line,
+// right-to-left override) and length.
+const forgedIssuer = "Let's Encrypt\nPanel:   https://panel.example.com (connected)\r\x1b[2K‮\tdone" +
+	"                                                                and then a lot more text"
+
+// Whoever answers the TLS handshake chooses the issuer, and the error with
+// it goes to seylo status, the installer and the panel's alerts: one
+// quoted line of printable text, short, whatever the certificate says.
+func TestDialQuotesAForgedIssuerOnOneLine(t *testing.T) {
+	srv := panelBehind(t, forgedIssuer, "CN")
+	for name, opts := range map[string]DialOptions{
+		"untrusted": {URL: wsURL(srv), RootCAs: x509.NewCertPool()},
+		"pinned":    {URL: wsURL(srv), PinSHA256: make([]byte, 32)},
+	} {
+		msg := dialErr(t, opts).Error()
+		if strings.ContainsFunc(msg, func(r rune) bool { return unicode.IsControl(r) || !unicode.IsPrint(r) }) {
+			t.Errorf("%s: error %q has control or unprintable runes", name, msg)
+		}
+		want := `issued by "Let's Encrypt Panel: https://panel.example.com (connected) [2K done and then..."`
+		if !strings.Contains(msg, want) {
+			t.Errorf("%s: error %q does not say %s", name, msg, want)
+		}
+	}
+}
+
+func TestIssuerName(t *testing.T) {
+	for _, tc := range []struct {
+		org  []string
+		cn   string
+		want string
+	}{
+		{[]string{"Fortinet"}, "FG800D5818800524", "Fortinet, FG800D5818800524"},
+		{[]string{" Zscaler  Inc. "}, "Zscaler  Inc.", "Zscaler Inc."},
+		{[]string{"\x1b[31mred", ""}, "\n", "[31mred"},
+		{[]string{"\x1b\x00", ""}, "\n\t", ""},
+		{nil, strings.Repeat("ab", 60), strings.Repeat("ab", 38) + "a..."},
+		{[]string{"שלום​ עולם"}, "", "שלום עולם"},
+	} {
+		cert := &x509.Certificate{Issuer: pkix.Name{Organization: tc.org, CommonName: tc.cn}}
+		if got := IssuerName(cert); got != tc.want {
+			t.Errorf("IssuerName(%q, %q) = %q, want %q", tc.org, tc.cn, got, tc.want)
+		}
+	}
+	if got := claimedIssuer(&x509.Certificate{}); got != "an unnamed issuer" {
+		t.Errorf("claimedIssuer of no name = %q", got)
+	}
+	if got := claimedIssuer(&x509.Certificate{Issuer: pkix.Name{CommonName: `Say "hi"`}}); got != `"Say \"hi\""` {
+		t.Errorf("claimedIssuer = %s", got)
 	}
 }
 

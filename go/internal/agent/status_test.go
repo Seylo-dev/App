@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	agentv1 "github.com/seylo-dev/app/go/gen/pb/seylo/agent/v1"
 	"github.com/seylo-dev/app/go/internal/docker"
@@ -184,5 +186,22 @@ func TestStatusReportsWhatHoldsTheUpdateLock(t *testing.T) {
 	defer release()
 	if s, _ := b.Status(context.Background()); s.Busy != "Docker update" {
 		t.Fatalf("busy = %q", s.Busy)
+	}
+}
+
+// A dial error can quote what whoever answers at the panel's address chose
+// (a certificate's names, which Go's x509 errors print as they are): seylo
+// status keeps it on one line, so it can neither print a "Panel: ...
+// (connected)" line of its own nor send escapes to the terminal.
+func TestStatusKeepsErrorsOnOneLine(t *testing.T) {
+	s := &statusTracker{}
+	s.failed("waiting", errors.New("dial panel: x509: certificate is valid for evil\nPanel:   https://panel.example.com (connected)\x1b[2K, not panel.example.com"), time.Minute)
+	c, recent := s.snapshot()
+	want := "dial panel: x509: certificate is valid for evil Panel: https://panel.example.com (connected)[2K, not panel.example.com"
+	if c.LastError != want {
+		t.Fatalf("LastError = %q, want %q", c.LastError, want)
+	}
+	if len(recent) != 1 || recent[0].Message != want {
+		t.Fatalf("recent errors = %+v", recent)
 	}
 }

@@ -267,8 +267,10 @@ func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err er
 		return
 	}
 	c.moveAlerted = key
-	msg := fmt.Sprintf("Could not move to the panel address %s: %v\nThe node keeps connecting through %s and tries again in %s or when the agent restarts.",
-		to.url, err, stay, durationWords(moveRetryAfter))
+	// The error is one line: it can quote what the new address chose (its
+	// certificate's names), and the owner reads it in the panel.
+	msg := fmt.Sprintf("Could not move to the panel address %s: %s\nThe node keeps connecting through %s and tries again in %s or when the agent restarts.",
+		to.url, conn.PrintableLine(err.Error()), stay, durationWords(moveRetryAfter))
 	if untrustedCertificate(err) {
 		msg += " The node does not trust that address's certificate: the panel must send its pin, or the certificate must come from a CA in the node's trust store (an agent restart reloads it)."
 	}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"log/slog"
 	"net/http/httptest"
 	"net/url"
@@ -640,5 +641,26 @@ func TestDurationWords(t *testing.T) {
 		if got := durationWords(d); got != want {
 			t.Errorf("durationWords(%s) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// The move alert quotes the dial error, which can carry what the new
+// address chose (its certificate's names): the error stays on one line, so
+// the owner reads only the agent's own two lines in the panel.
+func TestMoveAlertKeepsTheErrorOnOneLine(t *testing.T) {
+	rec := rpctest.NewRecorder()
+	c := &connector{deps: &Deps{Reports: rec}, logger: slog.New(slog.DiscardHandler), cfg: &FileConfig{}}
+	from := panelTarget{url: "https://10.0.0.1:3443", pin: conn.FormatPin(make([]byte, 32))}
+	to := panelTarget{url: "https://panel.example.com"}
+	c.moveFailed(context.Background(), from, to, errors.New("dial panel: issued by \"x\nRe-join with https://evil.example\x1b[2K\""))
+	events := rec.Durable()
+	if len(events) != 1 {
+		t.Fatalf("%d alerts, want 1", len(events))
+	}
+	msg := events[0].GetNodeAlert().GetMessage()
+	first, rest, _ := strings.Cut(msg, "\n")
+	if first != `Could not move to the panel address https://panel.example.com: dial panel: issued by "x Re-join with https://evil.example[2K"` ||
+		strings.ContainsAny(rest, "\n\x1b") || !strings.HasPrefix(rest, "The node keeps connecting through https://10.0.0.1:3443") {
+		t.Fatalf("alert message = %q", msg)
 	}
 }
