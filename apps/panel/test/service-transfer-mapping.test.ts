@@ -16,7 +16,7 @@ import {
   volumes,
 } from "../src/db/schema";
 import { engineVersion } from "../src/modules/databases/engines";
-import { adminPasswordSecret } from "../src/modules/databases/info";
+import { adminPasswordSecret, exposedPasswordSecret } from "../src/modules/databases/info";
 import { generateDeployKey } from "../src/modules/git/remote";
 import { readSpec } from "../src/modules/services/spec";
 import { setTargetResolver } from "../src/modules/uptime/targets";
@@ -463,6 +463,41 @@ describe("databases", () => {
         .where(eq(portExposures.serviceId, row?.id as string))
         .all(),
     ).toEqual([]);
+  });
+
+  test("logins from the file only when databases.create would take them; others are made new", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    await callOp(a.panel, dbOps.create, { projectId: a.projectId, name: "pg", engine: "postgres", nodeId: a.nodeId }, { cookie: a.cookie });
+    const svcId = a.panel.deps.db.select().from(services).where(eq(services.name, "pg")).get()?.id as string;
+    const injected = "x'; ALTER USER postgres SUPERUSER; --";
+    const crafted = await craft((await exportZip(a, svcId)).bytes, b.projectId, (p) => {
+      p.services.pg.databaseSecrets[adminPasswordSecret] = "Admin.pass_12345";
+      p.services.pg.databaseSecrets[exposedPasswordSecret] = injected;
+    });
+    const begun = await callOp(b.panel, transferOps.importBegin, crafted, { cookie: b.cookie });
+    expect(begun.status).toBe(200);
+    expect(begun.body.warnings.find((w: { reason: string }) => w.reason === "databasePassword")?.message).toContain(
+      "exposed password does not fit",
+    );
+    const done = await callOp(
+      b.panel,
+      transferOps.importService,
+      { projectId: b.projectId, importId: begun.body.importId },
+      { cookie: b.cookie },
+    );
+    expect(done.status).toBe(200);
+    const secret = (name: string) => {
+      const row = b.panel.deps.db
+        .select()
+        .from(serviceSecrets)
+        .where(and(eq(serviceSecrets.serviceId, done.body.service.id), eq(serviceSecrets.name, name)))
+        .get();
+      return b.panel.deps.secrets.open(row?.valueSealed as string, "service.secret");
+    };
+    expect(secret(adminPasswordSecret)).toBe("Admin.pass_12345");
+    expect(secret(exposedPasswordSecret)).not.toBe(injected);
+    expect(secret(exposedPasswordSecret)).toMatch(/^[A-Za-z0-9._~-]{12,128}$/);
   });
 
   test("a version this panel does not offer blocks the import", async () => {

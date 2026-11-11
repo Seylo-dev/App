@@ -729,7 +729,24 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       : doc.kind === "box"
         ? [{ name: boxWorkspaceVolume, mountPath: "/home/coder", readOnly: false }]
         : doc.volumes.map((v) => ({ name: v.name, mountPath: v.mountPath, readOnly: v.readOnly }));
-  const databaseSecrets = secrets?.databaseSecrets ?? {};
+  // Logins from the file only when databases.create would take them: engines.ts writes them into SQL and shell input as they are.
+  const databaseLogins: { name: string; value: string }[] = [];
+  if (isDatabase) {
+    const refused: string[] = [];
+    for (const name of [adminPasswordSecret, exposedPasswordSecret]) {
+      const value = secrets?.databaseSecrets[name];
+      const fits = value !== undefined && Value.Check(dbOps.create.input.properties.password, value);
+      if (value !== undefined && !fits) refused.push(name === adminPasswordSecret ? "admin" : "exposed");
+      databaseLogins.push({ name, value: fits ? (value as string) : generatePassword() });
+    }
+    if (refused.length) {
+      const one = refused.length === 1;
+      warnings.push({
+        reason: "databasePassword",
+        message: `The file's ${refused.join(" and ")} ${one ? "password does" : "passwords do"} not fit this panel's rule (12 to 128 letters, digits or . _ ~ -), so ${one ? "a new one is" : "new ones are"} made. Apps that connect with the old ${one ? "one need the new one" : "ones need the new ones"} from the database's Connect tab.`,
+      });
+    }
+  }
   const choices: Choices = {
     name,
     ...(nodeId ? { nodeId } : {}),
@@ -843,10 +860,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
                 tlsHostname: null,
                 webUiIdleMinutes: doc.database.webUiIdleMinutes,
               },
-              secrets: [
-                { name: adminPasswordSecret, value: databaseSecrets[adminPasswordSecret] ?? generatePassword() },
-                { name: exposedPasswordSecret, value: databaseSecrets[exposedPasswordSecret] ?? generatePassword() },
-              ],
+              secrets: databaseLogins,
             }
           : null,
       box: doc.kind === "box" ? { repository: doc.box?.repository ?? null, idleMinutes: Math.min(1440, doc.box?.idleMinutes ?? 30) } : null,
