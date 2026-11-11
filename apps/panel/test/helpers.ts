@@ -51,15 +51,17 @@ export function testPanel(
     /** panel.db on disk, for a test that starts a second panel on it (a restart, with the same masterKey); in memory by default. */
     panelPath?: string;
     masterKey?: Uint8Array;
+    /** The data folder, for a test whose modules read it at start (a moved panel's commit marker). */
+    dataDir?: string;
   } = {},
 ): TestPanel {
   const config = {
     ...loadConfig({}, packageRoot),
-    dataDir: "/nonexistent",
+    dataDir: options.dataDir ?? "/nonexistent",
     secureCookies: false,
     ...(options.webDist ? { webDist: options.webDist } : { webDist: "/nonexistent" }),
   };
-  const { panelPath = ":memory:", masterKey = crypto.getRandomValues(new Uint8Array(32)), ...rest } = options;
+  const { panelPath = ":memory:", masterKey = crypto.getRandomValues(new Uint8Array(32)), dataDir: _dataDir, ...rest } = options;
   const databases = openDatabases({ panelPath, metricsPath: ":memory:", migrationsDir: config.migrationsDir });
   const panel = createPanel({ config, databases, masterKey, logger: silentLogger(), ...rest });
   return { ...panel, close: () => databases.close() };

@@ -13,7 +13,15 @@
 //     joined now would be missing from the copy (agent-hub/session.ts);
 //   - at the switch, and on a copy left behind, agents' connects answer 503
 //     before the handshake, so every node gives up on this address and dials
-//     the new one it was given (agent-hub/endpoint.ts).
+//     the new one it was given (agent-hub/endpoint.ts). The moved panel does
+//     the same while it waits for the switch (arrival.ts), so a node that
+//     dials it early comes back to the old panel.
+//
+// The gate only stops changes that start after it: an op or a webhook that
+// passed it a moment before may still be awaiting an agent or a provider
+// before it writes. Both count themselves as writes in flight (beginWrite,
+// from ops/pipeline.ts and panel.ts) and the move waits for them
+// (writesSettled) before it copies the database.
 //
 // The job runner is held separately (Deps.jobControl). State is per panel,
 // keyed by its database like the other module state, so the tailnet
@@ -29,11 +37,25 @@ export interface WritePause {
   targetName: string;
   /** "moved": where the panel answers now ("http://203.0.113.20:3000"), when known. */
   newUrl?: string | null;
-  /** Agents' connects answer 503 (the switch began, or this copy was left behind). */
+  /** Agents' connects answer 503 (the switch began, this copy was left behind, or the moved copy waits for the switch). */
   agentsClosed: boolean;
+  /**
+   * Set on the moved panel while it waits as the copy of this move (until
+   * its first agent): /api/health answers it as "moveId", which every
+   * node's StagePanelAddress probe requires, so an address that reaches the
+   * old panel (same key, same port) never passes.
+   */
+  arrivalMoveId?: string;
 }
 
 const pauses = new WeakMap<object, WritePause>();
+
+interface Writes {
+  count: number;
+  waiters: (() => void)[];
+}
+
+const writes = new WeakMap<object, Writes>();
 
 /** Op ids that keep working while the panel moves. */
 const allowedOps = new Set(["panelMove.cancel"]);
@@ -71,9 +93,50 @@ export function pauseRefusal(db: PanelDb, opId: string): OpError | null {
 export function agentsRefused(db: PanelDb): string | null {
   const pause = pauses.get(db);
   if (!pause?.agentsClosed) return null;
+  if (pause.arrivalMoveId) {
+    return "This is the moved copy of the panel and the move has not switched to it yet. Connect to the panel's current address.";
+  }
   return pause.reason === "moved"
     ? `The panel moved to ${pause.targetName}. Connect to its new address.`
     : `The panel is moving to ${pause.targetName}. Connect to its new address.`;
+}
+
+/** The move this panel waits for as its moved copy, for /api/health; null otherwise. */
+export function arrivalMoveId(db: PanelDb): string | null {
+  return pauses.get(db)?.arrivalMoveId ?? null;
+}
+
+/**
+ * Counts a change that passed the gate until the returned function runs
+ * (once; later calls do nothing). Every op that is not a query and every
+ * module endpoint that writes counts itself, paused or not.
+ */
+export function beginWrite(db: PanelDb): () => void {
+  const state = writes.get(db) ?? { count: 0, waiters: [] };
+  writes.set(db, state);
+  state.count += 1;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    state.count -= 1;
+    if (state.count > 0) return;
+    const waiting = state.waiters;
+    state.waiters = [];
+    for (const resolve of waiting) resolve();
+  };
+}
+
+/** Changes that passed the gate and have not finished yet. */
+export function writesInFlight(db: PanelDb): number {
+  return writes.get(db)?.count ?? 0;
+}
+
+/** Resolves once no change that passed the gate is still running. */
+export function writesSettled(db: PanelDb): Promise<void> {
+  const state = writes.get(db);
+  if (!state || state.count === 0) return Promise.resolve();
+  return new Promise((resolve) => state.waiters.push(resolve));
 }
 
 /** Joins wait while the panel moves: a node that joined now would be missing from the moved panel. */

@@ -23,7 +23,7 @@ import { auditLog, deployments, jobs, nodes, servicePlacements, services, sessio
 import { panelWebsocket } from "../src/http/ws-guard";
 import { nodeOfflineJob, nodeOfflineJobType } from "../src/modules/alerts/events";
 import { ensurePanelService, panelServiceId } from "../src/modules/nodes/panel-service";
-import { commitArrival } from "../src/modules/panelMove/arrival";
+import { checkMoveCommit, commitArrival } from "../src/modules/panelMove/arrival";
 import { runCleanups } from "../src/modules/panelMove/cleanup";
 import type { PanelMoveArrival, PanelMoveDone, PanelMoveOut } from "../src/modules/panelMove/keys";
 import { setWritePause, writePause } from "../src/modules/panelMove/pause";
@@ -439,6 +439,10 @@ describe("the move", () => {
     await gate.started;
     expect(panel.runner.held).toBe(true);
     expect((await callOp(panel, settings.general, {}, { cookie: owner.cookie })).status).toBe(200);
+    // The old panel never answers health as a moved copy: a probe of an address that reaches it fails.
+    const healthy = (await (await panel.app.handle(new Request("http://panel.test/api/health"))).json()) as Record<string, unknown>;
+    expect(healthy).toMatchObject({ status: "ok" });
+    expect(healthy.moveId).toBeUndefined();
     const refused = await callOp(panel, settings.updateGeneral, { name: "x" }, { cookie: owner.cookie });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatchObject({ code: "CONFLICT", message: "The panel is moving to new. Try again in a few minutes." });
@@ -750,24 +754,108 @@ describe("the moved panel", () => {
     startedAt: Date.now() - 60_000,
   });
 
-  test("waits for its first agent with jobs held and changes refused, then takes over", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "panel-move-arrive-"));
+  /** A panel.db holding an arrival, as the old panel ships it; the nodes get fresh ids and the target the agent key. */
+  function shippedCopy(dir: string, masterKey: Uint8Array, key = agentKey()) {
     const panelPath = join(dir, "panel.db");
-    const masterKey = crypto.getRandomValues(new Uint8Array(32));
     const first = testPanel({ panelPath, masterKey });
     const ids = ["old", "new", "b"].map(
       (name) =>
         first.deps.db
           .insert(nodes)
-          .values({ name, publicKey: Buffer.from(crypto.getRandomValues(new Uint8Array(32))), isPanelNode: name === "new" })
+          .values({
+            name,
+            publicKey: name === "new" ? Buffer.from(key.publicKey) : Buffer.from(crypto.getRandomValues(new Uint8Array(32))),
+            isPanelNode: name === "new",
+          })
           .returning()
           .get().id,
     );
     [fromId, targetId, otherId] = ids as [string, string, string];
     setSetting(first.deps.db, "panelMoveArrival", arrival());
     first.close();
+    return { panelPath, key };
+  }
 
-    const moved = testPanel({ panelPath, masterKey });
+  const health = async (app: { handle(request: Request): Promise<Response> | Response }) =>
+    (await (await app.handle(new Request("http://panel.test/api/health"))).json()) as { status: string; moveId?: string };
+
+  test("is a standby until the old panel commits the switch here: agents get 503, health names the move", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "panel-move-arrive-"));
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const { panelPath, key } = shippedCopy(dir, masterKey);
+    const moved = testPanel({ panelPath, masterKey, dataDir: dir });
+    moved.app.listen({ hostname: "127.0.0.1", port: 0, websocket: panelWebsocket });
+    const url = `http://127.0.0.1:${moved.app.server?.port}`;
+    try {
+      const me = await createUser(moved, "owner");
+      expect(moved.runner.held).toBe(true);
+      const refused = await callOp(moved, settings.updateGeneral, { name: "x" }, { cookie: me.cookie });
+      expect(refused.body.error.details.reason).toBe("panelMoving");
+      const waiting = (await callOp(moved, panelMove.status, {}, { cookie: me.cookie })).body;
+      expect(waiting).toMatchObject({ state: "running", step: "switching", targetNodeName: "new", fromNodeName: "old", canCancel: false });
+      // The probe of every node requires the move id, on the panel port and the agents' TLS port alike.
+      expect(await health(moved.app)).toMatchObject({ status: "ok", moveId: "m".repeat(16) });
+      expect(await health(moved.agentApp)).toMatchObject({ status: "ok", moveId: "m".repeat(16) });
+
+      // A node that lost the old panel and dials here early gets 503 and goes back.
+      const early = new FakeAgent({ url, panelId: moved.deps.panelId, nodeId: targetId, key });
+      await expect(early.connect()).rejects.toBeDefined();
+      expect(moved.deps.agents.isOnline(targetId)).toBe(false);
+      // Even a session that got this far commits nothing before the switch.
+      const stray = fakeAgent(moved, otherId);
+      stray.disconnect();
+      expect(getSetting(moved.deps.db, "panelMoveArrival")).toBeDefined();
+      // A marker of another move opens nothing.
+      writeFileSync(join(dir, "move-commit"), "z".repeat(16));
+      expect(checkMoveCommit(moved.deps)).toBe(false);
+      expect(writePause(moved.deps.db)?.agentsClosed).toBe(true);
+
+      // CommitMovedPanel writes the marker with this move's id: within about a second agents are taken.
+      writeFileSync(join(dir, "move-commit"), `${"m".repeat(16)}\n`);
+      for (let i = 0; i < 300 && writePause(moved.deps.db)?.agentsClosed; i++) await Bun.sleep(10);
+      expect(writePause(moved.deps.db)).toMatchObject({ reason: "moving", agentsClosed: false });
+      // Still the copy until its first agent: changes wait, the probe still sees the move.
+      expect((await callOp(moved, settings.updateGeneral, { name: "x" }, { cookie: me.cookie })).body.error.details.reason).toBe(
+        "panelMoving",
+      );
+      expect((await health(moved.app)).moveId).toBe("m".repeat(16));
+
+      const agent = new FakeAgent({ url, panelId: moved.deps.panelId, nodeId: targetId, key });
+      await agent.connect();
+      expect(agent.nodeId).toBe(targetId);
+      expect(getSetting(moved.deps.db, "panelMoveArrival")).toBeUndefined();
+      expect(existsSync(join(dir, "move-commit"))).toBe(false);
+      expect((await health(moved.app)).moveId).toBeUndefined();
+      expect(moved.runner.held).toBe(false);
+      await agent.close();
+    } finally {
+      await moved.app.stop(true);
+      moved.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a standby that restarts after the commit takes agents at once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "panel-move-arrive-"));
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const { panelPath } = shippedCopy(dir, masterKey);
+    writeFileSync(join(dir, "move-commit"), "m".repeat(16));
+    const moved = testPanel({ panelPath, masterKey, dataDir: dir });
+    try {
+      expect(writePause(moved.deps.db)).toMatchObject({ reason: "moving", agentsClosed: false, arrivalMoveId: "m".repeat(16) });
+    } finally {
+      moved.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("waits for its first agent with jobs held and changes refused, then takes over", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "panel-move-arrive-"));
+    const masterKey = crypto.getRandomValues(new Uint8Array(32));
+    const { panelPath } = shippedCopy(dir, masterKey);
+    writeFileSync(join(dir, "move-commit"), "m".repeat(16));
+
+    const moved = testPanel({ panelPath, masterKey, dataDir: dir });
     try {
       const me = await createUser(moved, "owner");
       expect(moved.runner.held).toBe(true);
