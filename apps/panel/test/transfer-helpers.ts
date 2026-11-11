@@ -26,6 +26,14 @@ import {
   uptimeChecks,
   volumes,
 } from "../src/db/schema";
+import {
+  aadFor,
+  decryptSecrets,
+  deriveKeys,
+  encryptSecrets,
+  type SecretsEnvelope,
+  signManifest,
+} from "../src/modules/serviceTransfer/crypto";
 import { FakeFleet } from "./fake-fleet";
 import { callOp, createUser, type TestPanel, testPanel } from "./helpers";
 
@@ -228,3 +236,29 @@ export async function begin(
 }
 
 export const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
+
+/** secrets.enc's plaintext (PortableSecretsV1), loosely typed for crafting. */
+export type SecretsPlain = { services: Record<string, any> };
+
+/**
+ * An encrypted export changed the way someone who knows its passphrase can:
+ * secrets.enc opened, edited, sealed and the manifest signed again, so
+ * every integrity check passes and only the importer's own checks stand.
+ * Returns importBegin's input for `projectId`.
+ */
+export async function craft(zip: Uint8Array, projectId: string, edit: (plain: SecretsPlain) => void) {
+  const e = await entriesOf(zip);
+  const envelope = JSON.parse(e.secretsEnc as string) as SecretsEnvelope;
+  const keys = await deriveKeys(passphrase, envelope.kdf);
+  const aad = aadFor(e.manifest.services);
+  const plain = JSON.parse(decryptSecrets(envelope, keys, aad)) as SecretsPlain;
+  edit(plain);
+  const secretsEnc = encryptSecrets(JSON.stringify(plain), keys, envelope.kdf, aad);
+  const manifest = JSON.parse(e.manifestText) as transferOps.PortableManifestV1;
+  Object.assign(manifest.entries.find((x) => x.path === "secrets.enc") as object, {
+    size: Buffer.byteLength(secretsEnc),
+    sha256: sha(secretsEnc),
+  });
+  const manifestText = JSON.stringify(manifest);
+  return { projectId, manifest: manifestText, signature: signManifest(Buffer.from(manifestText), keys.macKey), secretsEnc, passphrase };
+}

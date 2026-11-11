@@ -44,7 +44,7 @@ import type { Materialize } from "../services/portable";
 import { gitLabel, nameKey } from "../services/rows";
 import { builtAppPort, defaultSpec, type ServiceSpecJson } from "../services/spec";
 import { assertTimeout } from "../uptime/index";
-import { type AccessOption, accessPlan, credentialFromFile, sameName, sourceFor } from "./mapping";
+import { type AccessOption, accessPlan, credentialFromFile, type FileCredential, sameName, sourceFor } from "./mapping";
 import { domainKey, type ServiceSecrets } from "./snapshot";
 
 type Doc = transferOps.PortableServiceV1;
@@ -68,7 +68,7 @@ export interface Plan {
   preview: ImportPreview;
   materialize: Omit<Materialize, "createdBy">;
   pick: AccessOption | null;
-  credential: ReturnType<typeof credentialFromFile>;
+  credential: FileCredential | null;
   /** The project's shared variables to write first (null: leave them). */
   sharedEnv: string | null;
   /** Domains by key whose basic auth users need a password from the import call. */
@@ -253,13 +253,21 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       field: "sourceAccess",
     });
   }
-  const credential = pick?.kind === "createFromFile" ? credentialFromFile(doc, secrets) : null;
-  if (credential && !ctx.access.can(credential.kind === "registry" ? "registries.manage" : "git.manage")) {
-    blockers.push({
-      reason: "permission",
-      message: `Creating the ${credential.kind === "registry" ? "registry login" : "git credential"} needs ${credential.kind === "registry" ? "registries.manage" : "git.manage"}.`,
-      field: "sourceAccess",
-    });
+  let credential: FileCredential | null = null;
+  if (pick?.kind === "createFromFile") {
+    const registry = doc.sourceAccess?.via === "registry";
+    if (!ctx.access.can(registry ? "registries.manage" : "git.manage")) {
+      blockers.push({
+        reason: "permission",
+        message: `Creating the ${registry ? "registry login" : "git credential"} needs ${registry ? "registries.manage" : "git.manage"}.`,
+        field: "sourceAccess",
+      });
+    }
+    try {
+      credential = credentialFromFile(doc, secrets);
+    } catch (error) {
+      blockers.push({ reason: "sourceAccess", message: message(error), field: "sourceAccess" });
+    }
   }
   const deployOnPush = choicesIn.deployOnPush ?? false;
   const source = isDatabase || doc.kind === "box" ? spec.source : sourceFor(doc, pick, { deployOnPush, createdId: "pending" });

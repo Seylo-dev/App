@@ -6,12 +6,15 @@
 // Nothing panel-wide is created from the file except, on request, the git
 // credential or registry login the exporter included.
 
-import type { serviceTransfer as transferOps } from "@seylo/ops";
+import { git as gitOps, OpError, registries as registryOps, type serviceTransfer as transferOps } from "@seylo/ops";
+import { Value } from "@sinclair/typebox/value";
 import { asc, eq, isNull } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { gitCredentials, githubInstallations, gitProviders, registryCredentials } from "../../db/schema";
+import { type NewCredential, newCredential } from "../git/credentials";
 import { recordedHostOf } from "../git/targets";
 import { accountLogin, connectedAccount } from "../github/account";
+import { type RegistryLogin, registryLogin } from "../registries/login";
 import { registryMatches } from "../services/source-guard";
 import type { ServiceSpecJson } from "../services/spec";
 import type { ServiceSecrets } from "./snapshot";
@@ -203,12 +206,55 @@ export function sourceFor(
   }
 }
 
-/** The credential row to create from the file (createFromFile), sealed by the caller. */
-export function credentialFromFile(doc: Doc, secrets: ServiceSecrets | null) {
+export type FileCredential =
+  | ({ kind: "gitCredential" } & ReturnType<typeof newCredential>)
+  | { kind: "registry"; name: string; login: RegistryLogin };
+
+/**
+ * The credential to create from the file (createFromFile), sealed by the
+ * caller. It goes through git.createCredential's checks (the host's shape
+ * and case, known_hosts lines for it, a key the panel can read: the public
+ * key and fingerprint come from the key, never from the file) and
+ * registries.create's input rules. registries.create also tries the login;
+ * an import does not, so a registry the panel cannot reach does not stop
+ * it. BAD_REQUEST field sourceAccess when the file's does not pass.
+ */
+export function credentialFromFile(doc: Doc, secrets: ServiceSecrets | null): FileCredential | null {
   const wanted = doc.sourceAccess;
   const cred = secrets?.sourceCredential;
-  if (wanted?.via === "gitCredential" && cred?.kind === "gitCredential") return { kind: "gitCredential" as const, wanted, cred };
-  if (wanted?.via === "registry" && cred?.kind === "registry") return { kind: "registry" as const, wanted, cred };
+  const refused = (what: string, error?: unknown) =>
+    new OpError(
+      "BAD_REQUEST",
+      `The ${what} in the file does not pass this panel's checks.${error instanceof OpError ? ` ${error.message}` : ""} Pick another way to read the source.`,
+      { field: "sourceAccess", reason: "sourceAccess" },
+    );
+  if (wanted?.via === "gitCredential" && cred?.kind === "gitCredential") {
+    const input: NewCredential = {
+      name: (wanted.name.trim() || wanted.host).slice(0, 60),
+      kind: wanted.kind,
+      host: wanted.host,
+      ...(wanted.kind === "token"
+        ? { token: cred.secret, ...(wanted.username ? { username: wanted.username } : {}) }
+        : { privateKey: cred.secret }),
+      ...(cred.knownHosts ? { knownHosts: cred.knownHosts } : {}),
+    };
+    if (!Value.Check(gitOps.createCredential.input, input)) throw refused("git credential");
+    try {
+      return { kind: "gitCredential", ...newCredential(input) };
+    } catch (error) {
+      throw refused("git credential", error);
+    }
+  }
+  if (wanted?.via === "registry" && cred?.kind === "registry") {
+    const input = {
+      name: (wanted.name.trim() || wanted.server).slice(0, 60),
+      server: wanted.server,
+      username: wanted.username,
+      password: cred.password,
+    };
+    if (!Value.Check(registryOps.create.input, input)) throw refused("registry login");
+    return { kind: "registry", name: input.name.trim(), login: registryLogin(input) };
+  }
   return null;
 }
 

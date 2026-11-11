@@ -7,6 +7,7 @@ import {
   gitCredentials,
   githubApps,
   githubInstallations,
+  gitInternalHosts,
   portExposures,
   registryCredentials,
   serviceDatabases,
@@ -16,9 +17,11 @@ import {
 } from "../src/db/schema";
 import { engineVersion } from "../src/modules/databases/engines";
 import { adminPasswordSecret } from "../src/modules/databases/info";
+import { generateDeployKey } from "../src/modules/git/remote";
 import { readSpec } from "../src/modules/services/spec";
+import { setTargetResolver } from "../src/modules/uptime/targets";
 import { callOp, createApiKey, createUser } from "./helpers";
-import { begin, closeSides, entriesOf, exportZip, type Side, sha, side } from "./transfer-helpers";
+import { begin, closeSides, craft, entriesOf, exportZip, type Side, sha, side } from "./transfer-helpers";
 
 afterEach(closeSides);
 
@@ -171,6 +174,183 @@ describe("what reads the source", () => {
       "tok-123456",
     ]);
     expect(done.body.service.sourceConfig.credentialId).toBe(created?.id);
+  });
+
+  test("a credential made from the file goes through git.createCredential's checks; the key gives its fingerprint", async () => {
+    const a = await side();
+    const c = await side("node-c");
+    const key = generateDeployKey("deploy");
+    const knownHosts = "git.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+    const cred = a.panel.deps.db
+      .insert(gitCredentials)
+      .values({
+        name: "deploy",
+        kind: "ssh_key",
+        host: "git.example.com",
+        secretSealed: a.panel.deps.secrets.seal(key.privateKey, "git.credential"),
+        knownHosts,
+        publicKey: key.publicKey,
+        fingerprint: key.fingerprint,
+      })
+      .returning()
+      .get();
+    const id = await app(a, "web", {
+      type: "git",
+      url: "ssh://git@git.example.com/team/web.git",
+      branch: "main",
+      credentialId: cred.id,
+      deployOnPush: false,
+    });
+    const file = await exportZip(a, id, { includeSourceLogin: true });
+    const made = () => c.panel.deps.db.select().from(gitCredentials).all();
+
+    // Refused before anything is made: known_hosts for another host, a key that cannot be read, a host that is no host.
+    const refusals: [(p: any) => void, string][] = [
+      [
+        (p) => (p.services.web.sourceCredential.knownHosts = "evil.example ssh-ed25519 AAAAC3Nza"),
+        "None of these lines are for git.example.com",
+      ],
+      [
+        (p) =>
+          (p.services.web.sourceCredential.secret = "-----BEGIN OPENSSH PRIVATE KEY-----\nnot a key\n-----END OPENSSH PRIVATE KEY-----\n"),
+        "This private key cannot be read",
+      ],
+      [(p) => (p.services.web.doc.sourceAccess.host = "git.example.com/../../x"), "does not pass this panel's checks"],
+    ];
+    for (const [edit, text] of refusals) {
+      const begun = await callOp(c.panel, transferOps.importBegin, await craft(file.bytes, c.projectId, edit), { cookie: c.cookie });
+      expect(begun.status).toBe(200);
+      expect(begun.body.blockers.find((x: { reason: string }) => x.reason === "sourceAccess")?.message).toContain(text);
+      const refused = await callOp(
+        c.panel,
+        transferOps.importService,
+        { projectId: c.projectId, importId: begun.body.importId },
+        { cookie: c.cookie },
+      );
+      expect(refused.status).toBe(409);
+      expect(made()).toEqual([]);
+    }
+
+    // Another key's public key and fingerprint, the host in capitals: what is stored comes from the key itself.
+    const other = generateDeployKey("other");
+    const forged = await craft(file.bytes, c.projectId, (p) => {
+      p.services.web.doc.sourceAccess.fingerprint = other.fingerprint;
+      p.services.web.doc.sourceAccess.host = "GIT.Example.com";
+      p.services.web.sourceCredential.publicKey = other.publicKey;
+    });
+    const begun = await callOp(c.panel, transferOps.importBegin, forged, { cookie: c.cookie });
+    expect(begun.body.source.access.picked.kind).toBe("createFromFile");
+    const done = await callOp(
+      c.panel,
+      transferOps.importService,
+      { projectId: c.projectId, importId: begun.body.importId },
+      { cookie: c.cookie },
+    );
+    expect(done.status).toBe(200);
+    const [row] = made();
+    expect([row?.host, row?.fingerprint, row?.publicKey?.split(" ").slice(0, 2), row?.origin, row?.username]).toEqual([
+      "git.example.com",
+      key.fingerprint,
+      key.publicKey.split(" ").slice(0, 2),
+      "manual",
+      null,
+    ]);
+    expect(c.panel.deps.secrets.open(row?.secretSealed as string, "git.credential")).toBe(`${key.privateKey.trim()}\n`);
+    expect(row?.knownHosts).toBe(knownHosts);
+  });
+
+  test("an admin's import with a credential from the file records an internal git host, as saving the source does", async () => {
+    setTargetResolver(async (host) => {
+      if (host === "gitea.lan") return ["10.1.2.3"];
+      throw Object.assign(new Error("NXDOMAIN"), { code: "ENOTFOUND" });
+    });
+    try {
+      const a = await side();
+      const c = await side("node-c");
+      const cred = a.panel.deps.db
+        .insert(gitCredentials)
+        .values({
+          name: "bot",
+          kind: "token",
+          host: "gitea.lan",
+          username: "bot",
+          secretSealed: a.panel.deps.secrets.seal("tok-123456", "git.credential"),
+        })
+        .returning()
+        .get();
+      const id = await app(a, "web", {
+        type: "git",
+        url: "https://gitea.lan/team/web.git",
+        branch: "main",
+        credentialId: cred.id,
+        deployOnPush: false,
+      });
+      const begun = await begin(c, (await exportZip(a, id, { includeSourceLogin: true })).bytes);
+      expect(begun.body.source.access.picked.kind).toBe("createFromFile");
+      const done = await callOp(
+        c.panel,
+        transferOps.importService,
+        { projectId: c.projectId, importId: begun.body.importId },
+        { cookie: c.cookie },
+      );
+      expect(done.status).toBe(200);
+      expect(
+        c.panel.deps.db
+          .select()
+          .from(gitInternalHosts)
+          .all()
+          .map((h) => [h.projectId, h.host]),
+      ).toEqual([[c.projectId, "gitea.lan"]]);
+    } finally {
+      setTargetResolver(null);
+    }
+  });
+
+  test("a registry login made from the file goes through registries.create's input rules", async () => {
+    const a = await side();
+    const c = await side("node-c");
+    const reg = a.panel.deps.db
+      .insert(registryCredentials)
+      .values({
+        name: "ghcr",
+        server: "ghcr.io",
+        username: "acme",
+        passwordSealed: a.panel.deps.secrets.seal("pw-123456", "registry.credential"),
+      })
+      .returning()
+      .get();
+    const id = await app(a, "web", { type: "image", image: "ghcr.io/acme/web:1", registryId: reg.id });
+    const file = await exportZip(a, id, { includeSourceLogin: true });
+    const begin = async (edit: (p: any) => void) =>
+      callOp(c.panel, transferOps.importBegin, await craft(file.bytes, c.projectId, edit), { cookie: c.cookie });
+    for (const edit of [
+      (p: any) => (p.services.web.doc.sourceAccess.server = "ghcr.io/../evil"),
+      (p: any) => (p.services.web.sourceCredential.password = "x".repeat(5001)),
+      (p: any) => (p.services.web.doc.sourceAccess.username = ""),
+    ]) {
+      const refused = await begin(edit);
+      expect(refused.status).toBe(200);
+      expect(refused.body.blockers.find((x: { reason: string }) => x.reason === "sourceAccess")?.message).toContain(
+        "The registry login in the file does not pass this panel's checks.",
+      );
+    }
+    const begun = await begin((p) => {
+      p.services.web.doc.sourceAccess.server = "GHCR.io";
+      p.services.web.doc.sourceAccess.username = " acme ";
+    });
+    expect(begun.body.source.access.picked.kind).toBe("createFromFile");
+    const done = await callOp(
+      c.panel,
+      transferOps.importService,
+      { projectId: c.projectId, importId: begun.body.importId },
+      { cookie: c.cookie },
+    );
+    expect(done.status).toBe(200);
+    const rows = c.panel.deps.db.select().from(registryCredentials).all();
+    expect(rows.map((r) => [r.name, r.server, r.username, c.panel.deps.secrets.open(r.passwordSealed, "registry.credential")])).toEqual([
+      ["ghcr", "ghcr.io", "acme", "pw-123456"],
+    ]);
+    expect(done.body.service.sourceConfig.registryId).toBe(rows[0]?.id);
   });
 
   test("a registry login is only included in an encrypted file, and only with registries.manage", async () => {

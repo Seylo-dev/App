@@ -228,8 +228,10 @@ export const importService = implement(transferOps.importService, async (input, 
     m.uptimeChecks = (m.uptimeChecks ?? []).filter((c) => !refusedTargets.has(c.url));
     skipped.push({ what: "Uptime checks of internal addresses", why: "Uptime checks only reach public addresses." });
   }
-  if (plan.credential === null && m.spec.source.type !== "none") {
-    assertSourceAllowed(ctx, row.projectId, m.spec.source);
+  if (m.spec.source.type !== "none") {
+    // A credential made from the file does not exist yet: the transaction checks the source once it does.
+    if (plan.credential === null) assertSourceAllowed(ctx, row.projectId, m.spec.source);
+    // As services.update does for the caller, so an admin's internal git host is recorded for the project.
     await assertGitSourceTarget(ctx.db, row.projectId, m.spec.source, gitCaller(ctx));
   }
 
@@ -245,26 +247,16 @@ export const importService = implement(transferOps.importService, async (input, 
         c.kind === "gitCredential"
           ? tx
               .insert(gitCredentials)
-              .values({
-                name: c.wanted.name || c.wanted.host,
-                kind: c.wanted.kind,
-                host: c.wanted.host,
-                username: c.wanted.username,
-                secretSealed: ctx.secrets.seal(c.cred.secret, "git.credential"),
-                knownHosts: c.cred.knownHosts,
-                publicKey: c.cred.publicKey,
-                fingerprint: c.wanted.fingerprint,
-                createdBy: userId,
-              })
+              .values({ ...c.values, secretSealed: ctx.secrets.seal(c.secret, "git.credential"), createdBy: userId })
               .returning({ id: gitCredentials.id })
               .get().id
           : tx
               .insert(registryCredentials)
               .values({
-                name: c.wanted.name || c.wanted.server,
-                server: c.wanted.server,
-                username: c.wanted.username,
-                passwordSealed: ctx.secrets.seal(c.cred.password, "registry.credential"),
+                name: c.name,
+                server: c.login.server,
+                username: c.login.username,
+                passwordSealed: ctx.secrets.seal(c.login.password, "registry.credential"),
                 createdBy: userId,
               })
               .returning({ id: registryCredentials.id })
