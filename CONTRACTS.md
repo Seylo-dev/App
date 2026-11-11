@@ -3093,6 +3093,20 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   builds only (compiled with the `__TEST_RELEASE_*` defines): the domain's
   HTTPS probe also trusts `<panel data dir>/test-ca.pem` (the e2e's Pebble
   root); a shipped panel never reads it.
+- `nodes.createJoinToken` `pinnedCommand` (since 0.2.8): when `command`
+  joins over the panel domain (no pin) and the agents' TLS port is open,
+  the same token over `https://<panel IP address>:<agents' port>` with
+  `--pin` (`join-target.ts` `agentPinnedTarget`, `panelIpUrl`), for a
+  server whose network decrypts HTTPS (TLS inspection re-signs the
+  domain's certificate) or cannot reach the domain; null otherwise. The
+  agent's dial error names the refused certificate's issuer
+  (`conn.certificateHint`: TLS inspection, or Traefik's own certificate
+  when the panel's server has none for the name), a pin mismatch too, and
+  the installer shows that hint instead of the ports one. A join on a node
+  already joined to the same `panel_url` joins again with the token (as
+  `--force`) when `seylo status` says rejected within 20 s of the restart
+  (another panel at that address, the node removed, another key);
+  connected or unreachable keeps the earlier join.
 - PanelService (`agent-hub/panel-service.ts`): ReportCrash stores
   `crash_reports`, ReportEvent stores a capped copy in `agent_reports` (30
   days), both with capped fields, deduped by (node, outbox id) and within
