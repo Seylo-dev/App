@@ -2384,7 +2384,7 @@ or the method descriptor's options (TS). Current names:
 | `panel.edge-access.v1` | CheckEdgeAccess |
 | `panel.backup-sign.v1` | SignBackupRequests |
 | `tailnet.login.v1` (0.2.1) | TailscaleLogin, TailscaleSetDns |
-| `panel.relocate.v1` (0.2.8) | StagePanelAddress, ClearPanelAddress, ImportPanelData, ExportRegistry, ImportRegistry, StartMovedPanel, AbortMovedPanel, RetirePanel, RemoveOldPanel |
+| `panel.relocate.v1` (0.2.8) | StagePanelAddress, ClearPanelAddress, ImportPanelData, ExportRegistry, ImportRegistry, StartMovedPanel, AbortMovedPanel, CommitMovedPanel, RetirePanel, RemoveOldPanel |
 
 An agent advertises a capability only once every method in it works.
 
@@ -2755,35 +2755,78 @@ the image, starts the panel on the copied data on standby and checks the
 pin and `expected_version`; this panel holds every desired-state send to
 the target from here, `DesiredStateSync.hold`, since a SyncDesired would
 drop the panel spec just installed), `staging` (StagePanelAddress on every
-other online node: config.yml `staged` = the new `https://` address and
-pin, `staged_move` = the move id, written before the answer, after an
-HTTPS probe of `<url>/api/health` over the pinned connection) and
-`switching` (RetirePanel on the old node: it answers, then stops the old
-panel and keeps its spec stopped; `update/panel-retire.json` makes
-`seylo panel start` refuse). The old panel then answers
-`/api/agent/connect` with 503 and Retry-After 10 and closes joins with
-1011. An agent dials `staged` only after its primary failed at the
-TCP/HTTP level for 10 s (a HelloRejected never counts), then alternates
-the two; on HelloAccepted from the staged address `panel_url` and
-`panel_pin` become the staged values, `insecure_transport` goes false and
-`staged`, `staged_move` and `fallback` are cleared. The pin is the SPKI
-of `agent-tls.key`, which moves with the data, so nodes need no re-join.
-The moved panel leaves standby when the first agent connects; alerts keep
-a 5 minute grace after a move. Any failure before `switching` aborts:
-AbortMovedPanel on the target (idempotent, refused with `panelHere` once
-its own agent reached the moved panel), ClearPanelAddress on staged nodes
-(a no-op for another `move_id`), the hold released; a panel that restarts
-with a move row still running treats it as failed (`recover.ts`). The old
+other online node, disabled ones included: config.yml `staged` = the new
+`https://` address and pin, `staged_move` = the move id, written before
+the answer, after an HTTPS probe of `<url>/api/health` over the pinned
+connection whose JSON must carry `"moveId"` = the move id, so an address
+that reaches the old panel, same pin, fails), `committing`
+(CommitMovedPanel on the target: the switch, see below) and `switching`
+(RetirePanel on the old node: it answers, then stops the old panel and
+keeps its spec stopped, and answers again once retired;
+`update/panel-retire.json` makes `seylo panel start` refuse). The moved
+panel answers `/api/agent/connect` with 503 and Retry-After 10 until the
+commit, and the old panel does the same from `switching` on and closes
+joins with 1011. An agent dials `staged` only after its primary failed at
+the TCP/HTTP level for 10 s (a HelloRejected never counts; a 503 there is
+a failed dial too), then alternates the two; the target dials its staged
+loopback address only after CommitMovedPanel. On HelloAccepted from the
+staged address `panel_url` and `panel_pin` become the staged values,
+`insecure_transport` goes false and `staged`, `staged_move` and `fallback`
+are cleared. The pin is the SPKI of `agent-tls.key`, which moves with the
+data, so nodes need no re-join. CommitMovedPanel first checks the moved
+panel works (reconcile RUNNING, the pin on the agents' TLS port, the
+version on /api/health; the journal carries the pin): not answering right
+now is UNAVAILABLE `commit` (retry), another key or version
+FAILED_PRECONDITION `notStarted`. It then records the commit in the
+target's move journal (Resume keeps a committed journal and rewrites a
+missing marker, never undoes it) and writes `move-commit` (the move id,
+temp file and rename, the panel user's, 0600) into the moved panel's data
+folder; ImportPanelData never takes a `move-commit` file. The standby
+panel polls it, then takes agents, and its first accepted agent session
+commits the arrival (the job runner starts; alerts keep a 5 minute
+grace); its /api/health answers `"switched": true` once the marker is
+there. The commit is the point of no return: AbortMovedPanel answers
+FAILED_PRECONDITION `committed` after it. The old panel retries a commit
+with an unknown outcome (timeout, UNAVAILABLE, target offline) every few
+seconds and never aborts by itself, read-only and still serving its nodes
+(`waitingSince`). Meanwhile it looks at the moved panel itself
+(`panelMove/probe.ts`: GET `https://<address>:<agents' port>/api/health`
+over the pinned key): `"switched"`, or no `moveId` any more (arrived),
+means the commit landed and the move goes forward; what it saw is in
+`error` while it waits. After 10 minutes without an answer and with that
+look done, `panelMove.cancel {force: true}` may abort (`canForceCancel`),
+for a target that is gone for good; a forced cancel the target answers
+`committed` (or whose look shows the switch) goes forward instead, and a
+queued abort refused later with `committed` is logged and audited
+(`panelMove.forcedCancelConflict`). A refusal `notStarted` aborts at once.
+Any failure before the commit aborts: AbortMovedPanel on the target
+(idempotent), ClearPanelAddress on staged nodes (a no-op for another
+`move_id`), the hold released. A panel that restarts mid-move
+(`recover.ts`) aborts a move that had not reached `committing`, resumes
+the commit retries in `committing`, and stays retired from `switching`
+on. The pause before the snapshot waits for mutations already past the
+gate. The old
 copy stays until `panelMove.removeOldCopy` (RemoveOldPanel: refused with
 `panelHere` or `moveUnfinished`, reports `freed_bytes`). The move is
 refused with IP access closed, Tailscale Serve on, an unfinished key
-rotation or no agents' TLS port; a node that is offline, on plain HTTP or
-too old blocks it unless the caller passes `leftBehind: true` (it joins
-again with `seylo join --force`).
+rotation, no agents' TLS port, a target or panel node that connects over
+plain http:// from another host (`targetPlainHttp`,
+`panelNodePlainHttp`; checked again before the registry and the data
+stream open), or the last move's old copy not deleted while its node
+still exists (`oldCopyLeft`; a later failure then shows in the done
+status's `error`); the address may not be one of the panel node's own,
+and `panelMove.check` with a typed address answers BAD_REQUEST field
+`address` for one start would refuse. RetirePanel answers success again
+for a copy already retired (same service, or the same move, no panel
+container running). A node that is offline, on plain HTTP or too old blocks
+it unless the caller passes `leftBehind: true` (it joins again with
+`seylo join --force`).
 `move_id` matches `^[a-z0-9][a-z0-9_-]{0,62}$`. Error reasons (status
 details key `reason`): INVALID_ARGUMENT `badRequest`, `manifest`,
 `badArchive`; FAILED_PRECONDITION `panelRunning`, `panelHere`, `noPanel`,
-`moveUnfinished`, `notImported`, `pin`, `version`, `plainHttp`, `probe`;
+`moveUnfinished`, `notImported`, `pin`, `version`, `plainHttp` (every move
+call that carries panel data or the switch, over a plain-HTTP session
+from another host), `probe`, `notStarted`, `committed`;
 RESOURCE_EXHAUSTED `noSpace` (free space below `max(size_bytes*3, sum of
 manifest sizes) + 64 MiB`); ABORTED `busy` (update lock); UNAVAILABLE
 `pull`, `start`, `health`, `pin`, `undo`, `config`; CANCELLED
@@ -3017,7 +3060,13 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   `panelDomainStatus` is `active` for the current domain (the hourly check
   reached `/api/health` there with the panel's public roots, so agents
   verify it with their system roots; `agent-hub/move-target.ts`); nothing
-  before. A domain proxied by Cloudflare (every A/AAAA answer in
+  before. Since 0.2.8 the check proves the answer is this panel's:
+  `/api/health?proof=<nonce>` answers `"proof"`, an HMAC-SHA256 of the
+  nonce (16-128 of `[A-Za-z0-9_-]`) under a key only this panel holds
+  (`http/health-proof.ts`, `deps.healthProof`, made at start, never
+  stored), and the check sends a fresh nonce and needs the match; before,
+  any `{"status":"ok"}` passed, so a proxied record still pointing at
+  another server went active. A domain proxied by Cloudflare (every A/AAAA answer in
   `http/cloudflare.ts`'s ranges, `domains/dns.ts` `classifyRecords`) skips
   the node-address comparison: the HTTPS probe through Cloudflare alone
   decides (`proxied: true` in `settings.general.domainStatus`), an active
