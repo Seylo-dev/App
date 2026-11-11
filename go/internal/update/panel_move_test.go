@@ -231,7 +231,16 @@ func (f *moveFake) panelSpec() *agentv1.ServiceSpec {
 type movedPanel struct {
 	tls, http *httptest.Server
 	pin       string
-	version   string
+
+	mu      sync.Mutex
+	version string
+}
+
+// setVersion changes the version the panel answers with while it serves.
+func (p *movedPanel) setVersion(v string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.version = v
 }
 
 func startMovedPanel(t *testing.T, version string) *movedPanel {
@@ -245,7 +254,10 @@ func startMovedPanel(t *testing.T, version string) *movedPanel {
 			http.NotFound(w, r)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": p.version, "moveId": testMove})
+		p.mu.Lock()
+		version := p.version
+		p.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": version, "moveId": testMove})
 	}))
 	t.Cleanup(p.http.Close)
 	return p
@@ -268,6 +280,8 @@ type moveFixture struct {
 	free uint64
 	url  string
 	lock *Lock
+	// panel is the moved panel startedTarget started.
+	panel *movedPanel
 }
 
 func newMoveFixture(t *testing.T) *moveFixture {
@@ -729,7 +743,7 @@ func TestStartMovedPanelFailuresPutEverythingBack(t *testing.T) {
 			p.tls.Close()
 		}, reason: ReasonPin},
 		"another version": {change: func(_ *moveFixture, p *movedPanel, _ *agentv1.StartMovedPanelRequest) {
-			p.version = "0.2.7"
+			p.setVersion("0.2.7")
 		}, reason: ReasonVersion},
 		"pull fails": {change: func(_ *moveFixture, _ *movedPanel, req *agentv1.StartMovedPanelRequest) {
 			req.Spec.Image.Digest = ""
@@ -941,8 +955,8 @@ func startedTarget(t *testing.T) *moveFixture {
 	t.Helper()
 	fx := newMoveFixture(t)
 	prepareTarget(t, fx)
-	p := startMovedPanel(t, "0.2.8")
-	if _, err := fx.m.Start(context.Background(), fx.startRequest(t, p)); err != nil {
+	fx.panel = startMovedPanel(t, "0.2.8")
+	if _, err := fx.m.Start(context.Background(), fx.startRequest(t, fx.panel)); err != nil {
 		t.Fatal(err)
 	}
 	return fx
@@ -1108,6 +1122,91 @@ func TestCommitRefusedWithoutAMovedPanel(t *testing.T) {
 		defer release()
 		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonBusy || codeOf(err) != agentv1.StatusCode_STATUS_CODE_ABORTED {
 			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+// The switch needs the moved panel to work right then, not only a container
+// that counts as running (one Docker keeps restarting does). A panel that
+// does not answer now is tried again (UNAVAILABLE), never committed; one
+// that answers as another panel is refused with notStarted. Neither writes
+// the marker, and an abort still undoes the move.
+func TestCommitNeedsAHealthyMovedPanel(t *testing.T) {
+	ctx := context.Background()
+	setPhase := func(fx *moveFixture, phase agentv1.ServicePhase) {
+		fx.f.rec.mu.Lock()
+		defer fx.f.rec.mu.Unlock()
+		fx.f.rec.status[defaultPanelServiceID].Phase = phase
+	}
+	setPin := func(t *testing.T, fx *moveFixture, pin string) {
+		var j panelMove
+		if err := readJSON(fx.path("update", moveJournal), &j); err != nil {
+			t.Fatal(err)
+		}
+		j.PanelPin = pin
+		if err := writeJSON(fx.path("update", moveJournal), &j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, tc := range map[string]struct {
+		change func(t *testing.T, fx *moveFixture)
+		code   agentv1.StatusCode
+		reason string
+	}{
+		"crash looping": {change: func(_ *testing.T, fx *moveFixture) {
+			// Up between two crashes: its health answers, its container runs.
+			setPhase(fx, agentv1.ServicePhase_SERVICE_PHASE_CRASH_LOOPING)
+		}, code: agentv1.StatusCode_STATUS_CODE_UNAVAILABLE, reason: ReasonCommit},
+		"health does not answer": {change: func(_ *testing.T, fx *moveFixture) {
+			fx.panel.http.Close()
+		}, code: agentv1.StatusCode_STATUS_CODE_UNAVAILABLE, reason: ReasonCommit},
+		"agents' TLS port does not answer": {change: func(_ *testing.T, fx *moveFixture) {
+			fx.panel.tls.Close()
+		}, code: agentv1.StatusCode_STATUS_CODE_UNAVAILABLE, reason: ReasonCommit},
+		"another TLS key": {change: func(t *testing.T, fx *moveFixture) {
+			setPin(t, fx, conn.FormatPin(make([]byte, 32)))
+		}, code: agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, reason: ReasonNotStarted},
+		"no pin recorded": {change: func(t *testing.T, fx *moveFixture) {
+			setPin(t, fx, "")
+		}, code: agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, reason: ReasonNotStarted},
+		"another version": {change: func(_ *testing.T, fx *moveFixture) {
+			fx.panel.setVersion("0.2.7")
+		}, code: agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, reason: ReasonNotStarted},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fx := startedTarget(t)
+			tc.change(t, fx)
+			err := fx.m.Commit(ctx, commitReq(testMove))
+			if codeOf(err) != tc.code || reasonOf(err) != tc.reason {
+				t.Fatalf("err = %v (code %v, reason %q), want %v %q", err, codeOf(err), reasonOf(err), tc.code, tc.reason)
+			}
+			gone(t, fx.path("panel", commitMarker))
+			if phase := journalPhase(t, fx); phase != moveHealthy || !fx.m.AwaitsCommit(testMove) {
+				t.Fatalf("phase %q: the switch counts as done", phase)
+			}
+			if err := fx.m.Abort(ctx, &agentv1.AbortMovedPanelRequest{MoveId: testMove}); err != nil {
+				t.Fatalf("abort after the refused switch: %v", err)
+			}
+			targetIsBack(t, fx)
+		})
+	}
+	t.Run("tried again once it recovered", func(t *testing.T) {
+		fx := startedTarget(t)
+		setPhase(fx, agentv1.ServicePhase_SERVICE_PHASE_CRASH_LOOPING)
+		if err := fx.m.Commit(ctx, commitReq(testMove)); reasonOf(err) != ReasonCommit {
+			t.Fatalf("err = %v", err)
+		}
+		setPhase(fx, agentv1.ServicePhase_SERVICE_PHASE_RUNNING)
+		if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+			t.Fatal(err)
+		}
+		if got := readFile(t, fx.path("panel", commitMarker)); got != testMove {
+			t.Fatalf("marker = %q", got)
+		}
+		// Committed: a retry no longer looks at the panel (it is the panel now).
+		fx.panel.http.Close()
+		if err := fx.m.Commit(ctx, commitReq(testMove)); err != nil {
+			t.Fatalf("again: %v", err)
 		}
 	})
 }

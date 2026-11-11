@@ -94,6 +94,9 @@ var (
 	// lock, inside the old panel's 30 s call timeout; a busy answer is
 	// tried again.
 	moveCommitWait = 20 * time.Second
+	// moveCommitCheck bounds CommitMovedPanel's look at the moved panel
+	// (its pin and /api/health), inside the same 30 s.
+	moveCommitCheck = 5 * time.Second
 	// moveUndoTimeout bounds putting things back after a failed start.
 	moveUndoTimeout = 2 * time.Minute
 	// moveReserve is the space an import leaves free on top of what it needs.
@@ -323,7 +326,9 @@ type panelMove struct {
 	Phase        movePhase `json:"phase"`
 	AgentTLSPort uint32    `json:"agentTlsPort"`
 	HostPort     uint32    `json:"hostPort"`
-	Version      string    `json:"version"`
+	// PanelPin is the agents' TLS key's pin the moved panel must present.
+	PanelPin string `json:"panelPin"`
+	Version  string `json:"version"`
 	// Spec is the marshalled ServiceSpec recorded in the desired state.
 	Spec []byte `json:"spec"`
 	// AsideRetired: the panel folder set aside was this panel's own copy,
@@ -522,7 +527,7 @@ func (m *PanelMover) Start(ctx context.Context, req *agentv1.StartMovedPanelRequ
 	}
 	j := &panelMove{
 		MoveID: id, ServiceID: spec.GetId(), Phase: moveActivating,
-		AgentTLSPort: tlsPort, HostPort: hostPort, Spec: specBytes,
+		AgentTLSPort: tlsPort, HostPort: hostPort, PanelPin: conn.FormatPin(pin), Spec: specBytes,
 		AsideRetired: exists(m.retireFile()),
 		StartedAt:    m.opts.Now().UTC(),
 	}
@@ -840,8 +845,10 @@ func (m *PanelMover) Arrived(id string) {
 // panel waiting here takes agents from now on. The journal records it
 // first, then the marker file tells the panel; nothing undoes the move
 // after that. Refused with notStarted when no healthy moved panel of that
-// move runs here, so the old panel knows nothing switched and aborts.
-// Calling it again for the same move succeeds.
+// move runs here, so the old panel knows nothing switched and aborts; a
+// moved panel that does not answer right now (checkStandby) answers
+// UNAVAILABLE, and the old panel tries again. Calling it again for the
+// same move succeeds.
 func (m *PanelMover) Commit(ctx context.Context, req *agentv1.CommitMovedPanelRequest) error {
 	id := req.GetMoveId()
 	if err := checkMoveID(id); err != nil {
@@ -880,6 +887,9 @@ func (m *PanelMover) Commit(ctx context.Context, req *agentv1.CommitMovedPanelRe
 	if !anyRunning(list) {
 		return refusedMove(ReasonNotStarted, "the moved panel of move %s does not run on this node", id)
 	}
+	if err := m.checkStandby(ctx, j); err != nil {
+		return err
+	}
 	j.Phase = moveCommitted
 	if err := m.writeJournal(j); err != nil {
 		return failedMove(ReasonCommit, err)
@@ -893,6 +903,53 @@ func (m *PanelMover) Commit(ctx context.Context, req *agentv1.CommitMovedPanelRe
 		return failedMove(ReasonCommit, err)
 	}
 	m.opts.Logger.Warn("panel move: committed; the moved panel on this node takes the nodes from now on", "move_id", id)
+	return nil
+}
+
+// checkStandby makes sure the moved panel of j still works right before
+// the switch: StartMovedPanel saw it healthy, but it may have crashed
+// since, and a container Docker keeps restarting still counts as running.
+// Reconcile must see it running, its agents' TLS port must present the
+// pinned key and its /api/health must answer ok with the version it
+// started with. A panel that answers as another one (another key or
+// version) is refused with notStarted; anything that may pass answers
+// UNAVAILABLE commit, so the old panel tries again instead of switching
+// every node to a panel that does not work.
+func (m *PanelMover) checkStandby(ctx context.Context, j *panelMove) error {
+	// A check that timed out is UNAVAILABLE like any other that may pass;
+	// only the call's own end answers CANCELLED or DEADLINE_EXCEEDED.
+	notNow := func(err error) error {
+		if ctx.Err() != nil {
+			return failedMove(ReasonCommit, err)
+		}
+		return &MoveError{Code: agentv1.StatusCode_STATUS_CODE_UNAVAILABLE, Reason: ReasonCommit, Err: err}
+	}
+	if status := m.opts.Runtime.Status; status != nil {
+		if s := status(j.ServiceID); s.GetPhase() != agentv1.ServicePhase_SERVICE_PHASE_RUNNING {
+			return notNow(fmt.Errorf("the moved panel of move %s is %s, not running (%s)", j.MoveID, s.GetPhase(), s.GetMessage()))
+		}
+	}
+	pin, err := conn.ParsePin(j.PanelPin)
+	if err != nil {
+		return refusedMove(ReasonNotStarted, "the panel move journal of move %s has no valid pin (%v), so the moved panel cannot be checked", j.MoveID, err)
+	}
+	cctx, cancel := context.WithTimeout(ctx, moveCommitCheck)
+	defer cancel()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(j.AgentTLSPort)))
+	if err := m.opts.CheckTLS(cctx, addr, pin); err != nil {
+		if errors.Is(err, conn.ErrPinMismatch) {
+			return refusedMove(ReasonNotStarted, "the panel on port %d presents another agents' TLS key than the one nodes pin: it is not the moved panel of move %s", j.AgentTLSPort, j.MoveID)
+		}
+		return notNow(fmt.Errorf("the moved panel's agents' TLS port %d does not answer: %w", j.AgentTLSPort, err))
+	}
+	healthURL := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(int(j.HostPort))) + "/api/health"
+	version, err := m.opts.Health(cctx, healthURL)
+	if err != nil {
+		return notNow(fmt.Errorf("the moved panel is not healthy (%s): %w", healthURL, err))
+	}
+	if version != j.Version {
+		return refusedMove(ReasonNotStarted, "the panel on port %d runs version %s, not %s: it is not the moved panel of move %s", j.HostPort, version, j.Version, j.MoveID)
+	}
 	return nil
 }
 
