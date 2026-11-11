@@ -4383,7 +4383,7 @@ has_text() { case $1 in *"$2"*) return 0 ;; *) return 1 ;; esac; }
 # container_started <letter> <service>: when the service's container last started.
 container_started() { on_node "$1" "docker inspect -f '{{.State.StartedAt}}' \$(docker ps -q --filter label=$SLUG.service=$2 --filter name=^$SLUG-$2-[0-9] | head -1)"; }
 
-# Check 42 (0.2.9): export a whoami service with its volume data and a
+# Check 42 (0.2.10): export a whoami service with its volume data and a
 # Postgres with its data from project e2e-exports on B with a passphrase,
 # check the zips with unzip, Python and their manifests, and import both
 # the way the CLI will (unzip -p the small entries into importBegin, the

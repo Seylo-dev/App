@@ -52,7 +52,7 @@ export type ExportVolumeResponse = Message<"seylo.agent.v1.ExportVolumeResponse"
 
   /**
    * Archive entries written (files, folders, links); 0 from agents before
-   * 0.2.9. added in 0.2.9 (volume.import-limits.v1)
+   * 0.2.10. added in 0.2.10 (volume.import-limits.v1)
    *
    * @generated from field: uint64 entries = 2;
    */
@@ -103,7 +103,7 @@ export type ImportVolumeRequest = Message<"seylo.agent.v1.ImportVolumeRequest"> 
    * The limits below are for data from outside (an uploaded export file).
    * An agent without the capability volume.import-limits.v1 ignores them,
    * so the panel sends such data only to agents that advertise it.
-   * added in 0.2.9
+   * added in 0.2.10
    *
    * Most file bytes the unpack may write; 0 = no cap. Before anything is
    * written the agent also refuses (RESOURCE_EXHAUSTED, reason "noSpace")

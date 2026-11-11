@@ -1039,7 +1039,7 @@ Ops (the only way the web app, CLI, MCP and AI reach the panel):
   action of one area, for example `services.*`) or exact actions; match
   them with `actionAllowed(list, action)` from `@seylo/ops`.
 - Admin-only scoped actions (`permission.project|service(action, resource,
-  { adminOnly: true })`, since 0.2.9 `services.export` and
+  { adminOnly: true })`, since 0.2.10 `services.export` and
   `services.import`): checked on the resource like any scoped action, so an
   admin's key limited to some projects holds them there only, but members
   never hold them whatever a grant lists (`access.ts` `isAdminOnly`, also in
@@ -2299,7 +2299,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificate revocation holds only on agents with `lb.tls.peers.v1`, only once they got their settings (a node cut off from the panel keeps its last list), and only for new connections (Traefik keeps a TLS connection it already accepted across reloads); while the panel lists a `legacy` peer (a node holding a certificate from before 0.2 that has not connected since, at most 30 days) every certificate of the LB CA is accepted; an older agent is reached by the shared name, which any node's certificate carries; a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
 | GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling, and the connected account (the token check, its repository list, repository webhooks and polling, 0.2.2) are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
-| Service export and import gaps: a database is stopped for its whole download (no staged copy on the panel's disk, no engine dump, no resumable download), compose stacks and their members and several services in one file, the CLI (`seylo export`, `seylo import`, `seylo export decrypt`; until then the API takes what `unzip -p` prints and `curl -T` sends), encrypting the uploaded archive and volume data, falling back to the branch head when the exported commit is gone, a part's own checksum (only the whole entry is hashed). e2e check 42 (settings, env, cron job, a volume's file, a Postgres's rows and basic auth from B to C, a flipped byte refused) is written but has not run on the VMs yet. The zip was checked with `unzip -t` and Python's `zipfile`, not with Finder, Archive Utility, `ditto` or Windows Explorer | Compose is CONFLICT `reason: compose`, a first deploy of a commit that is gone fails like any deploy, a database stays down while its file downloads (5 minutes without a read or 12 hours end it) |
+| Service export and import gaps: a database is stopped for its whole download (no staged copy on the panel's disk, no engine dump, no resumable download), compose stacks and their members and several services in one file, the CLI (`seylo export`, `seylo import`, `seylo export decrypt`; until then the API takes what `unzip -p` prints and `curl -T` sends), encrypting the uploaded archive and volume data, falling back to the branch head when the exported commit is gone, a part's own checksum (only the whole entry is hashed), retiring the old exposed user of a database from before 0.2.9 whose data is imported before its own panel retired it (the import has no separate user, so nothing drops that login in the copied data; `services.clone` with data does). e2e check 42 (settings, env, cron job, a volume's file, a Postgres's rows and basic auth from B to C, a flipped byte refused) is written but has not run on the VMs yet. The zip was checked with `unzip -t` and Python's `zipfile`, not with Finder, Archive Utility, `ditto` or Windows Explorer | Compose is CONFLICT `reason: compose`, a first deploy of a commit that is gone fails like any deploy, a database stays down while its file downloads (5 minutes without a read or 12 hours end it) |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`; the chat bubble and the Assistant page against the demo world's scripted replies only) | Works as tested |
@@ -2422,7 +2422,7 @@ the node is offline (`modules/databases/capability.ts`).
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
 | `routing.origin-proof.v1` (`edge.OriginCapability`, `wire_network.go`, only with the node key) | Every route file sends `GET /.well-known/<slug>-origin/<challenge>` on the route's hosts to the edge (`proxy` `addOrigin`), which answers with the node key's signature (`edge/origin.go`). The panel's origin check (`modules/domains/origin.ts`) asks only when a node of the service advertised it, and calls an answer without the proof "elsewhere" only when every node of the service did and reported the domain's route; otherwise "unknown" |
 | `node.docker-check.v1` (0.2.5, `update.DockerCheckCapability`, `wire_node.go`) | The agent looks for a newer Docker Engine by itself and reports it in every NodeFacts as `docker_update` (see "Releases and updates", Docker version check). The panel keeps the newest report per node and shows it as the node's `docker` only for agents that advertised it; an older agent's node has no `docker`, so the Machine card and Update Docker stay as before |
-| `volume.import-limits.v1` (0.2.9, `volumes.ImportLimitsCapability`, `wire_runtime.go`) | `ImportVolumeRequest.max_bytes`, `max_entries` and `sha256` hold: at most that many file bytes and archive headers, the whole stream hashes to `sha256`, and the data folder keeps `max_bytes` plus a floor (a tenth of the disk, 1 to 5 GiB) free (RESOURCE_EXHAUSTED `reason: noSpace`, `tooLarge`, `tooMany`; INVALID_ARGUMENT `reason: checksum`); with any limit set, a failure after writing started empties the volume and the agent answers at once instead of draining the stream. Imports into one volume run one after another (a second one waits for the first, its cleanup included). `ExportVolumeResponse.entries` counts what an export wrote. The panel sends an uploaded export file's volume data only to an agent that advertised it (an older one would ignore the limits); moves and clones send none and work on `volume.transfer.v1` as before |
+| `volume.import-limits.v1` (0.2.10, `volumes.ImportLimitsCapability`, `wire_runtime.go`) | `ImportVolumeRequest.max_bytes`, `max_entries` and `sha256` hold: at most that many file bytes and archive headers, the whole stream hashes to `sha256`, and the data folder keeps `max_bytes` plus a floor (a tenth of the disk, 1 to 5 GiB) free (RESOURCE_EXHAUSTED `reason: noSpace`, `tooLarge`, `tooMany`; INVALID_ARGUMENT `reason: checksum`); with any limit set, a failure after writing started empties the volume and the agent answers at once instead of draining the stream. Imports into one volume run one after another (a second one waits for the first, its cleanup included). `ExportVolumeResponse.entries` counts what an export wrote. The panel sends an uploaded export file's volume data only to an agent that advertised it (an older one would ignore the limits); moves and clones send none and work on `volume.transfer.v1` as before |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
 
 ## Panel access and the tailnet
@@ -3509,7 +3509,7 @@ A stopped or never-deployed service just changes project (no deployment).
 
 Service export and import (`modules/serviceTransfer`, contracts and the
 file format in `packages/ops/src/ops/serviceTransfer.ts`, published as
-`service-export.schema.json`; added in 0.2.9). Owners
+`service-export.schema.json`; added in 0.2.10). Owners
 and admins only: `services.export` on the service and `services.import` on
 the project are scoped actions with `adminOnly` (see Permission model), so
 an admin key limited to some projects works there and nowhere else, and
@@ -3638,13 +3638,28 @@ members never hold them. Every op is `mcp: false`.
   `checkCertificate` and `assertCertificateNames` (a failing one drops to
   Let's Encrypt), hosts through the unique (host, path) and `hostConflict`
   (`usedHere`, `usedHidden`: skipped), the primary recomputed after skips
-  (the file's, else the first that is not a redirect). Database and Box
-  specs are built from the engine (`databaseSpec`, `boxSpec`), never taken
-  from the file; a version the panel does not offer blocks
-  (`engineVersion`); exposed users are derived; database logins come from
-  the file only when they fit `databases.create`'s password rule (12 to
-  128 of `A-Za-z0-9._~-`: `engines.ts` writes them into SQL and shell
-  input as they are), else new ones with a `databasePassword` warning.
+  (the file's, else the first that is not a redirect); custom domains get
+  `domains.add`'s DNS check against the import's node when the import
+  runs, so one whose records still point at the old node waits before its
+  route asks Let's Encrypt (`acme_released_at` only once a check proves
+  it, the re-check and the origin check go on from there, as after
+  `domains.add`). Database and Box specs are built from the engine
+  (`databaseSpec`, `boxSpec`), never taken from the file: a database runs
+  this panel's catalog image of its version, whatever image the file says
+  it ran (a `databaseImage` warning names both; a newer one is set again
+  on the Version card), and a version the panel does not offer blocks
+  (`engineVersion`). One user inside and through the exposed port (0.2.9):
+  the export leaves out `service_databases.exposed_user` and the
+  `exposed_password` of a database from before 0.2.9, the import writes
+  `exposed_user` "" and only `admin_password`, and a file from before
+  0.2.9's exposure that names a separate exposed user and its password
+  imports without them. The admin password comes from the file only when
+  it fits `databases.create`'s password rule (12 to 128 of
+  `A-Za-z0-9._~-`: `engines.ts` writes it into SQL and shell input as it
+  is), else a new one with a `databasePassword` warning. Listeners follow
+  `databases.setExposure` on this panel: none for a version without TLS
+  (MariaDB 10.11) or on a node whose agent cannot keep the port TLS only
+  (`extras.exposures[].refusal` says why, and they are listed as skipped).
   What reads the source (`mapping.ts`) is the row the file's names point
   at, else a `needs` choice: another row, `createFromFile` (the included
   login, needs `git.manage`/`registries.manage`), or none (a repository
@@ -4214,7 +4229,7 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `src/routes/_app/settings/`, `src/routes/_app/{activity,approvals}.tsx`,
   `src/components/settings-nav.ts` and `src/components/settings/`. Nothing
   is mocked in shipped screens.
-- Service export and import (0.2.9): the Export card on the Settings tab
+- Service export and import (0.2.10): the Export card on the Settings tab
   (owners and admins, `auth.whoami`; compose and protected services show
   why instead) opens `components/service/transfer/export-dialog.tsx`; New
   service > Import from a file opens `/import?project=`

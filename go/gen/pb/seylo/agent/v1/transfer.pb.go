@@ -81,7 +81,7 @@ type ExportVolumeResponse struct {
 	// Uncompressed bytes archived.
 	SizeBytes uint64 `protobuf:"varint,1,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
 	// Archive entries written (files, folders, links); 0 from agents before
-	// 0.2.9. added in 0.2.9 (volume.import-limits.v1)
+	// 0.2.10. added in 0.2.10 (volume.import-limits.v1)
 	Entries       uint64 `protobuf:"varint,2,opt,name=entries,proto3" json:"entries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -146,7 +146,7 @@ type ImportVolumeRequest struct {
 	// The limits below are for data from outside (an uploaded export file).
 	// An agent without the capability volume.import-limits.v1 ignores them,
 	// so the panel sends such data only to agents that advertise it.
-	// added in 0.2.9
+	// added in 0.2.10
 	//
 	// Most file bytes the unpack may write; 0 = no cap. Before anything is
 	// written the agent also refuses (RESOURCE_EXHAUSTED, reason "noSpace")
