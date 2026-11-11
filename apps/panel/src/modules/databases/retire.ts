@@ -3,10 +3,11 @@
 // deployment's env is sealed when it starts (env/desired.ts
 // sealDeploymentEnv), so a service that used ${{db.EXPOSED_URL}} keeps the
 // old user's URL until it deploys again: the old user is named for
-// retirement only once no running service's live or target deployment
-// carries its password. A retirement a compile held back goes out without
-// waiting for the node's next full sync: whenever a deployment goes live or
-// a service is stopped or deleted, in any project, and every minute
+// retirement only once no service's live or target deployment carries its
+// password, stopped services too (several paths stop one for a moment and
+// start it again with the same env). A retirement a compile held back goes
+// out without waiting for the node's next full sync: whenever a deployment
+// goes live or a service is deleted, in any project, and every minute
 // (databases.retirements), releaseHeldRetirements checks those databases
 // again and sends the ones nothing holds any more.
 
@@ -19,24 +20,24 @@ import { deploymentEnv } from "../env/desired";
 import { type DatabaseInfo, findDatabase, loadDatabase, readSecret, retiredExposedPasswordSecret } from "./info";
 
 /**
- * The values of every live and target deployment's env of the services
- * that run: what their containers run with. A stopped service runs none
- * (it starts again with the env it deployed with).
+ * The values of every live and target deployment's env: what the services'
+ * containers run with. A stopped service counts too: services.start, a
+ * clone's data copy, a move that is undone and boxes start it again with
+ * the env it deployed with, no redeploy.
  */
 function runningEnvValues(deps: Pick<Deps, "db" | "secrets">): string[] {
   const rows = deps.db
     .selectDistinct({ id: deployments.id, envSealed: deployments.envSealed })
     .from(deployments)
     .innerJoin(services, or(eq(services.liveDeploymentId, deployments.id), eq(services.targetDeploymentId, deployments.id)))
-    .where(eq(services.stopped, false))
     .all();
   return rows.flatMap((r) => (deploymentEnv(deps, r.envSealed) ?? []).map((v) => v.value ?? ""));
 }
 
 /**
  * The old exposed user, "" when there is none (Redis-like engines have one
- * user; never the admin), and whether a running service still has its
- * password, as it is or in a URL. One scan of the deployments per memo.
+ * user; never the admin), and whether a service still has its password,
+ * as it is or in a URL. One scan of the deployments per memo.
  */
 function retirement(deps: Pick<Deps, "db" | "secrets">, info: DatabaseInfo, memo?: CompileMemo): { user: string; held: boolean } {
   const user = info.row.exposedUser;
@@ -75,9 +76,9 @@ export function retiredExposedUser(deps: Pick<Deps, "db" | "secrets">, info: Dat
 
 /**
  * Marks dirty the databases whose last compiled spec held their old user's
- * retirement back and that no running service holds any more, so the
- * agent gets it now (the kind spec is not part of the container, so
- * nothing restarts). A database is marked once per release: the compile
+ * retirement back and that no service holds any more, so the agent gets
+ * it now (the kind spec is not part of the container, so nothing
+ * restarts). A database is marked once per release: the compile
  * that follows remembers it again only if it is held again, and a node
  * that is offline gets it with its full sync on connect. With nothing
  * held back this reads nothing. Never throws. Returns the marked database

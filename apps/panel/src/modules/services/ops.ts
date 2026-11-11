@@ -8,7 +8,6 @@ import { domains, projectPrefs, projects, servicePlacements, services, volumes }
 import type { Deps } from "../../deps";
 import { isTimeZone, nodeCronProblem, normalizeCronSchedule } from "../../jobs/cron-expr";
 import { implement, type OpContext } from "../../ops/implement";
-import { releaseHeldRetirements } from "../databases/retire";
 import { assertNoActiveDeploy, queueDeploy } from "../deployments/queue";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
@@ -416,8 +415,6 @@ const stop = implement(serviceOps.stop, (input, ctx) => {
     publishService(ctx, m);
   }
   publishService(ctx, row);
-  // A stopped service no longer holds back an old exposed database user's retirement.
-  releaseHeldRetirements(ctx);
   return {};
 });
 

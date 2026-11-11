@@ -902,7 +902,7 @@ describe("held retirements of an old exposed user", () => {
   const marks = (spy: { mock: { calls: unknown[][] } }, serviceId: string) =>
     spy.mock.calls.filter(([target]) => (target as { serviceId?: string }).serviceId === serviceId).length;
 
-  test("a service of another project that stops or is deleted releases it at once", async () => {
+  test("a stopped service still holds it; one of another project that is deleted releases it at once", async () => {
     const { serviceId, node, compiled } = await oldDatabase();
     // The old URL copied into a service of another project (references stay within one project).
     const other = seedProject(panel);
@@ -910,14 +910,15 @@ describe("held retirements of an old exposed user", () => {
     runWith(worker.id, oldUrl);
     expect(compiled()).toBe("");
     const dirty = spyOn(panel.deps.agents.desired, "markDirty");
-    // Stopped, it runs nothing with the old URL.
+    // Stopped, it starts again with the same sealed env (services.start, a clone's data copy, an undone
+    // move), so the old user keeps working for it: nothing is sent, not even by the sweep.
     expect((await callOp(panel, serviceOps.stop, { serviceId: worker.id }, { cookie })).status).toBe(200);
-    expect(marks(dirty, serviceId)).toBe(1);
-    expect(compiled()).toBe("external");
-    // Started again it runs the old URL and holds it; deleted, it is gone.
+    expect(releaseHeldRetirements(panel.deps)).toEqual([]);
+    expect(marks(dirty, serviceId)).toBe(0);
+    expect(compiled()).toBe("");
     expect((await callOp(panel, serviceOps.start, { serviceId: worker.id }, { cookie })).status).toBe(200);
     expect(compiled()).toBe("");
-    dirty.mockClear();
+    // Deleted, it is gone.
     expect((await callOp(panel, serviceOps.remove, { serviceId: worker.id, confirmName: "worker" }, { cookie })).status).toBe(200);
     expect(marks(dirty, serviceId)).toBe(1);
     dirty.mockRestore();
