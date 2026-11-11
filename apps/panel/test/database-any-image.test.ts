@@ -298,7 +298,7 @@ describe("databases.setVersion and create with any image", () => {
   const deployCount = (serviceId: string) =>
     panel.deps.db.select().from(deployments).where(eq(deployments.serviceId, serviceId)).all().length;
   type Res = { status: number; body: { error: { message: string; details: Record<string, string> } } };
-  const refusal = (res: Res) => ({ status: res.status, ...res.body.error.details });
+  const refusal = (res: Res): Record<string, unknown> => ({ status: res.status, ...res.body.error.details });
 
   test("a risk is refused until it is accepted, with what can go wrong; then it deploys and records the line", async () => {
     const { serviceId, node } = await createDb("mongo", "8.0");
@@ -464,7 +464,7 @@ describe("databases.setVersion and create with any image", () => {
   test("databases.create takes any image of the engine and records the line its tag names", async () => {
     const { project, node } = seedPlace();
     const create = (name: string, input: Record<string, unknown>) =>
-      callOp(panel, dbOps.create, { projectId: project.id, name, nodeId: node.id, ...input }, { cookie });
+      callOp(panel, dbOps.create, { projectId: project.id, name, nodeId: node.id, ...input } as never, { cookie });
     const mountOf = (serviceId: string) => panel.deps.db.select().from(volumes).where(eq(volumes.serviceId, serviceId)).get()?.mountPath;
     for (const [name, input, version, stored, mount] of [
       ["mongo-82", { engine: "mongo", image: "docker.io/library/mongo:8.2.12" }, "8.2", "mongo:8.2.12", "/data/db"],
