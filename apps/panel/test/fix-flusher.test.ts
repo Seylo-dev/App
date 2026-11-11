@@ -97,3 +97,34 @@ test("ApplyService passes compile their specs together: one env graph per projec
     graphs.mockRestore();
   }
 });
+
+test("a held node gets nothing until the hold is released, then a full sync (a panel move holds its target)", async () => {
+  const agent = await joinAgent(panel, url);
+  agents.push(agent);
+  await panel.deps.agents.desired.settled();
+  await flusherFor(panel.deps)?.flush();
+  let syncs = 0;
+  let applies = 0;
+  agent.handle("SyncDesired", (request: any) => {
+    syncs++;
+    return { acceptedRevision: request.state?.revision ?? 0n };
+  });
+  agent.handle("ApplyService", (request: any) => {
+    applies++;
+    return { acceptedRevision: request.revision };
+  });
+  const release = panel.deps.agents.desired.hold(agent.nodeId);
+  const project = seedProject(panel);
+  seedService(panel, project.id, agent.nodeId, { name: "web" });
+  panel.deps.agents.desired.markDirty({ projectId: project.id });
+  panel.deps.agents.desired.markDirty({ nodeId: agent.nodeId });
+  await panel.deps.agents.desired.settled();
+  await flusherFor(panel.deps)?.flush();
+  expect(syncs + applies).toBe(0);
+  release();
+  release(); // twice is harmless
+  await panel.deps.agents.desired.settled();
+  await flusherFor(panel.deps)?.flush();
+  expect(syncs).toBeGreaterThanOrEqual(1);
+  expect(panel.deps.agents.desired.isHeld(agent.nodeId)).toBe(false);
+});

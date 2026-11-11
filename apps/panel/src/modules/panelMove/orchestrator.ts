@@ -55,7 +55,8 @@ export const holdTimeoutMs = 2 * 60_000;
 /** The moved panel's health wait on the target (StartMovedPanel.health_timeout). */
 export const healthTimeoutMs = 3 * 60_000;
 /** The panel's own wait for StartMovedPanel: the health wait, the pull and the checks. */
-export const startTimeoutMs = 5 * 60_000;
+/** The agent pulls the image, starts the panel (up to 3 minutes healthy) and checks the pin and version: room for a slow pull. */
+export const startTimeoutMs = 8 * 60_000;
 /** StagePanelAddress probes with a 10 s dial. */
 const stageTimeoutMs = 30_000;
 const abortTimeoutMs = 2 * 60_000;
@@ -328,6 +329,10 @@ async function runMove(deps: Deps, move: RunningMove): Promise<void> {
     // ---- starting
     writeOut(deps, move, "starting");
     setStep(deps, move, "starting");
+    // From here this panel must send the target nothing: its desired state (where the target is not the
+    // panel node) would drop the panel spec StartMovedPanel installs. Released on an abort; after the
+    // switch this panel is gone.
+    move.releaseTarget = deps.agents.desired.hold(move.targetNodeId);
     const started = await deps.agents.call(
       move.targetNodeId,
       "startMovedPanel",
@@ -561,6 +566,9 @@ async function abortMove(deps: Deps, move: RunningMove, error: unknown, held: bo
       log.warn({ err: failure, nodeId: move.targetNodeId }, "the target did not take AbortMovedPanel; retrying when it is back");
     }
   }
+  // The target gets this panel's desired state again (a full sync).
+  move.releaseTarget?.();
+  move.releaseTarget = undefined;
   const notCleared: string[] = [];
   await Promise.all(
     [...move.staged].map(async (nodeId) => {

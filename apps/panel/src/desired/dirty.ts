@@ -50,6 +50,16 @@ export interface DesiredStateSync {
   markSettled(): void;
 
   /**
+   * Holds every send to a node until the returned release runs: its marks
+   * wait and it gets a full sync after the release. A panel move holds the
+   * target while the moved panel starts there, since a send from this
+   * panel would drop the panel spec the target just installed.
+   */
+  hold(nodeId: string): () => void;
+  /** For the flusher: the node's sends wait. */
+  isHeld(nodeId: string): boolean;
+
+  /**
    * Called when a node refuses a service's spec, so the deployment that
    * shipped it fails with the agent's reason instead of waiting for the
    * health timeout. Returns an unsubscribe function.
@@ -78,8 +88,9 @@ export function createDesiredStateSync(): DesiredStateSync {
   let contributors: DesiredContributor[] = [];
   const refusedListeners = new Set<(nodeId: string, refusal: RefusedSpec) => void>();
   const syncedListeners = new Set<(nodeId: string, state: DesiredState) => void>();
+  const held = new Map<string, number>();
 
-  return {
+  const api: DesiredStateSync = {
     contribute(contributor) {
       // Stable sort: equal orders keep registration order.
       contributors = [...contributors, contributor].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -112,6 +123,20 @@ export function createDesiredStateSync(): DesiredStateSync {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    hold(nodeId) {
+      held.set(nodeId, (held.get(nodeId) ?? 0) + 1);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const left = (held.get(nodeId) ?? 1) - 1;
+        if (left > 0) held.set(nodeId, left);
+        else held.delete(nodeId);
+        // What waited goes out now, as a full sync.
+        if (left <= 0) api.markDirty({ nodeId });
+      };
+    },
+    isHeld: (nodeId) => held.has(nodeId),
     markSettled() {
       inFlight = false;
       if (pending.length > 0) return;
@@ -146,4 +171,5 @@ export function createDesiredStateSync(): DesiredStateSync {
       }
     },
   };
+  return api;
 }

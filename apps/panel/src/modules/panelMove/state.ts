@@ -30,6 +30,8 @@ export interface RunningMove {
   switching: boolean;
   /** Nodes that hold the staged address of this move. */
   readonly staged: Set<string>;
+  /** Releases the hold on desired-state sends to the target (set while the moved panel starts there). */
+  releaseTarget?: () => void;
   /** Set when the switch finished from this panel's side. */
   doneAt: number | null;
   /** The old node's agent did not confirm it stops this panel. */

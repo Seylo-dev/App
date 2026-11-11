@@ -497,6 +497,25 @@ describe("the move", () => {
     expect((await callOp(panel, settings.updateGeneral, { name: "back" }, { cookie: owner.cookie })).status).toBe(200);
   });
 
+  test("the target's desired state is held while the moved panel starts there; an abort releases it", async () => {
+    // A send from the old panel (where the target is not the panel node) would drop the panel spec StartMovedPanel installed.
+    const gate = held({ version: panel.deps.config.version });
+    fleet.answers.set("startMovedPanel", gate.answer);
+    fleet.answers.set("stagePanelAddress", (nodeId) => {
+      if (nodeId === otherId) throw agentRefusal("UNAVAILABLE", "dial tcp 203.0.113.20:3443: i/o timeout");
+      return {};
+    });
+    await start();
+    await gate.started;
+    // The flusher's side of the hold is in fix-flusher.test.ts.
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(true);
+    expect(panel.deps.agents.desired.isHeld(otherId)).toBe(false);
+    gate.release();
+    // Staging fails on b: the move undoes itself and releases the target.
+    await waitForState("failed");
+    expect(panel.deps.agents.desired.isHeld(targetId)).toBe(false);
+  });
+
   test("byte counts that disagree fail the move", async () => {
     fleet.answers.set("importPanelData", (_node, request, { bytes }) => ({
       sizeBytes: BigInt((bytes?.length ?? 0) - 1),

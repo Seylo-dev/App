@@ -297,6 +297,11 @@ export function startDesiredFlusher(
       const sends: Promise<void>[] = [];
       for (const [nodeId, p] of work) {
         if (!agents.isOnline(nodeId)) continue;
+        if (agents.desired.isHeld(nodeId)) {
+          // Held (a panel move starts the moved panel there): the release sends a full sync.
+          needsFull.add(nodeId);
+          continue;
+        }
         if ((backoffUntil.get(nodeId) ?? 0) > now) {
           // Wedged last time: keep its work for the full sync after the backoff or its next connection.
           needsFull.add(nodeId);
