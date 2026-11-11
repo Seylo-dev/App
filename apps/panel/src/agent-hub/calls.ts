@@ -18,7 +18,8 @@
 //   UNAVAILABLE      details.reason "cancelled"   options.signal aborted
 //   NOT_IMPLEMENTED  details.reason "capability"  the agent did not advertise the method's capability (old agent)
 //   <mapped>         details.reason "agent"       the agent answered with an error status; message is the agent's
-//                                                 (safe to show), details.agentStatus is the StatusCode name
+//                                                 (safe to show), details.agentStatus is the StatusCode name and
+//                                                 details.agentReason the agent's own details.reason, when it sent one
 
 import { getOption, type MessageInitShape, type MessageShape } from "@bufbuild/protobuf";
 import { OpError, type OpErrorCode } from "@seylo/ops";
@@ -180,7 +181,23 @@ export function agentStatusError(
   const code = status ? (statusToOpCode[status.code] ?? "INTERNAL") : "INTERNAL";
   const agentStatus = status ? (StatusCode[status.code] ?? String(status.code)) : "UNKNOWN";
   const message = code === "INTERNAL" || !status?.message ? "The node failed to do this. Its agent log has the details." : status.message;
-  return new OpError(code, message, { ...(status?.details ?? {}), reason: "agent", nodeId, agentStatus });
+  // The agent's own reason ("notStarted", "committed") would be lost under reason "agent".
+  const agentReason = status?.details?.reason;
+  return new OpError(code, message, {
+    ...(status?.details ?? {}),
+    reason: "agent",
+    nodeId,
+    agentStatus,
+    ...(agentReason ? { agentReason } : {}),
+  });
+}
+
+/** The agent's status name and reason of a call it refused (agentStatusError); null for any other failure. */
+export function agentRefusalOf(error: unknown): { status: string; reason: string | null } | null {
+  if (!(error instanceof OpError)) return null;
+  const details = error.details as { reason?: string; agentStatus?: string; agentReason?: string } | undefined;
+  if (details?.reason !== "agent" || !details.agentStatus) return null;
+  return { status: details.agentStatus, reason: details.agentReason ?? null };
 }
 
 export const defaultCallTimeoutMs = 30_000;

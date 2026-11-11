@@ -10,7 +10,7 @@ import {
   StatusCode,
   StreamMode,
 } from "@seylo/proto";
-import { agentStatusError, methodCapability, methodStreamMode, type RawMethodName } from "../src/agent-hub/calls";
+import { agentRefusalOf, agentStatusError, methodCapability, methodStreamMode, type RawMethodName } from "../src/agent-hub/calls";
 import { createAgentHub } from "../src/agent-hub/hub";
 import { createNodeStateStore } from "../src/agent-hub/node-state";
 import { createDesiredStateSync } from "../src/desired/dirty";
@@ -50,6 +50,12 @@ describe("method metadata", () => {
     expect(internal.code).toBe("INTERNAL");
     expect(internal.message).not.toContain("/var/lib");
     expect(internal.details?.agentStatus).toBe("INTERNAL");
+    // The agent's own reason survives next to reason "agent" (a panel move tells "notStarted" from "committed" by it).
+    const refused = agentStatusError("n", { code: StatusCode.FAILED_PRECONDITION, message: "not here", details: { reason: "notStarted" } });
+    expect(refused.details).toMatchObject({ reason: "agent", agentStatus: "FAILED_PRECONDITION", agentReason: "notStarted" });
+    expect(agentRefusalOf(refused)).toEqual({ status: "FAILED_PRECONDITION", reason: "notStarted" });
+    expect(agentRefusalOf(internal)).toEqual({ status: "INTERNAL", reason: null });
+    expect(agentRefusalOf(new Error("x"))).toBeNull();
   });
 });
 
