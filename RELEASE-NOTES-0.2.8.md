@@ -15,6 +15,7 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-8
 - **A service can reference its own domain.** `${{<service>.DOMAIN}}`, `URL` and the other built-ins work in the service's own environment (n8n's `N8N_HOST`, `WEBHOOK_URL`). Before, the editor called it an error and the deploy left it as written.
 - **Service pages.** The usage strip shows on every tab, so the tabs no longer jump when you switch; the Domains tab shows a red count of domains that still need DNS or a certificate; the node chip and the domain link in the header have icons. Project settings use two columns on wide screens.
 - **Databases.** Turning Exposed on asks for the port first (or picks a free one) and who may connect, and only then opens it; Port and access changes them later. The password has an eye to show it and a copy button, and the Connection tab shows the database's console. The New database form shows each engine's logo.
+- **Source tab.** A connected repository shows Connected (disabled) until you change the account, repository, branch or push setting.
 - **MCP setup for Claude.** The Claude Code command adds the panel for every project (`--scope user`), and Copy the URL and open Claude puts the server URL on the clipboard on the way to Claude's connectors page. Claude has no install link to go further.
 
 ## Fixed
