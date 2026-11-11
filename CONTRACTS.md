@@ -2773,7 +2773,11 @@ loopback address only after CommitMovedPanel. On HelloAccepted from the
 staged address `panel_url` and `panel_pin` become the staged values,
 `insecure_transport` goes false and `staged`, `staged_move` and `fallback`
 are cleared. The pin is the SPKI of `agent-tls.key`, which moves with the
-data, so nodes need no re-join. CommitMovedPanel first checks the moved
+data, so nodes need no re-join. The target, now the panel's node, dials
+`https://127.0.0.1:<agents' port>` with the pin from then on (not the
+installer's `http://127.0.0.1:<panel port>`); both count as loopback
+(`dialsLoopback`), and the agents' port stays bound on 127.0.0.1 while
+IP access is closed. CommitMovedPanel first checks the moved
 panel works (reconcile RUNNING, the pin on the agents' TLS port, the
 version on /api/health; the journal carries the pin): not answering right
 now is UNAVAILABLE `commit` (retry), another key or version

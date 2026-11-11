@@ -2294,7 +2294,8 @@ p31_run() {
   done
   p31_both_moved || return 1
   case $(on "$E2E_A" "grep '^panel_url:' $BRAND_DATA_DIR/config.yml") in
-  "panel_url: http://127.0.0.1"* | "panel_url: http://localhost"* | "panel_url: http://[::1]"*) good "A (the panel's node) keeps dialing loopback" ;;
+  # After a panel move (check 41) the panel's node dials its pinned TLS port on loopback, https://127.0.0.1:<agents' port>.
+  "panel_url: http://127.0.0.1"* | "panel_url: http://localhost"* | "panel_url: http://[::1]"* | "panel_url: https://127.0.0.1:"*) good "A (the panel's node) keeps dialing loopback" ;;
   *) bad "A no longer dials loopback: $(on "$E2E_A" "grep '^panel_url:' $BRAND_DATA_DIR/config.yml")" ;;
   esac
   for l in b c; do
