@@ -10,6 +10,7 @@ export default {
   pick: "Pick a version",
   noChoice: "No other version is available for this database.",
   change: "Change version",
+  anotherTag: "Another tag of {engine} {version}",
   newest: "{version} (newest)",
   kind: {
     current: "current",
@@ -28,6 +29,8 @@ export default {
     titlePatch: "Update to {image}?",
     titleLine: "Change {engine} to {version}?",
     stay: "Stay on {image}?",
+    titleTag: "Run another tag of {engine} {version}?",
+    tagSame: "The database runs {image}. Give the exact release tag to run instead.",
     restart: "The database restarts on {image}: a short outage while it starts.",
     undo: "This cannot be undone. Older versions cannot read the upgraded data files; going back means restoring a backup into a new database.",
     mongoFcv: "MongoDB's feature compatibility version is set to {version} on the running database first. If that fails, nothing changes.",

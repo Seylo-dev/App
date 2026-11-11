@@ -3806,7 +3806,18 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   Postgres tag keeps the catalog image's base system (`-alpine`, pgvector
   `-trixie`: another C library sorts text in another order under the same
   indexes). It is judged like a catalog image of that line and shown as
-  not tested by Seylo. `deployments.rollback` of a database takes only a
+  not tested by Seylo. That holds for the line the database runs too
+  (0.2.10), also when it runs the newest catalog image of it and no
+  catalog choice of the line is allowed: a newer release is a patch (no
+  backup), an older one is refused (`olderImage`), and the very image that
+  runs is refused as `current` ("nothing to change"; after a failed change
+  it may be set again to stay). `versionChoices.customOnCurrent` says
+  whether setVersion takes such a tag for the line it runs: false for
+  KeyDB and Dragonfly (no official repository), a variant without one, a
+  line the catalog no longer has, and while `blocked`. The Version card
+  offers it as "Another tag of <engine> <version>", which opens the
+  confirm dialog straight on the image field, starting from the image that
+  runs. `deployments.rollback` of a database takes only a
   deployment of the image it runs (CONFLICT, reason `databaseVersion`):
   the deployments from before a version change ran the older version. The
   web app's Version card is on the database's Settings tab; the header's

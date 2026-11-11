@@ -105,6 +105,32 @@ describe("version rules", () => {
     });
   });
 
+  test("the line a database runs on its newest catalog image: another exact tag of it is a patch, the same or an older one is refused", () => {
+    const tagOf = (engine: DatabaseEngine, variant: string | null, from: VersionPoint, image: string) =>
+      judgeVersion(engine, from, { ...from, image: customImage(engine, variant, from.version, image) }, lines(engine, variant));
+    const pg = point("postgres", "17");
+    expect(pg.image).toBe("postgres:17.6-alpine");
+    expect(tagOf("postgres", null, pg, "postgres:17.7-alpine")).toMatchObject({ kind: "patch", allowed: true });
+    for (const same of ["postgres:17.6-alpine", "docker.io/library/postgres:17.6-alpine"]) {
+      const j = tagOf("postgres", null, pg, same);
+      expect(j).toMatchObject({ kind: "current", allowed: false, reason: "current" });
+      expect(j.message).toBe("The database already runs postgres:17.6-alpine: nothing to change.");
+    }
+    expect(tagOf("postgres", null, pg, "postgres:17.5-alpine")).toMatchObject({ kind: "downgrade", allowed: false, reason: "olderImage" });
+
+    const vec = point("postgres", "17", "pgvector");
+    expect(tagOf("postgres", "pgvector", vec, "pgvector/pgvector:0.8.8-pg17-trixie")).toMatchObject({ kind: "patch", allowed: true });
+    expect(tagOf("postgres", "pgvector", vec, vec.image)).toMatchObject({ kind: "current", allowed: false, reason: "current" });
+    expect(tagOf("postgres", "pgvector", vec, "pgvector/pgvector:0.8.6-pg17-trixie")).toMatchObject({ reason: "olderImage" });
+
+    // The same release on another base, where the engine allows that (Postgres does not: customImage).
+    const mongo = point("mongo", "8.0");
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.34-noble")).toMatchObject({ kind: "patch", allowed: true });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.35")).toMatchObject({ kind: "patch", allowed: true });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.33")).toMatchObject({ kind: "downgrade", allowed: false, reason: "olderImage" });
+    expect(tagOf("mongo", null, mongo, "mongo:8.0.34")).toMatchObject({ kind: "current", allowed: false, reason: "current" });
+  });
+
   test("versions compare number by number; images give their release and line", () => {
     expect(compareVersions("10.11", "11.4")).toBe(-1);
     expect(compareVersions("11.10", "11.8")).toBe(1);
@@ -426,6 +452,83 @@ describe("databases.versionChoices and setVersion", () => {
     const step = await callOp(panel, dbOps.setVersion, { serviceId: maria.serviceId, version: "11.4", confirmNoBackup: true }, { cookie });
     expect(step.status).toBe(200);
     expect(specImage(maria.serviceId)).toBe("mariadb:11.4.7");
+  });
+
+  test("the line it runs on its newest catalog image takes another exact tag of it: newer is a patch, the same or an older one is refused", async () => {
+    const { serviceId } = await createDb("postgres", "17");
+    const choices = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+    expect(choices.body).toMatchObject({ version: "17", image: "postgres:17.6-alpine", customOnCurrent: true, backupFresh: false });
+    // No catalog choice of 17 can be picked: it runs the newest pinned image.
+    expect(choices.body.choices.find((c: { version: string }) => c.version === "17")).toMatchObject({ kind: "current", allowed: false });
+
+    const set = (image: string) => callOp(panel, dbOps.setVersion, { serviceId, version: "17", image }, { cookie });
+    const before = deployCount(serviceId);
+    for (const same of ["postgres:17.6-alpine", "docker.io/library/postgres:17.6-alpine"]) {
+      const res = await set(same);
+      expect(res.status).toBe(409);
+      expect(res.body.error.details.reason).toBe("current");
+      expect(res.body.error.message).toContain("nothing to change");
+    }
+    const older = await set("postgres:17.5-alpine");
+    expect(older.status).toBe(409);
+    expect(older.body.error.details.reason).toBe("olderImage");
+    for (const refused of [
+      "postgres:17.7",
+      "postgres:17.7-bookworm",
+      `postgres@sha256:${"c".repeat(64)}`,
+      "bitnami/postgresql:17.7.0",
+      "postgres:17",
+    ]) {
+      const res = await set(refused);
+      expect({ refused, status: res.status, reason: res.body.error.details.reason }).toEqual({
+        refused,
+        status: 400,
+        reason: "customImage",
+      });
+    }
+    expect(deployCount(serviceId)).toBe(before);
+    expect(specImage(serviceId)).toBe("postgres:17.6-alpine");
+
+    // A newer release of the line is a patch update: no backup, no confirmNoBackup.
+    const newer = await set("postgres:17.7-alpine");
+    expect(newer.status).toBe(200);
+    expect(newer.body.database.version).toBe("17");
+    expect(specImage(serviceId)).toBe("postgres:17.7-alpine");
+    expect(deployCount(serviceId)).toBe(before + 1);
+
+    // Once it runs, the catalog's image of its line is older, and another tag still goes.
+    await settleDeploys(panel);
+    goLive(serviceId);
+    const live = panel.deps.db.select({ id: services.liveDeploymentId }).from(services).where(eq(services.id, serviceId)).get()?.id ?? "";
+    panel.deps.db.update(deployments).set({ imageRef: "postgres:17.7-alpine" }).where(eq(deployments.id, live)).run();
+    const after = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+    expect(after.body).toMatchObject({ image: "postgres:17.7-alpine", pendingImage: null, customOnCurrent: true });
+    expect(after.body.choices.find((c: { version: string }) => c.version === "17")).toMatchObject({
+      kind: "downgrade",
+      allowed: false,
+      reason: "olderImage",
+    });
+    expect((await set("postgres:17.6-alpine")).body.error.details.reason).toBe("olderImage");
+    expect((await set("postgres:17.7-alpine")).body.error.details.reason).toBe("current");
+    expect((await set("postgres:17.8-alpine")).status).toBe(200);
+  });
+
+  test("another tag of the line it runs: not for KeyDB or Dragonfly, nor while blocked", async () => {
+    for (const [engine, version, image] of [
+      ["keydb", "6.3", "eqalpha/keydb:x86_64_v6.3.5"],
+      ["dragonfly", "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.3"],
+    ] as const) {
+      const { serviceId } = await createDb(engine, version);
+      const choices = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+      expect({ engine, customOnCurrent: choices.body.customOnCurrent }).toEqual({ engine, customOnCurrent: false });
+      const res = await callOp(panel, dbOps.setVersion, { serviceId, version, image }, { cookie });
+      expect({ engine, status: res.status, reason: res.body.error.details.reason }).toEqual({ engine, status: 400, reason: "customImage" });
+    }
+    const { serviceId } = await createDb("mongo", "8.0");
+    expect((await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie })).body.customOnCurrent).toBe(true);
+    panel.deps.db.update(services).set({ stopped: true }).where(eq(services.id, serviceId)).run();
+    const stopped = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+    expect(stopped.body).toMatchObject({ blocked: { reason: "stopped" }, customOnCurrent: false });
   });
 
   test("a stopped database, a running deploy or no node blocks every change", async () => {

@@ -680,10 +680,12 @@ const refused = (kind: string, reason: string, message: string) => ({ kind, allo
 /**
  * databases.versionChoices for the demo databases, as the panel's rules
  * answer them: Postgres refuses its next major and older ones, Redis
- * takes the newer line. database-version.spec.ts adds a MongoDB.
+ * takes the newer line. Both run the newest pinned image of their line, so
+ * only another exact tag of it (customOnCurrent) stays on the line.
+ * database-version.spec.ts adds a MongoDB.
  */
 export function versionChoicesOf(serviceId: string) {
-  const base = { variant: null, pendingImage: null, blocked: null, recentBackupAt: ago(15 * hour), backupFresh: true };
+  const base = { variant: null, pendingImage: null, blocked: null, customOnCurrent: true, recentBackupAt: ago(15 * hour), backupFresh: true };
   if (serviceId === ids.redis)
     return {
       ...base,
@@ -692,7 +694,7 @@ export function versionChoicesOf(serviceId: string) {
       image: "redis:7.4.5-alpine",
       choices: [
         { version: "8.2", image: "redis:8.2.1-alpine", kind: "major", allowed: true },
-        { version: "7.4", image: "redis:7.4.5-alpine", ...refused("current", "current", "The database runs redis:7.4.5-alpine.") },
+        { version: "7.4", image: "redis:7.4.5-alpine", ...refused("current", "current", "The database already runs redis:7.4.5-alpine: nothing to change.") },
       ],
     };
   const older = (version: string) => refused("downgrade", "downgrade", `PostgreSQL 17 data files cannot go back to ${version}. Restore a backup into a new database instead.`);
@@ -707,7 +709,7 @@ export function versionChoicesOf(serviceId: string) {
         image: "postgres:18.6-alpine",
         ...refused("major", "postgresMajor", "A Postgres major upgrade needs a dump and restore into a new database: pg_upgrade is not run in place."),
       },
-      { version: "17", image: "postgres:17.6-alpine", ...refused("current", "current", "The database runs postgres:17.6-alpine.") },
+      { version: "17", image: "postgres:17.6-alpine", ...refused("current", "current", "The database already runs postgres:17.6-alpine: nothing to change.") },
       { version: "16", image: "postgres:16.10-alpine", ...older("16") },
       { version: "15", image: "postgres:15.14-alpine", ...older("15") },
     ],

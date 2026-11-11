@@ -21118,7 +21118,7 @@
       "post": {
         "operationId": "databases.setVersion",
         "summary": "Change a database's version",
-        "description": "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line; digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
+        "description": "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
         "tags": [
           "databases"
         ],
@@ -21513,7 +21513,7 @@
       "get": {
         "operationId": "databases.versionChoices",
         "summary": "List the versions a database can change to",
-        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
+        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
         "tags": [
           "databases"
         ],
@@ -21553,6 +21553,7 @@
                     "pendingImage",
                     "choices",
                     "blocked",
+                    "customOnCurrent",
                     "recentBackupAt",
                     "backupFresh"
                   ],
@@ -21700,6 +21701,9 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "customOnCurrent": {
+                      "type": "boolean"
                     },
                     "recentBackupAt": {
                       "anyOf": [

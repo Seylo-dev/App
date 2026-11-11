@@ -265,7 +265,7 @@ export const versionChoices = defineOp({
   kind: "query",
   summary: "List the versions a database can change to",
   description:
-    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
+    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); customOnCurrent says whether another exact release tag of the line it runs can be given as setVersion's image; recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
   input: Type.Object({ serviceId: Id }),
   output: Type.Object({
     engine: DatabaseEngine,
@@ -279,6 +279,13 @@ export const versionChoices = defineOp({
     choices: Type.Array(VersionChoice),
     /** Why no change can start now (noNode, stopped, deployRunning); null when one can. */
     blocked: Type.Union([Type.Object({ reason: Type.String(), message: Type.String() }), Type.Null()]),
+    /**
+     * databases.setVersion takes another exact release tag (image) of the
+     * version line the database runs, even when no catalog choice of that
+     * line is allowed (it runs the newest pinned image). False for KeyDB and
+     * Dragonfly (no official repository) and while blocked.
+     */
+    customOnCurrent: Type.Boolean(),
     /** When the newest successful database backup finished; null when there is none. */
     recentBackupAt: Type.Union([Timestamp, Type.Null()]),
     /** That backup is from the last 24 hours: a change of version line needs no confirmNoBackup. */
@@ -295,7 +302,7 @@ export const setVersion = defineOp({
   kind: "destructive",
   summary: "Change a database's version",
   description:
-    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line; digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
+    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line (on the line it runs: a newer release is a patch, an older one or the image that runs is refused); digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
   input: Type.Object({
     serviceId: Id,
     /** A catalog version of the database's engine, for example "8.0". */

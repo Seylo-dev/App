@@ -1,7 +1,9 @@
 // The Version card on a database's Settings tab: the catalog versions with
 // the panel's reasons for the refused ones, a patch update, a MongoDB
 // upgrade that waits for a backup (Back up now) or "Change without a
-// backup", and Postgres refusing its next major and every older line.
+// backup", Postgres refusing its next major and every older line, and
+// another exact tag of the version a database runs when it runs the
+// newest pinned image of it.
 // Demo data (demo/service.ts versionChoicesOf) stands in for the panel;
 // databases.setVersion is answered here so nothing deploys.
 //
@@ -10,6 +12,7 @@
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
+import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
 import { databaseOf, ids as svc, versionChoicesOf } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
@@ -27,6 +30,7 @@ function mongoChoices(over: Record<string, unknown> = {}) {
     image: "mongo:7.0.21",
     pendingImage: null,
     blocked: null,
+    customOnCurrent: true,
     recentBackupAt: new Date(now - 3 * 86_400_000).toISOString(),
     backupFresh: false,
     choices: [
@@ -43,7 +47,7 @@ const mongoDb = () => ({ ...databaseOf(svc.db), engine: "mongo", version: "7.0",
 async function openVersion(page: Page) {
   await page.goto(settings(svc.db));
   const card = page.getByRole("region", { name: "Version" });
-  await expect(card.getByText("MongoDB 7.0")).toBeVisible();
+  await expect(card.getByText("MongoDB 7.0", { exact: true })).toBeVisible();
   return card;
 }
 
@@ -170,13 +174,15 @@ test.describe("database version", () => {
       overrides: {
         "databases.versionChoices": (input) => {
           const base = versionChoicesOf(String(input.serviceId));
-          return running ? { ...base, pendingImage: "postgres:17.7-alpine", blocked: { reason: "deployRunning", message: "A deploy is running." } } : base;
+          return running
+            ? { ...base, pendingImage: "postgres:17.7-alpine", blocked: { reason: "deployRunning", message: "A deploy is running." }, customOnCurrent: false }
+            : base;
         },
       },
     });
     await page.goto(settings(svc.db));
     const card = page.getByRole("region", { name: "Version" });
-    await expect(card.getByText("PostgreSQL 17")).toBeVisible();
+    await expect(card.getByText("PostgreSQL 17", { exact: true })).toBeVisible();
     await card.getByRole("combobox", { name: "Change to" }).click();
     const major = page.getByRole("option", { name: /^18/ });
     await expect(major).toHaveAttribute("aria-disabled", "true");
@@ -194,5 +200,58 @@ test.describe("database version", () => {
     await page.reload();
     await expect(page.getByRole("region", { name: "Version" }).getByText("Deploying postgres:17.7-alpine")).toBeVisible();
     await expect(page.getByRole("region", { name: "Version" }).getByRole("combobox", { name: "Change to" })).toBeDisabled();
+    // While blocked the panel takes no other tag either.
+    await expect(page.getByRole("region", { name: "Version" }).getByRole("button", { name: "Another tag of PostgreSQL 17" })).toHaveCount(0);
+  });
+
+  test("a database on the newest pinned image of its version takes another exact tag of it", async ({ page }) => {
+    const sent: Record<string, unknown>[] = [];
+    await installDemo(page, {
+      overrides: {
+        "databases.setVersion": (input) => {
+          sent.push(input);
+          // As the panel answers an older release of the line.
+          if (input.image === "postgres:17.5-alpine") {
+            throw new DemoRefusal(409, "CONFLICT", "postgres:17.5-alpine is older than postgres:17.6-alpine.", { reason: "olderImage" });
+          }
+          return { database: databaseOf(svc.db), deploymentId: "d0000000000000v3" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await expect(card.getByText("PostgreSQL 17", { exact: true })).toBeVisible();
+    // No catalog choice of 17 can be picked: it runs postgres:17.6-alpine, the newest pinned image of 17.
+    await expect(card.getByRole("button", { name: "Change version" })).toBeDisabled();
+    await card.getByRole("button", { name: "Another tag of PostgreSQL 17" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Run another tag of PostgreSQL 17?" })).toBeVisible();
+    // The field is there straight away, starting from what runs, which changes nothing.
+    await expect(dialog.getByLabel("Use another tag of this version")).toHaveCount(0);
+    const field = dialog.getByLabel("Image");
+    await expect(field).toHaveValue("postgres:17.6-alpine");
+    await expect(dialog.getByText("The database runs postgres:17.6-alpine. Give the exact release tag to run instead.")).toBeVisible();
+    await expect(dialog.getByText("Not tested by Seylo")).toBeVisible();
+    const submit = dialog.getByRole("button", { name: "Update" });
+    await expect(submit).toBeDisabled();
+    // The same line: no backup, nothing that cannot be undone.
+    await expect(dialog.getByRole("region", { name: "Backup" })).toHaveCount(0);
+    await expect(dialog.getByText("cannot be undone")).toHaveCount(0);
+
+    await field.fill("postgres:17.5-alpine");
+    await submit.click();
+    await expect(dialog.getByText("postgres:17.5-alpine is older than postgres:17.6-alpine.")).toBeVisible();
+
+    await field.fill("postgres:17.7-alpine");
+    await expect(dialog.getByText("The database restarts on postgres:17.7-alpine")).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/version-another-tag.png` });
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual([
+      { serviceId: svc.db, version: "17", image: "postgres:17.5-alpine" },
+      { serviceId: svc.db, version: "17", image: "postgres:17.7-alpine" },
+    ]);
   });
 });

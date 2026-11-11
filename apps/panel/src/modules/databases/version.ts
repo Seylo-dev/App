@@ -62,7 +62,9 @@ export interface VersionPoint {
  * it may run in place. `lines` are the version ids of the catalog
  * (engine and variant), for the engines that go one line at a time.
  *
- * - The same line with a newer image is a patch update; an older image is refused.
+ * - The same line with a newer image is a patch update (a catalog image or
+ *   another exact tag of that line, the same release on another base too);
+ *   an older image is refused, and so is the very image that runs (current).
  * - Older lines are refused for every engine: data files are not backward compatible.
  * - Postgres majors need pg_upgrade or a dump and restore, neither of which runs in place.
  * - MongoDB, MariaDB and MySQL go one line up at a time (MongoDB needs each
@@ -75,7 +77,9 @@ export function judgeVersion(engine: DatabaseEngine, from: VersionPoint, to: Ver
   const label = engines[engine].label;
   const order = compareVersions(to.version, from.version);
   if (order === 0) {
-    if (to.image === from.image) return { kind: "current", allowed: false, reason: "current", message: `The database runs ${to.image}.` };
+    if (to.image === from.image) {
+      return { kind: "current", allowed: false, reason: "current", message: `The database already runs ${to.image}: nothing to change.` };
+    }
     const a = imageRelease(from.image);
     const b = imageRelease(to.image);
     if (a && b && compareVersions(b, a) < 0) {
@@ -335,6 +339,10 @@ export const versionChoices = implement(dbOps.versionChoices, (input, ctx) => {
     pendingImage: state.pending?.image ?? null,
     choices: catalog.map((v) => ({ version: v.version, image: v.image, ...judge(state, v) })),
     blocked: state.blocked,
+    customOnCurrent:
+      state.blocked === null &&
+      officialRepository(state.info.row.engine, state.info.row.variant) !== null &&
+      catalog.some((v) => v.version === state.from.version),
     recentBackupAt: state.recentBackupAt?.toISOString() ?? null,
     backupFresh: backupFresh(state, new Date()),
   };

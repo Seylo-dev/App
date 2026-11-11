@@ -1,8 +1,10 @@
 // The Version card of a database's Settings tab: what the database runs,
 // the catalog versions it may change to (databases.versionChoices; refused
-// ones are disabled with their reason), and the confirm dialog: the
-// restart, no way back, a backup first and MongoDB's compatibility step.
-// While the change deploys the card shows the deploy and its log.
+// ones are disabled with their reason), another exact tag of the version it
+// runs (customOnCurrent, also when it runs that line's newest pinned image),
+// and the confirm dialog: the restart, no way back, a backup first and
+// MongoDB's compatibility step. While the change deploys the card shows the
+// deploy and its log.
 
 import { backups, databases, deployments, type OpOutput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -54,7 +56,8 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
     { retry: retryOp, refetchInterval: (q) => (q.state.data?.blocked?.reason === "deployRunning" ? 5000 : false) },
   );
   const [picked, setPicked] = useState("");
-  const [confirming, setConfirming] = useState<Choice | null>(null);
+  /** tag: another exact tag of the line it runs, typed in the dialog. */
+  const [confirming, setConfirming] = useState<{ choice: Choice; tag: boolean } | null>(null);
   const [log, setLog] = useState(false);
   const refetch = choices.refetch;
   const activeId = active?.id ?? null;
@@ -78,6 +81,8 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
   const selected = options.find((c) => `${c.version}|${c.image}` === picked) ?? null;
   const running = data.blocked?.reason === "deployRunning";
   const engine = t(`service.kind.${data.engine}`);
+  // The line it runs takes another exact tag even when none of its catalog choices can be picked.
+  const ownLine = data.customOnCurrent ? (data.choices.find((c) => c.version === data.version) ?? null) : null;
 
   return (
     <SectionCard
@@ -109,45 +114,75 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
           <Callout tone="warning">{t("databaseVersion.pending", { pending: data.pendingImage, image: data.image })}</Callout>
         ) : null}
         {data.blocked && !running && <Callout tone="neutral">{data.blocked.message}</Callout>}
-        {options.length === 0 ? (
+        {options.length === 0 && !ownLine ? (
           <span className="text-[13px] text-muted-foreground">{t("databaseVersion.noChoice")}</span>
         ) : (
           <div className="flex flex-wrap items-end gap-2">
-            <Field label={t("databaseVersion.changeTo")} htmlFor="dv-version" className="min-w-0 flex-[1_1_320px] max-w-[520px]">
-              <Select value={picked} onValueChange={setPicked} disabled={data.blocked !== null}>
-                <SelectTrigger id="dv-version" aria-label={t("databaseVersion.changeTo")}>
-                  <SelectValue placeholder={t("databaseVersion.pick")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {options.map((c) => (
-                    <SelectItem key={`${c.version}|${c.image}`} value={`${c.version}|${c.image}`} disabled={!c.allowed}>
-                      <span className="flex min-w-0 flex-col gap-0.5">
-                        <span>{choiceLabel(c, newest)}</span>
-                        <span className="font-mono text-xs text-muted-foreground">{shortImage(c.image)}</span>
-                        {!c.allowed && c.message && <span className="text-xs whitespace-normal text-muted-foreground">{c.message}</span>}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Button variant="primary" disabled={!selected || data.blocked !== null} onClick={() => selected && setConfirming(selected)}>
-              {t("databaseVersion.change")}
-            </Button>
+            {options.length > 0 && (
+              <>
+                <Field label={t("databaseVersion.changeTo")} htmlFor="dv-version" className="min-w-0 flex-[1_1_320px] max-w-[520px]">
+                  <Select value={picked} onValueChange={setPicked} disabled={data.blocked !== null}>
+                    <SelectTrigger id="dv-version" aria-label={t("databaseVersion.changeTo")}>
+                      <SelectValue placeholder={t("databaseVersion.pick")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options.map((c) => (
+                        <SelectItem key={`${c.version}|${c.image}`} value={`${c.version}|${c.image}`} disabled={!c.allowed}>
+                          <span className="flex min-w-0 flex-col gap-0.5">
+                            <span>{choiceLabel(c, newest)}</span>
+                            <span className="font-mono text-xs text-muted-foreground">{shortImage(c.image)}</span>
+                            {!c.allowed && c.message && (
+                              <span className="text-xs whitespace-normal text-muted-foreground">{c.message}</span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Button
+                  variant="primary"
+                  disabled={!selected || data.blocked !== null}
+                  onClick={() => selected && setConfirming({ choice: selected, tag: false })}
+                >
+                  {t("databaseVersion.change")}
+                </Button>
+              </>
+            )}
+            {ownLine && (
+              <Button onClick={() => setConfirming({ choice: ownLine, tag: true })}>
+                {t("databaseVersion.anotherTag", { engine, version: data.version })}
+              </Button>
+            )}
           </div>
         )}
       </div>
-      {confirming && <VersionDialog service={service} data={data} choice={confirming} onClose={() => setConfirming(null)} />}
+      {confirming && (
+        <VersionDialog service={service} data={data} choice={confirming.choice} tag={confirming.tag} onClose={() => setConfirming(null)} />
+      )}
       <DeployLogModal serviceId={service.id} deployment={log ? active : null} onClose={() => setLog(false)} />
     </SectionCard>
   );
 }
 
-function VersionDialog({ service, data, choice, onClose }: { service: ServiceDetail; data: Choices; choice: Choice; onClose: () => void }) {
+function VersionDialog({
+  service,
+  data,
+  choice,
+  tag,
+  onClose,
+}: {
+  service: ServiceDetail;
+  data: Choices;
+  choice: Choice;
+  /** Another exact tag of the line it runs: the image field only, starting from what runs. */
+  tag: boolean;
+  onClose: () => void;
+}) {
   const invalidate = useInvalidate();
   const lineChange = choice.version !== data.version;
-  const [custom, setCustom] = useState(false);
-  const [image, setImage] = useState(choice.image);
+  const [custom, setCustom] = useState(tag);
+  const [image, setImage] = useState(tag ? data.image : choice.image);
   const [withoutBackup, setWithoutBackup] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const needsBackup = lineChange && !data.backupFresh;
@@ -183,14 +218,30 @@ function VersionDialog({ service, data, choice, onClose }: { service: ServiceDet
   });
   const engine = t(`service.kind.${data.engine}`);
   const target = custom ? image.trim() : choice.image;
-  const title =
-    choice.kind === "current"
+  // The image it runs changes nothing: the panel refuses it.
+  const noTag = tag && (target === "" || target === data.image);
+  const title = tag
+    ? t("databaseVersion.confirm.titleTag", { engine, version: choice.version })
+    : choice.kind === "current"
       ? t("databaseVersion.confirm.stay", { image: choice.image })
       : lineChange
         ? t("databaseVersion.confirm.titleLine", { engine, version: choice.version })
         : t("databaseVersion.confirm.titlePatch", { image: choice.image });
   const backupOk = !needsBackup || withoutBackup || runStatus === "succeeded";
   const customOffered = data.engine !== "keydb" && data.engine !== "dragonfly";
+  const imageField = (
+    <Field
+      label={t("databaseVersion.customLabel")}
+      htmlFor="dv-image"
+      hint={t("databaseVersion.customHint", {
+        repo: repositoryOf(choice.image),
+        version: choice.version,
+        image: tag ? data.image : choice.image,
+      })}
+    >
+      <Input id="dv-image" className="font-mono" value={image} onChange={(e) => setImage(e.target.value)} />
+    </Field>
+  );
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -202,14 +253,18 @@ function VersionDialog({ service, data, choice, onClose }: { service: ServiceDet
             change.mutate({
               serviceId: service.id,
               version: choice.version,
-              ...(custom && target !== choice.image ? { image: target } : {}),
+              ...(tag || (custom && target !== choice.image) ? { image: target } : {}),
               ...(needsBackup && withoutBackup ? { confirmNoBackup: true } : {}),
             });
           }}
         >
           <div className="flex flex-col gap-1">
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{t("databaseVersion.confirm.restart", { image: target })}</DialogDescription>
+            <DialogDescription>
+              {noTag
+                ? t("databaseVersion.confirm.tagSame", { image: data.image })
+                : t("databaseVersion.confirm.restart", { image: target })}
+            </DialogDescription>
           </div>
           {lineChange && <Callout tone="warning">{t("databaseVersion.confirm.undo")}</Callout>}
           {lineChange && data.engine === "mongo" && (
@@ -217,23 +272,18 @@ function VersionDialog({ service, data, choice, onClose }: { service: ServiceDet
               {t("databaseVersion.confirm.mongoFcv", { version: data.version })}
             </p>
           )}
-          {customOffered && choice.kind !== "current" && (
-            <div className="flex flex-col gap-2">
-              <label htmlFor="dv-custom" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
-                <Checkbox id="dv-custom" checked={custom} onCheckedChange={(v) => setCustom(v === true)} />
-                {t("databaseVersion.customToggle")}
-              </label>
-              {custom && (
-                <Field
-                  label={t("databaseVersion.customLabel")}
-                  htmlFor="dv-image"
-                  hint={t("databaseVersion.customHint", { repo: repositoryOf(choice.image), version: choice.version, image: choice.image })}
-                >
-                  <Input id="dv-image" className="font-mono" value={image} onChange={(e) => setImage(e.target.value)} />
-                </Field>
+          {tag
+            ? imageField
+            : customOffered &&
+              choice.kind !== "current" && (
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="dv-custom" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
+                    <Checkbox id="dv-custom" checked={custom} onCheckedChange={(v) => setCustom(v === true)} />
+                    {t("databaseVersion.customToggle")}
+                  </label>
+                  {custom && imageField}
+                </div>
               )}
-            </div>
-          )}
           {lineChange && (
             <section
               aria-label={t("databaseVersion.confirm.backupTitle")}
@@ -286,7 +336,7 @@ function VersionDialog({ service, data, choice, onClose }: { service: ServiceDet
           {change.error && <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>}
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>{t("service.cancel")}</Button>
-            <Button type="submit" variant="primary" disabled={change.isPending || !backupOk || (custom && target === "")}>
+            <Button type="submit" variant="primary" disabled={change.isPending || !backupOk || (custom && target === "") || noTag}>
               {lineChange ? t("databaseVersion.confirm.button") : t("databaseVersion.confirm.buttonPatch")}
             </Button>
           </div>
