@@ -34,6 +34,8 @@ export const sealPurposes = [
   "push.vapid-key",
   "registry.credential",
   "service.env",
+  "service.export",
+  "service.import",
   "service.secret",
   "totp.secret",
   "volume.file",

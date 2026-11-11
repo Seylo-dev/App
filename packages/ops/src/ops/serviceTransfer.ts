@@ -475,6 +475,8 @@ export const SecretsEnvelopeV1 = Type.Object({
     r: Type.Integer({ minimum: 1 }),
     p: Type.Integer({ minimum: 1 }),
     salt: B64Url(64),
+    /** 16 bytes of an HMAC under a key from the passphrase: tells a wrong passphrase from a damaged file. */
+    check: B64Url(32),
   }),
   cipher: Type.Literal("aes-256-gcm"),
   iv: B64Url(64),

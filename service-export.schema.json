@@ -2308,7 +2308,8 @@
             "N",
             "r",
             "p",
-            "salt"
+            "salt",
+            "check"
           ],
           "properties": {
             "name": {
@@ -2330,6 +2331,11 @@
             "salt": {
               "pattern": "^[A-Za-z0-9_-]*$",
               "maxLength": 86,
+              "type": "string"
+            },
+            "check": {
+              "pattern": "^[A-Za-z0-9_-]*$",
+              "maxLength": 43,
               "type": "string"
             }
           }

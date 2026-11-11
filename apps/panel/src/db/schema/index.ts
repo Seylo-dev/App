@@ -19,3 +19,4 @@ export * from "./push";
 export * from "./runtime";
 export * from "./settings";
 export * from "./templates";
+export * from "./transfers";
