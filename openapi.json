@@ -21114,6 +21114,604 @@
         "x-mcp": true
       }
     },
+    "/api/v1/databases.setVersion": {
+      "post": {
+        "operationId": "databases.setVersion",
+        "summary": "Change a database's version",
+        "description": "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an explicit tag or digest instead of the catalog's (not tested by Seylo), judged by the version line it claims.",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "serviceId",
+                  "version"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "version": {
+                    "maxLength": 20,
+                    "pattern": "^[0-9A-Za-z._-]+$",
+                    "type": "string"
+                  },
+                  "image": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "confirmNoBackup": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "database",
+                    "deploymentId"
+                  ],
+                  "properties": {
+                    "database": {
+                      "type": "object",
+                      "required": [
+                        "serviceId",
+                        "projectId",
+                        "name",
+                        "engine",
+                        "version",
+                        "variant",
+                        "nodeId",
+                        "nodeName",
+                        "internal",
+                        "exposure",
+                        "shellClient",
+                        "webUi",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "serviceId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "name": {
+                          "minLength": 1,
+                          "maxLength": 40,
+                          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                          "description": "DNS-safe; the service's host name on the project network. Unique in its project.",
+                          "type": "string"
+                        },
+                        "engine": {
+                          "anyOf": [
+                            {
+                              "const": "postgres",
+                              "type": "string"
+                            },
+                            {
+                              "const": "mysql",
+                              "type": "string"
+                            },
+                            {
+                              "const": "mariadb",
+                              "type": "string"
+                            },
+                            {
+                              "const": "mongo",
+                              "type": "string"
+                            },
+                            {
+                              "const": "redis",
+                              "type": "string"
+                            },
+                            {
+                              "const": "valkey",
+                              "type": "string"
+                            },
+                            {
+                              "const": "keydb",
+                              "type": "string"
+                            },
+                            {
+                              "const": "dragonfly",
+                              "type": "string"
+                            },
+                            {
+                              "const": "clickhouse",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "type": "string"
+                        },
+                        "variant": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "maxLength": 30,
+                              "pattern": "^[a-z0-9-]+$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "nodeId": {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        "nodeName": {
+                          "type": "string"
+                        },
+                        "internal": {
+                          "type": "object",
+                          "required": [
+                            "host",
+                            "port",
+                            "database",
+                            "user"
+                          ],
+                          "properties": {
+                            "host": {
+                              "type": "string"
+                            },
+                            "port": {
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "type": "integer"
+                            },
+                            "database": {
+                              "type": "string"
+                            },
+                            "user": {
+                              "type": "string"
+                            },
+                            "httpPort": {
+                              "anyOf": [
+                                {
+                                  "minimum": 1,
+                                  "maximum": 65535,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "exposure": {
+                          "type": "object",
+                          "required": [
+                            "enabled",
+                            "host",
+                            "port",
+                            "user",
+                            "allowedCidrs",
+                            "needsAllowedCidrs",
+                            "tlsHostname",
+                            "certificate",
+                            "certificateIssuer",
+                            "certificateExpiresAt"
+                          ],
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "host": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "port": {
+                              "anyOf": [
+                                {
+                                  "minimum": 1024,
+                                  "maximum": 65535,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "user": {
+                              "type": "string"
+                            },
+                            "allowedCidrs": {
+                              "type": "array",
+                              "items": {
+                                "minLength": 2,
+                                "maxLength": 64,
+                                "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
+                                "type": "string"
+                              }
+                            },
+                            "needsAllowedCidrs": {
+                              "type": "boolean"
+                            },
+                            "tlsHostname": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "certificate": {
+                              "anyOf": [
+                                {
+                                  "const": "none",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "selfSigned",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "pending",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "valid",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "failed",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "certificateIssuer": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "certificateExpiresAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "shellClient": {
+                          "type": "string"
+                        },
+                        "webUi": {
+                          "type": "object",
+                          "required": [
+                            "tool",
+                            "idleMinutes",
+                            "running",
+                            "lastActiveAt"
+                          ],
+                          "properties": {
+                            "tool": {
+                              "type": "string"
+                            },
+                            "idleMinutes": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "running": {
+                              "type": "boolean"
+                            },
+                            "lastActiveAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "createdAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "deploymentId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "service:services.deploy",
+        "x-mcp": true
+      }
+    },
+    "/api/v1/databases.versionChoices": {
+      "get": {
+        "operationId": "databases.versionChoices",
+        "summary": "List the versions a database can change to",
+        "description": "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
+        "tags": [
+          "databases"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "engine",
+                    "version",
+                    "variant",
+                    "image",
+                    "pendingImage",
+                    "choices",
+                    "blocked",
+                    "recentBackupAt",
+                    "backupFresh"
+                  ],
+                  "properties": {
+                    "engine": {
+                      "anyOf": [
+                        {
+                          "const": "postgres",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mysql",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mariadb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "mongo",
+                          "type": "string"
+                        },
+                        {
+                          "const": "redis",
+                          "type": "string"
+                        },
+                        {
+                          "const": "valkey",
+                          "type": "string"
+                        },
+                        {
+                          "const": "keydb",
+                          "type": "string"
+                        },
+                        {
+                          "const": "dragonfly",
+                          "type": "string"
+                        },
+                        {
+                          "const": "clickhouse",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "variant": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "maxLength": 30,
+                          "pattern": "^[a-z0-9-]+$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "image": {
+                      "type": "string"
+                    },
+                    "pendingImage": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "version",
+                          "image",
+                          "kind",
+                          "allowed"
+                        ],
+                        "properties": {
+                          "version": {
+                            "type": "string"
+                          },
+                          "image": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "const": "current",
+                                "type": "string"
+                              },
+                              {
+                                "const": "patch",
+                                "type": "string"
+                              },
+                              {
+                                "const": "upgrade",
+                                "type": "string"
+                              },
+                              {
+                                "const": "downgrade",
+                                "type": "string"
+                              },
+                              {
+                                "const": "major",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "allowed": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "blocked": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "reason",
+                            "message"
+                          ],
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "recentBackupAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "backupFresh": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "service:services.view",
+        "x-mcp": true
+      }
+    },
     "/api/v1/deployments.cancel": {
       "post": {
         "operationId": "deployments.cancel",

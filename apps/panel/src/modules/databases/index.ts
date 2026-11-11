@@ -13,6 +13,7 @@ import { defineModule } from "../module";
 import { watchExposureCapabilities } from "./capability";
 import { connection, create, get, listEngines, openShell, openWebUi, resetPassword, setExposure } from "./ops";
 import { releaseHeldRetirements, watchRetirements } from "./retire";
+import { setVersion, versionChoices } from "./version";
 
 const retirementsType = "databases.retirements";
 
@@ -26,7 +27,7 @@ const retirements = defineJob({
 
 export default defineModule({
   name: "databases",
-  ops: [listEngines, create, get, connection, resetPassword, openWebUi, openShell, setExposure],
+  ops: [listEngines, create, get, connection, resetPassword, openWebUi, openShell, setExposure, versionChoices, setVersion],
   jobs: [retirements],
   start(deps) {
     watchRetirements(deps);

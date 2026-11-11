@@ -201,8 +201,9 @@ export const engines: Record<DatabaseEngine, Engine> = {
     port: 27017,
     httpPort: null,
     versions: [
-      { version: "8.0", image: "mongo:8.0.12", dataPath: "/data/db" },
-      { version: "7.0", image: "mongo:7.0.21", dataPath: "/data/db" },
+      { version: "9.0", image: "mongo:9.0.4", dataPath: "/data/db" },
+      { version: "8.0", image: "mongo:8.0.34", dataPath: "/data/db" },
+      { version: "7.0", image: "mongo:7.0.45", dataPath: "/data/db" },
     ],
     variants: [],
     defaultUser: "root",
@@ -376,6 +377,8 @@ export function containerEnv(engine: DatabaseEngine, creds: Credentials): { name
       const p = engine === "mysql" ? "MYSQL" : "MARIADB";
       const out = [env(`${p}_ROOT_PASSWORD`, creds.password, true), env(`${p}_DATABASE`, creds.database)];
       if (creds.user !== "root") out.push(env(`${p}_USER`, creds.user), env(`${p}_PASSWORD`, creds.password, true));
+      // MariaDB upgrades its system tables on the first start of a newer version (databases.setVersion); MySQL does by itself.
+      if (engine === "mariadb") out.push(env("MARIADB_AUTO_UPGRADE", "1"));
       return out;
     }
     case "mongo":

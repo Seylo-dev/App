@@ -230,6 +230,91 @@ export const create = defineOp({
   audit: true,
 });
 
+/** A catalog version as databases.setVersion would take it, and whether it may. */
+export const VersionChoice = Type.Object({
+  /** The catalog's version line, for example "8.0". */
+  version: Type.String(),
+  /** The pinned image of that line in this panel's catalog. */
+  image: Type.String(),
+  /**
+   * current: the database runs this very image. patch: the same version
+   * line, a newer pinned image. upgrade: a newer line of the same major
+   * (MariaDB 11.4 to 11.8). major: a newer major (MongoDB 7.0 to 8.0).
+   * downgrade: an older line, never allowed.
+   */
+  kind: Type.Union([
+    Type.Literal("current"),
+    Type.Literal("patch"),
+    Type.Literal("upgrade"),
+    Type.Literal("downgrade"),
+    Type.Literal("major"),
+  ]),
+  allowed: Type.Boolean(),
+  /**
+   * Why not, when allowed is false: current, downgrade, olderImage,
+   * postgresMajor, oneStep (one version line at a time), patchOnly or
+   * dataPath.
+   */
+  reason: Type.Optional(Type.String()),
+  /** The reason in a sentence. */
+  message: Type.Optional(Type.String()),
+});
+
+export const versionChoices = defineOp({
+  id: "databases.versionChoices",
+  kind: "query",
+  summary: "List the versions a database can change to",
+  description:
+    "Lists the catalog versions of a database's engine (and variant) with what databases.setVersion does with each: a patch update to a newer pinned image, an upgrade, or why it is refused (downgrades, Postgres majors, more than one MongoDB, MariaDB or MySQL step at a time, KeyDB and Dragonfly beyond patches). blocked says why no change can start now (not placed, stopped, a deploy running); recentBackupAt is the newest successful database backup, which a change of version line needs from the last 24 hours unless confirmNoBackup.",
+  input: Type.Object({ serviceId: Id }),
+  output: Type.Object({
+    engine: DatabaseEngine,
+    version: Type.String(),
+    variant: Type.Union([DatabaseVariant, Type.Null()]),
+    /** The image the database runs (its live deployment's). */
+    image: Type.String(),
+    /** The image it is set to run when that is not what runs: a change whose deploy is running or failed. */
+    pendingImage: Type.Union([Type.String(), Type.Null()]),
+    /** Newest first, like databases.engines. */
+    choices: Type.Array(VersionChoice),
+    /** Why no change can start now (noNode, stopped, deployRunning); null when one can. */
+    blocked: Type.Union([Type.Object({ reason: Type.String(), message: Type.String() }), Type.Null()]),
+    /** When the newest successful database backup finished; null when there is none. */
+    recentBackupAt: Type.Union([Timestamp, Type.Null()]),
+    /** That backup is from the last 24 hours: a change of version line needs no confirmNoBackup. */
+    backupFresh: Type.Boolean(),
+  }),
+  permission: serviceScope("services.view"),
+  mcp: true,
+  audit: false,
+});
+
+export const setVersion = defineOp({
+  id: "databases.setVersion",
+  // A newer version rewrites the data files: the only way back is a restore.
+  kind: "destructive",
+  summary: "Change a database's version",
+  description:
+    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an explicit tag or digest instead of the catalog's (not tested by Seylo), judged by the version line it claims.",
+  input: Type.Object({
+    serviceId: Id,
+    /** A catalog version of the database's engine, for example "8.0". */
+    version: Type.String({ maxLength: 20, pattern: "^[0-9A-Za-z._-]+$" }),
+    /** The engine's official image with an explicit tag or digest, for example "mongo:8.0.40"; never latest. */
+    image: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+    /** Change the version line without a backup from the last 24 hours. */
+    confirmNoBackup: Type.Optional(Type.Boolean()),
+  }),
+  output: Type.Object({
+    database: Database,
+    /** The deploy that starts the new version. */
+    deploymentId: Type.Union([Id, Type.Null()]),
+  }),
+  permission: serviceScope("services.deploy"),
+  mcp: true,
+  audit: true,
+});
+
 export const get = defineOp({
   id: "databases.get",
   kind: "query",
