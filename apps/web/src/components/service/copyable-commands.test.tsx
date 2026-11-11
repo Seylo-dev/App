@@ -33,7 +33,7 @@ const db = {
     enabled: false,
     host: null,
     port: null,
-    user: "external",
+    user: "ch_k3v9q2m8x1",
     allowedCidrs: [],
     needsAllowedCidrs: false,
     tlsHostname: null,

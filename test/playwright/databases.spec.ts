@@ -174,6 +174,9 @@ test.describe("database engines", () => {
     await expect(dialog.getByRole("heading", { name: /^Expose / })).toBeVisible();
     await expect(dialog.getByLabel("Port")).toBeFocused();
     await expect(dialog.getByLabel("Port")).toHaveAttribute("placeholder", "Any free port");
+    // Exposing only opens a port: the database's own login, no new user.
+    await expect(dialog).toContainText("Exposing only opens a port");
+    await expect(dialog).toContainText("its own user and password");
     expect(exposure).toBeNull();
     // A port the node may not open keeps Expose off.
     await dialog.getByLabel("Port").fill("80");
@@ -184,6 +187,41 @@ test.describe("database engines", () => {
     await dialog.getByRole("button", { name: "Expose" }).click();
     await expect.poll(() => exposure).not.toBeNull();
     expect(exposure).toMatchObject({ serviceId: svc.db, enabled: true, port: 25432 });
+  });
+
+  test("the exposed card has the same user and password; one reset for the database", async ({ page }) => {
+    let reset: Record<string, unknown> | null = null;
+    await installDemo(page, {
+      overrides: {
+        "databases.resetPassword": (input) => {
+          reset = input;
+          return { password: "Nw7pQ2xVb9Lk4Rt6", affectedServiceIds: [svc.web] };
+        },
+      },
+    });
+    await page.goto(connection(svc.db));
+    const exposed = page.getByRole("region", { name: "Exposed connection" });
+    await expect(exposed.getByText("User", { exact: true })).toBeVisible();
+    await expect(exposed.getByText("postgres", { exact: true }).first()).toBeVisible();
+    await expect(exposed).toContainText("The same user postgres and password as inside, here only over TLS.");
+    await expect(exposed).not.toContainText("separate");
+    // The password behind the eye is the internal one.
+    await expect(exposed).not.toContainText("Zq8vN3pXr7Lm2Kd9");
+    await exposed.getByRole("button", { name: /show/i }).last().click();
+    await expect(exposed.getByText("Zq8vN3pXr7Lm2Kd9", { exact: true })).toBeVisible();
+    // No reset of its own: the one Reset password is for every service using the database's credentials.
+    await expect(exposed.getByRole("button", { name: /Reset/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Reset/ })).toHaveCount(1);
+    await page.screenshot({ path: `${shots}/exposed-same-user.png`, fullPage: true });
+    await page.getByRole("region", { name: "Internal connection" }).getByRole("button", { name: "Reset password" }).click();
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm.getByRole("heading", { name: "Reset the database password?" })).toBeVisible();
+    await expect(confirm).toContainText("inside and through the exposed port");
+    await confirm.getByRole("textbox").fill("db");
+    await confirm.getByRole("button", { name: "Reset" }).click();
+    await expect.poll(() => reset).not.toBeNull();
+    expect(reset).toMatchObject({ serviceId: svc.db, user: "internal" });
+    await expect(page.getByRole("dialog")).toContainText("1 service needs a restart");
   });
 
   test("the password shows with the eye, and the database's console is on its main tab", async ({ page }) => {

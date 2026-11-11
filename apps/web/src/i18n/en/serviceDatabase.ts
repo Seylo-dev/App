@@ -21,10 +21,8 @@ export default {
   notExposed:
     "Off. Only services of this project on the same node can connect. Turn it on to reach the database from other nodes or your laptop, with TLS.",
   opening: "Opening the port…",
-  separateUserBefore: "A separate user",
   sameUserBefore: "The same user",
-  sameUserAfter: "as inside, here only over SSL. The internal URL is unchanged.",
-  separateUserAfter: "that must use SSL. The internal URL is unchanged.",
+  sameUserAfter: "and password as inside, here only over TLS. The internal URL is unchanged.",
   allowedFrom: "Allowed from:",
   anywhere: "anywhere",
   limit: "Limit to IPs",
@@ -44,7 +42,8 @@ export default {
   publicPortNewHint: "1024 to 65535. Leave it empty and the node picks a free one.",
   publicPortAuto: "Any free port",
   exposeTitle: "Expose {name}",
-  exposeBody: "Choose the port {node} opens for it, then who may connect. Clients connect over TLS.",
+  exposeBody:
+    "Exposing only opens a port on {node} to the database, with TLS: clients sign in with its own user and password. Choose the port, then who may connect.",
   exposeButton: "Expose",
   portAndAccess: "Port and access",
   tools: "Tools",
@@ -62,10 +61,8 @@ export default {
   scheduleBackups: "Schedule backups",
   reset: {
     button: "Reset password",
-    exposedButton: "Reset the exposed password",
-    titleInternal: "Reset the admin password?",
-    titleExposed: "Reset the exposed user's password?",
-    body: "Services that reference it get the new password on their next deploy or restart. Anything else using the old one stops connecting. Type the service name to confirm.",
+    title: "Reset the database password?",
+    body: "It is one password, inside and through the exposed port. Services that reference it get the new one on their next deploy or restart; anything else using the old one stops connecting, wherever it connects from. Type the service name to confirm.",
     confirm: "Reset",
     doneTitle: "New password",
     doneBody: {

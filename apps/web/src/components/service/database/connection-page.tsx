@@ -1,7 +1,8 @@
 // The Connection tab of a database (Database.dc.html): the internal URL
 // for services on the same node, the exposed URL with TLS for everything
-// else (toggle, allowed IPs, certificate), the on-demand web UI, a
-// pre-logged-in shell, the backup summary, and resetting a password.
+// else (toggle, allowed IPs, certificate; the same user and password as
+// inside), the on-demand web UI, a pre-logged-in shell, the backup
+// summary, and resetting the password.
 
 import { backups, databases, type OpOutput } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -21,7 +22,7 @@ import { toast } from "@seylo/ui/components/toast";
 import { cn } from "@seylo/ui/lib/utils";
 import { IconLock, IconTable, IconTerminal2 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
 import { describeCron } from "../cron-text";
@@ -216,7 +217,7 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
           {t("serviceDatabase.pgvectorBefore")} <CopyCode code="CREATE EXTENSION vector;" /> {t("serviceDatabase.pgvectorAfter")}
         </p>
       )}
-      {reset && <ResetPassword service={service} which="internal" onClose={() => setReset(false)} />}
+      {reset && <ResetPassword service={service} onClose={() => setReset(false)} />}
     </Section>
   );
 }
@@ -224,7 +225,6 @@ function InternalCard({ service, db, conn, connError }: { service: ServiceDetail
 function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; conn: Connection | null }) {
   const invalidate = useInvalidate();
   const [editing, setEditing] = useState(false);
-  const [reset, setReset] = useState(false);
   const set = useOpMutation(databases.setExposure, {
     onSuccess: () => invalidate(databases.get, databases.connection),
     onError: fail,
@@ -275,12 +275,19 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
               {e.host && e.port ? `${e.host}:${e.port}` : t("serviceDatabase.opening")}
             </span>
           )}
+          {/* Exposing only opens the port: the database's own login, the same password as the internal card's. */}
+          <div className="flex flex-wrap gap-2.5">
+            <Tile label={t("serviceDatabase.host")} value={conn?.exposed?.host ?? e.host ?? ""} />
+            <Tile label={t("serviceDatabase.port")} value={String(conn?.exposed?.port ?? e.port ?? "")} />
+            {db.internal.database !== "" && <Tile label={t("serviceDatabase.database")} value={db.internal.database} />}
+            <Tile label={t("serviceDatabase.user")} value={e.user} />
+            <PasswordTile password={conn?.exposed?.password ?? conn?.internal.password ?? null} />
+          </div>
           <div className="flex flex-wrap gap-x-[18px] gap-y-2 text-[12.5px] leading-normal text-ink-strong">
             <span>
-              {/* The Redis-like engines have one user: the same one, only over TLS here. */}
-              {t(e.user === db.internal.user ? "serviceDatabase.sameUserBefore" : "serviceDatabase.separateUserBefore")}{" "}
+              {t("serviceDatabase.sameUserBefore")}{" "}
               <b className="rounded-[5px] bg-field px-[5px] py-px font-mono text-xs font-medium text-foreground">{e.user}</b>{" "}
-              {t(e.user === db.internal.user ? "serviceDatabase.sameUserAfter" : "serviceDatabase.separateUserAfter")}
+              {t("serviceDatabase.sameUserAfter")}
             </span>
             <span>
               {t("serviceDatabase.allowedFrom")}{" "}
@@ -302,19 +309,15 @@ function ExposedCard({ service, db, conn }: { service: ServiceDetail; db: Db; co
               {e.certificateExpiresAt ? ` · ${t("serviceDatabase.certExpires", { date: formatDateTime(e.certificateExpiresAt) })}` : ""}
             </span>
           </div>
-          {/* The same kind of button as the internal card's Reset password (muted, as buttons inside a card are). */}
+          {/* Muted, as buttons inside a card are; the password is reset once, on the internal card. */}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="bg-muted shadow-none" onClick={() => setEditing(true)}>
               {t("serviceDatabase.portAndAccess")}
-            </Button>
-            <Button size="sm" className="bg-muted shadow-none" onClick={() => setReset(true)}>
-              {t("serviceDatabase.reset.exposedButton")}
             </Button>
           </div>
         </>
       )}
       {editing && <ExposureDialog service={service} db={db} onClose={() => setEditing(false)} />}
-      {reset && <ResetPassword service={service} which="exposed" onClose={() => setReset(false)} />}
     </Section>
   );
 }
@@ -416,11 +419,15 @@ function validPort(text: string): boolean {
   return text.trim() !== "" && Number.isInteger(p) && p >= 1024 && p <= 65535;
 }
 
-function ResetPassword({ service, which, onClose }: { service: ServiceDetail; which: "internal" | "exposed"; onClose: () => void }) {
+/** The database's one password: services using it inside or through the exposed port are listed as affected. */
+function ResetPassword({ service, onClose }: { service: ServiceDetail; onClose: () => void }) {
   const invalidate = useInvalidate();
   const [result, setResult] = useState<OpOutput<typeof databases.resetPassword> | null>(null);
+  // The confirm dialog closes itself once the reset succeeded; that must not close the new password with it.
+  const done = useRef(false);
   const reset = useOpMutation(databases.resetPassword, {
     onSuccess: (res) => {
+      done.current = true;
       setResult(res);
       invalidate(databases.connection);
     },
@@ -441,13 +448,13 @@ function ResetPassword({ service, which, onClose }: { service: ServiceDetail; wh
   return (
     <ConfirmDialog
       open
-      onOpenChange={(o) => !o && onClose()}
-      title={t(which === "internal" ? "serviceDatabase.reset.titleInternal" : "serviceDatabase.reset.titleExposed")}
+      onOpenChange={(o) => !o && !done.current && onClose()}
+      title={t("serviceDatabase.reset.title")}
       description={t("serviceDatabase.reset.body")}
       confirmText={service.name}
       confirmLabel={t("serviceDatabase.reset.confirm")}
       destructive
-      onConfirm={() => reset.mutateAsync({ serviceId: service.id, user: which }).then(() => undefined)}
+      onConfirm={() => reset.mutateAsync({ serviceId: service.id, user: "internal" }).then(() => undefined)}
     />
   );
 }

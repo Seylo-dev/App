@@ -328,7 +328,7 @@ const refs = {
       internalHost: "db",
       exposed: true,
       variables: [
-        { name: "EXPOSED_URL", value: "postgres://external:pw@203.0.113.10:15432/shop?sslmode=require", scope: "public", sensitive: true, description: "exposed URL" },
+        { name: "EXPOSED_URL", value: "postgres://postgres:pw@203.0.113.10:15432/shop?sslmode=require", scope: "public", sensitive: true, description: "exposed URL" },
         { name: "EXPOSED_HOST", value: "203.0.113.10", scope: "public", sensitive: false, description: "exposed host" },
         { name: "EXPOSED_PORT", value: "15432", scope: "public", sensitive: false, description: "exposed port" },
         { name: "INTERNAL_URL", value: "postgres://postgres:pw@db:5432/shop", scope: "internal", sensitive: true, description: "internal URL" },
@@ -680,7 +680,8 @@ export function databaseOf(serviceId: string) {
     enabled: true,
     host: "203.0.113.10",
     port: 15432,
-    user: "external",
+    // The database's own user: exposing only opens the port, with TLS.
+    user: "postgres",
     allowedCidrs: [],
     needsAllowedCidrs: false,
     tlsHostname: null,
@@ -716,7 +717,7 @@ export function databaseOf(serviceId: string) {
       engine: "clickhouse",
       version: "26.8",
       internal: { host: "events", port: 9000, database: "events", user: "ch_k3v9q2m8x1", httpPort: 8123 },
-      exposure: { ...exposure, enabled: false, host: null, port: null, certificate: "none" },
+      exposure: { ...exposure, enabled: false, host: null, port: null, user: "ch_k3v9q2m8x1", certificate: "none" },
       shellClient: "clickhouse-client",
       webUi: { ...base.webUi, tool: "ClickHouse Play", running: false, lastActiveAt: null },
     };
@@ -767,12 +768,12 @@ function connectionOf(serviceId: string) {
       password: "Zq8vN3pXr7Lm2Kd9",
     },
     exposed: {
-      url: "postgres://external:Ht5wQ9bLc2Vn8Rx4@203.0.113.10:15432/shop?sslmode=require",
+      url: "postgres://postgres:Zq8vN3pXr7Lm2Kd9@203.0.113.10:15432/shop?sslmode=require",
       host: "203.0.113.10",
       port: 15432,
       database: "shop",
-      user: "external",
-      password: "Ht5wQ9bLc2Vn8Rx4",
+      user: "postgres",
+      password: "Zq8vN3pXr7Lm2Kd9",
       tlsParams: "sslmode=require",
     },
   };
