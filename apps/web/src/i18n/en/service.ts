@@ -80,6 +80,8 @@ export default {
     noDomain: "no domain",
     noPorts: "background worker · no domain",
     databaseVersion: "{engine} {version}",
+    // An image whose tag names no release (latest, a digest).
+    databaseImage: "{engine} ({image})",
     databaseVariant: " with {variant}",
     restart: "Restart",
     restarted: "Restarting.",

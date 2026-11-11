@@ -676,12 +676,14 @@ export const handlers: Record<string, (input: Input) => unknown> = {
 };
 
 const refused = (kind: string, reason: string, message: string) => ({ kind, allowed: false, reason, message });
+/** A change setVersion takes with acceptRisk (0.2.11). */
+const risky = (kind: string, risk: string, message: string) => ({ kind, allowed: true, risk, message });
 
 /**
  * databases.versionChoices for the demo databases, as the panel's rules
- * answer them: Postgres refuses its next major and older ones, Redis
- * takes the newer line. Both run the newest pinned image of their line, so
- * only another exact tag of it (customOnCurrent) stays on the line.
+ * answer them: Postgres takes its next major and older ones only as risks,
+ * Redis takes the newer line. Both run the newest pinned image of their
+ * line, and any other image of their repository (anyImage).
  * database-version.spec.ts adds a MongoDB and MySQL.
  */
 export function versionChoicesOf(serviceId: string) {
@@ -689,6 +691,7 @@ export function versionChoicesOf(serviceId: string) {
     variant: null,
     pendingImage: null,
     blocked: null,
+    anyImage: true,
     customOnCurrent: true,
     recentBackupAt: ago(15 * hour),
     backupFresh: true,
@@ -700,22 +703,27 @@ export function versionChoicesOf(serviceId: string) {
       engine: "redis",
       version: "7.4",
       image: "redis:7.4.5-alpine",
+      release: "7.4.5",
+      repository: "redis",
       choices: [
         { version: "8.2", image: "redis:8.2.1-alpine", kind: "major", allowed: true },
         { version: "7.4", image: "redis:7.4.5-alpine", ...refused("current", "current", "The database already runs redis:7.4.5-alpine: nothing to change.") },
       ],
     };
-  const older = (version: string) => refused("downgrade", "downgrade", `PostgreSQL 17 data files cannot go back to ${version}. Restore a backup into a new database instead.`);
+  const older = (version: string) =>
+    risky("downgrade", "downgrade", `PostgreSQL ${version} is older than the 17 that runs: it may not open data files a newer version wrote.`);
   return {
     ...base,
     engine: "postgres",
     version: "17",
     image: "postgres:17.6-alpine",
+    release: "17.6",
+    repository: "postgres",
     choices: [
       {
         version: "18",
         image: "postgres:18.6-alpine",
-        ...refused("major", "postgresMajor", "A Postgres major upgrade needs a dump and restore into a new database: pg_upgrade is not run in place."),
+        ...risky("major", "postgresMajor", "PostgreSQL 18 does not open PostgreSQL 17 data files without pg_upgrade or a dump and restore, which do not run here, so it will most likely not start."),
       },
       { version: "17", image: "postgres:17.6-alpine", ...refused("current", "current", "The database already runs postgres:17.6-alpine: nothing to change.") },
       { version: "16", image: "postgres:16.10-alpine", ...older("16") },

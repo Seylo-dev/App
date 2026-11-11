@@ -37,6 +37,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { type MessageKey, t } from "../../i18n/t";
 import { errorMessage } from "../../lib/api";
+import { isFloatingImage } from "../../lib/database-image";
 import type { ComposePreview } from "../../lib/types";
 
 type Builder = "railpack" | "nixpacks" | "dockerfile";
@@ -177,6 +178,8 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
   // "" is the engine's newest version.
   const [version, setVersion] = useState("");
   const [withPgvector, setWithPgvector] = useState(false);
+  // Another image of the engine's repository instead of the version's (Use another image); null when off.
+  const [dbImage, setDbImage] = useState<string | null>(null);
   const [yaml, setYaml] = useState("");
   const [repository, setRepository] = useState("");
   const [error, setError] = useState<unknown>(null);
@@ -312,7 +315,8 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
     nodeId !== "" &&
     (kind !== "app" || appSource === "none" || (appSource === "image" ? image.trim() !== "" : repoSourceToCreate !== null)) &&
     (kind !== "cron" || (image.trim() !== "" && command.trim() !== "" && schedule.trim().split(/\s+/).length === 5)) &&
-    (kind !== "compose" || yaml.trim() !== "");
+    (kind !== "compose" || yaml.trim() !== "") &&
+    (kind !== "database" || dbImage === null || dbImage.trim() !== "");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -324,6 +328,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
         engine,
         version: version || undefined,
         variant: engine === "postgres" && withPgvector ? pgvector : undefined,
+        ...(dbImage !== null ? { image: dbImage.trim() } : {}),
       });
     } else if (kind === "compose") {
       createStack.mutate({ ...base, source: { type: "inline", yaml }, deployNow });
@@ -607,6 +612,7 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
               onValueChange={(v) => {
                 setEngine(v as Engine);
                 setVersion("");
+                setDbImage(null);
               }}
               aria-labelledby="ns-engine-label"
               className="grid grid-cols-2 gap-2 sm:grid-cols-3"
@@ -630,6 +636,8 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
             onVersion={setVersion}
             withPgvector={withPgvector}
             onPgvector={setWithPgvector}
+            image={dbImage}
+            onImage={setDbImage}
           />
           {engines.map(
             (item) =>
@@ -735,8 +743,10 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
 
 /**
  * The engine's versions from the panel's catalog (databases.engines), newest
- * first, and the pgvector checkbox for Postgres. A version the variant does
- * not have falls back to the newest.
+ * first, the pgvector checkbox for Postgres, and Use another image: any tag
+ * or digest of the engine's repository, prefilled with the picked version's
+ * image (not tested by Seylo; a floating tag can change on the next deploy).
+ * A version the variant does not have falls back to the newest.
  */
 function EngineVersion({
   engine,
@@ -744,12 +754,17 @@ function EngineVersion({
   onVersion,
   withPgvector,
   onPgvector,
+  image,
+  onImage,
 }: {
   engine: Engine;
   version: string;
   onVersion: (version: string) => void;
   withPgvector: boolean;
   onPgvector: (on: boolean) => void;
+  /** Another image instead of the picked version's; null when off. */
+  image: string | null;
+  onImage: (image: string | null) => void;
 }) {
   const catalog = useOp(databases.engines, {}, { staleTime: Number.POSITIVE_INFINITY });
   if (catalog.isError) return <QueryError error={catalog.error} onRetry={() => void catalog.refetch()} />;
@@ -765,11 +780,20 @@ function EngineVersion({
   const versions = (withPgvector && variant ? variant : info).versions;
   const newest = versions[0]?.version ?? "";
   const current = versions.some((v) => v.version === version) ? version : newest;
+  const imageOf = (v: string, vector = withPgvector) =>
+    ((vector && variant ? variant : info).versions.find((x) => x.version === v) ?? versions[0])?.image ?? "";
   const [before, after] = t("newService.pgvectorHint").split("{sql}");
   return (
     <>
       <Field id="ns-version" label="newService.version" hint="newService.versionHint">
-        <Select value={current} onValueChange={(v) => onVersion(v === newest ? "" : v)}>
+        <Select
+          value={current}
+          onValueChange={(v) => {
+            onVersion(v === newest ? "" : v);
+            // The field starts from the picked version's image.
+            if (image !== null) onImage(imageOf(v));
+          }}
+        >
           <SelectTrigger id="ns-version" className="font-mono">
             <SelectValue />
           </SelectTrigger>
@@ -787,10 +811,39 @@ function EngineVersion({
           </SelectContent>
         </Select>
       </Field>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="ns-other-image" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
+          <Checkbox id="ns-other-image" checked={image !== null} onCheckedChange={(v) => onImage(v === true ? imageOf(current) : null)} />
+          {t("newService.otherImage")}
+        </label>
+        {image !== null && (
+          <Field
+            id="ns-db-image"
+            label="newService.image"
+            hintText={t("newService.otherImageHint", { repo: repositoryOf(imageOf(current)) })}
+            note={
+              isFloatingImage(engine, image, withPgvector && variant ? pgvector : null) && (
+                <span className="text-xs text-chip-amber-fg">
+                  {t("newService.otherImageFloating", { image: image.trim() || "latest" })}
+                </span>
+              )
+            }
+          >
+            <Input id="ns-db-image" className="font-mono" value={image} onChange={(e) => onImage(e.target.value)} />
+          </Field>
+        )}
+      </div>
       {variant && (
         <div className="flex flex-col gap-1">
           <label htmlFor="ns-pgvector" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
-            <Checkbox id="ns-pgvector" checked={withPgvector} onCheckedChange={(v) => onPgvector(v === true)} />
+            <Checkbox
+              id="ns-pgvector"
+              checked={withPgvector}
+              onCheckedChange={(v) => {
+                onPgvector(v === true);
+                if (image !== null) onImage(imageOf(current, v === true));
+              }}
+            />
             {t("newService.pgvector")}
           </label>
           <span className="pl-[26px] text-xs leading-normal text-muted-foreground">
@@ -802,6 +855,11 @@ function EngineVersion({
       )}
     </>
   );
+}
+
+/** The repository of an image, for the hint: "mongo" of "mongo:8.0.38", "eqalpha/keydb" of a digest. */
+function repositoryOf(image: string): string {
+  return image.replace(/@.*$/, "").replace(/:[^/:]*$/, "");
 }
 
 function ComposePreviewList({ preview }: { preview: ComposePreview }) {

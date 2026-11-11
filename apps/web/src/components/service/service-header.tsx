@@ -15,7 +15,7 @@ import { errorMessage } from "../../lib/api";
 import { isPanelService } from "../../lib/service-display";
 import { useActiveDeploy } from "./active-deploy";
 import { ServiceMenu } from "./copy/service-menu";
-import { versionCardId } from "./database/version-card";
+import { customVersion, versionCardId } from "./database/version-card";
 import { useInvalidate } from "./invalidate";
 import { KindBadge } from "./kind-badge";
 import { isNotBuilt, retryOp } from "./op-state";
@@ -66,10 +66,12 @@ function HeaderAddress({ service, href }: { service: ServiceDetail; href: string
   return null;
 }
 
-/** "MongoDB 8.0": links to the Version card on Settings, where it changes. */
+/** "MongoDB 8.0", or "MongoDB (mongo:latest)" for a tag that names no release: links to the Version card on Settings. */
 function DatabaseSubtitle({ service }: { service: ServiceDetail }) {
   const db = useOp(databases.get, { serviceId: service.id }, { retry: retryOp });
   if (!db.data) return null;
+  const engine = t(`service.kind.${db.data.engine}`);
+  const image = service.sourceConfig.type === "image" ? service.sourceConfig.image : "";
   return (
     <Link
       to="/p/$projectId/s/$serviceId/settings"
@@ -77,7 +79,9 @@ function DatabaseSubtitle({ service }: { service: ServiceDetail }) {
       hash={versionCardId}
       className="text-[12.5px] text-muted-foreground no-underline hover:text-foreground"
     >
-      {t("service.header.databaseVersion", { engine: t(`service.kind.${db.data.engine}`), version: db.data.version })}
+      {db.data.version === customVersion && image
+        ? t("service.header.databaseImage", { engine, image })
+        : t("service.header.databaseVersion", { engine, version: db.data.version })}
       {db.data.variant && t("service.header.databaseVariant", { variant: db.data.variant })}
     </Link>
   );

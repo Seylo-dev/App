@@ -1,15 +1,16 @@
 // The Version card on a database's Settings tab: the catalog versions with
-// the panel's reasons for the refused ones, a patch update, a MongoDB
-// upgrade that waits for a backup (Back up now) or "Change without a
-// backup", Postgres refusing its next major and every older line, and
-// another exact tag of the version a database runs when it runs the
-// newest pinned image of it, staying on a custom tag after a change to
-// another one failed, and MySQL 8.0 to 8.4 refused for the accounts on
-// mysql_native_password (or when they cannot be listed) until their logins
-// are kept working, which the card then shows and a patch update keeps, and
-// a MySQL 8.4 turning those logins on and off on the image it runs.
-// Demo data (demo/service.ts versionChoicesOf) stands in for the panel;
-// databases.setVersion is answered here so nothing deploys.
+// the risks they take, a patch update, a MongoDB upgrade that waits for a
+// backup (Back up now) or "Change without a backup", Postgres's next major
+// and older lines as risks to accept ("I understand"), any other image of
+// the engine (Use another image: an older patch, a line outside the
+// catalog such as mongo:8.2.12, mongo:latest, another repository refused),
+// staying on a custom tag after a change to another one failed, the
+// header chip of a database on latest, and MySQL 8.0 to 8.4 refused for the
+// accounts on mysql_native_password (or when they cannot be listed) until
+// their logins are kept working, which the card then shows and a patch
+// update keeps, and a MySQL 8.4 turning those logins on and off on the image
+// it runs. Demo data (demo/service.ts versionChoicesOf) stands in for the
+// panel; databases.setVersion is answered here so nothing deploys.
 //
 // Screenshots: $SHOTS_DIR/databases/version-*.png.
 
@@ -18,7 +19,7 @@ import type { Page } from "@playwright/test";
 import { ids } from "./demo/fixtures";
 import { DemoRefusal } from "./demo/refusal";
 import { installDemo } from "./demo/routes";
-import { databaseOf, ids as svc, versionChoicesOf } from "./demo/service";
+import { databaseOf, servicesById, ids as svc, versionChoicesOf } from "./demo/service";
 import { expect, stateFile, test } from "./helpers";
 
 const shots = `${process.env.SHOTS_DIR ?? "shots"}/databases`;
@@ -32,6 +33,9 @@ function mongoChoices(over: Record<string, unknown> = {}) {
     version: "7.0",
     variant: null,
     image: "mongo:7.0.21",
+    release: "7.0.21",
+    repository: "mongo",
+    anyImage: true,
     pendingImage: null,
     blocked: null,
     customOnCurrent: true,
@@ -39,7 +43,7 @@ function mongoChoices(over: Record<string, unknown> = {}) {
     backupFresh: false,
     nativePassword: null,
     choices: [
-      { version: "9.0", image: "mongo:9.0.8", kind: "major", allowed: false, reason: "oneStep", message: "MongoDB upgrades one version at a time: go to 8.0 first." },
+      { version: "9.0", image: "mongo:9.0.8", kind: "major", allowed: true, risk: "oneStep", message: "MongoDB upgrades one version at a time: 9.0 skips 8.0, and may refuse the data files." },
       { version: "8.0", image: "mongo:8.0.38", kind: "major", allowed: true },
       { version: "7.0", image: "mongo:7.0.45", kind: "patch", allowed: true },
     ],
@@ -57,6 +61,9 @@ function mysqlChoices(version: "8.0" | "8.4", nativeOn = false) {
     version,
     variant: null,
     image: version === "8.0" ? "mysql:8.0.43" : "mysql:8.4.6",
+    release: version === "8.0" ? "8.0.43" : "8.4.6",
+    repository: "mysql",
+    anyImage: true,
     pendingImage: null,
     blocked: null,
     customOnCurrent: true,
@@ -71,7 +78,7 @@ function mysqlChoices(version: "8.0" | "8.4", nativeOn = false) {
           ]
         : [
             { version: "8.4", image: "mysql:8.4.6", ...current("mysql:8.4.6") },
-            { version: "8.0", image: "mysql:8.0.43", kind: "downgrade", allowed: false, reason: "downgrade", message: "MySQL 8.4 data files cannot go back to 8.0. Restore a backup into a new database instead." },
+            { version: "8.0", image: "mysql:8.0.43", kind: "downgrade", allowed: true, risk: "downgrade", message: "MySQL 8.0 is older than the 8.4 that runs: it may not open data files a newer version wrote." },
           ],
   };
 }
@@ -92,7 +99,7 @@ test.describe("database version", () => {
   test.use({ storageState: stateFile });
   test.beforeAll(() => mkdirSync(shots, { recursive: true }));
 
-  test("lists the choices with the reasons for the refused ones; the header chip links here", async ({ page }) => {
+  test("lists the choices with the risks they take; the header chip links here", async ({ page }) => {
     await installDemo(page, {
       overrides: {
         "databases.get": (input) => (input.serviceId === svc.db ? mongoDb() : databaseOf(String(input.serviceId))),
@@ -105,9 +112,10 @@ test.describe("database version", () => {
     const card = page.getByRole("region", { name: "Version" });
     await expect(card.getByText("mongo:7.0.21")).toBeVisible();
     await card.getByRole("combobox", { name: "Change to" }).click();
+    // A skipped line can be picked, with what it risks; the one that runs cannot.
     const skip = page.getByRole("option", { name: /^9\.0/ });
-    await expect(skip).toHaveAttribute("aria-disabled", "true");
-    await expect(skip).toContainText("go to 8.0 first");
+    await expect(skip).not.toHaveAttribute("aria-disabled", "true");
+    await expect(skip).toContainText("Skips a version");
     await expect(page.getByRole("option", { name: /^8\.0/ })).toContainText("major upgrade");
     await expect(page.getByRole("option", { name: /^7\.0/ })).toContainText("update to mongo:7.0.45");
     await page.screenshot({ path: `${shots}/version-choices.png` });
@@ -205,8 +213,9 @@ test.describe("database version", () => {
     expect(sent).toEqual({ serviceId: svc.db, version: "8.0" });
   });
 
-  test("Postgres refuses its next major and every older line; a running change shows its deploy", async ({ page }) => {
+  test("Postgres's next major and older lines are risks to accept; a running change shows its deploy", async ({ page }) => {
     let running = false;
+    let sent: Record<string, unknown> | null = null;
     await installDemo(page, {
       overrides: {
         "databases.versionChoices": (input) => {
@@ -215,6 +224,10 @@ test.describe("database version", () => {
             ? { ...base, pendingImage: "postgres:17.7-alpine", blocked: { reason: "deployRunning", message: "A deploy is running." }, customOnCurrent: false }
             : base;
         },
+        "databases.setVersion": (input) => {
+          sent = input;
+          return { database: databaseOf(svc.db), deploymentId: "d0000000000000v8" };
+        },
       },
     });
     await page.goto(settings(svc.db));
@@ -222,34 +235,61 @@ test.describe("database version", () => {
     await expect(card.getByText("PostgreSQL 17", { exact: true })).toBeVisible();
     await card.getByRole("combobox", { name: "Change to" }).click();
     const major = page.getByRole("option", { name: /^18/ });
-    await expect(major).toHaveAttribute("aria-disabled", "true");
-    await expect(major).toContainText("dump and restore into a new database");
+    await expect(major).not.toHaveAttribute("aria-disabled", "true");
+    await expect(major).toContainText("A major jump");
     for (const version of ["16", "15"]) {
       const older = page.getByRole("option", { name: new RegExp(`^${version}`) });
-      await expect(older).toHaveAttribute("aria-disabled", "true");
-      await expect(older).toContainText("cannot go back");
+      await expect(older).not.toHaveAttribute("aria-disabled", "true");
+      await expect(older).toContainText("Older than what runs");
     }
-    await page.keyboard.press("Escape");
-    await expect(card.getByRole("button", { name: "Change version" })).toBeDisabled();
+    // The one that runs is no choice at all.
+    await expect(page.getByRole("option", { name: /^17/ })).toHaveCount(0);
     await page.screenshot({ path: `${shots}/version-postgres.png` });
+    await page.getByRole("option", { name: /^16/ }).click();
+    await card.getByRole("button", { name: "Change version" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Change PostgreSQL to 16?" })).toBeVisible();
+    const risks = dialog.getByRole("list", { name: "What can go wrong" });
+    await expect(risks.getByText("postgres:16.10-alpine is older than what runs.")).toBeVisible();
+    await expect(dialog.getByText("the old container comes back on the same data")).toBeVisible();
+    // A risk is no plain upgrade: it says what can go wrong instead of "cannot be undone".
+    await expect(dialog.getByText("cannot be undone")).toHaveCount(0);
+    await expect(dialog.getByRole("region", { name: "Backup" }).getByText(/^Last backup/)).toBeVisible();
+    const submit = dialog.getByRole("button", { name: "Change version" });
+    await expect(submit).toBeDisabled();
+    await dialog.getByLabel("I understand").check();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/version-risk.png` });
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual({ serviceId: svc.db, version: "16", acceptRisk: true });
 
     running = true;
     await page.reload();
     await expect(page.getByRole("region", { name: "Version" }).getByText("Deploying postgres:17.7-alpine")).toBeVisible();
     await expect(page.getByRole("region", { name: "Version" }).getByRole("combobox", { name: "Change to" })).toBeDisabled();
-    // While blocked the panel takes no other tag either.
-    await expect(page.getByRole("region", { name: "Version" }).getByRole("button", { name: "Another tag of PostgreSQL 17" })).toHaveCount(0);
+    // While blocked the panel takes no other image either.
+    await expect(page.getByRole("region", { name: "Version" }).getByRole("button", { name: "Use another image" })).toHaveCount(0);
   });
 
-  test("a database on the newest pinned image of its version takes another exact tag of it", async ({ page }) => {
+  test("another image: an older patch of the line it runs is a risk to accept, a newer one a plain update", async ({ page }) => {
     const sent: Record<string, unknown>[] = [];
     await installDemo(page, {
       overrides: {
         "databases.setVersion": (input) => {
           sent.push(input);
           // As the panel answers an older release of the line.
-          if (input.image === "postgres:17.5-alpine") {
-            throw new DemoRefusal(409, "CONFLICT", "postgres:17.5-alpine is older than postgres:17.6-alpine.", { reason: "olderImage" });
+          if (input.image === "postgres:17.5-alpine" && input.acceptRisk !== true) {
+            throw new DemoRefusal(409, "CONFLICT", "postgres:17.5-alpine is older than postgres:17.6-alpine, which runs. Nothing changed.", {
+              reason: "riskNotAccepted",
+              risk: "olderImage",
+              risks: "olderImage",
+              message: "postgres:17.5-alpine is older than postgres:17.6-alpine, which runs.",
+              version: "17",
+              image: "postgres:17.5-alpine",
+              backupRequired: "false",
+            });
           }
           return { database: databaseOf(svc.db), deploymentId: "d0000000000000v3" };
         },
@@ -258,53 +298,172 @@ test.describe("database version", () => {
     await page.goto(settings(svc.db));
     const card = page.getByRole("region", { name: "Version" });
     await expect(card.getByText("PostgreSQL 17", { exact: true })).toBeVisible();
-    // No catalog choice of 17 can be picked: it runs postgres:17.6-alpine, the newest pinned image of 17.
-    await expect(card.getByRole("button", { name: "Change version" })).toBeDisabled();
-    await card.getByRole("button", { name: "Another tag of PostgreSQL 17" }).click();
+    await card.getByRole("button", { name: "Use another image" }).click();
 
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Run another tag of PostgreSQL 17?" })).toBeVisible();
-    // The field is there straight away, starting from what runs, which changes nothing.
-    await expect(dialog.getByLabel("Use another tag of this version")).toHaveCount(0);
+    await expect(dialog.getByRole("heading", { name: "Run another image of PostgreSQL?" })).toBeVisible();
+    // The field starts from what runs, which changes nothing.
     const field = dialog.getByLabel("Image");
     await expect(field).toHaveValue("postgres:17.6-alpine");
-    await expect(dialog.getByText("The database runs postgres:17.6-alpine. Give the exact release tag to run instead.")).toBeVisible();
-    await expect(dialog.getByText("Not tested by Seylo")).toBeVisible();
+    await expect(dialog.getByText("The database runs postgres:17.6-alpine. Give the image to run instead.")).toBeVisible();
+    await expect(dialog.getByText("Any tag or digest of postgres, like postgres:17.6-alpine. Not tested by Seylo.")).toBeVisible();
     const submit = dialog.getByRole("button", { name: "Update" });
     await expect(submit).toBeDisabled();
-    // The same line: no backup, nothing that cannot be undone.
     await expect(dialog.getByRole("region", { name: "Backup" })).toHaveCount(0);
-    await expect(dialog.getByText("cannot be undone")).toHaveCount(0);
 
     await field.fill("postgres:17.5-alpine");
     await submit.click();
-    await expect(dialog.getByText("postgres:17.5-alpine is older than postgres:17.6-alpine.")).toBeVisible();
+    const risks = dialog.getByRole("list", { name: "What can go wrong" });
+    await expect(risks.getByText("postgres:17.5-alpine is older than what runs.")).toBeVisible();
+    // A backup from the last day is there: the section says so.
+    await expect(dialog.getByRole("region", { name: "Backup" }).getByText(/^Last backup/)).toBeVisible();
+    const change = dialog.getByRole("button", { name: "Change version" });
+    await expect(change).toBeDisabled();
+    await dialog.getByLabel("I understand").check();
+    await change.click();
+    await expect(dialog).toHaveCount(0);
 
+    await card.getByRole("button", { name: "Use another image" }).click();
+    await field.fill("postgres:17.5-alpine");
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(risks).toBeVisible();
+    // The answer was about 17.5: typing another tag clears it.
     await field.fill("postgres:17.7-alpine");
     await expect(dialog.getByText("The database restarts on postgres:17.7-alpine")).toBeVisible();
-    // The refusal was about 17.5: typing another tag clears it.
-    await expect(dialog.getByText("postgres:17.5-alpine is older than postgres:17.6-alpine.")).toHaveCount(0);
+    await expect(risks).toHaveCount(0);
     await page.waitForTimeout(400);
-    await page.screenshot({ path: `${shots}/version-another-tag.png` });
-    await submit.click();
+    await page.screenshot({ path: `${shots}/version-another-image.png` });
+    await dialog.getByRole("button", { name: "Update" }).click();
     await expect(dialog).toHaveCount(0);
     expect(sent).toEqual([
-      { serviceId: svc.db, version: "17", image: "postgres:17.5-alpine" },
-      { serviceId: svc.db, version: "17", image: "postgres:17.7-alpine" },
+      { serviceId: svc.db, image: "postgres:17.5-alpine" },
+      { serviceId: svc.db, image: "postgres:17.5-alpine", acceptRisk: true },
+      { serviceId: svc.db, image: "postgres:17.5-alpine" },
+      { serviceId: svc.db, image: "postgres:17.7-alpine" },
     ]);
   });
 
-  test("after a failed change to another tag, the tag dialog stays on the custom tag that still runs", async ({ page }) => {
+  test("another image: mongo:8.2.12 on an 8.0 database is a line outside the catalog, latest a floating tag, another repository refused", async ({
+    page,
+  }) => {
+    const sent: Record<string, unknown>[] = [];
+    const mongo80 = () => ({
+      ...mongoChoices(),
+      version: "8.0",
+      image: "mongo:8.0.38",
+      release: "8.0.38",
+      choices: [
+        { version: "9.0", image: "mongo:9.0.8", kind: "major", allowed: true },
+        { version: "8.0", image: "mongo:8.0.38", kind: "current", allowed: false, reason: "current", message: "The database already runs mongo:8.0.38: nothing to change." },
+        { version: "7.0", image: "mongo:7.0.45", kind: "downgrade", allowed: true, risk: "downgrade", message: "MongoDB 7.0 is older than the 8.0 that runs." },
+      ],
+    });
+    const refusal = (image: string, risk: string, version: string) =>
+      new DemoRefusal(409, "CONFLICT", `${image}: ${risk}. Nothing changed: accept the risk (acceptRisk) to go ahead.`, {
+        reason: "riskNotAccepted",
+        risk,
+        risks: risk,
+        message: `${image}: ${risk}.`,
+        version,
+        image,
+        backupRequired: "true",
+      });
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? { ...mongoDb(), version: "8.0" } : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => mongo80(),
+        "databases.setVersion": (input) => {
+          sent.push(input);
+          const image = String(input.image);
+          if (image.startsWith("bitnami/")) {
+            throw new DemoRefusal(400, "BAD_REQUEST", "Use an image of mongo, MongoDB's official image.", { field: "image", reason: "customImage" });
+          }
+          if (input.acceptRisk !== true) {
+            if (image === "mongo:8.2.12") throw refusal(image, "otherLine", "8.2");
+            if (image === "mongo:latest") throw refusal(image, "floatingTag", "custom");
+          }
+          return { database: { ...mongoDb(), version: image === "mongo:latest" ? "custom" : "8.2" }, deploymentId: "d0000000000000v9" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await expect(card.getByText("MongoDB 8.0", { exact: true })).toBeVisible();
+    await card.getByRole("button", { name: "Use another image" }).click();
+    const dialog = page.getByRole("dialog");
+    const field = dialog.getByLabel("Image");
+    await expect(field).toHaveValue("mongo:8.0.38");
+
+    await field.fill("mongo:8.2.12");
+    await dialog.getByRole("button", { name: "Update" }).click();
+    const risks = dialog.getByRole("list", { name: "What can go wrong" });
+    await expect(risks.getByText("Not tested by Seylo: this version is not in Seylo's catalog.")).toBeVisible();
+    // No compatibility step outside the catalog's one-step upgrades: MongoDB may refuse the data.
+    await expect(risks.getByText("MongoDB may refuse data whose feature compatibility version it does not support")).toBeVisible();
+    await expect(dialog.getByText("the old container comes back on the same data")).toBeVisible();
+    const backup = dialog.getByRole("region", { name: "Backup" });
+    await expect(backup.getByText("No successful backup from the last 24 hours.")).toBeVisible();
+    const submit = dialog.getByRole("button", { name: "Change version" });
+    await expect(submit).toBeDisabled();
+    await dialog.getByLabel("I understand").check();
+    await expect(submit).toBeDisabled();
+    await backup.getByLabel("Change without a backup").check();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/version-other-line.png` });
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+
+    await card.getByRole("button", { name: "Use another image" }).click();
+    await field.fill("mongo:latest");
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(risks.getByText("A floating tag: the release behind it can change on the next deploy")).toBeVisible();
+    await dialog.getByLabel("I understand").check();
+    await dialog.getByRole("region", { name: "Backup" }).getByLabel("Change without a backup").check();
+    await dialog.getByRole("button", { name: "Change version" }).click();
+    await expect(dialog).toHaveCount(0);
+
+    await card.getByRole("button", { name: "Use another image" }).click();
+    await field.fill("bitnami/mongodb:8.0.4");
+    await dialog.getByRole("button", { name: "Update" }).click();
+    await expect(dialog.getByText("Use an image of mongo, MongoDB's official image.")).toBeVisible();
+    await expect(dialog.getByLabel("I understand")).toHaveCount(0);
+    expect(sent).toEqual([
+      { serviceId: svc.db, image: "mongo:8.2.12" },
+      { serviceId: svc.db, image: "mongo:8.2.12", acceptRisk: true, confirmNoBackup: true },
+      { serviceId: svc.db, image: "mongo:latest" },
+      { serviceId: svc.db, image: "mongo:latest", acceptRisk: true, confirmNoBackup: true },
+      { serviceId: svc.db, image: "bitnami/mongodb:8.0.4" },
+    ]);
+  });
+
+  test("a database on mongo:latest says so in the header and the card", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "databases.get": (input) => (input.serviceId === svc.db ? { ...mongoDb(), version: "custom" } : databaseOf(String(input.serviceId))),
+        "databases.versionChoices": () => ({ ...mongoChoices(), version: "custom", image: "mongo:latest", release: null }),
+        "services.get": (input) => {
+          const base = servicesById[String(input.serviceId)] ?? servicesById[svc.api];
+          return input.serviceId === svc.db ? { ...base, kind: "mongo", sourceConfig: { type: "image", image: "mongo:latest", registryId: null } } : base;
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    await expect(page.getByRole("link", { name: "MongoDB (mongo:latest)" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Version" }).getByText("MongoDB (mongo:latest)", { exact: true })).toBeVisible();
+  });
+
+  test("after a failed change to another image, the image dialog stays on the custom tag that still runs", async ({ page }) => {
     let sent: Record<string, unknown> | null = null;
     // It runs postgres:17.7-alpine (a tag the catalog does not pin); the change to postgres:17.99-alpine did not deploy.
     const base = versionChoicesOf(svc.db);
     const choices = {
       ...base,
       image: "postgres:17.7-alpine",
+      release: "17.7",
       pendingImage: "postgres:17.99-alpine",
       choices: base.choices.map((c) =>
         c.version === "17"
-          ? { ...c, kind: "downgrade", reason: "olderImage", message: "postgres:17.6-alpine is older than postgres:17.7-alpine." }
+          ? { version: c.version, image: c.image, kind: "downgrade", allowed: true, risk: "olderImage", message: "postgres:17.6-alpine is older than postgres:17.7-alpine, which runs." }
           : c,
       ),
     };
@@ -320,30 +479,30 @@ test.describe("database version", () => {
     await page.goto(settings(svc.db));
     const card = page.getByRole("region", { name: "Version" });
     await expect(card.getByText("or stay on postgres:17.7-alpine")).toBeVisible();
-    // The catalog's image of 17 is older than what runs: the select cannot stay.
+    // The catalog's image of 17 is older than what runs: a risk, no way to stay.
     await card.getByRole("combobox", { name: "Change to" }).click();
-    await expect(page.getByRole("option", { name: /^17/ })).toHaveAttribute("aria-disabled", "true");
+    await expect(page.getByRole("option", { name: /^17/ })).toContainText("Older than what runs");
     await page.keyboard.press("Escape");
-    await card.getByRole("button", { name: "Another tag of PostgreSQL 17" }).click();
+    await card.getByRole("button", { name: "Use another image" }).click();
 
     const dialog = page.getByRole("dialog");
     const field = dialog.getByLabel("Image");
     await expect(field).toHaveValue("postgres:17.7-alpine");
     await expect(dialog.getByRole("heading", { name: "Stay on postgres:17.7-alpine?" })).toBeVisible();
     await expect(dialog.getByText("The database restarts on postgres:17.7-alpine")).toBeVisible();
-    await expect(dialog.getByText("Give the exact release tag to run instead")).toHaveCount(0);
+    await expect(dialog.getByText("Give the image to run instead")).toHaveCount(0);
     const submit = dialog.getByRole("button", { name: "Update" });
     await expect(submit).toBeEnabled();
-    // Another tag is still a tag of 17; back on what runs, it stays again.
+    // Another image is a change; back on what runs, it stays again.
     await field.fill("postgres:17.8-alpine");
-    await expect(dialog.getByRole("heading", { name: "Run another tag of PostgreSQL 17?" })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: "Run another image of PostgreSQL?" })).toBeVisible();
     await field.fill("postgres:17.7-alpine");
     await expect(dialog.getByRole("heading", { name: "Stay on postgres:17.7-alpine?" })).toBeVisible();
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${shots}/version-stay-on-tag.png` });
     await submit.click();
     await expect(dialog).toHaveCount(0);
-    expect(sent).toEqual({ serviceId: svc.db, version: "17", image: "postgres:17.7-alpine" });
+    expect(sent).toEqual({ serviceId: svc.db, image: "postgres:17.7-alpine" });
   });
 
   test("MySQL 8.0 to 8.4 names the accounts on mysql_native_password, then keeps their logins working", async ({ page }) => {
@@ -407,7 +566,7 @@ test.describe("database version", () => {
     ]);
   });
 
-  test("a MySQL 8.4 with mysql_native_password logins on says so, and another tag of 8.4 keeps them", async ({ page }) => {
+  test("a MySQL 8.4 with mysql_native_password logins on says so, and another image of 8.4 keeps them", async ({ page }) => {
     let sent: Record<string, unknown> | null = null;
     await installDemo(page, {
       overrides: {
@@ -424,16 +583,16 @@ test.describe("database version", () => {
     await expect(card.getByText("MySQL 8.4", { exact: true })).toBeVisible();
     await expect(card.getByText("Old mysql_native_password logins are on")).toBeVisible();
     await page.screenshot({ path: `${shots}/version-mysql-native-on.png` });
-    await card.getByRole("button", { name: "Another tag of MySQL 8.4" }).click();
+    await card.getByRole("button", { name: "Use another image" }).click();
 
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Run another tag of MySQL 8.4?" })).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: "Run another image of MySQL?" })).toBeVisible();
     const keep = dialog.getByLabel("Keep mysql_native_password logins working in 8.4");
     await expect(keep).toBeChecked();
     await dialog.getByLabel("Image").fill("mysql:8.4.7");
     await dialog.getByRole("button", { name: "Update" }).click();
     await expect(dialog).toHaveCount(0);
-    expect(sent).toEqual({ serviceId: svc.db, version: "8.4", image: "mysql:8.4.7", keepNativePassword: true });
+    expect(sent).toEqual({ serviceId: svc.db, image: "mysql:8.4.7", keepNativePassword: true });
   });
 
   test("a MySQL whose accounts cannot be listed upgrades by keeping the old logins working", async ({ page }) => {

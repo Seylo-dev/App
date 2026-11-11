@@ -150,6 +150,9 @@ export default {
   versionHint: "Images are pinned to this exact release.",
   versionLatest: "{version} (newest)",
   versionsLoading: "Loading versions",
+  otherImage: "Use another image",
+  otherImageHint: "Any tag or digest of {repo}. Not tested by Seylo.",
+  otherImageFloating: "{image} is a floating tag: what it points at can change under you on the next deploy.",
   keydbNote: "Unmaintained",
   keydbNotice:
     "KeyDB has had no release since 2023 and gets no security fixes, including the 2025 Redis Lua advisories (CVE-2025-49844 and three more). Prefer Valkey. It can only be exposed to allowed IPs.",

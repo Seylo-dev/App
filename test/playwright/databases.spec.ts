@@ -1,5 +1,6 @@
 // The database engines on screen: the New database form (the offered engines,
-// versions from databases.engines on the real panel, pgvector for Postgres;
+// versions from databases.engines on the real panel, pgvector for Postgres,
+// Use another image with its floating-tag note;
 // KeyDB, Dragonfly and ClickHouse are hidden from it for now), KeyDB's exposure asking
 // for allowed IPs first, an exposure closed until its node is updated, and
 // the Connection tab of a ClickHouse database (native and HTTP URLs) and of
@@ -81,6 +82,47 @@ test.describe("database engines", () => {
     expect(created).toMatchObject({ projectId: ids.acme, name: "vectors", engine: "postgres", version: "17", variant: "pgvector" });
     await expect(page).toHaveURL(new RegExp(`/s/${svc.db}`));
     expect(errors).toEqual([]);
+  });
+
+  test("Use another image: any tag of the engine, prefilled with the picked version's, not tested by Seylo", async ({ page }) => {
+    let created: Record<string, unknown> | null = null;
+    await installDemo(page, {
+      overrides: {
+        "databases.create": (input) => {
+          created = input;
+          return { ...databaseOf(svc.db), name: String(input.name), engine: String(input.engine), version: "custom" };
+        },
+      },
+    });
+    const dialog = await openNewDatabase(page);
+    const version = dialog.getByRole("combobox", { name: "Version" });
+    await expect(version).toContainText("18 (newest)");
+    const other = dialog.getByLabel("Use another image");
+    await expect(dialog.getByLabel("Image", { exact: true })).toHaveCount(0);
+    await other.check();
+    // From the panel's catalog: the picked version's image, which follows the version.
+    const field = dialog.getByLabel("Image", { exact: true });
+    await expect(field).toHaveValue("postgres:18.6-alpine");
+    await expect(dialog.getByText("Any tag or digest of postgres. Not tested by Seylo.")).toBeVisible();
+    await expect(dialog.getByText("is a floating tag")).toHaveCount(0);
+    await version.click();
+    await page.getByRole("option", { name: /^17/ }).click();
+    await expect(field).toHaveValue("postgres:17.6-alpine");
+    await field.fill("postgres:17-alpine");
+    await expect(dialog.getByText("postgres:17-alpine is a floating tag: what it points at can change under you on the next deploy.")).toBeVisible();
+
+    // Another engine starts over without it.
+    await dialog.getByRole("radio", { name: "MongoDB" }).click();
+    await expect(other).not.toBeChecked();
+    await other.check();
+    await expect(dialog.getByText("Any tag or digest of mongo. Not tested by Seylo.")).toBeVisible();
+    await field.fill("mongo:latest");
+    await expect(dialog.getByText("mongo:latest is a floating tag")).toBeVisible();
+    await dialog.getByLabel("Name").fill("docs");
+    await page.screenshot({ path: `${shots}/new-database-image.png` });
+    await dialog.getByRole("button", { name: "Create" }).click();
+    await expect.poll(() => created).not.toBeNull();
+    expect(created).toMatchObject({ projectId: ids.acme, name: "docs", engine: "mongo", image: "mongo:latest" });
   });
 
   test("ClickHouse shows its native and HTTP URLs and its own tools", async ({ page }) => {

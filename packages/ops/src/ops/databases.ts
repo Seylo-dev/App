@@ -302,7 +302,7 @@ export const versionChoices = defineOp({
     variant: Type.Union([DatabaseVariant, Type.Null()]),
     /** The image the database runs (its live deployment's). */
     image: Type.String(),
-    /** The release that image's tag names ("8.0.34"); null for latest, a digest and other tags without one (0.2.11). */
+    /** The release that image's tag names ("8.0.38"); null for latest, a digest and other tags without one (0.2.11). */
     release: Type.Union([Type.String(), Type.Null()]),
     /** The repository whose tags and digests setVersion's image takes (0.2.11): mongo, postgres, pgvector/pgvector, ... */
     repository: Type.Union([Type.String(), Type.Null()]),

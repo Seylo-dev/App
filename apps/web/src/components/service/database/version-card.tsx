@@ -1,13 +1,15 @@
 // The Version card of a database's Settings tab: what the database runs,
-// the catalog versions it may change to (databases.versionChoices; refused
-// ones are disabled with their reason), another exact tag of the version it
-// runs (customOnCurrent, also when it runs that line's newest pinned image),
-// and the confirm dialog: the restart, no way back, a backup first,
-// MongoDB's compatibility step and MySQL 8.4's mysql_native_password check
-// (the accounts it would lock out, and keeping their logins working). A
-// MySQL 8.4 also turns those logins on or off on the image it runs (a
-// switch and Apply, then a confirm dialog). While the change deploys the
-// card shows the deploy and its log.
+// the catalog versions it may change to (databases.versionChoices; the one
+// that runs is disabled, the ones that take a risk say so), any other image
+// of its engine's repository (Use another image, anyImage), and the confirm
+// dialog: the restart, no way back, what can go wrong and "I understand"
+// (acceptRisk) for a risky change (from versionChoices, or the panel's
+// riskNotAccepted answer for another image), a backup first, MongoDB's
+// compatibility step and MySQL 8.4's mysql_native_password check (the
+// accounts it would lock out, and keeping their logins working). A MySQL
+// 8.4 also turns those logins on or off on the image it runs (a switch and
+// Apply, then a confirm dialog). While the change deploys the card shows the
+// deploy and its log.
 
 import { backups, databases, deployments, OpError, type OpOutput, services } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
@@ -25,6 +27,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
+import { type RiskRefusal, riskRefusalOf } from "../../../lib/database-image";
 import { shortImage } from "../../new-service/short-image";
 import { useActiveDeploy } from "../active-deploy";
 import { DeployLogModal } from "../deploy-log-modal";
@@ -41,7 +44,26 @@ type Choice = Choices["choices"][number];
 /** The card's id: the version chip in the service header links here. */
 export const versionCardId = "version";
 
-/** The repository of an image, for the custom tag hint: "mongo" of "mongo:8.0.38". */
+/** The version recorded for an image whose tag names no release (latest, a digest). */
+export const customVersion = "custom";
+
+/** The risks the panel names (VersionChoice.risk), each with its words in databaseVersion.confirm.risk. */
+const knownRisks = [
+  "downgrade",
+  "olderImage",
+  "postgresMajor",
+  "dataPath",
+  "patchOnly",
+  "oneStep",
+  "otherLine",
+  "postgresBase",
+  "floatingTag",
+  "digest",
+] as const;
+type Risk = (typeof knownRisks)[number];
+const isRisk = (risk: string): risk is Risk => (knownRisks as readonly string[]).includes(risk);
+
+/** The repository of an image, for the image hint: "mongo" of "mongo:8.0.38". */
 function repositoryOf(image: string): string {
   return image.replace(/@.*$/, "").replace(/:[^/:]*$/, "");
 }
@@ -60,8 +82,8 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
     { retry: retryOp, refetchInterval: (q) => (q.state.data?.blocked?.reason === "deployRunning" ? 5000 : false) },
   );
   const [picked, setPicked] = useState("");
-  /** tag: another exact tag of the line it runs, typed in the dialog. */
-  const [confirming, setConfirming] = useState<{ choice: Choice; tag: boolean } | null>(null);
+  /** choice null: another image, typed in the dialog. */
+  const [confirming, setConfirming] = useState<{ choice: Choice | null } | null>(null);
   const [log, setLog] = useState(false);
   /** MySQL 8.4's mysql_native_password logins on the image it runs: what the switch asks for, and its dialog. */
   const nativeOn = choices.data?.nativePassword?.on ?? false;
@@ -91,8 +113,11 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
   const selected = options.find((c) => `${c.version}|${c.image}` === picked) ?? null;
   const running = data.blocked?.reason === "deployRunning";
   const engine = t(`service.kind.${data.engine}`);
-  // The line it runs takes another exact tag even when none of its catalog choices can be picked.
-  const ownLine = data.customOnCurrent ? (data.choices.find((c) => c.version === data.version) ?? null) : null;
+  const anyImage = data.anyImage && data.blocked === null;
+  const runs =
+    data.version === customVersion
+      ? t("databaseVersion.currentImage", { engine, image: data.image })
+      : `${engine} ${data.version}${data.variant ? ` + ${data.variant}` : ""}`;
   // MySQL 8.4 turns mysql_native_password logins on or off on the image it runs; not while a change is pending.
   const nativeHere = data.nativePassword?.lines.includes(data.version) ?? false;
   const nativeLocked = data.blocked !== null || data.pendingImage !== null;
@@ -109,7 +134,7 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
           layout="grid"
           className="max-w-[520px]"
           items={[
-            { label: t("databaseVersion.current"), value: `${engine} ${data.version}${data.variant ? ` + ${data.variant}` : ""}` },
+            { label: t("databaseVersion.current"), value: runs },
             { label: t("databaseVersion.image"), value: data.image, mono: true },
             ...(data.nativePassword?.on ? [{ label: t("databaseVersion.logins"), value: t("databaseVersion.nativeOn") }] : []),
           ]}
@@ -148,7 +173,7 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
           <Callout tone="warning">{t("databaseVersion.pending", { pending: data.pendingImage, image: data.image })}</Callout>
         ) : null}
         {data.blocked && !running && <Callout tone="neutral">{data.blocked.message}</Callout>}
-        {options.length === 0 && !ownLine ? (
+        {options.length === 0 && !anyImage ? (
           <span className="text-[13px] text-muted-foreground">{t("databaseVersion.noChoice")}</span>
         ) : (
           <div className="flex flex-wrap items-end gap-2">
@@ -168,6 +193,11 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
                             {!c.allowed && c.message && (
                               <span className="text-xs whitespace-normal text-muted-foreground">{c.message}</span>
                             )}
+                            {c.allowed && c.risk && (
+                              <span className="text-xs whitespace-normal text-chip-amber-fg">
+                                {isRisk(c.risk) ? t(`databaseVersion.riskNote.${c.risk}`) : c.message}
+                              </span>
+                            )}
                           </span>
                         </SelectItem>
                       ))}
@@ -177,23 +207,17 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
                 <Button
                   variant="primary"
                   disabled={!selected || data.blocked !== null}
-                  onClick={() => selected && setConfirming({ choice: selected, tag: false })}
+                  onClick={() => selected && setConfirming({ choice: selected })}
                 >
                   {t("databaseVersion.change")}
                 </Button>
               </>
             )}
-            {ownLine && (
-              <Button onClick={() => setConfirming({ choice: ownLine, tag: true })}>
-                {t("databaseVersion.anotherTag", { engine, version: data.version })}
-              </Button>
-            )}
+            {anyImage && <Button onClick={() => setConfirming({ choice: null })}>{t("databaseVersion.anotherImage")}</Button>}
           </div>
         )}
       </div>
-      {confirming && (
-        <VersionDialog service={service} data={data} choice={confirming.choice} tag={confirming.tag} onClose={() => setConfirming(null)} />
-      )}
+      {confirming && <VersionDialog service={service} data={data} choice={confirming.choice} onClose={() => setConfirming(null)} />}
       {nativeConfirm && <NativePasswordDialog service={service} data={data} on={nativeWanted} onClose={() => setNativeConfirm(false)} />}
       <DeployLogModal serviceId={service.id} deployment={log ? active : null} onClose={() => setLog(false)} />
     </SectionCard>
@@ -204,30 +228,47 @@ function VersionDialog({
   service,
   data,
   choice,
-  tag,
   onClose,
 }: {
   service: ServiceDetail;
   data: Choices;
-  choice: Choice;
-  /** Another exact tag of the line it runs: the image field only, starting from what runs. */
-  tag: boolean;
+  /** A catalog version; null for another image, typed in the dialog starting from what runs. */
+  choice: Choice | null;
   onClose: () => void;
 }) {
   const invalidate = useInvalidate();
-  const lineChange = choice.version !== data.version;
-  const [custom, setCustom] = useState(tag);
-  const [image, setImage] = useState(tag ? data.image : choice.image);
+  const lineChange = choice !== null && choice.version !== data.version;
+  const [image, setImage] = useState(data.image);
   const [withoutBackup, setWithoutBackup] = useState(false);
+  // What the panel answered for another image: the risks (riskNotAccepted), or that it needs a backup.
+  const [refused, setRefused] = useState<RiskRefusal | null>(null);
+  const [backupAsked, setBackupAsked] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const risk: RiskRefusal | null =
+    refused ??
+    (choice?.risk
+      ? {
+          risk: choice.risk,
+          risks: [choice.risk],
+          message: choice.message ?? "",
+          version: choice.version,
+          image: choice.image,
+          backupRequired: !data.backupFresh,
+        }
+      : null);
+  // The line it would run: the catalog's, or the one the panel read from another image's tag.
+  const toVersion = choice?.version ?? (refused?.version || data.version);
   // MySQL 8.4: mysql_native_password logins. The checkbox shows while they are on, or once the
   // panel named accounts that would lose them or could not list them (an admin other than root
   // cannot read MySQL's accounts).
-  const nativeLine = data.nativePassword?.lines.includes(choice.version) ?? false;
+  const nativeLine = data.nativePassword?.lines.includes(toVersion) ?? false;
   const [keepNative, setKeepNative] = useState(data.nativePassword?.on ?? false);
   const [nativeRefused, setNativeRefused] = useState(false);
   const showNative = nativeLine && (data.nativePassword?.on === true || nativeRefused);
   const [runId, setRunId] = useState<string | null>(null);
-  const needsBackup = lineChange && !data.backupFresh;
+  // Every change but a newer patch of the line it runs needs a backup: a new line, or a risk taken.
+  const backupShown = lineChange || risk !== null || backupAsked;
+  const needsBackup = backupShown && !data.backupFresh;
   const policies = useOp(backups.listPolicies, { serviceId: service.id }, { retry: retryOp, enabled: needsBackup });
   const policy = policies.data?.policies.find((p) => p.target === "database");
   const runs = useOp(
@@ -251,66 +292,51 @@ function VersionDialog({
       invalidate(backups.listRuns);
     },
   });
+  const target = choice ? choice.image : image.trim();
   const change = useOpMutation(databases.setVersion, {
     onSuccess: () => {
-      toast.success(t("databaseVersion.confirm.done", { image: custom ? image.trim() : choice.image }));
+      toast.success(t("databaseVersion.confirm.done", { image: target }));
       invalidate(databases.versionChoices, databases.get, deployments.list, services.get);
       onClose();
     },
     onError: (error) => {
-      if (error instanceof OpError && nativeReasons.includes(error.details?.reason ?? "")) setNativeRefused(true);
+      const reason = error instanceof OpError ? (error.details?.reason ?? "") : "";
+      if (nativeReasons.includes(reason)) setNativeRefused(true);
+      if (reason === "backupRequired") setBackupAsked(true);
+      const answer = riskRefusalOf(error);
+      if (answer) {
+        setRefused(answer);
+        if (answer.backupRequired) setBackupAsked(true);
+      }
     },
   });
   const nativeUsers = nativeUsersOf(change.error);
   const engine = t(`service.kind.${data.engine}`);
-  const target = custom ? image.trim() : choice.image;
   // The image it runs changes nothing (the panel refuses it), unless a change to
   // another one did not finish: then setting it again stays on what runs.
-  const stay = tag ? target === data.image && data.pendingImage !== null : choice.kind === "current";
-  const noTag = tag && (target === "" || (target === data.image && !stay));
+  const stay = choice ? choice.kind === "current" : target === data.image && data.pendingImage !== null;
+  const sameImage = choice === null && (target === "" || (target === data.image && !stay));
   const title = stay
     ? t("databaseVersion.confirm.stay", { image: target })
-    : tag
-      ? t("databaseVersion.confirm.titleTag", { engine, version: choice.version })
+    : choice === null
+      ? t("databaseVersion.confirm.titleImage", { engine })
       : lineChange
         ? t("databaseVersion.confirm.titleLine", { engine, version: choice.version })
         : t("databaseVersion.confirm.titlePatch", { image: choice.image });
   const backupOk = !needsBackup || withoutBackup || runStatus === "succeeded";
-  const customOffered = data.engine !== "keydb" && data.engine !== "dragonfly";
-  const imageField = (
-    <Field
-      label={t("databaseVersion.customLabel")}
-      htmlFor="dv-image"
-      hint={t("databaseVersion.customHint", {
-        repo: repositoryOf(choice.image),
-        version: choice.version,
-        image: tag ? data.image : choice.image,
-      })}
-    >
-      <Input
-        id="dv-image"
-        className="font-mono"
-        value={image}
-        onChange={(e) => {
-          setImage(e.target.value);
-          // A refusal is about the tag that was sent: a new one starts without it.
-          if (change.error) change.reset();
-        }}
-      />
-    </Field>
-  );
+  const riskOk = risk === null || accepted;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="top-[12%]">
+      <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto">
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             change.mutate({
               serviceId: service.id,
-              version: choice.version,
-              ...(tag || (custom && target !== choice.image) ? { image: target } : {}),
+              ...(choice ? { version: choice.version } : { image: target }),
+              ...(risk && accepted ? { acceptRisk: true } : {}),
               ...(needsBackup && withoutBackup ? { confirmNoBackup: true } : {}),
               ...(showNative ? { keepNativePassword: keepNative } : {}),
             });
@@ -319,35 +345,53 @@ function VersionDialog({
           <div className="flex flex-col gap-1">
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>
-              {noTag
-                ? t("databaseVersion.confirm.tagSame", { image: data.image })
+              {sameImage
+                ? t("databaseVersion.confirm.imageSame", { image: data.image })
                 : t("databaseVersion.confirm.restart", { image: target })}
             </DialogDescription>
           </div>
-          {lineChange && <Callout tone="warning">{t("databaseVersion.confirm.undo")}</Callout>}
-          {lineChange && data.engine === "mongo" && (
+          {lineChange && !risk && <Callout tone="warning">{t("databaseVersion.confirm.undo")}</Callout>}
+          {lineChange && !risk && data.engine === "mongo" && (
             <p className="m-0 text-[13px] leading-normal text-ink-strong">
               {t("databaseVersion.confirm.mongoFcv", { version: data.version })}
             </p>
           )}
           {lineChange && nativeLine && !showNative && (
             <p className="m-0 text-[13px] leading-normal text-ink-strong">
-              {t("databaseVersion.confirm.mysqlNative", { version: choice.version })}
+              {t("databaseVersion.confirm.mysqlNative", { version: toVersion })}
             </p>
           )}
-          {tag
-            ? imageField
-            : customOffered &&
-              choice.kind !== "current" && (
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="dv-custom" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
-                    <Checkbox id="dv-custom" checked={custom} onCheckedChange={(v) => setCustom(v === true)} />
-                    {t("databaseVersion.customToggle")}
-                  </label>
-                  {custom && imageField}
-                </div>
-              )}
-          {lineChange && (
+          {choice === null && (
+            <Field
+              label={t("databaseVersion.customLabel")}
+              htmlFor="dv-image"
+              hint={t("databaseVersion.imageHint", { repo: data.repository ?? repositoryOf(data.image), image: data.image })}
+            >
+              <Input
+                id="dv-image"
+                className="font-mono"
+                value={image}
+                onChange={(e) => {
+                  setImage(e.target.value);
+                  // The panel's answer is about the image that was sent: a new one starts without it.
+                  if (change.error) change.reset();
+                  setRefused(null);
+                  setAccepted(false);
+                  setBackupAsked(false);
+                }}
+              />
+            </Field>
+          )}
+          {risk && (
+            <RiskNote
+              risk={risk}
+              engine={engine}
+              mongo={data.engine === "mongo" && (lineChange || choice === null)}
+              accepted={accepted}
+              onAccepted={setAccepted}
+            />
+          )}
+          {backupShown && (
             <section
               aria-label={t("databaseVersion.confirm.backupTitle")}
               className="flex flex-col gap-2 rounded-control bg-muted px-3.5 py-3"
@@ -397,25 +441,29 @@ function VersionDialog({
             </section>
           )}
           {nativeUsers ? (
-            <NativeUsersCallout users={nativeUsers} version={choice.version} />
+            <NativeUsersCallout users={nativeUsers} version={toVersion} />
           ) : (
-            change.error && <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>
+            change.error &&
+            !riskRefusalOf(change.error) &&
+            !(change.error instanceof OpError && change.error.details?.reason === "backupRequired") && (
+              <Callout tone="danger">{errorMessage(change.error, t("service.actionFailed"))}</Callout>
+            )
           )}
           {showNative && (
             <div className="flex flex-col gap-1">
               <label htmlFor="dv-native" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink-strong">
                 <Checkbox id="dv-native" checked={keepNative} onCheckedChange={(v) => setKeepNative(v === true)} />
-                {t("databaseVersion.confirm.keepNative", { version: choice.version })}
+                {t("databaseVersion.confirm.keepNative", { version: toVersion })}
               </label>
               <span className="pl-6.5 text-xs text-muted-foreground">
-                {t("databaseVersion.confirm.keepNativeHint", { version: choice.version })}
+                {t("databaseVersion.confirm.keepNativeHint", { version: toVersion })}
               </span>
             </div>
           )}
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>{t("service.cancel")}</Button>
-            <Button type="submit" variant="primary" disabled={change.isPending || !backupOk || (custom && target === "") || noTag}>
-              {lineChange ? t("databaseVersion.confirm.button") : t("databaseVersion.confirm.buttonPatch")}
+            <Button type="submit" variant="primary" disabled={change.isPending || !backupOk || !riskOk || sameImage}>
+              {lineChange || risk ? t("databaseVersion.confirm.button") : t("databaseVersion.confirm.buttonPatch")}
             </Button>
           </div>
         </form>
@@ -498,6 +546,43 @@ function NativeUsersCallout({ users, version }: { users: { accounts: string[]; c
           )}
         </ul>
         <span>{t("databaseVersion.confirm.nativeFix")}</span>
+      </div>
+    </Callout>
+  );
+}
+
+/** What can go wrong, in plain words for each risk the panel found, and the "I understand" that sends acceptRisk. */
+function RiskNote({
+  risk,
+  engine,
+  mongo,
+  accepted,
+  onAccepted,
+}: {
+  risk: RiskRefusal;
+  engine: string;
+  /** A MongoDB move the panel runs no compatibility step for. */
+  mongo: boolean;
+  accepted: boolean;
+  onAccepted: (accepted: boolean) => void;
+}) {
+  const known = risk.risks.filter(isRisk);
+  return (
+    <Callout tone="warning" title={t("databaseVersion.confirm.riskTitle")}>
+      <div className="flex flex-col gap-2">
+        <ul aria-label={t("databaseVersion.confirm.riskTitle")} className="m-0 flex list-disc flex-col gap-1 pl-4">
+          {known.length > 0 ? (
+            known.map((r) => <li key={r}>{t(`databaseVersion.confirm.risk.${r}`, { image: risk.image, engine })}</li>)
+          ) : (
+            <li>{risk.message}</li>
+          )}
+          {mongo && <li>{t("databaseVersion.confirm.riskMongo")}</li>}
+        </ul>
+        <span>{t("databaseVersion.confirm.riskBack")}</span>
+        <label htmlFor="dv-risk" className="flex cursor-pointer items-center gap-2.5 font-medium">
+          <Checkbox id="dv-risk" checked={accepted} onCheckedChange={(v) => onAccepted(v === true)} />
+          {t("databaseVersion.confirm.understand")}
+        </label>
       </div>
     </Callout>
   );
