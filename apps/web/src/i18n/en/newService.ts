@@ -5,7 +5,7 @@ export default {
   app: "App",
   appHint: "GitHub, Git, Docker image, Dockerfile or upload",
   database: "Database",
-  databaseHint: "Postgres, MySQL, MongoDB, Redis, Valkey, ClickHouse and more",
+  databaseHint: "Postgres, MySQL, MariaDB, MongoDB, Redis and Valkey",
   compose: "Compose stack",
   composeHint: "Paste a compose file or point at a repo",
   template: "From a template",
@@ -26,7 +26,7 @@ export default {
   // The dialogs' own subtitles: what each form offers (the menu hints above say what the kind can do later too).
   dialogHints: {
     app: "From a Docker image or a repository, or set the source later.",
-    database: "Postgres, MySQL, MongoDB, Redis, Valkey, ClickHouse and more, on one node.",
+    database: "Postgres, MySQL, MariaDB, MongoDB, Redis and Valkey, on one node.",
     compose: "Paste a docker-compose.yml and preview what it creates.",
     box: "VS Code in the browser, with a repository cloned in if you like.",
     cron: "An image that runs a command on a schedule.",
