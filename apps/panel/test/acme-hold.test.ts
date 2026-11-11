@@ -316,6 +316,67 @@ describe("the re-check of waiting domains", () => {
     expect(lookups).toBe(1);
   });
 
+  test("a failed lookup keeps the last answer: the hold stays and the domain is checked again", async () => {
+    const s = setup();
+    let lookups = 0;
+    const failing: DnsLookups = {
+      ...dns({}),
+      resolve4: () => {
+        lookups++;
+        return Promise.reject(new Error("timeout"));
+      },
+    };
+    setDnsLookups(dns({}));
+    const { domainId, ref } = await s.add("shop.example.com");
+    const row = () => panel.deps.db.select().from(domains).where(eq(domains.id, domainId)).get();
+    s.dirty();
+
+    // The public resolver times out at the next due check: no record is still the last word.
+    setDnsLookups(failing);
+    setSystemTime(new Date(Date.now() + 3 * 60_000));
+    await run();
+    expect(lookups).toBe(1);
+    expect(row()?.dnsStatus).toBe("missing");
+    expect(s.dirty()).toEqual([]);
+    expect(s.route(domainId)).toMatchObject(held);
+    expect((await s.listed(domainId))?.certificate.waitingForDns).toBe(true);
+    // The check counts for the pacing, so an outage is not asked about every minute.
+    expect(row()?.dnsCheckedAt?.getTime()).toBe(Date.now());
+
+    // Check now and Regenerate certificate during the outage say the lookup failed and change nothing.
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.status).toBe("unknown");
+    const refused = await callOp(panel, domainOps.retryCertificate, ref, { cookie });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.details.reason).toBe("waitingForDns");
+    expect(row()?.dnsStatus).toBe("missing");
+    expect(s.dirty()).toEqual([]);
+    expect(s.route(domainId)).toMatchObject(held);
+
+    // Still a waiting domain for the job: the next good lookup finds the record and starts the certificate.
+    setDnsLookups(dns({ "shop.example.com": [nodeIp] }));
+    setSystemTime(new Date(Date.now() + 3 * 60_000));
+    await run();
+    expect(s.dirty()).toEqual([{ serviceId: s.service.id }]);
+    expect(s.route(domainId)).toMatchObject(acme);
+  });
+
+  test("behind Cloudflare's proxy a failed lookup keeps the origin check's answer too", async () => {
+    const s = setup();
+    setDnsLookups(dns({ "shop.example.com": ["104.16.1.1"] }));
+    const { domainId, ref } = await s.add("shop.example.com");
+    setOriginFetch(async () => text("<!doctype html><title>Old host</title>"));
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.origin).toBe("elsewhere");
+    s.dirty();
+    setDnsLookups({ ...dns({}), resolve4: () => Promise.reject(new Error("timeout")) });
+    expect((await callOp(panel, domainOps.checkDns, ref, { cookie })).body.status).toBe("unknown");
+    expect(panel.deps.db.select().from(domains).where(eq(domains.id, domainId)).get()).toMatchObject({
+      dnsStatus: "proxied",
+      originStatus: "elsewhere",
+    });
+    expect(s.dirty()).toEqual([]);
+    expect(s.route(domainId)).toMatchObject(held);
+  });
+
   test("less often the longer a domain waits", () => {
     expect(recheckEveryMs(5 * 60_000)).toBe(2 * 60_000);
     expect(recheckEveryMs(3 * 3_600_000)).toBe(15 * 60_000);

@@ -21,8 +21,14 @@
 //                          answering on the node's address (elsewhere).
 //
 // A DNS answer of unknown (the lookup failed, or the node's address is not
-// known yet) never holds, so a resolver outage cannot keep a domain off
-// HTTPS: the route asks Let's Encrypt as it did before the hold.
+// known yet) says nothing about the record. It never starts a hold, so a
+// domain whose lookups fail from the start cannot be kept off HTTPS: its
+// route asks Let's Encrypt as it did before the hold. Nor does it end one
+// (keepsLastAnswer): a held domain keeps the last answer that said
+// something, and its origin, so a resolver timeout neither starts a
+// certificate against a record still missing nor takes the domain off the
+// re-check (recheck.ts picks only held domains); only dns_checked_at moves
+// on, and the next lookup that answers decides.
 //
 // A check that proves the domain (DNS ok with the origin not elsewhere, or
 // proxied with the origin check answered by a node) releases it for good
@@ -72,6 +78,11 @@ export function acmeHeld(row: HoldFacts): boolean {
     default:
       return false;
   }
+}
+
+/** Whether a check's DNS answer leaves the row as it was: unknown for a held domain (see the top of this file). */
+export function keepsLastAnswer(row: HoldFacts, dnsStatus: DnsStatus): boolean {
+  return dnsStatus === "unknown" && acmeHeld(row);
 }
 
 export interface CheckAnswer {

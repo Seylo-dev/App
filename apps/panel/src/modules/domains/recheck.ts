@@ -5,14 +5,15 @@
 // fixed in Cloudflare with the tab closed), so the certificate starts once
 // the record is right without anyone looking: every 2 minutes in the
 // domain's first hour, every 15 minutes in its first day, then every 6
-// hours. A check from the tab counts too (dns_checked_at).
+// hours. A check from the tab counts too (dns_checked_at), and so does one
+// whose lookup failed, which leaves the domain waiting.
 
 import { domains as domainOps } from "@seylo/ops";
 import { and, eq, isNull } from "drizzle-orm";
 import { domains, type OriginStatus } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
-import { acmeHeld, settleHold } from "./acme-hold";
+import { acmeHeld, keepsLastAnswer, settleHold } from "./acme-hold";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, serviceNodes } from "./lookup";
 import { checkOrigin, originApplies, originProvable, saveOrigin } from "./origin";
@@ -28,6 +29,12 @@ export async function checkDomain(
   row: DomainRow,
 ): Promise<{ dns: DnsResult; origin: OriginStatus | null; checkedAt: Date }> {
   const dns = await checkHost(row.host, serviceNodes(deps.db, row.serviceId), dnsLookups());
+  if (keepsLastAnswer(row, dns.status)) {
+    // The lookup failed: the last answer stands, and only the time moves on, for the re-check's pacing.
+    const checkedAt = new Date();
+    deps.db.update(domains).set({ dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
+    return { dns, origin: null, checkedAt };
+  }
   // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node.
   const check = originApplies(row, dns.status) ? await checkOrigin(deps, row) : null;
   const origin = check?.origin ?? null;

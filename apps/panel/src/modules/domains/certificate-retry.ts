@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
-import { settleHold } from "./acme-hold";
+import { keepsLastAnswer, settleHold } from "./acme-hold";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, type PlacedNode, serviceNodes } from "./lookup";
 import { requireDomain } from "./ops";
@@ -105,6 +105,12 @@ async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): P
   const nodes = serviceNodes(ctx.db, row.serviceId);
   if (nodes.length === 0) throw new OpError("CONFLICT", "The service is not on a node yet. Deploy it first.", { reason: "notPlaced" });
   const dns = await checkHost(row.host, nodes, dnsLookups());
+  if (keepsLastAnswer(row, dns.status)) {
+    // A failed lookup says nothing about the record: the domain keeps waiting on its last answer (acme-hold.ts).
+    throw new OpError("CONFLICT", `${dns.message} Its certificate waits until a check sees ${row.host} reach the service's node.`, {
+      reason: "waitingForDns",
+    });
+  }
   if (dns.status !== row.dnsStatus) {
     ctx.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: new Date() }).where(eq(domains.id, row.id)).run();
     invalidateService(ctx, row.serviceId, [domainOps.list.id]);
