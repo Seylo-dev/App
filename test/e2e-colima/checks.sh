@@ -4162,10 +4162,13 @@ p41_followed() {
   done
 }
 
+# p41_online_ge <n>: nodes online on the panel wherever it runs now (api_loop always asks A's loopback).
+p41_online_ge() { [ "$(api nodes.list | jq '[.nodes[] | select(.status=="online")] | length')" -ge "$1" ] 2>/dev/null; }
+
 p41_assert_moved() { # <from> <to> <facts before> <keys before> <repos before>
   local from=$1 to=$2 facts=$3 keys=$4 repos=$5
-  wait_for 240 "3 nodes online on the moved panel" online_ge_loop 3 || true
-  expect "3 nodes online on the panel on $to" online_ge_loop 3
+  wait_for 240 "3 nodes online on the moved panel" p41_online_ge 3 || true
+  expect "3 nodes online on the panel on $to ($(api nodes.list | jq -c '[.nodes[] | {name, status}]'))" p41_online_ge 3
   expect "$to is the panel node" test "$(p41_panel_node)" = "$(node_id "$to")"
   expect "the panel on $from no longer answers" p41_gone "$from"
   expect "no panel container runs on $from" fails p41_running "$from"
@@ -4194,7 +4197,7 @@ p41_cleanup() {
   relay_stop "$E2E_B" e2e-p41-reg
   relay_stop "$E2E_A" e2e-p41-fwd
   rm -f "$E2E_STATE/p41-panel-on"
-  wait_for 180 "3 nodes online" online_ge_loop 3 || bad "cleanup: not every node is back online"
+  wait_for 180 "3 nodes online" p41_online_ge 3 || bad "cleanup: not every node is back online"
 }
 
 check_41() {
