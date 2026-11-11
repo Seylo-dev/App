@@ -3106,9 +3106,20 @@ const file = ctx.agents.openRaw(nodeId, "fsRead", { root, path }); // raw bytes:
   when the panel's server has none for the name), a pin mismatch too, and
   the installer shows that hint instead of the ports one. A join on a node
   already joined to the same `panel_url` joins again with the token (as
-  `--force`) when `seylo status` says rejected within 20 s of the restart
-  (another panel at that address, the node removed, another key);
-  connected or unreachable keeps the earlier join.
+  `--force`) only when `seylo status` (read from its `Panel:` line and the
+  start of its `Error:` line, never text a peer chose) proves the earlier
+  join dead within 20 s of the restart: HELLO_REJECT_REASON_UNKNOWN_NODE
+  (removed from the panel), the agent's errOtherPanel for that address, or
+  a pin mismatch where the command's `--pin` names another key than
+  `panel_pin`. A disabled node, the same or no pin, AGENT_TOO_OLD, a bad
+  token, anything else, connected or unreachable keep the earlier join
+  (exit 0, a warning with the next step). Certificate issuers reach
+  `seylo status`, logs and alerts quoted, on one printable line, at most
+  80 runes (`conn.IssuerName`, `conn.PrintableLine`). A node on a pinned
+  `https://` address whose move to the domain fails on an untrusted issuer
+  or a pin mismatch tries it again after 24 h (`untrustedMoveRetryAfter`)
+  instead of 1 h, keeping its session meanwhile; an agent restart or
+  another address tries at once.
 - PanelService (`agent-hub/panel-service.ts`): ReportCrash stores
   `crash_reports`, ReportEvent stores a capped copy in `agent_reports` (30
   days), both with capped fields, deduped by (node, outbox id) and within
