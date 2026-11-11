@@ -38,6 +38,7 @@ import * as previews from "./previews";
 import * as projects from "./projects";
 import * as push from "./push";
 import * as registries from "./registries";
+import * as serviceTransfer from "./serviceTransfer";
 import * as services from "./services";
 import * as settings from "./settings";
 import * as setup from "./setup";
@@ -52,7 +53,7 @@ import * as uptime from "./uptime";
 import * as users from "./users";
 import * as webhooks from "./webhooks";
 
-export { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
+export { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, serviceTransfer, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks };
 
 /** Every op module by name; the name is the id prefix of its ops. */
-export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;
+export const opModules = { ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, serviceTransfer, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks } as const;

@@ -15,6 +15,7 @@ generated=(
   apps/web/src/i18n/en/index.gen.ts
   apps/web/src/routeTree.gen.ts
   openapi.json
+  service-export.schema.json
   apps/panel/drizzle
 )
 

@@ -8,7 +8,7 @@ import { defineOp } from "../define";
 import { permission } from "../permission";
 import { Empty, Id, Timestamp } from "../schemas";
 
-const JobName = Type.String({ minLength: 1, maxLength: 60 });
+export const JobName = Type.String({ minLength: 1, maxLength: 60 });
 /** Five fields (minute hour day month weekday), or @hourly / @daily / @weekly / @monthly. */
 export const CronSchedule = Type.String({
   minLength: 1,
@@ -17,8 +17,8 @@ export const CronSchedule = Type.String({
   description: "Five-field cron expression or @hourly, @daily, @weekly, @monthly, @yearly.",
 });
 /** IANA zone name, for example "Europe/Berlin". */
-const TimeZone = Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$" });
-const Command = Type.String({ minLength: 1, maxLength: 4096, description: "Run as sh -c <command>." });
+export const TimeZone = Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$" });
+export const Command = Type.String({ minLength: 1, maxLength: 4096, description: "Run as sh -c <command>." });
 export const CronConcurrency = Type.Union([Type.Literal("forbid"), Type.Literal("allow"), Type.Literal("replace")], {
   description: "When a run is still going at the next tick: skip the new one, run both, or stop the old one.",
 });

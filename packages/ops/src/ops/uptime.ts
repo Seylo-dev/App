@@ -18,15 +18,15 @@ export const UptimeStatus = Type.Union([
 ]);
 export type UptimeStatus = Static<typeof UptimeStatus>;
 
-const CheckName = Type.String({ minLength: 1, maxLength: 60 });
-const CheckUrl = Type.String({ maxLength: 2048, pattern: "^https?://[^\\s]+$" });
-const Method = Type.Union([Type.Literal("GET"), Type.Literal("HEAD")]);
+export const CheckName = Type.String({ minLength: 1, maxLength: 60 });
+export const CheckUrl = Type.String({ maxLength: 2048, pattern: "^https?://[^\\s]+$" });
+export const Method = Type.Union([Type.Literal("GET"), Type.Literal("HEAD")]);
 /** Text the response body must contain (GET only); null skips the check. */
-const Keyword = Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Null()]);
+export const Keyword = Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Null()]);
 /** Answers slower than this count as failures; null means only the timeout applies. */
-const MaxLatency = Type.Union([Type.Integer({ minimum: 1, maximum: 60_000 }), Type.Null()]);
+export const MaxLatency = Type.Union([Type.Integer({ minimum: 1, maximum: 60_000 }), Type.Null()]);
 
-const CheckSettings = {
+export const CheckSettings = {
   name: CheckName,
   url: CheckUrl,
   method: Method,
