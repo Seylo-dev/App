@@ -11,3 +11,10 @@ const (
 	imageDragonfly  = "ghcr.io/dragonflydb/dragonfly:v2.0.2"
 	imageClickHouse = "clickhouse/clickhouse-server:26.8.36.3"
 )
+
+// The MongoDB lines the panel offers.
+const (
+	imageMongo90 = "mongo:9.0.4"
+	imageMongo80 = "mongo:8.0.34"
+	imageMongo70 = "mongo:7.0.45"
+)

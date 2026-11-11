@@ -36,7 +36,11 @@ func TestWebUIsStartAndStop(t *testing.T) {
 			[]*agentv1.EnvVar{{Name: "POSTGRES_USER", Value: "admin"}, {Name: "POSTGRES_PASSWORD", Value: pw}, {Name: "POSTGRES_DB", Value: "app"}}, nil, "pgweb"},
 		"mysql": {agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, "mysql:8.4", "root",
 			[]*agentv1.EnvVar{{Name: "MYSQL_ROOT_PASSWORD", Value: pw}, {Name: "MYSQL_DATABASE", Value: "app"}}, nil, "phpMyAdmin"},
-		"mongo": {agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, "mongo:8.0", "admin",
+		"mongo": {agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, imageMongo90, "admin",
+			[]*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}, nil, "Mongo Express"},
+		"mongo80": {agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, imageMongo80, "admin",
+			[]*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}, nil, "Mongo Express"},
+		"mongo70": {agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, imageMongo70, "admin",
 			[]*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}, nil, "Mongo Express"},
 		"redis": {agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, "redis:7.4-alpine", "", nil, []string{"redis-server", "--requirepass", pw}, "Redis Commander"},
 		"postgres18": {agentv1.DatabaseEngine_DATABASE_ENGINE_POSTGRES, imagePostgres18, "admin",
@@ -120,7 +124,7 @@ func TestWebUIsStartAndStop(t *testing.T) {
 				})
 				// A container of the project reaches the helper too, but without
 				// the edge's login it gets nothing of the database.
-				guarded := map[string]string{"postgres": "/api/connection", "postgres18": "/api/connection", "mysql": "/", "mongo": "/",
+				guarded := map[string]string{"postgres": "/api/connection", "postgres18": "/api/connection", "mysql": "/", "mongo": "/", "mongo80": "/", "mongo70": "/",
 					"redis": "/apiv2/server/info", "valkey": "/apiv2/server/info", "keydb": "/apiv2/server/info", "dragonfly": "/apiv2/server/info"}
 				if path, ok := guarded[name]; ok {
 					for _, who := range []string{"", "Basic c2V5bG86d3Jvbmc=", "Bearer x.y.z"} {

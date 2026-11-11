@@ -153,7 +153,12 @@ func TestDatabaseDumpRestoreRoundTrip(t *testing.T) {
 			{Name: "MYSQL_ROOT_PASSWORD", Value: pw}, {Name: "MYSQL_DATABASE", Value: "app"}}, "/var/lib/mysql"),
 		"mariadb": sqlCase(agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, "mariadb:11.4", "root", []*agentv1.EnvVar{
 			{Name: "MARIADB_ROOT_PASSWORD", Value: pw}, {Name: "MARIADB_DATABASE", Value: "app"}}, "/var/lib/mysql"),
-		"mongo": {engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, image: "mongo:8.0", user: "admin", volume: "/data/db",
+		// Every MongoDB line the panel offers (apps/panel/src/modules/databases/engines.ts).
+		"mongo": {engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, image: "mongo:9.0.4", user: "admin", volume: "/data/db",
+			env: []*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}},
+		"mongo80": {engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, image: "mongo:8.0.34", user: "admin", volume: "/data/db",
+			env: []*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}},
+		"mongo70": {engine: agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, image: "mongo:7.0.45", user: "admin", volume: "/data/db",
 			env: []*agentv1.EnvVar{{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "admin"}, {Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw}}},
 		// --appendonly yes as the panel runs it: the restore must not leave
 		// Redis starting from an empty append-only file.
