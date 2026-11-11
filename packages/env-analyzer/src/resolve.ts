@@ -13,11 +13,35 @@ export interface ResolvedEnv {
   unresolved: { key: string; target: string; variable: string }[];
 }
 
+/**
+ * The service being edited as a reference target that holds only its own
+ * built-in values (AnalyzeContext.self.builtins); null without any.
+ */
+export function selfTarget(context: AnalyzeContext): ReferenceTarget | null {
+  const builtins = context.self.builtins;
+  if (!builtins?.length || !context.self.name) return null;
+  return {
+    name: context.self.name,
+    kind: "service",
+    serviceId: context.self.serviceId,
+    serviceKind: null,
+    nodes: context.self.nodes,
+    internalHost: context.self.name,
+    exposed: true,
+    variables: builtins,
+  };
+}
+
 export function findVariable(
   context: AnalyzeContext,
   target: string,
   variable: string,
 ): { target: ReferenceTarget; variable: ReferenceVariable } | null {
+  if (target.toLowerCase() === context.self.name.toLowerCase()) {
+    const own = selfTarget(context);
+    const v = own?.variables.find((c) => c.name === variable);
+    return own && v ? { target: own, variable: v } : null;
+  }
   const t = context.targets.find((c) => c.name.toLowerCase() === target.toLowerCase());
   const v = t?.variables.find((c) => c.name === variable);
   return t && v ? { target: t, variable: v } : null;
@@ -72,7 +96,8 @@ export interface ReferenceCompletion {
  */
 export function referenceCompletions(context: AnalyzeContext): ReferenceCompletion[] {
   const out: ReferenceCompletion[] = [];
-  for (const target of context.targets) {
+  const own = selfTarget(context);
+  for (const target of own ? [own, ...context.targets] : context.targets) {
     const sameNodes = missingNodes(context.self.nodes, target.nodes).length === 0;
     for (const variable of target.variables) {
       out.push({

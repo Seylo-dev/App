@@ -59,6 +59,7 @@ export default {
     noShared: "This project has no shared variables",
     unknownVariable: "{variable} is not a variable of {target}",
     selfReference: "{target} is this service",
+    selfReferenceDetail: "A service can reference its own {builtins}, not its own variables: write {variable}'s value instead.",
     referenceCycle: "{key} depends on itself",
     otherNode: "{target} runs on another node",
     otherNodeDetail: "{address} only works for services on {nodes}. {self} runs on {selfNodes}, so this connection will fail.",

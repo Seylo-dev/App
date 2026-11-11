@@ -31220,6 +31220,74 @@
                               }
                             }
                           }
+                        },
+                        "builtins": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "value",
+                              "scope",
+                              "sensitive",
+                              "description"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "scope": {
+                                "anyOf": [
+                                  {
+                                    "const": "internal",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "public",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "plain",
+                                    "type": "string"
+                                  }
+                                ]
+                              },
+                              "sensitive": {
+                                "type": "boolean"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "dependsOn": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "target",
+                                    "variable"
+                                  ],
+                                  "properties": {
+                                    "target": {
+                                      "type": "string"
+                                    },
+                                    "variable": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
                         }
                       }
                     },

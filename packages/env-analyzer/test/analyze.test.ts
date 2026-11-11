@@ -192,3 +192,38 @@ describe("database engine variables", () => {
     expect(result.diagnostics.map((d) => [d.code, d.range.startLine])).toEqual([["internal-reference-other-node", 1]]);
   });
 });
+
+// n8n's N8N_HOST=${{automations.DOMAIN}}: a service's own built-ins depend on none of its variables.
+describe("a service's own built-in values", () => {
+  const own: AnalyzeContext = {
+    ...context,
+    self: {
+      ...context.self,
+      builtins: [
+        { name: "DOMAIN", value: "worker.example.com", scope: "public", sensitive: false, description: "primary domain" },
+        { name: "URL", value: "https://worker.example.com", scope: "public", sensitive: false, description: "public URL" },
+      ],
+    },
+  };
+
+  test("referencing them is fine; its own variables still are not", () => {
+    expect(analyzeEnv("HOST=${{worker.DOMAIN}}\nHOOK=${{worker.URL}}/webhook\n", own).diagnostics).toEqual([]);
+    const bad = analyzeEnv("A=1\nB=${{worker.A}}\n", own).diagnostics;
+    expect(bad.map((d) => d.code)).toEqual(["self-reference"]);
+    expect(bad[0]?.detail).toContain("its own DOMAIN, URL");
+    // Without built-ins known (an older panel, a new service) it stays an error, as before.
+    expect(analyzeEnv("HOST=${{worker.DOMAIN}}\n", context).diagnostics.map((d) => d.code)).toEqual(["self-reference"]);
+  });
+
+  test("they resolve, show in hovers and completions, and never form a cycle", () => {
+    const parsed = parseEnv("HOST=${{worker.DOMAIN}}\nDOMAIN=${{worker.DOMAIN}}\n");
+    expect(resolveEnv(parsed, own).values).toEqual({ HOST: "worker.example.com", DOMAIN: "worker.example.com" });
+    expect(analyzeEnv(parsed.text, own).diagnostics).toEqual([]);
+    const hover = describeReference(parsed.entries[0]?.references[0] as never, own);
+    expect(hover.variable?.value).toBe("worker.example.com");
+    expect(hover.reachable).toBe(true);
+    const labels = referenceCompletions(own).map((c) => c.label);
+    expect(labels).toContain("worker.DOMAIN");
+    expect(labels).toContain("worker.URL");
+  });
+});

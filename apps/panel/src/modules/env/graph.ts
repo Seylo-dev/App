@@ -150,12 +150,18 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
       result = entry.value;
     } else {
       const self = service.row.name.toLowerCase();
-      const out = substituteReferences(entry.value, (target, variable) => (target.toLowerCase() === self ? null : value(target, variable)));
+      const out = substituteReferences(entry.value, (target, variable) =>
+        target.toLowerCase() === self ? ownBuiltin(service, variable) : value(target, variable),
+      );
       result = out.unresolved.length > 0 ? null : out.value;
     }
     memo.set(id, result);
     return result;
   };
+
+  /** A service's own built-in value (its DOMAIN, URL, ...), the only part of itself its env may reference. */
+  const ownBuiltin = (service: GraphService, variable: string): string | null =>
+    service.builtins.find((b) => b.name === variable)?.value ?? null;
 
   const value = (target: string, variable: string): string | null => {
     if (target === sharedTarget) return sharedMap.get(variable) ?? null;
@@ -216,8 +222,8 @@ export function buildEnvGraph(deps: Pick<Deps, "db" | "secrets">, projectId: str
           continue;
         }
         const out = substituteReferences(entry.value, (target, variable) => {
-          if (target.toLowerCase() === self) return null;
-          // A loop back into this file resolves to nothing rather than recursing forever.
+          // Its own DOMAIN, URL, ... resolve; its own variables do not (a loop back into this file).
+          if (target.toLowerCase() === self) return ownBuiltin(service, variable);
           return value(target, variable);
         });
         values.set(entry.key, out.value);
@@ -286,7 +292,13 @@ export function contextFor(graph: EnvGraph, serviceId: string, options: ContextO
     });
   }
   return {
-    self: { serviceId, name: self?.row.name ?? "", nodes: self?.nodes ?? [] },
+    self: {
+      serviceId,
+      name: self?.row.name ?? "",
+      nodes: self?.nodes ?? [],
+      // Its own DOMAIN, URL, ... it may reference as ${{<name>.DOMAIN}}.
+      builtins: self ? self.builtins.map((b) => ({ ...b, value: canSee(self, b.name) ? b.value : null })) : [],
+    },
     targets,
   };
 }

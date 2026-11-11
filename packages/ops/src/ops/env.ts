@@ -94,7 +94,13 @@ export const ReferenceTarget = Type.Object({
 
 /** Same shape as AnalyzeContext in @seylo/env-analyzer. */
 export const AnalyzeContext = Type.Object({
-  self: Type.Object({ serviceId: Type.Union([Id, Type.Null()]), name: Type.String(), nodes: Type.Array(NodeRef) }),
+  self: Type.Object({
+    serviceId: Type.Union([Id, Type.Null()]),
+    name: Type.String(),
+    nodes: Type.Array(NodeRef),
+    /** The service's own built-in values (DOMAIN, URL, INTERNAL_HOST, ...), which its env may reference by its own name. */
+    builtins: Type.Optional(Type.Array(ReferenceVariable)),
+  }),
   targets: Type.Array(ReferenceTarget),
 });
 

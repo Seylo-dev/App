@@ -44,6 +44,8 @@ export function problemMessage(d: Pick<Diagnostic, "code" | "params" | "message"
 }
 
 export function problemDetail(d: Pick<Diagnostic, "code" | "params" | "detail">, selfName: string): string {
+  // What the service can reference of itself instead (its DOMAIN, URL, ...), when the panel sent them.
+  if (d.code === "self-reference") return d.params.builtins ? t("serviceEnv.problem.selfReferenceDetail", d.params) : "";
   const key = detailKeys[d.code];
   return key ? t(key, { ...d.params, self: selfName }) : "";
 }

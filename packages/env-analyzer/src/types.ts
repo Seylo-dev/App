@@ -165,8 +165,13 @@ export interface ReferenceTarget {
 
 /** Everything the analyzer needs about the world around one service's env. */
 export interface AnalyzeContext {
-  /** The service whose env is being edited. */
-  self: { serviceId: string | null; name: string; nodes: NodeRef[] };
+  /**
+   * The service whose env is being edited. builtins: its own built-in
+   * values (DOMAIN, URL, INTERNAL_HOST, ...), which its env may reference
+   * as \${{<its name>.DOMAIN}}: they depend on none of its variables. Its
+   * own variables are not referenceable (they are the lines of the file).
+   */
+  self: { serviceId: string | null; name: string; nodes: NodeRef[]; builtins?: ReferenceVariable[] };
   /** Other services of the same project and the project's shared variables. */
   targets: ReferenceTarget[];
 }

@@ -68,13 +68,18 @@ function checkReference(
 ): Diagnostic[] {
   const params = { target: reference.target, variable: reference.variable, key: entry.key };
   if (reference.target.toLowerCase() === context.self.name.toLowerCase() && reference.target !== sharedTarget) {
+    // Its own built-in values (DOMAIN, URL, ...) depend on none of its variables: fine.
+    if (context.self.builtins?.some((v) => v.name === reference.variable)) return [];
+    const builtins = (context.self.builtins ?? []).map((v) => v.name);
     return [
       diag(
         "self-reference",
         "error",
         `${reference.target} is this service`,
-        "A service cannot reference its own variables; write the value instead.",
-        params,
+        builtins.length
+          ? `A service can reference its own ${builtins.join(", ")}, not its own variables: write ${reference.variable}'s value instead.`
+          : "A service cannot reference its own variables; write the value instead.",
+        { ...params, builtins: builtins.join(", ") },
         reference.targetRange,
       ),
     ];
@@ -244,7 +249,11 @@ function findCycle(
   const finished = new Set<string>();
 
   const depsOf = (target: string, variable: string): { target: string; variable: string }[] => {
-    if (target.toLowerCase() === selfName) return selfDeps.get(variable) ?? [];
+    if (target.toLowerCase() === selfName) {
+      // Its own built-ins depend on nothing in the file.
+      if (context.self.builtins?.some((v) => v.name === variable)) return [];
+      return selfDeps.get(variable) ?? [];
+    }
     const found = targets.get(target.toLowerCase())?.variables.find((v) => v.name === variable);
     return found?.dependsOn ?? [];
   };
