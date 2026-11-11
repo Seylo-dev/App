@@ -335,6 +335,30 @@ describe("databases.versionChoices and setVersion", () => {
     agent.disconnect();
   });
 
+  test("two changes at once: the second refuses once the first queued its deploy", async () => {
+    const { serviceId, node } = await createDb("mongo", "7.0");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const agent = fakeAgent(panel, node.id, {
+      exec: async () => {
+        await gate;
+        return { exitCode: 0 };
+      },
+    });
+    const before = deployCount(serviceId);
+    const first = callOp(panel, dbOps.setVersion, { serviceId, version: "8.0", confirmNoBackup: true }, { cookie });
+    const second = callOp(panel, dbOps.setVersion, { serviceId, version: "8.0", confirmNoBackup: true }, { cookie });
+    // Both wait in the MongoDB step.
+    await Bun.sleep(100);
+    release();
+    const statuses = (await Promise.all([first, second])).map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 409]);
+    expect(deployCount(serviceId)).toBe(before + 1);
+    agent.disconnect();
+  });
+
   test("downgrades, Postgres majors and skipped lines are refused; custom images are checked", async () => {
     const mongo = await createDb("mongo", "8.0");
     const down = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "7.0", confirmNoBackup: true }, { cookie });

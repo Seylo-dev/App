@@ -12,7 +12,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { backupRuns, type DatabaseEngine, deployments, serviceDatabases, services, volumes } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
-import { activeDeploy, queueDeploy } from "../deployments/queue";
+import { activeDeploy, assertNoActiveDeploy, queueDeploy } from "../deployments/queue";
 import { invalidateService } from "../domains/lookup";
 import { writeSpec } from "../services/insert";
 import { actorOf, publishService } from "../services/ops";
@@ -349,6 +349,8 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   }
   const node = info.node;
   if (lineChange && info.row.engine === "mongo" && node) await raiseFeatureCompatibility(ctx, info, node.id, state.from.version);
+  // Another change may have queued its deploy while the MongoDB step ran.
+  assertNoActiveDeploy(ctx, info.service.id);
 
   ctx.db.transaction((tx) => {
     tx.update(serviceDatabases).set({ version: to.version }).where(eq(serviceDatabases.serviceId, info.service.id)).run();
