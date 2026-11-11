@@ -4,16 +4,30 @@
 // internal and exposed connection URLs, password resets, the web UI and
 // shell links, and TLS exposure. desired.ts gives the compiler the runtime
 // half of their ServiceSpec; retire.ts holds back the retirement of an old
-// exposed user while running services still have its URL.
+// exposed user while running services still have its URL, and sends it
+// once none has (also from a job every minute).
 
+import { defineJob } from "../../jobs/queue";
 import { defineModule } from "../module";
 import { connection, create, get, listEngines, openShell, openWebUi, resetPassword, setExposure } from "./ops";
-import { watchRetirements } from "./retire";
+import { releaseHeldRetirements, watchRetirements } from "./retire";
+
+const retirementsType = "databases.retirements";
+
+const retirements = defineJob({
+  type: retirementsType,
+  maxAttempts: 1,
+  async run(_payload, ctx) {
+    releaseHeldRetirements(ctx);
+  },
+});
 
 export default defineModule({
   name: "databases",
   ops: [listEngines, create, get, connection, resetPassword, openWebUi, openShell, setExposure],
+  jobs: [retirements],
   start(deps) {
     watchRetirements(deps);
+    deps.schedules.ensure({ key: retirementsType, jobType: retirementsType, intervalSeconds: 60, missedRun: "skip" });
   },
 });

@@ -9,6 +9,7 @@ import { and, eq, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
 import { deployments, grants, previews, serviceCopies, servicePlacements, services, sourceUploads } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { implement } from "../../ops/implement";
+import { releaseHeldRetirements } from "../databases/retire";
 import { registryGcJobType } from "../deployments/registry-gc";
 import { registryRelay } from "../deployments/source";
 import { dropRepoHooks } from "../github/repo-hooks";
@@ -113,6 +114,8 @@ export async function deleteServiceTree(deps: Deps, root: ServiceRow): Promise<v
     for (const row of [...rows].reverse()) tx.delete(services).where(eq(services.id, row.id)).run();
   });
   for (const nodeId of nodeIds) deps.agents.desired.markDirty({ nodeId });
+  // A deleted service no longer holds back an old exposed database user's retirement.
+  releaseHeldRetirements(deps);
   for (const id of restarted) {
     deps.agents.desired.markDirty({ serviceId: id });
     const source = deps.db.select().from(services).where(eq(services.id, id)).get();

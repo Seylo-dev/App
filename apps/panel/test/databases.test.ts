@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { databases as dbOps, env as envOps, exposures as exposureOps } from "@seylo/ops";
+import { databases as dbOps, env as envOps, exposures as exposureOps, services as serviceOps } from "@seylo/ops";
 import { DatabaseEngine } from "@seylo/proto";
 import { eq } from "drizzle-orm";
 import { deployments, nodes, portExposures, serviceDatabases, serviceSecrets, services } from "../src/db/schema";
@@ -20,6 +20,7 @@ import {
   httpUrl,
 } from "../src/modules/databases/engines";
 import { retiredExposedPasswordSecret, writeSecret } from "../src/modules/databases/info";
+import { releaseHeldRetirements } from "../src/modules/databases/retire";
 import { publishDeploymentChange } from "../src/modules/deployments/store";
 import { deploymentEnv, resolveServiceEnv, sealDeploymentEnv } from "../src/modules/env/desired";
 import { ensureEdgeTicketKey } from "../src/security/edge-ticket-key";
@@ -796,7 +797,7 @@ describe("more engines", () => {
     expect(deploymentEnv(panel.deps, fresh.envSealed)?.[0]?.value).not.toContain("external");
     point({ targetDeploymentId: fresh.id });
     expect(retired()).toBe("");
-    // Live: the retirement goes out, and the project's databases with an old user get their spec again.
+    // Live: the retirement goes out, and the database it held back gets its spec again.
     const dirty = spyOn(panel.deps.agents.desired, "markDirty");
     point({ liveDeploymentId: fresh.id });
     publishDeploymentChange(panel.deps, worker.id, fresh.id);
@@ -867,5 +868,99 @@ describe("more engines", () => {
     expect(updated.exposure).toMatchObject({ enabled: true, state: "open", port: 45432 });
     expect(updated.exposed?.url).toBe(open.exposed.url);
     expect(updated.runtime).toMatchObject({ enabled: true, hostPort: 45432 });
+  });
+});
+
+describe("held retirements of an old exposed user", () => {
+  const oldUrl = "postgresql://external:OldExposed%2FPass123@203.0.113.10:45432/shop_db?sslmode=require";
+
+  /** A Postgres from before 0.2.9 (its separate exposed user and that user's password), its deploy settled. */
+  async function oldDatabase() {
+    const created = await createDb("postgres");
+    const serviceId = created.res.body.serviceId as string;
+    panel.deps.db.update(serviceDatabases).set({ exposedUser: "external" }).where(eq(serviceDatabases.serviceId, serviceId)).run();
+    writeSecret(panel.deps.db, panel.deps.secrets, serviceId, retiredExposedPasswordSecret, "OldExposed/Pass123");
+    await settleDeploys(panel);
+    // What the node's spec names for retirement: "" while held back.
+    const compiled = () => databaseRuntime(panel.deps, serviceId, created.node.id, compileMemo())?.database.retiredExposedUser;
+    return { ...created, serviceId, compiled };
+  }
+
+  /** A deployment of serviceId, live and target, whose env carries value. */
+  function runWith(serviceId: string, value: string, generation = 1) {
+    const envSealed = panel.deps.secrets.seal(JSON.stringify([{ name: "DATABASE_URL", value, secret: true }]), "deployment.env");
+    const row = panel.deps.db
+      .insert(deployments)
+      .values({ serviceId, generation, trigger: "manual", status: "live", imageRef: "nginx:1.27", envSealed })
+      .returning()
+      .get();
+    panel.deps.db.update(services).set({ liveDeploymentId: row.id, targetDeploymentId: row.id }).where(eq(services.id, serviceId)).run();
+    return row;
+  }
+
+  /** How often serviceId was marked dirty since the spy started. */
+  const marks = (spy: { mock: { calls: unknown[][] } }, serviceId: string) =>
+    spy.mock.calls.filter(([target]) => (target as { serviceId?: string }).serviceId === serviceId).length;
+
+  test("a service of another project that stops or is deleted releases it at once", async () => {
+    const { serviceId, node, compiled } = await oldDatabase();
+    // The old URL copied into a service of another project (references stay within one project).
+    const other = seedProject(panel);
+    const worker = seedService(panel, { projectId: other.id, name: "worker", nodeIds: [node.id] });
+    runWith(worker.id, oldUrl);
+    expect(compiled()).toBe("");
+    const dirty = spyOn(panel.deps.agents.desired, "markDirty");
+    // Stopped, it runs nothing with the old URL.
+    expect((await callOp(panel, serviceOps.stop, { serviceId: worker.id }, { cookie })).status).toBe(200);
+    expect(marks(dirty, serviceId)).toBe(1);
+    expect(compiled()).toBe("external");
+    // Started again it runs the old URL and holds it; deleted, it is gone.
+    expect((await callOp(panel, serviceOps.start, { serviceId: worker.id }, { cookie })).status).toBe(200);
+    expect(compiled()).toBe("");
+    dirty.mockClear();
+    expect((await callOp(panel, serviceOps.remove, { serviceId: worker.id, confirmName: "worker" }, { cookie })).status).toBe(200);
+    expect(marks(dirty, serviceId)).toBe(1);
+    dirty.mockRestore();
+    expect(compiled()).toBe("external");
+  });
+
+  test("a deployment going live in another project sends the retirement it released", async () => {
+    const { serviceId, node, compiled } = await oldDatabase();
+    const other = seedProject(panel);
+    const worker = seedService(panel, { projectId: other.id, name: "worker", nodeIds: [node.id] });
+    runWith(worker.id, oldUrl);
+    expect(compiled()).toBe("");
+    const dirty = spyOn(panel.deps.agents.desired, "markDirty");
+    // Redeployed with a URL of its own: the old one runs nowhere any more.
+    const fresh = runWith(worker.id, "postgresql://app:Fresh123@203.0.113.10:45432/shop_db?sslmode=require", 2);
+    publishDeploymentChange(panel.deps, worker.id, fresh.id);
+    expect(marks(dirty, serviceId)).toBe(1);
+    dirty.mockRestore();
+    expect(compiled()).toBe("external");
+  });
+
+  test("the sweep marks nothing while nothing changed, and a release once", async () => {
+    const { serviceId, node, project, compiled } = await oldDatabase();
+    const worker = seedService(panel, { projectId: project.id, name: "worker", nodeIds: [node.id] });
+    runWith(worker.id, oldUrl);
+    const dirty = spyOn(panel.deps.agents.desired, "markDirty");
+    // Nothing compiled held anything back yet.
+    expect(releaseHeldRetirements(panel.deps)).toEqual([]);
+    expect(compiled()).toBe("");
+    // Still held: sweep after sweep leaves it alone.
+    expect(releaseHeldRetirements(panel.deps)).toEqual([]);
+    expect(releaseHeldRetirements(panel.deps)).toEqual([]);
+    expect(marks(dirty, serviceId)).toBe(0);
+    // Released by something no hook sees (the worker's deployments are gone): the next sweep sends it, once.
+    panel.deps.db.update(services).set({ liveDeploymentId: null, targetDeploymentId: null }).where(eq(services.id, worker.id)).run();
+    expect(releaseHeldRetirements(panel.deps)).toEqual([serviceId]);
+    expect(releaseHeldRetirements(panel.deps)).toEqual([]);
+    expect(compiled()).toBe("external");
+    expect(releaseHeldRetirements(panel.deps)).toEqual([]);
+    expect(marks(dirty, serviceId)).toBe(1);
+    dirty.mockRestore();
+    // The databases module runs it every minute.
+    const databasesModule = (await import("../src/modules/databases")).default;
+    expect(databasesModule.jobs?.map((j) => j.type)).toContain("databases.retirements");
   });
 });
