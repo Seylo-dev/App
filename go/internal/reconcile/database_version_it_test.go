@@ -375,11 +375,24 @@ create procedure p() select concat(v, '!') from t;`); code != 0 {
 // 8.0 before a change to 8.4 (mysqlNativeUsersExec in
 // apps/panel/src/modules/databases/version.ts): the accounts whose plugin
 // is mysql_native_password, MySQL's own left out, one user@host a line.
-// The password is stdin's first line, read into MYSQL_PWD; the query follows.
+// Root signs in with the container's MYSQL_ROOT_PASSWORD; only when that
+// sign-in is refused does the admin, with the password from stdin's first
+// line. The query follows on stdin.
 func mysqlNativeUsers(user, password string) ([]string, string) {
 	query := "SELECT CONCAT(user, '@', host) FROM mysql.user WHERE plugin = 'mysql_native_password' AND user NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema') ORDER BY user, host;"
-	return []string{"sh", "-c", `IFS= read -r MYSQL_PWD || exit 2; export MYSQL_PWD; exec mysql -h127.0.0.1 -u"$1" -N -B`, "sh", user},
-		password + "\n" + query + "\n"
+	script := strings.Join([]string{
+		"IFS= read -r pw || exit 2",
+		`q=$(cat); [ -n "$q" ] || exit 2`,
+		`if [ -n "$MYSQL_ROOT_PASSWORD" ]; then`,
+		`  { err=$(MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1`,
+		"  code=$?",
+		`  [ "$code" -eq 0 ] && exit 0`,
+		`  [ -z "$err" ] || printf '%s\n' "$err" >&2`,
+		`  case "$err" in *"ERROR 1045"*) ;; *) exit "$code" ;; esac`,
+		"fi",
+		`MYSQL_PWD="$pw" exec mysql -h127.0.0.1 -u"$1" -N -B -e "$q"`,
+	}, "\n")
+	return []string{"sh", "-c", script, "sh", user}, password + "\n" + query + "\n"
 }
 
 // mysqlNativeCommand is MySQL 8.4's command with databases.setVersion
@@ -387,14 +400,18 @@ func mysqlNativeUsers(user, password string) ([]string, string) {
 var mysqlNativeCommand = []string{"mysqld", "--mysql-native-password=ON"}
 
 // TestITMySQLNativePasswordUpgrade: MySQL 8.4 ships mysql_native_password
-// off. An account made with it on 8.0 is found by the panel's check (a
-// wrong admin password fails it with a non-zero exit, and so does an admin
-// other than root, which cannot read MySQL's accounts), cannot sign in over
-// TCP after a plain upgrade to 8.4 while the data and the other logins are
-// fine, and signs in again once 8.4 runs with --mysql-native-password=ON
-// (a redeploy with the option, as keepNativePassword on a patch update).
-// A second database goes from 8.0 straight to 8.4 with the option, as
-// keepNativePassword on the upgrade does: its account never stops working.
+// off. An account made with it on 8.0 is found by the panel's check, with
+// root as the admin and with an admin other than root (MYSQL_USER, rights
+// on its own database only): root signs in with the container's
+// MYSQL_ROOT_PASSWORD. When that password is wrong, root as the admin still
+// lists them over TCP with its own, the other admin cannot (a non-zero
+// exit, so the panel refuses), and nor can a wrong admin password. The
+// account cannot sign in over TCP after a plain upgrade to 8.4 while the
+// data and the other logins are fine, and signs in again once 8.4 runs
+// with --mysql-native-password=ON (a redeploy with the option, as
+// keepNativePassword on a patch update). A second database goes from 8.0
+// straight to 8.4 with the option, as keepNativePassword on the upgrade
+// does: its account never stops working.
 func TestITMySQLNativePasswordUpgrade(t *testing.T) {
 	e := newIT(t)
 	e.pull(mysql80, mysql84)
@@ -411,19 +428,27 @@ create user 'legacy'@'%' identified with mysql_native_password by '`+legacy+`';
 grant select on app.* to 'legacy'@'%';`, "MYSQL_PWD="+root); code != 0 {
 			t.Fatalf("write on 8.0: %q (%d)", out, code)
 		}
+		const wrongRoot = "MYSQL_ROOT_PASSWORD=WrongPassword999"
+		for _, admin := range []struct{ user, password string }{{"root", root}, {"app", app}} {
+			argv, stdin := mysqlNativeUsers(admin.user, admin.password)
+			if out, code := execStdin(t, e, c, argv, stdin); code != 0 || out != "legacy@%" {
+				t.Fatalf("the panel's check on 8.0 with admin %s: %q (%d), want legacy@%%", admin.user, out, code)
+			}
+		}
+		// Root's sign-in refused: root as the admin lists them over TCP with its own password...
 		argv, stdin := mysqlNativeUsers("root", root)
-		if out, code := execStdin(t, e, c, argv, stdin); code != 0 || out != "legacy@%" {
-			t.Fatalf("the panel's check on 8.0: %q (%d), want legacy@%%", out, code)
+		if out, code := execStdin(t, e, c, argv, stdin, wrongRoot); code != 0 || !strings.HasSuffix(out, "legacy@%") {
+			t.Fatalf("the check as root with a wrong MYSQL_ROOT_PASSWORD: %q (%d), want legacy@%%", out, code)
 		}
-		// A failed check must refuse the change.
-		argv, stdin = mysqlNativeUsers("root", "WrongPassword999")
-		if out, code := execStdin(t, e, c, argv, stdin); code == 0 {
-			t.Fatalf("the check with a wrong password exited 0: %q", out)
-		}
-		// An admin other than root (MYSQL_USER) has its database only: it cannot read the accounts.
+		// ...an admin other than root has its database only and cannot read the accounts...
 		argv, stdin = mysqlNativeUsers("app", app)
-		if out, code := execStdin(t, e, c, argv, stdin); code == 0 || !strings.Contains(out, "denied") {
-			t.Fatalf("the check as the app user: %q (%d), want a refusal", out, code)
+		if out, code := execStdin(t, e, c, argv, stdin, wrongRoot); code == 0 || !strings.Contains(out, "ERROR 1142") || strings.Contains(out, "legacy") {
+			t.Fatalf("the check as the app user with a wrong MYSQL_ROOT_PASSWORD: %q (%d), want a refusal", out, code)
+		}
+		// ...and a wrong admin password fails it too: a failed check must refuse the change.
+		argv, stdin = mysqlNativeUsers("root", "WrongPassword999")
+		if out, code := execStdin(t, e, c, argv, stdin, wrongRoot); code == 0 {
+			t.Fatalf("the check with wrong passwords exited 0: %q", out)
 		}
 		return d, c
 	}

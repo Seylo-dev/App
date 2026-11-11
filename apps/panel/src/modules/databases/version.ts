@@ -235,19 +235,39 @@ export function mongoFcvExec(user: string, password: string, version: string): {
 const mysqlSystemAccounts = ["mysql.sys", "mysql.session", "mysql.infoschema"];
 
 /**
+ * The script of mysqlNativeUsersExec. Root signs in on the socket with the
+ * container's MYSQL_ROOT_PASSWORD, like changePasswordExec, as MYSQL_PWD
+ * (an environment variable, never an argument): an admin other than root
+ * (MYSQL_USER) has rights on its own database only and cannot read
+ * mysql.user. Only when root's sign-in is refused (ERROR 1045, or no
+ * MYSQL_ROOT_PASSWORD) does the admin ($1) sign in over TCP with the
+ * password from stdin's first line (the shell's read, a builtin); any other
+ * failure of root's (the server down) is the result. The query is the rest
+ * of stdin.
+ */
+const mysqlNativeUsersScript = [
+  "IFS= read -r pw || exit 2",
+  'q=$(cat); [ -n "$q" ] || exit 2',
+  'if [ -n "$MYSQL_ROOT_PASSWORD" ]; then',
+  '  { err=$(MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -N -B -e "$q" 2>&1 >&3); } 3>&1',
+  "  code=$?",
+  '  [ "$code" -eq 0 ] && exit 0',
+  '  [ -z "$err" ] || printf \'%s\\n\' "$err" >&2',
+  '  case "$err" in *"ERROR 1045"*) ;; *) exit "$code" ;; esac',
+  "fi",
+  'MYSQL_PWD="$pw" exec mysql -h127.0.0.1 -u"$1" -N -B -e "$q"',
+].join("\n");
+
+/**
  * Exec call that lists the accounts of a running MySQL whose plugin is
  * mysql_native_password, one user@host a line, MySQL's own system accounts
  * left out: MySQL 8.4 ships that plugin off, so they could not sign in
- * there. The admin signs in over TCP; the shell's read (a builtin) takes
- * the password from stdin's first line into MYSQL_PWD, so it never is an
- * argument, and mysql reads the query from the rest of stdin.
+ * there. Root reads the list (mysqlNativeUsersScript), the admin only when
+ * root cannot sign in; the admin's password and the query go on stdin.
  */
 export function mysqlNativeUsersExec(user: string, password: string): { command: string[]; stdin: string } {
   const query = `SELECT CONCAT(user, '@', host) FROM mysql.user WHERE plugin = 'mysql_native_password' AND user NOT IN (${mysqlSystemAccounts.map((a) => `'${a}'`).join(", ")}) ORDER BY user, host;`;
-  return {
-    command: ["sh", "-c", 'IFS= read -r MYSQL_PWD || exit 2; export MYSQL_PWD; exec mysql -h127.0.0.1 -u"$1" -N -B', "sh", user],
-    stdin: `${password}\n${query}\n`,
-  };
+  return { command: ["sh", "-c", mysqlNativeUsersScript, "sh", user], stdin: `${password}\n${query}\n` };
 }
 
 /** At most this many accounts are named in a nativePasswordUsers refusal. */

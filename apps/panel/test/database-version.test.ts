@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { databases as dbOps, deployments as deploymentOps, services as serviceOps } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { backupRuns, type DatabaseEngine, deployments, nodes, serviceDatabases, services } from "../src/db/schema";
@@ -219,12 +222,101 @@ describe("version rules", () => {
     expect(exec.command.join(" ")).not.toContain("S3cretPassword1");
     // The admin user is an argument of the script, not part of it.
     expect(exec.command).toEqual(["sh", "-c", expect.stringContaining('-u"$1"'), "sh", "root"]);
-    expect(exec.command[2]).toContain("read -r MYSQL_PWD");
+    expect(exec.command[2]).toContain('MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot');
     const [password, query, ...rest] = exec.stdin.split("\n");
     expect(password).toBe("S3cretPassword1");
     expect(query).toContain("plugin = 'mysql_native_password'");
     expect(query).toContain("NOT IN ('mysql.sys', 'mysql.session', 'mysql.infoschema')");
     expect(rest).toEqual([""]);
+  });
+
+  describe("MySQL's mysql_native_password check run by sh against a fake mysql", () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "mysql-native-"));
+      // Answers like MySQL: root on the socket with rootPassword reads mysql.user; any other user
+      // signs in with adminPassword but has its own database only (ERROR 1142). Every call's
+      // MYSQL_PWD and arguments go to calls.log.
+      writeFileSync(
+        join(dir, "mysql"),
+        [
+          "#!/bin/sh",
+          `printf '%s\\t%s\\n' "$MYSQL_PWD" "$*" >> "${dir}/calls.log"`,
+          "user=; query=",
+          'while [ $# -gt 0 ]; do case "$1" in -u*) user=${1#-u} ;; -e) shift; query=$1 ;; esac; shift; done',
+          '[ -n "$query" ] || query=$(cat)',
+          `[ "$FAKE_DOWN" = 1 ] && { echo "ERROR 2002 (HY000): Can't connect to local MySQL server through socket" >&2; exit 1; }`,
+          'if [ "$user" = root ]; then want=$FAKE_ROOT_PASSWORD; else want=$FAKE_ADMIN_PASSWORD; fi',
+          `[ "$MYSQL_PWD" = "$want" ] || { echo "ERROR 1045 (28000): Access denied for user '$user'@'localhost' (using password: YES)" >&2; exit 1; }`,
+          `[ "$user" = root ] || { echo "ERROR 1142 (42000): SELECT command denied to user '$user'@'localhost' for table 'user'" >&2; exit 1; }`,
+          `case "$query" in *mysql_native_password*) echo 'legacy@%' ;; esac`,
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    const rootPassword = "RootPassword111";
+    const adminPassword = "AdminPassword222";
+    /** Runs the check as the panel sends it, in a container whose MYSQL_ROOT_PASSWORD is rootEnv. */
+    const check = (user: string, password: string, rootEnv: string | null, down = false) => {
+      const exec = mysqlNativeUsersExec(user, password);
+      const result = Bun.spawnSync(exec.command, {
+        stdin: new TextEncoder().encode(exec.stdin),
+        env: {
+          PATH: `${dir}:/usr/bin:/bin`,
+          FAKE_ROOT_PASSWORD: rootPassword,
+          FAKE_ADMIN_PASSWORD: adminPassword,
+          FAKE_DOWN: down ? "1" : "",
+          ...(rootEnv === null ? {} : { MYSQL_ROOT_PASSWORD: rootEnv }),
+        },
+      });
+      const log = existsSync(join(dir, "calls.log")) ? readFileSync(join(dir, "calls.log"), "utf8") : "";
+      rmSync(join(dir, "calls.log"), { force: true });
+      const calls = log
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [pwd, args] = line.split("\t");
+          return { pwd, args };
+        });
+      // No password is ever an argument of mysql.
+      for (const call of calls) expect(call.args).not.toMatch(/RootPassword|AdminPassword|WrongPassword/);
+      return { code: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString(), calls };
+    };
+
+    test("an admin other than root: root reads the accounts with the container's root password", () => {
+      const r = check("shop", adminPassword, rootPassword);
+      expect(r).toMatchObject({ code: 0, stdout: "legacy@%\n" });
+      expect(r.calls).toEqual([{ pwd: rootPassword, args: expect.stringMatching(/^-uroot -N -B -e SELECT /) }]);
+    });
+
+    test("root's sign-in refused: the admin signs in over TCP with the password from stdin", () => {
+      // Root as the admin: its stored password still works over TCP.
+      const asRoot = check("root", rootPassword, "WrongPassword333");
+      expect(asRoot).toMatchObject({ code: 0, stdout: "legacy@%\n" });
+      expect(asRoot.calls.map((c) => c.pwd)).toEqual(["WrongPassword333", rootPassword]);
+      expect(asRoot.calls[1]?.args).toMatch(/^-h127\.0\.0\.1 -uroot -N -B -e SELECT /);
+      // No MYSQL_ROOT_PASSWORD at all: the admin right away.
+      const noRoot = check("root", rootPassword, null);
+      expect(noRoot).toMatchObject({ code: 0, stdout: "legacy@%\n" });
+      expect(noRoot.calls).toHaveLength(1);
+      // An admin other than root cannot read the accounts: the check fails with MySQL's last word.
+      const shop = check("shop", adminPassword, "WrongPassword333");
+      expect(shop.code).not.toBe(0);
+      expect(shop.stdout).toBe("");
+      expect(shop.stderr.trim().split("\n").at(-1)).toContain("ERROR 1142 (42000): SELECT command denied to user 'shop'");
+      expect(shop.calls.map((c) => c.pwd)).toEqual(["WrongPassword333", adminPassword]);
+    });
+
+    test("any other failure of root's is the result: no second try as the admin", () => {
+      const r = check("root", rootPassword, rootPassword, true);
+      expect(r.code).not.toBe(0);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toContain("ERROR 2002 (HY000)");
+      expect(r.calls).toHaveLength(1);
+    });
   });
 
   test("mysql_native_password: new databases and other engines never get the option; 8.4 takes it on and off", () => {
@@ -490,7 +582,8 @@ describe("databases.versionChoices and setVersion", () => {
     expect(specImage(serviceId)).toBe("mysql:8.4.6");
     expect(specCommand(serviceId)).toEqual([]);
     expect(deployCount(serviceId)).toBe(before + 1);
-    // One exec in the running 8.0, signed in as the admin with the password on stdin only.
+    // One exec in the running 8.0: root signs in from the container's environment, the admin (when root
+    // cannot) with the password on stdin only.
     expect(sent).toHaveLength(1);
     const req = sent[0] as ExecRequest;
     expect(req.command.at(-1)).toBe(conn.body.internal.user);
