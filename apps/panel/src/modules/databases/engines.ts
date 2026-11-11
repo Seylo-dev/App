@@ -177,7 +177,8 @@ export const engines: Record<DatabaseEngine, Engine> = {
         version: "10.11",
         image: "mariadb:10.11.13",
         dataPath: "/var/lib/mysql",
-        noExposure: "MariaDB 10.11 has no TLS, so it cannot be exposed: the exposed port only takes TLS connections. MariaDB 11.4 and later can.",
+        noExposure:
+          "MariaDB 10.11 has no TLS, so it cannot be exposed: the exposed port only takes TLS connections. MariaDB 11.4 and later can.",
       },
     ],
     variants: [],

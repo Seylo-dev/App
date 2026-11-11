@@ -784,7 +784,10 @@ describe("more engines", () => {
     const retired = () => databaseRuntime(panel.deps, serviceId, node.id, compileMemo())?.database.retiredExposedUser;
     // The worker's deployment started before the update: the old user's URL is sealed in it (the password percent-encoded).
     const oldUrl = "postgresql://external:OldExposed%2FPass123@203.0.113.10:45432/shop_db?sslmode=require";
-    const old = deployment(panel.deps.secrets.seal(JSON.stringify([{ name: "DATABASE_URL", value: oldUrl, secret: true }]), "deployment.env"), 1);
+    const old = deployment(
+      panel.deps.secrets.seal(JSON.stringify([{ name: "DATABASE_URL", value: oldUrl, secret: true }]), "deployment.env"),
+      1,
+    );
     point({ liveDeploymentId: old.id, targetDeploymentId: old.id });
     expect(retired()).toBe("");
     expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.retiredExposedUser).toBe("");

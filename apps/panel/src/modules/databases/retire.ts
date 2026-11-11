@@ -22,7 +22,7 @@ function runningEnvValues(deps: Pick<Deps, "db" | "secrets">): string[] {
     .from(deployments)
     .innerJoin(services, or(eq(services.liveDeploymentId, deployments.id), eq(services.targetDeploymentId, deployments.id)))
     .all();
-  return rows.flatMap((r) => (deploymentEnv(deps, r.envSealed) ?? []).map((v) => v.value));
+  return rows.flatMap((r) => (deploymentEnv(deps, r.envSealed) ?? []).map((v) => v.value ?? ""));
 }
 
 /**
