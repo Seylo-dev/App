@@ -15,7 +15,7 @@ import { hasActiveDeploy } from "../deployments/queue";
 import { receivesShared } from "../env/desired";
 import { buildEnvGraph, type EnvGraph } from "../env/graph";
 import { inviteStatus } from "../invites/rows";
-import { activeCopy } from "./copies";
+import { activeCopy, activeExport, activeImport } from "./copies";
 import { nameKey, type ServiceRow } from "./rows";
 import { assertSourceAllowed } from "./source-guard";
 import { readSpec } from "./spec";
@@ -316,6 +316,8 @@ function blockersFor(ctx: OpContext, svc: ServiceRow, targetProjectId: string, t
     block("nameTaken", `${target?.name ?? "That project"} already has a service named ${svc.name}. Rename one of them first.`);
   if (hasActiveDeploy(ctx, svc.id)) block("deploying", "Wait for the running deploy to finish.");
   if (activeCopy(ctx.db, svc.id)) block("copying", "Wait for its data copy to finish.");
+  if (activeExport(ctx.db, svc.id)) block("exporting", "Wait for the export that downloads its data to end, or stop it.");
+  if (activeImport(ctx.db, svc.id)) block("importing", "Finish or discard its import first: its files still go up into this project.");
   if (targetProjectId !== svc.projectId) {
     const planted = plantedReferences(to, svc.name, svc.kind, svc.id);
     if (planted.length > 0)

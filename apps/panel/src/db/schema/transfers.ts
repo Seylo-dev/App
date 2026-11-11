@@ -36,6 +36,14 @@ export const serviceExports = sqliteTable(
     payloadSealed: sealed("payload_sealed"),
     /** source_uploads.id of the archive the file carries; null when none. */
     uploadId: text("upload_id"),
+    /** Volumes whose data goes in the file, read from node_id. */
+    volumes: json<string[]>("volumes").notNull().default([]),
+    /** The node the volumes are read from; no foreign key, so removing a node never waits for old rows. */
+    nodeId: text("node_id"),
+    /** Stop the service while its volumes are read (always for databases). */
+    stopService: integer("stop_service", { mode: "boolean" }).notNull().default(false),
+    /** The download stopped the service and has to start it again when it ends (also after a panel restart). */
+    sourceStopped: integer("source_stopped", { mode: "boolean" }).notNull().default(false),
     fileName: text("file_name").notNull(),
     bytesSent: integer("bytes_sent").notNull().default(0),
     /** sha256 of the whole .zip as it went out. */
@@ -55,11 +63,17 @@ export const serviceExports = sqliteTable(
 export type ServiceImportStatus = "previewing" | "receiving" | "done" | "failed";
 
 export interface ImportEntry extends TransferEntry {
+  /** upload: the uploaded archive (missing on rows from before volumes); volume: a volume's data. */
+  kind?: "upload" | "volume";
   status: "pending" | "done" | "failed";
   /** Bytes received so far (parts go up in order). */
   received: number;
-  /** The archive's name for the Source tab. */
+  /** The archive's name for the Source tab ("" for volumes). */
   fileName: string;
+  /** Volumes: its name, and the limits the agent unpacks it with. */
+  volume?: string;
+  maxBytes?: number;
+  maxEntries?: number;
   error: string | null;
 }
 

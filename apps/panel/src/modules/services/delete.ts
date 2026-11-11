@@ -15,9 +15,10 @@ import { registryRelay } from "../deployments/source";
 import { dropRepoHooks } from "../github/repo-hooks";
 import { dropHooks } from "../gitProviders/hooks";
 import { metricsFor } from "../metrics/ingest";
-import { copyRunning } from "./copies";
+import { assertNoTransfer, copyRunning } from "./copies";
 import { publishService } from "./ops";
 import { loadService, type ServiceRow } from "./rows";
+import { cancelPipesInto } from "./volume-pipe";
 
 /** The service, its compose members and its preview services. */
 function closure(deps: Pick<Deps, "db">, root: ServiceRow): ServiceRow[] {
@@ -75,6 +76,8 @@ export async function deleteServiceTree(deps: Deps, root: ServiceRow): Promise<v
   // Repository webhooks go from the providers too (in the background; the rows go with the services).
   dropHooks(deps, ids);
   dropRepoHooks(deps, ids);
+  // An import still sending data into them stops first (its node empties the volume).
+  cancelPipesInto(deps, ids, "the service was deleted");
   const restarted: string[] = [];
   deps.db.transaction((tx) => {
     tx.delete(grants)
@@ -137,6 +140,8 @@ export const remove = implement(serviceOps.remove, async (input, ctx) => {
     throw new OpError("BAD_REQUEST", "Type the service name exactly to confirm.", { field: "confirmName" });
   if (row.parentId)
     throw new OpError("CONFLICT", `${row.name} belongs to a compose stack. Remove it from the stack's compose file instead.`);
+  // The download would read a folder being deleted. A half import may go.
+  assertNoTransfer(ctx.db, row.id, { importing: false });
   await deleteServiceTree(ctx, row);
   return {};
 });

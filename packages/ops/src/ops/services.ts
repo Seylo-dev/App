@@ -322,6 +322,31 @@ export const DataCopy = Type.Object({
   finishedAt: Type.Union([Timestamp, Type.Null()]),
 });
 
+/**
+ * A service export whose download runs or just ended, or an import that
+ * still receives the file's data (modules/serviceTransfer). Shown under the
+ * service's header.
+ */
+export const ServiceTransfer = Type.Object({
+  kind: Type.Union([Type.Literal("export"), Type.Literal("import")]),
+  id: Id,
+  /** export: ready, streaming, done, failed, cancelled. import: receiving, done, failed. */
+  status: Type.String(),
+  /** export: bytes of the .zip sent; import: bytes received of the entries. */
+  bytes: Type.Integer({ minimum: 0 }),
+  /** import: every entry's size together; null for exports (the size is known at the end). */
+  totalBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  /** export: the download stopped the service and starts it again when it ends. */
+  stopped: Type.Boolean(),
+  /** export: the volumes in the file. */
+  volumes: Type.Array(Type.String()),
+  /** export, once done: the .zip's sha256, to compare with `shasum -a 256`. */
+  sha256: Type.Union([Type.String(), Type.Null()]),
+  error: Type.Union([Type.String(), Type.Null()]),
+  startedAt: Type.Union([Timestamp, Type.Null()]),
+  finishedAt: Type.Union([Timestamp, Type.Null()]),
+});
+
 /** Everything the service page shows. */
 export const ServiceDetail = Type.Object({
   ...ServiceSummary.properties,
@@ -363,6 +388,8 @@ export const ServiceDetail = Type.Object({
   watchPaths: WatchPaths,
   /** Clones: the newest copy of the source's data, while it runs and after. */
   dataCopy: Type.Optional(Type.Union([DataCopy, Type.Null()])),
+  /** An export download that runs or ended in the last 10 minutes, or an import that still receives data. */
+  transfer: Type.Optional(Type.Union([ServiceTransfer, Type.Null()])),
 });
 
 const serviceScope = (input: { serviceId: string }) => input.serviceId;
@@ -769,6 +796,9 @@ export const MoveBlock = Type.Union([
   Type.Literal("nameTaken"),
   Type.Literal("deploying"),
   Type.Literal("copying"),
+  /** An export downloads its data, or an import still sends it its files. */
+  Type.Literal("exporting"),
+  Type.Literal("importing"),
   /** Moving needs every service action on it: the new project may give you more than you hold now. */
   Type.Literal("access"),
   /** A service of the new project already references its name for more than an address. */

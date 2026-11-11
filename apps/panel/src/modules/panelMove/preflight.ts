@@ -52,6 +52,7 @@ import type { OpContext } from "../../ops/implement";
 import { getSetting } from "../../settings";
 import { privateIpv4Of, urlHost } from "../domains/lookup";
 import { panelServiceId } from "../nodes/panel-service";
+import { transfersInFlight } from "../services/copies";
 import { readIpAccessApplied, updateRunning } from "../settings/ip-access";
 import { readServeWanted } from "../tailscale/keys";
 import "./keys";
@@ -199,6 +200,8 @@ export function workInFlight(deps: Pick<Deps, "db">): string | null {
   say(copies, "service copy", "service copies");
   say(backups, "backup or restore", "backups or restores");
   say(work, "service move or restore job", "service move or restore jobs");
+  const transfers = transfersInFlight(db);
+  if (transfers) parts.push(transfers);
   if (parts.length === 0) return null;
   return parts.length === 1 ? (parts[0] as string) : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }

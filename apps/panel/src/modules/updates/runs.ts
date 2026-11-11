@@ -47,6 +47,7 @@ import { defineJob, type JobContext } from "../../jobs/queue";
 import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { enqueueNext } from "../nodes/recurring";
+import { transfersInFlight } from "../services/copies";
 import { fetchRelease, ReleaseError } from "./manifest";
 import { type RunRelease, releaseChannel, rememberRunningRelease, runRelease, storedCheck, storedRelease } from "./release-state";
 import { forgetRollback, noteUpdateResult, panelKey, panelNodeId, wasRolledBack } from "./rollbacks";
@@ -298,6 +299,9 @@ export function startRun(
 ): RunRow {
   const release = storedRelease(deps.db);
   if (activeRun(deps.db)) throw new OpError("CONFLICT", "Another update is running. Wait for it to finish.");
+  // Restarting the panel or an agent would break them halfway; the next check tries again.
+  const transfers = transfersInFlight(deps.db);
+  if (transfers) throw new OpError("CONFLICT", `Wait until ${transfers} ended: updating now would break it.`, { reason: "transfer" });
   const auto = options.trigger === "auto";
   const steps: Omit<typeof updateSteps.$inferInsert, "runId" | "position">[] = [];
   if (!options.onlyNodeId && isNewer(release.version, deps.config.version)) {

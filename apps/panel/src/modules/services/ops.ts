@@ -14,7 +14,7 @@ import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { dropRepoHooks } from "../github/repo-hooks";
 import { dropHook } from "../gitProviders/hooks";
 import { panelServiceId } from "../nodes/panel-service";
-import { assertNoActiveCopy, assertNoMoveCopy } from "./copies";
+import { assertNoActiveCopy, assertNoMoveCopy, assertNoTransfer } from "./copies";
 import { assertCreateRights } from "./create-rights";
 import { assertNameFree, assertNode, insertService, writeSpec } from "./insert";
 import { entryNodeOf, loadService, nameKey, projectServiceRows, type ServiceRow, toDetail, toSummaries, volumesOf } from "./rows";
@@ -277,6 +277,8 @@ const setVolumes = implement(serviceOps.setVolumes, (input, ctx) => {
   if (row.kind === "compose") throw new OpError("CONFLICT", "A stack's volumes come from its compose file.");
   // A move copies the volumes it read when the copy began, into a placement it already holds.
   assertNoMoveCopy(ctx.db, row.id);
+  // An export reads them by name, an import fills them by name.
+  assertNoTransfer(ctx.db, row.id);
   const names = input.volumes.map((v) => v.name);
   if (new Set(names).size !== names.length) throw new OpError("BAD_REQUEST", "Volume names must be unique.", { field: "volumes" });
   const paths = input.volumes.map((v) => v.mountPath);

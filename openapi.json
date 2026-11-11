@@ -16696,6 +16696,117 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "transfer": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "kind",
+                                "id",
+                                "status",
+                                "bytes",
+                                "totalBytes",
+                                "stopped",
+                                "volumes",
+                                "sha256",
+                                "error",
+                                "startedAt",
+                                "finishedAt"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "anyOf": [
+                                    {
+                                      "const": "export",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "import",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "totalBytes": {
+                                  "anyOf": [
+                                    {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "stopped": {
+                                  "type": "boolean"
+                                },
+                                "volumes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "sha256": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "error": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "startedAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "finishedAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       }
                     },
@@ -26507,6 +26618,117 @@
                             "bytesCopied": {
                               "minimum": 0,
                               "type": "integer"
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "error": {
                               "anyOf": [
@@ -37786,6 +38008,117 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -40688,6 +41021,117 @@
                             "bytesCopied": {
                               "minimum": 0,
                               "type": "integer"
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "error": {
                               "anyOf": [
@@ -60482,6 +60926,117 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "transfer": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "kind",
+                                "id",
+                                "status",
+                                "bytes",
+                                "totalBytes",
+                                "stopped",
+                                "volumes",
+                                "sha256",
+                                "error",
+                                "startedAt",
+                                "finishedAt"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "anyOf": [
+                                    {
+                                      "const": "export",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "import",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "totalBytes": {
+                                  "anyOf": [
+                                    {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "stopped": {
+                                  "type": "boolean"
+                                },
+                                "volumes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "sha256": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "error": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "startedAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "finishedAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       }
                     },
@@ -62730,6 +63285,117 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -64181,6 +64847,117 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -64831,6 +65608,14 @@
                                     "type": "string"
                                   },
                                   {
+                                    "const": "exporting",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "const": "importing",
+                                    "type": "string"
+                                  },
+                                  {
                                     "const": "access",
                                     "type": "string"
                                   },
@@ -65125,6 +65910,14 @@
                               },
                               {
                                 "const": "copying",
+                                "type": "string"
+                              },
+                              {
+                                "const": "exporting",
+                                "type": "string"
+                              },
+                              {
+                                "const": "importing",
                                 "type": "string"
                               },
                               {
@@ -67913,6 +68706,117 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -69754,6 +70658,117 @@
                             "bytesCopied": {
                               "minimum": 0,
                               "type": "integer"
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "startedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "finishedAt": {
+                              "anyOf": [
+                                {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "kind",
+                            "id",
+                            "status",
+                            "bytes",
+                            "totalBytes",
+                            "stopped",
+                            "volumes",
+                            "sha256",
+                            "error",
+                            "startedAt",
+                            "finishedAt"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "const": "export",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "import",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "bytes": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "totalBytes": {
+                              "anyOf": [
+                                {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stopped": {
+                              "type": "boolean"
+                            },
+                            "volumes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "error": {
                               "anyOf": [
@@ -72018,6 +73033,117 @@
                                 "bytesCopied": {
                                   "minimum": 0,
                                   "type": "integer"
+                                },
+                                "error": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "startedAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "finishedAt": {
+                                  "anyOf": [
+                                    {
+                                      "format": "date-time",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "transfer": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "kind",
+                                "id",
+                                "status",
+                                "bytes",
+                                "totalBytes",
+                                "stopped",
+                                "volumes",
+                                "sha256",
+                                "error",
+                                "startedAt",
+                                "finishedAt"
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "anyOf": [
+                                    {
+                                      "const": "export",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "import",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "pattern": "^[a-z0-9]{16}$",
+                                  "description": "Panel-issued id.",
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "totalBytes": {
+                                  "anyOf": [
+                                    {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "stopped": {
+                                  "type": "boolean"
+                                },
+                                "volumes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "sha256": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "error": {
                                   "anyOf": [

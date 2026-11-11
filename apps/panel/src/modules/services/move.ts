@@ -27,6 +27,7 @@ import { assertNoActiveCopy } from "./copies";
 import { assertNode, dataVolumes } from "./insert";
 import { actorOf, publishService } from "./ops";
 import { loadService, nodeNames } from "./rows";
+import { pipeIntoVolume, readVolume } from "./volume-pipe";
 
 export const moveJobType = "services.move";
 const stopWaitMs = 2 * 60_000;
@@ -120,27 +121,28 @@ export async function waitStopped(deps: Deps, serviceId: string, nodeId: string)
 }
 
 /**
- * Copies one volume: ExportVolume on `from` piped into ImportVolume on `to`.
- * `toServiceId` (a clone) receives it instead of the same service.
+ * Copies one volume: ExportVolume on `from` piped into ImportVolume on `to`
+ * (volume-pipe.ts). `toServiceId` (a clone) receives it instead of the same
+ * service. Returns the file bytes written on `to`, which are never fewer
+ * than `from` archived (a file that shrank while it was read is padded).
  */
 export async function relayVolume(
   deps: Deps,
   input: { serviceId: string; volume: string; from: string; to: string; toServiceId?: string },
 ): Promise<number> {
-  const exported = deps.agents.openRaw(input.from, "exportVolume", { serviceId: input.serviceId, volume: input.volume });
-  const imported = deps.agents.openRaw(input.to, "importVolume", {
-    serviceId: input.toServiceId ?? input.serviceId,
-    volume: input.volume,
-    replace: true,
-  });
+  const exported = readVolume(deps, { nodeId: input.from, serviceId: input.serviceId, volume: input.volume });
   try {
-    for await (const chunk of exported.body) await imported.writer.write(chunk);
-    imported.writer.end();
-    const [, done] = await Promise.all([exported.response, imported.response]);
-    return Number(done.sizeBytes);
+    const { written } = await pipeIntoVolume(deps, {
+      nodeId: input.to,
+      serviceId: input.toServiceId ?? input.serviceId,
+      volume: input.volume,
+      chunks: exported.body,
+    });
+    const archived = Number((await exported.response).sizeBytes);
+    if (written < archived) throw new Error(`${input.volume}: ${archived} bytes were read but only ${written} written.`);
+    return written;
   } catch (error) {
     exported.cancel("move failed");
-    imported.cancel("move failed");
     throw error;
   }
 }

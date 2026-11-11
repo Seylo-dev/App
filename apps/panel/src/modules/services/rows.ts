@@ -10,7 +10,7 @@ import type { PanelDb } from "../../db/client";
 import { deployments, domains, nodes, servicePlacements, services, volumes } from "../../db/schema";
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
 import { appPort } from "../domains/lookup";
-import { latestCopy } from "./copies";
+import { latestCopy, latestTransfer } from "./copies";
 import { displaySource } from "./git-url";
 import { readSpec, restartDelaySeconds, type ServiceSpecJson } from "./spec";
 import { serviceStatus, serviceUsage } from "./status";
@@ -237,6 +237,7 @@ export function toDetail(db: PanelDb, agents: AgentHub, row: ServiceRow): Servic
     volumes: volumesOf(db, row.id),
     watchPaths: spec.watchPaths,
     dataCopy: latestCopy(db, row.id),
+    transfer: latestTransfer(db, row.id),
   };
 }
 

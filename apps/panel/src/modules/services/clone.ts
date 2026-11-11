@@ -55,7 +55,7 @@ import { checkEnvReferences } from "../env/ops";
 import { readServiceEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
-import { activeMove, copyRunning, toDataCopy } from "./copies";
+import { activeMove, assertNoTransfer, copyRunning, toDataCopy } from "./copies";
 import { withoutCredentials } from "./git-url";
 import { ownReferenceEffects, plantedMessage, plantedReferences, projectEnvOf, type ReferenceEffect, renameSelf } from "./impact";
 import { assertNode, writeSpec } from "./insert";
@@ -340,6 +340,8 @@ export const clone = implement(serviceOps.clone, async (input, ctx) => {
     // The move deletes the old node's data, the folder this copy would read, once the new node serves.
     if (activeMove(ctx.db, svc.id))
       throw new OpError("CONFLICT", `${svc.name} is moving to another node. Clone its data once the move ends.`, { reason: "moving" });
+    // An export may hold it stopped and start it again at its end; an import has not filled it yet.
+    assertNoTransfer(ctx.db, svc.id);
   }
   const spec = cloneSpecOf(plan.spec);
   assertSourceAllowed(ctx, plan.projectId, spec.source);

@@ -8,6 +8,7 @@ import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import { backupDestinations, backupPolicies, backupRuns, volumes } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
 import { getService, invalidateService } from "../domains/lookup";
+import { assertNoTransfer } from "../services/copies";
 import { applyRetention, checkTarget, nextRun, ownObjectKey, type PolicyRow, queuePrune, type RunRow, startBackup, toRun } from "./runs";
 import { type DestinationRow, deleteObject, type StorageConfig, storageConfig, testStorage } from "./storage";
 
@@ -342,6 +343,8 @@ export const restore = implement(backupOps.restore, (input, ctx) => {
     .where(and(eq(backupRuns.serviceId, input.serviceId), eq(backupRuns.kind, "restore"), eq(backupRuns.status, "running")))
     .get();
   if (running) throw new OpError("CONFLICT", "A restore of this service is already running.", { reason: "restoreRunning" });
+  // An export reads the folder this writes, or an import still fills it.
+  assertNoTransfer(ctx.db, service.id);
 
   const row = ctx.db
     .insert(backupRuns)
