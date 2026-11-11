@@ -138,6 +138,16 @@ run_check() {
   printf '[check %s] %s (%ss)\n' "$n" "$status" "$((SECONDS - start))" >&2
 }
 
+# The check numbers that exist: a branch can add a later check before an
+# earlier number lands (43 before 42), and a gap must not end the run.
+checks_known() {
+  local i
+  for i in $(seq 1 "$LAST"); do
+    [ -n "${TITLES[$i]:-}" ] && printf '%s\n' "$i"
+  done
+  return 0
+}
+
 write_report() {
   local out=$E2E_DIR/RESULTS.md n status pass=0 failn=0 other=0
   {
@@ -146,14 +156,14 @@ write_report() {
     printf '`test/e2e-colima/checks.sh <N>`). VMs: %s (panel + node, Colima), %s (Colima), %s (plain\n' "$E2E_A" "$E2E_B" "$E2E_C"
     printf 'Lima Ubuntu 24.04, Docker installed by install.sh). Release server and git server on the Mac.\n\n'
     printf '| # | Check | Status | When |\n|---|---|---|---|\n'
-    for i in $(seq 1 "$LAST"); do
+    for i in $(checks_known); do
       n=$(printf '%02d' "$i")
       status=$(cat "$RES/$n.status" 2>/dev/null || echo "NOT RUN")
       printf '| %s | %s | %s | %s |\n' "$i" "${TITLES[$i]}" "$status" "$(cat "$RES/$n.meta" 2>/dev/null || true)"
       case $status in PASS) pass=$((pass + 1)) ;; FAIL) failn=$((failn + 1)) ;; *) other=$((other + 1)) ;; esac
     done
     printf '\n%s passed, %s failed, %s blocked/skipped/not run.\n\n## Evidence\n' "$pass" "$failn" "$other"
-    for i in $(seq 1 "$LAST"); do
+    for i in $(checks_known); do
       n=$(printf '%02d' "$i")
       [ -f "$RES/$n.status" ] || continue
       printf '\n### %s. %s: %s\n\n```\n' "$i" "${TITLES[$i]}" "$(cat "$RES/$n.status")"
@@ -4381,7 +4391,7 @@ main() {
   fi
   local list n
   vm_routes
-  list=${*:-$(seq 1 "$LAST" | grep -vx "$DOMAIN_CHECK") $DOMAIN_CHECK}
+  list=${*:-$(checks_known | grep -vx "$DOMAIN_CHECK") $DOMAIN_CHECK}
   for n in $list; do
     run_check "$n"
     write_report 2>/dev/null
