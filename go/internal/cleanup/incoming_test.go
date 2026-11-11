@@ -40,7 +40,7 @@ func volumeArchive(t *testing.T) *bytes.Buffer {
 func TestCleanupKeepsAVolumeBeingMovedIn(t *testing.T) {
 	layout := datadir.New(t.TempDir())
 	tr := &volumes.Transfer{Layout: layout}
-	if _, err := tr.Import(context.Background(), "moving1", "moving1", "data", false, volumeArchive(t)); err != nil {
+	if _, err := tr.Import(context.Background(), "moving1", "moving1", "data", volumes.ImportOptions{}, volumeArchive(t)); err != nil {
 		t.Fatal(err)
 	}
 	vol, _ := layout.ServiceVolume("moving1", "data")
