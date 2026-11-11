@@ -310,9 +310,17 @@ function AccountSection({ data }: { data: Status }) {
               </Chip>
             ))}
           </span>
-          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setConfirm(true)}>
-            {t("settingsGithub.device.disconnect")}
-          </Button>
+          <span className="ml-auto flex flex-wrap gap-1">
+            {!tokenOpen && (
+              <Button size="sm" variant="ghost" onClick={() => setTokenOpen(true)}>
+                <IconKey size={15} stroke={1.8} />
+                {t(account.method === "token" ? "settingsGithub.device.replaceToken" : "settingsGithub.device.useTokenInstead")}
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => setConfirm(true)}>
+              {t("settingsGithub.device.disconnect")}
+            </Button>
+          </span>
         </div>
       )}
       {!account && !flow && !tokenOpen && (
@@ -333,7 +341,7 @@ function AccountSection({ data }: { data: Status }) {
           </div>
         </div>
       )}
-      {!account && tokenOpen && <TokenForm onDone={() => setTokenOpen(false)} onCancel={() => setTokenOpen(false)} />}
+      {tokenOpen && <TokenForm replaces={account?.login ?? null} onDone={() => setTokenOpen(false)} onCancel={() => setTokenOpen(false)} />}
       {flow && (
         <DeviceCodePanel
           code={flow}
@@ -366,7 +374,8 @@ function AccountSection({ data }: { data: Status }) {
 const tokensPage = "https://github.com/settings/tokens";
 
 /** "Use a token": the steps, a link to GitHub's token page and the field; the panel checks the token before it saves it. */
-function TokenForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+/** `replaces`: the login of the account connected now, which a saved token takes over from. */
+function TokenForm({ replaces, onDone, onCancel }: { replaces: string | null; onDone: () => void; onCancel: () => void }) {
   const [token, setToken] = useState("");
   const save = useSettingsMutation(github.tokenConnect, {
     invalidates: refresh,
@@ -386,6 +395,7 @@ function TokenForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => v
       }}
     >
       <span className="text-[13.5px] font-medium text-foreground">{t("settingsGithub.token.title")}</span>
+      {replaces && <Alert tone="neutral">{t("settingsGithub.token.replaces", { login: replaces })}</Alert>}
       <NumberedSteps
         steps={[
           <>

@@ -121,6 +121,45 @@ test("Use a token: the steps and GitHub's token page, a refused token says why, 
   expect(errors).toEqual([]);
 });
 
+test("a device login can switch to a token on the GitHub page: Use a token instead, then Replace the token", async ({ page }) => {
+  const errors = trackErrors(page);
+  const calls = watchOps(page);
+  let account: unknown = {
+    id: githubAccount.id,
+    login: githubAccount.login,
+    method: "device",
+    scopes: ["repo"],
+    tokenKind: null,
+    connectedAt: new Date().toISOString(),
+  };
+  await installDemo(page, {
+    overrides: {
+      "github.status": () => status(account),
+      "github.tokenConnect": () => {
+        account = { ...(account as object), method: "token", scopes: [], tokenKind: "fineGrained" };
+        return account;
+      },
+    },
+  });
+  await page.goto("/settings/github");
+  const card = page.getByTestId("github-account");
+  await expect(card).toContainText("Device login");
+  await card.getByRole("button", { name: "Use a token instead" }).click();
+  const form = page.getByTestId("github-token-form");
+  await expect(form).toContainText("The token takes over from @dana's connection once GitHub accepts it.");
+  await expect(card.getByRole("button", { name: "Use a token instead" })).toHaveCount(0);
+  await shot(page, "use-a-token-instead");
+  await form.getByLabel("Token").fill(goodToken);
+  await form.getByRole("button", { name: "Check and save" }).click();
+  await expect(page.getByText("Token saved for @dana")).toBeVisible();
+  await expect(card).toContainText("Personal access token");
+  await expect(form).toHaveCount(0);
+  // Connected with a token: a new one replaces it the same way.
+  await expect(card.getByRole("button", { name: "Replace the token" })).toBeVisible();
+  expect(calls("github.tokenConnect").map((c) => c.token)).toEqual([goodToken]);
+  expect(errors).toEqual([]);
+});
+
 test("the Source tab with only a connected account: no 'Connect GitHub first', its repositories, connect with accountId", async ({ page }) => {
   const errors = trackErrors(page);
   const calls = watchOps(page);

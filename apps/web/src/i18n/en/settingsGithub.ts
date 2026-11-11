@@ -51,6 +51,9 @@ export default {
     recommendApp: "The GitHub App gives narrower access and is the better choice. Use this only for repos the App cannot reach.",
     connect: "Connect a GitHub account",
     useToken: "Use a token",
+    // While an account is connected: switch it to a pasted token, or paste a new one.
+    useTokenInstead: "Use a token instead",
+    replaceToken: "Replace the token",
     connected: "@{login}, connected on {date}.",
     viaDevice: "Device login",
     viaToken: "Personal access token",
@@ -76,6 +79,8 @@ export default {
     save: "Check and save",
     checking: "Checking with GitHub",
     saved: "Token saved for @{login}",
+    replaces:
+      "The token takes over from @{login}'s connection once GitHub accepts it. Services that read their repository through the account keep working; revoke the old one on github.com.",
   },
   // Organizations that restrict OAuth app access, and how the App avoids it.
   orgs: {
