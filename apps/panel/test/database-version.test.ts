@@ -603,4 +603,34 @@ describe("databases.versionChoices and setVersion", () => {
     expect(stay.body.database.version).toBe("7.0");
     expect(specImage(serviceId)).toBe("mongo:7.0.45");
   });
+
+  test("after a failed change to another tag, the custom tag that still runs is set again as itself", async () => {
+    const { serviceId } = await createDb("postgres", "17");
+    // It runs postgres:17.7-alpine (not the catalog's 17.6); then a change to postgres:17.99-alpine failed.
+    const live = panel.deps.db.select({ id: services.liveDeploymentId }).from(services).where(eq(services.id, serviceId)).get()?.id ?? "";
+    panel.deps.db.update(deployments).set({ imageRef: "postgres:17.7-alpine" }).where(eq(deployments.id, live)).run();
+    setImage(serviceId, "postgres:17.99-alpine");
+    const res = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+    expect(res.body).toMatchObject({
+      version: "17",
+      image: "postgres:17.7-alpine",
+      pendingImage: "postgres:17.99-alpine",
+      blocked: null,
+      customOnCurrent: true,
+    });
+    // The catalog's image of 17 cannot be the way to stay: it is older than what runs.
+    expect(res.body.choices.find((c: { version: string }) => c.version === "17")).toMatchObject({ allowed: false, reason: "olderImage" });
+
+    const set = (image: string) => callOp(panel, dbOps.setVersion, { serviceId, version: "17", image }, { cookie });
+    expect((await set("postgres:17.6-alpine")).body.error.details.reason).toBe("olderImage");
+    // The tag it runs, given as the image of its own line: no backup, the spec runs it again.
+    const before = deployCount(serviceId);
+    const stay = await set("postgres:17.7-alpine");
+    expect(stay.status).toBe(200);
+    expect(stay.body.database.version).toBe("17");
+    expect(specImage(serviceId)).toBe("postgres:17.7-alpine");
+    expect(deployCount(serviceId)).toBe(before + 1);
+    const after = await callOp(panel, dbOps.versionChoices, { serviceId }, { cookie });
+    expect(after.body.pendingImage).toBeNull();
+  });
 });

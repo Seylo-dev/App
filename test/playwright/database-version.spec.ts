@@ -3,7 +3,8 @@
 // upgrade that waits for a backup (Back up now) or "Change without a
 // backup", Postgres refusing its next major and every older line, and
 // another exact tag of the version a database runs when it runs the
-// newest pinned image of it.
+// newest pinned image of it, and staying on a custom tag after a change to
+// another one failed.
 // Demo data (demo/service.ts versionChoicesOf) stands in for the panel;
 // databases.setVersion is answered here so nothing deploys.
 //
@@ -253,5 +254,57 @@ test.describe("database version", () => {
       { serviceId: svc.db, version: "17", image: "postgres:17.5-alpine" },
       { serviceId: svc.db, version: "17", image: "postgres:17.7-alpine" },
     ]);
+  });
+
+  test("after a failed change to another tag, the tag dialog stays on the custom tag that still runs", async ({ page }) => {
+    let sent: Record<string, unknown> | null = null;
+    // It runs postgres:17.7-alpine (a tag the catalog does not pin); the change to postgres:17.99-alpine did not deploy.
+    const base = versionChoicesOf(svc.db);
+    const choices = {
+      ...base,
+      image: "postgres:17.7-alpine",
+      pendingImage: "postgres:17.99-alpine",
+      choices: base.choices.map((c) =>
+        c.version === "17"
+          ? { ...c, kind: "downgrade", reason: "olderImage", message: "postgres:17.6-alpine is older than postgres:17.7-alpine." }
+          : c,
+      ),
+    };
+    await installDemo(page, {
+      overrides: {
+        "databases.versionChoices": () => choices,
+        "databases.setVersion": (input) => {
+          sent = input;
+          return { database: databaseOf(svc.db), deploymentId: "d0000000000000v4" };
+        },
+      },
+    });
+    await page.goto(settings(svc.db));
+    const card = page.getByRole("region", { name: "Version" });
+    await expect(card.getByText("or stay on postgres:17.7-alpine")).toBeVisible();
+    // The catalog's image of 17 is older than what runs: the select cannot stay.
+    await card.getByRole("combobox", { name: "Change to" }).click();
+    await expect(page.getByRole("option", { name: /^17/ })).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Escape");
+    await card.getByRole("button", { name: "Another tag of PostgreSQL 17" }).click();
+
+    const dialog = page.getByRole("dialog");
+    const field = dialog.getByLabel("Image");
+    await expect(field).toHaveValue("postgres:17.7-alpine");
+    await expect(dialog.getByRole("heading", { name: "Stay on postgres:17.7-alpine?" })).toBeVisible();
+    await expect(dialog.getByText("The database restarts on postgres:17.7-alpine")).toBeVisible();
+    await expect(dialog.getByText("Give the exact release tag to run instead")).toHaveCount(0);
+    const submit = dialog.getByRole("button", { name: "Update" });
+    await expect(submit).toBeEnabled();
+    // Another tag is still a tag of 17; back on what runs, it stays again.
+    await field.fill("postgres:17.8-alpine");
+    await expect(dialog.getByRole("heading", { name: "Run another tag of PostgreSQL 17?" })).toBeVisible();
+    await field.fill("postgres:17.7-alpine");
+    await expect(dialog.getByRole("heading", { name: "Stay on postgres:17.7-alpine?" })).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${shots}/version-stay-on-tag.png` });
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(sent).toEqual({ serviceId: svc.db, version: "17", image: "postgres:17.7-alpine" });
   });
 });

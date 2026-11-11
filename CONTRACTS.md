@@ -3817,7 +3817,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   line the catalog no longer has, and while `blocked`. The Version card
   offers it as "Another tag of <engine> <version>", which opens the
   confirm dialog straight on the image field, starting from the image that
-  runs. `deployments.rollback` of a database takes only a
+  runs; after a failed change (`pendingImage`) that image is the way to
+  stay on it, also a custom tag the line's catalog image is older than.
+  `deployments.rollback` of a database takes only a
   deployment of the image it runs (CONFLICT, reason `databaseVersion`):
   the deployments from before a version change ran the older version. The
   web app's Version card is on the database's Settings tab; the header's

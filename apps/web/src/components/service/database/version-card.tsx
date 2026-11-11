@@ -218,12 +218,14 @@ function VersionDialog({
   });
   const engine = t(`service.kind.${data.engine}`);
   const target = custom ? image.trim() : choice.image;
-  // The image it runs changes nothing: the panel refuses it.
-  const noTag = tag && (target === "" || target === data.image);
-  const title = tag
-    ? t("databaseVersion.confirm.titleTag", { engine, version: choice.version })
-    : choice.kind === "current"
-      ? t("databaseVersion.confirm.stay", { image: choice.image })
+  // The image it runs changes nothing (the panel refuses it), unless a change to
+  // another one did not finish: then setting it again stays on what runs.
+  const stay = tag ? target === data.image && data.pendingImage !== null : choice.kind === "current";
+  const noTag = tag && (target === "" || (target === data.image && !stay));
+  const title = stay
+    ? t("databaseVersion.confirm.stay", { image: target })
+    : tag
+      ? t("databaseVersion.confirm.titleTag", { engine, version: choice.version })
       : lineChange
         ? t("databaseVersion.confirm.titleLine", { engine, version: choice.version })
         : t("databaseVersion.confirm.titlePatch", { image: choice.image });
