@@ -18,6 +18,7 @@ import {
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog, backupRuns, nodes, serviceDatabases, serviceExports, serviceImports, serviceSecrets, services } from "../src/db/schema";
+import { databaseRuntime } from "../src/modules/databases/desired";
 import { engineVersion } from "../src/modules/databases/engines";
 import { adminPasswordSecret, retiredExposedPasswordSecret, writeSecret } from "../src/modules/databases/info";
 import { workInFlight } from "../src/modules/panelMove/preflight";
@@ -25,6 +26,7 @@ import { transfersInFlight } from "../src/modules/services/copies";
 import { readSpec } from "../src/modules/services/spec";
 import { exportWatch, recoverExports } from "../src/modules/serviceTransfer/export-stream";
 import { uploadWatch } from "../src/modules/serviceTransfer/import-data";
+import { retiredUserToKeep } from "../src/modules/serviceTransfer/plan";
 import { releaseSource } from "../src/modules/updates/manifest";
 import { callOp } from "./helpers";
 import { serveReleases } from "./release-fakes";
@@ -656,7 +658,7 @@ describe("import with volume data", () => {
     expect(without.body.blockers.map((x: { reason: string }) => x.reason)).not.toContain("databaseLogins");
   });
 
-  test("0.2.9's one user: the old exposed user stays out of an export, and a file that names one imports without it", async () => {
+  test("0.2.9's one user: an old exposed user goes by name only, kept with the data so the new node retires it", async () => {
     const a = await side();
     const b = await side("node-b");
     await callOp(a.panel, dbOps.create, { projectId: a.projectId, name: "pg", engine: "postgres", nodeId: a.nodeId }, { cookie: a.cookie });
@@ -672,12 +674,12 @@ describe("import with volume data", () => {
     await craft(zip, b.projectId, (plain) => {
       exported = structuredClone(plain.services.pg);
     });
-    expect(exported?.doc.database).not.toHaveProperty("exposedUser");
+    // The name, so the copied login can be retired; never its password.
+    expect(exported?.doc.database.exposedUser).toBe("external");
     expect(Object.keys(exported?.databaseSecrets ?? {})).toEqual([adminPasswordSecret]);
 
-    // A file written before 0.2.9's exposure: the separate user and its password.
+    // A crafted file that adds the old password too: never stored.
     const old = await craft(zip, b.projectId, (plain) => {
-      plain.services.pg.doc.database.exposedUser = "external";
       plain.services.pg.databaseSecrets[retiredExposedPasswordSecret] = "Old.exposed_pass_1";
     });
     const begun = await callOp(b.panel, transferOps.importBegin, old, { cookie: b.cookie });
@@ -689,7 +691,11 @@ describe("import with volume data", () => {
     expect(made.status).toBe(200);
     const newId = made.body.service.id as string;
     expect((await put(b, ref, "services/pg/volumes/data.tar.gz", 0, rows)).body.done).toBe(true);
-    expect(b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, newId)).get()?.exposedUser).toBe("");
+    // With the data the old login is in the new database too: its node retires it (nothing here uses it).
+    expect(b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, newId)).get()?.exposedUser).toBe(
+      "external",
+    );
+    expect(databaseRuntime(b.panel.deps, newId)?.database.retiredExposedUser).toBe("external");
     expect(
       b.panel.deps.db
         .select()
@@ -698,10 +704,29 @@ describe("import with volume data", () => {
         .all()
         .map((r) => r.name),
     ).toEqual([adminPasswordSecret]);
-    // The database reads as 0.2.9 makes them: no user to retire, exposure off.
+    // The database reads as 0.2.9 makes them: one user, exposure off.
     const got = await callOp(b.panel, dbOps.get, { serviceId: newId }, { cookie: b.cookie });
     expect(got.status).toBe(200);
     expect(got.body.exposure).toMatchObject({ enabled: false, state: "off" });
+
+    // Without the data the old login is not there: nothing to retire.
+    const empty = await callOp(b.panel, transferOps.importBegin, await craft(zip, b.projectId, () => {}), { cookie: b.cookie });
+    const emptyRef = { projectId: b.projectId, importId: empty.body.importId as string };
+    await callOp(b.panel, transferOps.setChoices, { ...emptyRef, choices: { volumes: [], name: "pg-empty" } }, { cookie: b.cookie });
+    const madeEmpty = await callOp(b.panel, transferOps.importService, emptyRef, { cookie: b.cookie });
+    expect(madeEmpty.status).toBe(200);
+    expect(
+      b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, madeEmpty.body.service.id)).get()?.exposedUser,
+    ).toBe("");
+  });
+
+  test("retiredUserToKeep: only with the data, a plain name, never the admin user or a Redis-like engine", () => {
+    expect(retiredUserToKeep("postgres", { adminUser: "app", exposedUser: "external" }, true)).toBe("external");
+    expect(retiredUserToKeep("postgres", { adminUser: "app", exposedUser: "external" }, false)).toBe("");
+    expect(retiredUserToKeep("postgres", { adminUser: "app", exposedUser: "app" }, true)).toBe("");
+    expect(retiredUserToKeep("postgres", { adminUser: "app", exposedUser: "x'; DROP ROLE app; --" }, true)).toBe("");
+    expect(retiredUserToKeep("mongo", { adminUser: "root" }, true)).toBe("");
+    expect(retiredUserToKeep("valkey", { adminUser: "default", exposedUser: "external" }, true)).toBe("");
   });
 
   test("data from a newer release of its line keeps that release; never an older image under newer data", async () => {

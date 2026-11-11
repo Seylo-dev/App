@@ -379,8 +379,12 @@ export function snapshotService(ctx: OpContext, svc: ServiceRow, options: { sour
           version: databaseRow.version,
           variant: databaseRow.variant,
           databaseName: databaseRow.databaseName,
-          // Exposure uses the admin user since 0.2.9; an old exposed user waiting for its retirement stays behind.
+          // Exposure uses the admin user since 0.2.9. An old exposed user waiting for its retirement is
+          // named (never its password): copied data still holds that login, so the importing panel retires it.
           adminUser: databaseRow.adminUser,
+          ...(databaseRow.exposedUser && databaseRow.exposedUser !== databaseRow.adminUser
+            ? { exposedUser: databaseRow.exposedUser }
+            : {}),
           webUiIdleMinutes: databaseRow.webUiIdleMinutes,
         }
       : null,

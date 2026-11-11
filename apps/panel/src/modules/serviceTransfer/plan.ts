@@ -151,6 +151,24 @@ export interface DatabaseImage {
  * image with an exact tag of the line), and the data is refused when not.
  * Without the data an empty database starts on the catalog image.
  */
+/** User names every engine takes unquoted: the agent puts the retired one into SQL and pg_hba.conf. */
+const retiredUserName = /^[A-Za-z][A-Za-z0-9_.-]{0,62}$/;
+
+/**
+ * The old exposed user an imported database keeps for its retirement: only
+ * with the database's data (the login is in it), a name the agent accepts,
+ * never the admin user, never on the Redis-like engines (one user).
+ */
+export function retiredUserToKeep(
+  engine: DatabaseEngine,
+  database: { adminUser: string; exposedUser?: string },
+  withData: boolean,
+): string {
+  const name = database.exposedUser ?? "";
+  if (!withData || !name || name === database.adminUser || engines[engine].redisLike) return "";
+  return retiredUserName.test(name) ? name : "";
+}
+
 export function importedDatabaseImage(
   engine: DatabaseEngine,
   variant: string | null,
@@ -1061,8 +1079,9 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
                 variant: doc.database.variant,
                 databaseName: engines[doc.kind as DatabaseEngine].hasDatabase ? doc.database.databaseName : "",
                 adminUser: doc.database.adminUser,
-                // Exposure uses the admin user; only databases from before 0.2.9 name another one, for their retirement.
-                exposedUser: "",
+                // Exposure uses the admin user. An old exposed user named by the file lives on in copied data:
+                // kept with the data so this panel's node retires it (as clone does), never without it.
+                exposedUser: retiredUserToKeep(doc.kind as DatabaseEngine, doc.database, picked.length > 0),
                 tlsHostname: null,
                 webUiIdleMinutes: doc.database.webUiIdleMinutes,
               },

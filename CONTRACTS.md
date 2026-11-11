@@ -3658,11 +3658,14 @@ members never hold them. Every op is `mcp: false`.
   once it runs. `pinDigest` only pins a source from the file: a database's
   or Box's image is never pinned to the file's digest (their
   `source.imageDigest` is null). One user inside and through the exposed port (0.2.9):
-  the export leaves out `service_databases.exposed_user` and the
-  `exposed_password` of a database from before 0.2.9, the import writes
-  `exposed_user` "" and only `admin_password`, and a file from before
-  0.2.9's exposure that names a separate exposed user and its password
-  imports without them. The admin password comes from the file only when
+  the export never carries the `exposed_password` of a database from
+  before 0.2.9, and names its `service_databases.exposed_user` only while
+  that old user still waits for its retirement (`exposedUser`, a name).
+  The import writes only `admin_password`, and `exposed_user` is that name
+  only when the database's data comes along (`retiredUserToKeep`: the
+  copied data holds the login, so this panel's node retires it, as
+  `services.clone` does), "" otherwise; a password for it in a file is
+  never stored. The admin password comes from the file only when
   it fits `databases.create`'s password rule (12 to 128 of
   `A-Za-z0-9._~-`: `engines.ts` writes it into SQL and shell input as it
   is), else a new one with a `databasePassword` warning. Listeners follow
@@ -4075,8 +4078,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   closed.
   `services.clone` never copies `exposed_password` and keeps
   `exposed_user` only with copied data (the old user is in it); a service
-  export carries neither, and an import writes `exposed_user` "" also
-  with data (see Service export and import). Postgres,
+  export carries its name only, and an import keeps it only with the data
+  (see Service export and import). Postgres,
   MySQL and MariaDB exposure needs `database.exposure.v2` on the node
   (`capability.ts` `missingExposureCapability`, `Engine.exposureNeedsCapability`):
   `setExposure` refuses it elsewhere (`agentTooOld`) and the desired state

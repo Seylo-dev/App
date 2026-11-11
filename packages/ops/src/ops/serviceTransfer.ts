@@ -389,9 +389,11 @@ export const PortableServiceV1 = Type.Object({
       /** Inside and through the exposed port alike (0.2.9's exposure). */
       adminUser: Type.String({ maxLength: 100 }),
       /**
-       * Only in files from builds before 0.2.9's exposure, which named a
-       * separate exposed user. Never written now, and an import ignores it:
-       * the imported database has no separate user.
+       * The old exposed user of a database from before 0.2.9 that its panel
+       * has not retired yet (a name, never its password). An import with the
+       * database's data keeps it so its node retires that login in the
+       * copied data; without the data it is ignored. Exposure itself uses
+       * adminUser.
        */
       exposedUser: Type.Optional(Type.String({ maxLength: 100 })),
       webUiIdleMinutes: Type.Integer({ minimum: 0, maximum: 10_000 }),
