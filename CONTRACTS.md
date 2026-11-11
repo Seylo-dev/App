@@ -4065,7 +4065,9 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   `noTls`) and `loadDatabase` reads an exposure row from before 0.2.9 as
   closed.
   `services.clone` never copies `exposed_password` and keeps
-  `exposed_user` only with copied data (the old user is in it). Postgres,
+  `exposed_user` only with copied data (the old user is in it); a service
+  export carries neither, and an import writes `exposed_user` "" also
+  with data (see Service export and import). Postgres,
   MySQL and MariaDB exposure needs `database.exposure.v2` on the node
   (`capability.ts` `missingExposureCapability`, `Engine.exposureNeedsCapability`):
   `setExposure` refuses it elsewhere (`agentTooOld`) and the desired state
