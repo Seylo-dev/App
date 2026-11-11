@@ -47,6 +47,7 @@ import { useDebounced } from "../docker-hub/use-debounced";
 import { InternalHostNote, useCanManageGit } from "../git/internal-hosts";
 import { NodePicker, ProjectPicker } from "../pickers";
 import { QueryError } from "../query-error";
+import { EngineLogo } from "./engine-logo";
 import { GithubSetup, GithubTabSkeleton } from "./github-setup";
 import { dockerHubRef } from "./image-port";
 import { type CatalogKind, KindBadge, type NewServiceKind, newServiceKinds } from "./kinds";
@@ -605,8 +606,8 @@ function NewServiceForm({ kind, fixedProjectId, onClose }: { kind: FormKind; fix
                   value={item.engine}
                   title={t(item.label)}
                   description={item.note && <span className="text-chip-amber-fg">{t(item.note)}</span>}
-                  icon={<KindBadge tag={item.tag} tone="sky" />}
-                  // The badge is taller than one line of title: centred against the text, in a tile of any height.
+                  icon={<EngineLogo engine={item.engine} tag={item.tag} />}
+                  // The logo is taller than one line of title: centred against the text, in a tile of any height.
                   className="items-center"
                 />
               ))}
