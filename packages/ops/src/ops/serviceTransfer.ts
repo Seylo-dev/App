@@ -386,8 +386,14 @@ export const PortableServiceV1 = Type.Object({
       version: Type.String({ maxLength: 40 }),
       variant: Type.Union([Type.String({ maxLength: 40 }), Type.Null()]),
       databaseName: Type.String({ maxLength: 100 }),
+      /** Inside and through the exposed port alike (0.2.9's exposure). */
       adminUser: Type.String({ maxLength: 100 }),
-      exposedUser: Type.String({ maxLength: 100 }),
+      /**
+       * Only in files from builds before 0.2.9's exposure, which named a
+       * separate exposed user. Never written now, and an import ignores it:
+       * the imported database has no separate user.
+       */
+      exposedUser: Type.Optional(Type.String({ maxLength: 100 })),
       webUiIdleMinutes: Type.Integer({ minimum: 0, maximum: 10_000 }),
     }),
     Type.Null(),
@@ -458,7 +464,11 @@ export const PortableSecretsV1 = Type.Object({
       env: Type.String({ maxLength: 2 * 1024 * 1024 }),
       /** File mount contents by mount name. */
       fileMounts: SecretMap,
-      /** service_secrets by name (database logins). */
+      /**
+       * service_secrets by name (database logins): admin_password. Files
+       * from builds before 0.2.9's exposure may also carry exposed_password,
+       * which an import ignores.
+       */
       databaseSecrets: SecretMap,
       /** By "<host><pathPrefix>". */
       domains: Type.Record(
@@ -805,7 +815,18 @@ export const ImportPreview = Type.Object({
     tunnel: Type.Boolean(),
     deployTrigger: Type.Boolean(),
     exposures: Type.Array(
-      Type.Object({ listenPort: Type.Integer(), allowedCidrs: Type.Array(Type.String()), clash: Type.Boolean(), action: Type.String() }),
+      Type.Object({
+        listenPort: Type.Integer(),
+        allowedCidrs: Type.Array(Type.String()),
+        clash: Type.Boolean(),
+        action: Type.String(),
+        /**
+         * Why it cannot be added here, as databases.setExposure would refuse
+         * it (a version without TLS, a node whose agent is too old to keep
+         * the port TLS only); null when it can.
+         */
+        refusal: Type.Union([Type.String(), Type.Null()]),
+      }),
     ),
     alerts: Type.Array(
       Type.Object({ event: Type.String(), channels: Type.Array(Type.Object({ name: Type.String(), mapped: Type.Boolean() })) }),

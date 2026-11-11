@@ -29,9 +29,17 @@ import { nextRun } from "../backups/runs";
 import { boxWorkspaceVolume } from "../boxes/desired";
 import { boxSpec } from "../boxes/ops";
 import { checkSchedule } from "../cron/index";
-import { nodeHasCapability } from "../databases/capability";
-import { databaseSpec, engines, enginesCapability, engineVersion, generatePassword } from "../databases/engines";
-import { adminPasswordSecret, retiredExposedPasswordSecret as exposedPasswordSecret } from "../databases/info";
+import { missingExposureCapability, nodeHasCapability } from "../databases/capability";
+import {
+  databaseSpec,
+  engines,
+  enginesCapability,
+  engineVersion,
+  exposureCapability,
+  exposureRefusal,
+  generatePassword,
+} from "../databases/engines";
+import { adminPasswordSecret } from "../databases/info";
 import { hasBuildx } from "../deployments/source";
 import { checkCertificate, checkRedirects, normalizeCidrs } from "../domains/checks";
 import { assertCertificateNames, hostConflict } from "../domains/ownership";
@@ -177,8 +185,16 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
         message: `${engine.label} ${db.version}${db.variant ? ` with ${db.variant}` : ""} is not offered on this panel.`,
       });
     else {
+      // This panel's image of the version, as databases.create runs it: a file names the one it ran, which may be
+      // older (a panel that was not updated) or a custom one from databases.setVersion.
       databaseSpecOf = databaseSpec(engineName, version);
       dataPath = version.dataPath;
+      const ran = doc.spec.source.type === "image" ? doc.spec.source.image : null;
+      if (ran && ran !== version.image)
+        warnings.push({
+          reason: "databaseImage",
+          message: `It ran ${ran}; it starts here on ${version.image}, this panel's image of ${engine.label} ${version.version}. Change it on the Version card of its Settings tab.`,
+        });
       if (
         !Value.Check(dbOps.create.input.properties.user, db.adminUser) ||
         (engine.hasDatabase && !Value.Check(dbOps.create.input.properties.database, db.databaseName))
@@ -551,6 +567,18 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
   if (isDatabase) {
     const engine = engines[doc.kind as DatabaseEngine];
     if (!exposuresEditable && doc.exposures.length) noPermission("Database listeners", "databases.expose");
+    // What databases.setExposure refuses: a version without TLS, a node whose agent cannot keep the port TLS only.
+    const noTls = doc.database
+      ? exposureRefusal({ engine: engine.engine, version: doc.database.version, variant: doc.database.variant })
+      : null;
+    const missing = node && doc.exposures.length ? missingExposureCapability(ctx.db, ctx.agents, engine, node.id) : null;
+    const refusal =
+      noTls ??
+      (missing === null || !node
+        ? null
+        : missing === exposureCapability
+          ? `The agent on ${node.name} cannot expose ${engine.label} with its own user over TLS yet. Update the node, then expose it on its Connect tab.`
+          : `The agent on ${node.name} cannot expose ${engine.label} with TLS yet. Update the node, then expose it on its Connect tab.`);
     for (const e of doc.exposures) {
       let cidrs: string[] = [];
       let valid = true;
@@ -567,14 +595,15 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
           .from(portExposures)
           .where(and(eq(portExposures.nodeId, node.id), eq(portExposures.listenPort, e.listenPort)))
           .get() !== undefined;
-      const forced = !valid || clash || !exposuresEditable || (engine.exposureNeedsAllowlist && cidrs.length === 0);
+      const forced = !valid || clash || refusal !== null || !exposuresEditable || (engine.exposureNeedsAllowlist && cidrs.length === 0);
       const wanted = choicesIn.exposures?.find((c) => c.listenPort === e.listenPort)?.action ?? (cidrs.length > 0 ? "add" : "skip");
       const action = forced ? "skip" : wanted;
-      exposureRows.push({ listenPort: e.listenPort, allowedCidrs: cidrs, clash, action });
+      exposureRows.push({ listenPort: e.listenPort, allowedCidrs: cidrs, clash, action, refusal });
       if (action === "add")
         exposureInserts.push({ kind: "database", listenPort: e.listenPort, targetPort: engine.port, allowedCidrs: cidrs, tls: true });
     }
-    if (exposureRows.some((e) => e.action === "skip"))
+    if (refusal && exposureRows.length) skipped.push({ what: "Database listeners", why: refusal });
+    else if (exposureRows.some((e) => e.action === "skip"))
       skipped.push({
         what: "Database listeners open to anyone or on a port in use",
         why: "Open them again on the database's Connect tab.",
@@ -743,23 +772,21 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       : doc.kind === "box"
         ? [{ name: boxWorkspaceVolume, mountPath: "/home/coder", readOnly: false }]
         : doc.volumes.map((v) => ({ name: v.name, mountPath: v.mountPath, readOnly: v.readOnly }));
-  // Logins from the file only when databases.create would take them: engines.ts writes them into SQL and shell input as they are.
+  // The login from the file only when databases.create would take it: engines.ts writes it into SQL and shell input as it is.
+  // One user inside and through the exposed port (0.2.9): a file from before that may name a separate exposed user and
+  // its password, and neither is created here.
   const databaseLogins: { name: string; value: string }[] = [];
   let loginsMade = false;
   if (isDatabase) {
-    const refused: string[] = [];
-    for (const name of [adminPasswordSecret, exposedPasswordSecret]) {
-      const value = secrets?.databaseSecrets[name];
-      const fits = value !== undefined && Value.Check(dbOps.create.input.properties.password, value);
-      if (value !== undefined && !fits) refused.push(name === adminPasswordSecret ? "admin" : "exposed");
-      databaseLogins.push({ name, value: fits ? (value as string) : generatePassword() });
-      if (!fits) loginsMade = true;
-    }
-    if (refused.length) {
-      const one = refused.length === 1;
+    const value = secrets?.databaseSecrets[adminPasswordSecret];
+    const fits = value !== undefined && Value.Check(dbOps.create.input.properties.password, value);
+    databaseLogins.push({ name: adminPasswordSecret, value: fits ? (value as string) : generatePassword() });
+    if (!fits) loginsMade = true;
+    if (value !== undefined && !fits) {
       warnings.push({
         reason: "databasePassword",
-        message: `The file's ${refused.join(" and ")} ${one ? "password does" : "passwords do"} not fit this panel's rule (12 to 128 letters, digits or . _ ~ -), so ${one ? "a new one is" : "new ones are"} made. Apps that connect with the old ${one ? "one need the new one" : "ones need the new ones"} from the database's Connect tab.`,
+        message:
+          "The file's admin password does not fit this panel's rule (12 to 128 letters, digits or . _ ~ -), so a new one is made. Apps that connect with the old one need the new one from the database's Connect tab.",
       });
     }
   }
@@ -969,7 +996,8 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
                 variant: doc.database.variant,
                 databaseName: engines[doc.kind as DatabaseEngine].hasDatabase ? doc.database.databaseName : "",
                 adminUser: doc.database.adminUser,
-                exposedUser: engines[doc.kind as DatabaseEngine].redisLike ? "default" : "external",
+                // Exposure uses the admin user; only databases from before 0.2.9 name another one, for their retirement.
+                exposedUser: "",
                 tlsHostname: null,
                 webUiIdleMinutes: doc.database.webUiIdleMinutes,
               },

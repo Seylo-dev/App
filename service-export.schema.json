@@ -1361,7 +1361,6 @@
                 "variant",
                 "databaseName",
                 "adminUser",
-                "exposedUser",
                 "webUiIdleMinutes"
               ],
               "properties": {

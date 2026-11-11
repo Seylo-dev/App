@@ -38,6 +38,7 @@ import {
 } from "../../db/schema";
 import { normalizeCronSchedule } from "../../jobs/cron-expr";
 import type { OpContext } from "../../ops/implement";
+import { retiredExposedPasswordSecret } from "../databases/info";
 import { readProjectEnv, readServiceEnv } from "../env/store";
 import { accountLogin } from "../github/account";
 import { panelServiceId } from "../nodes/panel-service";
@@ -233,6 +234,8 @@ export function snapshotService(ctx: OpContext, svc: ServiceRow, options: { sour
   if (databaseRow) {
     if (can("databases.credentials")) {
       for (const s of ctx.db.select().from(serviceSecrets).where(eq(serviceSecrets.serviceId, svc.id)).all()) {
+        // A database from before 0.2.9 still holds its old exposed user's password: nothing reads it, and it stays here.
+        if (s.name === retiredExposedPasswordSecret) continue;
         const value = ctx.secrets.open(s.valueSealed, "service.secret");
         if (value !== null) secrets.databaseSecrets[s.name] = value;
       }
@@ -376,8 +379,8 @@ export function snapshotService(ctx: OpContext, svc: ServiceRow, options: { sour
           version: databaseRow.version,
           variant: databaseRow.variant,
           databaseName: databaseRow.databaseName,
+          // Exposure uses the admin user since 0.2.9; an old exposed user waiting for its retirement stays behind.
           adminUser: databaseRow.adminUser,
-          exposedUser: databaseRow.exposedUser,
           webUiIdleMinutes: databaseRow.webUiIdleMinutes,
         }
       : null,

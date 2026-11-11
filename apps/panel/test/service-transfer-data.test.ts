@@ -17,8 +17,8 @@ import {
   updates,
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
-import { auditLog, backupRuns, nodes, serviceExports, serviceImports, serviceSecrets, services } from "../src/db/schema";
-import { adminPasswordSecret } from "../src/modules/databases/info";
+import { auditLog, backupRuns, nodes, serviceDatabases, serviceExports, serviceImports, serviceSecrets, services } from "../src/db/schema";
+import { adminPasswordSecret, retiredExposedPasswordSecret, writeSecret } from "../src/modules/databases/info";
 import { workInFlight } from "../src/modules/panelMove/preflight";
 import { transfersInFlight } from "../src/modules/services/copies";
 import { exportWatch, recoverExports } from "../src/modules/serviceTransfer/export-stream";
@@ -652,6 +652,54 @@ describe("import with volume data", () => {
     const ref2 = { projectId: b.projectId, importId: refused.body.importId as string };
     const without = await callOp(b.panel, transferOps.setChoices, { ...ref2, choices: { volumes: [] } }, { cookie: b.cookie });
     expect(without.body.blockers.map((x: { reason: string }) => x.reason)).not.toContain("databaseLogins");
+  });
+
+  test("0.2.9's one user: the old exposed user stays out of an export, and a file that names one imports without it", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    await callOp(a.panel, dbOps.create, { projectId: a.projectId, name: "pg", engine: "postgres", nodeId: a.nodeId }, { cookie: a.cookie });
+    const pg = a.panel.deps.db.select().from(services).where(eq(services.name, "pg")).get()?.id as string;
+    // A database from before 0.2.9 whose old exposed user waits for its retirement.
+    a.panel.deps.db.update(serviceDatabases).set({ exposedUser: "external" }).where(eq(serviceDatabases.serviceId, pg)).run();
+    writeSecret(a.panel.deps.db, a.panel.deps.secrets, pg, retiredExposedPasswordSecret, "Old.exposed_pass_1");
+    const rows = new Uint8Array(gzipSync(Buffer.from("table rows")));
+    putVolume(a, pg, "data", rows);
+    const zip = (await exportZip(a, pg, { volumes: ["data"] })).bytes;
+
+    let exported: { doc: { database: Record<string, unknown> }; databaseSecrets: Record<string, string> } | undefined;
+    await craft(zip, b.projectId, (plain) => {
+      exported = structuredClone(plain.services.pg);
+    });
+    expect(exported?.doc.database).not.toHaveProperty("exposedUser");
+    expect(Object.keys(exported?.databaseSecrets ?? {})).toEqual([adminPasswordSecret]);
+
+    // A file written before 0.2.9's exposure: the separate user and its password.
+    const old = await craft(zip, b.projectId, (plain) => {
+      plain.services.pg.doc.database.exposedUser = "external";
+      plain.services.pg.databaseSecrets[retiredExposedPasswordSecret] = "Old.exposed_pass_1";
+    });
+    const begun = await callOp(b.panel, transferOps.importBegin, old, { cookie: b.cookie });
+    expect(begun.status).toBe(200);
+    expect(begun.body.blockers).toEqual([]);
+    expect(begun.body.warnings.map((w: { reason: string }) => w.reason)).not.toContain("unknownSettings");
+    const ref = { projectId: b.projectId, importId: begun.body.importId as string };
+    const made = await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie });
+    expect(made.status).toBe(200);
+    const newId = made.body.service.id as string;
+    expect((await put(b, ref, "services/pg/volumes/data.tar.gz", 0, rows)).body.done).toBe(true);
+    expect(b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, newId)).get()?.exposedUser).toBe("");
+    expect(
+      b.panel.deps.db
+        .select()
+        .from(serviceSecrets)
+        .where(eq(serviceSecrets.serviceId, newId))
+        .all()
+        .map((r) => r.name),
+    ).toEqual([adminPasswordSecret]);
+    // The database reads as 0.2.9 makes them: no user to retire, exposure off.
+    const got = await callOp(b.panel, dbOps.get, { serviceId: newId }, { cookie: b.cookie });
+    expect(got.status).toBe(200);
+    expect(got.body.exposure).toMatchObject({ enabled: false, state: "off" });
   });
 });
 

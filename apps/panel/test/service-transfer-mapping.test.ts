@@ -15,8 +15,8 @@ import {
   services,
   volumes,
 } from "../src/db/schema";
-import { engineVersion } from "../src/modules/databases/engines";
-import { adminPasswordSecret, exposedPasswordSecret } from "../src/modules/databases/info";
+import { engineVersion, exposureCapability } from "../src/modules/databases/engines";
+import { adminPasswordSecret, retiredExposedPasswordSecret } from "../src/modules/databases/info";
 import { generateDeployKey } from "../src/modules/git/remote";
 import { readSpec } from "../src/modules/services/spec";
 import { setTargetResolver } from "../src/modules/uptime/targets";
@@ -385,6 +385,11 @@ describe("what reads the source", () => {
   });
 });
 
+/** The side's node runs an agent that keeps exposed Postgres, MySQL and MariaDB ports TLS only (0.2.9). */
+function exposingNode(s: Side) {
+  s.fleet.caps.set(s.nodeId, new Set([...(s.fleet.hub.capabilities(s.nodeId) ?? []), exposureCapability]));
+}
+
 describe("databases", () => {
   test("what runs is built from the engine, never taken from the file; listeners open to anyone stay closed", async () => {
     const a = await side();
@@ -405,6 +410,7 @@ describe("databases", () => {
     const file = await exportZip(a, svcId, { secrets: "omitted", passphrase: undefined });
     const e = await entriesOf(file.bytes);
     const doc = JSON.parse(e.services[0]?.json as string);
+    exposingNode(b);
     // A crafted file: another image and command for a database kind.
     doc.spec.source = { type: "image", image: "evil/image:1" };
     doc.spec.container.command = ["sh", "-c", "curl evil"];
@@ -421,7 +427,9 @@ describe("databases", () => {
       { cookie: b.cookie },
     );
     expect(begun.status).toBe(200);
-    expect(begun.body.extras.exposures).toEqual([{ listenPort: 15432, allowedCidrs: [], clash: false, action: "skip" }]);
+    expect(begun.body.extras.exposures).toEqual([{ listenPort: 15432, allowedCidrs: [], clash: false, action: "skip", refusal: null }]);
+    // It runs this panel's image of its version, and says it ran another.
+    expect(begun.body.warnings.find((w: { reason: string }) => w.reason === "databaseImage")?.message).toContain("evil/image:1");
     const done = await callOp(
       b.panel,
       transferOps.importService,
@@ -465,21 +473,34 @@ describe("databases", () => {
     ).toEqual([]);
   });
 
-  test("logins from the file only when databases.create would take them; others are made new", async () => {
+  test("the login from the file only when databases.create would take it; else a new one is made", async () => {
     const a = await side();
     const b = await side("node-b");
     await callOp(a.panel, dbOps.create, { projectId: a.projectId, name: "pg", engine: "postgres", nodeId: a.nodeId }, { cookie: a.cookie });
     const svcId = a.panel.deps.db.select().from(services).where(eq(services.name, "pg")).get()?.id as string;
     const injected = "x'; ALTER USER postgres SUPERUSER; --";
-    const crafted = await craft((await exportZip(a, svcId)).bytes, b.projectId, (p) => {
+    const zip = (await exportZip(a, svcId)).bytes;
+    const fits = await craft(zip, b.projectId, (p) => {
       p.services.pg.databaseSecrets[adminPasswordSecret] = "Admin.pass_12345";
-      p.services.pg.databaseSecrets[exposedPasswordSecret] = injected;
+      // A file from before 0.2.9's exposure carries the separate user's password too: never stored, never checked.
+      p.services.pg.doc.database.exposedUser = "external";
+      p.services.pg.databaseSecrets[retiredExposedPasswordSecret] = injected;
     });
-    const begun = await callOp(b.panel, transferOps.importBegin, crafted, { cookie: b.cookie });
-    expect(begun.status).toBe(200);
-    expect(begun.body.warnings.find((w: { reason: string }) => w.reason === "databasePassword")?.message).toContain(
-      "exposed password does not fit",
+    const kept = await callOp(b.panel, transferOps.importBegin, fits, { cookie: b.cookie });
+    expect(kept.status).toBe(200);
+    expect(kept.body.warnings.map((w: { reason: string }) => w.reason)).not.toContain("databasePassword");
+    const refused = await callOp(
+      b.panel,
+      transferOps.importBegin,
+      await craft(zip, b.projectId, (p) => {
+        p.services.pg.databaseSecrets[adminPasswordSecret] = injected;
+      }),
+      { cookie: b.cookie },
     );
+    expect(refused.body.warnings.find((w: { reason: string }) => w.reason === "databasePassword")?.message).toContain(
+      "admin password does not fit",
+    );
+    const begun = kept;
     const done = await callOp(
       b.panel,
       transferOps.importService,
@@ -496,8 +517,133 @@ describe("databases", () => {
       return b.panel.deps.secrets.open(row?.valueSealed as string, "service.secret");
     };
     expect(secret(adminPasswordSecret)).toBe("Admin.pass_12345");
-    expect(secret(exposedPasswordSecret)).not.toBe(injected);
-    expect(secret(exposedPasswordSecret)).toMatch(/^[A-Za-z0-9._~-]{12,128}$/);
+    expect(
+      b.panel.deps.db
+        .select()
+        .from(serviceSecrets)
+        .where(eq(serviceSecrets.serviceId, done.body.service.id))
+        .all()
+        .map((r) => r.name),
+    ).toEqual([adminPasswordSecret]);
+    expect(
+      b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, done.body.service.id)).get()?.exposedUser,
+    ).toBe("");
+  });
+
+  test("an old image in the file: the import runs this panel's image of the version", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    await callOp(
+      a.panel,
+      dbOps.create,
+      { projectId: a.projectId, name: "mongo", engine: "mongo", nodeId: a.nodeId, version: "8.0" },
+      {
+        cookie: a.cookie,
+      },
+    );
+    const svcId = a.panel.deps.db.select().from(services).where(eq(services.name, "mongo")).get()?.id as string;
+    // As a panel from before 0.2.9 left it: its catalog's 8.0 then.
+    const row = a.panel.deps.db.select().from(services).where(eq(services.id, svcId)).get();
+    a.panel.deps.db
+      .update(services)
+      .set({ spec: { ...readSpec(row?.spec), source: { type: "image", image: "mongo:8.0.12", registryId: null } } })
+      .where(eq(services.id, svcId))
+      .run();
+    const begun = await begin(b, (await exportZip(a, svcId)).bytes);
+    expect(begun.status).toBe(200);
+    const catalog = engineVersion("mongo", "8.0")?.image as string;
+    expect(catalog).not.toBe("mongo:8.0.12");
+    expect(begun.body.warnings.find((w: { reason: string }) => w.reason === "databaseImage")?.message).toBe(
+      `It ran mongo:8.0.12; it starts here on ${catalog}, this panel's image of MongoDB 8.0. Change it on the Version card of its Settings tab.`,
+    );
+    const done = await callOp(
+      b.panel,
+      transferOps.importService,
+      { projectId: b.projectId, importId: begun.body.importId },
+      { cookie: b.cookie },
+    );
+    expect(done.status).toBe(200);
+    const spec = readSpec(b.panel.deps.db.select().from(services).where(eq(services.id, done.body.service.id)).get()?.spec);
+    expect(spec.source).toEqual({ type: "image", image: catalog, registryId: null });
+    const fresh = await begin(b, (await exportZip(b, done.body.service.id)).bytes);
+    expect(fresh.body.warnings.map((w: { reason: string }) => w.reason)).not.toContain("databaseImage");
+  });
+
+  test("listeners follow databases.setExposure here: none for a version without TLS or a node too old to keep it TLS only", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const listener = (serviceId: string, s: Side, port: number) =>
+      s.panel.deps.db
+        .insert(portExposures)
+        .values({ serviceId, nodeId: s.nodeId, kind: "database", listenPort: port, targetPort: 3306, allowedCidrs: ["203.0.113.0/24"] })
+        .run();
+    // MariaDB 10.11 has no TLS: a listener from before 0.2.9 is closed there, and none is made here.
+    await callOp(
+      a.panel,
+      dbOps.create,
+      { projectId: a.projectId, name: "maria", engine: "mariadb", nodeId: a.nodeId, version: "10.11" },
+      {
+        cookie: a.cookie,
+      },
+    );
+    const maria = a.panel.deps.db.select().from(services).where(eq(services.name, "maria")).get()?.id as string;
+    listener(maria, a, 13306);
+    exposingNode(b);
+    const old = await begin(b, (await exportZip(a, maria)).bytes);
+    expect(old.status).toBe(200);
+    expect(old.body.extras.exposures).toEqual([
+      {
+        listenPort: 13306,
+        allowedCidrs: ["203.0.113.0/24"],
+        clash: false,
+        action: "skip",
+        refusal: engineVersion("mariadb", "10.11")?.noExposure,
+      },
+    ]);
+    const made = await callOp(
+      b.panel,
+      transferOps.importService,
+      { projectId: b.projectId, importId: old.body.importId },
+      { cookie: b.cookie },
+    );
+    expect(made.status).toBe(200);
+    expect(b.panel.deps.db.select().from(portExposures).where(eq(portExposures.serviceId, made.body.service.id)).all()).toEqual([]);
+    expect(made.body.skipped).toContainEqual({ what: "Database listeners", why: engineVersion("mariadb", "10.11")?.noExposure });
+
+    // MariaDB 11.4 on a node whose agent is from before 0.2.9: refused, as setExposure refuses it; added once the node can.
+    await callOp(
+      a.panel,
+      dbOps.create,
+      { projectId: a.projectId, name: "maria2", engine: "mariadb", nodeId: a.nodeId, version: "11.4" },
+      {
+        cookie: a.cookie,
+      },
+    );
+    const maria2 = a.panel.deps.db.select().from(services).where(eq(services.name, "maria2")).get()?.id as string;
+    listener(maria2, a, 13307);
+    const zip = (await exportZip(a, maria2)).bytes;
+    b.fleet.caps.set(b.nodeId, new Set([...(b.fleet.hub.capabilities(b.nodeId) ?? [])].filter((c) => c !== exposureCapability)));
+    const tooOld = await begin(b, zip);
+    expect(tooOld.body.extras.exposures[0]).toMatchObject({ listenPort: 13307, action: "skip" });
+    expect(tooOld.body.extras.exposures[0].refusal).toBe(
+      "The agent on node-b cannot expose MariaDB with its own user over TLS yet. Update the node, then expose it on its Connect tab.",
+    );
+    exposingNode(b);
+    const updated = await begin(b, zip);
+    expect(updated.body.extras.exposures).toEqual([
+      { listenPort: 13307, allowedCidrs: ["203.0.113.0/24"], clash: false, action: "add", refusal: null },
+    ]);
+    const added = await callOp(
+      b.panel,
+      transferOps.importService,
+      { projectId: b.projectId, importId: updated.body.importId },
+      {
+        cookie: b.cookie,
+      },
+    );
+    expect(added.status).toBe(200);
+    const got = await callOp(b.panel, dbOps.get, { serviceId: added.body.service.id }, { cookie: b.cookie });
+    expect(got.body.exposure).toMatchObject({ enabled: true, user: "root", allowedCidrs: ["203.0.113.0/24"] });
   });
 
   test("a version this panel does not offer blocks the import", async () => {

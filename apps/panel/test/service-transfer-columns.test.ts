@@ -59,7 +59,7 @@ const columns: Record<string, Record<string, Decision>> = {
     variant: "exported",
     database_name: "exported",
     admin_user: "exported",
-    exposed_user: "exported",
+    exposed_user: "out: the old exposed user of a database from before 0.2.9, waiting for its retirement; an import has none",
     tls_hostname: "out: a host name of the old node's edge; the listener uses a self-signed certificate until one is set",
     web_ui_idle_minutes: "exported",
     created_at: time,

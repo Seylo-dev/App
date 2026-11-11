@@ -74637,7 +74637,8 @@
                               "listenPort",
                               "allowedCidrs",
                               "clash",
-                              "action"
+                              "action",
+                              "refusal"
                             ],
                             "properties": {
                               "listenPort": {
@@ -74654,6 +74655,16 @@
                               },
                               "action": {
                                 "type": "string"
+                              },
+                              "refusal": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             }
                           }
@@ -75992,7 +76003,8 @@
                               "listenPort",
                               "allowedCidrs",
                               "clash",
-                              "action"
+                              "action",
+                              "refusal"
                             ],
                             "properties": {
                               "listenPort": {
@@ -76009,6 +76021,16 @@
                               },
                               "action": {
                                 "type": "string"
+                              },
+                              "refusal": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             }
                           }
@@ -77596,7 +77618,8 @@
                               "listenPort",
                               "allowedCidrs",
                               "clash",
-                              "action"
+                              "action",
+                              "refusal"
                             ],
                             "properties": {
                               "listenPort": {
@@ -77613,6 +77636,16 @@
                               },
                               "action": {
                                 "type": "string"
+                              },
+                              "refusal": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             }
                           }

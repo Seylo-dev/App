@@ -362,22 +362,30 @@ export function ReviewStep({
               onChange={(v) => choose({ backups: v as "mapByName" | "disabled" | "skip" })}
             />
           )}
-          {preview.extras.exposures.map((e) => (
-            <ChoiceRow
-              key={e.listenPort}
-              label={`${t("serviceTransfer.review.exposures")}: ${t("serviceTransfer.review.listener", { port: e.listenPort, cidrs: e.allowedCidrs.length ? e.allowedCidrs.join(", ") : t("serviceTransfer.review.anyone") })}${e.clash ? ` (${t("serviceTransfer.review.clash")})` : ""}`}
-              value={e.action}
-              options={{ add: t("serviceTransfer.review.add"), skip: t("serviceTransfer.review.skip") }}
-              onChange={(v) =>
-                choose({
-                  exposures: preview.extras.exposures.map((x) => ({
-                    listenPort: x.listenPort,
-                    action: (x.listenPort === e.listenPort ? v : x.action) as "add" | "skip",
-                  })),
-                })
-              }
-            />
-          ))}
+          {preview.extras.exposures.map((e) => {
+            const label = `${t("serviceTransfer.review.exposures")}: ${t("serviceTransfer.review.listener", { port: e.listenPort, cidrs: e.allowedCidrs.length ? e.allowedCidrs.join(", ") : t("serviceTransfer.review.anyone") })}${e.clash ? ` (${t("serviceTransfer.review.clash")})` : ""}`;
+            // Not one this panel can open (databases.setExposure's rules): say why instead of offering it.
+            return e.refusal ? (
+              <p key={e.listenPort} className="m-0 text-ink-strong" data-testid="import-exposure-refused">
+                {label}: <span className="text-muted-foreground">{e.refusal}</span>
+              </p>
+            ) : (
+              <ChoiceRow
+                key={e.listenPort}
+                label={label}
+                value={e.action}
+                options={{ add: t("serviceTransfer.review.add"), skip: t("serviceTransfer.review.skip") }}
+                onChange={(v) =>
+                  choose({
+                    exposures: preview.extras.exposures.map((x) => ({
+                      listenPort: x.listenPort,
+                      action: (x.listenPort === e.listenPort ? v : x.action) as "add" | "skip",
+                    })),
+                  })
+                }
+              />
+            );
+          })}
           {preview.extras.tunnel && <p className="m-0 text-muted-foreground">{t("serviceTransfer.review.tunnel")}</p>}
           {preview.extras.maintenance && <p className="m-0 text-muted-foreground">{t("serviceTransfer.review.maintenance")}</p>}
           {preview.extras.deployTrigger && <p className="m-0 text-muted-foreground">{t("serviceTransfer.review.deployTrigger")}</p>}
