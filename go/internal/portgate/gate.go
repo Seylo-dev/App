@@ -45,6 +45,11 @@ type Listener struct {
 	// first byte). TLSHost names the certificate (Config.Certificate).
 	TerminateTLS bool
 	TLSHost      string
+	// RequireTLS checks the first bytes of each connection to a database
+	// that negotiates TLS inside its protocol (exposed Postgres, MySQL and
+	// MariaDB) and refuses a client that does not ask for TLS, with the
+	// protocol's own error. What it read goes to the container unchanged.
+	RequireTLS TLSCheck
 }
 
 // Resolver returns the address ("10.0.3.4:5432") to relay a connection for

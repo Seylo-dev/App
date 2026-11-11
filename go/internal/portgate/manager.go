@@ -135,6 +135,7 @@ type active struct {
 	// so connection goroutines read them without locks.
 	svc, lid, redirect string
 	cport              uint32
+	check              TLSCheck
 
 	// want is replaced on sync under Manager.mu.
 	want  Listener
@@ -249,6 +250,7 @@ func ListenersFor(spec *agentv1.ServiceSpec) ([]Listener, []error) {
 			ID: "database", ServiceID: id, HostPort: db.GetExposure().GetHostPort(), ContainerPort: port,
 			AllowedSourceCIDRs: db.GetExposure().GetAllowedSourceCidrs(),
 			TerminateTLS:       dbengine.TLSAtGate(db.GetEngine()), TLSHost: db.GetExposure().GetTlsHostname(),
+			RequireTLS: tlsCheckFor(db.GetEngine()),
 		})
 	}
 	return out, errs
@@ -363,7 +365,8 @@ func (m *Manager) Sync(ctx context.Context, serviceID string, wanted []Listener)
 
 func (a *active) sameSocket(w Listener) bool {
 	return a.want.Mode == w.Mode && (w.HostPort == 0 || w.HostPort == a.port) && a.want.ContainerPort == w.ContainerPort &&
-		a.want.RedirectURL == w.RedirectURL && a.want.TerminateTLS == w.TerminateTLS && a.want.TLSHost == w.TLSHost
+		a.want.RedirectURL == w.RedirectURL && a.want.TerminateTLS == w.TerminateTLS && a.want.TLSHost == w.TLSHost &&
+		a.want.RequireTLS == w.RequireTLS
 }
 
 func parseCIDRs(list []string) ([]netip.Prefix, error) {
@@ -408,7 +411,7 @@ func (m *Manager) start(w Listener, allowed []netip.Prefix) (*active, error) {
 	if w.TerminateTLS {
 		ln = tls.NewListener(ln, m.tlsConfig(w.ServiceID, w.TLSHost))
 	}
-	a := &active{svc: w.ServiceID, lid: w.ID, redirect: w.RedirectURL, cport: w.ContainerPort,
+	a := &active{svc: w.ServiceID, lid: w.ID, redirect: w.RedirectURL, cport: w.ContainerPort, check: w.RequireTLS,
 		want: w, port: bound, ln: ln, allowed: allowed, conns: map[net.Conn]struct{}{}, clients: map[net.Conn]struct{}{},
 		sources: map[netip.Addr]int{}}
 	if w.Mode == ModeRedirect {
@@ -604,6 +607,17 @@ func (m *Manager) relay(a *active, client net.Conn) {
 	if m.cfg.Resolve == nil {
 		return
 	}
+	// A Postgres client speaks first: a plain login is refused before the
+	// database sees the connection.
+	var first []byte
+	sslRequest := false
+	if a.check == TLSCheckPostgres {
+		var err error
+		if first, sslRequest, err = postgresStart(client, postgresStartWait); err != nil {
+			m.log.Debug("portgate refused a database client", "service_id", a.svc, "listener", a.lid, "err", err)
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.ConnectTimeout)
 	upstream, err := m.dial(ctx, a)
 	cancel()
@@ -623,7 +637,38 @@ func (m *Manager) relay(a *active, client net.Conn) {
 	}
 	defer a.untrack(upstream)
 	defer upstream.Close()
+	if err := m.requireTLS(a, client, upstream, first, sslRequest); err != nil {
+		m.log.Debug("portgate refused a database client", "service_id", a.svc, "listener", a.lid, "err", err)
+		return
+	}
 	pipe(client, upstream, m.idleTimeout(a))
+}
+
+// requireTLS finishes a listener's TLS check once the container is
+// dialed: Postgres' opening goes to the database (and the answer to an
+// SSLRequest comes back through postgresAnswer); MySQL's greeting goes to
+// the client and the head of its answer, once it asks for TLS, to the
+// database. Nil for listeners without a check.
+func (m *Manager) requireTLS(a *active, client, upstream net.Conn, first []byte, sslRequest bool) error {
+	if a.check == TLSCheckMySQL {
+		var err error
+		if first, err = mysqlStart(client, upstream, mysqlStartWait); err != nil {
+			return err
+		}
+	}
+	if len(first) == 0 {
+		return nil
+	}
+	_ = upstream.SetWriteDeadline(time.Now().Add(m.cfg.ConnectTimeout))
+	_, err := upstream.Write(first)
+	_ = upstream.SetWriteDeadline(time.Time{})
+	if err != nil {
+		return err
+	}
+	if sslRequest {
+		return postgresAnswer(client, upstream, postgresStartWait)
+	}
+	return nil
 }
 
 // dial connects to the service's container port: the address of a

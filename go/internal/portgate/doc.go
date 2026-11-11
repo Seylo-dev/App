@@ -1,8 +1,11 @@
 // Package portgate owns direct IP:port access. Instead of Docker published
 // ports (which bypass UFW and similar firewalls), the agent listens itself
 // and relays TCP to the container: first-run access before a domain
-// exists, timed exposes locked to source addresses, and database exposure
-// (the database speaks its own TLS through the relay). Once a domain is
+// exists, timed exposes locked to source addresses, and database exposure,
+// TLS only with the database's own user (the gate terminates TLS for
+// Mongo, ClickHouse and the Redis-like engines; Postgres, MySQL and
+// MariaDB speak their own TLS through the relay, and the gate refuses
+// their clients that do not ask for it, RequireTLS). Once a domain is
 // live a public port becomes an HTTP redirector (308) to it, handing
 // cookies over through the edge, until its close_at. Expiries run on local
 // timers, so they hold while the panel is unreachable, and a listener past
