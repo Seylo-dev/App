@@ -70552,6 +70552,7 @@
                           "size",
                           "sha256",
                           "status",
+                          "received",
                           "error"
                         ],
                         "properties": {
@@ -70581,6 +70582,10 @@
                                 "type": "string"
                               }
                             ]
+                          },
+                          "received": {
+                            "minimum": 0,
+                            "type": "integer"
                           },
                           "error": {
                             "anyOf": [
@@ -76224,8 +76229,8 @@
     "/api/v1/serviceTransfer.uploadTicket": {
       "post": {
         "operationId": "serviceTransfer.uploadTicket",
-        "summary": "Get an upload link for an import's archive",
-        "description": "Returns a one-minute link to PUT one pending entry of an import (the uploaded archive of an upload app) with exactly the manifest's size; the panel checks its sha256 before it keeps it. Owners and admins only.",
+        "summary": "Get an upload link for a part of an import's archive",
+        "description": "Returns a one-minute link to PUT one part (at most 32 MiB) of a pending entry of an import (the uploaded archive of an upload app), starting at `offset`, which must be the bytes the panel already has (getImport's received; 0 starts over). Once the last part is in, the panel checks the whole entry's size and sha256 against the manifest before it keeps it. Owners and admins only.",
         "tags": [
           "serviceTransfer"
         ],
@@ -76247,7 +76252,8 @@
                 "required": [
                   "projectId",
                   "importId",
-                  "entry"
+                  "entry",
+                  "offset"
                 ],
                 "properties": {
                   "projectId": {
@@ -76263,6 +76269,11 @@
                   "entry": {
                     "maxLength": 300,
                     "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer"
                   }
                 }
               }

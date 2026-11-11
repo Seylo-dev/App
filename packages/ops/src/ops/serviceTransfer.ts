@@ -849,16 +849,25 @@ export const ImportEntry = Type.Object({
   size: Type.Integer({ minimum: 0 }),
   sha256: Sha256,
   status: Type.Union([Type.Literal("pending"), Type.Literal("done"), Type.Literal("failed")]),
+  /** Bytes the panel has; the next part starts here. */
+  received: Type.Integer({ minimum: 0 }),
   error: Type.Union([Type.String(), Type.Null()]),
 });
+
+/** An entry goes up in parts of at most this many bytes (under Cloudflare's and Bun's request body limits). */
+export const uploadPartBytes = 32 * 1024 * 1024;
 
 export const uploadTicket = defineOp({
   id: "serviceTransfer.uploadTicket",
   kind: "mutation",
-  summary: "Get an upload link for an import's archive",
+  summary: "Get an upload link for a part of an import's archive",
   description:
-    "Returns a one-minute link to PUT one pending entry of an import (the uploaded archive of an upload app) with exactly the manifest's size; the panel checks its sha256 before it keeps it. Owners and admins only.",
-  input: Type.Object({ ...ImportRef, entry: Type.String({ maxLength: 300 }) }),
+    "Returns a one-minute link to PUT one part (at most 32 MiB) of a pending entry of an import (the uploaded archive of an upload app), starting at `offset`, which must be the bytes the panel already has (getImport's received; 0 starts over). Once the last part is in, the panel checks the whole entry's size and sha256 against the manifest before it keeps it. Owners and admins only.",
+  input: Type.Object({
+    ...ImportRef,
+    entry: Type.String({ maxLength: 300 }),
+    offset: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  }),
   output: StreamTicket,
   sensitive: { output: ["url", "ticket"] },
   permission: importPermission,

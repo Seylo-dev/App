@@ -335,8 +335,14 @@ export async function readEntry(source: ZipSource, entry: ZipEntry, options: { m
 }
 
 async function inflate(raw: Uint8Array, maxBytes: number, name: string): Promise<Uint8Array> {
-  const stream = new Blob([raw as BlobPart]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  const reader = stream.getReader();
+  const inflater = new DecompressionStream("deflate-raw") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(raw);
+      controller.close();
+    },
+  });
+  const reader = source.pipeThrough(inflater).getReader();
   const parts: Uint8Array[] = [];
   let total = 0;
   try {

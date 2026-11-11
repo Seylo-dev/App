@@ -2,13 +2,14 @@
 // about one, and the guard that keeps a clone from deploying (and its
 // source from starting) while the copy reads or writes their folders.
 // Also the guard for a move to another node (services/move.ts) while it
-// copies the service's volumes.
+// copies the service's volumes, and for an import that still receives the
+// file's uploaded archive (modules/serviceTransfer).
 
 import { OpError, type services as serviceOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
-import { deployments, serviceCopies } from "../../db/schema";
+import { deployments, serviceCopies, serviceImports } from "../../db/schema";
 
 export type ServiceCopyRow = typeof serviceCopies.$inferSelect;
 export type DataCopy = Static<typeof serviceOps.DataCopy>;
@@ -66,8 +67,22 @@ export function activeCopy(
   return { row, role: row.serviceId === serviceId ? "clone" : "source" };
 }
 
-/** CONFLICT while a copy is busy with the service's folders. */
+/** An import that created the service and still receives entries of its file. */
+export function activeImport(db: PanelDb, serviceId: string): boolean {
+  return (
+    db
+      .select({ id: serviceImports.id })
+      .from(serviceImports)
+      .where(and(eq(serviceImports.serviceId, serviceId), eq(serviceImports.status, "receiving")))
+      .get() !== undefined
+  );
+}
+
+/** CONFLICT while a copy is busy with the service's folders, or an import still sends it what it needs. */
 export function assertNoActiveCopy(db: PanelDb, serviceId: string, options: { anySource?: boolean } = {}): void {
+  if (activeImport(db, serviceId)) {
+    throw new OpError("CONFLICT", "It is still receiving its imported files. Finish or discard the import first.", { reason: "importing" });
+  }
   const copy = activeCopy(db, serviceId, options);
   if (!copy) return;
   throw new OpError(

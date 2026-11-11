@@ -56,6 +56,10 @@ export type ServiceImportStatus = "previewing" | "receiving" | "done" | "failed"
 
 export interface ImportEntry extends TransferEntry {
   status: "pending" | "done" | "failed";
+  /** Bytes received so far (parts go up in order). */
+  received: number;
+  /** The archive's name for the Source tab. */
+  fileName: string;
   error: string | null;
 }
 
