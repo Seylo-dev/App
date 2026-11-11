@@ -44,7 +44,7 @@ jobs:
       # minisign signs the fake release the installer tests install from
       # (they skip without it); dash is the /bin/sh they run the installer under.
       - name: Installer test tools
-        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends minisign dash jq
+        run: scripts/ci/install-minisign.sh
 
       - run: make install
       - run: make check-gen
