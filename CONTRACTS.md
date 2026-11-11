@@ -3597,13 +3597,37 @@ members never hold them. Every op is `mcp: false`.
   specs are built from the engine (`databaseSpec`, `boxSpec`), never taken
   from the file; a version the panel does not offer blocks
   (`engineVersion`); exposed users are derived; database logins come from
-  the file when it has them, else new ones. What reads the source
-  (`mapping.ts`) is the row the file's names point at, else a `needs`
-  choice: another row, `createFromFile` (the included login, needs
-  `git.manage`/`registries.manage`), or none (a repository source becomes
-  no source). Shared variables: missing ones are added from the file's
-  lines (`overwrite` replaces ones that differ, `skip` leaves them); every
-  existing service a reference reads from is listed (`readsFrom`).
+  the file only when they fit `databases.create`'s password rule (12 to
+  128 of `A-Za-z0-9._~-`: `engines.ts` writes them into SQL and shell
+  input as they are), else new ones with a `databasePassword` warning.
+  What reads the source (`mapping.ts`) is the row the file's names point
+  at, else a `needs` choice: another row, `createFromFile` (the included
+  login, needs `git.manage`/`registries.manage`), or none (a repository
+  source becomes no source). `createFromFile` builds the row through
+  `git.createCredential`'s checks (`git/credentials.ts` `newCredential`:
+  the op's input schema, known_hosts lines for the host, the host lower
+  case, a key the panel can read, whose public key and fingerprint come
+  from the key, never from the file; origin `manual`) or
+  `registries.create`'s input schema (`registryLogin`; the login itself is
+  not tried, so a registry the panel cannot reach does not stop an
+  import); one that does not pass is a `sourceAccess` blocker. Shared
+  variables: a file value is taken only when it is one `KEY=value` of
+  that variable over the whole line, without syntax problems or
+  references (what `env.setShared` takes; anything else is `noValue` with
+  a `sharedRefused` warning, so a value cannot carry more lines); missing
+  ones are added (`overwrite` replaces ones that differ, `skip` leaves
+  them), merged at import into the text stored then, inside the
+  transaction (`mergeSharedLines`: a variable someone added since the
+  preview stays theirs; the result stays under 256 KiB); every existing
+  service a reference reads from is listed (`readsFrom`). The new
+  automatic domain takes the old automatic domain's access rules through
+  the same checks; when they do not pass or the file left the basic auth
+  hashes out, no automatic domain is offered. First-run IP:port access
+  opens only for an app whose file had no domains at all (the file does
+  not say whether the old one's IP:port was closed, and a skipped domain
+  may have been the only way in, behind basic auth or an allow list);
+  otherwise an app left without a domain stays closed with an
+  `unreachable` warning.
   Defaults: push deploys off, the tunnel off, deploy when ready from the
   file's `stopped`; from the same panel (`manifest.panel.id`) cron jobs,
   uptime checks and backups arrive switched off; channels and backup
@@ -3616,7 +3640,9 @@ members never hold them. Every op is `mcp: false`.
 - `serviceTransfer.import` (fresh sign-in; `passwords` is sensitive and the
   only way basic auth passwords arrive, bcrypt cost 10) refuses while a
   blocker or a `needs` choice is open, then writes everything in one
-  transaction (credential from the file, shared variables,
+  transaction (credential from the file, after `assertGitSourceTarget`
+  with the caller for every git source, so an admin's internal host is
+  recorded like saving the source does; shared variables;
   `services/portable.ts` `materializeService`, the import row to
   `receiving` or `done` with the sealed file wiped). The service is created
   stopped and never deployed (parked on its node); repository webhooks are
@@ -3638,9 +3664,13 @@ members never hold them. Every op is `mcp: false`.
   (CONFLICT `reason: importing`, `copies.ts` `activeImport`).
 - `serviceTransfer.getImport` tells a reloaded page the status and each
   entry's received bytes; `serviceTransfer.discardImport` deletes the row
-  and, while it is not done, the service (`deleteServiceTree`); it waits
-  while a part is uploading (`reason: uploading`). Only the person who
-  began an import goes on with it (`reason: notYours`).
+  and the part file and, only while the row is `receiving`, the service
+  (`deleteServiceTree`); a protected service or one with deployments is
+  refused there (CONFLICT `reason: protected` or `deployed`). A `failed`
+  row's service is the owner's (the sweep told them to upload the code on
+  the Source tab) and a `done` one's is in use: both stay. It waits while
+  a part is uploading (`reason: uploading`). Only the person who began an
+  import goes on with it (`reason: notYours`).
 - The hourly `serviceTransfer.sweep`: `ready` exports past 2 minutes lose
   their payload, exports go after 7 days, `previewing` imports at their
   expiry, `receiving` ones 48 h after their last part turn `failed` (the
