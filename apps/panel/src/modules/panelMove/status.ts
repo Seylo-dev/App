@@ -1,11 +1,14 @@
 // panelMove.status, from whichever record says the most about now: the
 // move running in memory, the old copy's panelMoveOut after a restart, the
 // moved panel's panelMoveArrival (waiting for its first agent) or
-// panelMoveDone, or the last failure. People without settings.view get
-// the state and the target's name only, for the banner.
+// panelMoveDone, or the last failure. A failure newer than panelMoveDone
+// wins only once that move's old copy is deleted (or its node removed):
+// until then the done state stays, with the failure in `error`, so the card
+// keeps Delete the old copy. People without settings.view get the state
+// and the target's name only, for the banner.
 
 import type { panelMove } from "@seylo/ops";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { nodes } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { getSetting } from "../../settings";
@@ -119,7 +122,11 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
   }
   const done = getSetting(deps.db, "panelMoveDone");
   const failure = getSetting(deps.db, "panelMoveFailure");
-  if (failure && (!done || failure.at > done.at)) {
+  const failed = failure ? { step: failure.step, message: failure.message } : null;
+  // A later move that failed never hides an old copy that is still on its server: the done state stays
+  // (Delete the old copy), with that failure in `error`.
+  const oldCopyLeft = done !== undefined && !done.oldCopyRemoved && nodeExists(deps, done.fromNodeId);
+  if (failure && (!done || failure.at > done.at) && !oldCopyLeft) {
     return {
       ...idle,
       state: "failed",
@@ -129,7 +136,7 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
       targetAddress: failure.address,
       step: failure.step,
       startedAt: iso(failure.startedAt),
-      error: { step: failure.step, message: failure.message },
+      error: failed,
     };
   }
   if (done) {
@@ -158,9 +165,14 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
       oldCopyRemoved: done.oldCopyRemoved === true,
       domain: done.domain,
       oldPanelRunning: !done.oldPanelRetired && !done.oldCopyRemoved && (done.retireTries ?? 0) >= 5,
+      error: failure && failure.at > done.at ? failed : null,
     };
   }
   return idle;
+}
+
+function nodeExists(deps: Pick<Deps, "db">, nodeId: string): boolean {
+  return deps.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.id, nodeId)).get() !== undefined;
 }
 
 /** panelMove.status for a caller; without settings.view only what the banner shows. */

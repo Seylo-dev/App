@@ -1045,6 +1045,40 @@ describe("the moved panel", () => {
     expect(row?.input).toMatchObject({ freedBytes: 123_456 });
   });
 
+  test("a later move that failed never hides an old copy still on its server", async () => {
+    const done: PanelMoveDone = { ...arrival(), at: Date.now() - 60_000 };
+    setSetting(panel.deps.db, "panelMoveDone", done);
+    setSetting(panel.deps.db, "panelMoveFailure", {
+      moveId: "f".repeat(16),
+      targetNodeId: otherId,
+      targetNodeName: "b",
+      address: "203.0.113.30",
+      step: "staging",
+      message: "b could not reach the moved panel.",
+      startedAt: Date.now() - 30_000,
+      at: Date.now(),
+    });
+    const status = (await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body;
+    // Delete the old copy stays on the card, with the failure next to it.
+    expect(status).toMatchObject({
+      state: "done",
+      side: "new",
+      moveId: done.moveId,
+      fromNodeId: fromId,
+      oldCopyRemoved: false,
+      error: { step: "staging", message: "b could not reach the moved panel." },
+    });
+    // Once it is deleted, the failure is what the card shows.
+    setSetting(panel.deps.db, "panelMoveDone", { ...done, oldCopyRemoved: true });
+    expect((await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body).toMatchObject({
+      state: "failed",
+      moveId: "f".repeat(16),
+    });
+    // So it does once the old node was removed: nothing is left to delete.
+    setSetting(panel.deps.db, "panelMoveDone", { ...done, fromNodeId: "0".repeat(16) });
+    expect((await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body.state).toBe("failed");
+  });
+
   test("never deletes the data of the node the panel runs on", async () => {
     setSetting(panel.deps.db, "panelMoveDone", { ...arrival(), at: Date.now() });
     const res = await callOp(panel, panelMove.removeOldCopy, {}, { cookie: owner.cookie });
