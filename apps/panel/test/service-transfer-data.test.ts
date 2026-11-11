@@ -481,6 +481,31 @@ describe("import with volume data", () => {
     expect([late.status, late.body.error.details.reason]).toEqual([409, "offset"]);
   });
 
+  test("starting a volume over cancels the node's stream before the next one opens, even while a write waits for the node", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const { id, data } = await appWithData(a);
+    const { ref } = await imported(b, (await exportZip(a, id, { volumes: ["uploads"] })).bytes);
+    const newId = (await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie })).body.service.id as string;
+    // Each ImportVolume that opens: how many the panel had cancelled by then.
+    const cancelledAtOpen: number[] = [];
+    const hub = b.panel.deps.agents;
+    const openRaw = hub.openRaw.bind(hub);
+    hub.openRaw = ((nodeId, method, request, options) => {
+      if (method === "importVolume") cancelledAtOpen.push(b.fleet.cancelled.length);
+      return openRaw(nodeId, method, request, options);
+    }) as typeof hub.openRaw;
+    // The node takes no bytes of the first stream: the panel's write to it waits.
+    b.fleet.holdImportWrites = 1;
+    expect(await put(b, ref, entryName, 0, data.subarray(0, 10_000))).toEqual({ status: 200, body: { received: 10_000, done: false } });
+    // The client starts over from 0 (any API client does after a failure).
+    expect((await put(b, ref, entryName, 0, data)).body).toEqual({ received: data.length, done: true });
+    expect(b.fleet.cancelled).toEqual([`importVolume ${newId}/uploads`]);
+    expect(cancelledAtOpen).toEqual([0, 1]);
+    expect(volumeOf(b, newId, "uploads")).toEqual(data);
+    expect(transfersInFlight(b.panel.deps.db)).toBeNull();
+  });
+
   test("a node without volume.import-limits.v1 takes no data from a file; leaving the data out imports the rest", async () => {
     const a = await side();
     const b = await side("node-b");

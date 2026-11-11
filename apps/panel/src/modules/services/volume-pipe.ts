@@ -50,7 +50,8 @@ export function readVolume(
  * Sends `chunks` into ImportVolume of `serviceId`'s volume on `nodeId`
  * (replacing what is there) and returns the bytes sent and the file bytes
  * the node wrote. A failure on either side cancels the node's stream and
- * throws; `kind` names the pipe for pipesRunning.
+ * throws; so does `signal`, at once, even while a write waits for the
+ * node. `kind` names the pipe for pipesRunning.
  */
 export async function pipeIntoVolume(
   deps: Pick<Deps, "agents" | "db">,
@@ -62,6 +63,7 @@ export async function pipeIntoVolume(
     sizeBytes?: number;
     limits?: ImportRequest;
     kind?: string;
+    signal?: AbortSignal;
   },
 ): Promise<{ sent: number; written: number }> {
   const imported = deps.agents.openRaw(input.nodeId, "importVolume", {
@@ -76,6 +78,9 @@ export async function pipeIntoVolume(
   const pipe: OpenPipe = { serviceId: input.serviceId, kind: input.kind ?? "copy", cancel: (reason) => imported.cancel(reason) };
   const open = openOn(deps.db);
   open.add(pipe);
+  const stop = () => imported.cancel(String(input.signal?.reason ?? "the copy was stopped"));
+  if (input.signal?.aborted) stop();
+  else input.signal?.addEventListener("abort", stop, { once: true });
   const chunks = input.chunks[Symbol.asyncIterator]();
   // The node may end the stream first (no space, a limit, a cancel): stop waiting for bytes then.
   const refused = imported.response.then(
@@ -101,6 +106,7 @@ export async function pipeIntoVolume(
     void chunks.return?.()?.catch(() => undefined);
     throw error;
   } finally {
+    input.signal?.removeEventListener("abort", stop);
     open.delete(pipe);
   }
 }

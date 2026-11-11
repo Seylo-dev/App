@@ -14,7 +14,10 @@
 //   node checks the same hash and empties the volume on any failure. A
 //   part cut short keeps what arrived (the next one goes on from there);
 //   uploadIdleMinutes without a part, a panel restart or a failure on the
-//   node start the volume over.
+//   node start the volume over. Starting over cancels the node's stream and
+//   waits for the panel's side of it to end before the next one opens; the
+//   node runs one import per volume at a time, so the cancelled one's
+//   cleanup ends before the new one unpacks (volumes.Transfer.Import).
 //
 // When the last entry is in the import is done and, with deploy when
 // ready, the service deploys. Each finished or failed entry is audited
@@ -55,6 +58,8 @@ interface VolumeSession {
   /** Bytes handed to the node. */
   received: number;
   pipe: Promise<{ sent: number; written: number }>;
+  /** Cancels the node's stream right away, even while a write waits for it. */
+  stop: AbortController;
   failed: unknown;
   idle: ReturnType<typeof setTimeout> | null;
 }
@@ -67,17 +72,23 @@ export function liveReceived(importId: string, path: string): number {
   return sessions.get(keyOf(importId, path))?.received ?? 0;
 }
 
-function closeSession(key: string, why: string): void {
+/** Ends a volume's stream; resolves once the panel's side of it has ended. */
+function closeSession(key: string, why: string): Promise<void> {
   const session = sessions.get(key);
-  if (!session) return;
+  if (!session) return Promise.resolve();
   sessions.delete(key);
   if (session.idle) clearTimeout(session.idle);
+  session.stop.abort(why);
   session.feed.fail(new OpError("CONFLICT", why, { reason: "cancelled" }));
+  return session.pipe.then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 /** Ends an import's open volume streams (discard, sweep): their nodes empty what arrived. */
 export function closeSessions(importId: string, why: string): void {
-  for (const [key, session] of sessions) if (session.importId === importId) closeSession(key, why);
+  for (const [key, session] of sessions) if (session.importId === importId) void closeSession(key, why);
 }
 
 /** What the panel holds of each entry right now. */
@@ -167,7 +178,7 @@ export async function receivePart(deps: Deps, input: Part): Promise<Response | {
     // A part that does not fit starts the archive over: what is on disk no longer matches any offset.
     if (!volume) await rm(partPath(deps, row.id), { force: true });
     // A volume's stream ends with it; its node empties what arrived.
-    else closeSession(keyOf(row.id, entry.path), "The volume's upload failed.");
+    else void closeSession(keyOf(row.id, entry.path), "The volume's upload failed.");
     return failEntry(error);
   } finally {
     uploadsRunning.delete(row.id);
@@ -246,7 +257,8 @@ async function volumePart(
   const key = keyOf(p.row.id, p.entry.path);
   let session = sessions.get(key);
   if (p.offset === 0 || !session) {
-    closeSession(key, "The volume's upload started over.");
+    // The old stream is cancelled before the new one opens.
+    await closeSession(key, "The volume's upload started over.");
     session = await openSession(deps, p.row, p.entry, p.serviceId);
     sessions.set(key, session);
   }
@@ -270,7 +282,7 @@ async function volumePart(
       const chunk = next.value;
       got += chunk.length;
       if (got > p.length) {
-        closeSession(key, "A part was longer than its Content-Length.");
+        void closeSession(key, "A part was longer than its Content-Length.");
         throw new OpError("BAD_REQUEST", "The part is longer than its Content-Length.", { reason: "size" });
       }
       if (s.failed) throw s.failed;
@@ -289,7 +301,7 @@ async function volumePart(
     p.save({ received: s.received, status: "pending", error: null });
     s.idle = setTimeout(() => {
       if (sessions.get(key) !== s) return;
-      closeSession(key, "No part arrived for a while.");
+      void closeSession(key, "No part arrived for a while.");
       p.save({
         received: 0,
         status: "failed",
@@ -307,6 +319,7 @@ async function volumePart(
     const error = new OpError("BAD_REQUEST", "The volume's data does not match the file's manifest (sha256). Pick the file again.", {
       reason: "checksum",
     });
+    s.stop.abort(error.message);
     s.feed.fail(error);
     await s.pipe.catch(() => undefined);
     throw error;
@@ -332,12 +345,14 @@ async function openSession(deps: Deps, row: ImportRow, entry: ImportEntry, servi
   // The node parks the stopped, never deployed service first, so its folder is the service's.
   await deps.agents.desired.settled();
   const feed = new ChunkFeed();
+  const stop = new AbortController();
   const session: VolumeSession = {
     importId: row.id,
     path: entry.path,
     feed,
     hash: createHash("sha256"),
     received: 0,
+    stop,
     failed: null,
     idle: null,
     pipe: pipeIntoVolume(deps, {
@@ -348,6 +363,7 @@ async function openSession(deps: Deps, row: ImportRow, entry: ImportEntry, servi
       sizeBytes: entry.size,
       limits: { maxBytes: entry.maxBytes ?? 0, maxEntries: entry.maxEntries ?? 0, sha256: entry.sha256 },
       kind: "import",
+      signal: stop.signal,
     }),
   };
   session.pipe.catch((error: unknown) => {

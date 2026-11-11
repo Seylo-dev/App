@@ -78,6 +78,8 @@ export class FakeFleet {
   volumeScript: (nodeId: string, request: { serviceId: string; volume: string }) => VolumeScript = () => ({});
   /** Raw streams the panel cancelled, as `${method} ${serviceId}/${volume}`. */
   readonly cancelled: string[] = [];
+  /** How many of the next ImportVolume streams take no bytes: their writes wait until they are cancelled. */
+  holdImportWrites = 0;
   /** Called with every chunk an ExportVolume hands out (to look at the panel meanwhile). */
   onExportChunk: ((nodeId: string, key: string) => void) | null = null;
   private seq = new Map<string, bigint>();
@@ -228,6 +230,8 @@ export class FakeFleet {
     }
     if (method === "importVolume" || method === "uploadBuildContext") {
       const chunks: Uint8Array[] = [];
+      const hold = method === "importVolume" && fleet.holdImportWrites > 0;
+      if (hold) fleet.holdImportWrites--;
       let finish!: () => void;
       let abort!: (e: unknown) => void;
       let cancelled: OpError | null = null;
@@ -257,6 +261,11 @@ export class FakeFleet {
         writer: {
           async write(chunk: Uint8Array) {
             if (cancelled) throw cancelled;
+            // Like a node that grants no window: the write waits, and fails once the stream ends.
+            if (hold) {
+              await ended.catch(() => undefined);
+              throw cancelled ?? new Error("stream already closed");
+            }
             chunks.push(new Uint8Array(chunk));
           },
           end: () => finish(),
