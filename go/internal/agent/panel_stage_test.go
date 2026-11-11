@@ -284,11 +284,12 @@ func TestTargetDialsTheMovedPanelOnlyAfterTheSwitch(t *testing.T) {
 		cfg, _ := LoadConfig(layout.ConfigFile())
 		return cfg != nil && cfg.PanelURL == moved.URL() && cfg.Staged == nil
 	})
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if !slices.Equal(w.ids, []string{stageMove}) {
-		t.Fatalf("arrivals = %v", w.ids)
-	}
+	// The arrival is reported right after config.yml is written, not with it.
+	waitUntil(t, "the arrival reported once", func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return slices.Equal(w.ids, []string{stageMove})
+	})
 }
 
 // ImportPanelData, ImportRegistry, StartMovedPanel and CommitMovedPanel
