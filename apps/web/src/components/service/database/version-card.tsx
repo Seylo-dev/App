@@ -89,6 +89,7 @@ export function VersionCard({ service }: { service: ServiceDetail }) {
       <div className="flex flex-col gap-4 pb-5">
         <KeyValue
           layout="grid"
+          className="max-w-[520px]"
           items={[
             { label: t("databaseVersion.current"), value: `${engine} ${data.version}${data.variant ? ` + ${data.variant}` : ""}` },
             { label: t("databaseVersion.image"), value: data.image, mono: true },
