@@ -4320,8 +4320,15 @@ sha_of() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 25
 
 # p42_begin <zip> <passphrase> <manifest text>: importBegin's input from what unzip -p prints.
 p42_begin() {
-  jq -nc --arg p "$(project_id e2e-imports)" --arg m "$3" --arg s "$(unzip -p "$1" manifest.sig)" --arg e "$(unzip -p "$1" secrets.enc)" --arg pw "$2" \
-    '{projectId:$p, manifest:$m, signature:$s, secretsEnc:$e, passphrase:$pw}'
+  # The file's entries go as their exact bytes (--rawfile), like the web app sends them: $(...) would drop
+  # a trailing newline the signature covers. A third argument replaces the manifest (the tamper test).
+  if [ $# -ge 3 ]; then
+    jq -nc --arg p "$(project_id e2e-imports)" --arg m "$3" --rawfile s <(unzip -p "$1" manifest.sig) --rawfile e <(unzip -p "$1" secrets.enc) --arg pw "$2" \
+      '{projectId:$p, manifest:$m, signature:$s, secretsEnc:$e, passphrase:$pw}'
+  else
+    jq -nc --arg p "$(project_id e2e-imports)" --rawfile m <(unzip -p "$1" manifest.json) --rawfile s <(unzip -p "$1" manifest.sig) --rawfile e <(unzip -p "$1" secrets.enc) --arg pw "$2" \
+      '{projectId:$p, manifest:$m, signature:$s, secretsEnc:$e, passphrase:$pw}'
+  fi
 }
 
 # p42_upload <import ref json> <entry> <file>: sends an entry's bytes the
@@ -4368,7 +4375,7 @@ EOF
 p42_import() {
   local preview imp ref out extra=${3:-}
   [ -n "$extra" ] || extra='{}'
-  preview=$(api serviceTransfer.importBegin "$(p42_begin "$1" "e2e passphrase 42" "$(unzip -p "$1" manifest.json)")") || return 1
+  preview=$(api serviceTransfer.importBegin "$(p42_begin "$1" "e2e passphrase 42")") || return 1
   imp=$(printf '%s' "$preview" | jq -r .importId)
   ref=$(jq -nc --arg p "$(project_id e2e-imports)" --arg i "$imp" '{projectId:$p, importId:$i}')
   api serviceTransfer.setChoices "$(printf '%s' "$ref" | jq -c --arg n "$2" --argjson x "$extra" '. + {choices:({nodeId:$n, deployWhenReady:false} + $x)}')" >/dev/null ||
@@ -4450,7 +4457,9 @@ check_42() {
   expect "xfer answered every request while its data was read ($(sort "$codes" | uniq -c | tr '\n' ' '))" test "$(grep -cvx 200 "$codes" || true)" = 0
   expect "unzip -t passes" unzip -tq "$zip"
   expect "python's zipfile reads it" python3 -m zipfile -t "$zip"
-  mf=$(unzip -p "$zip" manifest.json)
+  # Byte for byte, trailing newline included: the signature covers the exact file, and $(...) alone drops it.
+  mf=$(unzip -p "$zip" manifest.json; printf x)
+  mf=${mf%x}
   ok=1
   for path in $(printf '%s' "$mf" | jq -r '.entries[].path'); do
     want=$(printf '%s' "$mf" | jq -r --arg p "$path" '.entries[] | select(.path==$p) | .sha256')
@@ -4490,7 +4499,7 @@ check_42() {
   expect "a wrong passphrase is refused (FORBIDDEN passphrase)" has_text "$out" '"passphrase"'
   out=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42" "$(printf '%s' "$mf" | jq -c '.exportedAt="2000-01-01T00:00:00.000Z"')")" 2>&1 || true)
   expect "an edited manifest is refused (tampered)" has_text "$out" '"tampered"'
-  preview=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42" "$mf")") || { bad "serviceTransfer.importBegin failed"; return 1; }
+  preview=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42")") || { bad "serviceTransfer.importBegin failed"; return 1; }
   imp=$(printf '%s' "$preview" | jq -r .importId)
   ev "import preview: $(printf '%s' "$preview" | jq -c '{service: .service.name, blockers, needs, domains: [.domains[] | {host, status, action}], data: .data.volumes, samePanel: .file.samePanel}')"
   expect "its own domain is in use on this panel, so it is skipped" json_ok "$preview" "[.domains[] | select(.host==\"$host\" and .status==\"usedHere\" and .action==\"skip\")] | length == 1"
