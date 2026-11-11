@@ -4173,7 +4173,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   Dragonfly patches only, and a line whose data folder differs is
   refused. Since 0.2.11 `judgeImage` wraps it for any image of the
   engine's repository: only the very image that runs stays a refusal
-  (`current`, "nothing to change"), and every other refusal becomes a
+  (`current`, "nothing to change"; `judge` lets it through when only
+  MySQL 8.4's `keepNativePassword` changes, below), and every other refusal becomes a
   risk (`downgrade`, `olderImage`, `postgresMajor`, `dataPath`,
   `patchOnly`, `oneStep`), joined by `otherLine` (either side a line the
   catalog does not have: not tested by Seylo, and `oneStep` says nothing
@@ -4186,7 +4187,15 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   (`custom`) is judged against nothing but those. `risk` is the most
   serious one (`riskOrder`); the message says each of them, the MongoDB
   compatibility note for a MongoDB move, and that a new version that
-  never gets healthy brings the old container back. Without `acceptRisk`
+  never gets healthy brings the old container back. It names what a tag
+  is, in the words that refused a tag of another line before (`notOfLine`,
+  which imports' `customImage` still uses): a line outside the catalog,
+  the target's or the one that runs, as "mongo:8.2.12 is MongoDB 8.2.
+  Seylo does not offer MongoDB 8.2, so this change is not tested by
+  Seylo." ("with pgvector" for that variant), and a floating tag as "not
+  an exact release: it moves to each new MongoDB 8.2 release" ("a tag
+  without a full release number moves to each new release" for latest and
+  pgvector's tags). Without `acceptRisk`
   such a change is refused (CONFLICT `riskNotAccepted`, nothing changed;
   `details.risk`, `details.risks` comma-separated, `details.message`,
   `details.version` and `details.image` as it would be recorded, and
@@ -4194,7 +4203,8 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   next); with it, it proceeds, and the deploy's log says `Risk accepted:
   <risks>`. The hard refusals stay hard with `acceptRisk`: another
   repository (BAD_REQUEST `customImage`, field `image`), `noNode`,
-  `stopped`, `deployRunning` and `current`. Rules judge from what runs: the
+  `stopped`, `deployRunning` and `current` (but for `keepNativePassword`
+  alone). Rules judge from what runs: the
   live deployment's image (so after a failed change the old image may be
   set again and the change retried). Every change but a newer patch of the
   line that runs (another line, or any risk taken) needs a backup run
@@ -4256,8 +4266,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   command alone and deploys the same image again (off after the same
   list), with the deploy note "mysql_native_password logins on
   (--mysql-native-password=ON), on the image it runs (<image>)." (or
-  "off") and no "Version change" line; the same image with the option as
-  it is stays `current`. `versionChoices.nativePassword` is null for other engines
+  "off") and no "Version change" line, no risk to accept and no backup
+  step, also when the image that runs is a floating tag (`mysql:8.4`) or
+  a release the catalog does not pin, sent as `image` alone or with
+  `version`; the same image with the option as it is stays `current`,
+  `acceptRisk` or not. `versionChoices.nativePassword` is null for other engines
   and `{ on, lines }` for MySQL; the Version card shows "Old
   mysql_native_password logins are on" and, on a line in `lines`, the
   switch "Keep old mysql_native_password logins working" with Apply
@@ -4326,7 +4339,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   the image to run instead" until it changes; after a failed change,
   `pendingImage`, that image is the way to stay on it). A risk shows as
   "What can go wrong" with one line for each risk (a catalog choice's
-  `risks`, every risk it takes, 0.2.11), the MongoDB note for a
+  `risks`, every risk it takes, 0.2.11; `riskWords` in the web names the
+  tag like the panel's message: "Not tested by Seylo: mongo:8.2.12 is
+  MongoDB 8.2, which Seylo does not offer", the target's line or else the
+  one that runs, and "mongo:8.2 is not an exact release: it moves to each
+  new MongoDB 8.2 release", or that what runs is not one), the MongoDB note for a
   MongoDB move, and that the old container comes back, and "I understand",
   which sends `acceptRisk`; for another image the dialog learns the risks
   from the `riskNotAccepted` answer (and the backup step from

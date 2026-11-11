@@ -55,7 +55,7 @@ function image(engine: DatabaseEngine, ref: string, variant: string | null = nul
 }
 const lines = (engine: DatabaseEngine, variant: string | null = null) => (engineVersions(engine, variant) ?? []).map((v) => v.version);
 const judge = (engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, variant: string | null = null) =>
-  judgeImage(engine, from, to, lines(engine, variant));
+  judgeImage(engine, from, to, lines(engine, variant), variant);
 const digest = `sha256:${"d".repeat(64)}`;
 
 describe("any image of the engine", () => {
@@ -158,34 +158,56 @@ describe("any image of the engine", () => {
     // 8.2 is no catalog line: not tested by Seylo, and the catalog's one-step rule says nothing about it.
     const to82 = judge("mongo", mongo80, image("mongo", "mongo:8.2.12"));
     expect(to82).toMatchObject({ kind: "upgrade", allowed: true, risk: "otherLine", risks: ["otherLine"] });
-    expect(to82.message).toContain("MongoDB 8.2 is not in Seylo's catalog");
+    // The message names the tag's line and that Seylo does not offer it.
+    expect(to82.message).toStartWith(
+      "mongo:8.2.12 is MongoDB 8.2. Seylo does not offer MongoDB 8.2, so this change is not tested by Seylo.",
+    );
     expect(to82.message).toContain("MongoDB may refuse data whose featureCompatibilityVersion it does not support");
     expect(to82.message).toContain("the old container comes back");
     // From an off-catalog line to the next catalog one is no tested step either.
     const from82 = image("mongo", "mongo:8.2.12");
-    expect(judge("mongo", from82, point("mongo", "9.0")).risks).toEqual(["otherLine"]);
+    const to90 = judge("mongo", from82, point("mongo", "9.0"));
+    expect(to90.risks).toEqual(["otherLine"]);
+    expect(to90.message).toStartWith(
+      "mongo:8.2.12 is MongoDB 8.2. Seylo does not offer MongoDB 8.2, so this change from it is not tested by Seylo.",
+    );
     expect(judge("mongo", from82, mongo80).risks).toEqual(["downgrade", "otherLine"]);
     // Patches of the off-catalog line it runs take none.
     expect(judge("mongo", from82, image("mongo", "mongo:8.2.13")).risks).toEqual([]);
     expect(judge("mongo", from82, image("mongo", "mongo:8.2.11")).risks).toEqual(["olderImage"]);
     // mongo:8.2 is a floating tag of a line outside the catalog.
-    expect(judge("mongo", mongo80, image("mongo", "mongo:8.2")).risks).toEqual(["otherLine", "floatingTag"]);
+    const moving82 = judge("mongo", mongo80, image("mongo", "mongo:8.2"));
+    expect(moving82.risks).toEqual(["otherLine", "floatingTag"]);
+    expect(moving82.message).toContain(
+      "mongo:8.2 is not an exact release: it moves to each new MongoDB 8.2 release, so the release behind it can change on the next deploy",
+    );
     // A floating tag of the same line has no release to compare.
     expect(judge("mongo", mongo80, image("mongo", "mongo:8.0")).risks).toEqual(["floatingTag"]);
     // latest and a bare digest say nothing about the line.
     const latest = judge("mongo", mongo80, image("mongo", "mongo:latest"));
     expect(latest).toMatchObject({ kind: "upgrade", allowed: true, risk: "floatingTag" });
-    expect(latest.message).toContain("mongo:latest is a floating tag");
+    expect(latest.message).toContain(
+      "mongo:latest is not an exact release: a tag without a full release number moves to each new release, so the release behind it can change on the next deploy, and Seylo cannot tell which release it is.",
+    );
     expect(judge("mongo", mongo80, image("mongo", `mongo@${digest}`)).risks).toEqual(["digest"]);
     expect(judge("mongo", mongo80, image("mongo", `mongo:8.0.99@${digest}`)).risks).toEqual(["digest"]);
     // What runs can be the unknown side too: every change from it is a risk.
     const runsLatest = image("mongo", "mongo:latest");
     const back = judge("mongo", runsLatest, mongo80);
     expect(back.risks).toEqual(["floatingTag"]);
-    expect(back.message).toContain("mongo:latest, which runs, is a floating tag");
+    expect(back.message).toContain("mongo:latest, which runs, is not an exact release");
+    expect(back.message).toContain("Seylo cannot tell which release runs and cannot check this change.");
     expect(judge("mongo", image("mongo", `mongo@${digest}`), mongo80).risks).toEqual(["digest"]);
     // The most serious risk leads.
     expect(judge("postgres", point("postgres", "17"), image("postgres", "postgres:16.4")).risk).toBe("downgrade");
+    // pgvector's tags name their Postgres line after pgvector's release, and a line it does not offer says so.
+    const pgv = (ref: string) => judge("postgres", point("postgres", "17", "pgvector"), image("postgres", ref, "pgvector"), "pgvector");
+    expect(pgv("pgvector/pgvector:0.8.8-pg19-trixie").message).toContain(
+      "pgvector/pgvector:0.8.8-pg19-trixie is PostgreSQL 19. Seylo does not offer PostgreSQL 19 with pgvector, so this change is not tested by Seylo.",
+    );
+    expect(pgv("pgvector/pgvector:pg17-trixie").message).toContain(
+      "pgvector/pgvector:pg17-trixie is not an exact release: a tag without a full release number moves to each new release",
+    );
   });
 
   test("an off-catalog MariaDB line without TLS of its own is not exposed; one with it is", () => {
@@ -323,7 +345,7 @@ describe("databases.setVersion and create with any image", () => {
       reason: "riskNotAccepted",
       risk: "otherLine",
       risks: "otherLine",
-      message: expect.stringContaining("MongoDB 8.2 is not in Seylo's catalog"),
+      message: expect.stringContaining("mongo:8.2.12 is MongoDB 8.2. Seylo does not offer MongoDB 8.2"),
       version: "8.2",
       image: "mongo:8.2.12",
       backupRequired: "true",
@@ -502,6 +524,61 @@ describe("databases.setVersion and create with any image", () => {
       expect(deployCount(made.body.serviceId)).toBe(before);
     }
     expect(judge("keydb", image("keydb", "eqalpha/keydb:latest"), image("keydb", "eqalpha/keydb:latest")).reason).toBe("current");
+  });
+
+  test("keepNativePassword alone on the image that runs is a change of its own, also on a floating tag of 8.4", async () => {
+    const { project, node } = seedPlace();
+    const made = await callOp(
+      panel,
+      dbOps.create,
+      { projectId: project.id, name: "legacy-db", engine: "mysql", image: "mysql:8.4", nodeId: node.id },
+      { cookie },
+    );
+    expect(made.status).toBe(200);
+    const serviceId = made.body.serviceId as string;
+    await settleDeploys(panel);
+    goLive(serviceId);
+    expect(dbVersion(serviceId)).toBe("8.4");
+    const specCommand = () => {
+      const row = panel.deps.db.select({ spec: services.spec }).from(services).where(eq(services.id, serviceId)).get();
+      return (row?.spec as { container: { command: string[] } } | undefined)?.container.command ?? null;
+    };
+    let execs = 0;
+    const agent = fakeAgent(panel, node.id, {
+      exec: () => {
+        execs++;
+        return { exitCode: 0, stdout: new TextEncoder().encode("") };
+      },
+    });
+    const before = deployCount(serviceId);
+    // As it runs: nothing to change, risk accepted or not.
+    for (const input of [{}, { acceptRisk: true, confirmNoBackup: true }, { keepNativePassword: false }]) {
+      const same = (await callOp(panel, dbOps.setVersion, { serviceId, image: "mysql:8.4", ...input }, { cookie })) as Res;
+      const got: Record<string, unknown> = { input, ...refusal(same) };
+      expect(got).toEqual({ input, status: 409, reason: "current" });
+    }
+    // The option on: no risk to accept (the floating tag already runs), no backup, no account list.
+    const on = await callOp(panel, dbOps.setVersion, { serviceId, image: "mysql:8.4", keepNativePassword: true }, { cookie });
+    expect(on.status).toBe(200);
+    expect({ image: specImage(serviceId), command: specCommand(), version: dbVersion(serviceId), execs }).toEqual({
+      image: "mysql:8.4",
+      command: ["mysqld", "--mysql-native-password=ON"],
+      version: "8.4",
+      execs: 0,
+    });
+    expect(deployCount(serviceId)).toBe(before + 1);
+    await settleDeploys(panel);
+    goLive(serviceId);
+    // Off lists the accounts first, then deploys the same image without it.
+    const off = await callOp(panel, dbOps.setVersion, { serviceId, image: "mysql:8.4", keepNativePassword: false }, { cookie });
+    expect(off.status).toBe(200);
+    expect({ command: specCommand(), execs }).toEqual({ command: [], execs: 1 });
+    await settleDeploys(panel);
+    goLive(serviceId);
+    // Another image with the option is judged as before: what runs floats, a risk to accept.
+    const patch = (await callOp(panel, dbOps.setVersion, { serviceId, image: "mysql:8.4.9", keepNativePassword: true }, { cookie })) as Res;
+    expect(refusal(patch)).toMatchObject({ status: 409, reason: "riskNotAccepted", risk: "floatingTag" });
+    agent.disconnect();
   });
 
   test("versionChoices lists every risk of a catalog choice, not only the most serious", async () => {

@@ -74,9 +74,14 @@ export default {
         "This version keeps its data in another folder. Seylo runs it on the folder of the data that runs, so it will most likely not start.",
       patchOnly: "{engine} takes patch updates only: another version may not read the data files.",
       oneStep: "It skips a version: {engine} upgrades one version at a time, so it may refuse the data files.",
-      otherLine: "Not tested by Seylo: this version is not in Seylo's catalog.",
+      otherLine: "Not tested by Seylo: {image} is {engine} {version}, which Seylo does not offer.",
+      otherLineRuns: "Not tested by Seylo: {image}, which runs, is {engine} {version}, which Seylo does not offer.",
       postgresBase: "Another base system: its C library may sort text in another order, so indexes on text columns may need REINDEX.",
-      floatingTag: "A floating tag: the release behind it can change on the next deploy, and Seylo cannot check it against what runs.",
+      floatingTag:
+        "{image} is not an exact release: it moves to each new {engine} {release} release, so the release behind it can change on the next deploy, and Seylo cannot check it against what runs.",
+      floatingTagAny:
+        "{image} is not an exact release: a tag without a full release number moves to each new release, so the release behind it can change on the next deploy, and Seylo cannot check it against what runs.",
+      floatingTagRuns: "{image}, which runs, is not an exact release: Seylo cannot tell which release runs, so it cannot check the change.",
       digest: "A digest does not show which release it is, so Seylo cannot check the change.",
     },
     riskMongo:

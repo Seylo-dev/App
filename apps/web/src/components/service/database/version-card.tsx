@@ -27,7 +27,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { t } from "../../../i18n/t";
 import { errorMessage } from "../../../lib/api";
-import { imageLine, type RiskRefusal, riskRefusalOf } from "../../../lib/database-image";
+import { imageLine, type RiskRefusal, riskRefusalOf, riskWords } from "../../../lib/database-image";
 import { shortImage } from "../../new-service/short-image";
 import { useActiveDeploy } from "../active-deploy";
 import { DeployLogModal } from "../deploy-log-modal";
@@ -390,6 +390,7 @@ function VersionDialog({
           {risk && (
             <RiskNote
               risk={risk}
+              data={data}
               engine={engine}
               mongo={data.engine === "mongo" && (lineChange || choice === null)}
               accepted={accepted}
@@ -559,12 +560,15 @@ function NativeUsersCallout({ users, version }: { users: { accounts: string[]; c
 /** What can go wrong, in plain words for each risk the panel found, and the "I understand" that sends acceptRisk. */
 function RiskNote({
   risk,
+  data,
   engine,
   mongo,
   accepted,
   onAccepted,
 }: {
   risk: RiskRefusal;
+  /** What runs, for the risks about it (a line Seylo does not offer, a floating tag). */
+  data: Choices;
   engine: string;
   /** A MongoDB move the panel runs no compatibility step for. */
   mongo: boolean;
@@ -572,15 +576,16 @@ function RiskNote({
   onAccepted: (accepted: boolean) => void;
 }) {
   const known = risk.risks.filter(isRisk);
+  const lines = data.choices.map((c) => c.version);
+  const line = (r: Risk) => {
+    const w = riskWords(r, data.engine, risk, { image: data.image, version: data.version }, lines, data.variant ?? null);
+    return t(`databaseVersion.confirm.risk.${w.key}`, { image: w.image, engine, version: w.version, release: w.release });
+  };
   return (
     <Callout tone="warning" title={t("databaseVersion.confirm.riskTitle")}>
       <div className="flex flex-col gap-2">
         <ul aria-label={t("databaseVersion.confirm.riskTitle")} className="m-0 flex list-disc flex-col gap-1 pl-4">
-          {known.length > 0 ? (
-            known.map((r) => <li key={r}>{t(`databaseVersion.confirm.risk.${r}`, { image: risk.image, engine })}</li>)
-          ) : (
-            <li>{risk.message}</li>
-          )}
+          {known.length > 0 ? known.map((r) => <li key={r}>{line(r)}</li>) : <li>{risk.message}</li>}
           {mongo && <li>{t("databaseVersion.confirm.riskMongo")}</li>}
         </ul>
         <span>{t("databaseVersion.confirm.riskBack")}</span>

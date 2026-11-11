@@ -37,6 +37,55 @@ export function isFloatingImage(engine: string, image: string, variant: string |
 const customLine = "custom";
 
 /**
+ * The release an image's tag names ("8.2" of mongo:8.2, "17" of
+ * postgres:17-alpine); null for latest, a digest or none, and for
+ * pgvector, whose tags name pgvector's release.
+ */
+export function tagReleaseOf(image: string, variant: string | null = null): string | null {
+  const tag = tagOf(image);
+  if (tag === null || variant === "pgvector") return null;
+  return /^v?(\d+(?:\.\d+)*)/.exec(tag)?.[1] ?? /_v?(\d+(?:\.\d+)+)/.exec(tag)?.[1] ?? null;
+}
+
+/** The words a risk line of the Version dialog takes (databaseVersion.confirm.risk), and what fills them. */
+export interface RiskWords<R extends string> {
+  key: R | "otherLineRuns" | "floatingTagAny" | "floatingTagRuns";
+  image: string;
+  version: string;
+  release: string;
+}
+
+/**
+ * Which words say a risk, naming what the tag is like the panel's
+ * message does (0.2.11): otherLine names the line Seylo does not offer,
+ * the target's ("mongo:8.2.12 is MongoDB 8.2"), else the one that runs
+ * (otherLineRuns); floatingTag says the target is not an exact release
+ * and what it moves to (each new release of the release its tag names,
+ * else each new release: floatingTagAny), else that what runs is not one
+ * (floatingTagRuns). Every other risk keeps its own words and the
+ * target's image.
+ */
+export function riskWords<R extends string>(
+  risk: R,
+  engine: string,
+  to: { image: string; version: string },
+  runs: { image: string; version: string },
+  lines: readonly string[],
+  variant: string | null = null,
+): RiskWords<R> {
+  const words = (key: RiskWords<R>["key"], image: string, version = "", release = "") => ({ key, image, version, release });
+  if (risk === "otherLine") {
+    return lines.includes(to.version) ? words("otherLineRuns", runs.image, runs.version) : words(risk, to.image, to.version);
+  }
+  if (risk === "floatingTag") {
+    if (!isFloatingImage(engine, to.image, variant)) return words("floatingTagRuns", runs.image);
+    const release = tagReleaseOf(to.image, variant);
+    return release ? words(risk, to.image, to.version, release) : words("floatingTagAny", to.image);
+  }
+  return words(risk, to.image, to.version);
+}
+
+/**
  * The line databases.setVersion would record for an image (the panel's
  * images.ts engineImage): the catalog line of that very image, pgvector's
  * "-pg17", else the release in its tag as a line (Postgres its major from

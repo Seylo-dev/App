@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OpError } from "@seylo/ops";
-import { imageLine, isFloatingImage, riskRefusalOf } from "./database-image";
+import { imageLine, isFloatingImage, riskRefusalOf, riskWords, tagReleaseOf } from "./database-image";
 
 test("a tag floats unless it names an exact release or a digest pins it", () => {
   for (const [engine, image, variant, floating] of [
@@ -28,11 +28,11 @@ test("a tag floats unless it names an exact release or a digest pins it", () => 
 });
 
 test("a riskNotAccepted refusal gives its risks, the line and whether a backup is needed", () => {
-  const error = new OpError("CONFLICT", "MongoDB 8.2 is not in Seylo's catalog... Nothing changed.", {
+  const error = new OpError("CONFLICT", "mongo:8.2 is MongoDB 8.2. Seylo does not offer MongoDB 8.2... Nothing changed.", {
     reason: "riskNotAccepted",
     risk: "otherLine",
     risks: "otherLine,floatingTag",
-    message: "MongoDB 8.2 is not in Seylo's catalog...",
+    message: "mongo:8.2 is MongoDB 8.2. Seylo does not offer MongoDB 8.2...",
     version: "8.2",
     image: "mongo:8.2",
     backupRequired: "true",
@@ -40,7 +40,7 @@ test("a riskNotAccepted refusal gives its risks, the line and whether a backup i
   expect(riskRefusalOf(error)).toEqual({
     risk: "otherLine",
     risks: ["otherLine", "floatingTag"],
-    message: "MongoDB 8.2 is not in Seylo's catalog...",
+    message: "mongo:8.2 is MongoDB 8.2. Seylo does not offer MongoDB 8.2...",
     version: "8.2",
     image: "mongo:8.2",
     backupRequired: true,
@@ -74,4 +74,50 @@ test("the line an image is recorded as: the catalog's, the one its tag names, el
   ] as const) {
     expect({ image, line: imageLine(engine, image, catalog, variant) }).toEqual({ image, line });
   }
+});
+
+test("a risk's words name what the tag is: the line Seylo does not offer, what a floating tag moves to", () => {
+  const lines = ["9.0", "8.0", "7.0"];
+  const runs = { image: "mongo:8.0.38", version: "8.0" };
+  const off = { image: "mongo:8.2.12", version: "8.2" };
+  // The target's line is the one outside the catalog; else the one that runs.
+  expect(riskWords("otherLine", "mongo", off, runs, lines)).toEqual({
+    key: "otherLine",
+    image: "mongo:8.2.12",
+    version: "8.2",
+    release: "",
+  });
+  expect(riskWords("otherLine", "mongo", { image: "mongo:9.0.8", version: "9.0" }, off, lines)).toEqual({
+    key: "otherLineRuns",
+    image: "mongo:8.2.12",
+    version: "8.2",
+    release: "",
+  });
+  // A floating target moves to each new release of the one its tag names, or to each new one.
+  expect(riskWords("floatingTag", "mongo", { image: "mongo:8.2", version: "8.2" }, runs, lines)).toMatchObject({
+    key: "floatingTag",
+    image: "mongo:8.2",
+    release: "8.2",
+  });
+  expect(riskWords("floatingTag", "mongo", { image: "mongo:latest", version: "custom" }, runs, lines)).toMatchObject({
+    key: "floatingTagAny",
+    image: "mongo:latest",
+  });
+  const pgvector = { image: "pgvector/pgvector:pg17", version: "17" };
+  expect(riskWords("floatingTag", "postgres", pgvector, runs, lines, "pgvector")).toMatchObject({ key: "floatingTagAny" });
+  // An exact target: what runs floats.
+  expect(riskWords("floatingTag", "mongo", runs, { image: "mongo:8", version: "custom" }, lines)).toEqual({
+    key: "floatingTagRuns",
+    image: "mongo:8",
+    version: "",
+    release: "",
+  });
+  // Every other risk keeps its own words and the target's image.
+  expect(riskWords("downgrade", "mongo", { image: "mongo:7.0.45", version: "7.0" }, runs, lines)).toMatchObject({
+    key: "downgrade",
+    image: "mongo:7.0.45",
+  });
+  expect(tagReleaseOf("postgres:17-alpine")).toBe("17");
+  expect(tagReleaseOf(`mongo@sha256:${"a".repeat(64)}`)).toBeNull();
+  expect(tagReleaseOf("mongo")).toBeNull();
 });

@@ -179,9 +179,19 @@ export type Judged = Judgement & { risks: Risk[] };
  * is unknown) and a digest (digest: its release does not show), as the
  * target or as what runs. A tag that names no release (customLine) cannot
  * be judged against the other side at all. risk is the most serious one
- * (riskOrder) and message says all of them.
+ * (riskOrder) and message says all of them, naming what a tag is: the
+ * line of a release the catalog does not have ("mongo:8.2.12 is MongoDB
+ * 8.2. Seylo does not offer MongoDB 8.2"), and that a floating tag is not
+ * an exact release but moves to each new one. `variant` (pgvector) only
+ * changes those words.
  */
-export function judgeImage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, lines: readonly string[]): Judged {
+export function judgeImage(
+  engine: DatabaseEngine,
+  from: ImagePoint,
+  to: ImagePoint,
+  lines: readonly string[],
+  variant: string | null = null,
+): Judged {
   if (to.image === from.image) return nothingToChange(to.image);
   const unknown = from.version === customLine || to.version === customLine;
   const sameLine = !unknown && compareVersions(to.version, from.version) === 0;
@@ -209,7 +219,7 @@ export function judgeImage(engine: DatabaseEngine, from: ImagePoint, to: ImagePo
   const ordered = riskOrder.filter((r) => risks.has(r));
   const [risk] = ordered;
   if (!risk) return { ...base, risks: [] };
-  return { kind: base.kind, allowed: true, risk, message: riskMessage(engine, from, to, ordered, lines), risks: ordered };
+  return { kind: base.kind, allowed: true, risk, message: riskMessage(engine, variant, from, to, ordered, lines), risks: ordered };
 }
 
 /**
@@ -228,9 +238,25 @@ function nothingToChange(image: string): Judged {
 }
 
 /** The risks of a change in sentences, the most serious first, and what protects the data. */
-function riskMessage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, risks: readonly Risk[], lines: readonly string[]): string {
+function riskMessage(
+  engine: DatabaseEngine,
+  variant: string | null,
+  from: ImagePoint,
+  to: ImagePoint,
+  risks: readonly Risk[],
+  lines: readonly string[],
+): string {
   const label = engines[engine].label;
   const next = lines.filter((v) => compareVersions(v, from.version) > 0).sort(compareVersions)[0];
+  // "mongo:8.2.12 is MongoDB 8.2. Seylo does not offer MongoDB 8.2" (with pgvector for that variant).
+  const notOffered = (image: string, line: string) =>
+    `${image} is ${label} ${line}. Seylo does not offer ${label} ${line}${variant ? ` with ${variant}` : ""}`;
+  // A floating tag moves to each new release of the release it names (pgvector's tags name pgvector's), or to each new one.
+  const moves = (image: string) => {
+    const tag = imageTag(image);
+    const release = tag && variant !== "pgvector" ? tagRelease(tag) : null;
+    return release ? `it moves to each new ${label} ${release} release` : "a tag without a full release number moves to each new release";
+  };
   const sentence: Record<Risk, () => string> = {
     downgrade: () =>
       `${label} ${to.version} is older than the ${from.version} that runs: it may not open data files a newer version wrote.`,
@@ -243,14 +269,14 @@ function riskMessage(engine: DatabaseEngine, from: ImagePoint, to: ImagePoint, r
     oneStep: () => `${label} upgrades one version at a time: ${to.version} skips ${next ?? "a version"}, and may refuse the data files.`,
     otherLine: () =>
       lines.includes(to.version)
-        ? `The ${label} ${from.version} that runs is not in Seylo's catalog, so this change is not tested by Seylo.`
-        : `${label} ${to.version} is not in Seylo's catalog, so this change is not tested by Seylo.`,
+        ? `${notOffered(from.image, from.version)}, so this change from it is not tested by Seylo.`
+        : `${notOffered(to.image, to.version)}, so this change is not tested by Seylo.`,
     postgresBase: () =>
       `${to.image} is built on another base system than ${from.image}: its C library may sort text in another order, so indexes on text columns may need REINDEX.`,
     floatingTag: () =>
       to.floating
-        ? `${to.image} is a floating tag: the release behind it can change on the next deploy, and Seylo cannot tell which release it is.`
-        : `${from.image}, which runs, is a floating tag: Seylo cannot tell which release runs, so it cannot check this change.`,
+        ? `${to.image} is not an exact release: ${moves(to.image)}, so the release behind it can change on the next deploy, and Seylo cannot tell which release it is.`
+        : `${from.image}, which runs, is not an exact release: ${moves(from.image)}, so Seylo cannot tell which release runs and cannot check this change.`,
     digest: () =>
       to.digest
         ? `A digest does not show which release ${to.image} is, so Seylo cannot check this change.`
@@ -663,10 +689,14 @@ function targetOf(info: DatabaseInfo, version: string | undefined, image: string
 /**
  * judgeImage from what runs. After a change whose deploy failed, the
  * image that still runs may be set again (it only restarts the database),
- * and the change itself runs again under the same rules.
+ * and the change itself runs again under the same rules. The image that
+ * runs is nothing to change, unless its command changes (`commandChange`:
+ * MySQL 8.4's mysql_native_password turned on or off, keepNativePassword):
+ * then it deploys again with the new command, a change of its own that
+ * takes no risk and no backup.
  */
-function judge(state: VersionState, to: ImagePoint): Judged {
-  const j = judgeImage(state.info.row.engine, state.from, to, state.lines);
+function judge(state: VersionState, to: ImagePoint, commandChange = false): Judged {
+  const j = judgeImage(state.info.row.engine, state.from, to, state.lines, state.info.row.variant);
   if (j.reason === "current" && state.pending) {
     return {
       kind: "current",
@@ -674,6 +704,9 @@ function judge(state: VersionState, to: ImagePoint): Judged {
       message: `Stay on ${to.image}: the change to ${state.pending.image} did not finish.`,
       risks: [],
     };
+  }
+  if (j.reason === "current" && commandChange) {
+    return { kind: "current", allowed: true, message: `Deploy ${to.image} again with the new command.`, risks: [] };
   }
   return j;
 }
@@ -735,10 +768,10 @@ export const setVersion = implement(dbOps.setVersion, async (input, ctx) => {
   const image = to.image;
   assertNativePasswordKeepable(info.row.engine, to.version, input.keepNativePassword);
   const native = nativePasswordPlan(info.row.engine, state.command, state.from.version, to.version, input.keepNativePassword);
-  const verdict = judge(state, to);
+  const verdict = judge(state, to, native.command !== null);
   // The image that runs with mysql_native_password turned on or off (keepNativePassword): the command is the change.
-  const flagOnly = !verdict.allowed && verdict.reason === "current" && native.command !== null;
-  if (!verdict.allowed && !flagOnly)
+  const flagOnly = verdict.kind === "current" && state.pending === null && native.command !== null;
+  if (!verdict.allowed)
     throw new OpError("CONFLICT", verdict.message ?? "This version change is not allowed.", { reason: verdict.reason ?? "" });
   const lineChange = to.version !== state.from.version;
   // Every change but a newer patch of the line it runs: another line, or a risk taken.

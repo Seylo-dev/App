@@ -668,7 +668,10 @@ describe("databases", () => {
     }
     // An older release on the catalog's base: the catalog's newer patch opens its data.
     expect(pick("postgres", null, "17", "postgres:17.5-alpine")).toMatchObject({ image: "postgres:17.6-alpine", blocker: null });
-    expect(pick("mongo", null, "8.0", `mongo:8.0.20@sha256:${"c".repeat(64)}`)).toMatchObject({ image: engineVersion("mongo", "8.0")?.image, blocker: null });
+    expect(pick("mongo", null, "8.0", `mongo:8.0.20@sha256:${"c".repeat(64)}`)).toMatchObject({
+      image: engineVersion("mongo", "8.0")?.image,
+      blocker: null,
+    });
     // Newer data of another line: refused.
     for (const [engine, line, ran] of [["mariadb", "11.4", "mariadb:11.8.2"]] as const) {
       const got = pick(engine, null, line, ran);

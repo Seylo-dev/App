@@ -416,7 +416,7 @@ test.describe("database version", () => {
     await backup.getByLabel("Change without a backup").check();
     await submit.click();
     const risks = dialog.getByRole("list", { name: "What can go wrong" });
-    await expect(risks.getByText("Not tested by Seylo: this version is not in Seylo's catalog.")).toBeVisible();
+    await expect(risks.getByText("Not tested by Seylo: mongo:8.2.12 is MongoDB 8.2, which Seylo does not offer.")).toBeVisible();
     // No compatibility step outside the catalog's one-step upgrades: MongoDB may refuse the data.
     await expect(risks.getByText("MongoDB may refuse data whose feature compatibility version it does not support")).toBeVisible();
     await expect(dialog.getByText("the old container comes back on the same data")).toBeVisible();
@@ -431,7 +431,9 @@ test.describe("database version", () => {
     await field.fill("mongo:latest");
     await dialog.getByRole("region", { name: "Backup" }).getByLabel("Change without a backup").check();
     await dialog.getByRole("button", { name: "Change version" }).click();
-    await expect(risks.getByText("A floating tag: the release behind it can change on the next deploy")).toBeVisible();
+    await expect(
+      risks.getByText("mongo:latest is not an exact release: a tag without a full release number moves to each new release"),
+    ).toBeVisible();
     await dialog.getByLabel("I understand").check();
     await dialog.getByRole("button", { name: "Change version" }).click();
     await expect(dialog).toHaveCount(0);
@@ -632,11 +634,11 @@ test.describe("database version", () => {
             if (input.keepNativePassword !== undefined)
               throw new DemoRefusal(400, "BAD_REQUEST", "MySQL 9.1 has no mysql_native_password plugin to keep on.", { field: "keepNativePassword" });
             if (input.acceptRisk !== true)
-              throw new DemoRefusal(409, "CONFLICT", "MySQL 9.1 is not in Seylo's catalog. Nothing changed.", {
+              throw new DemoRefusal(409, "CONFLICT", "mysql:9.1.0 is MySQL 9.1. Seylo does not offer MySQL 9.1. Nothing changed.", {
                 reason: "riskNotAccepted",
                 risk: "otherLine",
                 risks: "otherLine",
-                message: "MySQL 9.1 is not in Seylo's catalog, so this change is not tested by Seylo.",
+                message: "mysql:9.1.0 is MySQL 9.1. Seylo does not offer MySQL 9.1, so this change is not tested by Seylo.",
                 version: "9.1",
                 image: "mysql:9.1.0",
                 backupRequired: "false",
@@ -670,7 +672,9 @@ test.describe("database version", () => {
     await dialog.getByLabel("Image").fill("mysql:9.1.0");
     await expect(dialog.getByLabel(/^Keep mysql_native_password logins working/)).toHaveCount(0);
     await dialog.getByRole("button", { name: "Change version" }).click();
-    await expect(dialog.getByRole("list", { name: "What can go wrong" }).getByText("Not tested by Seylo")).toBeVisible();
+    await expect(
+      dialog.getByRole("list", { name: "What can go wrong" }).getByText("Not tested by Seylo: mysql:9.1.0 is MySQL 9.1, which Seylo does not offer."),
+    ).toBeVisible();
     await dialog.getByLabel("I understand").check();
     await dialog.getByRole("button", { name: "Change version" }).click();
     await expect(dialog).toHaveCount(0);
