@@ -9,6 +9,8 @@ import { eq } from "drizzle-orm";
 import { backupRuns, builds, deployments, nodes, services } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { defineJob } from "../../jobs/queue";
+import { getSetting } from "../../settings";
+import { arrivalGraceMs } from "../panelMove/keys";
 import type { RaiseAlert } from "./sink";
 
 /** Grace period before a disconnected node counts as offline. */
@@ -32,6 +34,16 @@ export const nodeOfflineJob = defineJob<{ nodeId: string; since: string }>({
   maxAttempts: 2,
   async run(payload, ctx) {
     if (ctx.agents.isOnline(payload.nodeId)) return;
+    // Right after the panel moved, nodes find their way to it one by one: only one still away after the grace alerts.
+    const moved = getSetting(ctx.db, "panelMoveDone");
+    const graceEnds = moved ? moved.at + arrivalGraceMs : 0;
+    if (Date.now() < graceEnds) {
+      ctx.jobs.enqueue(nodeOfflineJobType, payload, {
+        runAt: new Date(graceEnds + 1000),
+        dedupeKey: `node-offline-after-move:${payload.nodeId}`,
+      });
+      return;
+    }
     const name = nodeName(ctx, payload.nodeId);
     if (name === undefined) return; // removed in the meantime
     ctx.alerts.raise({

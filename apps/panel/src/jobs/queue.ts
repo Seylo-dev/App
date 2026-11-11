@@ -54,7 +54,20 @@ export interface JobQueue {
   enqueue(type: string, payload: unknown, options?: EnqueueOptions): string | null;
 }
 
-export interface JobRunner extends JobQueue {
+/**
+ * Holding the runner: no schedule is enqueued and no job is claimed until
+ * release(), while start() and stop() keep working. Moving the panel holds
+ * it on the old panel (jobs left running would run twice, once on each) and
+ * on the moved one until its first agent connects (modules/panelMove).
+ */
+export interface JobControl {
+  /** Stops claiming; resolves once the jobs in flight finished. Holds count: each hold needs a release. */
+  hold(): Promise<void>;
+  release(): void;
+  readonly held: boolean;
+}
+
+export interface JobRunner extends JobQueue, JobControl {
   /** Recurring schedules; their due jobs are enqueued on every tick. */
   readonly schedules: Schedules;
   register(handlers: readonly JobHandler[]): void;
@@ -101,6 +114,7 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
   const limits: Record<JobLane, number> = { default: concurrency, slow: slowLaneSize };
   let timer: ReturnType<typeof setInterval> | undefined;
   let lastPruneAt = Number.NEGATIVE_INFINITY;
+  let holds = 0;
 
   const pruneFinished = (now: Date) => {
     lastPruneAt = now.getTime();
@@ -172,6 +186,7 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
 
   const tick = (deps: Deps, now: Date): Promise<void>[] => {
     const started: Promise<void>[] = [];
+    if (holds > 0) return started;
     if (now.getTime() - lastPruneAt >= finishedPruneEveryMs) {
       try {
         pruneFinished(now);
@@ -240,6 +255,17 @@ export function createJobRunner(db: PanelDb, logger: Logger, concurrency = 4): J
     async stop() {
       clearInterval(timer);
       await Promise.allSettled([...inFlight]);
+    },
+    async hold() {
+      holds += 1;
+      // A job that finishes may start nothing new (ticks return at once), so this set only shrinks.
+      while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
+    },
+    release() {
+      if (holds > 0) holds -= 1;
+    },
+    get held() {
+      return holds > 0;
     },
   };
   const schedules = createSchedules(db, runner, logger);

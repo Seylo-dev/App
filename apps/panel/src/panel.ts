@@ -10,11 +10,11 @@
 // state is keyed by deps.db and deps.agents, which the copy shares, so a
 // second module.http(deps) splits nothing.
 
-import { allOps } from "@seylo/ops";
+import { allOps, apiPrefix } from "@seylo/ops";
 import { opRoutes } from "@seylo/ops/elysia";
 import { eq } from "drizzle-orm";
 import { type AnyElysia, Elysia } from "elysia";
-import { agentEndpoint } from "./agent-hub/endpoint";
+import { agentConnectPath, agentEndpoint } from "./agent-hub/endpoint";
 import { createAgentHub } from "./agent-hub/hub";
 import { agentMoveTarget } from "./agent-hub/move-target";
 import type { Config } from "./config";
@@ -34,8 +34,10 @@ import { createLiveHub } from "./live/hub";
 import type { Logger } from "./logger";
 import { createAlertSink } from "./modules/alerts/sink";
 import { modules } from "./modules/index.gen";
+import { mcpPath } from "./modules/mcp/server";
 import type { PanelModule } from "./modules/module";
 import { createNotifier } from "./modules/notifications/email";
+import { agentsRefused, joinsRefused, pauseMessage, writePause } from "./modules/panelMove/pause";
 import { appContentSecurityPolicy, injectBoot, readBoot } from "./modules/settings/boot";
 import { tailnetIdentity } from "./modules/tailscale/facts";
 import { collectHandlers } from "./ops/handlers";
@@ -92,6 +94,8 @@ export function createPanel(options: PanelOptions): Panel {
     live,
     jobs: runner,
     schedules: runner.schedules,
+    jobControl: runner,
+    databases,
     agents,
     alerts: createAlertSink({ db, jobs: runner, live, logger: logger.child({ component: "alerts" }) }),
     notify: createNotifier({ db, secrets, logger: logger.child({ component: "notify" }) }),
@@ -168,6 +172,7 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
         // counts as working. WireGuard already encrypts and authenticates that path.
         Object.assign(set.headers, securityHeaders({ hsts: https && !options.tailnet }));
       })
+      .onRequest(({ request }) => pausedWrite(deps, request))
       .use(health(deps))
       .use(opRoutes(allOps, httpOpHandler(execute, deps)))
       .use(modules)
@@ -182,6 +187,24 @@ function buildApp(deps: Deps, execute: ExecuteOp, edgeTicketKey: EdgeTicketKey, 
           redirect: options.tailnet ? undefined : (request) => domainRedirect(deps, request),
         }),
       )
+  );
+}
+
+/**
+ * While the panel moves (modules/panelMove/pause.ts), module endpoints that
+ * change things (webhooks, deploy trigger URLs, source uploads) answer 503
+ * with Retry-After: what they would write is missing from the copy. Ops
+ * refuse in the pipeline with their own CONFLICT, and MCP calls run ops.
+ */
+function pausedWrite(deps: Deps, request: Request): Response | undefined {
+  const pause = writePause(deps.db);
+  if (!pause || request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") return undefined;
+  const path = new URL(request.url).pathname;
+  if (path.startsWith(`${apiPrefix}/`) || path === mcpPath || path === agentConnectPath) return undefined;
+  const reason = pause.reason === "moved" ? "panelMoved" : "panelMoving";
+  return Response.json(
+    { error: { code: "UNAVAILABLE", message: pauseMessage(pause), details: { reason } } },
+    { status: 503, headers: { "retry-after": "60" } },
   );
 }
 
@@ -205,5 +228,8 @@ function agentRoutes(deps: Deps, edgeTicketKey: EdgeTicketKey) {
     proxy: deps.proxy,
     // Nodes that joined over an IP address move to the live panel domain.
     moveTarget: (nodeId) => agentMoveTarget(deps.db, nodeId),
+    // A panel that moves takes no joins, and at the switch no connects (modules/panelMove/pause.ts).
+    joinsRefused: () => joinsRefused(deps.db),
+    refuse: () => agentsRefused(deps.db),
   });
 }

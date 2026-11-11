@@ -14,6 +14,15 @@ export type MetricsDb = BunSQLiteDatabase<typeof metricsSchema>;
 export interface Databases {
   db: PanelDb;
   metrics: MetricsDb;
+  /**
+   * Writes a consistent copy of panel.db and metrics.db into `dir` (which
+   * must exist) and returns their paths. Each copy is one read transaction
+   * of its database (VACUUM INTO), after the WAL was folded into the main
+   * file, so writes that run meanwhile never tear it; the copies are plain
+   * rollback-journal files with no -wal or -shm. Moving the panel uses it
+   * while writes are paused (modules/panelMove/snapshot.ts).
+   */
+  snapshotTo(dir: string): { panel: string; metrics: string };
   close(): void;
 }
 
@@ -35,11 +44,26 @@ export function openDatabases(options: OpenOptions): Databases {
   return {
     db,
     metrics,
+    snapshotTo(dir) {
+      const panel = join(dir, "panel.db");
+      const metricsCopy = join(dir, "metrics.db");
+      vacuumInto(panelFile, panel);
+      vacuumInto(metricsFile, metricsCopy);
+      return { panel, metrics: metricsCopy };
+    },
     close() {
       panelFile.close();
       metricsFile.close();
     },
   };
+}
+
+/** One consistent copy of the database at `path`; an existing file there is refused by SQLite. */
+function vacuumInto(sqlite: Database, path: string): void {
+  // Not needed for consistency (VACUUM INTO reads one snapshot) but it keeps
+  // the WAL small and the copy as new as the last commit.
+  sqlite.run("PRAGMA wal_checkpoint(TRUNCATE)");
+  sqlite.query("VACUUM INTO ?").run(path);
 }
 
 function openSqlite(path: string): Database {

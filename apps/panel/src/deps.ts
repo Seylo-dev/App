@@ -3,9 +3,9 @@
 
 import type { AgentHub } from "./agent-hub/hub";
 import type { Config } from "./config";
-import type { MetricsDb, PanelDb } from "./db/client";
+import type { Databases, MetricsDb, PanelDb } from "./db/client";
 import type { ProxyTrust } from "./http/proxy-trust";
-import type { JobQueue } from "./jobs/queue";
+import type { JobControl, JobQueue } from "./jobs/queue";
 import type { Schedules } from "./jobs/schedules";
 import type { LiveHub } from "./live/hub";
 import type { Logger } from "./logger";
@@ -29,6 +29,13 @@ export interface Deps {
   jobs: JobQueue;
   /** Recurring schedules on the job queue (jobs/schedules.ts). */
   schedules: Schedules;
+  /**
+   * Holds and releases the job runner (moving the panel, modules/panelMove).
+   * Set by panel.ts; absent in deps built by hand. added in 0.2.8
+   */
+  jobControl?: JobControl;
+  /** Consistent copies of panel.db and metrics.db (db/client.ts snapshotTo); set by panel.ts. added in 0.2.8 */
+  databases?: Pick<Databases, "snapshotTo">;
   agents: AgentHub;
   /** Records alerts and notifies channels (modules/alerts/sink.ts). */
   alerts: AlertSink;

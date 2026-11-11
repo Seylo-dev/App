@@ -19,6 +19,7 @@ import { defineJob } from "../../jobs/queue";
 import { signBackupRequests } from "../backups/signing";
 import { edgeAccessAllowed } from "../databases/edge-ticket";
 import { defineModule } from "../module";
+import { writesPaused } from "../panelMove/pause";
 import { runningMinAgent } from "../updates/release-state";
 import { seedPanelNodeAddress } from "./address";
 import { checksDocker, recordAgentFinding, recordDockerUpgraded, reportFromAgent } from "./docker-check";
@@ -110,6 +111,7 @@ function start(deps: Deps) {
       desiredState: (nodeId, knownRevision) => flusher.currentState(nodeId, knownRevision),
       edgeAccessAllowed: (nodeId, request) => edgeAccessAllowed(deps, nodeId, request),
       signBackupRequests: (nodeId, request) => signBackupRequests(deps, nodeId, request),
+      reportsPaused: () => writesPaused(deps.db),
       reportBudgetExceeded: (nodeId, lane) => {
         const name = deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId)).get()?.name ?? "A node";
         deps.alerts.raise({

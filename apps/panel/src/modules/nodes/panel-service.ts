@@ -40,6 +40,7 @@ import {
 } from "@seylo/proto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { envPrefix } from "../../config";
+import type { PanelDb } from "../../db/client";
 import { deployments, nodes, projects, servicePlacements, services, updateRuns, updateSteps } from "../../db/schema";
 import type { Deps } from "../../deps";
 import type { DesiredContributor } from "../../desired/contributors";
@@ -268,6 +269,54 @@ export function bumpPanelGeneration(deps: Pick<Deps, "db">, now = new Date()): n
   const reference = live.imageRef ?? (source?.type === "image" ? source.image : null);
   if (!reference) return null;
   return nextPanelDeployment(deps, svc, live, { reference, digest: live.imageDigest }, now);
+}
+
+/** A transaction of panel.db, or of a copy opened by hand (modules/panelMove/snapshot.ts). */
+export type PanelTx = Parameters<Parameters<PanelDb["transaction"]>[0]>[0];
+
+/**
+ * Moves the panel to `toNodeId` inside the caller's transaction, the way
+ * nextPanelDeployment records an update: the live deployment is superseded
+ * by a live one at the next generation that targets only that node, the
+ * service's generation follows, its placement is replaced, and the node
+ * becomes the panel node (every other row stops being one, so a database
+ * that ever had two never keeps them). Returns the new generation, or null
+ * when the panel is not a service (development).
+ *
+ * Moving the panel runs it on the copy of panel.db it ships, never on the
+ * live one: the panel the copy starts on is at that generation already.
+ */
+export function movePanelService(tx: PanelTx, toNodeId: string, now: Date): number | null {
+  const svc = tx.select().from(services).where(eq(services.id, panelServiceId)).get();
+  const live = svc?.targetDeploymentId ? tx.select().from(deployments).where(eq(deployments.id, svc.targetDeploymentId)).get() : undefined;
+  if (!svc || !live) return null;
+  const generation = live.generation + 1;
+  tx.update(deployments).set({ status: "superseded" }).where(eq(deployments.id, live.id)).run();
+  const next = tx
+    .insert(deployments)
+    .values({
+      serviceId: svc.id,
+      generation,
+      status: "live",
+      trigger: "move",
+      actor: null,
+      imageRef: live.imageRef,
+      imageDigest: live.imageDigest,
+      targetNodeIds: [toNodeId],
+      runSettings: live.runSettings,
+      steps: [],
+      startedAt: now,
+      finishedAt: now,
+      createdAt: now,
+    })
+    .returning({ id: deployments.id })
+    .get();
+  tx.update(services).set({ targetDeploymentId: next.id, generation }).where(eq(services.id, svc.id)).run();
+  tx.delete(servicePlacements).where(eq(servicePlacements.serviceId, svc.id)).run();
+  tx.insert(servicePlacements).values({ serviceId: svc.id, nodeId: toNodeId, replicas: 1 }).run();
+  tx.update(nodes).set({ isPanelNode: false }).run();
+  tx.update(nodes).set({ isPanelNode: true }).where(eq(nodes.id, toNodeId)).run();
+  return generation;
 }
 
 /**

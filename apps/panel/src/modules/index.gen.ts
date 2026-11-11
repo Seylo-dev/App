@@ -33,6 +33,7 @@ import mcp from "./mcp";
 import metrics from "./metrics";
 import nodes from "./nodes";
 import notifications from "./notifications";
+import panelMove from "./panelMove";
 import previews from "./previews";
 import projects from "./projects";
 import push from "./push";
@@ -52,4 +53,4 @@ import users from "./users";
 import webhooks from "./webhooks";
 
 /** Every panel feature module; each one's default export is a defineModule() result. */
-export const modules = [ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, previews, projects, push, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;
+export const modules = [ai, alerts, apiKeys, approvals, audit, auth, avatars, backups, boxes, builds, cleanup, cliLogin, compose, cron, databases, deployments, dockerHub, domains, env, exposures, files, git, gitProviders, github, grants, hostShell, invites, logs, maintenance, mcp, metrics, nodes, notifications, panelMove, previews, projects, push, registries, services, settings, setup, system, tailscale, telemetry, templates, terminals, tunnels, updates, uptime, users, webhooks] as const;

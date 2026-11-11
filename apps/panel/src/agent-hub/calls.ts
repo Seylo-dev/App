@@ -30,8 +30,8 @@ type Methods = typeof AgentService.method;
 export type AgentMethodName = keyof Methods;
 
 /** Raw methods: declared unary in proto, but move plain bytes between OPEN and CLOSE. */
-export type RawDownloadMethodName = "fsRead" | "exportVolume";
-export type RawUploadMethodName = "fsWrite" | "uploadBuildContext" | "importVolume";
+export type RawDownloadMethodName = "fsRead" | "exportVolume" | "exportRegistry";
+export type RawUploadMethodName = "fsWrite" | "uploadBuildContext" | "importVolume" | "importPanelData" | "importRegistry";
 export type RawBidiMethodName = "tunnel";
 export type RawMethodName = RawDownloadMethodName | RawUploadMethodName | RawBidiMethodName;
 

@@ -75,6 +75,12 @@ export interface SessionDeps {
   panelNodeFromInstallerOnly?: boolean;
   /** Where this node should dial from now on (HelloAccepted.panel_url/panel_pin); null keeps its address. */
   moveTarget?: (nodeId: string) => { url: string; pin: string } | null;
+  /**
+   * True while the panel takes no joins (it is moving, modules/panelMove):
+   * a joining agent's socket is closed without a HelloRejected, which it
+   * retries with backoff instead of waiting 5 minutes.
+   */
+  joinsRefused?: () => boolean;
 }
 
 type HandshakeStep = NonNullable<MessageInitShape<typeof HandshakeSchema>["step"]>;
@@ -337,6 +343,11 @@ export class AgentSession {
     // included, so a new field cannot miss the cut.
     capFields(hello, factsLimits);
     hello.agentVersion = hello.agentVersion.slice(0, maxAgentVersionLength);
+
+    if (hello.credential.case === "join" && this.deps.joinsRefused?.()) {
+      this.unavailable("the panel is moving to another server; join again in a few minutes");
+      return;
+    }
 
     const minimum = this.deps.hub.minimumAgentVersion();
     if (!agentVersionAllowed(hello.agentVersion, minimum)) {
@@ -613,6 +624,13 @@ export class AgentSession {
     this.state = "closed";
     this.writer.close();
     this.socket.close(closeRejected, message.slice(0, 120));
+  }
+
+  /** Ends the handshake without a verdict: the agent retries with backoff, as after a dropped connection. */
+  private unavailable(reason: string): void {
+    this.deps.logger.info({ remoteIp: this.remoteIp, reason }, "agent connect closed without an answer");
+    this.closed();
+    this.socket.close(closeUnavailable, reason.slice(0, 120));
   }
 
   /** The socket dropped a frame (the agent stopped reading): end the session so both sides start over. */

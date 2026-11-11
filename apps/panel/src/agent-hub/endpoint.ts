@@ -12,7 +12,19 @@ import { AgentSession, type SessionDeps } from "./session";
 export const agentConnectPath = "/api/agent/connect";
 export const agentSubprotocol = `${slug}.agent.v1`;
 
-export function agentEndpoint(deps: SessionDeps & { proxy?: ProxyTrust }) {
+export interface AgentEndpointDeps extends SessionDeps {
+  proxy?: ProxyTrust;
+  /**
+   * Why connects are refused right now (the panel moved or switches to its
+   * new address, modules/panelMove/pause.ts), or null. A refusal is HTTP 503
+   * before the handshake, not a HelloRejected: agents treat it as "the
+   * panel is down" and dial the address they were given for the move,
+   * where a rejection would make them wait 5 minutes on this one.
+   */
+  refuse?: () => string | null;
+}
+
+export function agentEndpoint(deps: AgentEndpointDeps) {
   const sessions = new Map<string, AgentSession>();
 
   return new Elysia({ name: "agent-hub" }).ws(agentConnectPath, {
@@ -25,6 +37,12 @@ export function agentEndpoint(deps: SessionDeps & { proxy?: ProxyTrust }) {
       if (!offered.includes(agentSubprotocol)) {
         set.status = 400;
         return `agents must offer the ${agentSubprotocol} subprotocol`;
+      }
+      const refused = deps.refuse?.() ?? null;
+      if (refused) {
+        set.status = 503;
+        set.headers["retry-after"] = "10";
+        return refused;
       }
     },
     upgrade: { "sec-websocket-protocol": agentSubprotocol },

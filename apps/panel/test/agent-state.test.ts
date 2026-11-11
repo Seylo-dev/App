@@ -20,7 +20,17 @@ const svc = (id: string, containerId = "c1") =>
 
 describe("method metadata", () => {
   test("the raw method list matches the stream_mode options in the proto", () => {
-    const raw: RawMethodName[] = ["fsRead", "exportVolume", "fsWrite", "uploadBuildContext", "importVolume", "tunnel"];
+    const raw: RawMethodName[] = [
+      "fsRead",
+      "exportVolume",
+      "exportRegistry",
+      "fsWrite",
+      "uploadBuildContext",
+      "importVolume",
+      "importPanelData",
+      "importRegistry",
+      "tunnel",
+    ];
     const fromProto = Object.keys(AgentService.method)
       .filter((name) => methodStreamMode(name as never) !== StreamMode.UNSPECIFIED)
       .sort();

@@ -20,6 +20,7 @@ import { describePrincipal, type Principal, type PrincipalUser } from "../auth/p
 import type { Deps } from "../deps";
 import { addressKey } from "../http/ip-ranges";
 import { readMcpSafety } from "../modules/mcp/keys";
+import { pauseRefusal } from "../modules/panelMove/pause";
 import { anonymousErrorRows, firstOverCapThisHour, takeAnonymousErrorRow, targetLabel, targetProject, writeAudit } from "./audit";
 import { type HttpEffects, maxViaLoginLength, type OpContext, type OpHandler, type OpVia } from "./implement";
 import type { RateLimiter } from "./rate-limit";
@@ -116,6 +117,11 @@ export function createOpExecutor(deps: Deps, handlers: ReadonlyMap<string, OpHan
       access.require(op.permission, op.kind, input);
       // Read the name now: after a delete it would be gone.
       if (target && op.audit) label = targetLabel(deps.db, target);
+      // While the panel moves it only reads: a change now would be missing from the copy (modules/panelMove/pause.ts).
+      if (op.kind !== "query") {
+        const paused = pauseRefusal(deps.db, op.id);
+        if (paused) throw paused;
+      }
       if (op.kind === "destructive" && fromModel(call, principal) && !call.approvalId && !autoMode && !approvalWaived(deps, principal)) {
         throw new OpError("APPROVAL_REQUIRED", "A person has to approve this action first.");
       }

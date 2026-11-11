@@ -53251,6 +53251,1847 @@
         "x-mcp": true
       }
     },
+    "/api/v1/panelMove.cancel": {
+      "post": {
+        "operationId": "panelMove.cancel",
+        "summary": "Cancel the panel move",
+        "description": "Stops a running move before the switch: the target's copy is deleted, every node forgets the new address and the panel takes changes again. CONFLICT details.reason \"notRunning\" when no move runs, \"switching\" once the switch started. Owner only, from a browser session.",
+        "tags": [
+          "panelMove"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "side",
+                    "moveId",
+                    "targetNodeId",
+                    "targetNodeName",
+                    "targetAddress",
+                    "newUrl",
+                    "step",
+                    "bytesDone",
+                    "bytesTotal",
+                    "startedAt",
+                    "error",
+                    "leftBehind",
+                    "doneAt",
+                    "fromNodeId",
+                    "fromNodeName",
+                    "oldCopyRemoved",
+                    "domain",
+                    "canCancel",
+                    "oldPanelRunning"
+                  ],
+                  "properties": {
+                    "state": {
+                      "anyOf": [
+                        {
+                          "const": "idle",
+                          "type": "string"
+                        },
+                        {
+                          "const": "running",
+                          "type": "string"
+                        },
+                        {
+                          "const": "failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "done",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "side": {
+                      "anyOf": [
+                        {
+                          "const": "old",
+                          "type": "string"
+                        },
+                        {
+                          "const": "new",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "moveId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetNodeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetAddress": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "newUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "step": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "pausing",
+                              "type": "string"
+                            },
+                            {
+                              "const": "registry",
+                              "type": "string"
+                            },
+                            {
+                              "const": "snapshot",
+                              "type": "string"
+                            },
+                            {
+                              "const": "shipping",
+                              "type": "string"
+                            },
+                            {
+                              "const": "starting",
+                              "type": "string"
+                            },
+                            {
+                              "const": "staging",
+                              "type": "string"
+                            },
+                            {
+                              "const": "switching",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "bytesDone": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "bytesTotal": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "startedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "step",
+                            "message"
+                          ],
+                          "properties": {
+                            "step": {
+                              "anyOf": [
+                                {
+                                  "const": "pausing",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "registry",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "snapshot",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "shipping",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "starting",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "staging",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "switching",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "leftBehind": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "doneAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNodeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "oldCopyRemoved": {
+                      "type": "boolean"
+                    },
+                    "domain": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canCancel": {
+                      "type": "boolean"
+                    },
+                    "oldPanelRunning": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/panelMove.check": {
+      "get": {
+        "operationId": "panelMove.check",
+        "summary": "Check a panel move",
+        "description": "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record.",
+        "tags": [
+          "panelMove"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "targetNodeId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "pattern": "^[a-z0-9]{16}$",
+              "description": "Panel-issued id.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "blocks",
+                    "targets",
+                    "targetNodeId",
+                    "defaultAddress",
+                    "nodesToMove",
+                    "nodesLeftBehind",
+                    "warnings",
+                    "domain",
+                    "agentPort",
+                    "fromNode"
+                  ],
+                  "properties": {
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message",
+                          "soft"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "notOwner",
+                                "type": "string"
+                              },
+                              {
+                                "const": "notBrowser",
+                                "type": "string"
+                              },
+                              {
+                                "const": "targetOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "targetIsPanel",
+                                "type": "string"
+                              },
+                              {
+                                "const": "targetDisabled",
+                                "type": "string"
+                              },
+                              {
+                                "const": "targetTooOld",
+                                "type": "string"
+                              },
+                              {
+                                "const": "updateRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "workRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "ipAccessClosed",
+                                "type": "string"
+                              },
+                              {
+                                "const": "tailscaleServe",
+                                "type": "string"
+                              },
+                              {
+                                "const": "rotationUnfinished",
+                                "type": "string"
+                              },
+                              {
+                                "const": "moveRunning",
+                                "type": "string"
+                              },
+                              {
+                                "const": "nodesLeftBehind",
+                                "type": "string"
+                              },
+                              {
+                                "const": "noAgentPort",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNotManaged",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeOffline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodeTooOld",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "nodeIds": {
+                            "type": "array",
+                            "items": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            }
+                          },
+                          "soft": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "online",
+                          "address",
+                          "ready",
+                          "blocks"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "online": {
+                            "type": "boolean"
+                          },
+                          "address": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "ready": {
+                            "type": "boolean"
+                          },
+                          "blocks": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "code",
+                                "message",
+                                "soft"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "anyOf": [
+                                    {
+                                      "const": "notOwner",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "notBrowser",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "targetOffline",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "targetIsPanel",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "targetDisabled",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "targetTooOld",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "updateRunning",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "workRunning",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "ipAccessClosed",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "tailscaleServe",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "rotationUnfinished",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "moveRunning",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "nodesLeftBehind",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "noAgentPort",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "panelNotManaged",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "panelNodeOffline",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "panelNodeTooOld",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "nodeIds": {
+                                  "type": "array",
+                                  "items": {
+                                    "pattern": "^[a-z0-9]{16}$",
+                                    "description": "Panel-issued id.",
+                                    "type": "string"
+                                  }
+                                },
+                                "soft": {
+                                  "type": "boolean"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "targetNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "defaultAddress": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "nodesToMove": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "nodesLeftBehind": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "reason"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "const": "offline",
+                                "type": "string"
+                              },
+                              {
+                                "const": "plainHttp",
+                                "type": "string"
+                              },
+                              {
+                                "const": "tooOld",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "properties": {
+                          "code": {
+                            "anyOf": [
+                              {
+                                "const": "domainDns",
+                                "type": "string"
+                              },
+                              {
+                                "const": "ipUrl",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "domain": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "agentPort": {
+                      "anyOf": [
+                        {
+                          "minimum": 1,
+                          "maximum": 65535,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNode": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "properties": {
+                            "id": {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "settings.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/panelMove.removeOldCopy": {
+      "post": {
+        "operationId": "panelMove.removeOldCopy",
+        "summary": "Delete the old copy of the panel",
+        "description": "After a move, on the moved panel: deletes the stopped panel the move left on the old server, with its data folder (master key, database, the agents' TLS key), the panel update snapshots and the old image registry storage. Owner only, from a browser session that signed in or confirmed it is them in the last 15 minutes. CONFLICT details.reason \"notMoved\" without a finished move, \"removed\" when it is gone already; UNAVAILABLE while the old server is offline.",
+        "tags": [
+          "panelMove"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "freedBytes",
+                    "status"
+                  ],
+                  "properties": {
+                    "freedBytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "object",
+                      "required": [
+                        "state",
+                        "side",
+                        "moveId",
+                        "targetNodeId",
+                        "targetNodeName",
+                        "targetAddress",
+                        "newUrl",
+                        "step",
+                        "bytesDone",
+                        "bytesTotal",
+                        "startedAt",
+                        "error",
+                        "leftBehind",
+                        "doneAt",
+                        "fromNodeId",
+                        "fromNodeName",
+                        "oldCopyRemoved",
+                        "domain",
+                        "canCancel",
+                        "oldPanelRunning"
+                      ],
+                      "properties": {
+                        "state": {
+                          "anyOf": [
+                            {
+                              "const": "idle",
+                              "type": "string"
+                            },
+                            {
+                              "const": "running",
+                              "type": "string"
+                            },
+                            {
+                              "const": "failed",
+                              "type": "string"
+                            },
+                            {
+                              "const": "done",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "side": {
+                          "anyOf": [
+                            {
+                              "const": "old",
+                              "type": "string"
+                            },
+                            {
+                              "const": "new",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "moveId": {
+                          "anyOf": [
+                            {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "targetNodeId": {
+                          "anyOf": [
+                            {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "targetNodeName": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "targetAddress": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "newUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "step": {
+                          "anyOf": [
+                            {
+                              "anyOf": [
+                                {
+                                  "const": "pausing",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "registry",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "snapshot",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "shipping",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "starting",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "staging",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "switching",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "bytesDone": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "bytesTotal": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "startedAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "step",
+                                "message"
+                              ],
+                              "properties": {
+                                "step": {
+                                  "anyOf": [
+                                    {
+                                      "const": "pausing",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "registry",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "snapshot",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "shipping",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "starting",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "staging",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "switching",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "leftBehind": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "properties": {
+                              "id": {
+                                "pattern": "^[a-z0-9]{16}$",
+                                "description": "Panel-issued id.",
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "doneAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "fromNodeId": {
+                          "anyOf": [
+                            {
+                              "pattern": "^[a-z0-9]{16}$",
+                              "description": "Panel-issued id.",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "fromNodeName": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "oldCopyRemoved": {
+                          "type": "boolean"
+                        },
+                        "domain": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "canCancel": {
+                          "type": "boolean"
+                        },
+                        "oldPanelRunning": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "destructive",
+        "x-permission": "settings.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/panelMove.start": {
+      "post": {
+        "operationId": "panelMove.start",
+        "summary": "Move the panel to another node",
+        "description": "Starts moving the panel to targetNodeId and answers at once with the move's status (panelMove.status follows it). The panel copies its database, keys, branding, uploads and image registry to the node, starts there, tells every node the new address and switches; it is read-only meanwhile, apps keep running, and the old server keeps a stopped copy until panelMove.removeOldCopy. address is the host name or IP nodes reach the target at (no scheme, no port); it defaults to the node's public address. Owner only, from a browser session that signed in or confirmed it is them in the last 15 minutes (FORBIDDEN details.reason \"reauth\" otherwise). A refusal is CONFLICT with details.reason one of the block codes of panelMove.check; nodesLeftBehind is allowed with leftBehind: true.",
+        "tags": [
+          "panelMove"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetNodeId"
+                ],
+                "properties": {
+                  "targetNodeId": {
+                    "pattern": "^[a-z0-9]{16}$",
+                    "description": "Panel-issued id.",
+                    "type": "string"
+                  },
+                  "address": {
+                    "minLength": 1,
+                    "maxLength": 253,
+                    "type": "string"
+                  },
+                  "leftBehind": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "side",
+                    "moveId",
+                    "targetNodeId",
+                    "targetNodeName",
+                    "targetAddress",
+                    "newUrl",
+                    "step",
+                    "bytesDone",
+                    "bytesTotal",
+                    "startedAt",
+                    "error",
+                    "leftBehind",
+                    "doneAt",
+                    "fromNodeId",
+                    "fromNodeName",
+                    "oldCopyRemoved",
+                    "domain",
+                    "canCancel",
+                    "oldPanelRunning"
+                  ],
+                  "properties": {
+                    "state": {
+                      "anyOf": [
+                        {
+                          "const": "idle",
+                          "type": "string"
+                        },
+                        {
+                          "const": "running",
+                          "type": "string"
+                        },
+                        {
+                          "const": "failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "done",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "side": {
+                      "anyOf": [
+                        {
+                          "const": "old",
+                          "type": "string"
+                        },
+                        {
+                          "const": "new",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "moveId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetNodeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetAddress": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "newUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "step": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "pausing",
+                              "type": "string"
+                            },
+                            {
+                              "const": "registry",
+                              "type": "string"
+                            },
+                            {
+                              "const": "snapshot",
+                              "type": "string"
+                            },
+                            {
+                              "const": "shipping",
+                              "type": "string"
+                            },
+                            {
+                              "const": "starting",
+                              "type": "string"
+                            },
+                            {
+                              "const": "staging",
+                              "type": "string"
+                            },
+                            {
+                              "const": "switching",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "bytesDone": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "bytesTotal": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "startedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "step",
+                            "message"
+                          ],
+                          "properties": {
+                            "step": {
+                              "anyOf": [
+                                {
+                                  "const": "pausing",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "registry",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "snapshot",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "shipping",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "starting",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "staging",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "switching",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "leftBehind": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "doneAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNodeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "oldCopyRemoved": {
+                      "type": "boolean"
+                    },
+                    "domain": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canCancel": {
+                      "type": "boolean"
+                    },
+                    "oldPanelRunning": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "mutation",
+        "x-permission": "settings.manage",
+        "x-mcp": false
+      }
+    },
+    "/api/v1/panelMove.status": {
+      "get": {
+        "operationId": "panelMove.status",
+        "summary": "Get the panel move's status",
+        "description": "Returns whether the panel is moving (the step and bytes copied), the last move's failure, or the result of a finished move: where it went, the nodes left behind, the panel domain to point at the new address and whether the old copy was deleted. Anyone signed in gets the state and the target's name (the panel is read-only for everyone while it moves); the rest needs settings.view.",
+        "tags": [
+          "panelMove"
+        ],
+        "security": [
+          {
+            "session": [],
+            "sessionKey": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "state",
+                    "side",
+                    "moveId",
+                    "targetNodeId",
+                    "targetNodeName",
+                    "targetAddress",
+                    "newUrl",
+                    "step",
+                    "bytesDone",
+                    "bytesTotal",
+                    "startedAt",
+                    "error",
+                    "leftBehind",
+                    "doneAt",
+                    "fromNodeId",
+                    "fromNodeName",
+                    "oldCopyRemoved",
+                    "domain",
+                    "canCancel",
+                    "oldPanelRunning"
+                  ],
+                  "properties": {
+                    "state": {
+                      "anyOf": [
+                        {
+                          "const": "idle",
+                          "type": "string"
+                        },
+                        {
+                          "const": "running",
+                          "type": "string"
+                        },
+                        {
+                          "const": "failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "done",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "side": {
+                      "anyOf": [
+                        {
+                          "const": "old",
+                          "type": "string"
+                        },
+                        {
+                          "const": "new",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "moveId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetNodeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "targetAddress": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "newUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "step": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "const": "pausing",
+                              "type": "string"
+                            },
+                            {
+                              "const": "registry",
+                              "type": "string"
+                            },
+                            {
+                              "const": "snapshot",
+                              "type": "string"
+                            },
+                            {
+                              "const": "shipping",
+                              "type": "string"
+                            },
+                            {
+                              "const": "starting",
+                              "type": "string"
+                            },
+                            {
+                              "const": "staging",
+                              "type": "string"
+                            },
+                            {
+                              "const": "switching",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "bytesDone": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "bytesTotal": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "startedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "step",
+                            "message"
+                          ],
+                          "properties": {
+                            "step": {
+                              "anyOf": [
+                                {
+                                  "const": "pausing",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "registry",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "snapshot",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "shipping",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "starting",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "staging",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "switching",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "leftBehind": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "properties": {
+                          "id": {
+                            "pattern": "^[a-z0-9]{16}$",
+                            "description": "Panel-issued id.",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "doneAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNodeId": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-z0-9]{16}$",
+                          "description": "Panel-issued id.",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "fromNodeName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "oldCopyRemoved": {
+                      "type": "boolean"
+                    },
+                    "domain": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canCancel": {
+                      "type": "boolean"
+                    },
+                    "oldPanelRunning": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-op-kind": "query",
+        "x-permission": "signed-in",
+        "x-mcp": false
+      }
+    },
     "/api/v1/previews.delete": {
       "post": {
         "operationId": "previews.delete",

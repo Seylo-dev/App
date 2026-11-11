@@ -76,6 +76,12 @@ export interface PanelServiceDeps {
   edgeAccessAllowed(nodeId: string, request: { subject: string; userId: string }): boolean;
   /** SignBackupRequests: presigned URLs for a run on this node, or a PanelServiceError (modules/backups/signing.ts). */
   signBackupRequests(nodeId: string, request: SignBackupRequestsRequest): Promise<SignedStorageRequest[]>;
+  /**
+   * True while the panel moves (modules/panelMove/pause.ts): durable
+   * reports answer UNAVAILABLE, so agents keep them in their outboxes for
+   * the moved panel instead of this database, which was copied already.
+   */
+  reportsPaused?(): boolean;
 }
 
 const wire = (name: string) => `/${PanelService.typeName}/${name}`;
@@ -156,6 +162,9 @@ export function createPanelService(deps: PanelServiceDeps): PanelServiceHandlers
 
   /** Size and rate limits shared by both Report calls. */
   const admitReport = (nodeId: string, bytes: Uint8Array) => {
+    if (deps.reportsPaused?.()) {
+      throw new PanelServiceError(StatusCode.UNAVAILABLE, "The panel is moving to another server. Send the report again later.");
+    }
     if (bytes.length > maxReportBytes) {
       throw new PanelServiceError(StatusCode.INVALID_ARGUMENT, `A report may be at most ${maxReportBytes} bytes.`);
     }
