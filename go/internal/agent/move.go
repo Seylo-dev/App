@@ -32,6 +32,15 @@ import (
 // again after moveRetryAfter or an agent restart. The panel's own node
 // dials loopback and never moves.
 //
+// A node at a pinned https:// address whose move fails because it does not
+// trust the new address's certificate waits untrustedMoveRetryAfter
+// instead: most often its network decrypts HTTPS (TLS inspection re-signs
+// the domain's certificate), which is why it joined over the panel's IP
+// and pin, and the panel names its domain on every connect. Each try drops
+// the session the panel just accepted, so the node tries that address
+// again only after that long, an agent restart (which reloads the trust
+// store), or when the panel names another address or a pin for it.
+//
 // Only an authenticated session (https:// with a pin or a CA-verified
 // certificate) can move the node. Over plain HTTP anyone on the path can
 // write the ServerHello and the HelloAccepted, panel id included, so such a
@@ -47,6 +56,9 @@ var (
 	// moveRetryAfter is how long a failed move to an address waits before
 	// the agent tries it again.
 	moveRetryAfter = time.Hour
+	// untrustedMoveRetryAfter is that wait for a node at a pinned https://
+	// address whose move failed on the new address's certificate.
+	untrustedMoveRetryAfter = 24 * time.Hour
 	// standingFallbackAfter is how long connects to panel_url fail before
 	// the agent dials a standing fallback.
 	standingFallbackAfter = 5 * time.Minute
@@ -250,19 +262,28 @@ func (c *connector) moved(ctx context.Context, from, to panelTarget) {
 	})
 }
 
-// moveFailed keeps (or puts back) the old address and reports why.
+// moveFailed keeps (or puts back) the old address and reports why, once
+// per address (moveAlerted). A move that failed on the certificate from a
+// pinned https:// address waits untrustedMoveRetryAfter, any other
+// moveRetryAfter.
 func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err error) {
 	key := moveKey(to)
+	untrusted := untrustedCertificate(err)
+	pinned := untrusted && from.pin != "" && tlsURL(from.url)
+	retry := moveRetryAfter
+	if pinned {
+		retry = untrustedMoveRetryAfter
+	}
 	if c.moveRetry == nil {
 		c.moveRetry = map[string]time.Time{}
 	}
-	c.moveRetry[key] = time.Now().Add(moveRetryAfter)
+	c.moveRetry[key] = time.Now().Add(retry)
 	stay := from.url
 	if from.fallback && restorable(c.config().Fallback) {
 		c.restoreFallback()
 	}
 	c.logger.Error("could not move to the panel's new address; staying on the current one",
-		"panel_url", to.url, "current", stay, "retry_in", moveRetryAfter, "err", err)
+		"panel_url", to.url, "current", stay, "retry_in", retry, "err", err)
 	if c.moveAlerted == key {
 		return
 	}
@@ -270,9 +291,12 @@ func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err er
 	// The error is one line: it can quote what the new address chose (its
 	// certificate's names), and the owner reads it in the panel.
 	msg := fmt.Sprintf("Could not move to the panel address %s: %s\nThe node keeps connecting through %s and tries again in %s or when the agent restarts.",
-		to.url, conn.PrintableLine(err.Error()), stay, durationWords(moveRetryAfter))
-	if untrustedCertificate(err) {
+		to.url, conn.PrintableLine(err.Error()), stay, durationWords(retry))
+	if untrusted {
 		msg += " The node does not trust that address's certificate: the panel must send its pin, or the certificate must come from a CA in the node's trust store (an agent restart reloads it)."
+	}
+	if pinned {
+		msg += " If the node's network decrypts HTTPS (TLS inspection), it cannot use that address and stays on its pinned one."
 	}
 	c.moveAlert(ctx, &agentv1.NodeAlert{
 		Kind:     agentv1.NodeAlertKind_NODE_ALERT_KIND_PANEL_MOVE_FAILED,

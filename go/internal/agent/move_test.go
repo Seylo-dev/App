@@ -4,11 +4,17 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
+	"log"
 	"log/slog"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,8 +31,10 @@ func moveSetup(t *testing.T, keepLoopback bool) {
 	t.Helper()
 	isolate(t)
 	savedOwn, savedRoots, savedDelay, savedRetry, savedStanding := ownNodePanel, panelRoots, moveAttemptDelay, moveRetryAfter, standingFallbackAfter
+	savedUntrusted := untrustedMoveRetryAfter
 	t.Cleanup(func() {
 		ownNodePanel, panelRoots, moveAttemptDelay, moveRetryAfter, standingFallbackAfter = savedOwn, savedRoots, savedDelay, savedRetry, savedStanding
+		untrustedMoveRetryAfter = savedUntrusted
 	})
 	if !keepLoopback {
 		ownNodePanel = func(string) bool { return false }
@@ -186,6 +194,98 @@ func TestMoveFailureKeepsOldAddress(t *testing.T) {
 	}
 	if n := len(moveAlerts(panel)); n != 1 {
 		t.Fatalf("%d move alerts, want 1", n)
+	}
+}
+
+// untrustedAddress is an https:// address whose certificate the node does
+// not trust (a firewall that decrypts HTTPS re-signs it), counting the
+// connections the agent opens to it.
+func untrustedAddress(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var dials atomic.Int32
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			dials.Add(1)
+		}
+	}
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return srv, &dials
+}
+
+// A node joined over the panel's IP and pin because its network decrypts
+// HTTPS: the panel names its domain on every connect, and the node cannot
+// trust the certificate there. The move fails once with one alert; after
+// that the node stays on its pinned address and keeps the sessions the
+// panel accepts (before: every reconnect after the hour dropped the
+// session to try the domain again), until the panel names another
+// address.
+func TestUntrustedMoveFromAPinnedAddressWaitsADay(t *testing.T) {
+	moveSetup(t, false)
+	moveRetryAfter = time.Millisecond // a move that failed for another reason would be tried again at once
+	panel := rpctest.NewFakePanel(t, rpctest.WithTLS())
+	domain, dials := untrustedAddress(t)
+	panelRoots = x509.NewCertPool()
+	layout := joined(t, panel)
+	panel.SetPanelAddress(domain.URL, "")
+
+	startDaemon(t, layout)
+	waitUntil(t, "the failed move and the session after it", func() bool { return dials.Load() > 0 && len(panel.AcceptedHosts()) >= 2 })
+	nodeID := panel.WaitConnected(loadCfg(t, layout).NodeID)
+
+	panel.DropConnections()
+	panel.WaitConnected(nodeID)
+	time.Sleep(300 * time.Millisecond)
+	if hosts := panel.AcceptedHosts(); len(hosts) != 3 {
+		t.Fatalf("accepted connections = %v, want the join, the session after the move and one after the drop", hosts)
+	}
+	if n := dials.Load(); n != 1 {
+		t.Fatalf("%d connections to the untrusted address, want 1", n)
+	}
+	waitUntil(t, "the move alert", func() bool { return len(moveAlerts(panel)) > 0 })
+	if alerts := moveAlerts(panel); len(alerts) != 1 || !strings.Contains(alerts[0].GetMessage(), "tries again in 24 hours") ||
+		!strings.Contains(alerts[0].GetMessage(), "TLS inspection") {
+		t.Fatalf("move alerts = %v, want one that waits 24 hours", alerts)
+	}
+	cfg := loadCfg(t, layout)
+	if cfg.PanelURL != panel.URL() || cfg.PanelPin != conn.FormatPin(panel.SPKI()) || cfg.Fallback != nil {
+		t.Fatalf("config = %+v", cfg)
+	}
+
+	// Another address the panel names is tried at once.
+	other, otherDials := untrustedAddress(t)
+	panel.SetPanelAddress(other.URL, "")
+	panel.DropConnections()
+	waitUntil(t, "the move to the other address", func() bool { return otherDials.Load() == 1 })
+}
+
+// Only a certificate failure from a pinned https:// address waits the
+// long time: other failed moves, and moves from a CA-verified address,
+// are tried again after moveRetryAfter as before.
+func TestMoveRetryAfterAFailedMove(t *testing.T) {
+	pin := conn.FormatPin(make([]byte, 32))
+	untrusted := fmt.Errorf("dial panel: tls: failed to verify certificate: %w", x509.UnknownAuthorityError{})
+	to := panelTarget{url: "https://panel.example.com"}
+	for _, tc := range []struct {
+		name string
+		from panelTarget
+		err  error
+		want time.Duration
+	}{
+		{"untrusted from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, untrusted, untrustedMoveRetryAfter},
+		{"pin mismatch from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, fmt.Errorf("dial panel: %w", conn.ErrPinMismatch), untrustedMoveRetryAfter},
+		{"unreachable from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, errors.New("dial panel: connect: connection refused"), moveRetryAfter},
+		{"another panel from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, errors.New(`https://panel.example.com answers as another panel ("p2", not "p1")`), moveRetryAfter},
+		{"untrusted from a CA-verified address", panelTarget{url: "https://old.example.com"}, untrusted, moveRetryAfter},
+	} {
+		c := &connector{deps: &Deps{}, logger: slog.New(slog.DiscardHandler), cfg: &FileConfig{}}
+		before := time.Now()
+		c.moveFailed(context.Background(), tc.from, to, tc.err)
+		if got := c.moveRetry[moveKey(to)].Sub(before); got < tc.want || got > tc.want+time.Minute {
+			t.Errorf("%s: retry in %s, want %s", tc.name, got, tc.want)
+		}
 	}
 }
 
