@@ -4338,7 +4338,10 @@ check_43() {
   p43_js() {
     printf '%s\n' "$1" | on "$E2E_B" "docker exec -i \$(docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app"
   }
-  wait_for 120 "mongosh answers" sh -c "printf 'db.runCommand({ping: 1}).ok\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q 1" ||
+  # p43_sees <script> <pattern>: the script's answer matches. The container is looked up inside
+  # B, not with a second ssh in $(...), which would read the script meant for mongosh.
+  p43_sees() { p43_js "$1" | grep -q "$2"; }
+  wait_for 120 "mongosh answers" p43_sees "db.runCommand({ping: 1}).ok" 1 ||
     { bad "mongosh never signed in to MongoDB 7.0"; return 1; }
   out=$(p43_js "db.t.insertOne({v: 'e2e-43'}).acknowledged")
   printf '%s' "$out" | grep -q true && good "MongoDB 7.0 on B holds a document" || { bad "insert failed: $(printf '%s' "$out" | tail -2)"; return 1; }
@@ -4354,7 +4357,7 @@ check_43() {
   dep=$(printf '%s' "$out" | jq -r .deploymentId)
   st=$(wait_deploy "$db" 600 "$dep")
   expect "the patch update deployed (status $st)" test "$st" = live
-  wait_for 120 "mongosh after the patch update" sh -c "printf 'db.t.findOne().v\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q e2e-43" ||
+  wait_for 120 "mongosh after the patch update" p43_sees "db.t.findOne().v" e2e-43 ||
     bad "the document is gone after the patch update"
   out=$(on "$E2E_B" "docker inspect --format '{{.Config.Image}}' \$(docker ps -q --filter label=$SLUG.service=$db | head -1)")
   expect "the container runs $P43_TAG ($out)" sh -c "printf '%s' '$out' | grep -q 7.0.45-jammy"
@@ -4366,7 +4369,7 @@ check_43() {
   dep=$(printf '%s' "$out" | jq -r .deploymentId)
   st=$(wait_deploy "$db" 600 "$dep")
   expect "the upgrade deployed (status $st)" test "$st" = live
-  wait_for 120 "mongosh on 8.0" sh -c "printf 'db.version()\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q '^8\.0\.'" ||
+  wait_for 120 "mongosh on 8.0" p43_sees "db.version()" '8\.0\.' ||
     bad "MongoDB 8.0 never answered"
   out=$(p43_js "db.t.findOne().v")
   expect "the document survives the upgrade ($(printf '%s' "$out" | tail -1))" sh -c "printf '%s' '$out' | grep -q e2e-43"
