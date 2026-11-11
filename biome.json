@@ -16,6 +16,7 @@
       "!packages/brand/src",
       "!apps/panel/drizzle",
       "!apps/web/src/components/docker-hub/logos",
+      "!apps/web/src/components/new-service/logos",
       "!**/*.md"
     ]
   },
