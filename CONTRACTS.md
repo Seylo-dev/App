@@ -75,7 +75,7 @@ packages use. "Built" means implemented and tested.
 | `reconcile` | Converge to desired state, health-gated deploys, rollback, adoption by labels, `Resolve`, `SetSleeping`, moving running containers to another project's network without a restart (`reattach.go`) | Built (`Runtime`; the project move verified in the VM, `TestITMoveProjectReattach`, `TestITMoveProjectInterruptedLeavesTheOldNetwork`) |
 | `crash` | Crash policy and reports | Built (`Streaks`, `Redact`) |
 | `health` | Service health probes | Built (`Probes`, `Watch`) |
-| `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services; extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
+| `volumes` | Volume export/import (.tar.gz through `os.Root`) for moving services and for the data of service export files (`ImportOptions`: at most `MaxBytes` file bytes and `MaxEntries` headers, the stream's `SHA256`, free space for `MaxBytes` plus `FreeFloor`; a failed import with limits leaves the volume empty; `Export` counts the entries it wrote); extracted modes (`ArchiveMode`, imports and backup restores) keep the permission bits, sticky, and setgid on folders, and drop setuid and setgid on files like uploads; `WriteArchive` for any archive of a live volume (walks through `os.Root`, checks each opened file against its listing, so symlink swaps mid-walk never reach host files) | Built (`Transfer`, `WriteArchive`) |
 | `proxy` | Traefik route files (`Build`, a route with `acme_hold` gets its HTTPS routers without the certificate resolver and no redirect, since 0.2.8; `FileRouter`: atomic write, `Verify` probe through Traefik, `Status` from acme.json, Traefik's log (`CertFailures`, `WatchCertFailures`: CERTIFICATE_FAILED with the CA's reason) and DNS (a host whose every address is Cloudflare's, `proxy/cloudflare.go`, is never a DNS_MISMATCH: behind the proxy only the certificate tells, since 0.2.8), certificate issuer and expiry, `RetryCertificate` (renames one route's routers so Traefik runs ACME again, no restart), `Certificate`, `ProxyContainers`), the agent's own Traefik (`Traefik.Ensure`), the LB-only Traefik next to Wings (`LBOnly`, `FileConfig.LBDir`), `MobyDocker` for networking's Docker calls | Built (routing, middlewares, custom and ACME certificates and ACME failures via Pebble, a failed host fixed and retried to a certificate in both modes (`TestIntegrationACMERetry`), switch under load, shared Wings Traefik plus the LB Traefik verified in the VM) |
 | `edge` | Agent HTTP listener on the `seylo-edge` gateway: maintenance/status pages (served with `proxy.PageContentSecurityPolicy` and nosniff: no scripts or frames), tool sessions from panel-signed tickets (`Verifier`, `Tools`), cookie handoff, origin proofs for the panel's origin check of service domains (`origin.go`: `proxy.OriginPath`, signed with the node key, `OriginCapability`) | Built (Box ticket flow, tool host and handoff through Traefik verified in the VM; origin proofs unit tested, e2e check 29 written but not run yet) |
 | `portgate` | Agent-owned IP:port TCP relays from the desired state (`SyncAll`, `ListenersFor`): allow lists, local expiry, redirect-then-close, TLS termination for exposed Mongo, Redis, Valkey, KeyDB, Dragonfly and ClickHouse's native port (`dbengine.TLSAtGate`, `Config.Certificate`, `OpenPort.tls`), a TLS check on exposed Postgres, MySQL and MariaDB (0.2.9, `Listener.RequireTLS`, `requiretls.go`: Postgres must open with an SSLRequest, a direct TLS ClientHello or a CancelRequest, a GSSENCRequest gets "N" from the gate and the next message must ask for TLS, and a database that answers the SSLRequest "N" gets no plain login either; MySQL and MariaDB: the server's greeting must offer TLS (CLIENT_SSL; read whole, up to 1 KiB) or the client gets an ERR 3159 "TLS is not on in this database yet" in its place (MariaDB 10.11 has no TLS), and the client's first packet must be a 4.1 SSLRequest, payload exactly 32 bytes with CLIENT_SSL, since a whole handshake response with the flag set goes in the clear and a server without TLS masks the flag off; anything else gets the protocol's error, a Postgres ErrorResponse FATAL 28000 "this port only accepts TLS connections: connect with sslmode=require" or a MySQL ERR 3159 HY000, and the connection closes; 10 s for Postgres' first bytes, 30 s for MySQL's greeting and answer, at most the 8 bytes (Postgres) or the greeting and 6 bytes (MySQL) checked are buffered and go on unchanged, and a refused startup message is read to its end, up to Postgres' 10000 bytes or 64 KiB, so the client reads the error before the close), per-listener and per-source connection caps, idle cut-off (15 min, databases 2 h), one shared `Resolve` per container port every 2 s. Through a deploy (since 0.2.1): a new connection waits for its service (`ConnectTimeout`, 5 s) instead of closing at the first miss (a failed lookup or a refusing address is tried again after a short pause; an address from an earlier lookup gets one second, then a fresh lookup), one connection giving up never fails the shared lookup for the rest, reconcile calls `Manager.Switched` when a deploy switches the route, switches back, removes the old generation and ends the rollout (it drops the service's lookups, failed ones too), and reconcile's `Resolve` keeps to the serving generation until the switch (`worker.rollSwitched`); a listener that gives up on connections warns once a minute | Built (relay to a container, allow list, redirect and expiry, redis-cli/valkey-cli `--tls`, mongosh `tls=true` and clickhouse-client `--secure` through the gate verified in the VM; psql `sslmode=require` and `prefer`, mysql `--ssl-mode=REQUIRED` and mariadb `--ssl` pass, `sslmode=disable`, `--ssl-mode=DISABLED`, `--skip-ssl` and `prefer` to a Postgres with TLS off get the gate's error, MariaDB 10.11 refuses `--ssl`, `--skip-ssl` and a plain response with CLIENT_SSL, and 120 refused MySQL logins in a row do not block the gate's address, verified in the VM: `TestIntegrationDatabaseTLSInProtocol`) |
@@ -170,7 +170,10 @@ pushes); for 0.2.8 `0015_domain_acme_hold` (`domains.acme_released_at`,
 set on existing domains whose DNS was not missing or pointing elsewhere,
 so the update holds back none of their certificates); for 0.2.10
 `0016_service_transfers` (`service_exports` and `service_imports`,
-service export and import)), which the panel applies at start, also
+service export and import) and `0017_transfer_volumes`
+(`service_exports.volumes`, `node_id` without a foreign key, `stop_service`
+and `source_stopped`, so a download that stopped its service starts it
+again after a panel restart)), which the panel applies at start, also
 right after an update (e2e check 38 updates a 0.1.1 install). After a
 schema change run `bun run db:generate` in apps/panel and commit the new
 migration with the change. Two people
@@ -2296,7 +2299,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Networking gaps: UDP public ports (portgate relays TCP; `portgate.ErrUDP`), the real next-to-Wings test (the Wings fork change is not made yet; the shared mode and its LB Traefik ran with a stand-in Traefik in the VM), ACME failures are read from the last 24 h of Traefik's log only. The `network.firewall` check names closed portgate ports but not 5757 on nodes with load-balanced services (it would need the other nodes' addresses in the agent). LB certificate revocation holds only on agents with `lb.tls.peers.v1`, only once they got their settings (a node cut off from the panel keeps its last list), and only for new connections (Traefik keeps a TLS connection it already accepted across reloads); while the panel lists a `legacy` peer (a node holding a certificate from before 0.2 that has not connected since, at most 30 days) every certificate of the LB CA is accepted; an older agent is reached by the shared name, which any node's certificate carries; a new LB CA comes only with `seylo panel rotate-key --new-panel-identity` | Logged errors / reopen links |
 | GitHub: sign-in, linking and the repo-access device flow use the GitHub OAuth App client id in `brand.oauthClientId` (`SEYLO_GITHUB_CLIENT_ID` overrides it for sign-in and linking); they, the App manifest flow, installations, webhooks and polling, and the connected account (the token check, its repository list, repository webhooks and polling, 0.2.2) are tested only against a mocked GitHub (`test/playwright/run.sh` gives its panel a placeholder id, so the browser tests never call github.com); a public git repo build was not run | Tested against mocks; with a placeholder id sign-in and linking answer UNAVAILABLE (`githubAvailable: false`) and the device flow NOT_IMPLEMENTED |
 | Moving compose stacks or their members (compose files from any git host are read through the agent's `FetchGitFile`), to another node or another project; cloning a whole stack (members clone one by one, as standalone apps) | CONFLICT `reason: compose` |
-| Service export and import gaps (0.2.9 is settings only): volume data in the file (the agent's ImportVolume limits, `volume.import-limits.v1`, the stopped-while-streaming database export and its watchdog), compose stacks and their members and several services in one file, the CLI (`seylo export`, `seylo import`, `seylo export decrypt`; until then the API takes what `unzip -p` prints), encrypting the uploaded archive, falling back to the branch head when the exported commit is gone. e2e check 42 (settings, env, cron job, an empty volume and basic auth from B to C) is written but has not run on the VMs yet. The zip was checked with `unzip -t` and Python's `zipfile`, not with Finder, Archive Utility, `ditto` or Windows Explorer | Volumes arrive empty, compose is CONFLICT `reason: compose`, a first deploy of a commit that is gone fails like any deploy |
+| Service export and import gaps: a database is stopped for its whole download (no staged copy on the panel's disk, no engine dump, no resumable download), compose stacks and their members and several services in one file, the CLI (`seylo export`, `seylo import`, `seylo export decrypt`; until then the API takes what `unzip -p` prints and `curl -T` sends), encrypting the uploaded archive and volume data, falling back to the branch head when the exported commit is gone, a part's own checksum (only the whole entry is hashed). e2e check 42 (settings, env, cron job, a volume's file, a Postgres's rows and basic auth from B to C, a flipped byte refused) is written but has not run on the VMs yet. The zip was checked with `unzip -t` and Python's `zipfile`, not with Finder, Archive Utility, `ditto` or Windows Explorer | Compose is CONFLICT `reason: compose`, a first deploy of a commit that is gone fails like any deploy, a database stays down while its file downloads (5 minutes without a read or 12 hours end it) |
 | Clone and project move gaps: a service with open PR previews cannot change project (close them first); app volume data copied without stopping the source may be inconsistent (the dialog stops it by default); a compose member cloned standalone keeps references to the other members' compose aliases, which only resolve in the same project; literal host names are matched by service name, not by compose aliases; a project move's route switch through a real Traefik is unit-tested only (the VM tests check `Resolve` and Docker DNS, not an e2e curl through Traefik during the switch) | CONFLICT `reason: previews`; the dialog lists references |
 | `BuildSource.image` (mirroring private images into the panel registry) is not used | Each node pulls private images itself with `ImageRef.auth` |
 | The AI assistant against the real Anthropic API and real MCP hosts (tested with a scripted client and `app.handle`; the chat bubble and the Assistant page against the demo world's scripted replies only) | Works as tested |
@@ -2419,6 +2422,7 @@ the node is offline (`modules/databases/capability.ts`).
 | `tailnet.serve.v1` (0.2.1, `wire_tailnet.go`) | The agent reads the host's tailscaled and reports it in every NodeFacts as `tailscale` (unset = no tailscaled socket, an explicit report from this agent), and follows `NodeSettings.tailnet.panel`. Without it `tailscale.get` says `agentSupported: false` and `tailscale.setServe` refuses with `agentTooOld` |
 | `routing.origin-proof.v1` (`edge.OriginCapability`, `wire_network.go`, only with the node key) | Every route file sends `GET /.well-known/<slug>-origin/<challenge>` on the route's hosts to the edge (`proxy` `addOrigin`), which answers with the node key's signature (`edge/origin.go`). The panel's origin check (`modules/domains/origin.ts`) asks only when a node of the service advertised it, and calls an answer without the proof "elsewhere" only when every node of the service did and reported the domain's route; otherwise "unknown" |
 | `node.docker-check.v1` (0.2.5, `update.DockerCheckCapability`, `wire_node.go`) | The agent looks for a newer Docker Engine by itself and reports it in every NodeFacts as `docker_update` (see "Releases and updates", Docker version check). The panel keeps the newest report per node and shows it as the node's `docker` only for agents that advertised it; an older agent's node has no `docker`, so the Machine card and Update Docker stay as before |
+| `volume.import-limits.v1` (0.2.9, `volumes.ImportLimitsCapability`, `wire_runtime.go`) | `ImportVolumeRequest.max_bytes`, `max_entries` and `sha256` hold: at most that many file bytes and archive headers, the whole stream hashes to `sha256`, and the data folder keeps `max_bytes` plus a floor (a tenth of the disk, 1 to 5 GiB) free (RESOURCE_EXHAUSTED `reason: noSpace`, `tooLarge`, `tooMany`; INVALID_ARGUMENT `reason: checksum`); with any limit set, a failure after writing started empties the volume and the agent answers at once instead of draining the stream. `ExportVolumeResponse.entries` counts what an export wrote. The panel sends an uploaded export file's volume data only to an agent that advertised it (an older one would ignore the limits); moves and clones send none and work on `volume.transfer.v1` as before |
 | `lb.tls.peers.v1` | The LB entry point answers `LoadBalancerTls.node_server_name` as SNI and takes `peers` (client CAs = the listed issuers, each copy on another node verified by its listed name). The panel lists a node under its own name only once its agent advertised this and it confirmed a certificate for that name `confirmGraceMs` (2 min) ago; before that, the shared `server_name` (an older agent answers 421 to its own name: Traefik's SNI check) |
 
 ## Panel access and the tailnet
@@ -3505,7 +3509,7 @@ A stopped or never-deployed service just changes project (no deployment).
 
 Service export and import (`modules/serviceTransfer`, contracts and the
 file format in `packages/ops/src/ops/serviceTransfer.ts`, published as
-`service-export.schema.json`; added in 0.2.9 without volume data). Owners
+`service-export.schema.json`; added in 0.2.9). Owners
 and admins only: `services.export` on the service and `services.import` on
 the project are scoped actions with `adminOnly` (see Permission model), so
 an admin key limited to some projects works there and nowhere else, and
@@ -3519,13 +3523,19 @@ members never hold them. Every op is `mcp: false`.
   `manifest.sig` (HMAC of the manifest's exact bytes) and `secrets.enc`
   when encrypted; `services/<name>/service.json` (`PortableServiceV1`)
   only when secret values were left out; `services/<name>/source/upload.tar.gz`,
-  the newest uploaded archive of an upload app, stored. Entry names are an
+  the newest uploaded archive of an upload app, stored;
+  `services/<name>/volumes/<volume>.tar.gz`, a volume's data as
+  ExportVolume streams it (gzipped tar, owners, modes and links kept),
+  stored with a data descriptor (zip64 past 4 GiB), its manifest entry with
+  `unpackedBytes` (the agent's file bytes) and `files` (its entries, null
+  from older agents); the document's `volumes[].data` names it. Entry names are an
   allowlist (`isExportEntryName`). With a passphrase the whole service
   document is inside `secrets.enc` (commands, URLs, host names and notes are
   private too); left out, service.json is in clear and holds no secret value
   (`.env` values, file mount contents, database logins, certificates, basic
   auth hashes, the tunnel token, shared variables' lines stay out). The
-  uploaded archive is never encrypted; the dialog and README say so.
+  uploaded archive and volume data are never encrypted; the dialog and
+  README say so.
 - Crypto (`crypto.ts`): scrypt (N 2^16, r 8, p 1 for new files; a file may
   ask for N 2^14 to 2^20, r 8 to 16, p up to 4, at most 256 MiB, checked
   before anything runs; 2 at a time, 8 waiting, then RATE_LIMITED, the
@@ -3563,6 +3573,39 @@ members never hold them. Every op is `mcp: false`.
   audited. `serviceTransfer.exportLink` issues a new link while the row is
   `ready` (2 minutes, same person, fresh sign-in). File name:
   `<service>-<yyyymmdd-hhmm>.<slug>.zip` (UTC).
+- Volume data in an export: `serviceTransfer.export { volumes, stopService }`
+  (`files.read`; a database all of its volumes or none, only encrypted,
+  BAD_REQUEST `reason: databaseLogins` otherwise, and with
+  `databases.credentials`; stopping a running service needs
+  `services.control`). `exportPreview.data` says whether the data can go
+  now (`noNode`, `offline`, `agentTooOld`, `permission`, `exporting`,
+  `busy`), whether it is a database and whether it runs. With volumes the
+  row keeps the node, the volumes and `stop_service` (on by default, always
+  for a database). The download (`export-stream.ts`) takes the row to
+  `streaming` only while no other download reads that service's data and
+  fewer than 3 do on the panel (else 409); with `stop_service` it stops the
+  service (`services.stopped` and `source_stopped` in one transaction,
+  `desired.settled()`, `waitStopped`, 2 minutes, else 409 and it runs
+  again) before the response starts, then writes the small entries, the
+  archive, each volume (`readVolume`), the manifest and the signature, and
+  saves `bytes_sent` every 2 seconds. However it ends (done, an agent or
+  stream failure, the browser cancelling, nothing read for 5 minutes,
+  12 hours stopped, `serviceTransfer.cancelExport`, or the panel
+  restarting: `start()` fails `streaming` rows) the service starts again
+  (`startExported`) and `serviceTransfer.exportFinished` is audited with
+  the volumes and how long the service was stopped. `ServiceDetail.transfer`
+  shows a download that runs or ended in the last 10 minutes (bytes, stopped,
+  the zip's sha256 once done) and an import that still receives data.
+- Guards (`services/copies.ts`): while a download holds a service stopped,
+  `queueDeploy`, `services.start` and `boxes.open` refuse it (CONFLICT
+  `reason: exporting`); while a download reads its data, `services.move`,
+  `services.setVolumes`, `services.delete`, `services.clone` with data and
+  `backups.restore` refuse it too (`assertNoTransfer`, also `importing` for
+  an import that fills it, except delete) and `services.moveProjectImpact`
+  lists `exporting`/`importing`. An export is refused while a copy, a move
+  or an import runs. `updates.start` (and the automatic run) waits with
+  CONFLICT `reason: transfer` and the panel move preflight lists the work
+  while a download or an import upload moves bytes (`transfersInFlight`).
 - `serviceTransfer.importBegin` (strict rate limit, 4 MiB body, every
   input field sensitive) takes the text of the small entries the browser
   read: the manifest is checked (`document.ts`: clean relative paths
@@ -3649,6 +3692,23 @@ members never hold them. Every op is `mcp: false`.
   made like the connect ops do (`ensureRepoHook`, `ensureHook`); a new
   deploy trigger URL is answered once. Nothing is left when the
   transaction throws.
+- Volume data in an import: importBegin refuses a volume archive no volume
+  of the document names (`tampered`), one without `unpackedBytes` or
+  claiming more than 1100 times its size plus 16 MiB (`badManifest`). The
+  preview lists each volume with its sizes; `choices.volumes` (default: all
+  in the file; a database all or none; `files.write`) picks what goes up.
+  With data picked: blockers `offline` and `agentTooOld` (the node needs
+  `importVolume` and `volume.import-limits.v1`), `databaseLogins` for a
+  database whose file left its logins out or whose logins this panel does
+  not take (new ones would not open the data; leave the data out instead),
+  a `needs` item `confirmData` (`choices.confirmData`) when the data may
+  take more than half of what the node last reported free or unpacks to
+  more than 200 times its size, a warning when the node may refuse it for
+  space, and one that files keep the owners and modes from the file. Each
+  picked volume is an entry of the import (`kind: volume`) with
+  `volumeImportLimits`: at most `ceil(unpackedBytes * 1.01) + 16 MiB` file
+  bytes and `ceil(files * 1.01) + 1000` entries (2,000,000 when not
+  counted); the archive goes before the volumes.
 - The archive goes up after: `serviceTransfer.uploadTicket { entry, offset }`
   then `PUT /api/transfer/import?t=` with one part of at most 32 MiB
   (`uploadPartBytes`, under Bun's 128 MiB body default and Cloudflare's
@@ -3662,6 +3722,22 @@ members never hold them. Every op is `mcp: false`.
   deploys (at the exported commit when chosen). While a row is `receiving`,
   `queueDeploy`, `services.start` and `boxes.open` refuse the service
   (CONFLICT `reason: importing`, `copies.ts` `activeImport`).
+  A volume's parts never land on the panel (`import-data.ts`): the first
+  part (offset 0) waits for `desired.settled()` (the node parks the
+  stopped service) and opens ImportVolume with `replace`, the manifest's
+  sha256 and the limits (`pipeIntoVolume` over a `ChunkFeed`); every part
+  goes straight into that stream, which stays open between parts. The
+  panel hashes what passes and, at the last byte, compares with the
+  manifest before it ends the stream (a mismatch cancels it, BAD_REQUEST
+  `reason: checksum`, and the entry starts over); the node checks the same
+  hash and empties the volume on any failure. A part cut short keeps what
+  reached the node (400, the next part goes on from `received`); 10
+  minutes without a part, a panel restart (`start()` sets `received` to 0)
+  or a failure on the node start the volume over (`received` 0, `offset`
+  refused otherwise). `discardImport`, deleting the service and the sweep
+  end an open stream first. The web app (`?resume=<importId>` on the import
+  page) goes on after a closed page once the same file's manifest hashes to
+  `manifestSha256`.
 - `serviceTransfer.getImport` tells a reloaded page the status and each
   entry's received bytes; `serviceTransfer.discardImport` deletes the row
   and the part file and, only while the row is `receiving`, the service
@@ -3683,7 +3759,10 @@ members never hold them. Every op is `mcp: false`.
   4 MiB, the uploaded archive 512 MiB in parts of 32 MiB, a passphrase 12
   to 1024 characters (NFC), one service per file in format version 1, the
   scrypt bounds above, download links 2 minutes, files in review 24 h,
-  imports waiting for their archive 48 h.
+  imports waiting for their archive or data 48 h; volume data: one download
+  per service and 3 per panel, 5 minutes without a read, 12 hours stopped,
+  10 minutes between upload parts, a confirmation past 200 times its size,
+  refused past 1100 times.
 - `test/service-transfer-columns.test.ts` lists every column of every
   table with a foreign key to `services` (and the scope-id tables) and
   every key of `ServiceSpecJson` as exported or left out with a reason: a
@@ -3709,6 +3788,17 @@ without an error and leaves the key out when none is left. Global
 `templates.manage` gates custom templates.
 
 APIs for other modules (all in `apps/panel/src/modules/`):
+
+- `services/volume-pipe.ts`: `readVolume(deps, { nodeId, serviceId, volume })`
+  (ExportVolume as a stream) and `pipeIntoVolume(deps, { nodeId, serviceId,
+  volume, chunks, sizeBytes?, limits?, kind? })` (ImportVolume with
+  `replace`, the limits of data from outside, stops at the node's refusal;
+  answers the bytes sent and written) are how every volume copy goes
+  through the panel (`move.ts` `relayVolume`, which refuses fewer bytes
+  written than read, the export download, the import's parts through a
+  `ChunkFeed`). Pipes are listed per panel: `cancelPipesInto` (deleting a
+  service), `pipesRunning`. `services/copies.ts`: `activeExport`,
+  `assertNoTransfer`, `transfersInFlight`, `latestTransfer`.
 
 - `services/insert.ts` `insertService(tx, { projectId, name, kind, nodeId, spec?, volumes?, ... })`:
   the only way to create service rows (checks name, node and spec).
@@ -4124,7 +4214,16 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   anything is sent and a re-zip by macOS still reads), the review page
   saves every choice with `serviceTransfer.setChoices`, basic auth
   passwords stay in the page until `serviceTransfer.import`, and the
-  uploaded archive goes up in 32 MiB parts with progress and Retry.
+  uploaded archive and each picked volume go up in 32 MiB parts with a row
+  per entry, progress and Retry (which asks `serviceTransfer.getImport`
+  what the panel has). The Export dialog picks the volumes whose data goes
+  in and whether the service stops (a database always, and only with a
+  passphrase), warns that it stays stopped until the download ends, and
+  shows the download's bytes, Stop the export and the zip's sha256 from
+  `ServiceDetail.transfer`; `components/service/transfer/transfer-note.tsx`
+  says the same under the service header, and while an import still sends
+  data links to `/import?project=&resume=` (`components/import/resume-step.tsx`:
+  the same file again, checked by its manifest's sha256).
 - Sidebar (0.2.2, `components/shell/`): the mark and the panel name are
   one link to the dashboard (`/`, active only there). Each project row
   but the protected Panel project has a + next to its "..." menu (shown
