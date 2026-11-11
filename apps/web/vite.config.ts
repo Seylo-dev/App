@@ -23,6 +23,8 @@ export default defineConfig({
       "/api": { target: panel, ws: true, changeOrigin: false },
       // The panel generates the app manifest from its branding (modules/push/http.ts).
       "/manifest.webmanifest": { target: panel, changeOrigin: false },
+      // MCP sign-in: the panel serves its bridge and consent pages (modules/mcp/oauth.ts), as it does in production.
+      "/oauth": { target: panel, changeOrigin: false },
     },
   },
   build: {

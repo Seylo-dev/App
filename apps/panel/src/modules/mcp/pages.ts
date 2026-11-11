@@ -47,7 +47,7 @@ button.primary{background:var(--primary);border-color:var(--primary);color:#fff}
 
 function page(title: string, body: string, status = 200, script?: { source: string; hash: string }): Response {
   const scriptTag = script ? `<script>${script.source}</script>` : "";
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="referrer" content="no-referrer" /><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><main>${body}</main>${scriptTag}</body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="referrer" content="same-origin" /><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><main>${body}</main>${scriptTag}</body></html>`;
   const scripts = script ? `; script-src '${script.hash}'` : "";
   return new Response(html, {
     status,
@@ -56,7 +56,10 @@ function page(title: string, body: string, status = 200, script?: { source: stri
       "cache-control": "no-store",
       "x-frame-options": "DENY",
       "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'${scripts}; frame-ancestors 'none'; base-uri 'none'`,
-      "referrer-policy": "no-referrer",
+      // same-origin, never no-referrer: with no-referrer browsers send "Origin: null" on the form posts (Fetch
+      // standard, for every non-GET), which the same-origin check refuses, so no MCP sign-in could finish.
+      // same-origin still sends no Referer to the app the answer goes back to.
+      "referrer-policy": "same-origin",
     },
   });
 }

@@ -101,3 +101,16 @@ describe("client address", () => {
     expect((await call(panel, auth.login, { email: user.email, password }, via("203.0.113.5"))).status).toBe(200);
   });
 });
+
+// A form post from a page with referrer policy no-referrer carries "Origin: null"
+// (Fetch standard); the browser's Sec-Fetch-Site, which pages cannot set, then decides.
+test("isSameOrigin: Origin null counts only with Sec-Fetch-Site same-origin", () => {
+  const post = (headers: Record<string, string>) =>
+    new Request("http://panel.test/oauth/authorize", { method: "POST", headers: { host: "panel.test", ...headers } });
+  expect(isSameOrigin(post({ origin: "null", "sec-fetch-site": "same-origin" }))).toBe(true);
+  expect(isSameOrigin(post({ origin: "null", "sec-fetch-site": "same-site" }))).toBe(false);
+  expect(isSameOrigin(post({ origin: "null", "sec-fetch-site": "cross-site" }))).toBe(false);
+  expect(isSameOrigin(post({ origin: "null" }))).toBe(false);
+  expect(isSameOrigin(post({ origin: "http://panel.test" }))).toBe(true);
+  expect(isSameOrigin(post({ origin: "https://evil.example", "sec-fetch-site": "same-origin" }))).toBe(false);
+});

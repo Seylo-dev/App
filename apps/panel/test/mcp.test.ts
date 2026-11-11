@@ -113,6 +113,18 @@ async function connect(cookie: string, access: "read" | "write") {
     body: form.toString(),
   });
   expect(crossSite.status).toBe(403);
+  // The pages ask for same-origin referrers: with no-referrer a browser sends "Origin: null" on these posts.
+  expect(consent.headers.get("referrer-policy")).toBe("same-origin");
+  expect(html).toContain('<meta name="referrer" content="same-origin" />');
+  // "Origin: null" counts only when the browser says the post came from this origin (Sec-Fetch-Site).
+  const nullOrigin = (site: string | null) =>
+    send("/oauth/authorize", {
+      method: "POST",
+      headers: { ...formHeaders, cookie, origin: "null", ...(site ? { "sec-fetch-site": site } : {}) },
+      body: new URLSearchParams([...form].map(([k, v]) => [k, k === "decision" ? "deny" : v])).toString(),
+    });
+  expect((await nullOrigin("cross-site")).status).toBe(403);
+  expect((await nullOrigin(null)).status).toBe(403);
   const withoutKey = new URLSearchParams(form);
   withoutKey.delete("session_key");
   expect(

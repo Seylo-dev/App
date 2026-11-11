@@ -4,8 +4,11 @@
 // switches, on by default, which change the safety note, the Create token
 // sheet's note and what mcp.info answers, and stay changed after a reload.
 
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import type { Page } from "@playwright/test";
-import { api, expect, slug, stateFile, test } from "./helpers";
+import { api, credentials, expect, postPastRateLimit, slug, stateFile, test } from "./helpers";
 
 const shots = process.env.SHOTS_DIR ?? "shots";
 
@@ -89,6 +92,71 @@ test.describe("MCP setup", () => {
     await tab("Gemini CLI").click();
     await expect(code).toHaveText(`gemini mcp add --transport http ${slug} ${url}`);
     await expect(card.getByRole("link", { name: /^(Add to|Install in|Open Claude)/ })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("an app signs in through the consent page in a real browser: the posts carry the panel's Origin", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/settings/api-keys");
+    // The consent page needs a session that signed in or confirmed it is them in the last minutes.
+    const fresh = await postPastRateLimit(api(page), page, "auth.reauth", { password: credentials.password });
+    expect(fresh.ok(), await fresh.text()).toBe(true);
+    // The MCP server is off until someone turns it on.
+    expect((await api(page).post("/api/v1/mcp.update", { data: { enabled: true } })).ok()).toBe(true);
+
+    // The app's loopback callback, as Claude Code and other desktop clients run one.
+    const app = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("back in the app");
+    });
+    await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
+    const appPort = (app.address() as AddressInfo).port;
+    const redirectUri = `http://127.0.0.1:${appPort}/callback`;
+    const registered = await page.request.post("/oauth/register", {
+      data: { client_name: "Playwright app", redirect_uris: [redirectUri] },
+    });
+    expect(registered.status()).toBe(201);
+    const client = (await registered.json()) as { client_id: string };
+    const verifier = `pw-${"v".repeat(40)}`;
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: client.client_id,
+      redirect_uri: redirectUri,
+      code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+      code_challenge_method: "S256",
+      state: "pw-state",
+    });
+    const posts: { origin: string | null; site: string | null }[] = [];
+    page.on("request", async (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/oauth/authorize") {
+        posts.push({ origin: await request.headerValue("origin"), site: await request.headerValue("sec-fetch-site") });
+      }
+    });
+
+    // The bridge page posts itself, then the consent page shows.
+    await page.goto(`/oauth/authorize?${query}`);
+    await expect(page.getByRole("heading", { name: `Connect an app at 127.0.0.1:${appPort}?` })).toBeVisible();
+    await page.screenshot({ path: `${shots}/mcp-consent.png`, fullPage: true });
+    await page.getByRole("button", { name: "Allow" }).click();
+    await page.waitForURL(`${redirectUri}**`);
+    const back = new URL(page.url());
+    expect(back.searchParams.get("state")).toBe("pw-state");
+    const code = back.searchParams.get("code") ?? "";
+    expect(code).not.toBe("");
+    // Both posts (the bridge's and Allow) went with this panel's origin, never "null".
+    const panelOrigin = new URL(test.info().project.use.baseURL ?? "").origin;
+    expect(posts).toEqual([
+      { origin: panelOrigin, site: "same-origin" },
+      { origin: panelOrigin, site: "same-origin" },
+    ]);
+
+    const token = await page.request.post("/oauth/token", {
+      form: { grant_type: "authorization_code", code, client_id: client.client_id, redirect_uri: redirectUri, code_verifier: verifier },
+    });
+    expect(token.ok(), await token.text()).toBe(true);
+    expect(((await token.json()) as { access_token: string }).access_token).toMatch(new RegExp(`^${slug}_mcp_`));
+    app.close();
     expect(errors).toEqual([]);
   });
 
