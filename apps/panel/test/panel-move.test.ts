@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { create, toBinary } from "@bufbuild/protobuf";
-import { defineOp, panelMove, permission, settings } from "@seylo/ops";
+import { auth, defineOp, panelMove, permission, settings } from "@seylo/ops";
 import { EventSchema, PanelService, ReportEventRequestSchema, ReportEventResponseSchema, StatusCode } from "@seylo/proto";
 import { Type } from "@sinclair/typebox";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -915,6 +915,9 @@ describe("the switch: CommitMovedPanel on the target", () => {
     expect((await callOp(panel, settings.updateGeneral, { name: "x" }, { cookie: owner.cookie })).body.error.details.reason).toBe(
       "panelMoving",
     );
+    // The wait has no end of its own: the owner can still sign in (a new device, an expired cookie) to cancel it.
+    const login = await callOp(panel, auth.login, { email: owner.user.email, password: owner.password });
+    expect(login.status).toBe(200);
     const plain = await callOp(panel, panelMove.cancel, {}, { cookie: owner.cookie });
     expect(plain.body.error.details.reason).toBe("switching");
     const early = await callOp(panel, panelMove.cancel, { force: true }, { cookie: owner.cookie });
@@ -938,6 +941,35 @@ describe("the switch: CommitMovedPanel on the target", () => {
     expect(panel.runner.held).toBe(false);
     const audit = panel.deps.db.select().from(auditLog).where(eq(auditLog.opId, "panelMove.cancel")).orderBy(desc(auditLog.id)).get();
     expect(audit).toMatchObject({ outcome: "ok", input: expect.objectContaining({ forced: true }) });
+  });
+
+  test("a switch that had to wait shows no wait once the target confirms it", async () => {
+    moveTiming.commitRetryMs = 20;
+    let tries = 0;
+    fleet.answers.set("commitMovedPanel", (nodeId, request) => {
+      tries++;
+      if (tries === 1) throw agentRefusal("UNAVAILABLE", "The node did not answer in time.");
+      fleet.committed.add(`${nodeId}/${request.moveId}`);
+      return {};
+    });
+    let retire!: () => void;
+    const retiring = new Promise<void>((resolve) => {
+      retire = resolve;
+    });
+    let atRetire: any = null;
+    fleet.answers.set("retirePanel", async () => {
+      atRetire = (await callOp(panel, panelMove.status, {}, { cookie: owner.cookie })).body;
+      await retiring;
+      return {};
+    });
+    await start();
+    for (let i = 0; i < 500 && atRetire === null; i++) await Bun.sleep(5);
+    expect(tries).toBe(2);
+    // The old panel stops after this: a page that keeps this answer must read it as switched.
+    expect(atRetire).toMatchObject({ state: "running", step: "switching", waitingSince: null, error: null, canForceCancel: false });
+    expect(getSetting(panel.deps.db, "panelMoveOut")).not.toHaveProperty("waitingSince");
+    retire();
+    await waitForState("done");
   });
 
   test("a forced cancel the target contradicts (it had committed) is reported and dropped", async () => {

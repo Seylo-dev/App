@@ -57,8 +57,23 @@ interface Writes {
 
 const writes = new WeakMap<object, Writes>();
 
-/** Op ids that keep working while the panel moves. */
-const allowedOps = new Set(["panelMove.cancel"]);
+/**
+ * Op ids that keep working while the panel moves: the cancel, and signing
+ * in and out, since the owner may need a fresh session to cancel a switch
+ * the target never confirmed (that wait has no end of its own). A session
+ * made after the copy exists only here; on the moved panel people sign in
+ * again.
+ */
+const allowedOps = new Set([
+  "panelMove.cancel",
+  "auth.login",
+  "auth.verifySecondFactor",
+  "auth.passkeyLoginBegin",
+  "auth.passkeyLoginFinish",
+  "auth.githubStart",
+  "auth.githubPoll",
+  "auth.logout",
+]);
 
 export function setWritePause(db: PanelDb, pause: WritePause | null): void {
   if (pause) pauses.set(db, pause);

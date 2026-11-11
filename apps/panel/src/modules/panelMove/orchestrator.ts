@@ -554,6 +554,8 @@ async function commit(deps: Deps, move: RunningMove, log: Deps["logger"]): Promi
     try {
       await deps.agents.call(move.targetNodeId, "commitMovedPanel", { moveId: move.moveId }, { timeoutMs: commitTimeoutMs, signal });
       if (move.waitingSince !== null) log.info({ nodeId: move.targetNodeId }, "the target confirmed the switch after all");
+      // Nothing waits any more: screens following the move must see the switch, not the wait.
+      move.waitingSince = null;
       return;
     } catch (error) {
       cancelled(move);

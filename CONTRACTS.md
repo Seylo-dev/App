@@ -2744,7 +2744,7 @@ codes, soft `nodesLeftBehind`), `panelMove.start` (owner, browser session
 confirmed in the last 15 minutes), `panelMove.status` (query, anyone signed
 in gets the state), `panelMove.cancel` (before the switch) and
 `panelMove.removeOldCopy` (destructive); none is an MCP tool. Steps:
-`pausing` (writes refused with 503, the job runner held, durable reports
+`pausing` (every change answers CONFLICT `panelMoving`, signing in and out and `panelMove.cancel` excepted, the job runner held, durable reports
 from agents answer UNAVAILABLE), `registry` (ExportRegistry on the old
 node streamed into ImportRegistry on the target; the two `size_bytes`
 must match), `snapshot` (`Databases.snapshotTo`: a consistent copy of

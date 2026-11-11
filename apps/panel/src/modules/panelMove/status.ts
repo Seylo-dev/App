@@ -81,7 +81,7 @@ export function fullStatus(deps: Pick<Deps, "db" | "config" | "agents">): Status
       fromNodeName: move.fromNodeName,
       domain: move.domain,
       canCancel: !done && !move.committing && !move.switching && !move.abort.signal.aborted,
-      waitingSince: done ? null : iso(move.waitingSince),
+      waitingSince: done || move.switching ? null : iso(move.waitingSince),
       canForceCancel: !done && canForceCancel(move),
       // While the target leaves the switch unconfirmed: what the panel saw at the moved panel's address.
       error:
