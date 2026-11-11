@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The e2e checklist against the three VMs. One function per check
-# (check_01 .. check_41); each prints its sub-results with evidence and ends
+# (check_01 .. check_43); each prints its sub-results with evidence and ends
 # PASS, FAIL, BLOCKED (a precondition is missing, with the reason) or SKIP.
 # Results are kept per check in dist/e2e/state/results and RESULTS.md (next
 # to this file) is rewritten from them after every run, so a single check
@@ -68,11 +68,13 @@ TITLES=(
   "Panel on Tailscale (Headscale): Serve over HTTP to the panel's socket, reached from C, Lock to Tailscale, automatic and CLI recovery"
   "Move the panel A -> B in the browser: data, keys, registry and sign-ins come along, every node follows; a failed move rolls back; back to A"
 )
+# 0.2.9 checks by number: another 0.2.9 change adds 42.
+TITLES[43]="Database version: patch update and a MongoDB major upgrade keep the data"
 # The highest check number. Check 31 gives the panel a domain and puts
 # everything back afterwards; it runs last (after 32..41) so a failed
 # cleanup cannot spoil the others. Checks 39, 40 and 41 put back what they
 # change too.
-LAST=41
+LAST=43
 DOMAIN_CHECK=31
 
 CUR=
@@ -4299,6 +4301,68 @@ p41_run() {
   out=$(session_op panelMove.removeOldCopy '{}')
   expect "the old copy on B is gone" on "$E2E_B" "test ! -e $BRAND_DATA_DIR/panel/master.key && [ -z \"\$(docker ps -aq --filter label=$SLUG.service=panel00000000000)\" ]"
   rm -f "$E2E_STATE/p41-panel-on"
+}
+
+# Check 43 (0.2.9): databases.setVersion on the real panel and B. A MongoDB
+# 7.0 with a document takes a patch update (the same release pinned by
+# digest: no backup, no compatibility step), is refused 8.0 without a
+# backup, then moves to 8.0 with confirmNoBackup (the panel sets
+# featureCompatibilityVersion 7.0 on the running 7.0 first) and keeps the
+# document; going back to 7.0 is refused.
+P43_DIGEST=mongo:7.0.45@sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4
+check_43() {
+  need_key || return 3
+  local nb pid db pass out dep st
+  nb=$(node_id b)
+  [ -n "$nb" ] || { blocked "node B is not joined"; return 3; }
+  op_is_query databases.versionChoices || { blocked "this build has no databases.versionChoices"; return 3; }
+  pid=$(project_id e2e-data)
+  delete_service e2e-data mongo-ver
+  db=$(api databases.create "{\"projectId\":\"$pid\",\"name\":\"mongo-ver\",\"engine\":\"mongo\",\"version\":\"7.0\",\"nodeId\":\"$nb\",\"database\":\"app\"}" | jq -r .serviceId) ||
+    { bad "databases.create mongo 7.0 failed"; return 1; }
+  wait_for 420 "mongo-ver running" svc_running "$db" || { bad "MongoDB 7.0 did not reach running ($(svc_status "$db"))"; return 1; }
+  pass=$(api databases.connection "{\"serviceId\":\"$db\"}" | jq -r .internal.password)
+  # p43_js <script>: runs it in the database's running container with mongosh, the script on stdin.
+  p43_js() {
+    printf '%s\n' "$1" | on "$E2E_B" "docker exec -i \$(docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app"
+  }
+  wait_for 120 "mongosh answers" sh -c "printf 'db.runCommand({ping: 1}).ok\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q 1" ||
+    { bad "mongosh never signed in to MongoDB 7.0"; return 1; }
+  out=$(p43_js "db.t.insertOne({v: 'e2e-43'}).acknowledged")
+  printf '%s' "$out" | grep -q true && good "MongoDB 7.0 on B holds a document" || { bad "insert failed: $(printf '%s' "$out" | tail -2)"; return 1; }
+  out=$(api databases.versionChoices "{\"serviceId\":\"$db\"}")
+  ev "versionChoices: $(printf '%s' "$out" | jq -c '{version, image, backupFresh, choices: [.choices[] | {version, kind, allowed, reason}]}')"
+  expect "8.0 is offered as the next major; 9.0 waits for it (oneStep)" jq_ok "$out" \
+    '([.choices[] | select(.version == "8.0" and .allowed)] | length == 1) and ([.choices[] | select(.version == "9.0" and .reason == "oneStep")] | length == 1)'
+
+  # Patch update: the same release by digest. No backup needed.
+  out=$(api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_DIGEST" '{serviceId: $s, version: "7.0", image: $i}')") ||
+    { bad "the patch update was refused"; return 1; }
+  dep=$(printf '%s' "$out" | jq -r .deploymentId)
+  st=$(wait_deploy "$db" 600 "$dep")
+  expect "the patch update deployed (status $st)" test "$st" = live
+  wait_for 120 "mongosh after the patch update" sh -c "printf 'db.t.findOne().v\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q e2e-43" ||
+    bad "the document is gone after the patch update"
+  out=$(on "$E2E_B" "docker inspect --format '{{.Config.Image}}' \$(docker ps -q --filter label=$SLUG.service=$db | head -1)")
+  expect "the container runs the pinned digest ($out)" sh -c "printf '%s' '$out' | grep -q 8bb4442761a6"
+
+  # A new major: refused without a backup, then with confirmNoBackup.
+  expect "8.0 without a backup is refused (backupRequired)" refused_with backupRequired api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"8.0\"}"
+  out=$(api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"8.0\",\"confirmNoBackup\":true}") ||
+    { bad "databases.setVersion 8.0 was refused"; return 1; }
+  dep=$(printf '%s' "$out" | jq -r .deploymentId)
+  st=$(wait_deploy "$db" 600 "$dep")
+  expect "the upgrade deployed (status $st)" test "$st" = live
+  wait_for 120 "mongosh on 8.0" sh -c "printf 'db.version()\n' | colima ssh -p $E2E_B -- sudo docker exec -i \$(colima ssh -p $E2E_B -- sudo docker ps -q --filter label=$SLUG.service=$db | head -1) mongosh --quiet --norc -u root -p '$pass' --authenticationDatabase admin app | grep -q '^8\.0\.'" ||
+    bad "MongoDB 8.0 never answered"
+  out=$(p43_js "db.t.findOne().v")
+  expect "the document survives the upgrade ($(printf '%s' "$out" | tail -1))" sh -c "printf '%s' '$out' | grep -q e2e-43"
+  out=$(p43_js "db.adminCommand({getParameter: 1, featureCompatibilityVersion: 1}).featureCompatibilityVersion.version")
+  expect "8.0 runs with featureCompatibilityVersion 7.0 until the next step ($(printf '%s' "$out" | tail -1))" sh -c "printf '%s' '$out' | grep -q '7\.0'"
+  ev "database: $(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '{engine, version}'), choices now: $(api databases.versionChoices "{\"serviceId\":\"$db\"}" | jq -c '{image, choices: [.choices[] | {version, allowed, reason}]}')"
+
+  expect "going back to 7.0 is refused (downgrade)" refused_with downgrade api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"7.0\",\"confirmNoBackup\":true}"
+  api services.delete "{\"serviceId\":\"$db\",\"confirmName\":\"mongo-ver\"}" >/dev/null || true
 }
 
 main() {
