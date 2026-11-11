@@ -229,6 +229,37 @@ describe("export with volume data", () => {
     expect((await callOp(a.panel, serviceOps.setVolumes, { serviceId: id, volumes: [] }, { cookie: a.cookie })).status).toBe(200);
   });
 
+  test("a service stopped before the download stays down while it is read, and stays stopped after", async () => {
+    const a = await side();
+    const { id } = await appWithData(a);
+    expect((await callOp(a.panel, serviceOps.stop, { serviceId: id }, { cookie: a.cookie })).status).toBe(200);
+    a.fleet.volumeScript = () => ({ hang: true });
+    const res = await exportOp(a, id, { volumes: ["uploads"] });
+    expect(res.body.stopsService).toBe(false);
+    const { reader } = await openDownload(a, res.body.download.url);
+    const reading = (async () => {
+      for (;;) if ((await reader?.read())?.done) return;
+    })().catch(() => undefined);
+    await until(() => a.fleet.calls.some((c) => c.method === "exportVolume"));
+    // The export did not stop it, but it needs it down: nothing starts it mid-read.
+    expect(exportRow(a, res.body.exportId)).toMatchObject({ status: "streaming", stopService: true, sourceStopped: false });
+    const refusals = [
+      await callOp(a.panel, serviceOps.start, { serviceId: id }, { cookie: a.cookie }),
+      await callOp(a.panel, deploymentOps.deploy, { serviceId: id }, { cookie: a.cookie }),
+    ];
+    expect(refusals.map((r) => [r.status, r.body.error?.details?.reason])).toEqual([
+      [409, "exporting"],
+      [409, "exporting"],
+    ]);
+    expect(stoppedNow(a, id)).toBe(true);
+    const cancelled = await callOp(a.panel, transferOps.cancelExport, { serviceId: id, exportId: res.body.exportId }, { cookie: a.cookie });
+    expect(cancelled.body).toEqual({ cancelled: true });
+    await reading;
+    // It was stopped by hand, so the end of the export leaves it stopped.
+    expect(stoppedNow(a, id)).toBe(true);
+    expect((await callOp(a.panel, serviceOps.start, { serviceId: id }, { cookie: a.cookie })).status).toBe(200);
+  });
+
   test("a download nobody reads stops, and the service starts again", async () => {
     const a = await side();
     const { id } = await appWithData(a);

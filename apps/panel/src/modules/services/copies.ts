@@ -139,7 +139,9 @@ export function activeImport(db: PanelDb, serviceId: string): boolean {
 
 /**
  * An export whose download reads the service's volume data now; stopped:
- * only one that stopped the service for it (and starts it again at the end).
+ * only one that needs the service down while it reads (stopService),
+ * whether the export stopped it or it was stopped already. sourceStopped
+ * only says whether the export starts it again at the end.
  */
 export function activeExport(db: PanelDb, serviceId: string, options: { stopped?: boolean } = {}): boolean {
   return (
@@ -151,7 +153,7 @@ export function activeExport(db: PanelDb, serviceId: string, options: { stopped?
           eq(serviceExports.serviceId, serviceId),
           eq(serviceExports.status, "streaming"),
           ne(serviceExports.volumes, []),
-          options.stopped ? eq(serviceExports.sourceStopped, true) : undefined,
+          options.stopped ? eq(serviceExports.stopService, true) : undefined,
         ),
       )
       .get() !== undefined
@@ -174,7 +176,7 @@ function importing(): OpError {
 
 /**
  * CONFLICT while a copy is busy with the service's folders, an import still
- * sends it what it needs, or an export stopped it to read its data
+ * sends it what it needs, or an export reads its data with it stopped
  * (anySource: also one that reads it while it runs).
  */
 export function assertNoActiveCopy(db: PanelDb, serviceId: string, options: { anySource?: boolean } = {}): void {
