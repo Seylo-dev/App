@@ -14,6 +14,7 @@ import {
   projects,
   services as serviceOps,
   serviceTransfer as transferOps,
+  updates,
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog, backupRuns, nodes, serviceExports, serviceImports, serviceSecrets, services } from "../src/db/schema";
@@ -22,12 +23,16 @@ import { workInFlight } from "../src/modules/panelMove/preflight";
 import { transfersInFlight } from "../src/modules/services/copies";
 import { exportWatch, recoverExports } from "../src/modules/serviceTransfer/export-stream";
 import { uploadWatch } from "../src/modules/serviceTransfer/import-data";
+import { releaseSource } from "../src/modules/updates/manifest";
 import { callOp } from "./helpers";
+import { serveReleases } from "./release-fakes";
 import { begin, closeSides, craft, entriesOf, exportZip, makeApp, passphrase, type Side, secretValue, sha, side } from "./transfer-helpers";
 
 const watch = { ...exportWatch };
 const idle = uploadWatch.idleMs;
+const releases = { ...releaseSource };
 afterEach(() => {
+  Object.assign(releaseSource, releases);
   Object.assign(exportWatch, watch);
   uploadWatch.idleMs = idle;
   closeSides();
@@ -205,6 +210,11 @@ describe("export with volume data", () => {
     expect(impact.body.blockers.map((x: { reason: string }) => x.reason)).toContain("exporting");
     expect(transfersInFlight(a.panel.deps.db)).toBe("1 service export download");
     expect(workInFlight(a.panel.deps)).toContain("1 service export download");
+    // An update would restart the panel under it: it waits.
+    serveReleases([{ tag: "v9.9.9" }]);
+    expect((await callOp(a.panel, updates.check, {}, { cookie: a.cookie })).status).toBe(200);
+    const update = await callOp(a.panel, updates.updatePanel, {}, { cookie: a.cookie });
+    expect([update.status, update.body.error.details.reason]).toEqual([409, "transfer"]);
     // A second download of its data waits for this one.
     const second = await exportOp(a, id, { volumes: ["uploads"] });
     expect([second.status, second.body.error.details.reason]).toEqual([409, "exporting"]);
