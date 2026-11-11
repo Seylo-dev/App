@@ -7,7 +7,8 @@
 //             now, and the tick for nodes that cannot follow. Start asks
 //             first; a stale sign-in opens the re-auth dialog (lib/reauth.ts).
 //   moving    the steps with the current one, bytes copied, Cancel until
-//             the switch.
+//             the switch. When the target does not confirm the switch: how
+//             long the panel has waited, and after 10 minutes Cancel anyway.
 //   failed    where it stopped and why; nothing changed. Try again.
 //   done      on the moved panel: the DNS hint for a domain, the nodes to
 //             join again, and Delete the old copy. On the old copy (it still
@@ -39,9 +40,10 @@ import { IconCircleCheck, IconCircleDashed, IconExternalLink, IconLoader2 } from
 import { keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { t } from "../../i18n/t";
-import { formatBytes, formatNames } from "../../lib/format";
+import { formatBytes, formatDuration, formatNames } from "../../lib/format";
 import { followMovePoll, lostMove, movedLinks } from "../../lib/panel-move";
 import { isReauthCancelled } from "../../lib/reauth";
+import { useNow } from "../service/use-now";
 import { invalidateOps, useSettingsMutation } from "./mutation";
 import { QueryView } from "./op-state";
 import { Field } from "./page";
@@ -53,7 +55,7 @@ type Step = NonNullable<MoveStatus["step"]>;
 export const moveSteps: readonly Step[] = ["pausing", "registry", "snapshot", "shipping", "starting", "staging", "switching"];
 
 /** The target reasons the node picker shows next to a node that cannot take the panel. */
-const targetCodes = ["targetIsPanel", "targetOffline", "targetDisabled", "targetTooOld"] as const;
+const targetCodes = ["targetIsPanel", "targetOffline", "targetDisabled", "targetTooOld", "targetPlainHttp"] as const;
 type TargetCode = (typeof targetCodes)[number];
 
 /** How often the form asks panelMove.check again while it shows: work that finished, a node that went offline. */
@@ -172,9 +174,11 @@ function MoveForm({ compact }: { compact: boolean }) {
 }
 
 /** "b1 (offline)" for a node that cannot take the panel. */
-function targetLabel(node: MoveCheck["targets"][number]): string {
+export function targetLabel(node: MoveCheck["targets"][number]): string {
   const code = node.blocks.find((block) => (targetCodes as readonly string[]).includes(block.code))?.code as TargetCode | undefined;
-  return code ? `${node.name} (${t(`settingsPanelMove.reasons.${code}`)})` : node.name;
+  if (code) return `${node.name} (${t(`settingsPanelMove.reasons.${code}`)})`;
+  // A reason this page does not know yet (a newer panel): still say it cannot.
+  return node.ready ? node.name : `${node.name} (${t("settingsPanelMove.reasons.other")})`;
 }
 
 const addressShape = /^(\[[0-9a-f:.]+\]|[0-9a-f:.]+|[a-z0-9.-]+)$/i;
@@ -374,9 +378,16 @@ export function moveProgress(status: MoveStatus): number {
 export function MoveProgress({ status }: { status: MoveStatus }) {
   const node = status.targetNodeName ?? "";
   const current = status.step ? moveSteps.indexOf(status.step) : 0;
+  const [forcing, setForcing] = useState(false);
   const cancel = useSettingsMutation(panelMove.cancel, {
     invalidates: [panelMove.status],
     success: t("settingsPanelMove.cancelled"),
+  });
+  // The dialog shows a refusal itself (the target confirmed meanwhile, say).
+  const forceCancel = useSettingsMutation(panelMove.cancel, {
+    invalidates: [panelMove.status, panelMove.check],
+    success: t("settingsPanelMove.cancelled"),
+    failure: false,
   });
   const bytes =
     status.bytesTotal > 0
@@ -416,6 +427,7 @@ export function MoveProgress({ status }: { status: MoveStatus }) {
           );
         })}
       </ol>
+      {status.waitingSince && <MoveWaiting status={status} since={status.waitingSince} onForceCancel={() => setForcing(true)} />}
       {status.canCancel && (
         <div className="flex justify-end">
           <Button variant="secondary" disabled={cancel.isPending} onClick={() => cancel.mutate({})}>
@@ -423,7 +435,50 @@ export function MoveProgress({ status }: { status: MoveStatus }) {
           </Button>
         </div>
       )}
+      <ConfirmDialog
+        open={forcing}
+        onOpenChange={setForcing}
+        destructive
+        title={t("settingsPanelMove.forceCancelTitle")}
+        description={t("settingsPanelMove.forceCancelDescription", { node })}
+        confirmLabel={t("settingsPanelMove.forceCancel")}
+        cancelLabel={t("settingsPanelMove.forceCancelKeep")}
+        onConfirm={async () => {
+          try {
+            await forceCancel.mutateAsync({ force: true });
+          } catch (error) {
+            if (isReauthCancelled(error)) return;
+            throw error;
+          }
+        }}
+      />
     </div>
+  );
+}
+
+/**
+ * The switch waits for the target to confirm it: the panel stays read-only
+ * and keeps its nodes, and asks again every few seconds. After 10 minutes
+ * (canForceCancel) the owner may cancel anyway, for a target that is gone.
+ */
+function MoveWaiting({ status, since, onForceCancel }: { status: MoveStatus; since: string; onForceCancel: () => void }) {
+  const now = useNow(1000);
+  const node = status.targetNodeName ?? "";
+  return (
+    <Alert
+      tone="warning"
+      title={t("settingsPanelMove.waitingTitle", { node })}
+      action={
+        status.canForceCancel ? (
+          <Button variant="secondary" size="sm" onClick={onForceCancel}>
+            {t("settingsPanelMove.forceCancel")}
+          </Button>
+        ) : undefined
+      }
+    >
+      <p className="m-0">{t("settingsPanelMove.waitingHint", { node, duration: formatDuration(Math.max(0, now - Date.parse(since))) })}</p>
+      {status.canForceCancel && <p className="m-0">{t("settingsPanelMove.forceCancelHint", { node })}</p>}
+    </Alert>
   );
 }
 

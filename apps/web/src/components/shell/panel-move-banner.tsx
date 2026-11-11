@@ -29,7 +29,11 @@ export function PanelMoveBannerView({ status, className }: { status: Status; cla
   if (!moving && !moved) return null;
   const node = status.targetNodeName ?? "";
   const { url, domainUrl } = moved ? movedLinks(status) : { url: null, domainUrl: null };
-  const text = moved ? t("settingsPanelMove.banner.moved", { node }) : t("settingsPanelMove.banner.moving", { node });
+  const text = moved
+    ? t("settingsPanelMove.banner.moved", { node })
+    : status.waitingSince
+      ? t("settingsPanelMove.banner.waiting", { node })
+      : t("settingsPanelMove.banner.moving", { node });
   return (
     <div
       role="status"

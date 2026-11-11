@@ -391,6 +391,59 @@ test.describe("panel move", () => {
     await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toBeVisible();
   });
 
+  test("the switch waits for the target: how long, the banner stays, and Cancel anyway after 10 minutes", async ({ page }) => {
+    let status = movingStatus({
+      step: "switching",
+      bytesDone: 0,
+      bytesTotal: 0,
+      canCancel: false,
+      waitingSince: new Date(Date.now() - 11 * 60_000).toISOString(),
+      canForceCancel: true,
+    });
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => status,
+        "panelMove.cancel": (input) => {
+          if (input.force !== true) throw new DemoRefusal(409, "CONFLICT", "The switch started.", { reason: "switching" });
+          status = moveStatus({
+            state: "failed",
+            moveId: "move000000000001",
+            targetNodeId: ids.us,
+            targetNodeName: "us-ash-1",
+            targetAddress: "198.51.100.7",
+            step: "switching",
+            error: { step: "switching", message: "Cancelled by you@example.com: us-ash-1 never confirmed the switch." },
+          });
+          return status;
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    const progress = card(page).getByTestId("panel-move-progress");
+    await expect(progress.getByText("Waiting for us-ash-1 to confirm the switch")).toBeVisible();
+    await expect(progress.getByText(/us-ash-1 has not answered for 1[01]m \d+s\./)).toBeVisible();
+    await expect(progress.getByRole("button", { name: "Cancel the move" })).toHaveCount(0);
+    await expect(banner(page)).toContainText("The panel is moving to us-ash-1 and waits for it to confirm the switch: read-only until then.");
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/waiting.png`, fullPage: true });
+
+    await progress.getByRole("button", { name: "Cancel anyway" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Cancel the move anyway?" });
+    await expect(dialog.getByText("Only for a target that is gone for good")).toBeVisible();
+    await page.screenshot({ path: `${shots}/force-cancel.png` });
+    await dialog.getByRole("button", { name: "Keep waiting" }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent["panelMove.cancel"]).toBeUndefined();
+
+    await progress.getByRole("button", { name: "Cancel anyway" }).click();
+    await dialog.getByRole("button", { name: "Cancel anyway" }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent["panelMove.cancel"]).toEqual([{ force: true }]);
+    await expect(card(page).getByText("The move to us-ash-1 stopped")).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
   test("done on the moved panel: the DNS record, who to join again, Delete the old copy", async ({ page }) => {
     let status = movingStatus({
       state: "done",

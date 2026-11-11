@@ -11,6 +11,7 @@ import {
   type MoveStatus,
   moveProgress,
   showsFailure,
+  targetLabel,
 } from "./panel-move-card";
 
 const ids = { old: "oldnode000000001", fresh: "newnode000000002", b: "bnode00000000003" };
@@ -231,6 +232,59 @@ test("a failed move shows until Try again, and the next move's failure shows aga
   // Try again, Start, and that move fails too: its failure shows.
   expect(showsFailure({ state: "failed", moveId: "move000000000002" }, "move000000000001")).toBe(true);
   expect(showsFailure({ state: "idle", moveId: null }, undefined)).toBe(false);
+});
+
+test("waiting for the target to confirm the switch: how long, read-only, and Cancel anyway only after 10 minutes", async () => {
+  const since = new Date(Date.now() - 125_000).toISOString();
+  const waiting = moving({ step: "switching", canCancel: false, waitingSince: since });
+  const out = text(await renderStatic(() => <MoveProgress status={waiting} />));
+  expect(out).toContain("Waiting for de-fsn-2 to confirm the switch");
+  expect(out).toMatch(/de-fsn-2 has not answered for 2m [45]s\. The panel stays read-only/);
+  expect(out).not.toContain("Cancel anyway");
+  expect(out).not.toContain("Cancel the move");
+  const late = text(await renderStatic(() => <MoveProgress status={{ ...waiting, canForceCancel: true }} />));
+  expect(late).toContain("If de-fsn-2 is gone for good, you can cancel the move anyway.");
+  expect(late).toContain("Cancel anyway");
+  // The banner stays: read-only until the target answers.
+  const banner = text(await renderStatic(() => <PanelMoveBannerView status={waiting} />));
+  expect(banner).toContain("The panel is moving to de-fsn-2 and waits for it to confirm the switch: read-only until then.");
+  // Not while the switch goes ahead.
+  expect(text(await renderStatic(() => <MoveProgress status={moving({ step: "switching", canCancel: false })} />))).not.toContain(
+    "Waiting for",
+  );
+});
+
+test("the node picker names every reason, plain http:// too, and a reason it does not know", () => {
+  const node = check().targets[0] as MoveCheck["targets"][number];
+  expect(targetLabel(node)).toBe("de-fsn-2");
+  const plain = {
+    ...node,
+    ready: false,
+    blocks: [{ code: "targetPlainHttp" as const, message: "de-fsn-2 connects over plain http://.", soft: false }],
+  };
+  expect(targetLabel(plain)).toBe("de-fsn-2 (connects over plain http://)");
+  const unknown = {
+    ...node,
+    ready: false,
+    blocks: [{ code: "targetSomethingNew", message: "No.", soft: false }],
+  } as unknown as typeof node;
+  expect(targetLabel(unknown)).toBe("de-fsn-2 (can't take the panel)");
+});
+
+test("the panel-wide refusals new in 0.2.8 show in the panel's words, unknown codes too", async () => {
+  const blocked = check({
+    blocks: [
+      { code: "panelNodePlainHttp", message: "de-fsn-1 connects to the panel over plain http:// from another server.", soft: false },
+      { code: "oldCopyLeft", message: "The last move's old copy is still on de-fsn-0. Delete the old copy first.", soft: false },
+      { code: "somethingNewer", message: "A reason from a newer panel.", soft: false } as unknown as MoveCheck["blocks"][number],
+    ],
+  });
+  const html = await renderStatic(() => <MoveFormView check={blocked} target={ids.fresh} onTarget={() => {}} />);
+  const out = text(html);
+  expect(out).toContain("de-fsn-1 connects to the panel over plain http:// from another server.");
+  expect(out).toContain("Delete the old copy first.");
+  expect(out).toContain("A reason from a newer panel.");
+  expect(startButton(html)).toContain("disabled");
 });
 
 test("an address the panel refused shows its words under the field and keeps Start off", async () => {

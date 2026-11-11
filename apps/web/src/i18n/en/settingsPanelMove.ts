@@ -20,6 +20,9 @@ export default {
     targetOffline: "offline",
     targetDisabled: "disabled",
     targetTooOld: "agent too old",
+    targetPlainHttp: "connects over plain http://",
+    /** A reason a newer panel gives that this page has no words for. */
+    other: "can't take the panel",
   },
   address: "Address",
   addressHint: "The host name or IP address other servers reach {node} at. Nodes connect to https://{host}:{port}.",
@@ -54,6 +57,15 @@ export default {
   bytesDone: "{done} copied",
   cancel: "Cancel the move",
   cancelled: "The move is cancelled",
+  waitingTitle: "Waiting for {node} to confirm the switch",
+  waitingHint:
+    "{node} has not answered for {duration}. The panel stays read-only and keeps every node until it does, and asks again every few seconds.",
+  forceCancel: "Cancel anyway",
+  forceCancelHint: "If {node} is gone for good, you can cancel the move anyway.",
+  forceCancelTitle: "Cancel the move anyway?",
+  forceCancelDescription:
+    "Only for a target that is gone for good, for example a deleted server. The panel takes changes here again and tells {node} to delete its copy once it is back. If {node} took the switch after all, the nodes that reach it stay with it and have to be joined here again.",
+  forceCancelKeep: "Keep waiting",
   failedTitle: "The move to {node} stopped",
   failedStep: "At: {step}.",
   failedHint: "Nothing changed: the panel runs here as before.",
@@ -81,6 +93,7 @@ export default {
   open: "Open {url}",
   banner: {
     moving: "The panel is moving to {node}: read-only for a few minutes.",
+    waiting: "The panel is moving to {node} and waits for it to confirm the switch: read-only until then.",
     moved: "The panel moved to {node}.",
     domain: "works once its DNS record points at the new server",
     open: "Open it",
