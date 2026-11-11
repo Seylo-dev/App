@@ -64,6 +64,21 @@ test.describe("sidebar new service", () => {
     await expect(sidebar.getByRole("link", { name: /^Approvals/ })).toBeVisible();
   });
 
+  test("an open project's services end with a gap before the next project", async ({ page }) => {
+    await installDemo(page);
+    await page.goto("/");
+    const sidebar = page.getByRole("navigation", { name: "Main" });
+    const lastService = sidebar.getByRole("link", { name: /^worker/ });
+    const nextProject = sidebar.getByRole("link", { name: /^personal/ });
+    await expect(lastService).toBeVisible();
+    const a = await lastService.boundingBox();
+    const b = await nextProject.boundingBox();
+    expect(a && b).toBeTruthy();
+    // 8 px of room after the services (the rows themselves sit 1 px apart).
+    expect(Math.round((b?.y ?? 0) - ((a?.y ?? 0) + (a?.height ?? 0)))).toBeGreaterThanOrEqual(8);
+    await page.screenshot({ path: `${process.env.SHOTS_DIR ?? "test/playwright/shots"}/sidebar-project-spacing.png`, clip: { x: 0, y: 0, width: 300, height: 700 } });
+  });
+
   test("the protected Panel project has no +", async ({ page }) => {
     await installDemo(page);
     await page.goto("/");

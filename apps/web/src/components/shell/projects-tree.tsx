@@ -198,7 +198,12 @@ function ProjectRow({
           <ProjectMenu name={project.name} hidden={hidden} onHiddenChange={(hide) => onHiddenChange(project, hide)} />
         </div>
       </div>
-      {open && project.serviceCount > 0 && <ProjectServices projectId={project.id} count={project.serviceCount} sortable={!hidden} />}
+      {/* A little room after an open project's services, so the next project reads as its own group. */}
+      {open && project.serviceCount > 0 && (
+        <div className="pb-2">
+          <ProjectServices projectId={project.id} count={project.serviceCount} sortable={!hidden} />
+        </div>
+      )}
     </>
   );
 }
