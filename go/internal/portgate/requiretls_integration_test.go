@@ -25,7 +25,9 @@ import (
 // connect to the host port: psql sslmode=require, mysql
 // --ssl-mode=REQUIRED and mariadb --ssl pass; sslmode=disable,
 // --ssl-mode=DISABLED and --skip-ssl get the gate's error. A Postgres
-// whose TLS is still off refuses psql's default (sslmode=prefer) too.
+// whose TLS is still off refuses psql's default (sslmode=prefer) too, and
+// MariaDB 10.11, which has no TLS, gets no client at all: --ssl and
+// --skip-ssl read the gate's error where the greeting would be.
 func TestIntegrationDatabaseTLSInProtocol(t *testing.T) {
 	if os.Getenv("SEYLO_IT") != "1" {
 		t.Skip("integration test: run with scripts/dev/vm-gotest.sh")
@@ -36,8 +38,10 @@ func TestIntegrationDatabaseTLSInProtocol(t *testing.T) {
 		imagePostgres = "postgres:17-alpine"
 		imageMySQL    = "mysql:8.4"
 		imageMariaDB  = "mariadb:11.4"
+		// The panel's MariaDB 10.11 (apps/panel engines.ts).
+		imageMariaDB10 = "mariadb:10.11.13"
 	)
-	e.Pull(imagePostgres, imageMySQL, imageMariaDB)
+	e.Pull(imagePostgres, imageMySQL, imageMariaDB, imageMariaDB10)
 	type db struct {
 		engine agentv1.DatabaseEngine
 		image  string
@@ -54,6 +58,8 @@ func TestIntegrationDatabaseTLSInProtocol(t *testing.T) {
 		"mysql": {agentv1.DatabaseEngine_DATABASE_ENGINE_MYSQL, imageMySQL, "root",
 			[]*agentv1.EnvVar{{Name: "MYSQL_ROOT_PASSWORD", Value: pw}, {Name: "MYSQL_DATABASE", Value: "app"}}, true},
 		"mariadb": {agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, imageMariaDB, "root",
+			[]*agentv1.EnvVar{{Name: "MARIADB_ROOT_PASSWORD", Value: pw}, {Name: "MARIADB_DATABASE", Value: "app"}}, false},
+		"mariadb-10": {agentv1.DatabaseEngine_DATABASE_ENGINE_MARIADB, imageMariaDB10, "root",
 			[]*agentv1.EnvVar{{Name: "MARIADB_ROOT_PASSWORD", Value: pw}, {Name: "MARIADB_DATABASE", Value: "app"}}, false},
 	}
 	specs, names := map[string]*agentv1.ServiceSpec{}, map[string]string{}
@@ -162,18 +168,61 @@ func TestIntegrationDatabaseTLSInProtocol(t *testing.T) {
 		t.Fatalf("mysql --ssl-mode=REQUIRED after refused logins: %v %s", err, out)
 	}
 
-	mariadb := func(flags ...string) func() (string, error) {
+	mariadbOn := func(name, image string, flags ...string) func() (string, error) {
 		return func() (string, error) {
-			args := append([]string{"mariadb", "--host", host, "--port", ports["mariadb"], "-uroot", "-p" + pw}, flags...)
-			return client(imageMariaDB, append(args, "-N", "-e", "SHOW STATUS LIKE 'Ssl_cipher'")...)
+			args := append([]string{"mariadb", "--host", host, "--port", ports[name], "-uroot", "-p" + pw}, flags...)
+			return client(image, append(args, "-N", "-e", "SHOW STATUS LIKE 'Ssl_cipher'")...)
 		}
 	}
+	mariadb := func(flags ...string) func() (string, error) { return mariadbOn("mariadb", imageMariaDB, flags...) }
 	eventually("mariadb --ssl", mariadb("--ssl", "--skip-ssl-verify-server-cert"), func(out string) bool {
 		f := strings.Fields(out)
 		return len(f) == 2 && f[0] == "Ssl_cipher"
 	})
 	out, err = mariadb("--skip-ssl")()
 	refused("mariadb --skip-ssl", out, err, "Connections using insecure transport are prohibited on this port")
+
+	// MariaDB 10.11 makes no certificate: the gate lets no client sign in, with or without TLS.
+	e.Eventually("mariadb 10.11 ready", 4*time.Minute, func() bool {
+		_, code := e.Exec(names["mariadb-10"], []string{"healthcheck.sh", "--connect", "--innodb_initialized"}, nil)
+		return code == 0
+	})
+	for _, flags := range [][]string{{"--ssl", "--skip-ssl-verify-server-cert"}, {"--skip-ssl"}} {
+		out, err := mariadbOn("mariadb-10", imageMariaDB10, flags...)()
+		// --skip-ssl prints it as ERROR 3159; --ssl as an error before the TLS handshake whose authenticity it cannot verify.
+		refused("mariadb 10.11 "+strings.Join(flags, " "), out, err, mysqlNoTLS)
+	}
+	// A plain handshake response with CLIENT_SSL set never reaches it.
+	if reply := sslFlagMySQLLogin(t, host, ports["mariadb-10"]); !strings.Contains(reply, "TLS is not on in this database yet") {
+		t.Fatalf("a handshake response with CLIENT_SSL to MariaDB 10.11 got %q", reply)
+	}
+}
+
+// sslFlagMySQLLogin connects through the gate and, when it sees a
+// greeting, answers with a whole plain handshake response that sets
+// CLIENT_SSL; it returns what came back.
+func sslFlagMySQLLogin(t *testing.T, host, port string) string {
+	t.Helper()
+	c, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	head := make([]byte, 4)
+	if _, err := io.ReadFull(c, head); err != nil {
+		t.Fatal(err)
+	}
+	first := make([]byte, mysqlLength(head))
+	if _, err := io.ReadFull(c, first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first) > 0 && first[0] == 0xFF {
+		return string(first)
+	}
+	_, _ = c.Write(mysqlResponse(0x0000_8200|mysqlClientSSL, "root\x00\x00app\x00"))
+	reply, _ := io.ReadAll(c)
+	return string(reply)
 }
 
 // plainMySQLLogin reads the greeting through the gate and answers without

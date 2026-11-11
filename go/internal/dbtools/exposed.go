@@ -27,9 +27,11 @@ import (
 //     is written to the data directory and ssl is turned on with ALTER
 //     SYSTEM. The portgate refuses clients that do not ask for TLS.
 //   - MySQL: the certificate is installed with SET PERSIST and ALTER
-//     INSTANCE RELOAD TLS; the portgate refuses clients without CLIENT_SSL.
+//     INSTANCE RELOAD TLS; the portgate refuses clients that do not open
+//     with an SSLRequest.
 //   - MariaDB (11.4+ makes its own certificate at start): the portgate's
-//     check only.
+//     check only. 10.11 has no TLS, so the panel never exposes it (and the
+//     portgate refuses its clients: its greeting offers no TLS).
 //   - Mongo, ClickHouse and the Redis-like engines: TLS is the portgate's,
 //     which terminates it on the exposed port with Certificate and relays
 //     plain TCP inside; nothing to do in the database.

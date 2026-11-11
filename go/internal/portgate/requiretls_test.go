@@ -276,7 +276,22 @@ func mysqlResponse(flags uint32, rest string) []byte {
 	return mysqlPacket(1, append(payload, rest...))
 }
 
-var mysqlGreeting = mysqlPacket(0, append([]byte{10}, "8.4.7\x00greeting-scramble-and-flags\x00caching_sha2_password\x00"...))
+// mysqlHandshake is a HandshakeV10 greeting with the low capability flags.
+func mysqlHandshake(version string, flags uint16) []byte {
+	p := append([]byte{10}, version...)
+	p = append(p, 0)
+	p = append(p, 7, 0, 0, 0)    // connection id
+	p = append(p, "scramble"...) // the scramble's first 8 bytes
+	p = append(p, 0)             // filler
+	p = binary.LittleEndian.AppendUint16(p, flags)
+	p = append(p, 255, 2, 0, 0xff, 0xdf, 21) // character set, status, high flags, auth data length
+	p = append(p, make([]byte, 10)...)
+	p = append(p, "twelve-bytes\x00caching_sha2_password\x00"...)
+	return mysqlPacket(0, p)
+}
+
+// mysqlGreeting offers TLS, as MySQL 8 and MariaDB 11.4 do.
+var mysqlGreeting = mysqlHandshake("8.4.7", 0xffff)
 
 type mysqlSide struct {
 	client, db net.Conn
@@ -348,6 +363,61 @@ func TestMySQLStartRefusesPlainLogins(t *testing.T) {
 	}
 }
 
+// A whole handshake response with CLIENT_SSL set is no SSLRequest: a
+// database without TLS would mask the flag off and sign the client in
+// over plain TCP.
+func TestMySQLStartRefusesAHandshakeResponseWithTheSSLFlag(t *testing.T) {
+	s := startMySQL(t, time.Second)
+	s.greet(t, mysqlGreeting)
+	send(t, s.client, mysqlResponse(0x0000_8200|mysqlClientSSL, "root\x00\x20"+strings.Repeat("a", 32)+"app\x00"))
+	_ = s.client.SetReadDeadline(time.Now().Add(time.Second))
+	want := mysqlError(2, mysqlInsecureTransport, "HY000", mysqlRefusal)
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(s.client, got); err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if r := result(t, s.done); !errors.Is(r.err, errPlainClient) || r.first != nil {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+// A database whose greeting does not offer TLS (MariaDB 10.11, a MySQL
+// with TLS off) gets no client: the client reads the gate's error where
+// the greeting would be, and nothing it sends is read.
+func TestMySQLStartNeedsTLSFromTheDatabase(t *testing.T) {
+	greetings := map[string][]byte{
+		"MariaDB 10.11":      mysqlHandshake("5.5.5-10.11.13-MariaDB-ubu2204", 0xffff&^mysqlClientSSL),
+		"MySQL with TLS off": mysqlHandshake("8.4.7", 0xffff&^mysqlClientSSL),
+		"protocol 9":         mysqlPacket(0, append([]byte{9}, "3.23\x00"...)),
+		"cut short":          mysqlHandshake("8.4.7", 0xffff)[:4+1+6+4],
+		"no version end":     mysqlPacket(0, append([]byte{10}, "8.4.7"...)),
+	}
+	for name, greeting := range greetings {
+		t.Run(name, func(t *testing.T) {
+			if name == "cut short" {
+				// The header says what the payload holds.
+				binary.LittleEndian.PutUint16(greeting, uint16(len(greeting)-4))
+			}
+			s := startMySQL(t, time.Second)
+			go func() { _, _ = s.db.Write(greeting) }()
+			_ = s.client.SetReadDeadline(time.Now().Add(time.Second))
+			want := mysqlError(0, mysqlInsecureTransport, "", mysqlNoTLS)
+			got := make([]byte, len(want))
+			if _, err := io.ReadFull(s.client, got); err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("got %q, %v", got, err)
+			}
+			if r := result(t, s.done); !errors.Is(r.err, errNoTLSUpstream) || r.first != nil {
+				t.Fatalf("got %+v", r)
+			}
+		})
+	}
+	t.Run("MariaDB 11.4 offers TLS", func(t *testing.T) {
+		if !mysqlOffersTLS(mysqlHandshake("5.5.5-11.4.7-MariaDB-ubu2404", 0xf7fe|mysqlClientSSL)[4:]) {
+			t.Fatal("no TLS read from the greeting")
+		}
+	})
+}
+
 func TestMySQLStartEdges(t *testing.T) {
 	t.Run("a packet too short for flags is refused", func(t *testing.T) {
 		s := startMySQL(t, time.Second)
@@ -367,8 +437,14 @@ func TestMySQLStartEdges(t *testing.T) {
 		s := startMySQL(t, time.Second)
 		tooMany := mysqlError(0, 1040, "08004", "Too many connections")
 		s.greet(t, tooMany)
-		_ = s.client.Close()
-		if r := result(t, s.done); r.err == nil {
+		if r := result(t, s.done); !errors.Is(r.err, errUpstreamRefused) {
+			t.Fatalf("got %+v", r)
+		}
+	})
+	t.Run("a greeting past the bound is not read", func(t *testing.T) {
+		s := startMySQL(t, time.Second)
+		go func() { _, _ = s.db.Write([]byte{0, 0, 1, 0}) }()
+		if r := result(t, s.done); r.err == nil || errors.Is(r.err, errPlainClient) {
 			t.Fatalf("got %+v", r)
 		}
 	})

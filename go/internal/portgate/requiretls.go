@@ -1,6 +1,7 @@
 package portgate
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,8 +28,9 @@ const (
 	// ask for TLS. A database that answers the SSLRequest with "N" (its TLS
 	// is not on yet) gets no plain login either.
 	TLSCheckPostgres
-	// TLSCheckMySQL (MySQL and MariaDB): the server's greeting is relayed,
-	// then the client's first packet must set CLIENT_SSL.
+	// TLSCheckMySQL (MySQL and MariaDB): the server's greeting must offer
+	// TLS (relayed then; a database without TLS on gets no client at all),
+	// and the client's first packet must be an SSLRequest.
 	TLSCheckMySQL
 )
 
@@ -170,6 +172,15 @@ func postgresError(message string) []byte {
 // MySQL protocol values.
 const (
 	mysqlClientSSL = 0x0800
+	// mysqlSSLRequestLength is the payload of a 4.1 SSLRequest: capability
+	// flags, max packet size, character set and 23 reserved bytes (MariaDB
+	// keeps its extended capabilities in the last 4). A longer first packet
+	// is a whole handshake response, user name and auth data in the clear,
+	// even with CLIENT_SSL set.
+	mysqlSSLRequestLength = 32
+	// mysqlMaxGreeting bounds the greeting read for its capability flags
+	// (a real one is around 100 bytes).
+	mysqlMaxGreeting = 1024
 	// mysqlMaxDrain bounds how much of a refused handshake response is
 	// read before the error (a response with connection attributes is a
 	// few hundred bytes).
@@ -178,13 +189,29 @@ const (
 	mysqlInsecureTransport = 3159
 )
 
-const mysqlRefusal = "Connections using insecure transport are prohibited on this port: connect with TLS (mysql --ssl-mode=REQUIRED, mariadb --ssl)"
+const (
+	mysqlRefusal = "Connections using insecure transport are prohibited on this port: connect with TLS (mysql --ssl-mode=REQUIRED, mariadb --ssl)"
+	mysqlNoTLS   = "TLS is not on in this database yet, and this port only accepts TLS connections"
+)
 
-// mysqlStart relays the server's first packet (its greeting, or an error)
-// to the client, then reads the head of the client's answer: the packet
-// header and the low 16 bits of its capability flags, returned for the
-// database. A client that does not set CLIENT_SSL gets an ERR packet
-// (3159, HY000) with the next sequence id.
+var (
+	// errNoTLSUpstream: the database's greeting does not offer TLS, so no
+	// client may sign in through the port.
+	errNoTLSUpstream = errors.New("the database does not offer TLS")
+	// errUpstreamRefused: the database answered with an error (too many
+	// connections, a blocked host), relayed to the client.
+	errUpstreamRefused = errors.New("the database refused the connection")
+)
+
+// mysqlStart reads the server's greeting and relays it to the client when
+// it offers TLS (CLIENT_SSL); a database without TLS on (MariaDB 10.11
+// has none, a MySQL whose TLS is off) gets the client an ERR packet in its
+// place, and an error from the database goes to the client as it is.
+// Then it reads the head of the client's answer, which must be a 4.1
+// SSLRequest (payload exactly 32 bytes, CLIENT_SSL set): the packet header
+// and the low 16 bits of its capability flags are returned for the
+// database, the rest follows in the relay. Anything else gets an ERR
+// packet (3159, HY000) with the next sequence id.
 func mysqlStart(client, upstream net.Conn, wait time.Duration) ([]byte, error) {
 	deadline := time.Now().Add(wait)
 	_ = upstream.SetReadDeadline(deadline)
@@ -193,14 +220,20 @@ func mysqlStart(client, upstream net.Conn, wait time.Duration) ([]byte, error) {
 		_ = upstream.SetReadDeadline(time.Time{})
 		_ = client.SetDeadline(time.Time{})
 	}()
-	var header [4]byte
-	if _, err := io.ReadFull(upstream, header[:]); err != nil {
+	greeting, err := mysqlReadPacket(upstream, mysqlMaxGreeting)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := client.Write(header[:]); err != nil {
-		return nil, err
+	if greeting[4] == 0xFF {
+		_, _ = client.Write(greeting)
+		return nil, errUpstreamRefused
 	}
-	if _, err := io.CopyN(client, upstream, int64(mysqlLength(header[:]))); err != nil {
+	if !mysqlOffersTLS(greeting[4:]) {
+		// Before the handshake the client has no 4.1 flags yet: no SQLSTATE marker.
+		_, _ = client.Write(mysqlError(greeting[3], mysqlInsecureTransport, "", mysqlNoTLS))
+		return nil, errNoTLSUpstream
+	}
+	if _, err := client.Write(greeting); err != nil {
 		return nil, err
 	}
 	head := make([]byte, 6)
@@ -208,7 +241,7 @@ func mysqlStart(client, upstream net.Conn, wait time.Duration) ([]byte, error) {
 		return nil, err
 	}
 	length, seq := mysqlLength(head), head[3]
-	if length >= 2 {
+	if length == mysqlSSLRequestLength {
 		if _, err := io.ReadFull(client, head[4:]); err != nil {
 			return nil, err
 		}
@@ -222,6 +255,40 @@ func mysqlStart(client, upstream net.Conn, wait time.Duration) ([]byte, error) {
 	return nil, errPlainClient
 }
 
+// mysqlReadPacket reads one packet, header included, of at most max bytes
+// of payload (and at least one).
+func mysqlReadPacket(c net.Conn, max uint32) ([]byte, error) {
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(c, header); err != nil {
+		return nil, err
+	}
+	n := mysqlLength(header)
+	if n == 0 || n > max {
+		return nil, fmt.Errorf("a first packet of %d bytes", n)
+	}
+	packet := append(header, make([]byte, n)...)
+	if _, err := io.ReadFull(c, packet[4:]); err != nil {
+		return nil, err
+	}
+	return packet, nil
+}
+
+// mysqlOffersTLS reads the low capability flags of a HandshakeV10
+// greeting: protocol version 10, the server version (NUL terminated), the
+// connection id (4 bytes), 8 bytes of scramble and a filler byte, then
+// the flags (2 bytes). Anything that does not parse offers nothing.
+func mysqlOffersTLS(p []byte) bool {
+	if len(p) == 0 || p[0] != 10 {
+		return false
+	}
+	end := bytes.IndexByte(p[1:], 0)
+	if end < 0 {
+		return false
+	}
+	at := 1 + end + 1 + 4 + 8 + 1
+	return len(p) >= at+2 && binary.LittleEndian.Uint16(p[at:])&mysqlClientSSL != 0
+}
+
 // mysqlLength is the payload length in a packet header (3 bytes, little
 // endian).
 func mysqlLength(header []byte) uint32 {
@@ -229,10 +296,14 @@ func mysqlLength(header []byte) uint32 {
 }
 
 // mysqlError is an ERR packet as a 4.1 client reads it: 0xFF, the error
-// code, "#" and the SQLSTATE, then the message.
+// code, "#" and the SQLSTATE, then the message. Without a state (before
+// the handshake, as a server sends it then) the message follows the code.
 func mysqlError(seq byte, code uint16, state, message string) []byte {
-	payload := []byte{0xFF, byte(code), byte(code >> 8), '#'}
-	payload = append(payload, state...)
+	payload := []byte{0xFF, byte(code), byte(code >> 8)}
+	if state != "" {
+		payload = append(payload, '#')
+		payload = append(payload, state...)
+	}
 	payload = append(payload, message...)
 	n := len(payload)
 	return append([]byte{byte(n), byte(n >> 8), byte(n >> 16), seq}, payload...)

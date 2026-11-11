@@ -647,8 +647,8 @@ func (m *Manager) relay(a *active, client net.Conn) {
 // requireTLS finishes a listener's TLS check once the container is
 // dialed: Postgres' opening goes to the database (and the answer to an
 // SSLRequest comes back through postgresAnswer); MySQL's greeting goes to
-// the client and the head of its answer, once it asks for TLS, to the
-// database. Nil for listeners without a check.
+// the client when it offers TLS, and the head of the client's SSLRequest
+// to the database. Nil for listeners without a check.
 func (m *Manager) requireTLS(a *active, client, upstream net.Conn, first []byte, sslRequest bool) error {
 	if a.check == TLSCheckMySQL {
 		var err error
