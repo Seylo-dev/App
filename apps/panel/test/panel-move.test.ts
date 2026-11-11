@@ -267,7 +267,11 @@ describe("who may move the panel and what refuses it", () => {
     panel.deps.db.update(nodes).set({ publicIpv4: null }).where(eq(nodes.id, targetId)).run();
     expect((await start()).body.error.message).toContain("The panel knows no address of new");
     // Nodes on one private network: the private IPv4 the target's agent reports is the default.
-    panel.deps.db.update(nodes).set({ facts: { privateIpv4: "10.0.0.20" } }).where(eq(nodes.id, targetId)).run();
+    panel.deps.db
+      .update(nodes)
+      .set({ facts: { privateIpv4: "10.0.0.20" } })
+      .where(eq(nodes.id, targetId))
+      .run();
     const lan = await check();
     expect(lan.body.defaultAddress).toBe("10.0.0.20");
     expect(lan.body.targets.find((t: { id: string }) => t.id === targetId)?.address).toBe("10.0.0.20");
@@ -279,6 +283,107 @@ describe("who may move the panel and what refuses it", () => {
     await waitForState("done");
     const staged = fleet.of("stagePanelAddress").find((c) => c.nodeId === otherId);
     expect(staged?.request.panelUrl).toBe("https://[2001:db8::20]:3443");
+  });
+
+  test("a target or panel node on plain http:// from another server is refused before anything is shipped", async () => {
+    // The archive with master.key would cross that connection in the clear, and the agent refuses the address over it.
+    recordDialedUrl(panel.deps.db, targetId, "http://203.0.113.10:3000");
+    const blocked = (await check()).body;
+    expect(codes(blocked.blocks)).toEqual(["targetPlainHttp"]);
+    expect(blocked.blocks[0].message).toContain("join --force");
+    expect(blocked.targets.find((t: { id: string }) => t.id === targetId)).toMatchObject({ ready: false });
+    expect((await start({ leftBehind: true })).body.error.details).toMatchObject({ reason: "targetPlainHttp", nodeIds: targetId });
+    recordDialedUrl(panel.deps.db, targetId, "https://203.0.113.10:3443");
+    expect((await check()).body.blocks).toEqual([]);
+
+    // The panel's own node on loopback is how the installer sets it up; over http:// from another address it is not.
+    recordDialedUrl(panel.deps.db, fromId, "http://127.0.0.1:3000");
+    expect((await check()).body.blocks).toEqual([]);
+    recordDialedUrl(panel.deps.db, fromId, "http://203.0.113.10:3000");
+    expect(codes((await check()).body.blocks)).toEqual(["panelNodePlainHttp"]);
+    expect((await start({ leftBehind: true })).body.error.details.reason).toBe("panelNodePlainHttp");
+    expect(fleet.calls).toEqual([]);
+    expect(activeMove(panel.deps.db)).toBeNull();
+  });
+
+  test("never an address of the server the panel leaves: the old panel answers there with the same key", async () => {
+    panel.deps.db
+      .update(nodes)
+      .set({ publicAddress: "old.example.com", publicIpv6: "2001:db8::10", facts: { privateIpv4: "10.0.0.10" } })
+      .where(eq(nodes.id, fromId))
+      .run();
+    for (const address of ["203.0.113.10", "OLD.example.com", "[2001:DB8:0::10]", "10.0.0.10"]) {
+      const res = await start({ address });
+      expect(res.status).toBe(400);
+      expect(res.body.error.details.field).toBe("address");
+      expect(res.body.error.message).toContain("is an address of old");
+    }
+    // The target's own default too, when both sit behind one address.
+    panel.deps.db.update(nodes).set({ publicIpv4: "203.0.113.10" }).where(eq(nodes.id, targetId)).run();
+    expect((await start()).body.error.details.field).toBe("address");
+    expect(activeMove(panel.deps.db)).toBeNull();
+    expect(fleet.calls).toEqual([]);
+  });
+
+  test("the warnings name the address the owner typed, when start would take it", async () => {
+    const warn = async (address?: string) =>
+      (
+        await callOp(
+          panel,
+          panelMove.check,
+          { targetNodeId: targetId, ...(address === undefined ? {} : { address }) },
+          { cookie: owner.cookie },
+        )
+      ).body.warnings[0].message as string;
+    expect(await warn("Panel2.example.net")).toContain("http://panel2.example.net:3000");
+    expect(await warn("2001:db8::20")).toContain("http://[2001:db8::20]:3000");
+    // Not an address start takes: the default it would use.
+    for (const address of [undefined, "", "http://x", "203.0.113.10"]) expect(await warn(address)).toContain("http://203.0.113.20:3000");
+    setSetting(panel.deps.db, "panelDomain", "panel.example.com");
+    expect(await warn("panel2.example.net")).toContain("Point the DNS record of panel.example.com at panel2.example.net");
+  });
+
+  test("disabled nodes are part of the fleet: left behind with the others, or staged when their agent is connected", async () => {
+    const disabledId = addNode("d", { publicIpv4: "203.0.113.40", disabledAt: new Date() });
+    const offline = (await check()).body;
+    expect(offline.nodesLeftBehind).toEqual([{ id: disabledId, name: "d", reason: "offline" }]);
+    expect(offline.blocks).toEqual([expect.objectContaining({ code: "nodesLeftBehind", soft: true, nodeIds: [disabledId] })]);
+    expect(offline.blocks[0].message).toContain("d is disabled, so it cannot follow");
+    expect(offline.targets.map((t: { id: string }) => t.id)).not.toContain(disabledId);
+    fleet.online.add(disabledId);
+    expect((await check()).body.nodesToMove.map((n: { id: string }) => n.id)).toContain(disabledId);
+    fleet.online.delete(disabledId);
+
+    await start({ leftBehind: true });
+    const done = await waitForState("done");
+    expect(done.leftBehind).toEqual([{ id: disabledId, name: "d" }]);
+  });
+
+  test("the last move's old copy must be deleted first, unless its node is gone or the move goes back onto it", async () => {
+    const done: PanelMoveDone = {
+      moveId: "p".repeat(16),
+      fromNodeId: otherId,
+      fromNodeName: "b",
+      toNodeId: fromId,
+      toNodeName: "old",
+      address: "203.0.113.10",
+      at: Date.now() - 1000,
+      leftBehind: [],
+      domain: null,
+      startedAt: Date.now() - 60_000,
+    };
+    setSetting(panel.deps.db, "panelMoveDone", done);
+    const blocked = (await check()).body;
+    expect(codes(blocked.blocks)).toEqual(["oldCopyLeft"]);
+    expect(blocked.blocks[0]).toMatchObject({ soft: false, nodeIds: [otherId], message: expect.stringContaining("on b") });
+    expect((await start({ leftBehind: true })).body.error.details.reason).toBe("oldCopyLeft");
+    // Back onto b: the move sets that copy aside and its arrival deletes it.
+    expect((await check(otherId)).body.blocks).toEqual([]);
+    setSetting(panel.deps.db, "panelMoveDone", { ...done, oldCopyRemoved: true });
+    expect((await check()).body.blocks).toEqual([]);
+    setSetting(panel.deps.db, "panelMoveDone", { ...done, fromNodeId: "0".repeat(16) });
+    expect((await check()).body.blocks).toEqual([]);
+    expect(fleet.calls).toEqual([]);
   });
 });
 

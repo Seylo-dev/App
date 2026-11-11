@@ -7,16 +7,26 @@
 // - The target is an enabled, online node other than the panel's own, and
 //   its agent advertises panel.relocate.v1 and runs the panel's version (the
 //   moved panel is that version and must answer /api/health with it).
+// - The target and the panel's own node connect over https:// (or the
+//   panel node over loopback): the master key and the database go to the
+//   target over its connection, and agents refuse an address handed over
+//   plain http:// from another server, so such a move could never switch.
 // - Nothing that would run twice or be lost: no update run, and no
 //   deployment, build, service move, clone, backup or restore queued or
 //   running (jobs left running are run again by the next panel).
 // - IP access and the agents' port open, Tailscale Serve off: both
 //   describe the old server's own network, which the moved panel cannot
 //   keep (a closed port or a tailnet path could lock the owner out).
-// - No master key rotation half done, no other move running.
-// - Nodes that cannot follow (offline, plain http:// from another server,
-//   an agent without the move) are a soft block: the owner ticks that they
-//   join them again afterwards.
+// - No master key rotation half done, no other move running, and the last
+//   move's old copy deleted (the next copy only knows its own old server,
+//   so an older one would stay there for good), unless its node is gone or
+//   is the target (a move back onto it replaces the old copy).
+// - Nodes that cannot follow (offline or disabled, plain http:// from
+//   another server, an agent without the move) are a soft block: the owner
+//   ticks that they join them again afterwards.
+// - The address is not one of the panel node's own: the old panel answers
+//   there with the same key on the same port, so nothing but the probe's
+//   move id could tell it from the moved one.
 
 import { existsSync } from "node:fs";
 import { isIP } from "node:net";
@@ -111,6 +121,44 @@ export function parseAddress(raw: string): string {
   return bare;
 }
 
+/** A host or IP in one spelling: lower case, IPv6 compressed ("2001:DB8:0::1" and "2001:db8::1" match). */
+function sameHostKey(address: string): string {
+  const bare = address
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  if (isIP(bare) === 0) return bare.replace(/\.$/, "");
+  try {
+    return new URL(`http://${urlHost(bare)}`).hostname.replace(/^\[(.*)\]$/, "$1");
+  } catch {
+    return bare;
+  }
+}
+
+/**
+ * parseAddress, and never an address of the panel's own node (its public
+ * address, public IPv4 or IPv6, or the private IPv4 its agent reports):
+ * the old panel answers there with the agents' key every node pins, so
+ * nodes would be sent back to the panel that retires.
+ */
+export function checkAddress(deps: Pick<Deps, "db">, raw: string): string {
+  const address = parseAddress(raw);
+  const panelNode = panelNodeRow(deps);
+  if (panelNode) {
+    const own = [panelNode.publicAddress, panelNode.publicIpv4, panelNode.publicIpv6, privateIpv4Of(panelNode.facts)]
+      .filter((value): value is string => typeof value === "string" && value !== "")
+      .map(sameHostKey);
+    if (own.includes(sameHostKey(address))) {
+      throw new OpError(
+        "BAD_REQUEST",
+        `${address} is an address of ${panelNode.name}, the server the panel moves away from. Enter the address other servers reach the target at.`,
+        { field: "address" },
+      );
+    }
+  }
+  return address;
+}
+
 /** True when the agent runs the panel's own version (a development panel takes any). */
 export function sameVersion(agentVersion: string | null | undefined, panelVersion: string): boolean {
   const panel = parseVersion(panelVersion);
@@ -160,14 +208,36 @@ export function rotationUnfinished(deps: Pick<Deps, "config">): boolean {
   return ["master.key.new", "agent-tls.key.new"].some((name) => existsSync(join(deps.config.dataDir, name)));
 }
 
-/** The panel-wide refusals (not about the caller or the target). */
-export function panelBlocks(deps: MoveDeps): Block[] {
+/** A remote node's agent that dials the panel over plain http:// (not loopback). */
+function dialsPlainRemote(deps: MoveDeps, nodeId: string, stored?: ReturnType<typeof readDialedUrls>): boolean {
+  const url = dialedUrlOf(deps, nodeId, stored);
+  return dialsPlainHttp(url) && !dialsLoopback(url);
+}
+
+/**
+ * The panel-wide refusals (not about the caller or the target, except that
+ * a move back onto the last move's old server needs no deleted old copy).
+ */
+export function panelBlocks(deps: MoveDeps, targetId?: string): Block[] {
   const out: Block[] = [];
   const moveOut = getSetting(deps.db, "panelMoveOut");
   if (moveOut?.phase === "moved") {
     out.push(block("moveRunning", `This panel moved to ${moveOut.targetNodeName} already. Open it there.`));
   } else if (activeMove(deps.db) || moveOut || getSetting(deps.db, "panelMoveArrival")) {
     out.push(block("moveRunning", "The panel is moving already. Wait until it finished."));
+  }
+  const done = getSetting(deps.db, "panelMoveDone");
+  if (done && !done.oldCopyRemoved && done.fromNodeId !== targetId) {
+    const oldNode = deps.db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, done.fromNodeId)).get();
+    if (oldNode) {
+      out.push(
+        block(
+          "oldCopyLeft",
+          `The last move left the old copy of the panel (its master key and database) on ${oldNode.name}. Delete the old copy first, then move the panel again.`,
+          [done.fromNodeId],
+        ),
+      );
+    }
   }
   const panelNode = panelNodeRow(deps);
   const managed =
@@ -193,6 +263,15 @@ export function panelBlocks(deps: MoveDeps): Block[] {
       block(
         "panelNodeTooOld",
         `The agent of ${panelNode.name}, the panel's own node, cannot hand the panel over. Update it in Settings > Updates first.`,
+        [panelNode.id],
+      ),
+    );
+  } else if (dialsPlainRemote(deps, panelNode.id)) {
+    // Its agent would refuse the new address over this connection (anyone on the path could have named it).
+    out.push(
+      block(
+        "panelNodePlainHttp",
+        `The agent of ${panelNode.name}, the panel's own node, connects to the panel over plain http:// from another address, so it could not take the new address. Join it again with the https:// command from Add node (${slug} join --force), then try again.`,
         [panelNode.id],
       ),
     );
@@ -240,7 +319,7 @@ export function panelBlocks(deps: MoveDeps): Block[] {
 }
 
 /** What stops a move to this node. */
-export function targetBlocks(deps: MoveDeps, row: NodeRow): Block[] {
+export function targetBlocks(deps: MoveDeps, row: NodeRow, stored?: ReturnType<typeof readDialedUrls>): Block[] {
   if (row.isPanelNode) return [block("targetIsPanel", `The panel runs on ${row.name} already.`, [row.id])];
   if (row.disabledAt) return [block("targetDisabled", `${row.name} is disabled. Enable it under Nodes first.`, [row.id])];
   if (!deps.agents.isOnline(row.id)) return [block("targetOffline", `${row.name} is offline. Try again once its agent is back.`, [row.id])];
@@ -257,26 +336,40 @@ export function targetBlocks(deps: MoveDeps, row: NodeRow): Block[] {
       ),
     ];
   }
+  if (dialsPlainRemote(deps, row.id, stored)) {
+    // The archive with master.key and the agents' TLS key would cross that connection in the clear, and its
+    // agent would refuse the new address over it anyway.
+    return [
+      block(
+        "targetPlainHttp",
+        `${row.name} connects to the panel over plain http:// from another server, so the panel's master key and database cannot go to it. Join it again with the https:// command from Add node (${slug} join --force), then try again.`,
+        [row.id],
+      ),
+    ];
+  }
   return [];
 }
 
 export interface FleetPlan {
   follow: { id: string; name: string }[];
   leftBehind: panelMove.PanelMoveLeftBehind[];
+  /** Nodes left behind that are disabled (their reason is offline: a disabled node gets no session), for the message. */
+  disabled: Set<string>;
 }
 
 /**
- * Which enabled nodes follow a move to `targetId`: the target and the
- * panel's own node always do (they are online, or the move is refused);
- * any other node only when it is online, its agent can stage an address
- * and it does not connect over plain http:// from another server (agents
- * refuse an address handed over such a connection: anyone on the path
- * could have named it).
+ * Which nodes follow a move to `targetId`: the target and the panel's own
+ * node always do (they are online, or the move is refused); any other
+ * node, disabled ones too, only when it is online, its agent can stage an
+ * address and it does not connect over plain http:// from another server
+ * (agents refuse an address handed over such a connection: anyone on the
+ * path could have named it). A disabled node is part of the fleet: the
+ * moved panel has it too, and once enabled there it must find it.
  */
 export function fleetPlan(deps: MoveDeps, targetId: string): FleetPlan {
   const stored = readDialedUrls(deps.db);
-  const plan: FleetPlan = { follow: [], leftBehind: [] };
-  const rows = deps.db.select().from(nodes).where(isNull(nodes.disabledAt)).orderBy(nodes.name).all();
+  const plan: FleetPlan = { follow: [], leftBehind: [], disabled: new Set() };
+  const rows = deps.db.select().from(nodes).orderBy(nodes.name).all();
   for (const row of rows) {
     const one = { id: row.id, name: row.name };
     if (row.id === targetId || row.isPanelNode) {
@@ -285,6 +378,7 @@ export function fleetPlan(deps: MoveDeps, targetId: string): FleetPlan {
     }
     if (!deps.agents.isOnline(row.id)) {
       plan.leftBehind.push({ ...one, reason: "offline" });
+      if (row.disabledAt) plan.disabled.add(row.id);
       continue;
     }
     const url = dialedUrlOf(deps, row.id, stored);
@@ -305,9 +399,10 @@ const leftBehindWhy = {
 export function leftBehindBlock(plan: FleetPlan): Block | null {
   if (plan.leftBehind.length === 0) return null;
   const one = plan.leftBehind.length === 1 ? plan.leftBehind[0] : undefined;
+  const why = (node: panelMove.PanelMoveLeftBehind) => (plan.disabled.has(node.id) ? "is disabled" : leftBehindWhy[node.reason]);
   const message = one
-    ? `${one.name} ${leftBehindWhy[one.reason]}, so it cannot follow. Tick that you will join it again with ${slug} join --force afterwards, or bring it back first.`
-    : `${nodeNames(plan.leftBehind)} cannot follow (offline, plain http:// or an old agent). Tick that you will join them again with ${slug} join --force afterwards, or bring them back first.`;
+    ? `${one.name} ${why(one)}, so it cannot follow. Tick that you will join it again with ${slug} join --force afterwards, or bring it back first.`
+    : `${nodeNames(plan.leftBehind)} cannot follow (offline, disabled, plain http:// or an old agent). Tick that you will join them again with ${slug} join --force afterwards, or bring them back first.`;
   return block(
     "nodesLeftBehind",
     message,
@@ -321,11 +416,22 @@ function panelPort(deps: MoveDeps): number {
   return getSetting(deps.db, "panelHostPort") ?? deps.config.hostPort ?? deps.config.port;
 }
 
-/** panelMove.check for this caller. */
-export function moveCheck(ctx: OpContext, targetNodeId?: string): Check {
+/** The address the owner typed, checked like panelMove.start does; null when it is missing or would be refused. */
+function typedAddress(deps: Pick<Deps, "db">, raw: string | undefined): string | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  try {
+    return checkAddress(deps, raw);
+  } catch {
+    return null;
+  }
+}
+
+/** panelMove.check for this caller; `address` is what the owner typed, for the warnings. */
+export function moveCheck(ctx: OpContext, targetNodeId?: string, address?: string): Check {
   const rows = ctx.db.select().from(nodes).where(isNull(nodes.disabledAt)).orderBy(nodes.name).all();
+  const stored = readDialedUrls(ctx.db);
   const targets: panelMove.PanelMoveTarget[] = rows.map((row) => {
-    const blocks = targetBlocks(ctx, row);
+    const blocks = targetBlocks(ctx, row, stored);
     return {
       id: row.id,
       name: row.name,
@@ -335,7 +441,7 @@ export function moveCheck(ctx: OpContext, targetNodeId?: string): Check {
       blocks,
     };
   });
-  const blocks = [...callerBlocks(ctx), ...panelBlocks(ctx)];
+  const blocks = [...callerBlocks(ctx), ...panelBlocks(ctx, targetNodeId)];
   const panelNode = panelNodeRow(ctx);
   const domain = getSetting(ctx.db, "panelDomain") ?? null;
   const out: Check = {
@@ -353,14 +459,15 @@ export function moveCheck(ctx: OpContext, targetNodeId?: string): Check {
   if (!targetNodeId) return out;
   const target = ctx.db.select().from(nodes).where(eq(nodes.id, targetNodeId)).get();
   if (!target) throw new OpError("NOT_FOUND", "That node does not exist.", { nodeId: targetNodeId });
-  blocks.push(...targetBlocks(ctx, target));
+  blocks.push(...targetBlocks(ctx, target, stored));
   const plan = fleetPlan(ctx, target.id);
   out.nodesToMove = plan.follow;
   out.nodesLeftBehind = plan.leftBehind;
   const soft = leftBehindBlock(plan);
   if (soft) blocks.push(soft);
   out.defaultAddress = defaultAddressOf(target);
-  out.warnings = moveWarnings(ctx, domain, out.defaultAddress);
+  // The warnings name the address the move would use: the typed one when start would take it.
+  out.warnings = moveWarnings(ctx, domain, typedAddress(ctx, address) ?? out.defaultAddress);
   return out;
 }
 

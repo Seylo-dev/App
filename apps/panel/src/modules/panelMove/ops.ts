@@ -7,7 +7,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { getSetting, setSetting } from "../../settings";
 import { panelServiceId } from "../nodes/panel-service";
 import { beginMove, cancelMove, publishStatus } from "./orchestrator";
-import { callerBlocks, moveCheck, panelNodeRow, parseAddress, refusal } from "./preflight";
+import { callerBlocks, checkAddress, moveCheck, panelNodeRow, refusal } from "./preflight";
 import { activeMove } from "./state";
 import { moveStatus } from "./status";
 
@@ -20,7 +20,7 @@ function by(ctx: OpContext): string {
   return ctx.principal.type === "session" ? ctx.principal.user.email : "the owner";
 }
 
-export const check = implement(panelMove.check, (input, ctx) => moveCheck(ctx, input.targetNodeId));
+export const check = implement(panelMove.check, (input, ctx) => moveCheck(ctx, input.targetNodeId, input.address));
 
 export const status = implement(panelMove.status, (_input, ctx) => moveStatus(ctx, ctx.access.can("settings.view")));
 
@@ -40,7 +40,7 @@ export const start = implement(panelMove.start, (input, ctx) => {
       },
     );
   }
-  const address = parseAddress(raw);
+  const address = checkAddress(ctx, raw);
   requireFreshSignIn(ctx);
   const from = panelNodeRow(ctx);
   if (!from) throw new OpError("CONFLICT", "The panel has no node of its own to move from.", { reason: "panelNotManaged" });
