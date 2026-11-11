@@ -80,7 +80,7 @@ export default {
     checking: "Checking with GitHub",
     saved: "Token saved for @{login}",
     replaces:
-      "The token takes over from @{login}'s connection once GitHub accepts it. Services that read their repository through the account keep working; revoke the old one on github.com.",
+      "The token takes over from @{login}'s connection once GitHub accepts it. Services that read their repository through the account keep working as long as the token can read those repositories; revoke the old one on github.com.",
   },
   // Organizations that restrict OAuth app access, and how the App avoids it.
   orgs: {
