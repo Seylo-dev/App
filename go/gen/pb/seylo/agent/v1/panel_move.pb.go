@@ -35,8 +35,10 @@ type StagePanelAddressRequest struct {
 	// "sha256:<hex>" of the agents' TLS key. Required: the moved panel
 	// presents the same key at its new address.
 	PanelPin string `protobuf:"bytes,3,opt,name=panel_pin,json=panelPin,proto3" json:"panel_pin,omitempty"`
-	// Dial the address first (TLS with the pin, no WebSocket) and refuse to
-	// stage it when it cannot be reached from this node.
+	// Dial the address first (HTTPS with the pin, GET /api/health) and
+	// refuse to stage it when it cannot be reached from this node or the
+	// panel there is not the moved copy of this move (its health answer
+	// must carry "moveId": move_id; the old panel presents the same pin).
 	Probe         bool `protobuf:"varint,4,opt,name=probe,proto3" json:"probe,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -750,7 +752,8 @@ func (x *StartMovedPanelResponse) GetVersion() string {
 // AbortMovedPanelRequest stops a panel StartMovedPanel started for that
 // move, restores the folders it set aside and deletes the staged copies
 // (master.key and the agents' TLS key included). Safe to call at any step
-// and more than once.
+// before CommitMovedPanel and more than once; refused with
+// FAILED_PRECONDITION "committed" after it.
 type AbortMovedPanelRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MoveId        string                 `protobuf:"bytes,1,opt,name=move_id,json=moveId,proto3" json:"move_id,omitempty"`
@@ -831,6 +834,93 @@ func (*AbortMovedPanelResponse) Descriptor() ([]byte, []int) {
 	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{14}
 }
 
+// CommitMovedPanelRequest is the switch, sent to the target once every
+// node holds the new address: the agent records it in its move journal
+// and writes the commit marker into the moved panel's data folder
+// (move-commit, holding move_id), which ends the panel's 503 to agents.
+// Idempotent for the same move. Refused with FAILED_PRECONDITION
+// "notStarted" when no healthy moved panel of that move runs here. On the
+// target, the agent dials its staged loopback address only after it.
+type CommitMovedPanelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MoveId        string                 `protobuf:"bytes,1,opt,name=move_id,json=moveId,proto3" json:"move_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitMovedPanelRequest) Reset() {
+	*x = CommitMovedPanelRequest{}
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitMovedPanelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitMovedPanelRequest) ProtoMessage() {}
+
+func (x *CommitMovedPanelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitMovedPanelRequest.ProtoReflect.Descriptor instead.
+func (*CommitMovedPanelRequest) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *CommitMovedPanelRequest) GetMoveId() string {
+	if x != nil {
+		return x.MoveId
+	}
+	return ""
+}
+
+type CommitMovedPanelResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitMovedPanelResponse) Reset() {
+	*x = CommitMovedPanelResponse{}
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitMovedPanelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitMovedPanelResponse) ProtoMessage() {}
+
+func (x *CommitMovedPanelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitMovedPanelResponse.ProtoReflect.Descriptor instead.
+func (*CommitMovedPanelResponse) Descriptor() ([]byte, []int) {
+	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{16}
+}
+
 // RetirePanelRequest is sent to the old panel node: the agent answers, then
 // stops the panel container running here (it stays, stopped, with its data
 // folder, until RemoveOldPanel). Its own connection to the panel fails then
@@ -846,7 +936,7 @@ type RetirePanelRequest struct {
 
 func (x *RetirePanelRequest) Reset() {
 	*x = RetirePanelRequest{}
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[15]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -858,7 +948,7 @@ func (x *RetirePanelRequest) String() string {
 func (*RetirePanelRequest) ProtoMessage() {}
 
 func (x *RetirePanelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[15]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -871,7 +961,7 @@ func (x *RetirePanelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetirePanelRequest.ProtoReflect.Descriptor instead.
 func (*RetirePanelRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{15}
+	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RetirePanelRequest) GetMoveId() string {
@@ -896,7 +986,7 @@ type RetirePanelResponse struct {
 
 func (x *RetirePanelResponse) Reset() {
 	*x = RetirePanelResponse{}
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[16]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +998,7 @@ func (x *RetirePanelResponse) String() string {
 func (*RetirePanelResponse) ProtoMessage() {}
 
 func (x *RetirePanelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[16]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1011,7 @@ func (x *RetirePanelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetirePanelResponse.ProtoReflect.Descriptor instead.
 func (*RetirePanelResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{16}
+	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{18}
 }
 
 // RemoveOldPanelRequest deletes the stopped panel container a move left on
@@ -937,7 +1027,7 @@ type RemoveOldPanelRequest struct {
 
 func (x *RemoveOldPanelRequest) Reset() {
 	*x = RemoveOldPanelRequest{}
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[17]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1039,7 @@ func (x *RemoveOldPanelRequest) String() string {
 func (*RemoveOldPanelRequest) ProtoMessage() {}
 
 func (x *RemoveOldPanelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[17]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1052,7 @@ func (x *RemoveOldPanelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveOldPanelRequest.ProtoReflect.Descriptor instead.
 func (*RemoveOldPanelRequest) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{17}
+	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RemoveOldPanelRequest) GetServiceId() string {
@@ -981,7 +1071,7 @@ type RemoveOldPanelResponse struct {
 
 func (x *RemoveOldPanelResponse) Reset() {
 	*x = RemoveOldPanelResponse{}
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[18]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -993,7 +1083,7 @@ func (x *RemoveOldPanelResponse) String() string {
 func (*RemoveOldPanelResponse) ProtoMessage() {}
 
 func (x *RemoveOldPanelResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[18]
+	mi := &file_seylo_agent_v1_panel_move_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1006,7 +1096,7 @@ func (x *RemoveOldPanelResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveOldPanelResponse.ProtoReflect.Descriptor instead.
 func (*RemoveOldPanelResponse) Descriptor() ([]byte, []int) {
-	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{18}
+	return file_seylo_agent_v1_panel_move_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RemoveOldPanelResponse) GetFreedBytes() uint64 {
@@ -1068,7 +1158,10 @@ const file_seylo_agent_v1_panel_move_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"1\n" +
 	"\x16AbortMovedPanelRequest\x12\x17\n" +
 	"\amove_id\x18\x01 \x01(\tR\x06moveId\"\x19\n" +
-	"\x17AbortMovedPanelResponse\"L\n" +
+	"\x17AbortMovedPanelResponse\"2\n" +
+	"\x17CommitMovedPanelRequest\x12\x17\n" +
+	"\amove_id\x18\x01 \x01(\tR\x06moveId\"\x1a\n" +
+	"\x18CommitMovedPanelResponse\"L\n" +
 	"\x12RetirePanelRequest\x12\x17\n" +
 	"\amove_id\x18\x01 \x01(\tR\x06moveId\x12\x1d\n" +
 	"\n" +
@@ -1094,7 +1187,7 @@ func file_seylo_agent_v1_panel_move_proto_rawDescGZIP() []byte {
 	return file_seylo_agent_v1_panel_move_proto_rawDescData
 }
 
-var file_seylo_agent_v1_panel_move_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_seylo_agent_v1_panel_move_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_seylo_agent_v1_panel_move_proto_goTypes = []any{
 	(*StagePanelAddressRequest)(nil),  // 0: seylo.agent.v1.StagePanelAddressRequest
 	(*StagePanelAddressResponse)(nil), // 1: seylo.agent.v1.StagePanelAddressResponse
@@ -1111,17 +1204,19 @@ var file_seylo_agent_v1_panel_move_proto_goTypes = []any{
 	(*StartMovedPanelResponse)(nil),   // 12: seylo.agent.v1.StartMovedPanelResponse
 	(*AbortMovedPanelRequest)(nil),    // 13: seylo.agent.v1.AbortMovedPanelRequest
 	(*AbortMovedPanelResponse)(nil),   // 14: seylo.agent.v1.AbortMovedPanelResponse
-	(*RetirePanelRequest)(nil),        // 15: seylo.agent.v1.RetirePanelRequest
-	(*RetirePanelResponse)(nil),       // 16: seylo.agent.v1.RetirePanelResponse
-	(*RemoveOldPanelRequest)(nil),     // 17: seylo.agent.v1.RemoveOldPanelRequest
-	(*RemoveOldPanelResponse)(nil),    // 18: seylo.agent.v1.RemoveOldPanelResponse
-	(*ServiceSpec)(nil),               // 19: seylo.agent.v1.ServiceSpec
-	(*durationpb.Duration)(nil),       // 20: google.protobuf.Duration
+	(*CommitMovedPanelRequest)(nil),   // 15: seylo.agent.v1.CommitMovedPanelRequest
+	(*CommitMovedPanelResponse)(nil),  // 16: seylo.agent.v1.CommitMovedPanelResponse
+	(*RetirePanelRequest)(nil),        // 17: seylo.agent.v1.RetirePanelRequest
+	(*RetirePanelResponse)(nil),       // 18: seylo.agent.v1.RetirePanelResponse
+	(*RemoveOldPanelRequest)(nil),     // 19: seylo.agent.v1.RemoveOldPanelRequest
+	(*RemoveOldPanelResponse)(nil),    // 20: seylo.agent.v1.RemoveOldPanelResponse
+	(*ServiceSpec)(nil),               // 21: seylo.agent.v1.ServiceSpec
+	(*durationpb.Duration)(nil),       // 22: google.protobuf.Duration
 }
 var file_seylo_agent_v1_panel_move_proto_depIdxs = []int32{
 	5,  // 0: seylo.agent.v1.ImportPanelDataRequest.manifest:type_name -> seylo.agent.v1.PanelDataFile
-	19, // 1: seylo.agent.v1.StartMovedPanelRequest.spec:type_name -> seylo.agent.v1.ServiceSpec
-	20, // 2: seylo.agent.v1.StartMovedPanelRequest.health_timeout:type_name -> google.protobuf.Duration
+	21, // 1: seylo.agent.v1.StartMovedPanelRequest.spec:type_name -> seylo.agent.v1.ServiceSpec
+	22, // 2: seylo.agent.v1.StartMovedPanelRequest.health_timeout:type_name -> google.protobuf.Duration
 	3,  // [3:3] is the sub-list for method output_type
 	3,  // [3:3] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
@@ -1141,7 +1236,7 @@ func file_seylo_agent_v1_panel_move_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_seylo_agent_v1_panel_move_proto_rawDesc), len(file_seylo_agent_v1_panel_move_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

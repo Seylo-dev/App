@@ -33,6 +33,12 @@ export const panelMoveBlockCodes = [
   "targetDisabled",
   /** The target's agent cannot take the panel (no panel.relocate.v1) or runs another version than the panel. */
   "targetTooOld",
+  /**
+   * The target connects to the panel over plain http:// from another
+   * server: the panel's master key and database cannot go to it over that
+   * connection. Join it again with the https:// command from Add node.
+   */
+  "targetPlainHttp",
   /** A panel, agent or Docker update is running. */
   "updateRunning",
   /** A deployment, build, service move, clone, backup or restore is queued or running; nodeIds names nothing. */
@@ -60,6 +66,13 @@ export const panelMoveBlockCodes = [
   "panelNodeOffline",
   /** The agent of the node the panel runs on cannot hand the panel over (no panel.relocate.v1): update it. */
   "panelNodeTooOld",
+  /** The agent of the node the panel runs on connects over plain http:// from another server. */
+  "panelNodePlainHttp",
+  /**
+   * The last move's old copy (master key, database) is still on its old
+   * server: Delete the old copy first. Not once that node was removed.
+   */
+  "oldCopyLeft",
 ] as const;
 export type PanelMoveBlockCode = (typeof panelMoveBlockCodes)[number];
 export const PanelMoveBlockCode = Type.Union(panelMoveBlockCodes.map((code) => Type.Literal(code)));
@@ -83,7 +96,7 @@ export const PanelMoveTarget = Type.Object({
   address: Type.Union([Type.String(), Type.Null()]),
   /** Nothing about this node stops a move to it (the panel-wide blocks still may). */
   ready: Type.Boolean(),
-  /** targetOffline, targetIsPanel, targetDisabled, targetTooOld. */
+  /** targetOffline, targetIsPanel, targetDisabled, targetTooOld, targetPlainHttp. */
   blocks: Type.Array(PanelMoveBlock),
 });
 export type PanelMoveTarget = Static<typeof PanelMoveTarget>;
@@ -166,6 +179,17 @@ export const PanelMoveStatus = Type.Object({
   domain: Type.Union([Type.String(), Type.Null()]),
   /** panelMove.cancel is allowed now (before the switch). */
   canCancel: Type.Boolean(),
+  /**
+   * The switch waits for the target to confirm it (CommitMovedPanel did not
+   * answer): since when. The panel stays read-only and keeps its nodes.
+   */
+  waitingSince: Type.Union([Timestamp, Type.Null()]),
+  /**
+   * panelMove.cancel with force: true is allowed: the target has not
+   * confirmed the switch for 10 minutes. Only for a target that is gone
+   * for good: if it took the switch, nodes that reach it stay there.
+   */
+  canForceCancel: Type.Boolean(),
   /** For done on the old side: the old panel did not confirm it stopped; its container may still run. */
   oldPanelRunning: Type.Boolean(),
 });
@@ -176,8 +200,12 @@ export const check = defineOp({
   kind: "query",
   summary: "Check a panel move",
   description:
-    "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record.",
-  input: Type.Object({ targetNodeId: Type.Optional(Id) }),
+    "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record (naming address when given).",
+  input: Type.Object({
+    targetNodeId: Type.Optional(Id),
+    /** The address the owner typed (host name or IP): the warnings name it instead of the default. */
+    address: Type.Optional(Type.String({ maxLength: 253 })),
+  }),
   output: PanelMoveCheck,
   permission: permission.global("settings.manage"),
   mcp: false,
@@ -221,8 +249,11 @@ export const cancel = defineOp({
   kind: "mutation",
   summary: "Cancel the panel move",
   description:
-    'Stops a running move before the switch: the target\'s copy is deleted, every node forgets the new address and the panel takes changes again. CONFLICT details.reason "notRunning" when no move runs, "switching" once the switch started. Owner only, from a browser session.',
-  input: Empty,
+    'Stops a running move before the switch: the target\'s copy is deleted, every node forgets the new address and the panel takes changes again. CONFLICT details.reason "notRunning" when no move runs, "switching" once the switch started. With force: true, also while the switch waits for a target that has not confirmed it for 10 minutes (canForceCancel): for a target that is gone for good. Owner only, from a browser session.',
+  input: Type.Object({
+    /** Cancel a switch the target never confirmed (canForceCancel). */
+    force: Type.Optional(Type.Boolean()),
+  }),
   output: PanelMoveStatus,
   permission: permission.global("settings.manage"),
   mcp: false,

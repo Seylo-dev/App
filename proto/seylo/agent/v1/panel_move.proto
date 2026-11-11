@@ -17,7 +17,11 @@ import "seylo/agent/v1/service.proto";
 //      it presents the agents' TLS key nodes pin.
 //   4. StagePanelAddress on every node: the new address, checked by a TLS
 //      dial with the pin, that a node switches to when its panel goes away.
-//   5. RetirePanel on the old panel node: it stops the old panel after
+//      Until step 5 the moved panel answers agents with 503, so a node
+//      that fails over early comes back to the old panel.
+//   5. CommitMovedPanel on the target: the switch. The moved panel takes
+//      agents from then on; nothing undoes the move after it.
+//   6. RetirePanel on the old panel node: it stops the old panel after
 //      answering; every node then fails over to its staged address.
 //
 // AbortMovedPanel and ClearPanelAddress undo 1 to 4 when any step fails;
@@ -36,8 +40,10 @@ message StagePanelAddressRequest {
   // "sha256:<hex>" of the agents' TLS key. Required: the moved panel
   // presents the same key at its new address.
   string panel_pin = 3;
-  // Dial the address first (TLS with the pin, no WebSocket) and refuse to
-  // stage it when it cannot be reached from this node.
+  // Dial the address first (HTTPS with the pin, GET /api/health) and
+  // refuse to stage it when it cannot be reached from this node or the
+  // panel there is not the moved copy of this move (its health answer
+  // must carry "moveId": move_id; the old panel presents the same pin).
   bool probe = 4;
 }
 
@@ -133,12 +139,26 @@ message StartMovedPanelResponse {
 // AbortMovedPanelRequest stops a panel StartMovedPanel started for that
 // move, restores the folders it set aside and deletes the staged copies
 // (master.key and the agents' TLS key included). Safe to call at any step
-// and more than once.
+// before CommitMovedPanel and more than once; refused with
+// FAILED_PRECONDITION "committed" after it.
 message AbortMovedPanelRequest {
   string move_id = 1;
 }
 
 message AbortMovedPanelResponse {}
+
+// CommitMovedPanelRequest is the switch, sent to the target once every
+// node holds the new address: the agent records it in its move journal
+// and writes the commit marker into the moved panel's data folder
+// (move-commit, holding move_id), which ends the panel's 503 to agents.
+// Idempotent for the same move. Refused with FAILED_PRECONDITION
+// "notStarted" when no healthy moved panel of that move runs here. On the
+// target, the agent dials its staged loopback address only after it.
+message CommitMovedPanelRequest {
+  string move_id = 1;
+}
+
+message CommitMovedPanelResponse {}
 
 // RetirePanelRequest is sent to the old panel node: the agent answers, then
 // stops the panel container running here (it stays, stopped, with its data

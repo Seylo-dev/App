@@ -53255,7 +53255,7 @@
       "post": {
         "operationId": "panelMove.cancel",
         "summary": "Cancel the panel move",
-        "description": "Stops a running move before the switch: the target's copy is deleted, every node forgets the new address and the panel takes changes again. CONFLICT details.reason \"notRunning\" when no move runs, \"switching\" once the switch started. Owner only, from a browser session.",
+        "description": "Stops a running move before the switch: the target's copy is deleted, every node forgets the new address and the panel takes changes again. CONFLICT details.reason \"notRunning\" when no move runs, \"switching\" once the switch started. With force: true, also while the switch waits for a target that has not confirmed it for 10 minutes (canForceCancel): for a target that is gone for good. Owner only, from a browser session.",
         "tags": [
           "panelMove"
         ],
@@ -53274,7 +53274,11 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
@@ -53306,6 +53310,8 @@
                     "oldCopyRemoved",
                     "domain",
                     "canCancel",
+                    "waitingSince",
+                    "canForceCancel",
                     "oldPanelRunning"
                   ],
                   "properties": {
@@ -53576,6 +53582,20 @@
                     "canCancel": {
                       "type": "boolean"
                     },
+                    "waitingSince": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canForceCancel": {
+                      "type": "boolean"
+                    },
                     "oldPanelRunning": {
                       "type": "boolean"
                     }
@@ -53597,7 +53617,7 @@
       "get": {
         "operationId": "panelMove.check",
         "summary": "Check a panel move",
-        "description": "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record.",
+        "description": "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record (naming address when given).",
         "tags": [
           "panelMove"
         ],
@@ -53618,6 +53638,15 @@
             "schema": {
               "pattern": "^[a-z0-9]{16}$",
               "description": "Panel-issued id.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "maxLength": 253,
               "type": "string"
             }
           }
@@ -53679,6 +53708,10 @@
                                 "type": "string"
                               },
                               {
+                                "const": "targetPlainHttp",
+                                "type": "string"
+                              },
+                              {
                                 "const": "updateRunning",
                                 "type": "string"
                               },
@@ -53720,6 +53753,14 @@
                               },
                               {
                                 "const": "panelNodeTooOld",
+                                "type": "string"
+                              },
+                              {
+                                "const": "panelNodePlainHttp",
+                                "type": "string"
+                              },
+                              {
+                                "const": "oldCopyLeft",
                                 "type": "string"
                               }
                             ]
@@ -53815,6 +53856,10 @@
                                       "type": "string"
                                     },
                                     {
+                                      "const": "targetPlainHttp",
+                                      "type": "string"
+                                    },
+                                    {
                                       "const": "updateRunning",
                                       "type": "string"
                                     },
@@ -53856,6 +53901,14 @@
                                     },
                                     {
                                       "const": "panelNodeTooOld",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "panelNodePlainHttp",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "oldCopyLeft",
                                       "type": "string"
                                     }
                                   ]
@@ -54112,6 +54165,8 @@
                         "oldCopyRemoved",
                         "domain",
                         "canCancel",
+                        "waitingSince",
+                        "canForceCancel",
                         "oldPanelRunning"
                       ],
                       "properties": {
@@ -54382,6 +54437,20 @@
                         "canCancel": {
                           "type": "boolean"
                         },
+                        "waitingSince": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "canForceCancel": {
+                          "type": "boolean"
+                        },
                         "oldPanelRunning": {
                           "type": "boolean"
                         }
@@ -54473,6 +54542,8 @@
                     "oldCopyRemoved",
                     "domain",
                     "canCancel",
+                    "waitingSince",
+                    "canForceCancel",
                     "oldPanelRunning"
                   ],
                   "properties": {
@@ -54741,6 +54812,20 @@
                       ]
                     },
                     "canCancel": {
+                      "type": "boolean"
+                    },
+                    "waitingSince": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canForceCancel": {
                       "type": "boolean"
                     },
                     "oldPanelRunning": {
@@ -54805,6 +54890,8 @@
                     "oldCopyRemoved",
                     "domain",
                     "canCancel",
+                    "waitingSince",
+                    "canForceCancel",
                     "oldPanelRunning"
                   ],
                   "properties": {
@@ -55073,6 +55160,20 @@
                       ]
                     },
                     "canCancel": {
+                      "type": "boolean"
+                    },
+                    "waitingSince": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canForceCancel": {
                       "type": "boolean"
                     },
                     "oldPanelRunning": {

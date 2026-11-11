@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file seylo/agent/v1/panel_move.proto.
  */
 export const file_seylo_agent_v1_panel_move: GenFile = /*@__PURE__*/
-  fileDesc("Ch9zZXlsby9hZ2VudC92MS9wYW5lbF9tb3ZlLnByb3RvEg5zZXlsby5hZ2VudC52MSJgChhTdGFnZVBhbmVsQWRkcmVzc1JlcXVlc3QSDwoHbW92ZV9pZBgBIAEoCRIRCglwYW5lbF91cmwYAiABKAkSEQoJcGFuZWxfcGluGAMgASgJEg0KBXByb2JlGAQgASgIIjEKGVN0YWdlUGFuZWxBZGRyZXNzUmVzcG9uc2USFAoMcHJvYmVfbWlsbGlzGAEgASgNIisKGENsZWFyUGFuZWxBZGRyZXNzUmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJIhsKGUNsZWFyUGFuZWxBZGRyZXNzUmVzcG9uc2UibgoWSW1wb3J0UGFuZWxEYXRhUmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAQSLwoIbWFuaWZlc3QYAyADKAsyHS5zZXlsby5hZ2VudC52MS5QYW5lbERhdGFGaWxlIjsKDVBhbmVsRGF0YUZpbGUSDAoEcGF0aBgBIAEoCRIMCgRzaXplGAIgASgEEg4KBnNoYTI1NhgDIAEoCSI8ChdJbXBvcnRQYW5lbERhdGFSZXNwb25zZRISCgpzaXplX2J5dGVzGAEgASgEEg0KBWZpbGVzGAIgASgNIigKFUV4cG9ydFJlZ2lzdHJ5UmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJIiwKFkV4cG9ydFJlZ2lzdHJ5UmVzcG9uc2USEgoKc2l6ZV9ieXRlcxgBIAEoBCI8ChVJbXBvcnRSZWdpc3RyeVJlcXVlc3QSDwoHbW92ZV9pZBgBIAEoCRISCgpzaXplX2J5dGVzGAIgASgEIiwKFkltcG9ydFJlZ2lzdHJ5UmVzcG9uc2USEgoKc2l6ZV9ieXRlcxgBIAEoBCLfAQoWU3RhcnRNb3ZlZFBhbmVsUmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJEikKBHNwZWMYAiABKAsyGy5zZXlsby5hZ2VudC52MS5TZXJ2aWNlU3BlYxIRCglwYW5lbF9waW4YAyABKAkSFgoOYWdlbnRfdGxzX3BvcnQYBCABKA0SEQoJaG9zdF9wb3J0GAUgASgNEhgKEGV4cGVjdGVkX3ZlcnNpb24YBiABKAkSMQoOaGVhbHRoX3RpbWVvdXQYByABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iKgoXU3RhcnRNb3ZlZFBhbmVsUmVzcG9uc2USDwoHdmVyc2lvbhgBIAEoCSIpChZBYm9ydE1vdmVkUGFuZWxSZXF1ZXN0Eg8KB21vdmVfaWQYASABKAkiGQoXQWJvcnRNb3ZlZFBhbmVsUmVzcG9uc2UiOQoSUmV0aXJlUGFuZWxSZXF1ZXN0Eg8KB21vdmVfaWQYASABKAkSEgoKc2VydmljZV9pZBgCIAEoCSIVChNSZXRpcmVQYW5lbFJlc3BvbnNlIisKFVJlbW92ZU9sZFBhbmVsUmVxdWVzdBISCgpzZXJ2aWNlX2lkGAEgASgJIi0KFlJlbW92ZU9sZFBhbmVsUmVzcG9uc2USEwoLZnJlZWRfYnl0ZXMYASABKARCuQEKEmNvbS5zZXlsby5hZ2VudC52MUIOUGFuZWxNb3ZlUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_duration, file_seylo_agent_v1_service]);
+  fileDesc("Ch9zZXlsby9hZ2VudC92MS9wYW5lbF9tb3ZlLnByb3RvEg5zZXlsby5hZ2VudC52MSJgChhTdGFnZVBhbmVsQWRkcmVzc1JlcXVlc3QSDwoHbW92ZV9pZBgBIAEoCRIRCglwYW5lbF91cmwYAiABKAkSEQoJcGFuZWxfcGluGAMgASgJEg0KBXByb2JlGAQgASgIIjEKGVN0YWdlUGFuZWxBZGRyZXNzUmVzcG9uc2USFAoMcHJvYmVfbWlsbGlzGAEgASgNIisKGENsZWFyUGFuZWxBZGRyZXNzUmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJIhsKGUNsZWFyUGFuZWxBZGRyZXNzUmVzcG9uc2UibgoWSW1wb3J0UGFuZWxEYXRhUmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAQSLwoIbWFuaWZlc3QYAyADKAsyHS5zZXlsby5hZ2VudC52MS5QYW5lbERhdGFGaWxlIjsKDVBhbmVsRGF0YUZpbGUSDAoEcGF0aBgBIAEoCRIMCgRzaXplGAIgASgEEg4KBnNoYTI1NhgDIAEoCSI8ChdJbXBvcnRQYW5lbERhdGFSZXNwb25zZRISCgpzaXplX2J5dGVzGAEgASgEEg0KBWZpbGVzGAIgASgNIigKFUV4cG9ydFJlZ2lzdHJ5UmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJIiwKFkV4cG9ydFJlZ2lzdHJ5UmVzcG9uc2USEgoKc2l6ZV9ieXRlcxgBIAEoBCI8ChVJbXBvcnRSZWdpc3RyeVJlcXVlc3QSDwoHbW92ZV9pZBgBIAEoCRISCgpzaXplX2J5dGVzGAIgASgEIiwKFkltcG9ydFJlZ2lzdHJ5UmVzcG9uc2USEgoKc2l6ZV9ieXRlcxgBIAEoBCLfAQoWU3RhcnRNb3ZlZFBhbmVsUmVxdWVzdBIPCgdtb3ZlX2lkGAEgASgJEikKBHNwZWMYAiABKAsyGy5zZXlsby5hZ2VudC52MS5TZXJ2aWNlU3BlYxIRCglwYW5lbF9waW4YAyABKAkSFgoOYWdlbnRfdGxzX3BvcnQYBCABKA0SEQoJaG9zdF9wb3J0GAUgASgNEhgKEGV4cGVjdGVkX3ZlcnNpb24YBiABKAkSMQoOaGVhbHRoX3RpbWVvdXQYByABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iKgoXU3RhcnRNb3ZlZFBhbmVsUmVzcG9uc2USDwoHdmVyc2lvbhgBIAEoCSIpChZBYm9ydE1vdmVkUGFuZWxSZXF1ZXN0Eg8KB21vdmVfaWQYASABKAkiGQoXQWJvcnRNb3ZlZFBhbmVsUmVzcG9uc2UiKgoXQ29tbWl0TW92ZWRQYW5lbFJlcXVlc3QSDwoHbW92ZV9pZBgBIAEoCSIaChhDb21taXRNb3ZlZFBhbmVsUmVzcG9uc2UiOQoSUmV0aXJlUGFuZWxSZXF1ZXN0Eg8KB21vdmVfaWQYASABKAkSEgoKc2VydmljZV9pZBgCIAEoCSIVChNSZXRpcmVQYW5lbFJlc3BvbnNlIisKFVJlbW92ZU9sZFBhbmVsUmVxdWVzdBISCgpzZXJ2aWNlX2lkGAEgASgJIi0KFlJlbW92ZU9sZFBhbmVsUmVzcG9uc2USEwoLZnJlZWRfYnl0ZXMYASABKARCuQEKEmNvbS5zZXlsby5hZ2VudC52MUIOUGFuZWxNb3ZlUHJvdG9QAVo5Z2l0aHViLmNvbS9zZXlsby1kZXYvYXBwL2dvL2dlbi9wYi9zZXlsby9hZ2VudC92MTthZ2VudHYxogIDU0FYqgIOU2V5bG8uQWdlbnQuVjHKAg5TZXlsb1xBZ2VudFxWMeICGlNleWxvXEFnZW50XFYxXEdQQk1ldGFkYXRh6gIQU2V5bG86OkFnZW50OjpWMWIGcHJvdG8z", [file_google_protobuf_duration, file_seylo_agent_v1_service]);
 
 /**
  * StagePanelAddressRequest records the address this node switches to when
@@ -47,8 +47,10 @@ export type StagePanelAddressRequest = Message<"seylo.agent.v1.StagePanelAddress
   panelPin: string;
 
   /**
-   * Dial the address first (TLS with the pin, no WebSocket) and refuse to
-   * stage it when it cannot be reached from this node.
+   * Dial the address first (HTTPS with the pin, GET /api/health) and
+   * refuse to stage it when it cannot be reached from this node or the
+   * panel there is not the moved copy of this move (its health answer
+   * must carry "moveId": move_id; the old panel presents the same pin).
    *
    * @generated from field: bool probe = 4;
    */
@@ -372,7 +374,8 @@ export const StartMovedPanelResponseSchema: GenMessage<StartMovedPanelResponse> 
  * AbortMovedPanelRequest stops a panel StartMovedPanel started for that
  * move, restores the folders it set aside and deletes the staged copies
  * (master.key and the agents' TLS key included). Safe to call at any step
- * and more than once.
+ * before CommitMovedPanel and more than once; refused with
+ * FAILED_PRECONDITION "committed" after it.
  *
  * @generated from message seylo.agent.v1.AbortMovedPanelRequest
  */
@@ -404,6 +407,44 @@ export const AbortMovedPanelResponseSchema: GenMessage<AbortMovedPanelResponse> 
   messageDesc(file_seylo_agent_v1_panel_move, 14);
 
 /**
+ * CommitMovedPanelRequest is the switch, sent to the target once every
+ * node holds the new address: the agent records it in its move journal
+ * and writes the commit marker into the moved panel's data folder
+ * (move-commit, holding move_id), which ends the panel's 503 to agents.
+ * Idempotent for the same move. Refused with FAILED_PRECONDITION
+ * "notStarted" when no healthy moved panel of that move runs here. On the
+ * target, the agent dials its staged loopback address only after it.
+ *
+ * @generated from message seylo.agent.v1.CommitMovedPanelRequest
+ */
+export type CommitMovedPanelRequest = Message<"seylo.agent.v1.CommitMovedPanelRequest"> & {
+  /**
+   * @generated from field: string move_id = 1;
+   */
+  moveId: string;
+};
+
+/**
+ * Describes the message seylo.agent.v1.CommitMovedPanelRequest.
+ * Use `create(CommitMovedPanelRequestSchema)` to create a new message.
+ */
+export const CommitMovedPanelRequestSchema: GenMessage<CommitMovedPanelRequest> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_move, 15);
+
+/**
+ * @generated from message seylo.agent.v1.CommitMovedPanelResponse
+ */
+export type CommitMovedPanelResponse = Message<"seylo.agent.v1.CommitMovedPanelResponse"> & {
+};
+
+/**
+ * Describes the message seylo.agent.v1.CommitMovedPanelResponse.
+ * Use `create(CommitMovedPanelResponseSchema)` to create a new message.
+ */
+export const CommitMovedPanelResponseSchema: GenMessage<CommitMovedPanelResponse> = /*@__PURE__*/
+  messageDesc(file_seylo_agent_v1_panel_move, 16);
+
+/**
  * RetirePanelRequest is sent to the old panel node: the agent answers, then
  * stops the panel container running here (it stays, stopped, with its data
  * folder, until RemoveOldPanel). Its own connection to the panel fails then
@@ -430,7 +471,7 @@ export type RetirePanelRequest = Message<"seylo.agent.v1.RetirePanelRequest"> & 
  * Use `create(RetirePanelRequestSchema)` to create a new message.
  */
 export const RetirePanelRequestSchema: GenMessage<RetirePanelRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_move, 15);
+  messageDesc(file_seylo_agent_v1_panel_move, 17);
 
 /**
  * @generated from message seylo.agent.v1.RetirePanelResponse
@@ -443,7 +484,7 @@ export type RetirePanelResponse = Message<"seylo.agent.v1.RetirePanelResponse"> 
  * Use `create(RetirePanelResponseSchema)` to create a new message.
  */
 export const RetirePanelResponseSchema: GenMessage<RetirePanelResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_move, 16);
+  messageDesc(file_seylo_agent_v1_panel_move, 18);
 
 /**
  * RemoveOldPanelRequest deletes the stopped panel container a move left on
@@ -465,7 +506,7 @@ export type RemoveOldPanelRequest = Message<"seylo.agent.v1.RemoveOldPanelReques
  * Use `create(RemoveOldPanelRequestSchema)` to create a new message.
  */
 export const RemoveOldPanelRequestSchema: GenMessage<RemoveOldPanelRequest> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_move, 17);
+  messageDesc(file_seylo_agent_v1_panel_move, 19);
 
 /**
  * @generated from message seylo.agent.v1.RemoveOldPanelResponse
@@ -482,5 +523,5 @@ export type RemoveOldPanelResponse = Message<"seylo.agent.v1.RemoveOldPanelRespo
  * Use `create(RemoveOldPanelResponseSchema)` to create a new message.
  */
 export const RemoveOldPanelResponseSchema: GenMessage<RemoveOldPanelResponse> = /*@__PURE__*/
-  messageDesc(file_seylo_agent_v1_panel_move, 18);
+  messageDesc(file_seylo_agent_v1_panel_move, 20);
 

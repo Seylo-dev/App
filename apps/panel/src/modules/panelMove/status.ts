@@ -37,6 +37,8 @@ const idle: Status = {
   oldCopyRemoved: false,
   domain: null,
   canCancel: false,
+  waitingSince: null,
+  canForceCancel: false,
   oldPanelRunning: false,
 };
 
