@@ -200,7 +200,7 @@ export const check = defineOp({
   kind: "query",
   summary: "Check a panel move",
   description:
-    "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record (naming address when given).",
+    "Returns why moving the panel to targetNodeId (or to any node, without it) is refused right now, every node with what stops a move to it, the nodes that follow and the ones that would be left behind, the default address nodes will reach the moved panel at, and warnings such as the panel domain's DNS record (naming address when given). A typed address that panelMove.start would refuse answers BAD_REQUEST with details.field address, as start does; a blank one means the default.",
   input: Type.Object({
     targetNodeId: Type.Optional(Id),
     /** The address the owner typed (host name or IP): the warnings name it instead of the default. */

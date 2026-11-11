@@ -63,6 +63,7 @@ export default {
     "{node} has not answered for {duration}. The panel stays read-only and keeps every node until it does, and asks again every few seconds.",
   forceCancel: "Cancel anyway",
   forceCancelHint: "If {node} is gone for good, you can cancel the move anyway.",
+  laterFailed: "A later move stopped: {message} Delete this old copy before you move the panel again.",
   forceCancelTitle: "Cancel the move anyway?",
   forceCancelDescription:
     "Only for a target that is gone for good, for example a deleted server. The panel takes changes here again and tells {node} to delete its copy once it is back. If {node} took the switch after all, the nodes that reach it stay with it and have to be joined here again.",

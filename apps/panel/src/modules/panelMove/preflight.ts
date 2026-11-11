@@ -417,13 +417,10 @@ function panelPort(deps: MoveDeps): number {
 }
 
 /** The address the owner typed, checked like panelMove.start does; null when it is missing or would be refused. */
+/** The typed address, checked like panelMove.start checks it (BAD_REQUEST field address); blank means the default. */
 function typedAddress(deps: Pick<Deps, "db">, raw: string | undefined): string | null {
   if (raw === undefined || raw.trim() === "") return null;
-  try {
-    return checkAddress(deps, raw);
-  } catch {
-    return null;
-  }
+  return checkAddress(deps, raw);
 }
 
 /** panelMove.check for this caller; `address` is what the owner typed, for the warnings. */

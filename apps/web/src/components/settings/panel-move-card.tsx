@@ -509,6 +509,7 @@ function MoveWaiting({ status, since, onForceCancel }: { status: MoveStatus; sin
       }
     >
       <p className="m-0">{t("settingsPanelMove.waitingHint", { node, duration: formatDuration(Math.max(0, now - Date.parse(since))) })}</p>
+      {status.error && <p className="m-0">{status.error.message}</p>}
       {status.canForceCancel && <p className="m-0">{t("settingsPanelMove.forceCancelHint", { node })}</p>}
     </Alert>
   );
@@ -555,6 +556,11 @@ export function MoveResult({ status }: { status: MoveStatus }) {
           <p className="m-0">{t("settingsPanelMove.leftBehindDone", { nodes: formatNames(status.leftBehind.map((node) => node.name)) })}</p>
         )}
       </Alert>
+      {status.error && (
+        <p data-testid="panel-move-later-failure" className="m-0 text-[13px] text-chip-amber-fg">
+          {t("settingsPanelMove.laterFailed", { message: status.error.message })}
+        </p>
+      )}
       {status.oldCopyRemoved ? (
         <p className="m-0 text-[12.5px] text-muted-foreground">{t("settingsPanelMove.oldCopyGone", { node: from })}</p>
       ) : (

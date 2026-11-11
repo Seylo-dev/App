@@ -369,6 +369,19 @@ describe("who may move the panel and what refuses it", () => {
     expect(activeMove(panel.deps.db)).toBeNull();
   });
 
+  test("a target that joins again over plain http:// during the move gets no keys: the move stops before shipping", async () => {
+    fleet.answers.set("exportRegistry", async () => {
+      recordDialedUrl(panel.deps.db, targetId, "http://203.0.113.20:3000");
+      return { sizeBytes: BigInt(fleet.registry.length * 3) };
+    });
+    await start();
+    const failed = await waitForState("failed");
+    expect(failed.error).toMatchObject({ step: "shipping" });
+    expect(failed.error.message).toContain("plain http://");
+    expect(fleet.of("importPanelData")).toEqual([]);
+    expect(fleet.of("startMovedPanel")).toEqual([]);
+  });
+
   test("never an address of the server the panel leaves: the old panel answers there with the same key", async () => {
     panel.deps.db
       .update(nodes)
@@ -400,8 +413,14 @@ describe("who may move the panel and what refuses it", () => {
       ).body.warnings[0].message as string;
     expect(await warn("Panel2.example.net")).toContain("http://panel2.example.net:3000");
     expect(await warn("2001:db8::20")).toContain("http://[2001:db8::20]:3000");
-    // Not an address start takes: the default it would use.
-    for (const address of [undefined, "", "http://x", "203.0.113.10"]) expect(await warn(address)).toContain("http://203.0.113.20:3000");
+    // No address typed: the default.
+    for (const address of [undefined, "", "  "]) expect(await warn(address)).toContain("http://203.0.113.20:3000");
+    // One start would refuse: the same refusal, under the field.
+    for (const address of ["http://x", "203.0.113.10"]) {
+      const res = await callOp(panel, panelMove.check, { targetNodeId: targetId, address }, { cookie: owner.cookie });
+      expect(res.status).toBe(400);
+      expect(res.body.error.details.field).toBe("address");
+    }
     setSetting(panel.deps.db, "panelDomain", "panel.example.com");
     expect(await warn("panel2.example.net")).toContain("Point the DNS record of panel.example.com at panel2.example.net");
   });

@@ -194,6 +194,13 @@ test("done on the moved panel: the new address, the DNS record, who to join agai
   expect(gone).not.toContain("is still on de-fsn-1");
   const running = text(await renderStatic(() => <MoveResult status={{ ...done, oldPanelRunning: true }} />));
   expect(running).toContain("de-fsn-1 did not confirm that the old panel stopped.");
+  expect(out).not.toContain("A later move stopped");
+  // A later move that failed while this old copy is still there: both show.
+  const later = text(
+    await renderStatic(() => <MoveResult status={{ ...done, error: { step: "starting", message: "The image could not be pulled." } }} />),
+  );
+  expect(later).toContain("A later move stopped: The image could not be pulled.");
+  expect(later).toContain("Delete the old copy");
 });
 
 /** The hrefs of the links in rendered markup, in order. */
@@ -267,6 +274,16 @@ test("waiting for the target to confirm the switch: how long, read-only, and Can
   expect(out).toMatch(/de-fsn-2 has not answered for 2m [45]s\. The panel stays read-only/);
   expect(out).not.toContain("Cancel anyway");
   expect(out).not.toContain("Cancel the move");
+  expect(out).not.toContain("still answers as the moved copy");
+  // What the panel saw at the moved panel's address while it waits.
+  const seen = text(
+    await renderStatic(() => (
+      <MoveProgress
+        status={{ ...waiting, error: { step: "switching", message: "de-fsn-2 still answers as the moved copy, not switched." } }}
+      />
+    )),
+  );
+  expect(seen).toContain("de-fsn-2 still answers as the moved copy, not switched.");
   const late = text(await renderStatic(() => <MoveProgress status={{ ...waiting, canForceCancel: true }} />));
   expect(late).toContain("If de-fsn-2 is gone for good, you can cancel the move anyway.");
   expect(late).toContain("Cancel anyway");

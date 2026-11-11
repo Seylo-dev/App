@@ -337,6 +337,7 @@ async function runMove(deps: Deps, move: RunningMove): Promise<void> {
     // after a restart. The journal is in this database; the offline edit drops it from the copy.
     writeOut(deps, move, "registry");
     setStep(deps, move, "registry");
+    refusePlainTarget(deps, move);
     await relayRegistry(deps, move);
     cancelled(move);
 
@@ -394,6 +395,7 @@ async function runMove(deps: Deps, move: RunningMove): Promise<void> {
     // ---- shipping
     writeOut(deps, move, "shipping");
     setStep(deps, move, "shipping");
+    refusePlainTarget(deps, move);
     await ship(deps, move, archive, manifest);
     rmSync(archive, { force: true });
     cancelled(move);
@@ -619,6 +621,22 @@ function finishSwitch(deps: Deps, move: RunningMove, undoSkipped?: string): void
     ...(undoSkipped ? { undoSkipped } : {}),
   });
   publishStatus(deps);
+}
+
+/**
+ * The registry and the panel's data (master key included) never go to a
+ * target whose connection is plain http:// from another server: the
+ * preflight refuses such a target (targetPlainHttp), and this catches one
+ * that joined again that way during the move, before a byte is sent (the
+ * agent refuses those calls too, but only after the first window arrived).
+ */
+function refusePlainTarget(deps: Deps, move: RunningMove): void {
+  const url = dialedUrlOf(deps, move.targetNodeId);
+  if (dialsPlainHttp(url) && !dialsLoopback(url)) {
+    throw new MoveFailure(
+      `${move.targetNodeName} connects to the panel over plain http://, so the panel's keys and database cannot go to it. Join it again with the https:// command from Add node, then move.`,
+    );
+  }
 }
 
 /** ExportRegistry piped into ImportRegistry; the byte counts must agree. */
