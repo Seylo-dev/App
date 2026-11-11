@@ -1292,15 +1292,27 @@ describe("the copy", () => {
     raw.run("CREATE TABLE pair_a (n INTEGER)");
     raw.run("CREATE TABLE pair_b (n INTEGER)");
     raw.close();
-    // Every transaction adds one row to each table: a torn copy would show different counts.
+    // Every transaction adds one row to each table: a torn copy would show different counts. The writer
+    // runs until the stop file appears (not for a fixed time: on a slow CI runner a timed writer was done
+    // before the first copy), and the copies start once its first row is in.
+    const stopFile = join(dir, "stop");
     const writer = Bun.spawn(
       [
         process.execPath,
         "-e",
-        `const { Database } = require("bun:sqlite"); const db = new Database(${JSON.stringify(panelPath)}); db.run("PRAGMA busy_timeout = 5000"); const add = db.transaction((i) => { db.run("INSERT INTO pair_a VALUES (?)", [i]); db.run("INSERT INTO pair_b VALUES (?)", [i]); }); const until = Date.now() + 1500; for (let i = 0; Date.now() < until; i++) add(i);`,
+        `const { existsSync } = require("node:fs"); const { Database } = require("bun:sqlite"); const db = new Database(${JSON.stringify(panelPath)}); db.run("PRAGMA busy_timeout = 5000"); const add = db.transaction((i) => { db.run("INSERT INTO pair_a VALUES (?)", [i]); db.run("INSERT INTO pair_b VALUES (?)", [i]); }); for (let i = 0; !existsSync(${JSON.stringify(stopFile)}); i++) add(i);`,
       ],
       { stdout: "ignore", stderr: "pipe" },
     );
+    const rows = () => {
+      const peek = new Database(panelPath, { readonly: true });
+      try {
+        return peek.query<{ n: number }, []>("SELECT count(*) AS n FROM pair_a").get()?.n ?? 0;
+      } finally {
+        peek.close();
+      }
+    };
+    for (let i = 0; i < 200 && rows() === 0; i++) await Bun.sleep(50);
     const counts: number[] = [];
     try {
       for (let i = 0; i < 6; i++) {
@@ -1320,6 +1332,7 @@ describe("the copy", () => {
         expect(existsSync(copies.metrics)).toBe(true);
       }
     } finally {
+      writeFileSync(stopFile, "");
       await writer.exited;
       databases.close();
       rmSync(dir, { recursive: true, force: true });
