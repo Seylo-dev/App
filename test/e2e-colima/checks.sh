@@ -4576,11 +4576,12 @@ check_42() {
 
 # Check 43 (0.2.9): databases.setVersion on the real panel and B. A MongoDB
 # 7.0 with a document takes a patch update (the same release by another
-# tag, 7.0.45-jammy: no backup, no compatibility step; a digest is
-# refused, it does not show its version), is refused 8.0 without a
-# backup, then moves to 8.0 with confirmNoBackup (the panel sets
-# featureCompatibilityVersion 7.0 on the running 7.0 first) and keeps the
-# document; going back to 7.0 is refused, a rollback to a 7.0 deployment too.
+# tag, 7.0.45-jammy: no backup, no compatibility step; a digest is a
+# risk, refused without acceptRisk since 0.2.11: it does not show its
+# version), is refused 8.0 without a backup, then moves to 8.0 with
+# confirmNoBackup (the panel sets featureCompatibilityVersion 7.0 on the
+# running 7.0 first) and keeps the document; going back to 7.0 is refused
+# without acceptRisk, a rollback to a 7.0 deployment always.
 P43_TAG=mongo:7.0.45-jammy
 P43_DIGEST=mongo:7.0.45@sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4
 check_43() {
@@ -4607,12 +4608,12 @@ check_43() {
   out=$(p43_js "db.t.insertOne({v: 'e2e-43'}).acknowledged")
   printf '%s' "$out" | grep -q true && good "MongoDB 7.0 on B holds a document" || { bad "insert failed: $(printf '%s' "$out" | tail -2)"; return 1; }
   out=$(api databases.versionChoices "{\"serviceId\":\"$db\"}")
-  ev "versionChoices: $(printf '%s' "$out" | jq -c '{version, image, backupFresh, choices: [.choices[] | {version, kind, allowed, reason}]}')"
-  expect "8.0 is offered as the next major; 9.0 waits for it (oneStep)" jq_ok "$out" \
-    '([.choices[] | select(.version == "8.0" and .allowed)] | length == 1) and ([.choices[] | select(.version == "9.0" and .reason == "oneStep")] | length == 1)'
+  ev "versionChoices: $(printf '%s' "$out" | jq -c '{version, image, backupFresh, choices: [.choices[] | {version, kind, allowed, reason, risk}]}')"
+  expect "8.0 is offered as the next major; 9.0 skips it (risk oneStep)" jq_ok "$out" \
+    '([.choices[] | select(.version == "8.0" and .allowed and .risk == null)] | length == 1) and ([.choices[] | select(.version == "9.0" and .risk == "oneStep")] | length == 1)'
 
-  # A digest could be any version: refused. Patch update: the same release by another tag, no backup needed.
-  expect "a custom image by digest is refused (customImage)" refused_with customImage api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_DIGEST" '{serviceId: $s, version: "7.0", image: $i}')"
+  # A digest could be any version: a risk to accept. Patch update: the same release by another tag, no backup needed.
+  expect "a custom image by digest needs acceptRisk (riskNotAccepted)" refused_with riskNotAccepted api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_DIGEST" '{serviceId: $s, version: "7.0", image: $i}')"
   out=$(api databases.setVersion "$(jq -nc --arg s "$db" --arg i "$P43_TAG" '{serviceId: $s, version: "7.0", image: $i}')") ||
     { bad "the patch update was refused"; return 1; }
   dep=$(printf '%s' "$out" | jq -r .deploymentId)
@@ -4638,7 +4639,7 @@ check_43() {
   expect "8.0 runs with featureCompatibilityVersion 7.0 until the next step ($(printf '%s' "$out" | grep -m1 -oE '[0-9]+\.[0-9]+'))" sh -c "printf '%s' '$out' | grep -qE '(^|> )7\.0$'"
   ev "database: $(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '{engine, version}'), choices now: $(api databases.versionChoices "{\"serviceId\":\"$db\"}" | jq -c '{image, choices: [.choices[] | {version, allowed, reason}]}')"
 
-  expect "going back to 7.0 is refused (downgrade)" refused_with downgrade api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"7.0\",\"confirmNoBackup\":true}"
+  expect "going back to 7.0 needs acceptRisk (riskNotAccepted)" refused_with riskNotAccepted api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"7.0\",\"confirmNoBackup\":true}"
   # The 7.0 images are kept, but a database's deployment of another image is not offered for a rollback.
   out=$(api deployments.list "{\"serviceId\":\"$db\"}")
   dep=$(printf '%s' "$out" | jq -r '([.deployments[] | select(.live)][0].image.reference // "") as $live

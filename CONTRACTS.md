@@ -2288,7 +2288,7 @@ stubs: `grep -rn 'stub.NotImplemented' go/internal`.
 | Database TLS: Mongo, the Redis-like engines and ClickHouse's native port get TLS from the agent's portgate (VM-tested with redis-cli/valkey-cli `--tls`, mongosh `tls=true` against MongoDB 7.0 and 9.0, and clickhouse-client `--secure` against real containers; plain clients get nothing), but not through a real panel yet; MariaDB keeps its own generated certificate; the ACME certificate for `tls_hostname` ran with Pebble, not Let's Encrypt. ClickHouse's HTTP port (8123) is never exposed: only the native port is, and the HTTP interface is internal (`INTERNAL_HTTP_URL`) | MariaDB clients see a self-signed certificate; HTTP clients of ClickHouse reach it from the same node only |
 | Exposed databases with their own user (0.2.9): before, they had a separate TLS-only user (e2e checks 10 and 37 ran that through the real panel for Postgres, Valkey and ClickHouse). Now the port is the database's own login and the portgate keeps Postgres, MySQL and MariaDB TLS only (VM-tested with real psql, mysql and mariadb clients); e2e checks 10 and 37 were changed for it (own user, the gate's message for `sslmode=disable`, an old `external` role losing LOGIN) but did not run in 0.2.9. Retiring the old exposed user is VM-tested per engine, not through a real panel upgrade. A user the owner created by hand named like the old exposed user (`external`) in a database from before 0.2.9 is locked too. The panel holds the retirement while any service's live or target deployment env carries the old user's password (services that used `EXPOSED_URL` before the update), a stopped one too (it can start again with that env), so a service nobody redeploys keeps the old user working; clients outside the panel lose it at once. A held retirement is sent once released: when a deployment goes live or a service is deleted, in any project, else within a minute. MariaDB 10.11 cannot be exposed (no TLS), and an exposure from before 0.2.9 reads as closed with its port row left until it is turned off by the API. MySQL/MariaDB/Mongo/Redis exposure is VM-tested on the agent side only | Unit and VM package tests, browser tests |
 | The engines added in 0.2 ran through the agent's VM package tests (create, client, web UI, exposure, backup and restore through MinIO; every offered version), the panel's unit tests and Playwright; Valkey 9.1, ClickHouse 26.8 and Postgres 18 with pgvector also ran through `make e2e` (check 37: created by the panel, an app reaching them by references, the database shells, TLS exposure, backups to MinIO and restores). KeyDB and Dragonfly did not run through a real panel | Unit, VM package, browser and e2e tests |
-| Engine changes in place (`databases.setVersion`, 0.2.9): a Postgres database cannot switch to or from pgvector (the pgvector images are Debian, the plain ones Alpine: a different collation library under the same data), to a custom tag on another base system, or change major version, and no engine goes back to an older version, a rollback to an earlier deployment's image included. Custom images take a release tag only: the tag is what the rules judge. A new version that does not become healthy within the deploy's 300 s health timeout brings the old container back on the same volume; MongoDB stays readable by the old version (its featureCompatibilityVersion is not raised by the upgrade), but MySQL and MariaDB may already have upgraded their files, and the old version can refuse them: hence the backup step. Every in-place step the rules allow ran in the VM on the catalog's images, as reconcile recreate deploys on the same data volume with the panel's environment and commands (`go/internal/reconcile/database_version_it_test.go`; MongoDB and MariaDB 10.11 to 11.4 since 0.2.9, the rest since 0.2.11), and kept the data: MongoDB 7.0 to 8.0 to 9.0, MariaDB 10.11 to 11.4 to 11.8 (system tables upgraded on each start), MySQL 8.0 to 8.4 (the server log says the upgrade completed; a table, its view and procedure, and the root and app logins over TCP work on 8.4; an account made with mysql_native_password, which the panel's check finds on 8.0 with root or the app user as the admin, cannot sign in to 8.4 until it runs with `--mysql-native-password=ON`, straight from 8.0 or by a redeploy, and then can: `databases.setVersion` refuses the upgrade while such accounts exist unless `keepNativePassword`), Redis 7.4 to 8.2 and Valkey 8.1 to 9.0 to 9.1 and 8.1 straight to 9.1 (the panel's `--appendonly yes` command: an RDB base file and an incremental AOF file are both read, TTLs kept), ClickHouse 26.3 to 26.8 (a MergeTree table in two parts that 26.8 merges, and a user made with SQL), and a Postgres 17 patch from the catalog's 17.6-alpine to 17.11-alpine, a newer Alpine (amcheck finds the text index whole). e2e check 43 covers MongoDB 7.0 to 8.0 through a real panel (written, not yet run); the other steps did not run through a real panel, and other custom tags are tested in the panel's rules only | Postgres: create a new database and restore a dump into it. A failed MySQL/MariaDB upgrade: restore the backup into a new database |
+| Engine changes in place (`databases.setVersion`, 0.2.9; any image since 0.2.11): a Postgres database cannot switch to or from pgvector (the pgvector images are Debian, the plain ones Alpine: a different collation library under the same data; another repository is refused outright), and a rollback never goes to an earlier deployment's image. Since 0.2.11 everything else the rules refused before is a risk the caller accepts (`acceptRisk`, "I understand" on the Version card), and that can go wrong: an older version or release than what runs may not open the data files a newer one wrote (MongoDB 8.0 refuses 9.0 data whose featureCompatibilityVersion is 9.0 and exits with code 62); a Postgres major does not open another major's files (no pg_upgrade) and will not start; a skipped MongoDB, MariaDB or MySQL line, or a line outside the catalog, is not tested by Seylo, and MongoDB gets no featureCompatibilityVersion step then, so a MongoDB that does not support the data's compatibility version refuses it; a floating tag (latest, 8.2) can pull another release on any later deploy, and neither it nor a digest shows which release runs, so the rules cannot judge the next change; another Postgres base system (another C library) can sort text in another order under the same indexes, which then need REINDEX, and that one starts healthy, so nothing catches it; a line whose data folder differs can start on an empty folder (the data stays on the volume). What protects the data: the recreate rollback (a new version that does not become healthy within the deploy's 300 s health timeout brings the old container back on the same volume, VM-tested for a MongoDB 9.0 database set to the 8.0 image), and the backup step (a successful backup from the last 24 hours, or `confirmNoBackup`) for every change but a newer patch of the line that runs. MongoDB stays readable by the old version after a catalog upgrade (its featureCompatibilityVersion is not raised by the upgrade), but MySQL and MariaDB may already have upgraded their files, and the old version can refuse them: hence the backup step. Every in-place step the rules allow ran in the VM on the catalog's images, as reconcile recreate deploys on the same data volume with the panel's environment and commands (`go/internal/reconcile/database_version_it_test.go`; MongoDB and MariaDB 10.11 to 11.4 since 0.2.9, the rest since 0.2.11), and kept the data: MongoDB 7.0 to 8.0 to 9.0, MariaDB 10.11 to 11.4 to 11.8 (system tables upgraded on each start), MySQL 8.0 to 8.4 (the server log says the upgrade completed; a table, its view and procedure, and the root and app logins over TCP work on 8.4; an account made with mysql_native_password, which the panel's check finds on 8.0 with root or the app user as the admin, cannot sign in to 8.4 until it runs with `--mysql-native-password=ON`, straight from 8.0 or by a redeploy, and then can: `databases.setVersion` refuses the upgrade while such accounts exist unless `keepNativePassword`), Redis 7.4 to 8.2 and Valkey 8.1 to 9.0 to 9.1 and 8.1 straight to 9.1 (the panel's `--appendonly yes` command: an RDB base file and an incremental AOF file are both read, TTLs kept), ClickHouse 26.3 to 26.8 (a MergeTree table in two parts that 26.8 merges, and a user made with SQL), and a Postgres 17 patch from the catalog's 17.6-alpine to 17.11-alpine, a newer Alpine (amcheck finds the text index whole). Of the risks (0.2.11, `TestITMongoAnyImage`): MongoDB 8.0 to `mongo:8.2.12`, a line outside the catalog, kept the data with no compatibility step (8.2 opens data whose featureCompatibilityVersion is 8.0), and a 9.0 database set to the 8.0 image failed its deploy, and the 9.0 container came back with the data. e2e check 43 covers MongoDB 7.0 to 8.0 through a real panel (written, not yet run); the other steps did not run through a real panel, and other images are tested in the panel's rules only | Postgres: create a new database and restore a dump into it. A failed MySQL/MariaDB upgrade: restore the backup into a new database |
 | Dragonfly has no append-only file: it runs with `--dbfilename dump --df_snapshot_format=false --snapshot_cron "*/5 * * * *"`, so a crash loses up to five minutes of writes (a stop saves first). Only Dragonfly 2.0 is offered | Behaviour as described |
 | KeyDB publishes no multi-arch version tag and has had no release since 6.3.4 (2023): it is pinned by the digest of its `latest` index, which is `x86_64_v6.3.4` + `arm64_v6.3.4`. It gets no security fixes: the 2025 Redis Lua scripting advisories (CVE-2025-49844 use-after-free RCE, CVE-2025-46817, CVE-2025-46818, CVE-2025-46819; fixed in Redis 6.2.20 and Valkey) are unpatched in it, and its one `default` user may run scripts. The New database form, `databases.engines` (`notice`) and the op descriptions say so and point to Valkey; `databases.setExposure` refuses KeyDB without `allowedCidrs` (`exposure.needsAllowedCidrs`, reason `allowlistRequired`). Lua stays on (renaming EVAL would break clients such as BullMQ) | One KeyDB version, unmaintained, exposed only to listed addresses |
 | ClickHouse restores replace the databases the backup holds (like `pg_dumpall --clean`), renamed aside until `RESTORE` succeeds: while it runs the disk holds both copies, and a database `RENAME DATABASE` cannot move (it needs the default Atomic engine) stops the restore before anything changed. If putting the copies back fails too (the server went down), they stay as `<name>__seylo_pre_restore_<time>` and the restore error says so. Users and grants are not restored over existing ones. ClickHouse and Dragonfly take a new admin password by restarting with the new environment (`passwordChange: "restart"`), not live | Behaviour as described |
@@ -4155,26 +4155,64 @@ APIs for other modules (all in `apps/panel/src/modules/`):
 - Version changes (`modules/databases/version.ts`, 0.2.9):
   `databases.versionChoices` lists the catalog lines of the database's
   engine and variant with `kind` (current, patch, upgrade, major,
-  downgrade), `allowed` and `reason`/`message`, plus `blocked` (noNode,
-  stopped, deployRunning), `pendingImage` and the newest successful
-  database backup. `databases.setVersion` (destructive, `services.deploy`,
-  so MCP and AI callers need approval) writes `service_databases.version`
-  and the spec's image (the variant stays) and queues a deploy (recreate
-  on the same volume). The rules are one pure function, `judgeVersion`:
-  the same line with a newer pinned image is a patch (no backup needed),
-  an older image or line is refused for every engine, Postgres and
-  pgvector never change major (dump and restore into a new database),
-  MongoDB, MariaDB and MySQL go one line up at a time, Redis, Valkey and
-  ClickHouse any newer line, KeyDB and Dragonfly patches only, and a line
-  whose data folder differs is refused. Rules judge from what runs: the
+  downgrade), `allowed`, `reason` (a refusal: only `current` since
+  0.2.11), `risk` (what setVersion needs `acceptRisk` for, 0.2.11) and
+  `message`, plus `blocked` (noNode, stopped, deployRunning),
+  `pendingImage`, the newest successful database backup, and (0.2.11)
+  `release` (the release the running image's tag names, null for latest
+  or a digest), `repository` and `anyImage`. `databases.setVersion`
+  (destructive, `services.deploy`, so MCP and AI callers need approval)
+  writes `service_databases.version` and the spec's image (the variant
+  stays) and queues a deploy (recreate on the same volume). The rules are
+  one pure function, `judgeVersion`: the same line with a newer pinned
+  image is a patch (no backup needed), an older image or line is refused
+  for every engine, Postgres and pgvector never change major (dump and
+  restore into a new database), MongoDB, MariaDB and MySQL go one line up
+  at a time, Redis, Valkey and ClickHouse any newer line, KeyDB and
+  Dragonfly patches only, and a line whose data folder differs is
+  refused. Since 0.2.11 `judgeImage` wraps it for any image of the
+  engine's repository: only the very image that runs stays a refusal
+  (`current`, "nothing to change"), and every other refusal becomes a
+  risk (`downgrade`, `olderImage`, `postgresMajor`, `dataPath`,
+  `patchOnly`, `oneStep`), joined by `otherLine` (either side a line the
+  catalog does not have: not tested by Seylo, and `oneStep` says nothing
+  then), `postgresBase` (another base system than the running image's:
+  `baseOfTag`, Alpine's own version left out), `floatingTag` (a tag
+  without an exact release, as the target or as what runs: the release
+  behind it is unknown and can change on the next deploy; on the same
+  line no releases are compared) and `digest` (a target with a digest, or
+  a running image known by a digest only); a tag that names no release
+  (`custom`) is judged against nothing but those. `risk` is the most
+  serious one (`riskOrder`); the message says each of them, the MongoDB
+  compatibility note for a MongoDB move, and that a new version that
+  never gets healthy brings the old container back. Without `acceptRisk`
+  such a change is refused (CONFLICT `riskNotAccepted`, nothing changed;
+  `details.risk`, `details.risks` comma-separated, `details.message`,
+  `details.version` and `details.image` as it would be recorded, and
+  `details.backupRequired` "true" when the backup step would refuse it
+  next); with it, it proceeds, and the deploy's log says `Risk accepted:
+  <risks>`. The hard refusals stay hard with `acceptRisk`: another
+  repository (BAD_REQUEST `customImage`, field `image`), `noNode`,
+  `stopped`, `deployRunning` and `current`. Rules judge from what runs: the
   live deployment's image (so after a failed change the old image may be
-  set again and the change retried). A change of line needs a backup run
+  set again and the change retried). Every change but a newer patch of the
+  line that runs (another line, or any risk taken) needs a backup run
   that succeeded in the last 24 hours (object not deleted) or
   `confirmNoBackup` (reason `backupRequired`). Before a MongoDB line
-  change the panel runs `setFeatureCompatibilityVersion` to the running
+  change that takes no risk (a one-step upgrade between catalog lines) the
+  panel runs `setFeatureCompatibilityVersion` to the running
   line through `Exec` (`mongoFcvExec`: the admin signs in inside the
   script on stdin; `quit()` gives the exit code), and refuses with
-  `fcvFailed` without changing anything when it fails. MySQL 8.4 ships the
+  `fcvFailed` without changing anything when it fails; other MongoDB
+  moves (0.2.11) get no step, and MongoDB refuses data whose
+  compatibility version it does not support, which the risk message says.
+  Since 0.2.11 the account list below also runs for every change to a
+  MySQL line from 8.4 on that the catalog does not have (9.0 removed the
+  plugin; a tag without a release counts as one), from a line before 8.4
+  or one run with the plugin on (`nativePasswordCheckNeeded`); for a line
+  without `nativePasswordOption` the refusal names only switching the
+  accounts (`nativePasswordGoneRefusal`, the same reason and details), and
+  `keepNativePassword` is a BAD_REQUEST there as on other lines. MySQL 8.4 ships the
   mysql_native_password plugin off (0.2.11): accounts made with it (older
   apps, users made by hand) cannot sign in there, while the data is fine.
   Before a change from 8.0 to 8.4 the panel lists the running 8.0's
@@ -4229,38 +4267,59 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   mysql_native_password logins working in 8.4" (after a
   `nativePasswordCheckFailed` too, and checked for patch updates while it
   is on). A stopped database
-  is refused (the deploy would start it). `image` takes the engine's own
-  official repository (`mongo`, `postgres` or `pgvector/pgvector`, `mysql`,
-  `mariadb`, `redis`, `valkey/valkey`, `clickhouse/clickhouse-server`;
-  none for KeyDB and Dragonfly) with an exact release tag of the claimed
-  line, never `latest`, a bare line tag or a digest (a digest does not
-  show its version, so a downgrade or a major could pass as a patch); a
-  Postgres tag keeps the catalog image's base system (`-alpine`, pgvector
-  `-trixie`: another C library sorts text in another order under the same
-  indexes). It is judged like a catalog image of that line and shown as
-  not tested by Seylo. That holds for the line the database runs too
-  (0.2.10), also when it runs the newest catalog image of it and no
-  catalog choice of the line is allowed: a newer release is a patch (no
-  backup), an older one is refused (`olderImage`), and the very image that
-  runs is refused as `current` ("nothing to change"; after a failed change
-  it may be set again to stay). The refusal of a tag that is not a release
-  of the claimed line says what it is (0.2.11): an exact release of
-  another line of the engine is named as that line ("mongo:8.2.12 is
-  MongoDB 8.2, not 8.0", with "Seylo does not offer MongoDB 8.2" when the
-  catalog has no such line) and a move to another version is sent to the
-  list of versions; a moving tag (`mongo:8.2`, `latest`) is "not an exact
-  release" that moves to each new release. `versionChoices.customOnCurrent` says
-  whether setVersion takes such a tag for the line it runs: false for
-  KeyDB and Dragonfly (no official repository), a variant without one, a
-  line the catalog no longer has, and while `blocked`. The Version card
-  offers it as "Another tag of <engine> <version>", which opens the
-  confirm dialog straight on the image field, starting from the image that
-  runs; after a failed change (`pendingImage`) that image is the way to
-  stay on it, also a custom tag the line's catalog image is older than.
+  is refused (the deploy would start it). `image` (0.2.11; `version` is
+  then not needed and not used) takes any tag or digest of the engine's
+  own repository (`modules/databases/images.ts` `engineRepository`:
+  `mongo`, `postgres` or `pgvector/pgvector` for that variant, `mysql`,
+  `mariadb`, `redis`, `valkey/valkey`, `clickhouse/clickhouse-server`,
+  `eqalpha/keydb`, `ghcr.io/dragonflydb/dragonfly`), with or without
+  `docker.io/` (and `library/`), stored without them, a bare repository
+  as `:latest`. Another repository is refused (`customImage`): the
+  panel's env, data path, health check and command are made for the
+  engine's image. `engineImage` reads the tag: the line recorded in
+  `service_databases.version` is the catalog's for a catalog image, else
+  major.minor of the tag's release ("8.2" of `mongo:8.2.12`; ClickHouse
+  26.8 of 26.8.36.3; KeyDB's `x86_64_v6.3.4` is 6.3), Postgres its major
+  from 10 on ("17", "9.6" before), pgvector the `-pgN` of its tag, and
+  `custom` when the tag names none (latest, a digest, `mongo:8`). A tag
+  floats unless it names an exact release (Postgres 17.6, ClickHouse four
+  numbers, pgvector `<x.y.z>-pgN`, the others three) or a digest pins it.
+  (Imports still use `customImage`, an exact release tag of the line.)
+  Every reader of `service_databases.version` takes a line the catalog
+  does not have: `dataPathOf` gives the volume path (the catalog line's,
+  else the engine's own; Postgres before 18 `/var/lib/postgresql/data`,
+  18, later and `custom` `/var/lib/postgresql`), `exposureRefusal` goes
+  by the newest catalog line not newer than it (else the oldest, so
+  MariaDB 10.6 and 11.2 are not exposed; `custom` by none),
+  `databaseRuntime` sends it as the agent's `DatabaseSpec.version`
+  (display only), clones copy it, and an import of such a database
+  (`importedVersion`) starts on the image the file ran when that image
+  is of the engine's repository and names the same line. `databases.create`
+  takes the same `image` (0.2.11): any image of the engine's repository,
+  the line recorded the same way, the volume at `dataPathOf`. The Version
+  card offers the catalog lines (the running one left out, a risky one
+  with a short note in the select) and "Use another image" (while
+  `anyImage` and not blocked), which opens the confirm dialog on an image
+  field starting from the image that runs ("The database runs ...: give
+  the image to run instead" until it changes; after a failed change,
+  `pendingImage`, that image is the way to stay on it). A risk shows as
+  "What can go wrong" with one line for each risk, the MongoDB note for a
+  MongoDB move, and that the old container comes back, and "I understand",
+  which sends `acceptRisk`; for another image the dialog learns the risks
+  from the `riskNotAccepted` answer (and the backup step from
+  `details.backupRequired` or `backupRequired`), and forgets them when the
+  image changes. The New database form's "Use another image" (under
+  Version, starting from the picked version's image) says "Not tested by
+  Seylo", and for a floating tag that it can change on the next deploy.
+  The header chip and the card say "MongoDB 8.2", or "MongoDB
+  (mongo:latest)" for `custom`. `versionChoices.customOnCurrent` is
+  deprecated (0.2.11): it is `anyImage` while not blocked.
   `deployments.rollback` of a database takes only a
   deployment of the image it runs (CONFLICT, reason `databaseVersion`):
   the deployments from before a version change ran the older version.
-  `deployments.list` and `deployments.get` say `canRollback: false` for
+  That stays so with any image (0.2.11): `acceptRisk` is for
+  `databases.setVersion` only, and a rollback across images is not offered
+  or taken. `deployments.list` and `deployments.get` say `canRollback: false` for
   those (0.2.11; before, they were offered and then refused). The
   web app's Version card is on the database's Settings tab; the header's
   version chip links to it (`#version`).

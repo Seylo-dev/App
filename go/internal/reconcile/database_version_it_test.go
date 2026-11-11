@@ -947,3 +947,111 @@ insert into t (name) values ('kept');`)
 	// Every row is in the index, in the order the new image sorts text.
 	psql(c, "create extension amcheck; select bt_index_check('t_name', true)")
 }
+
+// mongo82 is a MongoDB line outside the panel's catalog, as Use another
+// image on the Version card takes it (databases.setVersion with
+// acceptRisk, 0.2.11).
+const mongo82 = "mongo:8.2.12"
+
+// try runs image as the next generation and returns the deploy's result,
+// healthy or not, and the name of the container it started.
+func (d *dbIT) try(image string) (*agentv1.DeployProgress, string) {
+	d.e.t.Helper()
+	d.spec = cloneOf(d.spec)
+	d.spec.Generation++
+	d.spec.Image = &agentv1.ImageRef{Reference: image}
+	d.e.rt.mu.Lock()
+	rev := d.e.rt.desired.GetRevision() + 1
+	d.e.rt.mu.Unlock()
+	d.e.apply(rev, d.spec)
+	return d.e.result(d.spec.GetId(), d.spec.GetGeneration()), docker.ContainerName(d.spec.GetId(), d.spec.GetGeneration(), 0)
+}
+
+// TestITMongoAnyImage runs two MongoDB changes databases.setVersion takes
+// only as risks (0.2.11) on real Docker, recreate deploys on the same data
+// volume with the panel's environment and TCP health check. A MongoDB 8.0
+// database moves to mongo:8.2.12, a line outside the catalog, with no
+// featureCompatibilityVersion step, and keeps its data (8.2 opens data
+// whose compatibility version is 8.0). A 9.0 database set to the 8.0
+// image (a downgrade) never gets healthy, since 8.0 refuses data files
+// whose compatibility version is 9.0: the deploy fails and the 9.0
+// container comes back with the data intact.
+func TestITMongoAnyImage(t *testing.T) {
+	e := newIT(t)
+	e.pull(mongo80, mongo82, mongo90)
+	const user, pass = "root", "AnyImagePassword123"
+	mongo := func(name string) *dbIT {
+		d := e.database(name, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, 27017, "/data/db", nil, nil,
+			"MONGO_INITDB_ROOT_USERNAME="+user, "MONGO_INITDB_ROOT_PASSWORD="+pass, "MONGO_INITDB_DATABASE=app")
+		// healthProbe("mongo") in engines.ts; a shorter timeout than the panel's 300 s.
+		d.spec.HealthCheck.Probe = &agentv1.HealthCheck_Tcp{Tcp: &agentv1.TcpProbe{Port: 27017}}
+		d.spec.Deploy.HealthTimeout = durationpb.New(45 * time.Second)
+		return d
+	}
+	mongosh := func(d *dbIT, container, js string) (string, int) {
+		return d.run(container, []string{"mongosh", "--quiet", "-u", user, "-p", pass, "--authenticationDatabase", "admin", "app", "--eval", js})
+	}
+	// The port answers once mongod listens; logins work a moment later on a first start.
+	ready := func(d *dbIT, container string) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			if out, code := mongosh(d, container, "db.runCommand({ ping: 1 }).ok"); code == 0 && out == "1" {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s never answered", container)
+			}
+			time.Sleep(time.Second)
+		}
+	}
+	fcv := func(d *dbIT, container string) string {
+		out, _ := mongosh(d, container, "db.adminCommand({ getParameter: 1, featureCompatibilityVersion: 1 }).featureCompatibilityVersion.version")
+		return out
+	}
+
+	a := mongo("mongo-a")
+	c := a.deploy(mongo80)
+	ready(a, c)
+	if out, code := mongosh(a, c, `db.t.insertOne({ v: "kept" }).acknowledged`); code != 0 || out != "true" {
+		t.Fatalf("insert on 8.0: %q (%d)", out, code)
+	}
+	c = a.deploy(mongo82)
+	ready(a, c)
+	if out, _ := mongosh(a, c, "db.version()"); out != release(mongo82) {
+		t.Fatalf("version after the change to %s = %q", mongo82, out)
+	}
+	if out, _ := mongosh(a, c, "db.t.findOne().v"); out != "kept" {
+		t.Fatalf("after %s: %q", mongo82, out)
+	}
+	// No compatibility step ran: the data still says 8.0, which 8.2 opens.
+	if got := fcv(a, c); got != "8.0" {
+		t.Fatalf("featureCompatibilityVersion on 8.2 = %q", got)
+	}
+
+	b := mongo("mongo-b")
+	old := b.deploy(mongo90)
+	ready(b, old)
+	if out, code := mongosh(b, old, `db.t.insertOne({ v: "kept on 9.0" }).acknowledged`); code != 0 || out != "true" {
+		t.Fatalf("insert on 9.0: %q (%d)", out, code)
+	}
+	if got := fcv(b, old); got != "9.0" {
+		t.Fatalf("featureCompatibilityVersion of a new 9.0 database = %q", got)
+	}
+	p, started := b.try(mongo80)
+	if p.GetStage() != agentv1.DeployStage_DEPLOY_STAGE_FAILED {
+		t.Fatalf("%s on 9.0 data: %v", mongo80, p)
+	}
+	t.Logf("%s on 9.0 data: %s", mongo80, p.GetMessage())
+	// The old container runs again on the same volume, and the new one is gone.
+	ready(b, old)
+	if out, _ := mongosh(b, old, "db.version()"); out != release(mongo90) {
+		t.Fatalf("version after the failed downgrade = %q", out)
+	}
+	if out, _ := mongosh(b, old, "db.t.findOne().v"); out != "kept on 9.0" {
+		t.Fatalf("data after the failed downgrade: %q", out)
+	}
+	if list := e.containers(b.spec.GetId()); len(list) != 1 || list[0].Name != old || list[0].State != agentv1.InstanceState_INSTANCE_STATE_RUNNING {
+		t.Fatalf("containers after the failed %s (%s): %+v", mongo80, started, list)
+	}
+}
