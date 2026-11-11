@@ -35,7 +35,9 @@ const (
 // Retire answers, then stops the panel running on this node in the
 // background (its container and data folder stay, stopped): the old
 // panel's last call. The journal is written first, so an agent restart
-// right after the answer still finishes the stop.
+// right after the answer still finishes the stop. A panel retired here
+// already answers again without anything changing: the moved panel calls
+// too, and by then its desired state may have taken the spec away.
 func (m *PanelMover) Retire(ctx context.Context, req *agentv1.RetirePanelRequest) error {
 	id := req.GetMoveId()
 	if err := checkMoveID(id); err != nil {
@@ -48,9 +50,14 @@ func (m *PanelMover) Retire(ctx context.Context, req *agentv1.RetirePanelRequest
 	if !ok {
 		return busyMove(m.lock.Holder())
 	}
-	if _, _, err := m.opts.Runtime.spec(ctx, req.GetServiceId()); err != nil {
+	if _, spec, err := m.opts.Runtime.spec(ctx, req.GetServiceId()); err != nil || spec.GetStopped() {
 		list, lerr := m.panelContainers(ctx)
-		if lerr != nil || !anyRunning(list) {
+		switch {
+		case lerr == nil && !anyRunning(list) && m.retiredHere(id, req.GetServiceId()):
+			release()
+			m.opts.Logger.Info("panel move: the old panel is stopped here already", "move_id", id)
+			return nil
+		case err != nil && (lerr != nil || !anyRunning(list)):
 			release()
 			return refusedMove(ReasonNoPanel, "the panel does not run on this node")
 		}
@@ -161,6 +168,16 @@ func (m *PanelMover) resumeRetire(ctx context.Context) error {
 		m.retire(ctx, &r)
 	}()
 	return nil
+}
+
+// retiredHere reports whether the retire journal is serviceID's and says
+// the panel was retired, or is retiring for move id.
+func (m *PanelMover) retiredHere(id, serviceID string) bool {
+	var r panelRetire
+	if err := readJSON(m.retireFile(), &r); err != nil {
+		return false
+	}
+	return r.ServiceID == serviceID && (r.Phase == retired || r.MoveID == id)
 }
 
 // Retired returns the move that retired the panel copy on this node.

@@ -1313,6 +1313,66 @@ func TestRetirePanel(t *testing.T) {
 	})
 }
 
+// A panel retired here already answers RetirePanel again with success and
+// nothing changed, also once the moved panel's desired state took the
+// spec away (the moved panel calls it too, after its arrival).
+func TestRetirePanelAgain(t *testing.T) {
+	fx := newMoveFixture(t)
+	fx.m.SetBackground(context.Background())
+	ctx := context.Background()
+	spec := &agentv1.ServiceSpec{Id: defaultPanelServiceID, Name: "panel", Protected: true, Generation: 3, Image: &agentv1.ImageRef{Reference: "panel:1", Digest: "sha256:1"}}
+	if err := fx.f.rec.runtime().Install(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	req := &agentv1.RetirePanelRequest{MoveId: testMove, ServiceId: defaultPanelServiceID}
+	if err := fx.m.Retire(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the old panel stopped", func() bool {
+		var r panelRetire
+		return readJSON(fx.path("update", retireJournal), &r) == nil && r.Phase == retired && fx.lock.Holder() == ""
+	})
+	before := readFile(t, fx.path("update", retireJournal))
+	// The spec is still there, stopped.
+	if err := fx.m.Retire(ctx, req); err != nil {
+		t.Fatalf("again with the stopped spec: %v", err)
+	}
+	// The moved panel's SyncDesired dropped it.
+	if err := fx.f.rec.runtime().Uninstall(ctx, defaultPanelServiceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.m.Retire(ctx, req); err != nil {
+		t.Fatalf("again without the spec: %v", err)
+	}
+	if got := readFile(t, fx.path("update", retireJournal)); got != before {
+		t.Fatalf("the journal was rewritten:\n%s\nwas\n%s", got, before)
+	}
+	if fx.lock.Holder() != "" || len(fx.f.running()) != 0 {
+		t.Fatalf("holder %q, running %v", fx.lock.Holder(), fx.f.running())
+	}
+	// Docker does not answer: nothing shows the copy is stopped.
+	fx.f.mu.Lock()
+	fx.f.listErr = errors.New("docker is down")
+	fx.f.mu.Unlock()
+	if err := fx.m.Retire(ctx, req); reasonOf(err) != ReasonNoPanel {
+		t.Fatalf("without Docker = %v", err)
+	}
+}
+
+// Another move's unfinished retire journal does not count as retired.
+func TestRetireRefusedForAnotherMovesJournal(t *testing.T) {
+	fx := newMoveFixture(t)
+	if err := writeJSON(fx.path("update", retireJournal), &panelRetire{MoveID: "mv0000000000000a", ServiceID: defaultPanelServiceID, Phase: retiring}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.m.Retire(context.Background(), &agentv1.RetirePanelRequest{MoveId: testMove, ServiceId: defaultPanelServiceID}); reasonOf(err) != ReasonNoPanel {
+		t.Fatalf("err = %v", err)
+	}
+	if err := fx.m.Retire(context.Background(), &agentv1.RetirePanelRequest{MoveId: "mv0000000000000a", ServiceId: defaultPanelServiceID}); err != nil {
+		t.Fatalf("its own move: %v", err)
+	}
+}
+
 // While a moved panel waits on this node for the switch, the retire
 // journal of the copy it set aside never stops it.
 func TestResumeLeavesTheMovedPanelToTheMove(t *testing.T) {
