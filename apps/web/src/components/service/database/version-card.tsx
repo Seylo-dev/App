@@ -241,7 +241,16 @@ function VersionDialog({
         image: tag ? data.image : choice.image,
       })}
     >
-      <Input id="dv-image" className="font-mono" value={image} onChange={(e) => setImage(e.target.value)} />
+      <Input
+        id="dv-image"
+        className="font-mono"
+        value={image}
+        onChange={(e) => {
+          setImage(e.target.value);
+          // A refusal is about the tag that was sent: a new one starts without it.
+          if (change.error) change.reset();
+        }}
+      />
     </Field>
   );
 

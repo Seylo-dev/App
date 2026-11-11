@@ -246,6 +246,8 @@ test.describe("database version", () => {
 
     await field.fill("postgres:17.7-alpine");
     await expect(dialog.getByText("The database restarts on postgres:17.7-alpine")).toBeVisible();
+    // The refusal was about 17.5: typing another tag clears it.
+    await expect(dialog.getByText("postgres:17.5-alpine is older than postgres:17.6-alpine.")).toHaveCount(0);
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${shots}/version-another-tag.png` });
     await submit.click();
