@@ -1,0 +1,295 @@
+// Settings > General > Move the panel to another server (0.2.8) with the
+// demo data (demo/panel-move.ts): the card's states (blocked, ready with the
+// node picker and its disabled nodes, nodes that cannot follow and the tick,
+// running with its steps and the banner on every page, failed with Try
+// again, done on the moved panel with Delete the old copy, and the old copy
+// that says where the panel went). The ops are answered in the browser, so
+// the requests the page sends are checked here; the panel's own tests
+// (apps/panel/test/panel-move.test.ts) cover the server.
+
+import { mkdirSync } from "node:fs";
+import type { Page } from "@playwright/test";
+import { ids } from "./demo/fixtures";
+import { moveCheck, moveNodes, moveStatus, movingStatus } from "./demo/panel-move";
+import { installDemo } from "./demo/routes";
+import { expect, stateFile, test } from "./helpers";
+
+type Input = Record<string, any>;
+const shots = `${process.env.SHOTS_DIR ?? "shots"}/panel-move`;
+mkdirSync(shots, { recursive: true });
+
+function recordOps(page: Page) {
+  const sent: Record<string, Input[]> = {};
+  page.on("request", (request) => {
+    const match = /\/api\/v1\/([a-zA-Z]+\.[a-zA-Z]+)/.exec(request.url());
+    if (!match || request.method() !== "POST") return;
+    const id = match[1] as string;
+    (sent[id] ??= []).push((request.postDataJSON() as Input | null) ?? {});
+  });
+  return sent;
+}
+
+const card = (page: Page) => page.locator("section", { has: page.getByRole("heading", { name: "Move the panel to another server" }) });
+const startButton = (page: Page) => card(page).getByRole("button", { name: "Move the panel", exact: true });
+const banner = (page: Page) => page.getByTestId("panel-move-banner");
+
+async function pickTarget(page: Page, name: string) {
+  await card(page).getByRole("combobox", { name: "Move to" }).click();
+  await page.getByRole("option", { name }).click();
+}
+
+test.describe("panel move", () => {
+  test.use({ storageState: stateFile });
+
+  test("blocked: the panel's reasons in a list, Start stays off", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "panelMove.check": (input) =>
+          moveCheck(input, {
+            blocks: [
+              {
+                code: "workRunning",
+                message: "1 deployment is queued or running. Try again once it finished.",
+                soft: false,
+              },
+              {
+                code: "tailscaleServe",
+                message: "Turn off Serve on my tailnet first (Settings > Tailscale). Turn it on again on the new server once the move finished.",
+                soft: false,
+              },
+            ],
+          }),
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await expect(card(page)).toBeVisible();
+    await expect(card(page).getByText("Everything moves: the database, the master key")).toBeVisible();
+    await expect(card(page).getByText("Can't move the panel yet")).toBeVisible();
+    await expect(card(page).getByText("1 deployment is queued or running. Try again once it finished.")).toBeVisible();
+    await expect(card(page).getByText("Turn off Serve on my tailnet first")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    await expect(banner(page)).toHaveCount(0);
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/blocked.png`, fullPage: true });
+    expect(sent["panelMove.start"]).toBeUndefined();
+  });
+
+  test("ready: pick a node, the address is prefilled, confirm, and the move starts", async ({ page }) => {
+    let status = moveStatus();
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => status,
+        "panelMove.start": (input) => {
+          status = movingStatus({ step: "pausing", bytesDone: 0, bytesTotal: 0, targetAddress: input.address });
+          return status;
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await expect(startButton(page)).toBeDisabled();
+
+    await card(page).getByRole("combobox", { name: "Move to" }).click();
+    // Nodes that cannot take the panel are listed with why, and cannot be picked.
+    await expect(page.getByRole("option", { name: "de-fsn-1 (runs the panel now)" })).toHaveAttribute("aria-disabled", "true");
+    await expect(page.getByRole("option", { name: "il-tlv-1 (agent too old)" })).toHaveAttribute("aria-disabled", "true");
+    await page.getByRole("option", { name: "us-ash-1" }).click();
+
+    const address = card(page).getByRole("textbox", { name: "Address" });
+    await expect(address).toHaveValue("198.51.100.7");
+    await expect(card(page).getByText("Nodes connect to https://198.51.100.7:3443.")).toBeVisible();
+    await expect(card(page).getByText("3 nodes follow on their own: de-fsn-1, il-tlv-1 and us-ash-1.")).toBeVisible();
+    await expect(card(page).getByText("Point the DNS record of panel.acme.dev at 198.51.100.7")).toBeVisible();
+    await expect(startButton(page)).toBeEnabled();
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/ready.png`, fullPage: true });
+
+    // A typo in the address is caught before the panel sees it.
+    await address.fill("http://198.51.100.7");
+    await expect(card(page).getByText("Enter only a host name or IP address, without http://, a port or a path.")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    await address.fill("panel-2.acme.dev");
+
+    await startButton(page).click();
+    const dialog = page.getByRole("alertdialog", { name: "Move the panel to us-ash-1?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("then every node switches to panel-2.acme.dev")).toBeVisible();
+    await page.screenshot({ path: `${shots}/confirm.png` });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(sent["panelMove.start"]).toBeUndefined();
+
+    await startButton(page).click();
+    await dialog.getByRole("button", { name: "Move the panel" }).click();
+    await expect(dialog).toBeHidden();
+    expect(sent["panelMove.start"]).toEqual([{ targetNodeId: ids.us, address: "panel-2.acme.dev" }]);
+    await expect(card(page).getByText("Moving the panel to us-ash-1")).toBeVisible();
+    await expect(banner(page)).toContainText("The panel is moving to us-ash-1: read-only for a few minutes.");
+  });
+
+  test("nodes that cannot follow: listed with why, and Start waits for the tick", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "panelMove.check": (input) =>
+          moveCheck(input, {
+            nodesToMove: input.targetNodeId ? [moveNodes.de, moveNodes.us] : [],
+            nodesLeftBehind: input.targetNodeId ? [{ ...moveNodes.il, reason: "offline" }] : [],
+            blocks: input.targetNodeId
+              ? [
+                  {
+                    code: "nodesLeftBehind",
+                    message: "il-tlv-1 is offline, so it cannot follow.",
+                    nodeIds: [ids.il],
+                    soft: true,
+                  },
+                ]
+              : [],
+          }),
+        "panelMove.start": () => movingStatus(),
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    await pickTarget(page, "us-ash-1");
+    await expect(card(page).getByText("These nodes cannot follow")).toBeVisible();
+    await expect(card(page).getByText("il-tlv-1: offline")).toBeVisible();
+    await expect(startButton(page)).toBeDisabled();
+    const tick = card(page).getByRole("checkbox", { name: "I will join these again with seylo join --force afterwards" });
+    await tick.click();
+    await expect(startButton(page)).toBeEnabled();
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/left-behind.png`, fullPage: true });
+    await startButton(page).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Move the panel" }).click();
+    await expect.poll(() => sent["panelMove.start"]).toEqual([{ targetNodeId: ids.us, address: "198.51.100.7", leftBehind: true }]);
+  });
+
+  test("running: the steps with bytes, the banner on every page, and Cancel", async ({ page }) => {
+    let status = movingStatus();
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => status,
+        "panelMove.cancel": () => {
+          status = moveStatus({
+            state: "failed",
+            moveId: "move000000000001",
+            targetNodeId: ids.us,
+            targetNodeName: "us-ash-1",
+            targetAddress: "198.51.100.7",
+            step: "shipping",
+            error: { step: "shipping", message: "Cancelled by you@example.com." },
+          });
+          return status;
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/");
+    await expect(banner(page)).toContainText("The panel is moving to us-ash-1: read-only for a few minutes.");
+    await page.goto("/settings/general");
+    const progress = card(page).getByTestId("panel-move-progress");
+    await expect(progress.getByText("Moving the panel to us-ash-1")).toBeVisible();
+    await expect(progress.getByText("Pausing changes")).toBeVisible();
+    await expect(progress.locator('[aria-current="step"]')).toContainText("Sending the copy to us-ash-1");
+    await expect(progress.getByText("18 MB of 46 MB")).toBeVisible();
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/running.png`, fullPage: true });
+
+    await card(page).getByRole("button", { name: "Cancel the move" }).click();
+    await expect.poll(() => sent["panelMove.cancel"]).toEqual([{}]);
+    await expect(card(page).getByText("The move to us-ash-1 stopped")).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
+  test("failed: where it stopped and why, then Try again shows the form", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () =>
+          moveStatus({
+            state: "failed",
+            moveId: "move000000000001",
+            targetNodeId: ids.us,
+            targetNodeName: "us-ash-1",
+            targetAddress: "198.51.100.7",
+            step: "staging",
+            error: {
+              step: "staging",
+              message:
+                "il-tlv-1 could not reach the moved panel at https://198.51.100.7:3443: dial tcp 198.51.100.7:3443: i/o timeout. Open the agents' port 3443 on us-ash-1 to that node (a firewall or cloud security group), or move to another address.",
+            },
+          }),
+      },
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("The move to us-ash-1 stopped")).toBeVisible();
+    await expect(card(page).getByText("il-tlv-1 could not reach the moved panel at https://198.51.100.7:3443")).toBeVisible();
+    await expect(card(page).getByText("At: Telling every node the new address.")).toBeVisible();
+    await expect(card(page).getByText("Nothing changed: the panel runs here as before.")).toBeVisible();
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/failed.png`, fullPage: true });
+    await card(page).getByRole("button", { name: "Try again" }).click();
+    await expect(card(page).getByRole("combobox", { name: "Move to" })).toBeVisible();
+    await expect(card(page).getByText("The move to us-ash-1 stopped")).toHaveCount(0);
+  });
+
+  test("done on the moved panel: the DNS record, who to join again, Delete the old copy", async ({ page }) => {
+    let status = movingStatus({
+      state: "done",
+      side: "new",
+      step: null,
+      bytesDone: 0,
+      bytesTotal: 0,
+      canCancel: false,
+      domain: "panel.acme.dev",
+      leftBehind: [moveNodes.il],
+      doneAt: new Date(Date.now() - 120_000).toISOString(),
+    });
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => status,
+        "panelMove.removeOldCopy": () => {
+          status = { ...status, oldCopyRemoved: true };
+          return { freedBytes: 812 * 1024 * 1024, status };
+        },
+      },
+    });
+    const sent = recordOps(page);
+    await page.goto("/settings/general");
+    const result = card(page).getByTestId("panel-move-result");
+    await expect(result.getByText("The panel moved to us-ash-1")).toBeVisible();
+    await expect(result.getByText("Point the DNS record of panel.acme.dev at 198.51.100.7.")).toBeVisible();
+    await expect(result.getByText("with --force on each: il-tlv-1.")).toBeVisible();
+    await expect(result.getByText("The old copy of the panel is still on de-fsn-1, stopped.")).toBeVisible();
+    // No banner on the moved panel: it takes changes again.
+    await expect(banner(page)).toHaveCount(0);
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/done.png`, fullPage: true });
+
+    await result.getByRole("button", { name: "Delete the old copy" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete the old copy on de-fsn-1?" });
+    await expect(dialog.getByText("It cannot be undone.")).toBeVisible();
+    const confirm = dialog.getByRole("button", { name: "Delete the old copy" });
+    // The node's name has to be typed first.
+    await expect(confirm).toBeDisabled();
+    await dialog.getByRole("textbox").fill("de-fsn-1");
+    await confirm.click();
+    await expect(dialog).toBeHidden();
+    expect(sent["panelMove.removeOldCopy"]).toEqual([{}]);
+    await expect(page.getByText("Deleted the old copy on de-fsn-1 (812 MB freed)")).toBeVisible();
+    await expect(result.getByText("The old copy on de-fsn-1 is deleted.")).toBeVisible();
+  });
+
+  test("the old copy: where the panel is now, on the card and every page", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => movingStatus({ state: "done", side: "old", step: "switching", canCancel: false, domain: null }),
+      },
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("This is the old copy.")).toBeVisible();
+    await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await expect(banner(page)).toContainText("The panel moved to us-ash-1.");
+    await expect(banner(page).getByRole("link", { name: "Open it" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await page.screenshot({ path: `${shots}/old-copy.png`, fullPage: true });
+  });
+});

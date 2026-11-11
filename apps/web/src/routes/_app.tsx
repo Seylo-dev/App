@@ -11,6 +11,7 @@ import { AppPushSync } from "../components/app-push-sync";
 import { AssistantProvider, useBubbleShown } from "../components/assistant/assistant-context";
 import { AssistantBubble } from "../components/assistant/bubble";
 import { ErrorPage, NotFound } from "../components/not-found";
+import { PanelMoveBanner } from "../components/shell/panel-move-banner";
 import { PlainHttpNotice } from "../components/shell/plain-http-notice";
 import { ShellProvider } from "../components/shell/shell-context";
 import { Sidebar } from "../components/shell/sidebar";
@@ -66,6 +67,7 @@ function Main() {
   return (
     <main className={cn("box-border flex min-w-0 flex-1 flex-col px-4 pt-[26px] md:px-[30px]", bubble ? "pb-24" : "pb-10")}>
       <PlainHttpNotice className="mb-5" />
+      <PanelMoveBanner className="mb-5" />
       <EnterOnChange motionKey={page} className="flex min-w-0 flex-1 flex-col gap-5">
         <Outlet />
       </EnterOnChange>

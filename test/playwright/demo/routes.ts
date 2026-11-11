@@ -16,6 +16,7 @@ import { followAssistantTopic, resetAssistantDemo } from "./assistant";
 import { handlers as dockerHubHandlers } from "./dockerhub";
 import * as world from "./fixtures";
 import { handlers as gitHandlers, resetGitDemo } from "./git";
+import { moveCheck, moveStatus } from "./panel-move";
 import { DemoRefusal } from "./refusal";
 import { handlers as repoHandlers } from "./repos";
 import { handlers as serviceHandlers, logEntries } from "./service";
@@ -79,6 +80,9 @@ const worldHandlers: Record<string, Handler> = {
     panelAccess.lastChange = { at: new Date().toISOString(), reason: "changed in Settings", by: "You" };
     return panelAccess;
   },
+  // Settings > General > Move the panel: nothing moving, us-ash-1 can take it (added in 0.2.8).
+  "panelMove.status": () => moveStatus(),
+  "panelMove.check": (input) => moveCheck(input),
   // Settings > Tailscale: signed in to the owner's tailnet, Serve off (added in 0.2.1).
   "tailscale.get": () => tailscaleStatus,
   "tailscale.setServe": (input) => {

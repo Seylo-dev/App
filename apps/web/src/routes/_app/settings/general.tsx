@@ -1,7 +1,8 @@
 // Settings > General: the panel's name and the node new services go to by
 // default, the Panel domain card (the domain with its certificate state,
-// "Serve on IP address" and the agents' port: panel-access-card.tsx),
-// uptime check targets and how long the activity log keeps entries.
+// "Serve on IP address" and the agents' port: panel-access-card.tsx), moving
+// the panel to another server (owner only: panel-move-card.tsx), uptime
+// check targets and how long the activity log keeps entries.
 
 import { nodes, type OpOutput, settings } from "@seylo/ops";
 import { useOp } from "@seylo/ops/react";
@@ -17,6 +18,7 @@ import { useSettingsMutation } from "../../../components/settings/mutation";
 import { QueryView } from "../../../components/settings/op-state";
 import { Field, FormActions, FormGrid, SettingRow, SettingsPage } from "../../../components/settings/page";
 import { PanelDomainCard } from "../../../components/settings/panel-access-card";
+import { PanelMoveCard } from "../../../components/settings/panel-move-card";
 import { FieldSkeleton, FormActionsSkeleton, SettingRowSkeleton } from "../../../components/settings/skeletons";
 import { t } from "../../../i18n/t";
 import { prefetchOp, startPrefetch } from "../../../lib/prefetch";
@@ -41,6 +43,7 @@ function GeneralPage() {
           <>
             <GeneralForm key={`${data.name}|${data.defaultNodeId}`} data={data} />
             <PanelDomainCard general={data} />
+            <PanelMoveCard />
             <UptimeTargets allowed={data.uptimeAllowInternalTargets} />
             <AuditRetention days={data.auditRetentionDays} />
           </>
