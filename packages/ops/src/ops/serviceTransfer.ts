@@ -902,7 +902,7 @@ export const discardImport = defineOp({
   kind: "destructive",
   summary: "Discard an import",
   description:
-    "Throws an import away. While it is not done, the service it created is deleted too (with what arrived); once done, only the import's record goes. Owners and admins only.",
+    "Throws an import away. While it still waits for its archive, the service it created is deleted too (with what arrived), unless it is protected or has deployments (CONFLICT reason protected or deployed); a failed or done import only loses its record and the service stays. Owners and admins only.",
   input: Type.Object(ImportRef),
   output: Type.Object({ deletedService: Type.Boolean() }),
   permission: importPermission,

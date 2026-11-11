@@ -108,10 +108,16 @@ export function UploadStep({ result, file, deployWhenReady }: { result: ImportRe
               {t("serviceTransfer.upload.failed", { reason: failed })}
             </Alert>
           )}
+          {failed && discard.error && (
+            <Alert tone="danger" role="alert">
+              {errorMessage(discard.error, t("common.unknownError"))}
+            </Alert>
+          )}
           {failed && (
             <div className="flex justify-end">
               <Button
                 variant="ghost"
+                disabled={discard.isPending}
                 onClick={() =>
                   discard.mutate(
                     { projectId: service.projectId, importId: result.importId },

@@ -200,4 +200,46 @@ test.describe("service import", () => {
     await page.getByRole("button", { name: "Open web-2" }).click();
     await expect(page).toHaveURL(new RegExp("/s/svcweb200000000a"));
   });
+
+  test("Discard after a failed upload says why when the panel keeps the service", async ({ page }) => {
+    let discards = 0;
+    await installDemo(page, {
+      overrides: {
+        "serviceTransfer.importBegin": () => importPreview({ needs: [] }),
+        "serviceTransfer.setChoices": (input) => importPreview({ choices: { ...importPreview().choices, ...(input.choices as object) }, needs: [] }),
+        "serviceTransfer.import": () => ({
+          service: { id: "svcweb200000000a", projectId: ids.acme, name: "web-2", stopped: true },
+          importId: "import0000000001",
+          pending: [{ entry: "services/web/source/upload.tar.gz", sizeBytes: 300_000 }],
+          deployTrigger: null,
+          skipped: [],
+        }),
+        "serviceTransfer.uploadTicket": (input) => ({
+          url: `/api/transfer/import?t=part-${input.offset}`,
+          ticket: `part-${input.offset}`,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+        "serviceTransfer.discardImport": () => {
+          discards++;
+          throw new DemoRefusal(409, "CONFLICT", "web-2 is protected, so discarding its import does not delete it. Turn protection off first.", {
+            reason: "protected",
+          });
+        },
+      },
+    });
+    await page.route("**/api/transfer/import?t=*", (route) =>
+      route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "UNAVAILABLE", message: "The node is offline." } }) }),
+    );
+    await page.goto(`/import?project=${ids.acme}`);
+    await page.getByLabel("Pick a .zip file").setInputFiles({ name: "web-20261111-1200.seylo.zip", mimeType: "application/zip", buffer: await exportFile(300_000) });
+    await page.getByLabel("Passphrase").fill("correct horse battery staple");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("New password for admin").fill("a new admin password");
+    await page.getByRole("button", { name: "Import", exact: true }).click();
+    await expect(page.getByText("The upload failed: The node is offline.")).toBeVisible();
+    await page.getByRole("button", { name: "Discard" }).click();
+    await expect(page.getByText("web-2 is protected, so discarding its import does not delete it.")).toBeVisible();
+    expect(discards).toBe(1);
+    await expect(page).toHaveURL(/\/import/);
+  });
 });

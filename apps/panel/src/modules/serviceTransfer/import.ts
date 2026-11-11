@@ -13,7 +13,16 @@ import { eq } from "drizzle-orm";
 import { ticketsFor } from "../../agent-hub/relay";
 import { requireFreshIfSession } from "../../auth/fresh";
 import { userOf } from "../../auth/principal";
-import { gitCredentials, gitProviders, type ImportEntry, projects, registryCredentials, serviceImports, services } from "../../db/schema";
+import {
+  deployments,
+  gitCredentials,
+  gitProviders,
+  type ImportEntry,
+  projects,
+  registryCredentials,
+  serviceImports,
+  services,
+} from "../../db/schema";
 import type { Deps } from "../../deps";
 import { implement, type OpContext } from "../../ops/implement";
 import { ensurePanelId } from "../../settings";
@@ -418,11 +427,30 @@ export const discardImport = implement(transferOps.discardImport, async (input, 
   return { deletedService: deleted };
 });
 
-/** Deletes an import and, while it was not done, the service it created. */
+/**
+ * Deletes an import and, while it still waits for its archive (receiving),
+ * the service it created: nothing ran there yet. A failed import's service
+ * is the owner's to keep (the sweep told them to upload the code on the
+ * Source tab), and a done one is in use: for those only the record and the
+ * part file go. A protected service, or one that was deployed somehow, is
+ * never deleted here: CONFLICT, services.delete is the way.
+ */
 export async function discard(deps: Deps, row: ImportRow): Promise<boolean> {
   let deleted = false;
-  if (row.status !== "done" && row.serviceId) {
+  if (row.status === "receiving" && row.serviceId) {
     const svc = deps.db.select().from(services).where(eq(services.id, row.serviceId)).get();
+    if (svc?.protected)
+      throw new OpError("CONFLICT", `${svc.name} is protected, so discarding its import does not delete it. Turn protection off first.`, {
+        reason: "protected",
+      });
+    if (svc && deps.db.select({ id: deployments.id }).from(deployments).where(eq(deployments.serviceId, svc.id)).get())
+      throw new OpError(
+        "CONFLICT",
+        `${svc.name} has deployments, so discarding its import does not delete it. Delete it on its Settings tab.`,
+        {
+          reason: "deployed",
+        },
+      );
     if (svc) {
       await deleteServiceTree(deps, svc);
       deleted = true;

@@ -9,6 +9,7 @@ import {
   alertRules,
   auditLog,
   cronJobs,
+  deployments,
   deployTriggers,
   domains,
   maintenancePages,
@@ -439,7 +440,7 @@ describe("import on the same panel", () => {
     expect(db.select().from(cronJobs).all()).toEqual([]);
   });
 
-  test("discardImport deletes the service while the import is not done", async () => {
+  test("discardImport of a file still in review deletes only the import", async () => {
     const a = await side();
     const b = await side("node-b");
     const file = await exportZip(a, await makeApp(a));
@@ -539,6 +540,77 @@ describe("shared variables from the file", () => {
     expect(mergeSharedLines("A=1\nB=mine\n", [add])).toBeNull();
     expect(mergeSharedLines('A=1\nexport B="old"\nC=3\n', [{ key: "B", line: "B=new", overwrite: true }])).toBe("A=1\nB=new\nC=3\n");
     expect(() => mergeSharedLines("A=1\n", [{ key: "B", line: `B=${"x".repeat(262_144)}`, overwrite: false }])).toThrow("256 KiB");
+  });
+});
+
+describe("discardImport", () => {
+  async function receiving(s: Side) {
+    const id = (
+      await callOp(
+        s.panel,
+        serviceOps.create,
+        {
+          projectId: s.projectId,
+          name: "site",
+          kind: "app",
+          nodeId: s.nodeId,
+          source: { type: "upload", fileName: null },
+          ports: [{ containerPort: 80, protocol: "tcp" }],
+        },
+        { cookie: s.cookie },
+      )
+    ).body.id as string;
+    const archive = gzipSync(Buffer.alloc(1000, 7));
+    await mkdir(join(s.dataDir, "uploads"), { recursive: true });
+    const upload = s.panel.deps.db
+      .insert(sourceUploads)
+      .values({ serviceId: id, fileName: "site.tar.gz", sizeBytes: archive.length, sha256: sha(archive) })
+      .returning()
+      .get();
+    writeFileSync(join(s.dataDir, "uploads", `${upload.id}.tar.gz`), archive);
+    const row = s.panel.deps.db.select().from(services).where(eq(services.id, id)).get();
+    s.panel.deps.db
+      .update(services)
+      .set({ spec: { ...(row?.spec as object), source: { type: "upload", fileName: "site.tar.gz" } } })
+      .where(eq(services.id, id))
+      .run();
+    return id;
+  }
+
+  test("a failed import's service is kept: the owner was told to go on with it on the Source tab", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const begun = await begin(b, (await exportZip(a, await receiving(a))).bytes);
+    const ref = { projectId: b.projectId, importId: begun.body.importId };
+    const made = await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie });
+    expect(made.body.pending.length).toBe(1);
+    await sweepTransfers(b.panel.deps, new Date(Date.now() + 49 * 60 * 60_000));
+    expect(b.panel.deps.db.select().from(serviceImports).get()?.status).toBe("failed");
+    expect((await callOp(b.panel, transferOps.discardImport, ref, { cookie: b.cookie })).body).toEqual({ deletedService: false });
+    expect(b.panel.deps.db.select().from(services).where(eq(services.id, made.body.service.id)).get()).toBeDefined();
+    expect(b.panel.deps.db.select().from(serviceImports).all()).toEqual([]);
+  });
+
+  test("while it waits for its archive: a protected or deployed service is refused, an untouched one is deleted", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const begun = await begin(b, (await exportZip(a, await receiving(a))).bytes);
+    const ref = { projectId: b.projectId, importId: begun.body.importId };
+    const made = await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie });
+    const serviceId = made.body.service.id as string;
+    const db = b.panel.deps.db;
+    db.update(services).set({ protected: true }).where(eq(services.id, serviceId)).run();
+    const shielded = await callOp(b.panel, transferOps.discardImport, ref, { cookie: b.cookie });
+    expect([shielded.status, shielded.body.error.details.reason]).toEqual([409, "protected"]);
+    db.update(services).set({ protected: false }).where(eq(services.id, serviceId)).run();
+    const deployment = db.insert(deployments).values({ serviceId, generation: 1, trigger: "manual" }).returning().get();
+    const deployed = await callOp(b.panel, transferOps.discardImport, ref, { cookie: b.cookie });
+    expect([deployed.status, deployed.body.error.details.reason]).toEqual([409, "deployed"]);
+    expect(db.select().from(services).where(eq(services.id, serviceId)).get()).toBeDefined();
+    expect(db.select().from(serviceImports).get()?.status).toBe("receiving");
+    db.delete(deployments).where(eq(deployments.id, deployment.id)).run();
+    expect((await callOp(b.panel, transferOps.discardImport, ref, { cookie: b.cookie })).body).toEqual({ deletedService: true });
+    expect(db.select().from(services).where(eq(services.id, serviceId)).get()).toBeUndefined();
   });
 });
 
