@@ -32,14 +32,19 @@ import (
 // again after moveRetryAfter or an agent restart. The panel's own node
 // dials loopback and never moves.
 //
-// A node at a pinned https:// address whose move fails because it does not
-// trust the new address's certificate waits untrustedMoveRetryAfter
-// instead: most often its network decrypts HTTPS (TLS inspection re-signs
-// the domain's certificate), which is why it joined over the panel's IP
-// and pin, and the panel names its domain on every connect. Each try drops
-// the session the panel just accepted, so the node tries that address
-// again only after that long, an agent restart (which reloads the trust
-// store), or when the panel names another address or a pin for it.
+// A node at a pinned https:// address whose move fails because the new
+// address's certificate comes from an issuer it does not trust, or does
+// not match the pin the panel sent (inspectedCertificate), waits
+// untrustedMoveRetryAfter instead: most often its network decrypts HTTPS
+// (TLS inspection re-signs the domain's certificate), which is why it
+// joined over the panel's IP and pin, and the panel names its domain on
+// every connect. Each try drops the session the panel just accepted, so
+// the node tries that address again only after that long, an agent
+// restart (which reloads the trust store), or when the panel names
+// another address or a pin for it. A certificate that is expired, not
+// valid yet or for another name is no sign of that (a clock that is not
+// set yet, DNS that still leads to the old server) and keeps
+// moveRetryAfter.
 //
 // Only an authenticated session (https:// with a pin or a CA-verified
 // certificate) can move the node. Over plain HTTP anyone on the path can
@@ -57,7 +62,8 @@ var (
 	// the agent tries it again.
 	moveRetryAfter = time.Hour
 	// untrustedMoveRetryAfter is that wait for a node at a pinned https://
-	// address whose move failed on the new address's certificate.
+	// address whose move failed on the new address's certificate's issuer
+	// or pin (inspectedCertificate).
 	untrustedMoveRetryAfter = 24 * time.Hour
 	// standingFallbackAfter is how long connects to panel_url fail before
 	// the agent dials a standing fallback.
@@ -263,13 +269,13 @@ func (c *connector) moved(ctx context.Context, from, to panelTarget) {
 }
 
 // moveFailed keeps (or puts back) the old address and reports why, once
-// per address (moveAlerted). A move that failed on the certificate from a
-// pinned https:// address waits untrustedMoveRetryAfter, any other
-// moveRetryAfter.
+// per address (moveAlerted). A move from a pinned https:// address that
+// failed on the certificate's issuer or pin (inspectedCertificate) waits
+// untrustedMoveRetryAfter, any other moveRetryAfter.
 func (c *connector) moveFailed(ctx context.Context, from, to panelTarget, err error) {
 	key := moveKey(to)
 	untrusted := untrustedCertificate(err)
-	pinned := untrusted && from.pin != "" && tlsURL(from.url)
+	pinned := inspectedCertificate(err) && from.pin != "" && tlsURL(from.url)
 	retry := moveRetryAfter
 	if pinned {
 		retry = untrustedMoveRetryAfter
@@ -310,6 +316,15 @@ func untrustedCertificate(err error) bool {
 	var verify *tls.CertificateVerificationError
 	var hostname x509.HostnameError
 	return errors.As(err, &unknown) || errors.As(err, &verify) || errors.As(err, &hostname) || errors.Is(err, conn.ErrPinMismatch)
+}
+
+// inspectedCertificate reports whether err is what TLS inspection makes of
+// a certificate: one from an issuer the node does not trust, or one whose
+// key is not the pinned one. An expired or not yet valid certificate, or
+// one for another name, is not.
+func inspectedCertificate(err error) bool {
+	var unknown x509.UnknownAuthorityError
+	return errors.As(err, &unknown) || errors.Is(err, conn.ErrPinMismatch)
 }
 
 func (c *connector) moveAlert(ctx context.Context, alert *agentv1.NodeAlert) {

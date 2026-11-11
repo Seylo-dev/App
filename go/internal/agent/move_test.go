@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -261,12 +262,19 @@ func TestUntrustedMoveFromAPinnedAddressWaitsADay(t *testing.T) {
 	waitUntil(t, "the move to the other address", func() bool { return otherDials.Load() == 1 })
 }
 
-// Only a certificate failure from a pinned https:// address waits the
-// long time: other failed moves, and moves from a CA-verified address,
-// are tried again after moveRetryAfter as before.
+// Only an untrusted issuer or a pin mismatch (what TLS inspection makes of
+// a certificate) from a pinned https:// address waits the long time: an
+// expired or misnamed certificate (a clock not set yet, DNS that still
+// leads to the old server), other failed moves, and moves from a
+// CA-verified address are tried again after moveRetryAfter as before.
 func TestMoveRetryAfterAFailedMove(t *testing.T) {
 	pin := conn.FormatPin(make([]byte, 32))
-	untrusted := fmt.Errorf("dial panel: tls: failed to verify certificate: %w", x509.UnknownAuthorityError{})
+	verify := func(err error) error {
+		return fmt.Errorf("dial panel: %w", &tls.CertificateVerificationError{Err: err})
+	}
+	untrusted := verify(x509.UnknownAuthorityError{})
+	expired := verify(x509.CertificateInvalidError{Reason: x509.Expired})
+	misnamed := verify(x509.HostnameError{Certificate: &x509.Certificate{DNSNames: []string{"old.example.com"}}, Host: "panel.example.com"})
 	to := panelTarget{url: "https://panel.example.com"}
 	for _, tc := range []struct {
 		name string
@@ -276,6 +284,8 @@ func TestMoveRetryAfterAFailedMove(t *testing.T) {
 	}{
 		{"untrusted from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, untrusted, untrustedMoveRetryAfter},
 		{"pin mismatch from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, fmt.Errorf("dial panel: %w", conn.ErrPinMismatch), untrustedMoveRetryAfter},
+		{"expired or not yet valid from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, expired, moveRetryAfter},
+		{"another name from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, misnamed, moveRetryAfter},
 		{"unreachable from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, errors.New("dial panel: connect: connection refused"), moveRetryAfter},
 		{"another panel from a pinned address", panelTarget{url: "https://10.0.0.1:3443", pin: pin}, errors.New(`https://panel.example.com answers as another panel ("p2", not "p1")`), moveRetryAfter},
 		{"untrusted from a CA-verified address", panelTarget{url: "https://old.example.com"}, untrusted, moveRetryAfter},
