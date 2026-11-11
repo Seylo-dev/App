@@ -78,7 +78,8 @@ export function TerminalPanel({
   pendingLine?: string;
   onPendingSent?: () => void;
 }) {
-  const session = useTerminalSession(source, describe);
+  // The console follows its process across a restart or deploy; a shell's exit is someone typing exit.
+  const session = useTerminalSession(source, describe, { followExit: stdin });
   const view = useRef<XtermHandle | null>(null);
   const [paused, setPaused] = useState(false);
   const [searching, setSearching] = useState(false);

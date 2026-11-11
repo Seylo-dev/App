@@ -23,6 +23,7 @@ export default {
   disconnected: "Disconnected.",
   failed: "Could not open the terminal.",
   reconnect: "Reconnect",
+  reconnecting: "Waiting for the new process…",
   exited: "The process exited with code {code}.",
   search: "Search output",
   searchPlaceholder: "Find (Enter, Shift+Enter)",

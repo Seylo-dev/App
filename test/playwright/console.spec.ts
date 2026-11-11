@@ -345,6 +345,32 @@ test.describe("console and shell", () => {
     expect(terminalSockets.map((s) => s.kind)).toEqual(["console"]);
   });
 
+  test("the console follows the process across a restart: no Reconnect click", async ({ page }) => {
+    await installDemo(page);
+    const tickets = ticketRequests(page);
+    await page.goto(api);
+    const card = page.getByRole("region", { name: "Console" });
+    await expect(card.getByText(consoleLine)).toBeVisible();
+    expect(terminalSockets.map((s) => s.kind)).toEqual(["console"]);
+    // The old process exits (a restart): the card notes it, then opens the new one by itself.
+    await terminalSockets[0]?.end(0);
+    await expect(card.getByText("The process exited with code 0.")).toBeVisible();
+    await expect.poll(() => terminalSockets.length, { timeout: 10_000 }).toBe(2);
+    expect(terminalSockets[1]?.kind).toBe("console");
+    await expect(card.getByRole("button", { name: "Reconnect" })).toHaveCount(0);
+    expect(tickets).toEqual(["terminals.watchConsole", "terminals.watchConsole"]);
+  });
+
+  test("a shell that exits stays closed: the person typed exit", async ({ page }) => {
+    await installDemo(page);
+    await page.goto(`${api}/console?mode=shell`);
+    await expect.poll(() => terminalSockets.filter((s) => s.kind === "shell").length).toBe(1);
+    await terminalSockets.find((s) => s.kind === "shell")?.end(0);
+    await expect(page.getByRole("button", { name: "Reconnect" })).toBeVisible();
+    await page.waitForTimeout(2500);
+    expect(terminalSockets.filter((s) => s.kind === "shell")).toHaveLength(1);
+  });
+
   test("with no running instance the card says so calmly, at its own height, and opens no socket", async ({ page }) => {
     await installDemo(page);
     const tickets = ticketRequests(page);

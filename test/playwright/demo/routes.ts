@@ -198,8 +198,11 @@ const runningTailscale = () => ({
 });
 let tailscaleStatus: Record<string, any> = runningTailscale();
 
-/** Every terminal socket a page opened since installDemo, in order: its kind and whether the page closed it. */
-export const terminalSockets: { kind: "console" | "shell"; closed: boolean }[] = [];
+/**
+ * Every terminal socket a page opened since installDemo, in order: its kind, whether the page closed it,
+ * and an end() that plays the process exiting (an exit message, then the server closing the socket).
+ */
+export const terminalSockets: { kind: "console" | "shell"; closed: boolean; end: (exitCode?: number) => Promise<void> }[] = [];
 
 /** Puts the panel access, Tailscale and git credential demo state back (installDemo runs it for every page). */
 function resetDemoState() {
@@ -389,7 +392,14 @@ async function installSockets(page: Page, options: DemoOptions): Promise<void> {
   });
   await page.routeWebSocket(/\/api\/terminal/, (ws) => {
     const shell = /shell|db/.test(ws.url());
-    const entry = { kind: shell ? ("shell" as const) : ("console" as const), closed: false };
+    const entry = {
+      kind: shell ? ("shell" as const) : ("console" as const),
+      closed: false,
+      end: async (exitCode = 0) => {
+        ws.send(JSON.stringify({ type: "exit", exitCode }));
+        await ws.close({ code: 1000, reason: "the process exited" });
+      },
+    };
     terminalSockets.push(entry);
     ws.onClose(() => {
       entry.closed = true;
