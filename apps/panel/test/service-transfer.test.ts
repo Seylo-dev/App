@@ -14,6 +14,7 @@ import {
   domains,
   maintenancePages,
   notificationChannels,
+  portExposures,
   serviceExports,
   serviceImports,
   services,
@@ -611,6 +612,92 @@ describe("discardImport", () => {
     db.delete(deployments).where(eq(deployments.id, deployment.id)).run();
     expect((await callOp(b.panel, transferOps.discardImport, ref, { cookie: b.cookie })).body).toEqual({ deletedService: true });
     expect(db.select().from(services).where(eq(services.id, serviceId)).get()).toBeUndefined();
+  });
+});
+
+describe("how the imported app is reached", () => {
+  async function plainApp(s: Side, name: string) {
+    const created = await callOp(
+      s.panel,
+      serviceOps.create,
+      {
+        projectId: s.projectId,
+        name,
+        kind: "app",
+        nodeId: s.nodeId,
+        source: { type: "image", image: "nginx:1.27", registryId: null },
+        ports: [{ containerPort: 8080, protocol: "tcp" }],
+      },
+      { cookie: s.cookie },
+    );
+    expect(created.status).toBe(200);
+    return created.body.id as string;
+  }
+  const hash = `$2y$10$${"b".repeat(53)}`;
+  const firstRunOf = (s: Side, serviceId: string) =>
+    s.panel.deps.db
+      .select()
+      .from(portExposures)
+      .where(and(eq(portExposures.serviceId, serviceId), eq(portExposures.kind, "first_run")))
+      .all();
+  async function importAll(s: Side, zip: Uint8Array, choices: Record<string, unknown> = {}) {
+    const begun = await begin(s, zip);
+    expect(begun.status).toBe(200);
+    const ref = { projectId: s.projectId, importId: begun.body.importId };
+    const chosen = await callOp(s.panel, transferOps.setChoices, { ...ref, choices }, { cookie: s.cookie });
+    const done = await callOp(s.panel, transferOps.importService, ref, { cookie: s.cookie });
+    expect(done.status).toBe(200);
+    return { preview: chosen.body, serviceId: done.body.service.id as string };
+  }
+
+  test("a copy whose domains are all skipped keeps IP:port closed and says so; one whose file had none opens it", async () => {
+    const a = await side();
+    const guarded = await plainApp(a, "admin");
+    a.panel.deps.db
+      .insert(domains)
+      .values({
+        serviceId: guarded,
+        host: "admin.example.org",
+        targetPort: 8080,
+        isPrimary: true,
+        middlewares: { ipAllowList: ["10.0.0.0/8"] },
+      })
+      .run();
+    // Same panel: the domain is in use by the original, so it is skipped.
+    const copy = await importAll(a, (await exportZip(a, guarded)).bytes);
+    expect(copy.preview.domains.map((d: { status: string; action: string }) => [d.status, d.action])).toEqual([["usedHere", "skip"]]);
+    expect(copy.preview.warnings.find((w: { reason: string }) => w.reason === "unreachable")?.message).toContain(
+      "IP:port access stays closed",
+    );
+    expect(firstRunOf(a, copy.serviceId)).toEqual([]);
+
+    const open = await plainApp(a, "open");
+    const fresh = await importAll(a, (await exportZip(a, open)).bytes);
+    expect(fresh.preview.warnings.some((w: { reason: string }) => w.reason === "unreachable")).toBe(false);
+    expect(firstRunOf(a, fresh.serviceId).length).toBe(1);
+  });
+
+  test("the new automatic domain keeps the old one's basic auth and allow list, or is not offered without them", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const id = await plainApp(a, "xfer");
+    const rules = { basicAuth: { users: [{ username: "e2e", hash }] }, ipAllowList: ["192.168.0.0/16"] };
+    a.panel.deps.db
+      .insert(domains)
+      .values({ serviceId: id, host: "xfer.node-a.example.com", targetPort: 8080, auto: true, isPrimary: true, middlewares: rules })
+      .run();
+    const encrypted = await importAll(b, (await exportZip(a, id)).bytes, { deployWhenReady: false });
+    expect(encrypted.preview.autoDomain).toEqual({ host: "xfer.node-b.example.com", reason: null });
+    const auto = b.panel.deps.db.select().from(domains).where(eq(domains.serviceId, encrypted.serviceId)).all();
+    expect(auto.map((d) => [d.host, d.auto, d.middlewares])).toEqual([["xfer.node-b.example.com", true, rules]]);
+
+    // Without the hashes it would come up open: no automatic domain, and IP:port stays closed.
+    const c = await side("node-c");
+    const omitted = await importAll(c, (await exportZip(a, id, { secrets: "omitted", passphrase: undefined })).bytes, { autoDomain: true });
+    expect(omitted.preview.autoDomain.host).toBeNull();
+    expect(omitted.preview.autoDomain.reason).toContain("left its passwords out");
+    expect(c.panel.deps.db.select().from(domains).where(eq(domains.serviceId, omitted.serviceId)).all()).toEqual([]);
+    expect(firstRunOf(c, omitted.serviceId)).toEqual([]);
   });
 });
 

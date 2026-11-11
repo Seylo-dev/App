@@ -311,8 +311,8 @@ export const importService = implement(transferOps.importService, async (input, 
 
   const serviceId = created.made.id;
   const svc = loadService(ctx.db, serviceId);
-  // Like a new app: reachable on IP:port until it has a domain.
-  if (svc.kind === "app" && m.spec.ports.length > 0 && created.made.domains.length === 0) openFirstRun(ctx.db, serviceId);
+  // Like a new app: reachable on IP:port until it has a domain, when the file had none (plan.ts says why).
+  if (plan.firstRun && created.made.domains.length === 0) openFirstRun(ctx.db, serviceId);
   // The node keeps the stopped service's folders until it starts.
   ctx.agents.desired.markDirty({ serviceId });
   for (const check of created.made.uptimeChecks) syncSchedule(ctx, check, check.enabled);

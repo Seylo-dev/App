@@ -71,6 +71,8 @@ export interface Plan {
   credential: FileCredential | null;
   /** Shared variables to add (or, with overwrite, replace) in the project's shared env, merged into the stored text at import. */
   sharedLines: SharedLine[];
+  /** Open first-run IP:port access: an app with a port whose file had no domains at all. */
+  firstRun: boolean;
   /** Domains by key whose basic auth users need a password from the import call. */
   passwordsNeeded: Map<string, string[]>;
   /** Uptime check URLs to check against internal targets before they are created. */
@@ -397,26 +399,18 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     let status: ImportPreview["domains"][number]["status"] = "free";
     let note: string | null = null;
     const users = d.middlewares.basicAuthUsers;
-    let ipAllowList: string[] = [];
+    let middlewares: DomainMiddlewares = {};
     let certificate: { certPem: string; keyPem: string } | null = null;
     if (d.auto) {
       status = "auto";
-      note = "Automatic domains belong to the old node; an automatic domain on this node can be added instead.";
+      note = "Automatic domains belong to the old node; one on this node can be added instead, with the same access rules.";
     } else {
-      try {
-        checkRedirects(d.middlewares.redirects);
-        ipAllowList = normalizeCidrs(d.middlewares.ipAllowList, "ipAllowList");
-        if (users.length && hashes) {
-          const byUser = new Map(hashes.map((h) => [h.username, h.hash]));
-          if (byUser.size !== users.length || users.some((u) => !bcryptHash.test(byUser.get(u) ?? ""))) {
-            throw new OpError("BAD_REQUEST", "Its basic auth users have hashes this panel does not accept (bcrypt, cost 4 to 12).");
-          }
-        }
-      } catch (error) {
+      const checked = fileMiddlewares(d, hashes);
+      middlewares = checked.middlewares;
+      if (checked.problem !== null) {
         status = "invalid";
-        note = message(error);
-      }
-      if (status === "free" && users.length && !hashes) {
+        note = checked.problem;
+      } else if (checked.needsPassword) {
         status = "needsPassword";
         note = `The file left the passwords of ${users.join(", ")} out: type new ones, or skip the domain.`;
       }
@@ -477,21 +471,16 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
         auto: false,
         forward: d.forward,
         isPrimary: false,
-        middlewares: {
-          ...(users.length
-            ? { basicAuth: { users: users.map((u) => ({ username: u, hash: hashes?.find((h) => h.username === u)?.hash ?? "" })) } }
-            : {}),
-          ...(ipAllowList.length ? { ipAllowList } : {}),
-          ...(d.middlewares.rateLimit ? { rateLimit: { ...d.middlewares.rateLimit } } : {}),
-          ...(d.middlewares.redirects.length ? { redirects: d.middlewares.redirects.map((r) => ({ ...r })) } : {}),
-        },
+        middlewares,
         dnsStatus: "unknown",
         certStatus: https === "off" ? "none" : https === "custom" ? "valid" : "pending",
       });
     }
   }
 
-  // An automatic domain on this node, like a clone gets.
+  // An automatic domain on this node, like a clone gets, with the old automatic domain's access rules.
+  const fileAuto = doc.domains.find((d) => d.auto);
+  const autoRules = fileAuto ? fileMiddlewares(fileAuto, secrets?.domains[domainKey(fileAuto)]?.basicAuth ?? null) : null;
   const port = isDatabase
     ? null
     : (spec.ports.find((p) => p.protocol === "tcp")?.containerPort ??
@@ -503,6 +492,11 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
   else if (!domainsEditable) autoReason = "Adding a domain needs the domains.edit permission.";
   else if (ctx.db.select({ id: domains.id }).from(domains).where(eq(domains.host, autoHost)).get())
     autoReason = "That automatic domain is already in use.";
+  else if (autoRules?.problem)
+    autoReason = `The old automatic domain's access rules are not accepted here: ${autoRules.problem} Add one on the Domains tab after the import.`;
+  else if (autoRules?.needsPassword)
+    autoReason =
+      "The old automatic domain had basic auth, and the file left its passwords out. Add one with new passwords on the Domains tab after the import.";
   const autoDomain = autoReason === null && (choicesIn.autoDomain ?? doc.domains.some((d) => d.auto));
   if (autoDomain && autoHost && port !== null) {
     domainInserts.push({
@@ -515,7 +509,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       dnsCheckedAt: new Date(),
       certStatus: "pending",
       isPrimary: false,
-      middlewares: {},
+      middlewares: autoRules?.middlewares ?? {},
     });
   }
   // The primary: the file's when it is added, else the first that is not a redirect (domains.add's rule).
@@ -524,6 +518,18 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     domainInserts.find((d) => !d.forward);
   if (primary) primary.isPrimary = true;
   for (const r of domainRows) r.primary = !!primary && primary.host === r.host && primary.pathPrefix === r.pathPrefix;
+
+  // IP:port access like a new app's, only when the file had no domains at all: the file does not say whether
+  // the old one's IP:port was closed, and a skipped domain may have been the only way in, behind basic auth or an allow list.
+  const appWithPort = doc.kind === "app" && spec.ports.length > 0 && domainInserts.length === 0;
+  const fileDomains = Math.max(doc.domains.length, manifest.services[0]?.counts.domains ?? 0);
+  const firstRun = appWithPort && fileDomains === 0;
+  if (appWithPort && fileDomains > 0)
+    warnings.push({
+      reason: "unreachable",
+      message:
+        "None of its domains are added here, so it is not reachable: IP:port access stays closed, since the old service may have been behind basic auth or an IP allow list. Add a domain, or open IP:port access on its Domains tab.",
+    });
 
   // Database listeners: added only to listed addresses by default, never on a port in use.
   const exposuresEditable = can("databases.expose");
@@ -827,6 +833,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     pick,
     credential,
     sharedLines,
+    firstRun,
     passwordsNeeded,
     checkTargets: checks.map((c) => c.url),
     envText,
@@ -876,6 +883,45 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       deployTrigger,
     },
   };
+}
+
+type DomainMiddlewares = NonNullable<Materialize["domains"][number]["middlewares"]>;
+
+/**
+ * A domain's access rules from the file, through domains.setMiddlewares'
+ * checks: problem when one does not pass; needsPassword when it has basic
+ * auth users and the file left their hashes out (they stay empty until the
+ * import call brings passwords).
+ */
+function fileMiddlewares(
+  d: Doc["domains"][number],
+  hashes: { username: string; hash: string }[] | null,
+): { middlewares: DomainMiddlewares; problem: string | null; needsPassword: boolean } {
+  const users = d.middlewares.basicAuthUsers;
+  try {
+    checkRedirects(d.middlewares.redirects);
+    const ipAllowList = normalizeCidrs(d.middlewares.ipAllowList, "ipAllowList");
+    if (users.length && hashes) {
+      const byUser = new Map(hashes.map((h) => [h.username, h.hash]));
+      if (byUser.size !== users.length || users.some((u) => !bcryptHash.test(byUser.get(u) ?? ""))) {
+        throw new OpError("BAD_REQUEST", "Its basic auth users have hashes this panel does not accept (bcrypt, cost 4 to 12).");
+      }
+    }
+    return {
+      problem: null,
+      needsPassword: users.length > 0 && !hashes,
+      middlewares: {
+        ...(users.length
+          ? { basicAuth: { users: users.map((u) => ({ username: u, hash: hashes?.find((h) => h.username === u)?.hash ?? "" })) } }
+          : {}),
+        ...(ipAllowList.length ? { ipAllowList } : {}),
+        ...(d.middlewares.rateLimit ? { rateLimit: { ...d.middlewares.rateLimit } } : {}),
+        ...(d.middlewares.redirects.length ? { redirects: d.middlewares.redirects.map((r) => ({ ...r })) } : {}),
+      },
+    };
+  } catch (error) {
+    return { middlewares: {}, problem: message(error), needsPassword: false };
+  }
 }
 
 /**
