@@ -6,18 +6,21 @@
 //                     its first agent, then turns it into panelMoveDone
 //                     (arrival.ts).
 //   panelMoveDone     the moved panel: the result card and "Delete the old
-//                     copy".
+//                     copy". While its old copy is not deleted (and its node
+//                     still exists) no other move starts (oldCopyLeft), so
+//                     dropping it from the next copy loses nothing.
 //   panelMoveOut      the OLD panel.db only (the offline edit drops it from
 //                     the copy): how far the move got, so a restart of the old
 //                     panel mid-move neither runs a second live panel next
 //                     to the moved one nor forgets to clean up the target.
-//   panelMoveCleanups the old panel.db: undo work of failed moves that waits
-//                     for a node to come back (a staged copy on the target,
-//                     a staged address on a node).
+//   panelMoveCleanups undo work of failed moves that waits for a node to
+//                     come back (a staged copy on the target, a staged
+//                     address on a node). The copy keeps it: once the old
+//                     panel is retired only the moved one can finish it.
 //   panelMoveFailure  the old panel.db: the last failed move, for the card.
 //
 // None holds a secret. The offline edit (snapshot.ts) removes every one of
-// them from the copy except the new panelMoveArrival.
+// them from the copy except panelMoveCleanups and the new panelMoveArrival.
 
 import type { panelMove } from "@seylo/ops";
 

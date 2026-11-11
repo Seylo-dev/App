@@ -66,7 +66,17 @@ function seedDataDir(dir: string) {
   writeFileSync(join(dir, "branding", "favicon"), "icon-bytes");
   mkdirSync(join(dir, "uploads"));
   writeFileSync(join(dir, "uploads", "u1.tar.gz"), crypto.getRandomValues(new Uint8Array(70_000)));
-  for (const name of ["setup-token", "join-token", "telemetry-off", "ip-access-on", "panel.db-wal", "panel.db-shm", "metrics.db-wal"]) {
+  // move-commit: the commit marker of an earlier arrival here; a copy holding it could take agents before its own switch.
+  for (const name of [
+    "setup-token",
+    "join-token",
+    "telemetry-off",
+    "ip-access-on",
+    "panel.db-wal",
+    "panel.db-shm",
+    "metrics.db-wal",
+    "move-commit",
+  ]) {
     writeFileSync(join(dir, name), "never shipped");
   }
 }
@@ -401,6 +411,9 @@ describe("the move", () => {
     recordDialedUrl(panel.deps.db, targetId, "https://203.0.113.10:3443");
     recordDialedUrl(panel.deps.db, otherId, "https://203.0.113.10:3443");
     setSetting(panel.deps.db, "tailscaleSeen", { detected: true, state: "Running" } as never);
+    // Undo work of an earlier failed move: once this panel is retired only the moved one can finish it.
+    const cleanups = [{ moveId: "e".repeat(16), abortNodeId: otherId, clearNodeIds: [fromId], at: Date.now() }];
+    setSetting(panel.deps.db, "panelMoveCleanups", cleanups);
     const before = panel.deps.db.select().from(services).where(eq(services.id, panelServiceId)).get();
 
     const started = await start();
@@ -516,6 +529,7 @@ describe("the move", () => {
       leftBehind: [],
     });
     expect(setting("panelMoveOut")).toBeUndefined();
+    expect(setting("panelMoveCleanups")).toEqual(cleanups);
     expect(sqlite.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("delete");
     sqlite.close();
 

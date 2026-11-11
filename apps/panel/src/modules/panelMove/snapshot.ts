@@ -19,8 +19,14 @@
 // and certificate, branding/ and uploads/ (and test-ca.pem in test builds).
 // Never the live databases or their -wal/-shm, the tailnet socket, the
 // setup or join tokens, the telemetry and IP access files, rotation
-// leftovers (*.new) or anything a previous move left. Symbolic links and
-// anything that is not a regular file are skipped.
+// leftovers (*.new), the commit marker of an earlier arrival (move-commit:
+// a copy holding one could take agents before its own switch) or anything
+// a previous move left. Symbolic links and anything that is not a regular
+// file are skipped.
+//
+// The copy keeps panelMoveCleanups: undo work of earlier failed moves (a
+// staged copy with master.key on a node, a staged address) that only the
+// moved panel can finish once this one is retired.
 
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
@@ -138,8 +144,13 @@ export interface MoveEdit {
   now: number;
 }
 
-/** Settings of a move or the old server that must not reach the moved panel. */
-const droppedSettings = ["panelMoveOut", "panelMoveCleanups", "panelMoveFailure", "panelMoveDone", "panelDomainStatus"] as const;
+/**
+ * Settings of a move or the old server that must not reach the moved panel.
+ * panelMoveDone goes too: a move starts only once its old copy is deleted
+ * (or its node removed, or the move goes back onto it), preflight.ts
+ * oldCopyLeft, so it names nothing left to delete.
+ */
+const droppedSettings = ["panelMoveOut", "panelMoveFailure", "panelMoveDone", "panelDomainStatus"] as const;
 
 /** Opens a copy of panel.db made by snapshotTo for an edit or a compile; the caller closes it. */
 function openCopy(path: string): { sqlite: Database; db: PanelDb } {
