@@ -369,7 +369,7 @@ Summary; the full rules are in `proto/README.md` and the comments of
   `can_build`, the `acme_ca*` keys and
   keys this agent does not know, with their comments. It replaces only the connection
   (`panel_url`, `panel_pin`, `trust_on_first_use`, `insecure_transport`,
-  `fallback`), the identity the token gives (`node_id` cleared,
+  `fallback`, since 0.2.8 `staged` and `staged_move`), the identity the token gives (`node_id` cleared,
   `join_token`) and the old panel's identity (`panel_id`, `panel_key`,
   `panel_proves` cleared); `node_name` changes with `--name`, `can_build`
   with `--can-build` / `--can-build=false` (the installer's `--can-build`
@@ -2384,6 +2384,7 @@ or the method descriptor's options (TS). Current names:
 | `panel.edge-access.v1` | CheckEdgeAccess |
 | `panel.backup-sign.v1` | SignBackupRequests |
 | `tailnet.login.v1` (0.2.1) | TailscaleLogin, TailscaleSetDns |
+| `panel.relocate.v1` (0.2.8) | StagePanelAddress, ClearPanelAddress, ImportPanelData, ExportRegistry, ImportRegistry, StartMovedPanel, AbortMovedPanel, RetirePanel, RemoveOldPanel |
 
 An agent advertises a capability only once every method in it works.
 
@@ -2735,6 +2736,60 @@ names the snapshot folder). Outcome: durable `UpdateResult`
 (target PANEL). VM-tested against the real reconcile runtime
 (`reconcile` `TestITPanelAdoptAndSwap`: adopt, swap, broken image rolled
 back with panel.db restored). `Apply` uses the stored desired revision.
+
+Panel move (since 0.2.8, `panel.relocate.v1`, panel `modules/panelMove`,
+agent `update/panel_move*.go`, `agent/panel_stage.go`): moves the panel
+service to another joined node. Ops `panelMove.check` (query: block
+codes, soft `nodesLeftBehind`), `panelMove.start` (owner, browser session
+confirmed in the last 15 minutes), `panelMove.status` (query, anyone signed
+in gets the state), `panelMove.cancel` (before the switch) and
+`panelMove.removeOldCopy` (destructive); none is an MCP tool. Steps:
+`pausing` (writes refused with 503, the job runner held, durable reports
+from agents answer UNAVAILABLE), `registry` (ExportRegistry on the old
+node streamed into ImportRegistry on the target; the two `size_bytes`
+must match), `snapshot` (`Databases.snapshotTo`: a consistent copy of
+`panel.db` and `metrics.db` plus `master.key` and `agent-tls.key`, with a
+sha256 manifest), `shipping` (ImportPanelData, a tar.gz checked file by
+file against the manifest), `starting` (StartMovedPanel: the agent pulls
+the image, starts the panel on the copied data on standby and checks the
+pin and `expected_version`; this panel holds every desired-state send to
+the target from here, `DesiredStateSync.hold`, since a SyncDesired would
+drop the panel spec just installed), `staging` (StagePanelAddress on every
+other online node: config.yml `staged` = the new `https://` address and
+pin, `staged_move` = the move id, written before the answer, after an
+HTTPS probe of `<url>/api/health` over the pinned connection) and
+`switching` (RetirePanel on the old node: it answers, then stops the old
+panel and keeps its spec stopped; `update/panel-retire.json` makes
+`seylo panel start` refuse). The old panel then answers
+`/api/agent/connect` with 503 and Retry-After 10 and closes joins with
+1011. An agent dials `staged` only after its primary failed at the
+TCP/HTTP level for 10 s (a HelloRejected never counts), then alternates
+the two; on HelloAccepted from the staged address `panel_url` and
+`panel_pin` become the staged values, `insecure_transport` goes false and
+`staged`, `staged_move` and `fallback` are cleared. The pin is the SPKI
+of `agent-tls.key`, which moves with the data, so nodes need no re-join.
+The moved panel leaves standby when the first agent connects; alerts keep
+a 5 minute grace after a move. Any failure before `switching` aborts:
+AbortMovedPanel on the target (idempotent, refused with `panelHere` once
+its own agent reached the moved panel), ClearPanelAddress on staged nodes
+(a no-op for another `move_id`), the hold released; a panel that restarts
+with a move row still running treats it as failed (`recover.ts`). The old
+copy stays until `panelMove.removeOldCopy` (RemoveOldPanel: refused with
+`panelHere` or `moveUnfinished`, reports `freed_bytes`). The move is
+refused with IP access closed, Tailscale Serve on, an unfinished key
+rotation or no agents' TLS port; a node that is offline, on plain HTTP or
+too old blocks it unless the caller passes `leftBehind: true` (it joins
+again with `seylo join --force`).
+`move_id` matches `^[a-z0-9][a-z0-9_-]{0,62}$`. Error reasons (status
+details key `reason`): INVALID_ARGUMENT `badRequest`, `manifest`,
+`badArchive`; FAILED_PRECONDITION `panelRunning`, `panelHere`, `noPanel`,
+`moveUnfinished`, `notImported`, `pin`, `version`, `plainHttp`, `probe`;
+RESOURCE_EXHAUSTED `noSpace` (free space below `max(size_bytes*3, sum of
+manifest sizes) + 64 MiB`); ABORTED `busy` (update lock); UNAVAILABLE
+`pull`, `start`, `health`, `pin`, `undo`, `config`; CANCELLED
+`cancelled`. ImportPanelData, ImportRegistry and StartMovedPanel are
+refused while a panel container runs on the node. e2e check 41 moves the
+panel from A to C and back.
 
 Test builds of the panel (the e2e only): `bun build` with
 `--define __TEST_RELEASE_API_URL__='"<mirror>/repos/<org>/<repo>/releases/latest"'`
