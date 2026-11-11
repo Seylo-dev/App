@@ -4397,7 +4397,7 @@ container_started() { on_node "$1" "docker inspect -f '{{.State.StartedAt}}' \$(
 check_42() {
   need_key || return 3
   local nb nc src host dom domid secret marker dbmark dir zip dbzip out code mf ok path want got imp ref newid st envsrc envnew auto prevwild preview link
-  local db before after pidc newdb entry res codes flipped
+  local db before after pidc newdb entry res codes flipped n
   nb=$(node_id b)
   nc=$(node_id c)
   [ -n "$nc" ] || { blocked "node C is not joined"; return 3; }
@@ -4406,7 +4406,8 @@ check_42() {
   for n in xfer xfer-2 xferdb; do delete_service e2e-imports "$n"; done
   delete_service e2e-exports xfer
   delete_service e2e-exports xferdb
-  src=$(image_service e2e-exports xfer b traefik/whoami:v1.10.3 80) || { bad "services.create xfer failed"; return 1; }
+  # Created without a deploy: the one deploy below runs it with its env, volume, domain and cron job.
+  src=$(image_service e2e-exports xfer b traefik/whoami:v1.10.3 80 '{"deployNow":false}') || { bad "services.create xfer failed"; return 1; }
   secret=xfer-secret-$(openssl rand -hex 8)
   marker=xfer-marker-$(openssl rand -hex 8)
   api env.set "$(jq -nc --arg s "$src" --arg v "$secret" '{serviceId:$s, text:("PLAIN=1\nSECRET=" + $v + "\nSELF=http://xfer:80/\n")}')" >/dev/null || bad "env.set on xfer failed"
