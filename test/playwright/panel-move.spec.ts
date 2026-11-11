@@ -232,6 +232,78 @@ test.describe("panel move", () => {
     await expect(card(page).getByText("The move to us-ash-1 stopped")).toHaveCount(0);
   });
 
+  test("a second failure shows too: Try again, the next move fails, its reason is on the card", async ({ page }) => {
+    const failed = (moveId: string, message: string) =>
+      moveStatus({
+        state: "failed",
+        moveId,
+        targetNodeId: ids.us,
+        targetNodeName: "us-ash-1",
+        targetAddress: "198.51.100.7",
+        step: "starting",
+        error: { step: "starting", message },
+      });
+    let status = failed("move000000000001", "The first try stopped.");
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => status,
+        "panelMove.start": () => {
+          status = movingStatus({ moveId: "move000000000002", step: "starting", bytesDone: 0, bytesTotal: 0 });
+          return status;
+        },
+      },
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("The first try stopped.")).toBeVisible();
+    await card(page).getByRole("button", { name: "Try again" }).click();
+    await pickTarget(page, "us-ash-1");
+    await startButton(page).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Move the panel" }).click();
+    await expect(card(page).getByTestId("panel-move-progress")).toBeVisible();
+    status = failed("move000000000002", "The second try stopped too.");
+    await expect(card(page).getByText("The move to us-ash-1 stopped")).toBeVisible();
+    await expect(card(page).getByText("The second try stopped too.")).toBeVisible();
+    await expect(card(page).getByText("At: Starting the panel on us-ash-1.")).toBeVisible();
+  });
+
+  test("the old panel stops answering at the end of a move the page missed: it says where the panel went, then stops asking", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () => movingStatus({ step: "switching", bytesDone: 0, bytesTotal: 0, canCancel: false }),
+      },
+    });
+    let statusReads = 0;
+    let gone = false;
+    // Routes added later win: once gone, the old panel answers nothing at all.
+    await page.route(/\/api\/v1\/panelMove\.status/, (route) => {
+      statusReads++;
+      return gone ? route.abort("connectionrefused") : route.fallback();
+    });
+    await page.goto("/settings/general");
+    await expect(card(page).getByText("Moving the panel to us-ash-1")).toBeVisible();
+    gone = true;
+    await expect(card(page).getByText("The old server stopped answering at the last step of the move")).toBeVisible();
+    await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await expect(card(page).getByText("Could not load this")).toHaveCount(0);
+    await expect(banner(page)).toContainText("The panel moved to us-ash-1.");
+    await expect(banner(page).getByRole("link", { name: "Open it" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await card(page).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/lost.png`, fullPage: true });
+    // Minutes later the page has stopped asking the dead address. The last
+    // round (a read and its retries) ends in real time; then 30 seconds
+    // more of the page's time bring no read.
+    await page.clock.fastForward("03:00");
+    await page.waitForTimeout(6000);
+    const settled = statusReads;
+    await page.clock.runFor(30_000);
+    await page.waitForTimeout(4000);
+    expect(statusReads).toBe(settled);
+    await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toBeVisible();
+  });
+
   test("done on the moved panel: the DNS record, who to join again, Delete the old copy", async ({ page }) => {
     let status = movingStatus({
       state: "done",
@@ -291,5 +363,23 @@ test.describe("panel move", () => {
     await expect(banner(page)).toContainText("The panel moved to us-ash-1.");
     await expect(banner(page).getByRole("link", { name: "Open it" })).toHaveAttribute("href", "http://198.51.100.7:3000");
     await page.screenshot({ path: `${shots}/old-copy.png`, fullPage: true });
+  });
+
+  test("the old copy with a domain: Open goes to the new IP address, the domain once its DNS points there", async ({ page }) => {
+    await installDemo(page, {
+      overrides: {
+        "panelMove.status": () =>
+          movingStatus({ state: "done", side: "old", step: "switching", canCancel: false, domain: "panel.acme.dev" }),
+      },
+    });
+    await page.goto("/settings/general");
+    // Right after the move the domain's DNS record still points at this old server.
+    await expect(card(page).getByRole("link", { name: "Open http://198.51.100.7:3000" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await expect(card(page).getByText("works too once its DNS record points at 198.51.100.7.")).toBeVisible();
+    await expect(card(page).getByRole("link", { name: "panel.acme.dev" })).toHaveAttribute("href", "https://panel.acme.dev");
+    await expect(banner(page).getByRole("link", { name: "Open it" })).toHaveAttribute("href", "http://198.51.100.7:3000");
+    await expect(banner(page)).toContainText("panel.acme.dev works once its DNS record points at the new server");
+    await expect(banner(page).getByRole("link", { name: "panel.acme.dev" })).toHaveAttribute("href", "https://panel.acme.dev");
+    await page.screenshot({ path: `${shots}/old-copy-domain.png`, fullPage: true });
   });
 });

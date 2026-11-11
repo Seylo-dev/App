@@ -11,11 +11,14 @@
 //   failed    where it stopped and why; nothing changed. Try again.
 //   done      on the moved panel: the DNS hint for a domain, the nodes to
 //             join again, and Delete the old copy. On the old copy (it still
-//             answers for a moment): where the panel is now.
+//             answers for a moment): where the panel is now, at its new IP
+//             address first (the domain still points here).
 //
 // The panel decides and refuses (panelMove.check, panelMove.start); the
 // card shows its reasons and never guesses. The live socket refreshes the
 // status while the move runs; a 2 second poll covers a dropped socket.
+// When the old panel stops answering at the end of a move the page missed,
+// the card says where the panel went (lib/panel-move.ts).
 
 import { slug } from "@seylo/brand";
 import { auth, type OpOutput, panelMove } from "@seylo/ops";
@@ -35,6 +38,7 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { t } from "../../i18n/t";
 import { formatBytes, formatNames } from "../../lib/format";
+import { followMovePoll, lostMove, movedLinks } from "../../lib/panel-move";
 import { isReauthCancelled } from "../../lib/reauth";
 import { useSettingsMutation } from "./mutation";
 import { QueryView } from "./op-state";
@@ -60,18 +64,29 @@ export function PanelMoveCard() {
 }
 
 function OwnerCard() {
-  const status = useOp(panelMove.status, {}, { refetchInterval: (query) => (query.state.data?.state === "running" ? 2000 : false) });
+  const status = useOp(panelMove.status, {}, { refetchInterval: followMovePoll(2000) });
+  // The panel stopped answering at the end of the move: it went through, most likely.
+  const lost = lostMove(status);
   return (
     <SectionCard title={t("settingsPanelMove.title")} description={t("settingsPanelMove.description")}>
-      <QueryView query={status} skeleton={<MoveSkeleton />} className="flex flex-col gap-4">
-        {(data) => (
-          <div className="flex flex-col gap-4">
-            <MoveBody status={data} form={(compact) => <MoveForm compact={compact} />} />
-          </div>
-        )}
-      </QueryView>
+      {lost ? (
+        <MovedAway status={lost} lost />
+      ) : (
+        <QueryView query={status} skeleton={<MoveSkeleton />} className="flex flex-col gap-4">
+          {(data) => (
+            <div className="flex flex-col gap-4">
+              <MoveBody status={data} form={(compact) => <MoveForm compact={compact} />} />
+            </div>
+          )}
+        </QueryView>
+      )}
     </SectionCard>
   );
+}
+
+/** The card shows a failed move until Try again on that move; the failure of a later move shows again. */
+export function showsFailure(status: Pick<MoveStatus, "state" | "moveId">, dismissed: string | null | undefined): boolean {
+  return status.state === "failed" && status.moveId !== dismissed;
 }
 
 /**
@@ -79,14 +94,15 @@ function OwnerCard() {
  * own queries), so tests render the other states without it.
  */
 export function MoveBody({ status, form }: { status: MoveStatus; form: (compact: boolean) => React.ReactNode }) {
-  const [retrying, setRetrying] = useState(false);
+  // The move whose failure Try again put away (undefined: none yet).
+  const [dismissed, setDismissed] = useState<string | null | undefined>(undefined);
   if (status.state === "running") return <MoveProgress status={status} />;
   if (status.state === "done" && status.side === "old") return <MovedAway status={status} />;
   return (
     <>
       {status.state === "done" && <MoveResult status={status} />}
-      {status.state === "failed" && !retrying ? (
-        <MoveFailed status={status} onRetry={() => setRetrying(true)} />
+      {showsFailure(status, dismissed) ? (
+        <MoveFailed status={status} onRetry={() => setDismissed(status.moveId)} />
       ) : (
         form(status.state !== "idle")
       )}
@@ -429,9 +445,13 @@ export function MoveResult({ status }: { status: MoveStatus }) {
   );
 }
 
-/** The old copy, which still answers for a moment after the switch: where the panel is now. */
-export function MovedAway({ status }: { status: MoveStatus }) {
-  const url = status.domain ? `https://${status.domain}` : status.newUrl;
+/**
+ * The old copy, which still answers for a moment after the switch: where
+ * the panel is now. `lost`: this page only saw the old panel stop answering
+ * at the end of the move.
+ */
+export function MovedAway({ status, lost = false }: { status: MoveStatus; lost?: boolean }) {
+  const { url, domainUrl } = movedLinks(status);
   return (
     <Alert
       tone="info"
@@ -447,7 +467,15 @@ export function MovedAway({ status }: { status: MoveStatus }) {
         ) : undefined
       }
     >
-      {t("settingsPanelMove.movedAwayHint")}
+      <p className="m-0">{lost ? t("settingsPanelMove.movedLostHint") : t("settingsPanelMove.movedAwayHint")}</p>
+      {domainUrl && (
+        <p className="m-0">
+          <a href={domainUrl} className="font-medium text-link hover:text-link-hover">
+            {status.domain}
+          </a>{" "}
+          {t("settingsPanelMove.movedAwayDomain", { address: status.targetAddress ?? t("settingsPanelMove.newServer") })}
+        </p>
+      )}
     </Alert>
   );
 }

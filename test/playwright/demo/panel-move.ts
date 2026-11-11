@@ -35,6 +35,8 @@ export function moveStatus(over: Input = {}): Input {
     oldCopyRemoved: false,
     domain: null,
     canCancel: false,
+    waitingSince: null,
+    canForceCancel: false,
     oldPanelRunning: false,
     ...over,
   };

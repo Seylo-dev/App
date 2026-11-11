@@ -10,6 +10,7 @@ import {
   MoveResult,
   type MoveStatus,
   moveProgress,
+  showsFailure,
 } from "./panel-move-card";
 
 const ids = { old: "oldnode000000001", fresh: "newnode000000002", b: "bnode00000000003" };
@@ -191,14 +192,45 @@ test("done on the moved panel: the new address, the DNS record, who to join agai
   expect(running).toContain("de-fsn-1 did not confirm that the old panel stopped.");
 });
 
+/** The hrefs of the links in rendered markup, in order. */
+const hrefs = (html: string) => [...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((match) => match[1]);
+
 test("the old copy says where the panel is now", async () => {
   const old = moving({ state: "done", side: "old", step: "switching", canCancel: false });
   const html = await renderStatic(() => <MovedAway status={old} />);
   expect(text(html)).toContain("The panel moved to de-fsn-2");
   expect(text(html)).toContain("This is the old copy.");
-  expect(html).toContain('href="http://203.0.113.20:3000"');
-  const withDomain = await renderStatic(() => <MovedAway status={{ ...old, domain: "panel.acme.dev" }} />);
-  expect(withDomain).toContain('href="https://panel.acme.dev"');
+  expect(hrefs(html)).toEqual(["http://203.0.113.20:3000"]);
+});
+
+test("the old copy with a domain: Open goes to the new IP address, the domain only once its DNS points there", async () => {
+  const old = moving({ state: "done", side: "old", step: "switching", canCancel: false, domain: "panel.acme.dev" });
+  const html = await renderStatic(() => <MovedAway status={old} />);
+  // The domain's record still points at this server right after the move.
+  expect(/<a [^>]*href="http:\/\/203\.0\.113\.20:3000"[^>]*>Open http:\/\/203\.0\.113\.20:3000/.test(html)).toBe(true);
+  expect(hrefs(html).sort()).toEqual(["http://203.0.113.20:3000", "https://panel.acme.dev"]);
+  expect(text(html)).toContain("panel.acme.dev works too once its DNS record points at 203.0.113.20.");
+  const banner = await renderStatic(() => <PanelMoveBannerView status={old} />);
+  expect(text(banner)).toContain("panel.acme.dev works once its DNS record points at the new server");
+  expect(/<a [^>]*href="http:\/\/203\.0\.113\.20:3000"[^>]*>Open it/.test(banner)).toBe(true);
+  expect(hrefs(banner).sort()).toEqual(["http://203.0.113.20:3000", "https://panel.acme.dev"]);
+});
+
+test("a page that only saw the old panel stop answering at the end says where the panel went", async () => {
+  const lost = moving({ state: "done", side: "old", step: "switching", canCancel: false });
+  const out = text(await renderStatic(() => <MovedAway status={lost} lost />));
+  expect(out).toContain("The panel moved to de-fsn-2");
+  expect(out).toContain("The old server stopped answering at the last step of the move");
+  expect(out).toContain("Open http://203.0.113.20:3000");
+});
+
+test("a failed move shows until Try again, and the next move's failure shows again", () => {
+  const first = { state: "failed" as const, moveId: "move000000000001" };
+  expect(showsFailure(first, undefined)).toBe(true);
+  expect(showsFailure(first, "move000000000001")).toBe(false);
+  // Try again, Start, and that move fails too: its failure shows.
+  expect(showsFailure({ state: "failed", moveId: "move000000000002" }, "move000000000001")).toBe(true);
+  expect(showsFailure({ state: "idle", moveId: null }, undefined)).toBe(false);
 });
 
 test("the banner: on every page while it moves, on the old copy with a link, never otherwise", async () => {
@@ -206,7 +238,7 @@ test("the banner: on every page while it moves, on the old copy with a link, nev
   expect(run).toContain("The panel is moving to de-fsn-2: read-only for a few minutes.");
   const old = await renderStatic(() => <PanelMoveBannerView status={moving({ state: "done", side: "old" })} />);
   expect(text(old)).toContain("The panel moved to de-fsn-2.");
-  expect(old).toContain('href="http://203.0.113.20:3000"');
+  expect(hrefs(old)).toEqual(["http://203.0.113.20:3000"]);
   expect(await renderStatic(() => <PanelMoveBannerView status={status()} />)).not.toContain("panel-move-banner");
   expect(await renderStatic(() => <PanelMoveBannerView status={moving({ state: "done", side: "new" })} />)).not.toContain(
     "panel-move-banner",

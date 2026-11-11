@@ -74,10 +74,15 @@ export default {
   oldCopyGone: "The old copy on {node} is deleted.",
   movedAwayTitle: "The panel moved to {node}",
   movedAwayHint: "This is the old copy. It takes no changes and no nodes; open the panel at its new address.",
+  movedLostHint:
+    "The old server stopped answering at the last step of the move, as it does once the move is done. Open the panel at its new address; if it does not answer there, reload this page.",
+  movedAwayDomain: "works too once its DNS record points at {address}.",
+  newServer: "the new server",
   open: "Open {url}",
   banner: {
     moving: "The panel is moving to {node}: read-only for a few minutes.",
     moved: "The panel moved to {node}.",
+    domain: "works once its DNS record points at the new server",
     open: "Open it",
   },
 } as const;
