@@ -869,6 +869,34 @@ describe("more engines", () => {
     expect(updated.exposed?.url).toBe(open.exposed.url);
     expect(updated.runtime).toMatchObject({ enabled: true, hostPort: 45432 });
   });
+
+  test("open screens of a database waiting for its node read it again when the updated agent connects", async () => {
+    const { res, node } = await createDb("postgres");
+    const serviceId = res.body.serviceId;
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie })).status).toBe(200);
+    // Exposed on another node: not told.
+    const elsewhere = await createDb("postgres");
+    const elsewhereId = elsewhere.res.body.serviceId;
+    expect((await callOp(panel, dbOps.setExposure, { serviceId: elsewhereId, enabled: true }, { cookie })).status).toBe(200);
+    advertise(node.id, [enginesCapability]);
+    expect((await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure.state).toBe("waitingForNodeUpdate");
+    const told: { topic: string; ops: string[] }[] = [];
+    const socket = {
+      id: "tab",
+      send: (m: { type: string; topic?: string; event?: { ops?: string[] } }) => {
+        if (m.type === "event" && m.topic) told.push({ topic: m.topic, ops: m.event?.ops ?? [] });
+      },
+    } as never;
+    panel.deps.live.subscribe(socket, `service:${serviceId}`);
+    panel.deps.live.subscribe(socket, `service:${elsewhereId}`);
+    const refreshed = ["databases.get", "databases.connection", "exposures.get", "env.references"];
+    // The node was updated: its hello stored the new facts, then its agent connects.
+    advertise(node.id, [enginesCapability, exposureCapability]);
+    fakeAgent(panel, node.id, {}, [], [enginesCapability, exposureCapability]);
+    expect(told).toContainEqual({ topic: `service:${serviceId}`, ops: refreshed });
+    expect(told.filter((t) => t.topic === `service:${elsewhereId}` && t.ops.includes("databases.get"))).toEqual([]);
+    expect((await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure.state).toBe("open");
+  });
 });
 
 describe("held retirements of an old exposed user", () => {

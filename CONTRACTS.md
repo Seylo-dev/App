@@ -3757,7 +3757,11 @@ APIs for other modules (all in `apps/panel/src/modules/`):
   and `EXPOSED_PORT` resolve empty (env.analyze: `empty-reference`; a
   running service keeps the env it was sealed with until it deploys
   again). The row is kept, so the port opens with the node's sync once it
-  is updated; the Connection tab says "Closed until <node> updates".
+  is updated; the Connection tab says "Closed until <node> updates", and
+  when the node's facts change (its updated agent connects) open screens
+  of the databases exposed there read `databases.get`,
+  `databases.connection`, `exposures.get` and `env.references` again
+  (`capability.ts` `watchExposureCapabilities`).
 - Databases and Boxes are created with `insertService` and `queueDeploy`.
   Credentials live in `service_secrets` (`admin_password`, purpose
   `service.secret`; `exposed_password` only in databases from before

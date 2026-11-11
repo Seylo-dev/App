@@ -5,10 +5,12 @@
 // shell links, and TLS exposure. desired.ts gives the compiler the runtime
 // half of their ServiceSpec; retire.ts holds back the retirement of an old
 // exposed user while running services still have its URL, and sends it
-// once none has (also from a job every minute).
+// once none has (also from a job every minute); capability.ts tells open
+// screens when a node's update reopens its exposed databases.
 
 import { defineJob } from "../../jobs/queue";
 import { defineModule } from "../module";
+import { watchExposureCapabilities } from "./capability";
 import { connection, create, get, listEngines, openShell, openWebUi, resetPassword, setExposure } from "./ops";
 import { releaseHeldRetirements, watchRetirements } from "./retire";
 
@@ -28,6 +30,7 @@ export default defineModule({
   jobs: [retirements],
   start(deps) {
     watchRetirements(deps);
+    watchExposureCapabilities(deps);
     deps.schedules.ensure({ key: retirementsType, jobType: retirementsType, intervalSeconds: 60, missedRun: "skip" });
   },
 });
