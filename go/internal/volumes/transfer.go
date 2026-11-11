@@ -108,7 +108,9 @@ func (t *Transfer) Export(ctx context.Context, owner, volume string, w io.Writer
 
 // Import unpacks a .tar.gz from r into owner's volume and returns the
 // uncompressed bytes written. serviceID is the service being moved (for
-// the running check).
+// the running check). Imports into one volume run one after another: a
+// second one waits until the first has ended, emptying the volume after a
+// failure included, or until its own ctx ends.
 func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, opts ImportOptions, r io.Reader) (uint64, error) {
 	if opts.SHA256 != "" && !sha256Hex.MatchString(opts.SHA256) {
 		return 0, fmt.Errorf("%w: the checksum is not a lower-case hex SHA-256", ErrBadArchive)
@@ -138,6 +140,13 @@ func (t *Transfer) Import(ctx context.Context, serviceID, owner, volume string, 
 	if err != nil {
 		return 0, err
 	}
+	// One import at a time per volume, its cleanup included: an upload
+	// that starts over waits until the cancelled one has emptied it.
+	unlock, err := lockVolume(ctx, dir)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return 0, fmt.Errorf("opening volume: %w", err)

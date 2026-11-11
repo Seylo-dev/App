@@ -1,6 +1,7 @@
 package volumes
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -117,4 +118,46 @@ func RemoveServiceDir(dir string, now time.Time, stillOrphan func() bool) error 
 		return ErrInUse
 	}
 	return os.RemoveAll(dir)
+}
+
+// volumeLocks keeps imports into one volume folder apart, by its path. A
+// cancelled import may still be emptying the volume when the panel opens
+// the next one into it (an upload that starts over), and that cleanup
+// would delete what the new one unpacks.
+var volumeLocks = struct {
+	sync.Mutex
+	held map[string]chan struct{}
+}{held: map[string]chan struct{}{}}
+
+// lockVolume waits until no other import holds the volume folder dir, then
+// holds it until the returned func is called. It gives up when ctx ends
+// first, and also when ctx ended while it waited: a cancelled import must
+// not empty a volume another one has filled since.
+func lockVolume(ctx context.Context, dir string) (func(), error) {
+	for {
+		volumeLocks.Lock()
+		busy, held := volumeLocks.held[dir]
+		if !held {
+			mine := make(chan struct{})
+			volumeLocks.held[dir] = mine
+			volumeLocks.Unlock()
+			unlock := func() {
+				volumeLocks.Lock()
+				delete(volumeLocks.held, dir)
+				volumeLocks.Unlock()
+				close(mine)
+			}
+			if err := ctx.Err(); err != nil {
+				unlock()
+				return nil, err
+			}
+			return unlock, nil
+		}
+		volumeLocks.Unlock()
+		select {
+		case <-busy:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
