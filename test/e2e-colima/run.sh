@@ -6,7 +6,7 @@
 # goes on after a failure; the exit code is 1 when any check failed.
 #
 #   KEEP=1       keep the VMs afterwards (to look around or rerun one check)
-#   CHECKS="1 2 3"  run only these checks (default: all 40)
+#   CHECKS="1 2 3"  run only these checks (default: all 41)
 #   E2E_A, E2E_B, E2E_C, E2E_PORT, E2E_OUT, ...  see lib.sh
 #
 # Steps can run alone: up.sh, serve.sh, infra.sh, build.sh [step], publish.sh <v>,

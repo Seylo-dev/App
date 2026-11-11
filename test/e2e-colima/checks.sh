@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The e2e checklist against the three VMs. One function per check
-# (check_01 .. check_40); each prints its sub-results with evidence and ends
+# (check_01 .. check_41); each prints its sub-results with evidence and ends
 # PASS, FAIL, BLOCKED (a precondition is missing, with the reason) or SKIP.
 # Results are kept per check in dist/e2e/state/results and RESULTS.md (next
 # to this file) is rewritten from them after every run, so a single check
@@ -66,12 +66,13 @@ TITLES=(
   "Upgrade: a $E2E_BASE panel and node with real rows move to this build by the normal update; 0001 applies, data survives"
   "Build default: Add node's box decides Can build, a refused join exits 3; Serve on IP address off over the domain, CLI and domain-death reopen"
   "Panel on Tailscale (Headscale): Serve over HTTP to the panel's socket, reached from C, Lock to Tailscale, automatic and CLI recovery"
+  "Move the panel A -> B in the browser: data, keys, registry and sign-ins come along, every node follows; a failed move rolls back; back to A"
 )
 # The highest check number. Check 31 gives the panel a domain and puts
-# everything back afterwards; it runs last (after 32..40) so a failed
-# cleanup cannot spoil the others. Checks 39 and 40 put back what they
+# everything back afterwards; it runs last (after 32..41) so a failed
+# cleanup cannot spoil the others. Checks 39, 40 and 41 put back what they
 # change too.
-LAST=40
+LAST=41
 DOMAIN_CHECK=31
 
 CUR=
@@ -577,7 +578,9 @@ has_first_run() { [ -n "$(first_run_addr "$1")" ]; }
 map_nodes() {
   local nodes
   nodes=$(api nodes.list) || return 1
-  state_set node-a "$(printf '%s' "$nodes" | jq -r '.nodes[] | select(.isPanelNode) | .id' | head -1)"
+  # A by its VM like B and C (check 41 moves the panel, so the panel node is not always A); the panel node when nothing matches.
+  state_set node-a "$(printf '%s' "$nodes" | jq -r --arg vm "$E2E_A" --arg ip "$(node_ip a)" \
+    '([.nodes[] | select((.facts.hostname // "" | contains($vm)) or .publicIpv4 == $ip or (.name | contains($vm)))] + [.nodes[] | select(.isPanelNode)]) | .[0].id // empty')"
   for l in b c; do
     local vm ip
     vm=$(vm_of $l)
@@ -4093,6 +4096,183 @@ p40_cleanup() {
 # ---------------------------------------------------------------- main
 
 # The whole file is read before main runs, so editing it during a run is safe.
+# ---------------------------------------------------------------- 41 move the panel to another node
+
+# Check 41 (0.2.8): the owner moves the panel from A to B in the browser
+# (panelMove.start with a fresh sign-in). Everything comes along: the
+# panel's database, master.key and the agents' TLS key (nodes keep their
+# pin), the image registry, the API key and the owner's sign-in. Every node
+# follows by itself to its staged address: A and C to https://B:<agents'
+# port>, B to its own loopback. A failed move (C's agents' port held by
+# something else) rolls back with the panel still on B. Then it moves back
+# to A, and each old copy is deleted. Runs before the domain check, which
+# needs the panel on A.
+
+p41_url() { echo "http://$(node_ip "$1"):$E2E_PORT"; }
+p41_version() { curl -fsS -m 5 "$(p41_url "$1")/api/health" 2>/dev/null | jq -r '.version // empty'; }
+p41_answers() { [ -n "$(p41_version "$1")" ]; }
+p41_gone() { ! curl -s -m 5 -o /dev/null "$(p41_url "$1")/api/health"; }
+# p41_running <letter>: a running panel container on that VM.
+p41_running() { [ -n "$(on_node "$1" "docker ps -q --filter label=$SLUG.service=panel00000000000 | head -1")" ]; }
+p41_conn() { p31_conn "$1" | tr '\n' ' '; }
+p41_keys() { on_node "$1" "sha256sum $BRAND_DATA_DIR/panel/master.key $BRAND_DATA_DIR/panel/agent-tls.key 2>/dev/null | cut -c1-64 | tr '\n' ' '"; }
+p41_repos() { on_node "$1" "ls $BRAND_DATA_DIR/registry/docker/registry/v2/repositories 2>/dev/null | wc -l" | tr -d ' '; }
+p41_panel_node() { api nodes.list | jq -r '.nodes[] | select(.isPanelNode) | .id'; }
+p41_status() { sess_get "$E2E_STATE/cookies" "$(panel_url)" panelMove.status 2>/dev/null; }
+p41_facts() { # counts that must survive the move
+  printf '%s|%s|%s' "$(api projects.list | jq '[.projects[].serviceCount] | add')" \
+    "$(api settings.telemetry | jq -r .installId)" "$(api nodes.list | jq '.nodes | length')"
+}
+
+# p41_move <from letter> <to letter>: the owner moves the panel; returns when the
+# moved panel answers on <to> and the old one is gone, or fails.
+p41_move() {
+  local from=$1 to=$2 nto out st t
+  nto=$(node_id "$to")
+  owner_session || { bad "the owner could not sign in on $(panel_url)"; return 1; }
+  out=$(sess_get "$E2E_STATE/cookies" "$(panel_url)" panelMove.check) || out='{}'
+  ev "panelMove.check on $(panel_url): $(printf '%s' "$out" | jq -c '{blocks: [.blocks[]? | {code, nodeId}], nodes: [.nodes[]? | {name, canMove}], defaultAddress}' 2>/dev/null)"
+  reauth "$E2E_STATE/cookies"
+  out=$(session_op panelMove.start "$(jq -nc --arg n "$nto" '{targetNodeId: $n}')")
+  ev "panelMove.start to $to: $(printf '%s' "$out" | head -c 400)"
+  printf '%s' "$out" | jq -e '.state == "running"' >/dev/null || { bad "panelMove.start to $to did not start: $(printf '%s' "$out" | head -c 300)"; return 1; }
+  t=$SECONDS
+  while [ $((SECONDS - t)) -lt 900 ]; do
+    st=$(p41_status | jq -r '.state // empty' 2>/dev/null)
+    if [ "$st" = failed ]; then
+      bad "the move to $to failed: $(p41_status | jq -c .error)"
+      return 1
+    fi
+    if p41_answers "$to" && p41_gone "$from"; then break; fi
+    sleep 3
+  done
+  p41_answers "$to" && p41_gone "$from" || { bad "the panel did not come up on $to within 15 minutes ($(p41_status | jq -c '{state, step, error}' 2>/dev/null))"; return 1; }
+  good "the panel moved from $from to $to in $((SECONDS - t))s (version $(p41_version "$to"))"
+  export E2E_PANEL_URL
+  E2E_PANEL_URL=$(p41_url "$to")
+  state_set p41-panel-on "$to"
+}
+
+# p41_followed <panel letter> <pin>: every node dials the moved panel with the same pin.
+p41_followed() {
+  local at=$1 pin=$2 l want
+  for l in a b c; do
+    if [ "$l" = "$at" ]; then want="https://127.0.0.1:$P41_TLS_PORT"; else want="https://$(node_ip "$at"):$P41_TLS_PORT"; fi
+    p31_conn "$l" | grep -qx "panel_url: $want" && p31_conn "$l" | grep -qx "panel_pin: $pin" || return 1
+  done
+}
+
+p41_assert_moved() { # <from> <to> <facts before> <keys before> <repos before>
+  local from=$1 to=$2 facts=$3 keys=$4 repos=$5
+  wait_for 240 "3 nodes online on the moved panel" online_ge_loop 3 || true
+  expect "3 nodes online on the panel on $to" online_ge_loop 3
+  expect "$to is the panel node" test "$(p41_panel_node)" = "$(node_id "$to")"
+  expect "the panel on $from no longer answers" p41_gone "$from"
+  expect "no panel container runs on $from" fails p41_running "$from"
+  expect "the panel container on $to runs as the panel user with a private folder" panel_user_ok "$(vm_of "$to")"
+  wait_for 120 "every node on the new address" p41_followed "$to" "$P41_PIN" || true
+  expect "every node dials the moved panel with the same pin (a: $(p41_conn a); b: $(p41_conn b); c: $(p41_conn c))" p41_followed "$to" "$P41_PIN"
+  expect "the API key, projects, services, nodes and the install id came along ($(p41_facts))" test "$(p41_facts)" = "$facts"
+  expect "master.key and the agents' TLS key are the same files on $to" test "$(p41_keys "$to")" = "$keys"
+  expect "the image registry came along ($(p41_repos "$to") repositories, $repos before)" test "$(p41_repos "$to")" -ge "$repos"
+  expect "the owner signs in on the moved panel" owner_session
+  expect "panelMove.status on the moved panel says done, from $from" jq_ok "$(p41_status)" --arg f "$(node_id "$from")" '.state == "done" and .fromNodeId == $f'
+}
+
+p41_cleanup() {
+  local on
+  on=$(state_get p41-panel-on)
+  relay_stop "$E2E_C" e2e-p41-hold
+  if [ -n "$on" ] && [ "$on" != a ]; then
+    ev "cleanup: the panel is still on $on; moving it back to A"
+    export E2E_PANEL_URL
+    E2E_PANEL_URL=$(p41_url "$on")
+    p41_move "$on" a || bad "cleanup: moving the panel back to A failed"
+  fi
+  unset E2E_PANEL_URL
+  relay_stop "$E2E_B" e2e-p41-reg
+  relay_stop "$E2E_A" e2e-p41-fwd
+  rm -f "$E2E_STATE/p41-panel-on"
+  wait_for 180 "3 nodes online" online_ge_loop 3 || bad "cleanup: not every node is back online"
+}
+
+check_41() {
+  need_key || return 3
+  local rc=0
+  if [ -n "$(state_get p41-panel-on)" ]; then
+    ev "an earlier run of this check stopped half way; putting things back first"
+    p41_cleanup
+  fi
+  p41_run || rc=$?
+  p41_cleanup
+  return "$rc"
+}
+
+P41_TLS_PORT=
+P41_PIN=
+p41_run() {
+  local facts keys repos out t
+  [ -n "$(node_id b)" ] && [ -n "$(node_id c)" ] || { blocked "B and C are not joined (check 3)"; return 3; }
+  [ -s "$E2E_STATE/owner" ] || { blocked "no owner credentials (check 2)"; return 3; }
+  op_is_query panelMove.status || { blocked "this build has no panelMove ops"; return 3; }
+  [ "$(api settings.general | jq -r .domain)" = null ] || { blocked "the panel has a domain; check $CUR starts from IP:port"; return 3; }
+  ip_access_reset
+  P41_TLS_PORT=$(p31_conn b | sed -n 's#^panel_url: https://[^/]*:\([0-9][0-9]*\).*#\1#p')
+  P41_PIN=$(p31_conn b | sed -n 's#^panel_pin: ##p')
+  [ -n "$P41_TLS_PORT" ] && [ -n "$P41_PIN" ] || { blocked "B does not dial the agents' TLS port with a pin ($(p41_conn b))"; return 3; }
+  # B and C pull the panel image the e2e registry on A serves at 127.0.0.1:$E2E_REG_PORT.
+  relay_start "$E2E_A" "$(node_ip a)" 15012 127.0.0.1 "$E2E_REG_PORT" e2e-p41-fwd || { bad "registry relay on A failed"; return 1; }
+  relay_start "$E2E_B" 127.0.0.1 "$E2E_REG_PORT" "$(node_ip a)" 15012 e2e-p41-reg || { bad "registry relay on B failed"; return 1; }
+  facts=$(p41_facts)
+  keys=$(p41_keys a)
+  repos=$(p41_repos a)
+  ev "before: facts $facts, keys $keys, $repos registry repositories, a: $(p41_conn a); b: $(p41_conn b); c: $(p41_conn c)"
+
+  # Refused without a browser session and the owner.
+  expect "an API key cannot start a move" fails api panelMove.start "$(jq -nc --arg n "$(node_id b)" '{targetNodeId: $n}')"
+
+  # A -> B.
+  p41_move a b || return 1
+  p41_assert_moved a b "$facts" "$keys" "$repos"
+  out=$(api nodes.createJoinToken '{"name":"p41-check"}' 2>/dev/null || true)
+  [ -z "$out" ] || expect "Add node's command now names B with the same pin" sh -c "printf '%s' '$out' | grep -q '$(node_ip b)' && printf '%s' '$out' | grep -q '$P41_PIN'"
+  reauth "$E2E_STATE/cookies"
+  out=$(session_op panelMove.removeOldCopy '{}')
+  ev "panelMove.removeOldCopy: $(printf '%s' "$out" | head -c 300)"
+  expect "the old copy on A is gone (no master.key, no panel container)" on "$E2E_A" "test ! -e $BRAND_DATA_DIR/panel/master.key && [ -z \"\$(docker ps -aq --filter label=$SLUG.service=panel00000000000)\" ]"
+
+  # A failed move rolls back: something else holds C's agents' port.
+  relay_start "$E2E_C" 0.0.0.0 "$P41_TLS_PORT" 127.0.0.1 9 e2e-p41-hold || true
+  owner_session
+  reauth "$E2E_STATE/cookies"
+  out=$(session_op panelMove.start "$(jq -nc --arg n "$(node_id c)" '{targetNodeId: $n}')")
+  ev "panelMove.start to C with its port held: $(printf '%s' "$out" | head -c 300)"
+  t=$SECONDS
+  while [ $((SECONDS - t)) -lt 600 ]; do
+    case $(p41_status | jq -r '.state // empty') in failed | idle) break ;; esac
+    sleep 3
+  done
+  ev "status after the refused move: $(p41_status | jq -c '{state, step, error}')"
+  expect "the move to C failed and rolled back" jq_ok "$(p41_status)" '.state == "failed" and .error != null'
+  expect "the panel still answers on B" p41_answers b
+  expect "C holds no copy of the panel (no master.key)" fails on "$E2E_C" "test -e $BRAND_DATA_DIR/panel/master.key"
+  expect "every node still dials B with the same pin" p41_followed b "$P41_PIN"
+  expect "the panel on B takes changes again after the rollback" api settings.updateGeneral '{"name":"Seylo"}'
+  relay_stop "$E2E_C" e2e-p41-hold
+
+  # B -> A, and B's old copy goes.
+  facts=$(p41_facts)
+  keys=$(p41_keys b)
+  repos=$(p41_repos b)
+  relay_stop "$E2E_B" e2e-p41-reg
+  p41_move b a || return 1
+  p41_assert_moved b a "$facts" "$keys" "$repos"
+  reauth "$E2E_STATE/cookies"
+  out=$(session_op panelMove.removeOldCopy '{}')
+  expect "the old copy on B is gone" on "$E2E_B" "test ! -e $BRAND_DATA_DIR/panel/master.key && [ -z \"\$(docker ps -aq --filter label=$SLUG.service=panel00000000000)\" ]"
+  rm -f "$E2E_STATE/p41-panel-on"
+}
+
 main() {
   if [ "${1:-}" = report ]; then
     write_report

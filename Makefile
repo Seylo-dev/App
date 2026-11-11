@@ -124,7 +124,7 @@ release: ## Signed draft release from a v* tag (GITHUB_TOKEN, MINISIGN_SECRET_KE
 	$(BRAND_ENV) v=$$(jq -r .version dist/metadata.json) && scripts/release-sign.sh sign "$$v" dist/release && \
 		scripts/release-sign.sh upload "v$$v" dist/release
 
-e2e: ## Three VMs (Colima A/B, plain Lima C): install, join, the 40-check checklist -> test/e2e-colima/RESULTS.md (KEEP=1 keeps the VMs)
+e2e: ## Three VMs (Colima A/B, plain Lima C): install, join, the 41-check checklist -> test/e2e-colima/RESULTS.md (KEEP=1 keeps the VMs)
 	test/e2e-colima/run.sh
 
 e2e-checks: ## Rerun e2e checks on the kept VMs: make e2e-checks CHECKS="7 8"

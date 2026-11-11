@@ -1,7 +1,7 @@
 # End-to-end harness (three VMs)
 
 `make e2e` (or `test/e2e-colima/run.sh`) builds test releases, installs Seylo on
-three VMs with the real installer and runs the 40-check checklist. Results go to
+three VMs with the real installer and runs the 41-check checklist. Results go to
 `RESULTS.md` here (PASS / FAIL / BLOCKED with evidence per check).
 
 | VM | What | Role |
@@ -42,7 +42,7 @@ test/e2e-colima/build.sh       # agents panel release git base (any subset)
 test/e2e-colima/publish.sh 0.2.1   # make a built release "latest"
 test/e2e-colima/checks.sh 7 8  # rerun some checks (make e2e-checks CHECKS="7 8")
 test/e2e-colima/refresh.sh     # put the working tree on the kept VMs (make e2e-refresh)
-test/e2e-colima/extra-installs.sh [deb] [ufw]  # install.sh on Debian 12 and on Ubuntu with ufw (not one of the 40)
+test/e2e-colima/extra-installs.sh [deb] [ufw]  # install.sh on Debian 12 and on Ubuntu with ufw (not one of the 41)
 test/e2e-colima/down.sh        # delete the VMs and ~/.cache/seylo-e2e
 ```
 
@@ -84,7 +84,7 @@ refreshed version instead of N.
   another server is refused without `--insecure`.
 - The first-run port closes 24 h after its domain is live; check 4 moves that stored time into the past
   (one SQLite write in the panel container) and waits for the panel's minute sweep to close it.
-- The default order is 1..30, 32..40, then 31.
+- The default order is 1..30, 32..41, then 31.
 - Check 3 joins C without `--yes`: the installer installs the missing Docker by itself and waits for the
   agent's first connection ("Connected: the node shows up in the panel now."). B and C join with the default
   join command, so they build images (canBuild), and check 6's inline and uploaded builds run on B, their own
@@ -100,6 +100,11 @@ refreshed version instead of N.
   panel (the test CA goes, and one failed check is backdated so the next is the second in a row): IP access
   reopens by itself; with the CA back and the hour backdated it closes again. While IP access is closed the
   check reaches the API from A itself over 127.0.0.1 (`api_loop`), as the SSH tunnel would.
+- Check 41 moves the panel from A to B and back (0.2.8). B pulls the panel image from A's
+  `e2e-registry` through two relays (`e2e-p41-fwd` on A at port 15012, `e2e-p41-reg` on B), and the
+  failure part holds C's agents' TLS port with a relay (`e2e-p41-hold`) so the panel cannot start
+  there. If the check stops half way, the next run moves the panel back to A first (state
+  `p41-panel-on`).
 - Check 40 runs Tailscale against `e2e-headscale` (`headscale/headscale:v0.29.7`, pinned by digest, on A;
   `infra.sh` starts it with a certificate from `serve.sh`'s test CA, so run `serve.sh` first). A's own
   tailscaled is the owner's server (kernel mode, or userspace when A has no `/dev/net/tun`), C's tailscaled
