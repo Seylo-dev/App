@@ -551,14 +551,15 @@ expect_fail "re-running a join on a node with a newer agent stops" "this node's 
 case $(installed) in *" $NEWER "*) pass "a refused join downgrade keeps the agent" ;; *) flunk "a refused join downgrade replaced the agent" "$(installed)" ;; esac
 PRESEED=$T/seed-newer-join run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
 expect_ok "a --binary is installed as given" "Already joined to https://192.0.2.10:3443"
-# rerun_join <error>: the join command again on a node joined to https://192.0.2.10:3443 whose
-# seylo status says rejected with this error.
+# rerun_join <error> [<node's panel_pin> [<command's --pin>]]: the join command again on a node
+# joined to https://192.0.2.10:3443 whose seylo status says rejected with this error.
 rerun_join() {
   seed_node "$T/seed-rerun" "$V" https://192.0.2.10:3443
+  [ -z "${2:-}" ] || printf 'panel_pin: %s\n' "$2" >>"$T/seed-rerun$BRAND_DATA_DIR/config.yml"
   FAKE_STATUS="Node:    n1 (n1)
 Panel:   https://192.0.2.10:3443 (rejected)
 Error:   $1" INSTALLER_TEST_KNOWN_WAIT=0 INSTALLER_TEST_JOIN_WAIT=0 \
-    PRESEED=$T/seed-rerun run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary"
+    PRESEED=$T/seed-rerun run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://192.0.2.10:3443 --token t --binary "$T/local-binary" ${3:+--pin "$3"}
 }
 # expect_rejoin <name> <error>: the re-run joined again with the token, saying why.
 # (The fake status still says rejected after the new join, so the run ends as refused: the calls are what counts.)
@@ -594,9 +595,31 @@ expect_rejoin "a node removed from the panel at its address joins again with the
 # would lose its pin.
 rerun_join "panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED: This node is disabled in the panel. (retrying at 10:40:00)"
 expect_kept "a disabled node keeps its join" "HELLO_REJECT_REASON_NODE_DISABLED" "Enable it under Nodes in the panel and it connects again."
-rerun_join "dial panel: failed to WebSocket dial: failed to send handshake request: Get \"https://192.0.2.10:3443/api/agent/connect\": conn: panel certificate does not match the pinned key (the certificate presented says it was issued by \"Fortinet, FG800D5818800524\"). 192.0.2.10 did not present the panel's pinned key: a firewall or proxy on this server's network may decrypt HTTPS (TLS inspection), or the address leads to another server (retrying at 10:40:00)"
+mismatch="dial panel: failed to WebSocket dial: failed to send handshake request: Get \"https://192.0.2.10:3443/api/agent/connect\": conn: panel certificate does not match the pinned key (the certificate presented says it was issued by \"Fortinet, FG800D5818800524\"). 192.0.2.10 did not present the panel's pinned key: a firewall or proxy on this server's network may decrypt HTTPS (TLS inspection), or the address leads to another server (retrying at 10:40:00)"
+pin_a=sha256:$(printf 'a%.0s' $(seq 64))
+pin_b=sha256:$(printf 'b%.0s' $(seq 64))
+rerun_join "$mismatch" "$pin_a" "$pin_a"
 expect_kept "a node whose pin does not match keeps its join and pin" "does not match the pinned key"
 has "re-run with --force" && flunk "a pin mismatch is not sent to --force" "$OUT" || pass "a pin mismatch is not sent to --force"
+rerun_join "$mismatch" "$pin_a"
+expect_kept "a pin mismatch with no --pin in the command keeps the join"
+# The same key spelled another way (upper case, colons between the bytes) is no new key.
+rerun_join "$mismatch" "$pin_a" "SHA256:$(printf 'AA:%.0s' $(seq 31))AA"
+expect_kept "a pin mismatch with the node's pin spelled another way keeps the join"
+# A panel reinstalled at the same address presents a new key, and its join command pins it: the
+# owner's own command says the key changed, so the token joins the node again with the new pin
+# (before: "the earlier join stays" for good, since the old pin never matches again).
+rerun_join "$mismatch" "$pin_a" "$pin_b"
+if has "warning: the panel at https://192.0.2.10:3443 does not present the key this node pins, and this command's --pin names another one" &&
+  has "joining it again with the token" && has "join https://192.0.2.10:3443 --token t --no-start --pin $pin_b --force"; then
+  pass "a pin mismatch with another --pin in the command joins again with the token and that pin"
+else
+  flunk "a pin mismatch with another --pin in the command joins again with the token and that pin" "$OUT"
+fi
+# A --pin the installer cannot compare (a base64 spelling) only says how to join again.
+rerun_join "$mismatch" "$pin_a" "sha256/u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7s="
+expect_kept "a pin mismatch with a --pin spelled in base64 keeps the join" \
+  "If this command's --pin is the panel's new key (a panel reinstalled at this address), re-run with --force."
 rerun_join "panel rejected the agent: HELLO_REJECT_REASON_BAD_SIGNATURE: The node's signature does not match its registered key."
 expect_kept "a node the panel refuses for another reason keeps its join" "To join it again with the token, re-run with --force."
 # The other-panel words count only where the agent puts them: after this address, not in the

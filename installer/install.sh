@@ -1295,9 +1295,10 @@ install_join() {
 			END=join-updated
 			return
 		fi
-		# Another panel at the same address (a reinstall, a move of the domain) or this node removed
-		# there: the token joins it again, as with --force. Anything else keeps the join (earlier_join_refused).
-		warn "the panel at $PANEL_URL refuses this node's earlier join${reason:+ ($reason)}: joining it again with the token"
+		# Another panel at the same address (a reinstall, a move of the domain), this node removed
+		# there, or another key there that this command's --pin names: the token joins it again, as
+		# with --force. Anything else keeps the join (earlier_join_refused).
+		warn "$rejoin: joining it again with the token"
 		FORCE=1
 	fi
 	step "Joining $PANEL_URL"
@@ -1318,17 +1319,23 @@ install_join() {
 }
 
 # earlier_join_refused: on a node already joined to $PANEL_URL, true when
-# the panel's answer there proves that join is dead (join_dead), with the
-# reason in $reason: the token joins the node again. That drops the node's
-# id and the panel's identity and pin before the panel checks anything, so
-# any other refusal keeps the earlier join and the token unspent, with a
+# the panel's answer there proves that join is dead (join_dead), or the
+# address does not present the key the node pins and this command's --pin
+# names another one (pin_changed: the owner's own command says the panel's
+# key changed, a panel reinstalled at the same address), with the warning
+# in $rejoin: the token joins the node again. That drops the node's id and
+# the panel's identity and pin before the panel checks anything, so any
+# other refusal keeps the earlier join and the token unspent, with a
 # warning: a node disabled in the panel (enabling it brings it back), a pin
-# that does not match (a firewall that decrypts HTTPS, until it exempts the
-# panel), any other reason. Connected, or not reached yet, is false too.
-# Waits up to KNOWN_WAIT seconds for the restarted agent's answer; a panel
-# that needs a newer agent is waited for.
+# that does not match the one in this command too, or none in it (a
+# firewall that decrypts HTTPS, until it exempts the panel), any other
+# reason. Connected, or not reached yet, is false too. The new pin
+# authenticates the panel, so a firewall that decrypts HTTPS cannot use the
+# re-join. Waits up to KNOWN_WAIT seconds for the restarted agent's answer;
+# a panel that needs a newer agent is waited for.
 earlier_join_refused() {
 	reason=
+	rejoin=
 	[ -z "$DRY_RUN" ] || return 1
 	waited=0
 	while :; do
@@ -1336,11 +1343,24 @@ earlier_join_refused() {
 		case $state in
 		connected) return 1 ;;
 		rejected)
-			join_dead && return 0
+			if join_dead; then
+				rejoin="the panel at $PANEL_URL refuses this node's earlier join${reason:+ ($reason)}"
+				return 0
+			fi
 			if ! too_old; then
 				case $reason in
 				"panel rejected the agent: HELLO_REJECT_REASON_NODE_DISABLED:"*) next=" Enable it under Nodes in the panel and it connects again." ;;
-				"dial panel"*) next= ;; # a certificate or pin: the error says what to check
+				"dial panel"*"does not match the pinned key"*)
+					case $(pin_changed) in
+					yes)
+						rejoin="the panel at $PANEL_URL does not present the key this node pins, and this command's --pin names another one (a panel reinstalled at this address has a new key)"
+						return 0
+						;;
+					unknown) next=" If this command's --pin is the panel's new key (a panel reinstalled at this address), re-run with --force." ;;
+					*) next= ;; # the same pin, or none: the error says what to check
+					esac
+					;;
+				"dial panel"*) next= ;; # a certificate: the error says what to check
 				*) next=" To join it again with the token, re-run with --force." ;;
 				esac
 				warn "the panel at $PANEL_URL refuses this node${reason:+ ($reason)}: the earlier join stays and the token was not used.$next"
@@ -1368,6 +1388,36 @@ join_dead() {
 	"$PANEL_URL "*": not the panel this node belongs to" | "$PANEL_URL: "*": not the panel this node belongs to") return 0 ;;
 	esac
 	return 1
+}
+
+# pin_changed prints yes when this command's --pin names another key than
+# the panel_pin in the node's config.yml, no when it names the same one or
+# either is missing, unknown when the pins are not both spelled
+# sha256:<hex> (pin_hex) and differ as text. Run it in $(...): it sets
+# variables.
+pin_changed() {
+	node_pin=$(sed -n 's/^panel_pin: *//p' "$DATA/config.yml" | head -1 | tr -d "\"'")
+	if [ -z "$PIN" ] || [ -z "$node_pin" ]; then
+		echo no
+	elif cmd_hex=$(pin_hex "$PIN") && node_hex=$(pin_hex "$node_pin"); then
+		[ "$cmd_hex" = "$node_hex" ] && echo no || echo yes
+	elif [ "$PIN" = "$node_pin" ]; then
+		echo no
+	else
+		echo unknown
+	fi
+}
+
+# pin_hex <pin> prints the 64 lower-case hex digits of a sha256:<hex> pin
+# (any case, colons between the bytes allowed, as seylo join --pin takes
+# it, the prefix optional), and fails for anything else (the base64
+# spellings).
+pin_hex() {
+	h=$(printf '%s' "$1" | tr -d ': \t\r' | tr '[:upper:]' '[:lower:]')
+	h=${h#sha256}
+	case $h in '' | *[!0-9a-f]*) return 1 ;; esac
+	[ "${#h}" -eq 64 ] || return 1
+	printf '%s\n' "$h"
 }
 
 # read_status runs seylo status and sets $status (all it printed), $state
