@@ -289,7 +289,8 @@ describe("domains ops", () => {
 
   test("when the primary domain goes live, first-run IP:port redirects to it and closes later", async () => {
     const { service, node } = setup();
-    setDnsLookups(fakeDns({}));
+    // Its record points at the node, so its route asks Let's Encrypt (acme-hold.test.ts has the domains that wait).
+    setDnsLookups(fakeDns({ a: { "shop.example.com": ["203.0.113.10"] } }));
     expect(openFirstRun(panel.deps.db, service.id)).toBe(true);
     const agent = fakeAgent(panel, node.id);
     agent.snapshot({ epoch: 1n, services: [{ serviceId: service.id, openPorts: [{ hostPort: 41203, containerPort: 3000 }] }] });
@@ -326,7 +327,7 @@ describe("domains ops", () => {
 
   test("a failed certificate shows its error, alerts once, and clears when the route goes live", async () => {
     const { service, node } = setup();
-    setDnsLookups(fakeDns({}));
+    setDnsLookups(fakeDns({ a: { "shop.example.com": ["203.0.113.10"] } }));
     const { body } = await callOp(panel, domainOps.add, { serviceId: service.id, host: "shop.example.com" }, { cookie });
     const agent = fakeAgent(panel, node.id);
     const failed = {

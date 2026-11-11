@@ -6,6 +6,7 @@ import type { Static } from "@sinclair/typebox";
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { PanelDb } from "../../db/client";
 import { domains } from "../../db/schema";
+import { acmeHeld } from "./acme-hold";
 import { originApplies } from "./origin";
 
 export type DomainRow = typeof domains.$inferSelect;
@@ -60,6 +61,7 @@ export function toDomain(row: DomainRow): Domain {
       expiresAt: row.certExpiresAt?.toISOString() ?? null,
       issuer,
       error: row.https !== "off" && row.certStatus === "failed" ? (row.certError ?? null) : null,
+      ...(acmeHeld(row) ? { waitingForDns: true } : {}),
     },
     liveAt: row.liveAt?.toISOString() ?? null,
     url: domainUrl(row),

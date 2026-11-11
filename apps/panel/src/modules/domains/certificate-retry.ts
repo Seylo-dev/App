@@ -6,17 +6,21 @@
 // validation against 5 per host name per hour, so retries are allowed
 // once a minute per domain and refused while DNS points elsewhere, or,
 // behind Cloudflare's proxy, while the origin check says the record there
-// points elsewhere.
+// points elsewhere. A domain whose certificate waits for DNS
+// (acme-hold.ts) has no ACME route on its nodes: the checks here release
+// it once they prove it, and the desired state that follows starts the
+// certificate instead of a retry.
 
 import { domains as domainOps, OpError, type OpOutput } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { userOf } from "../../auth/principal";
 import { domains } from "../../db/schema";
 import { implement, type OpContext } from "../../ops/implement";
+import { settleHold } from "./acme-hold";
 import { checkHost, type DnsResult, dnsLookups } from "./dns";
 import { invalidateService, type PlacedNode, serviceNodes } from "./lookup";
 import { requireDomain } from "./ops";
-import { checkOrigin, originApplies, saveOrigin } from "./origin";
+import { checkOrigin, originApplies, originProvable, saveOrigin } from "./origin";
 import { toDomain } from "./rows";
 
 /** "203.0.113.10" or "203.0.113.10 or 198.51.100.4": where the record should point. */
@@ -105,6 +109,14 @@ async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): P
     ctx.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: new Date() }).where(eq(domains.id, row.id)).run();
     invalidateService(ctx, row.serviceId, [domainOps.list.id]);
   }
+  // Behind Cloudflare's proxy the DNS answer hides where the record points; the origin check sees through it (origin.ts).
+  const check = originApplies(row, dns.status) ? await checkOrigin(ctx, row) : null;
+  if (check) saveOrigin(ctx, row, check.origin);
+  const hold = settleHold(ctx, row, {
+    dnsStatus: dns.status,
+    origin: check?.origin ?? null,
+    provable: check?.provable ?? originProvable(ctx, row.serviceId),
+  });
   if (dns.status === "missing" || dns.status === "wrongTarget") {
     throw new OpError(
       "CONFLICT",
@@ -112,17 +124,25 @@ async function retryOnNodes(ctx: OpContext, row: typeof domains.$inferSelect): P
       { reason: "dnsNotPointing", dnsStatus: dns.status },
     );
   }
-  // Behind Cloudflare's proxy the DNS answer hides where the record points; the origin check sees through it (origin.ts).
-  if (originApplies(row, dns.status)) {
-    const { origin } = await checkOrigin(ctx, row);
-    saveOrigin(ctx, row, origin);
-    if (origin === "elsewhere") {
-      throw new OpError(
-        "CONFLICT",
-        `${row.host} is behind Cloudflare's proxy, and the record there does not point at the service's node: something else answered. Let's Encrypt reaches the domain the same way, so a new certificate cannot be issued until that record points at ${nodeAddressText(nodes)}.`,
-        { reason: "originElsewhere" },
-      );
-    }
+  if (check?.origin === "elsewhere") {
+    throw new OpError(
+      "CONFLICT",
+      `${row.host} is behind Cloudflare's proxy, and the record there does not point at the service's node: something else answered. Let's Encrypt reaches the domain the same way, so a new certificate cannot be issued until that record points at ${nodeAddressText(nodes)}.`,
+      { reason: "originElsewhere" },
+    );
+  }
+  if (hold.held) {
+    throw new OpError(
+      "CONFLICT",
+      `${row.host} is behind Cloudflare's proxy, and requests through it did not reach the service's node. Let's Encrypt reaches the domain the same way, so its certificate waits until the record in Cloudflare points at ${nodeAddressText(nodes)}; it starts as soon as a check sees the domain reach the node.`,
+      { reason: "waitingForDns" },
+    );
+  }
+  if (hold.released) {
+    // This check released the hold: the desired state on its way asks Let's Encrypt, and the nodes have no ACME route to retry yet.
+    const updated = ctx.db.update(domains).set({ certStatus: "pending" }).where(eq(domains.id, row.id)).returning().get();
+    invalidateService(ctx, row.serviceId, [domainOps.list.id]);
+    return toDomain(updated);
   }
 
   const targets = nodesInDns(nodes, dns).filter((n) => ctx.agents.isOnline(n.id));

@@ -9,10 +9,11 @@ import { type DomainMiddlewares, domains } from "../../db/schema";
 import type { OpContext } from "../../ops/implement";
 import { implement } from "../../ops/implement";
 import { applyDomainLive } from "../exposures/logic";
+import { releases, settleHold } from "./acme-hold";
 import { checkCertificate, checkRedirects, hashBasicAuthPassword, normalizeCidrs } from "./checks";
 import { checkHost, dnsLookups, pointsTo } from "./dns";
 import { appPort, getService, invalidateService, type ServiceRow, serviceNodes } from "./lookup";
-import { checkOrigin, enqueueOriginCheck, originApplies, saveOrigin } from "./origin";
+import { checkOrigin, enqueueOriginCheck, originApplies, originProvable, saveOrigin } from "./origin";
 import { assertCertificateNames, assertHostAvailable, type HostCaller } from "./ownership";
 import { type DomainRow, getDomain, primaryDomain, serviceDomains, toDomain } from "./rows";
 
@@ -119,6 +120,9 @@ export const add = implement(domainOps.add, async (input, ctx) => {
   const targetPort = targetPortFor(ctx.db, service, input.targetPort);
   const nodes = serviceNodes(ctx.db, service.id);
   const dns = await checkHost(input.host, nodes, dnsLookups());
+  // DNS on the node already proves it; behind Cloudflare's proxy the origin check a few seconds from now may (acme-hold.ts).
+  const answer = { dnsStatus: dns.status, origin: null, provable: originProvable(ctx, service.id) };
+  const now = new Date();
   const row = ctx.db.transaction((tx) => {
     const makePrimary = !input.forward && (input.primary === true || !primaryDomain(tx, service.id));
     if (makePrimary) tx.update(domains).set({ isPrimary: false }).where(eq(domains.serviceId, service.id)).run();
@@ -132,8 +136,9 @@ export const add = implement(domainOps.add, async (input, ctx) => {
       forward: input.forward ?? null,
       isPrimary: makePrimary,
       dnsStatus: dns.status,
-      dnsCheckedAt: new Date(),
+      dnsCheckedAt: now,
       certStatus: https === "off" ? "none" : "pending",
+      acmeReleasedAt: releases({ forward: input.forward ?? null }, answer) ? now : null,
     });
   });
   afterChange(ctx, service.id);
@@ -147,11 +152,14 @@ export const checkDns = implement(domainOps.checkDns, async (input, ctx) => {
   const nodes = serviceNodes(ctx.db, input.serviceId);
   const dns = await checkHost(row.host, nodes, dnsLookups());
   // Behind Cloudflare's proxy only the origin check tells whether the record there points at the node.
-  const origin = originApplies(row, dns.status) ? (await checkOrigin(ctx, row)).origin : null;
+  const check = originApplies(row, dns.status) ? await checkOrigin(ctx, row) : null;
+  const origin = check?.origin ?? null;
   const checkedAt = new Date();
   ctx.db.update(domains).set({ dnsStatus: dns.status, dnsCheckedAt: checkedAt }).where(eq(domains.id, row.id)).run();
   const originChanged = saveOrigin(ctx, row, origin, checkedAt);
   if (dns.status !== row.dnsStatus && !originChanged) invalidateService(ctx, input.serviceId, [domainOps.list.id]);
+  // A domain whose certificate waited for this: its node asks Let's Encrypt now (acme-hold.ts).
+  settleHold(ctx, row, { dnsStatus: dns.status, origin, provable: check?.provable ?? originProvable(ctx, row.serviceId) }, checkedAt);
   return { domainId: row.id, host: row.host, checkedAt: checkedAt.toISOString(), ...dns, ...(origin ? { origin } : {}) };
 });
 

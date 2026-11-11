@@ -72,6 +72,15 @@ export const domains = sqliteTable(
      */
     originStatus: text("origin_status").$type<OriginStatus>(),
     originCheckedAt: timestamp("origin_checked_at"),
+    /**
+     * When the domain's route was first allowed to ask Let's Encrypt
+     * (modules/domains/acme-hold.ts): a check proved the domain reaches a
+     * node of the service, or nothing could prove it. Set once, never
+     * cleared; null while the hold may apply. Domains from before 0.2.8
+     * whose DNS was not missing or pointing elsewhere got it in the
+     * migration, so an update never takes HTTPS away from one.
+     */
+    acmeReleasedAt: timestamp("acme_released_at"),
     /** First time the route served with a valid certificate; starts the IP:port redirect-then-close. */
     liveAt: timestamp("live_at"),
     createdAt: createdAt(),

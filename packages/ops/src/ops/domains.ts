@@ -140,6 +140,17 @@ export const Domain = Type.Object({
     issuer: Type.Union([Type.String(), Type.Null()]),
     /** Why the last issue or renewal failed (status "failed"), as the node reported it. */
     error: Type.Union([Type.String(), Type.Null()]),
+    /**
+     * Set (true) while Let's Encrypt waits for DNS: the panel has not seen
+     * the custom domain reach a node of the service yet (DNS missing or
+     * pointing elsewhere, or behind Cloudflare's proxy without the origin
+     * check reaching the node), so the node serves it over plain HTTP and
+     * asks for no certificate, and failed validations do not use up Let's
+     * Encrypt's limits. The first check that proves it (domains.checkDns)
+     * starts the certificate. Never set for automatic domains, HTTPS modes
+     * custom and off, or a domain that has had a certificate.
+     */
+    waitingForDns: Type.Optional(Type.Boolean()),
   }),
   /** First time the route served with a valid certificate. */
   liveAt: Type.Union([Timestamp, Type.Null()]),
@@ -231,7 +242,7 @@ export const add = defineOp({
   kind: "mutation",
   summary: "Add a custom domain",
   description:
-    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
+    "Adds a custom domain (and optional path) to a service and returns it together with the DNS record to create. The route goes live once DNS points at the service's node and a certificate is issued. Until the panel sees the domain reach the node, its certificate waits (certificate.waitingForDns) and the node serves it over plain HTTP. Set forward to make it a redirect-only domain, for example www to the apex. When its DNS is ok or proxied, the panel checks a few seconds later, once the node has the route, that the domain reaches the node (the domain's origin in domains.list).",
   input: Type.Object({
     serviceId: Id,
     host: Hostname,
@@ -255,7 +266,7 @@ export const checkDns = defineOp({
   kind: "query",
   summary: "Check a domain's DNS",
   description:
-    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node. Also refreshes the stored status.",
+    "Resolves the domain through public resolvers now and classifies the answer (ok, missing, wrong target, Cloudflare proxied). Returns the records to create and a Cloudflare DNS link when the zone is on Cloudflare. For a custom domain that is ok or proxied it also checks that requests to it reach the service's node (origin: node, elsewhere or unknown), which tells whether a Cloudflare-proxied record points at the node. Also refreshes the stored status, and when the check shows a domain whose certificate waits for DNS reaching the node, the node asks Let's Encrypt for it right away.",
   input: Type.Object(DomainRef),
   output: DnsCheck,
   permission: byService("domains.view"),
@@ -349,7 +360,7 @@ export const retryCertificate = defineOp({
   kind: "mutation",
   summary: "Regenerate a domain's certificate",
   description:
-    "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise); behind Cloudflare's proxy the origin check runs too, and the op refuses (reason originElsewhere) while something other than the node answers. Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
+    "Asks Let's Encrypt again for the certificate of a domain whose certificate is pending or failed, without restarting the node's proxy: every other domain keeps serving. The domain's DNS must point at the service's node (it is checked now and the op refuses otherwise); behind Cloudflare's proxy the origin check runs too, and the op refuses (reason originElsewhere) while something other than the node answers, and (reason waitingForDns) while a domain whose certificate waits for DNS is not seen reaching the node; when the check shows it reaching the node, the certificate starts. Allowed once a minute per domain. Let's Encrypt itself allows 5 failed validations per host name per hour, so fix what the last error names before trying again. The domain shows certificate status pending until the node reports a certificate or a new failure.",
   input: Type.Object(DomainRef),
   output: Domain,
   permission: byService("domains.edit"),

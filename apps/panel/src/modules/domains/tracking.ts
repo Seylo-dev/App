@@ -1,7 +1,9 @@
 // Follows what agents report about routes (RouteStatus, route_id = domain
 // id) and keeps the domain rows current: certificate state, DNS mismatch,
 // and liveAt, the first time a route served. When the primary domain goes
-// live, first-run IP:port access switches to redirect-then-close.
+// live, first-run IP:port access switches to redirect-then-close. A domain
+// whose certificate waits for DNS (acme-hold.ts) is served over plain
+// HTTP, so its reports count only when they name a certificate.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { domains as domainOps, exposures as exposureOps } from "@seylo/ops";
@@ -10,12 +12,14 @@ import { and, eq } from "drizzle-orm";
 import { domains } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { applyDomainLive } from "../exposures/logic";
+import { acmeHeld } from "./acme-hold";
 import { invalidateService } from "./lookup";
 
 /** Applies one service's route reports; returns true when a row changed. */
 export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "alerts">, status: ServiceStatus, now = new Date()): boolean {
   let changed = false;
   let primaryWentLive = false;
+  let holdChanged = false;
   for (const route of status.routes) {
     const row = deps.db
       .select()
@@ -24,8 +28,12 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
       .get();
     if (!row) continue;
     const set: Partial<typeof domains.$inferInsert> = {};
+    const held = acmeHeld(row);
     switch (route.state) {
       case RouteState.ACTIVE:
+        // A held route is plain HTTP (acme-hold.ts): that it serves says nothing about a
+        // certificate, unless the report names one (from an ACME route the node had before).
+        if (held && !route.certificateExpiresAt) break;
         if (row.https === "acme" && row.certStatus !== "valid") {
           set.certStatus = "valid";
           // Let's Encrypt reached a node of the service: an "elsewhere" from before is out of date (origin.ts).
@@ -46,6 +54,8 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
         if (row.https === "acme" && row.certStatus !== "pending") set.certStatus = "pending";
         break;
       case RouteState.CERTIFICATE_FAILED:
+        // Nothing asks Let's Encrypt while held: a failure of the route from before is no reason for an alert.
+        if (held) break;
         if (row.https === "acme" && row.certStatus !== "failed") set.certStatus = "failed";
         if (row.https === "acme" && route.message && row.certError !== route.message) set.certError = route.message.slice(0, 1000);
         // One alert per failure streak; an ACTIVE report resolves it.
@@ -75,9 +85,11 @@ export function applyRouteStatus(deps: Pick<Deps, "db" | "agents" | "live" | "al
     if (Object.keys(set).length > 0) {
       deps.db.update(domains).set(set).where(eq(domains.id, row.id)).run();
       changed = true;
+      // A certificate after all ends the hold; the node's DNS check saying elsewhere starts one.
+      if (acmeHeld({ ...row, ...set }) !== held) holdChanged = true;
     }
   }
-  if (primaryWentLive && applyDomainLive(deps.db, status.serviceId, now)) {
+  if ((primaryWentLive && applyDomainLive(deps.db, status.serviceId, now)) || holdChanged) {
     deps.agents.desired.markDirty({ serviceId: status.serviceId });
   }
   if (changed) invalidateService(deps, status.serviceId, [domainOps.list.id, exposureOps.get.id]);

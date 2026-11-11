@@ -21,6 +21,7 @@ import { portExposures } from "../../db/schema";
 import type { Deps } from "../../deps";
 import { effectivePage, globalMaintenanceState, servicePageRow } from "../maintenance/page";
 import { effectiveToken, tunnelActive, tunnelRow } from "../tunnels/logic";
+import { acmeHeld } from "./acme-hold";
 import { serviceNodes } from "./lookup";
 import { type DomainRow, serviceDomains } from "./rows";
 
@@ -67,6 +68,8 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
       certificate = { certPem: pair.certPem, keyPem: pair.keyPem };
     }
   }
+  // Let's Encrypt waits for DNS (acme-hold.ts): plain HTTP until then, and no redirect to an HTTPS without a certificate.
+  const held = acmeHeld(row);
   return {
     id: row.id,
     hosts: [row.host],
@@ -74,9 +77,9 @@ export function domainRoute(deps: Pick<Deps, "secrets">, row: DomainRow): Route 
     stripPrefix: row.stripPrefix,
     targetPort: row.targetPort,
     // A custom certificate that cannot be opened falls back to ACME rather than breaking the route.
-    https: row.https === "custom" && !certificate ? HttpsMode.ACME : httpsModes[row.https],
+    https: held ? HttpsMode.OFF : row.https === "custom" && !certificate ? HttpsMode.ACME : httpsModes[row.https],
     certificate,
-    redirectToHttps: row.https !== "off" && row.redirectToHttps,
+    redirectToHttps: !held && row.https !== "off" && row.redirectToHttps,
     redirects,
     basicAuth: m.basicAuth?.users.length
       ? { users: m.basicAuth.users.map((u) => ({ username: u.username, passwordHash: u.hash })) }

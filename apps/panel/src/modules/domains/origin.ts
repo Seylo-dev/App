@@ -47,6 +47,7 @@ import { defineJob } from "../../jobs/queue";
 import { nodeHasCapability } from "../databases/capability";
 import { enqueueNext } from "../nodes/recurring";
 import { blockedTarget, checkTarget } from "../uptime/targets";
+import { settleHold } from "./acme-hold";
 import { invalidateService } from "./lookup";
 import type { DomainRow } from "./rows";
 
@@ -179,6 +180,18 @@ export interface OriginCheck {
    * yet (it was just added): the answer may change once it has.
    */
   waiting: boolean;
+  /** Some node of the service answers the check, so it can prove the domain (acme-hold.ts). */
+  provable: boolean;
+}
+
+/** Whether some node the service is placed on answers origin checks (the capability, live or as last advertised). */
+export function originProvable(deps: Pick<Deps, "db" | "agents">, serviceId: string): boolean {
+  return deps.db
+    .select({ id: servicePlacements.nodeId })
+    .from(servicePlacements)
+    .where(eq(servicePlacements.serviceId, serviceId))
+    .all()
+    .some((n) => nodeHasCapability(deps.db, deps.agents, n.id, originCapability));
 }
 
 /** The domain's origin now, against the nodes the service is placed on. */
@@ -200,12 +213,12 @@ export async function checkOrigin(
       return { ...n, capable: nodeHasCapability(deps.db, deps.agents, n.id, originCapability), routed };
     });
   const waiting = placed.some((n) => n.capable && !n.routed && deps.agents.isOnline(n.id));
-  if (!placed.some((n) => n.capable)) return { origin: "unknown", waiting: false };
+  if (!placed.some((n) => n.capable)) return { origin: "unknown", waiting: false, provable: false };
   const answer = await probeOrigin(row.host, placed, fetcher);
-  if (answer.kind === "proof") return { origin: "node", waiting: false };
+  if (answer.kind === "proof") return { origin: "node", waiting: false, provable: true };
   // Only a node that answers the check and has the route gives the proof for certain.
-  if (answer.kind === "other" && placed.every((n) => n.capable && n.routed)) return { origin: "elsewhere", waiting: false };
-  return { origin: "unknown", waiting };
+  if (answer.kind === "other" && placed.every((n) => n.capable && n.routed)) return { origin: "elsewhere", waiting: false, provable: true };
+  return { origin: "unknown", waiting, provable: true };
 }
 
 /** Stores an origin (null clears it); tells open screens when it changed. Returns whether it did. */
@@ -245,7 +258,8 @@ export function enqueueOriginCheck(deps: Pick<Deps, "jobs">, domainId: string, n
  * The origin check after domains.add. While an online node has not
  * reported the route it runs again 10 s later (4 tries), since whatever
  * answers before the route is there (Traefik's 404, the app) is no proof
- * either way.
+ * either way. A proof releases a domain whose certificate waits for it
+ * (acme-hold.ts), so its node asks Let's Encrypt right away.
  */
 export const originCheckJob = defineJob<{ domainId: string; tries?: number }>({
   type: originCheckJobType,
@@ -260,5 +274,6 @@ export const originCheckJob = defineJob<{ domainId: string; tries?: number }>({
       return;
     }
     saveOrigin(ctx, row, check.origin);
+    settleHold(ctx, row, { dnsStatus: row.dnsStatus, origin: check.origin, provable: check.provable });
   },
 });
