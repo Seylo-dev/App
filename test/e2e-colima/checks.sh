@@ -4502,7 +4502,7 @@ check_42() {
   preview=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42")") || { bad "serviceTransfer.importBegin failed"; return 1; }
   imp=$(printf '%s' "$preview" | jq -r .importId)
   ev "import preview: $(printf '%s' "$preview" | jq -c '{service: .service.name, blockers, needs, domains: [.domains[] | {host, status, action}], data: .data.volumes, samePanel: .file.samePanel}')"
-  expect "its own domain is in use on this panel, so it is skipped" json_ok "$preview" "[.domains[] | select(.host==\"$host\" and .status==\"usedHere\" and .action==\"skip\")] | length == 1"
+  expect "its old automatic domain is not recreated (auto, skip): C gets one of its own" json_ok "$preview" "[.domains[] | select(.host==\"$host\" and .status==\"auto\" and .action==\"skip\")] | length == 1"
   expect "its volume's data is in the file and picked" json_ok "$preview" '[.data.volumes[] | select(.name=="data" and .inFile and .include)] | length == 1'
   ref=$(jq -nc --arg p "$(project_id e2e-imports)" --arg i "$imp" '{projectId:$p, importId:$i}')
   preview=$(api serviceTransfer.setChoices "$(printf '%s' "$ref" | jq -c --arg n "$nc" '. + {choices:{nodeId:$n, autoDomain:true, deployWhenReady:false}}')") ||
@@ -4522,7 +4522,8 @@ check_42() {
   envsrc=$(api env.get "{\"serviceId\":\"$src\"}" | jq -r .text)
   envnew=$(api env.get "{\"serviceId\":\"$newid\"}" | jq -r .text)
   expect "the env came along as it was" test "$envsrc" = "$envnew"
-  expect "the cron job came along" json_ok "$(api cron.list "{\"serviceId\":\"$newid\"}")" '[.jobs[] | select(.name=="tick" and .enabled)] | length == 1'
+  # Imported on the same panel, cron jobs arrive off so nothing runs twice.
+  expect "the cron job came along, off on the same panel" json_ok "$(api cron.list "{\"serviceId\":\"$newid\"}")" '[.jobs[] | select(.name=="tick" and (.enabled | not))] | length == 1'
   api services.start "{\"serviceId\":\"$newid\"}" >/dev/null || bad "services.start (first deploy of the import) failed"
   st=$(wait_deploy "$newid" 300)
   expect "the import's first deploy on C went live" test "$st" = live
@@ -4561,7 +4562,9 @@ check_42() {
 
   # The sources are untouched.
   expect "the source still answers on B" sh -c 'curl -fsS -m 5 -u e2e:e2e-basic-pass -H "Host: $1" "http://$2/" | grep -q Hostname' _ "$host" "$(node_ip b)"
-  expect "its marker is still on B" test "$(api files.read "{\"serviceId\":\"$src\",\"volume\":\"data\",\"path\":\"/marker.txt\"}" | jq -r '.content // .text // empty')" = "$marker"
+  # Read into a variable first: an escaped-quote JSON inside "$(...)" splits under older bash.
+  got=$(api files.read "{\"serviceId\":\"$src\",\"volume\":\"data\",\"path\":\"/marker.txt\"}" | jq -r '.content // .text // empty')
+  expect "its marker is still on B ($got)" test "$got" = "$marker"
   expect "xferdb on B still has its row" test "$(pg_exec b "$db" "select note from marker" | tr -d '\r')" = "$dbmark"
 
   [ -n "$prevwild" ] || api nodes.updateSettings "{\"nodeId\":\"$nc\",\"wildcardDomain\":null}" >/dev/null || true
