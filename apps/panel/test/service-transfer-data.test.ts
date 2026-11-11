@@ -18,9 +18,11 @@ import {
 } from "@seylo/ops";
 import { eq } from "drizzle-orm";
 import { auditLog, backupRuns, nodes, serviceDatabases, serviceExports, serviceImports, serviceSecrets, services } from "../src/db/schema";
+import { engineVersion } from "../src/modules/databases/engines";
 import { adminPasswordSecret, retiredExposedPasswordSecret, writeSecret } from "../src/modules/databases/info";
 import { workInFlight } from "../src/modules/panelMove/preflight";
 import { transfersInFlight } from "../src/modules/services/copies";
+import { readSpec } from "../src/modules/services/spec";
 import { exportWatch, recoverExports } from "../src/modules/serviceTransfer/export-stream";
 import { uploadWatch } from "../src/modules/serviceTransfer/import-data";
 import { releaseSource } from "../src/modules/updates/manifest";
@@ -700,6 +702,109 @@ describe("import with volume data", () => {
     const got = await callOp(b.panel, dbOps.get, { serviceId: newId }, { cookie: b.cookie });
     expect(got.status).toBe(200);
     expect(got.body.exposure).toMatchObject({ enabled: false, state: "off" });
+  });
+
+  test("data from a newer release of its line keeps that release; never an older image under newer data", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    await callOp(
+      a.panel,
+      dbOps.create,
+      { projectId: a.projectId, name: "my", engine: "mysql", nodeId: a.nodeId, version: "8.0" },
+      { cookie: a.cookie },
+    );
+    const my = a.panel.deps.db.select().from(services).where(eq(services.name, "my")).get()?.id as string;
+    const catalog = engineVersion("mysql", "8.0")?.image as string;
+    expect(catalog).toBe("mysql:8.0.43");
+    // As databases.setVersion leaves it (a custom image of the line), or a newer panel's catalog.
+    const spec = readSpec(a.panel.deps.db.select().from(services).where(eq(services.id, my)).get()?.spec);
+    a.panel.deps.db
+      .update(services)
+      .set({ spec: { ...spec, source: { type: "image", image: "mysql:8.0.44", registryId: null } } })
+      .where(eq(services.id, my))
+      .run();
+    const rows = new Uint8Array(gzipSync(Buffer.from("rows written by 8.0.44")));
+    putVolume(a, my, "data", rows);
+    const zip = (await exportZip(a, my, { volumes: ["data"] })).bytes;
+    const reasons = (issues: { reason: string }[]) => issues.map((i) => i.reason);
+    const imageWarning = (preview: { warnings: { reason: string; message: string }[] }) =>
+      preview.warnings.find((w) => w.reason === "databaseImage")?.message;
+
+    // With the data: it keeps 8.0.44, which databases.setVersion takes; 8.0.43 would refuse the data files.
+    const { ref, preview } = await imported(b, zip);
+    expect(preview.blockers).toEqual([]);
+    expect(preview.service.source.label).toBe("mysql:8.0.44");
+    expect(imageWarning(preview)).toBe(
+      `It ran mysql:8.0.44, newer than ${catalog}, this panel's image of MySQL 8.0. It keeps mysql:8.0.44: its data cannot go back to an older release.`,
+    );
+    const made = await callOp(b.panel, transferOps.importService, ref, { cookie: b.cookie });
+    expect(made.status).toBe(200);
+    const newId = made.body.service.id as string;
+    expect(readSpec(b.panel.deps.db.select().from(services).where(eq(services.id, newId)).get()?.spec).source).toEqual({
+      type: "image",
+      image: "mysql:8.0.44",
+      registryId: null,
+    });
+    expect(b.panel.deps.db.select().from(serviceDatabases).where(eq(serviceDatabases.serviceId, newId)).get()?.version).toBe("8.0");
+    expect((await put(b, ref, "services/my/volumes/data.tar.gz", 0, rows)).body.done).toBe(true);
+    // The Version card judges from what it runs: the catalog's 8.0.43 is a downgrade.
+    const choices = await callOp(b.panel, dbOps.versionChoices, { serviceId: newId }, { cookie: b.cookie });
+    expect(choices.body.image).toBe("mysql:8.0.44");
+    expect(choices.body.choices.find((c: { version: string }) => c.version === "8.0")).toMatchObject({
+      image: catalog,
+      allowed: false,
+      reason: "olderImage",
+    });
+
+    // Without the data an empty database starts on the catalog image, and can move up once it runs.
+    const empty = await imported(b, zip, { volumes: [] });
+    expect(empty.preview.blockers).toEqual([]);
+    expect(empty.preview.service.source.label).toBe(catalog);
+    expect(imageWarning(empty.preview)).toBe(
+      `It ran mysql:8.0.44; it starts here on ${catalog}, this panel's image of MySQL 8.0. Once it runs, change it to mysql:8.0.44 on the Version card of its Settings tab.`,
+    );
+
+    // A newer image databases.setVersion would not take (another line, another repository): the data cannot go up.
+    for (const image of ["mysql:8.4.6", "evil/mysql:9.9"]) {
+      const crafted = await craft(zip, b.projectId, (plain) => {
+        plain.services.my.doc.spec.source.image = image;
+      });
+      const refused = await callOp(b.panel, transferOps.importBegin, crafted, { cookie: b.cookie });
+      expect(refused.status).toBe(200);
+      expect(refused.body.blockers).toEqual([
+        {
+          reason: "databaseImage",
+          field: "volumes",
+          message: `Its data was written by ${image}, newer than ${catalog}, this panel's image of MySQL 8.0, and data cannot go back to an older release. Update this panel, or leave the data out to start with an empty database.`,
+        },
+      ]);
+      const ref2 = { projectId: b.projectId, importId: refused.body.importId as string };
+      const without = await callOp(b.panel, transferOps.setChoices, { ...ref2, choices: { volumes: [] } }, { cookie: b.cookie });
+      expect(reasons(without.body.blockers)).toEqual([]);
+      expect(without.body.service.source.label).toBe(catalog);
+      expect(imageWarning(without.body)).toBe(`It ran ${image}; it starts here on ${catalog}, this panel's image of MySQL 8.0.`);
+      await callOp(b.panel, transferOps.discardImport, ref2, { cookie: b.cookie });
+    }
+
+    // An older release under the data starts on the catalog image: a patch update.
+    const older = await craft(zip, b.projectId, (plain) => {
+      plain.services.my.doc.spec.source.image = "mysql:8.0.40";
+    });
+    const up = await callOp(b.panel, transferOps.importBegin, older, { cookie: b.cookie });
+    expect(up.body.blockers).toEqual([]);
+    expect(up.body.service.source.label).toBe(catalog);
+    expect(imageWarning(up.body)).toBe(`It ran mysql:8.0.40; it starts here on ${catalog}, this panel's image of MySQL 8.0.`);
+
+    // A database is never pinned to a digest: the file's digest is of the image it ran, not of the one here.
+    const pinned = await craft(zip, b.projectId, (plain) => {
+      plain.services.my.doc.live = { commitSha: null, branch: null, imageDigest: `sha256:${"a".repeat(64)}`, deployedAt: null };
+    });
+    const begun = await callOp(b.panel, transferOps.importBegin, pinned, { cookie: b.cookie });
+    expect(begun.body.source.imageDigest).toBeNull();
+    const ref3 = { projectId: b.projectId, importId: begun.body.importId as string };
+    const pin = await callOp(b.panel, transferOps.setChoices, { ...ref3, choices: { pinDigest: true } }, { cookie: b.cookie });
+    expect(pin.body.choices.pinDigest).toBe(false);
+    expect(pin.body.service.source.label).toBe("mysql:8.0.44");
   });
 });
 

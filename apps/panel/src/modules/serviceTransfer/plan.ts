@@ -32,6 +32,7 @@ import { checkSchedule } from "../cron/index";
 import { missingExposureCapability, nodeHasCapability } from "../databases/capability";
 import {
   databaseSpec,
+  type EngineVersion,
   engines,
   enginesCapability,
   engineVersion,
@@ -40,6 +41,7 @@ import {
   generatePassword,
 } from "../databases/engines";
 import { adminPasswordSecret } from "../databases/info";
+import { compareVersions, customImage, imageRelease } from "../databases/version";
 import { hasBuildx } from "../deployments/source";
 import { checkCertificate, checkRedirects, normalizeCidrs } from "../domains/checks";
 import { assertCertificateNames, hostConflict } from "../domains/ownership";
@@ -132,6 +134,63 @@ function message(error: unknown): string {
   return error instanceof OpError ? error.message : "It does not pass this panel's checks.";
 }
 
+/** What an imported database starts on, and what the review page says about it. */
+export interface DatabaseImage {
+  image: string;
+  warning: string | null;
+  /** The file's data cannot start on any image this panel would run. */
+  blocker: string | null;
+}
+
+/**
+ * The image an imported database starts on: this panel's catalog image of
+ * its version, unless its data comes along and the file ran a newer release
+ * of that line. Data files do not go back to an older release (judgeVersion
+ * refuses it as olderImage), so it keeps that release when
+ * databases.setVersion would take it (customImage: the engine's official
+ * image with an exact tag of the line), and the data is refused when not.
+ * Without the data an empty database starts on the catalog image.
+ */
+export function importedDatabaseImage(
+  engine: DatabaseEngine,
+  variant: string | null,
+  version: EngineVersion,
+  ran: string | null,
+  withData: boolean,
+): DatabaseImage {
+  const catalog = version.image;
+  if (!ran || ran === catalog) return { image: catalog, warning: null, blocker: null };
+  const label = engines[engine].label;
+  const theirs = imageRelease(ran);
+  const ours = imageRelease(catalog);
+  const newer = theirs !== null && ours !== null && compareVersions(theirs, ours) > 0;
+  let kept: string | null = null;
+  try {
+    kept = newer ? customImage(engine, variant, version.version, ran) : null;
+  } catch {
+    kept = null;
+  }
+  const here = `${catalog}, this panel's image of ${label} ${version.version}`;
+  if (newer && withData) {
+    if (kept)
+      return {
+        image: kept,
+        warning: `It ran ${ran}, newer than ${here}. It keeps ${kept}: its data cannot go back to an older release.`,
+        blocker: null,
+      };
+    return {
+      image: catalog,
+      warning: null,
+      blocker: `Its data was written by ${ran}, newer than ${here}, and data cannot go back to an older release. Update this panel, or leave the data out to start with an empty database.`,
+    };
+  }
+  return {
+    image: catalog,
+    warning: `It ran ${ran}; it starts here on ${here}.${kept ? ` Once it runs, change it to ${kept} on the Version card of its Settings tab.` : ""}`,
+    blocker: null,
+  };
+}
+
 export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choicesIn: Choices): Plan {
   const { doc, manifest, secrets } = opened;
   const projectId = row.projectId;
@@ -171,6 +230,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
   // Database and Box: what runs comes from the engine; the file only names it.
   const isDatabase = databaseKinds.has(doc.kind);
   let databaseSpecOf: ReturnType<typeof databaseSpec> | null = null;
+  let databaseVersion: EngineVersion | null = null;
   let dataPath: string | null = null;
   if (isDatabase) {
     const engineName = doc.kind as DatabaseEngine;
@@ -185,16 +245,12 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
         message: `${engine.label} ${db.version}${db.variant ? ` with ${db.variant}` : ""} is not offered on this panel.`,
       });
     else {
-      // This panel's image of the version, as databases.create runs it: a file names the one it ran, which may be
-      // older (a panel that was not updated) or a custom one from databases.setVersion.
+      // This panel's image of the version, as databases.create runs it; the image once the data is known
+      // (importedDatabaseImage): a file names the one it ran, which may be older (a panel that was not updated),
+      // newer, or a custom one from databases.setVersion.
       databaseSpecOf = databaseSpec(engineName, version);
+      databaseVersion = version;
       dataPath = version.dataPath;
-      const ran = doc.spec.source.type === "image" ? doc.spec.source.image : null;
-      if (ran && ran !== version.image)
-        warnings.push({
-          reason: "databaseImage",
-          message: `It ran ${ran}; it starts here on ${version.image}, this panel's image of ${engine.label} ${version.version}. Change it on the Version card of its Settings tab.`,
-        });
       if (
         !Value.Check(dbOps.create.input.properties.user, db.adminUser) ||
         (engine.hasDatabase && !Value.Check(dbOps.create.input.properties.database, db.databaseName))
@@ -318,7 +374,9 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
   const live = doc.live;
   const repo = doc.spec.source.type === "github" || doc.spec.source.type === "git" || doc.spec.source.type === "provider";
   const commit = choicesIn.commit ?? (repo && live?.commitSha ? "live" : "head");
-  const pinDigest = choicesIn.pinDigest ?? false;
+  // Only a source from the file: a database's or Box's image is this panel's (a digest is never a database image).
+  const ownSource = !isDatabase && doc.kind !== "box";
+  const pinDigest = ownSource && (choicesIn.pinDigest ?? false);
   if (pinDigest && spec.source.type === "image" && live?.imageDigest) {
     spec.source = { ...spec.source, image: `${spec.source.image.split("@")[0]}@${live.imageDigest}` };
   }
@@ -862,6 +920,13 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       }
     }
   }
+  if (isDatabase && databaseVersion && doc.database && spec.source.type === "image") {
+    const ran = doc.spec.source.type === "image" ? doc.spec.source.image : null;
+    const chosen = importedDatabaseImage(doc.kind as DatabaseEngine, doc.database.variant, databaseVersion, ran, picked.length > 0);
+    spec.source = { ...spec.source, image: chosen.image };
+    if (chosen.warning) warnings.push({ reason: "databaseImage", message: chosen.warning });
+    if (chosen.blocker) blockers.push({ reason: "databaseImage", message: chosen.blocker, field: "volumes" });
+  }
   for (const v of inFile.filter((f) => !picked.includes(f.volume)))
     skipped.push({ what: `The data of volume ${v.volume}`, why: "It was left out, so the volume arrives empty." });
   const withoutData = doc.volumes.filter((v) => v.data === null).map((v) => v.name);
@@ -923,7 +988,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     source: {
       access: { picked: pick, options: access.options, wanted: access.wanted },
       commitSha: live?.commitSha ?? null,
-      imageDigest: live?.imageDigest ?? null,
+      imageDigest: ownSource ? (live?.imageDigest ?? null) : null,
     },
     extras: {
       cronJobs: cronJobs.length,

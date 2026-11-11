@@ -3646,9 +3646,18 @@ members never hold them. Every op is `mcp: false`.
   `domains.add`). Database and Box specs are built from the engine
   (`databaseSpec`, `boxSpec`), never taken from the file: a database runs
   this panel's catalog image of its version, whatever image the file says
-  it ran (a `databaseImage` warning names both; a newer one is set again
-  on the Version card), and a version the panel does not offer blocks
-  (`engineVersion`). One user inside and through the exposed port (0.2.9):
+  it ran (a `databaseImage` warning names both), and a version the panel
+  does not offer blocks (`engineVersion`). The one exception is data
+  written by a newer release of the line (`importedDatabaseImage`): data
+  files do not go back (`judgeVersion`'s `olderImage`), so with its data
+  the database keeps the file's image when `customImage` takes it (what
+  `databases.setVersion` would set), and a newer one it does not take
+  blocks the data (`databaseImage`, field `volumes`: leave it out or
+  update the panel). Without the data an empty database starts on the
+  catalog image, and a newer custom one is set again on the Version card
+  once it runs. `pinDigest` only pins a source from the file: a database's
+  or Box's image is never pinned to the file's digest (their
+  `source.imageDigest` is null). One user inside and through the exposed port (0.2.9):
   the export leaves out `service_databases.exposed_user` and the
   `exposed_password` of a database from before 0.2.9, the import writes
   `exposed_user` "" and only `admin_password`, and a file from before

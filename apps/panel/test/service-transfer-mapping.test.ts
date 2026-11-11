@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import {
   backupDestinations,
   backupPolicies,
+  type DatabaseEngine,
   gitCredentials,
   githubApps,
   githubInstallations,
@@ -15,10 +16,11 @@ import {
   services,
   volumes,
 } from "../src/db/schema";
-import { engineVersion, exposureCapability } from "../src/modules/databases/engines";
+import { type EngineVersion, engineVersion, exposureCapability } from "../src/modules/databases/engines";
 import { adminPasswordSecret, retiredExposedPasswordSecret } from "../src/modules/databases/info";
 import { generateDeployKey } from "../src/modules/git/remote";
 import { readSpec } from "../src/modules/services/spec";
+import { importedDatabaseImage } from "../src/modules/serviceTransfer/plan";
 import { setTargetResolver } from "../src/modules/uptime/targets";
 import { callOp, createApiKey, createUser } from "./helpers";
 import { begin, closeSides, craft, entriesOf, exportZip, type Side, sha, side } from "./transfer-helpers";
@@ -554,7 +556,7 @@ describe("databases", () => {
     const catalog = engineVersion("mongo", "8.0")?.image as string;
     expect(catalog).not.toBe("mongo:8.0.12");
     expect(begun.body.warnings.find((w: { reason: string }) => w.reason === "databaseImage")?.message).toBe(
-      `It ran mongo:8.0.12; it starts here on ${catalog}, this panel's image of MongoDB 8.0. Change it on the Version card of its Settings tab.`,
+      `It ran mongo:8.0.12; it starts here on ${catalog}, this panel's image of MongoDB 8.0.`,
     );
     const done = await callOp(
       b.panel,
@@ -567,6 +569,37 @@ describe("databases", () => {
     expect(spec.source).toEqual({ type: "image", image: catalog, registryId: null });
     const fresh = await begin(b, (await exportZip(b, done.body.service.id)).bytes);
     expect(fresh.body.warnings.map((w: { reason: string }) => w.reason)).not.toContain("databaseImage");
+  });
+
+  test("importedDatabaseImage: newer data keeps its release only as databases.setVersion would take it", () => {
+    const pick = (engine: DatabaseEngine, variant: string | null, line: string, ran: string | null, withData = true) =>
+      importedDatabaseImage(engine, variant, engineVersion(engine, line, variant) as EngineVersion, ran, withData);
+    // Same image, or none named: the catalog's, nothing to say.
+    expect(pick("postgres", null, "17", "postgres:17.6-alpine")).toEqual({ image: "postgres:17.6-alpine", warning: null, blocker: null });
+    expect(pick("postgres", null, "17", null)).toEqual({ image: "postgres:17.6-alpine", warning: null, blocker: null });
+    // A newer patch on the catalog's base system is kept, normalized like setVersion stores it.
+    expect(pick("postgres", null, "17", "docker.io/library/postgres:17.7-alpine")).toMatchObject({
+      image: "postgres:17.7-alpine",
+      blocker: null,
+    });
+    expect(pick("postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg17-trixie").image).toBe("pgvector/pgvector:0.8.8-pg17-trixie");
+    expect(pick("mongo", null, "8.0", "mongo:8.0.40").image).toBe("mongo:8.0.40");
+    expect(pick("clickhouse", null, "26.3", "clickhouse/clickhouse-server:26.3.70.1").image).toBe("clickhouse/clickhouse-server:26.3.70.1");
+    // Newer on another base system, or an engine that takes the catalog's image only: the data is refused.
+    for (const [engine, line, ran] of [
+      ["postgres", "17", "postgres:17.7-trixie"],
+      ["dragonfly", "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.9"],
+      ["mariadb", "11.4", "mariadb:11.8.2"],
+    ] as const) {
+      const got = pick(engine, null, line, ran);
+      expect(got.image).toBe(engineVersion(engine, line)?.image as string);
+      expect(got.blocker).toContain(`Its data was written by ${ran}, newer than`);
+      // Without the data nothing is refused: an empty database on the catalog image.
+      expect(pick(engine, null, line, ran, false)).toMatchObject({ blocker: null, image: engineVersion(engine, line)?.image });
+    }
+    // A digest has no release to compare (KeyDB's catalog image is one): the catalog image.
+    expect(pick("keydb", null, "6.3", "eqalpha/keydb:x86_64_v6.3.5")).toMatchObject({ blocker: null });
+    expect(pick("redis", null, "7.4", `redis@sha256:${"b".repeat(64)}`)).toMatchObject({ image: "redis:7.4.5-alpine", blocker: null });
   });
 
   test("listeners follow databases.setExposure here: none for a version without TLS or a node too old to keep it TLS only", async () => {
