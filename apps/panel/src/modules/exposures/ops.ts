@@ -58,6 +58,7 @@ export const get = implement(exposureOps.get, (input, ctx) => {
   let database: { host: string; port: number; allowedCidrs: string[] } | null = null;
   if (findDatabase(ctx.db, input.serviceId)) {
     const info = loadDatabase(ctx, input.serviceId);
+    // None while the node's agent is too old to keep the port TLS only: it is closed there.
     const address = exposedAddress(info);
     if (address?.port && info.exposure) database = { host: address.host, port: address.port, allowedCidrs: info.exposure.allowedCidrs };
   }

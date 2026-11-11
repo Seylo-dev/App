@@ -2,7 +2,9 @@
 // exposure row and the internal and exposed connection details. Env
 // references (${{db.INTERNAL_URL}}), the connection op and the desired
 // state all use this, so they always agree. The exposed connection uses
-// the database's own user and password, over TLS only.
+// the database's own user and password, over TLS only, and reads as closed
+// while the node's agent is too old to keep the port TLS only
+// (exposureWaitsFor), as the desired state keeps it.
 
 import { OpError } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
@@ -11,6 +13,7 @@ import { portExposures, serviceDatabases, serviceSecrets } from "../../db/schema
 import type { Deps } from "../../deps";
 import type { SecretBox } from "../../security/secret-box";
 import { getService, nodeAddress, type PlacedNode, type ServiceRow, serviceNodes } from "../domains/lookup";
+import { missingExposureCapability } from "./capability";
 import { type Credentials, connectionUrl, type Engine, engines, exposureRefusal, httpUrl } from "./engines";
 
 type Tx = Parameters<Parameters<PanelDb["transaction"]>[0]>[0];
@@ -34,6 +37,14 @@ export interface DatabaseInfo {
   /** Inside and through the exposed port alike. */
   admin: Credentials;
   exposure: ExposureRow | null;
+  /**
+   * The capability the node's agent lacks to keep the exposed port TLS only
+   * (missingExposureCapability, from the node's stored facts as the desired
+   * state reads them); null when it has it or exposure is off. While set,
+   * the row is kept but the port is closed (databaseRuntime), and every
+   * reader says so: exposedAddress and exposedConnection are null.
+   */
+  exposureWaitsFor: string | null;
 }
 
 export function readSecret(deps: Pick<Deps, "db" | "secrets">, serviceId: string, name: string): string | null {
@@ -72,14 +83,22 @@ export function loadDatabase(deps: Pick<Deps, "db" | "secrets">, serviceId: stri
           .where(and(eq(portExposures.serviceId, serviceId), eq(portExposures.kind, "database")))
           .get() ?? null)
       : null;
+  const node = serviceNodes(deps.db, serviceId)[0] ?? null;
   return {
     service,
     row,
     engine,
-    node: serviceNodes(deps.db, serviceId)[0] ?? null,
+    node,
     admin: { user: row.adminUser, password: adminPassword, database: row.databaseName },
     exposure,
+    exposureWaitsFor: exposure && node ? missingExposureCapability(deps.db, null, engine, node.id) : null,
   };
+}
+
+/** databases.get exposure.state: "waitingForNodeUpdate" while exposure is on and the node's agent is too old for it. */
+export function exposureState(info: DatabaseInfo): "off" | "open" | "waitingForNodeUpdate" {
+  if (!info.exposure) return "off";
+  return info.exposureWaitsFor ? "waitingForNodeUpdate" : "open";
 }
 
 export interface Connection {
@@ -107,9 +126,12 @@ export function internalConnection(info: DatabaseInfo): Connection & { httpUrl?:
   };
 }
 
-/** Host and port people connect to from outside; null while exposure is off or the port is not known yet. */
+/**
+ * Host and port people connect to from outside (port null until the agent
+ * reports it); null while exposure is off or waits for the node's update.
+ */
 export function exposedAddress(info: DatabaseInfo): { host: string; port: number | null } | null {
-  if (!info.exposure) return null;
+  if (!info.exposure || info.exposureWaitsFor) return null;
   const host = info.row.tlsHostname ?? (info.node ? nodeAddress(info.node) : null);
   if (!host) return null;
   return { host, port: info.exposure.listenPort > 0 ? info.exposure.listenPort : null };

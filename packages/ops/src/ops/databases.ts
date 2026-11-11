@@ -61,7 +61,16 @@ export const ConnectionSummary = Type.Object({
 
 export const DatabaseExposure = Type.Object({
   enabled: Type.Boolean(),
-  /** Node public address (or tlsHostname) and the agent-owned port. Null while closed. */
+  /**
+   * "off" while exposure is off, "open" while the node keeps the port open.
+   * "waitingForNodeUpdate" while exposure is on but the node's agent cannot
+   * keep this engine's port TLS only yet (Postgres, MySQL and MariaDB need
+   * an agent from 0.2.9): the port stays closed and host, port and the
+   * exposed URL are null, and the setting is kept, so the port opens by
+   * itself once the node is updated.
+   */
+  state: Type.Union([Type.Literal("off"), Type.Literal("open"), Type.Literal("waitingForNodeUpdate")]),
+  /** Node public address (or tlsHostname) and the agent-owned port. Null while closed (state is not "open"). */
   host: Type.Union([Type.String(), Type.Null()]),
   port: Type.Union([PublicPort, Type.Null()]),
   /** The user for exposed access: the database's own (internal.user), over TLS only. */
@@ -128,7 +137,7 @@ export const DatabaseConnection = Type.Object({
     /** ClickHouse only: the HTTP interface's URL (port 8123), with the password. */
     httpUrl: Type.Optional(Type.String()),
   }),
-  /** Null while exposure is off. */
+  /** Null while exposure is off or waits for the node's update (Database exposure.state). */
   exposed: Type.Union([
     Type.Object({
       url: Type.String(),

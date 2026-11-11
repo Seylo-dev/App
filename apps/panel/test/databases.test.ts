@@ -24,7 +24,7 @@ import { publishDeploymentChange } from "../src/modules/deployments/store";
 import { deploymentEnv, resolveServiceEnv, sealDeploymentEnv } from "../src/modules/env/desired";
 import { ensureEdgeTicketKey } from "../src/security/edge-ticket-key";
 import { callOp, createUser, grant, type TestPanel, testPanel } from "./helpers";
-import { fakeAgent, seedNode, seedProject, settleDeploys } from "./seed-helpers";
+import { fakeAgent, seedNode, seedProject, seedService, settleDeploys } from "./seed-helpers";
 
 let panel: TestPanel;
 let cookie: string;
@@ -813,8 +813,59 @@ describe("more engines", () => {
     // The node went back to an older agent: the compiled spec keeps the port closed, and the op refuses.
     advertise(node.id, []);
     expect(databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure).toEqual({ enabled: false });
+    expect((await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure.state).toBe("waitingForNodeUpdate");
     const again = await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie });
     expect(again.status).toBe(409);
     expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: false }, { cookie })).status).toBe(200);
+  });
+
+  test("an exposure the node's agent cannot keep TLS only reads as closed everywhere until the node is updated", async () => {
+    const { res, node, project } = await createDb("postgres");
+    const serviceId = res.body.serviceId;
+    expect(res.body.exposure.state).toBe("off");
+    expect((await callOp(panel, dbOps.setExposure, { serviceId, enabled: true }, { cookie })).status).toBe(200);
+    // The port the agent picked.
+    panel.deps.db.update(portExposures).set({ listenPort: 45432 }).where(eq(portExposures.serviceId, serviceId)).run();
+    const worker = seedService(panel, { projectId: project.id, name: "worker", nodeIds: [node.id] });
+    const text = "OUT=${{shop-db.EXPOSED_URL}}\nOUT_HOST=${{shop-db.EXPOSED_HOST}}\nOUT_PORT=${{shop-db.EXPOSED_PORT}}\n";
+    expect((await callOp(panel, envOps.set, { serviceId: worker.id, text }, { cookie })).status).toBe(200);
+    const read = async () => {
+      const env = Object.fromEntries(resolveServiceEnv(panel.deps, worker.id).map((v) => [v.name, v.value]));
+      const analyzed = await callOp(panel, envOps.analyze, { serviceId: worker.id }, { cookie });
+      return {
+        exposure: (await callOp(panel, dbOps.get, { serviceId }, { cookie })).body.exposure,
+        exposed: (await callOp(panel, dbOps.connection, { serviceId }, { cookie })).body.exposed,
+        access: (await callOp(panel, exposureOps.get, { serviceId }, { cookie })).body.database,
+        env: { OUT: env.OUT, OUT_HOST: env.OUT_HOST, OUT_PORT: env.OUT_PORT },
+        problems: analyzed.body.diagnostics.map((d: { code: string }) => d.code),
+        runtime: databaseRuntime(panel.deps, serviceId, node.id)?.database.exposure,
+      };
+    };
+    const open = await read();
+    expect(open.exposure).toMatchObject({ enabled: true, state: "open", host: "203.0.113.10", port: 45432 });
+    expect(open.exposed?.url).toContain("@203.0.113.10:45432/");
+    expect(open.access).toMatchObject({ host: "203.0.113.10", port: 45432 });
+    expect(open.env).toEqual({ OUT: open.exposed.url, OUT_HOST: "203.0.113.10", OUT_PORT: "45432" });
+    expect(open.problems).toEqual([]);
+    expect(open.runtime).toMatchObject({ enabled: true, hostPort: 45432 });
+
+    // The node still runs an agent from before 0.2.9: the desired state keeps the port closed, and so does every reader.
+    advertise(node.id, [enginesCapability]);
+    const waiting = await read();
+    expect(waiting.runtime).toEqual({ enabled: false });
+    // The setting is kept (the switch stays on), without an address.
+    expect(waiting.exposure).toMatchObject({ enabled: true, state: "waitingForNodeUpdate", host: null, port: null });
+    expect(waiting.exposed).toBeNull();
+    expect(waiting.access).toBeNull();
+    // A deploy now gets no URL to a closed port, and the editor says the references have no value yet.
+    expect(waiting.env).toEqual({ OUT: "", OUT_HOST: "", OUT_PORT: "" });
+    expect(waiting.problems).toEqual(["empty-reference", "empty-reference", "empty-reference"]);
+
+    // Updated, the same port opens again by itself.
+    advertise(node.id, [enginesCapability, exposureCapability]);
+    const updated = await read();
+    expect(updated.exposure).toMatchObject({ enabled: true, state: "open", port: 45432 });
+    expect(updated.exposed?.url).toBe(open.exposed.url);
+    expect(updated.runtime).toMatchObject({ enabled: true, hostPort: 45432 });
   });
 });

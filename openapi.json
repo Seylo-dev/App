@@ -19757,6 +19757,7 @@
                       "type": "object",
                       "required": [
                         "enabled",
+                        "state",
                         "host",
                         "port",
                         "user",
@@ -19770,6 +19771,22 @@
                       "properties": {
                         "enabled": {
                           "type": "boolean"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "waitingForNodeUpdate",
+                              "type": "string"
+                            }
+                          ]
                         },
                         "host": {
                           "anyOf": [
@@ -20288,6 +20305,7 @@
                       "type": "object",
                       "required": [
                         "enabled",
+                        "state",
                         "host",
                         "port",
                         "user",
@@ -20301,6 +20319,22 @@
                       "properties": {
                         "enabled": {
                           "type": "boolean"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "waitingForNodeUpdate",
+                              "type": "string"
+                            }
+                          ]
                         },
                         "host": {
                           "anyOf": [
@@ -20902,6 +20936,7 @@
                       "type": "object",
                       "required": [
                         "enabled",
+                        "state",
                         "host",
                         "port",
                         "user",
@@ -20915,6 +20950,22 @@
                       "properties": {
                         "enabled": {
                           "type": "boolean"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "const": "off",
+                              "type": "string"
+                            },
+                            {
+                              "const": "open",
+                              "type": "string"
+                            },
+                            {
+                              "const": "waitingForNodeUpdate",
+                              "type": "string"
+                            }
+                          ]
                         },
                         "host": {
                           "anyOf": [

@@ -22,7 +22,7 @@ import {
 import { and, asc, eq, ne } from "drizzle-orm";
 import { domains, services } from "../../db/schema";
 import type { Deps } from "../../deps";
-import { exposedConnection, findDatabase, internalConnection, loadDatabase } from "../databases/info";
+import { exposedConnection, exposureState, findDatabase, internalConnection, loadDatabase } from "../databases/info";
 import { databaseKinds, mainPort, type ServiceRow, serviceNodes } from "../domains/lookup";
 import { domainUrl, primaryDomain } from "../domains/rows";
 import { readProjectEnv, readServiceEnv } from "./store";
@@ -69,8 +69,9 @@ function builtinsFor(deps: Pick<Deps, "db" | "secrets">, row: ServiceRow): { bui
   if (databaseKinds.has(row.kind) && findDatabase(deps.db, row.id)) {
     const info = loadDatabase(deps, row.id);
     const internal = internalConnection(info);
+    // Null, so EXPOSED_* are empty, while exposure is off or waits for the node's update (its port is closed).
     const outside = exposedConnection(info);
-    exposed = info.exposure !== null;
+    exposed = exposureState(info) === "open";
     values.set("INTERNAL_URL", internal.url);
     values.set("INTERNAL_HOST", internal.host);
     values.set("INTERNAL_PORT", String(internal.port));

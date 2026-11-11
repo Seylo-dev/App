@@ -69,7 +69,7 @@ export const get = defineOp({
   output: Type.Object({
     firstRun: FirstRunAccess,
     timed: Type.Array(TimedExpose),
-    /** Exposed database port, managed by databases.setExposure. */
+    /** Exposed database port, managed by databases.setExposure; null while closed (databases.get exposure.state). */
     database: Type.Union([Type.Object({ host: Type.String(), port: Type.Integer(), allowedCidrs: Type.Array(Cidr) }), Type.Null()]),
   }),
   permission: serviceScope("exposures.view"),

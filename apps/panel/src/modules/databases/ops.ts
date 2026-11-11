@@ -45,6 +45,7 @@ import {
   type DatabaseInfo,
   exposedAddress,
   exposedConnection,
+  exposureState,
   internalConnection,
   loadDatabase,
   writeSecret,
@@ -99,6 +100,8 @@ export function toDatabase(info: DatabaseInfo, agents?: AgentHub, now = new Date
     shellClient: info.engine.shellClient,
     exposure: {
       enabled: info.exposure !== null,
+      // The row stays while the node's agent is too old for it, but its port is closed: no address.
+      state: exposureState(info),
       host: address?.host ?? null,
       port: address?.port ?? null,
       user: info.admin.user,
