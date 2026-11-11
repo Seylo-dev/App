@@ -14,6 +14,7 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-8
 - **Joining behind a firewall that decrypts HTTPS.** A network doing TLS inspection (a FortiGate, Zscaler or the like) replaces the panel domain's certificate, and the agent refuses it. Add node now also offers the same token over the panel's IP address and its pinned key ("Network decrypts HTTPS? Join over the panel's IP instead"), and the agent and installer name who issued the certificate they got and say it looks like TLS inspection, instead of advice about open ports.
 - **A service can reference its own domain.** `${{<service>.DOMAIN}}`, `URL` and the other built-ins work in the service's own environment (n8n's `N8N_HOST`, `WEBHOOK_URL`). Before, the editor called it an error and the deploy left it as written.
 - **Service pages.** The usage strip shows on every tab, so the tabs no longer jump when you switch; the Domains tab shows a red count of domains that still need DNS or a certificate; the node chip and the domain link in the header have icons. Project settings use two columns on wide screens.
+- **Databases.** Turning Exposed on asks for the port first (or picks a free one) and who may connect, and only then opens it; Port and access changes them later. The password has an eye to show it and a copy button, and the Connection tab shows the database's console. The New database form shows each engine's logo.
 - **MCP setup for Claude.** The Claude Code command adds the panel for every project (`--scope user`), and Copy the URL and open Claude puts the server URL on the clipboard on the way to Claude's connectors page. Claude has no install link to go further.
 
 ## Fixed
@@ -23,6 +24,8 @@ What's new in full: https://docs.seylo.dev/self-hosting/whats-new-in-0-2-8
 - **The panel domain could go active for another server.** The check took any `{"status":"ok"}` answer from `https://<domain>/api/health` as the panel's, and a Cloudflare-proxied record skips the address check. So a proxied domain still pointing at another server (an old panel, or any app with that health route) went active: `http://<ip>:3000` redirected people there, and with Serve on IP address off, IP access could close. The check now sends a one-time nonce that only this panel can answer, so only the panel itself counts.
 
 - **A node joined to an old panel at the same address kept the old one.** Running the join command of a new panel that took over the old panel's domain said "Already joined" and never used the token. When the panel at that address refuses the earlier join, the installer now joins again with the token; an unreachable panel keeps the earlier join.
+
+- **A new database or Box did not show in the sidebar** until a reload (the project stayed at 0 services). It shows at once now.
 
 ## After you update
 
