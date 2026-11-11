@@ -67,7 +67,7 @@ TITLES=(
   "Build default: Add node's box decides Can build, a refused join exits 3; Serve on IP address off over the domain, CLI and domain-death reopen"
   "Panel on Tailscale (Headscale): Serve over HTTP to the panel's socket, reached from C, Lock to Tailscale, automatic and CLI recovery"
   "Move the panel A -> B in the browser: data, keys, registry and sign-ins come along, every node follows; a failed move rolls back; back to A"
-  "Export a service from e2e-exports with a passphrase, import it into e2e-imports on C: env, cron job, volume (empty), basic auth; refusals"
+  "Export whoami with its volume and a Postgres with its data from e2e-exports on B, import both into e2e-imports on C: env, cron job, the volume's file, the rows, basic auth; refusals"
   "Database version: patch update and a MongoDB major upgrade keep the data"
 )
 # The highest check number. Check 31 gives the panel a domain and puts
@@ -4324,27 +4324,91 @@ p42_begin() {
     '{projectId:$p, manifest:$m, signature:$s, secretsEnc:$e, passphrase:$pw}'
 }
 
+# p42_upload <import ref json> <entry> <file>: sends an entry's bytes the
+# way the web app does, in parts of at most 32 MiB, each to its own upload
+# link at the offset the panel has. Prints the last answer; returns 1 (with
+# the panel's answer) when a part is refused.
+p42_upload() {
+  local ref=$1 entry=$2 file=$3 offset=0 part link out dir
+  dir=$(mktemp -d)
+  split -b 33554432 -a 4 "$file" "$dir/part-"
+  for part in "$dir"/part-*; do
+    link=$(api serviceTransfer.uploadTicket "$(printf '%s' "$ref" | jq -c --arg e "$entry" --argjson o "$offset" '. + {entry:$e, offset:$o}')" | jq -r .url) ||
+      { rm -rf "$dir"; return 1; }
+    out=$(curl -sS -m 900 -T "$part" -w '\n%{http_code}' "$(panel_url)$link") || out=$'\n000'
+    if [ "$(printf '%s' "$out" | tail -1)" != 200 ]; then
+      printf '%s\n' "$out" | sed '$d'
+      rm -rf "$dir"
+      return 1
+    fi
+    offset=$((offset + $(wc -c <"$part" | tr -d ' ')))
+  done
+  rm -rf "$dir"
+  printf '%s\n' "$out" | sed '$d'
+}
+
+# p42_flip <zip> <out> <entry>: a copy of the zip with one byte in the
+# middle of a stored entry's data flipped (its manifest still says the
+# old sha256).
+p42_flip() {
+  python3 -I - "$1" "$2" "$3" <<'EOF'
+import struct, sys, zipfile
+src, dst, name = sys.argv[1:4]
+data = bytearray(open(src, "rb").read())
+info = zipfile.ZipFile(src).getinfo(name)
+h = info.header_offset
+n, e = struct.unpack("<HH", data[h + 26 : h + 30])
+data[h + 30 + n + e + info.file_size // 2] ^= 1
+open(dst, "wb").write(data)
+EOF
+}
+
+# p42_import <zip> <node id> [extra choices]: importBegin, setChoices and
+# import for a file; prints import's answer with the ref as .ref.
+p42_import() {
+  local preview imp ref out extra=${3:-}
+  [ -n "$extra" ] || extra='{}'
+  preview=$(api serviceTransfer.importBegin "$(p42_begin "$1" "e2e passphrase 42" "$(unzip -p "$1" manifest.json)")") || return 1
+  imp=$(printf '%s' "$preview" | jq -r .importId)
+  ref=$(jq -nc --arg p "$(project_id e2e-imports)" --arg i "$imp" '{projectId:$p, importId:$i}')
+  api serviceTransfer.setChoices "$(printf '%s' "$ref" | jq -c --arg n "$2" --argjson x "$extra" '. + {choices:({nodeId:$n, deployWhenReady:false} + $x)}')" >/dev/null ||
+    return 1
+  out=$(api serviceTransfer.import "$ref") || return 1
+  printf '%s' "$out" | jq -c --argjson r "$ref" '. + {ref:$r}'
+}
+
 # has_text <text> <needle>: the text contains the needle.
 has_text() { case $1 in *"$2"*) return 0 ;; *) return 1 ;; esac; }
 
-# Check 42 (0.2.9): export a service from project e2e-exports on B with a
-# passphrase, check the zip with unzip, Python and its manifest, and import
-# it the way the CLI will (unzip -p the small entries into importBegin)
-# into e2e-imports on C: the env, the cron job, the volume (empty) and the
-# basic auth (on C's automatic domain, its own domain being in use here)
-# come along, and it deploys. A wrong passphrase and an edited manifest are
-# refused. Volume data is not in 0.2.9's files; it comes with volume export.
+# container_started <letter> <service>: when the service's container last started.
+container_started() { on_node "$1" "docker inspect -f '{{.State.StartedAt}}' \$(docker ps -q --filter label=$SLUG.service=$2 --filter name=^$SLUG-$2-[0-9] | head -1)"; }
+
+# Check 42 (0.2.9): export a whoami service with its volume data and a
+# Postgres with its data from project e2e-exports on B with a passphrase,
+# check the zips with unzip, Python and their manifests, and import both
+# the way the CLI will (unzip -p the small entries into importBegin, the
+# data in 32 MiB parts with curl -T) into e2e-imports on C: the env, the
+# cron job, the volume's file, the database's rows and the basic auth (on
+# C's automatic domain, its own domain being in use here) come along, and
+# they deploy. whoami keeps running while its data is read (stopService
+# off); Postgres stops and starts again. A wrong passphrase, an edited
+# manifest and a flipped byte in the volume data are refused; discarding
+# that import leaves no service and no folder on C.
 check_42() {
   need_key || return 3
-  local nc src host dom domid secret dir zip out code mf ok path want got imp ref newid st envsrc envnew auto prevwild preview link
+  local nb nc src host dom domid secret marker dbmark dir zip dbzip out code mf ok path want got imp ref newid st envsrc envnew auto prevwild preview link
+  local db before after pidc newdb entry res codes flipped
+  nb=$(node_id b)
   nc=$(node_id c)
   [ -n "$nc" ] || { blocked "node C is not joined"; return 3; }
   project_id e2e-exports >/dev/null
   project_id e2e-imports >/dev/null
+  for n in xfer xfer-2 xferdb; do delete_service e2e-imports "$n"; done
   delete_service e2e-exports xfer
-  delete_service e2e-imports xfer
+  delete_service e2e-exports xferdb
   src=$(image_service e2e-exports xfer b traefik/whoami:v1.10.3 80) || { bad "services.create xfer failed"; return 1; }
   secret=xfer-secret-$(openssl rand -hex 8)
+  marker=xfer-marker-$(openssl rand -hex 8)
   api env.set "$(jq -nc --arg s "$src" --arg v "$secret" '{serviceId:$s, text:("PLAIN=1\nSECRET=" + $v + "\nSELF=http://xfer:80/\n")}')" >/dev/null || bad "env.set on xfer failed"
   api services.setVolumes "{\"serviceId\":\"$src\",\"volumes\":[{\"name\":\"data\",\"mountPath\":\"/data\"}]}" >/dev/null || bad "services.setVolumes on xfer failed"
   dom=$(api domains.addAuto "{\"serviceId\":\"$src\",\"subdomain\":\"xfer\",\"targetPort\":80}") || { bad "domains.addAuto failed"; return 1; }
@@ -4358,15 +4422,31 @@ check_42() {
   api deployments.deploy "{\"serviceId\":\"$src\"}" >/dev/null || { bad "deploying xfer failed"; return 1; }
   st=$(wait_deploy "$src" 300)
   [ "$st" = live ] || { bad "xfer did not go live ($st)"; return 1; }
-  good "xfer runs on B with env, a volume, basic auth on $host and a cron job"
+  api files.write "$(jq -nc --arg s "$src" --arg m "$marker" '{serviceId:$s, volume:"data", path:"/marker.txt", content:$m, createParents:true}')" >/dev/null ||
+    { bad "files.write of xfer's marker failed"; return 1; }
+  good "xfer runs on B with env, a volume with /marker.txt, basic auth on $host and a cron job"
+  db=$(api databases.create "{\"projectId\":\"$(project_id e2e-exports)\",\"name\":\"xferdb\",\"engine\":\"postgres\",\"version\":\"17\",\"nodeId\":\"$nb\",\"database\":\"app\",\"user\":\"app\",\"password\":\"e2e-xfer-db-pass1\"}" | jq -r .serviceId) ||
+    { bad "databases.create xferdb failed"; return 1; }
+  wait_for 300 "xferdb running" svc_running "$db" || { bad "xferdb did not reach running ($(svc_status "$db"))"; return 1; }
+  wait_for 90 "xferdb accepting" pg_exec b "$db" "select 1" || true
+  dbmark=row-$(openssl rand -hex 6)
+  pg_exec b "$db" "create table marker (note text); insert into marker values ('$dbmark')" >/dev/null || bad "the marker row in xferdb failed"
+  expect "xferdb on B holds the marker row" test "$(pg_exec b "$db" "select note from marker" | tr -d '\r')" = "$dbmark"
 
-  # Export with a passphrase; an API key needs no fresh sign-in.
+  # Export xfer with its data, still running: its route keeps answering meanwhile.
   dir=$(mktemp -d)
   zip="$dir/xfer.zip"
-  out=$(api serviceTransfer.export "{\"serviceId\":\"$src\",\"secrets\":\"encrypted\",\"passphrase\":\"e2e passphrase 42\"}") || { bad "serviceTransfer.export failed"; return 1; }
+  out=$(api serviceTransfer.export "{\"serviceId\":\"$src\",\"secrets\":\"encrypted\",\"passphrase\":\"e2e passphrase 42\",\"volumes\":[\"data\"],\"stopService\":false}") ||
+    { bad "serviceTransfer.export of xfer failed"; return 1; }
+  expect "the export does not stop xfer (stopService off)" json_ok "$out" '.stopsService == false'
   link="$(panel_url)$(printf '%s' "$out" | jq -r .download.url)"
-  code=$(curl -sS -m 120 -o "$zip" -w '%{http_code}' "$link") || code=000
+  codes="$dir/codes"
+  (for _ in $(seq 1 40); do curl -s -o /dev/null -m 3 -w '%{http_code}\n' -u e2e:e2e-basic-pass -H "Host: $host" "http://$(node_ip b)/" >>"$codes" 2>/dev/null || echo 000 >>"$codes"; sleep 0.2; done) &
+  pidc=$!
+  code=$(curl -sS -m 600 -o "$zip" -w '%{http_code}' "$link") || code=000
+  wait "$pidc" 2>/dev/null || true
   expect "the download answered 200 as $(printf '%s' "$out" | jq -r .fileName)" test "$code" = 200
+  expect "xfer answered every request while its data was read ($(sort "$codes" | uniq -c | tr '\n' ' '))" test "$(grep -cvx 200 "$codes" || true)" = 0
   expect "unzip -t passes" unzip -tq "$zip"
   expect "python's zipfile reads it" python3 -m zipfile -t "$zip"
   mf=$(unzip -p "$zip" manifest.json)
@@ -4380,11 +4460,29 @@ check_42() {
     }
   done
   expect "every entry matches its sha256 in manifest.json" test "$ok" = 1
+  entry=services/xfer/volumes/data.tar.gz
+  expect "the volume's data is in it with its counts" json_ok "$mf" "[.entries[] | select(.path==\"$entry\" and .unpackedBytes >= ${#marker} and .files >= 1)] | length == 1"
+  expect "and holds marker.txt (unzip -p | tar -tz)" sh -c 'unzip -p "$1" "$2" | tar -tzf - | grep -qx marker.txt' _ "$zip" "$entry"
   expect "the secret value is nowhere in the zip, packed or unpacked" sh -c '! grep -aq "$1" "$2" && ! unzip -p "$2" | grep -aq "$1"' _ "$secret" "$zip"
-  expect "with a passphrase the settings are not in clear either (no service.json, no host name)" sh -c '! unzip -l "$2" | grep -q service.json && ! unzip -p "$2" | grep -aq "$1"' _ "$host" "$zip"
+  expect "with a passphrase the settings are not in clear either (no service.json, no host name)" sh -c '! unzip -l "$2" | grep -q service.json && ! unzip -p "$2" README.txt manifest.json secrets.enc | grep -aq "$1"' _ "$host" "$zip"
   expect "a second download of the same link is refused" test "$(http_code "$link")" = 401
 
-  # Import into e2e-imports on C.
+  # Export the database: it stops before its data is read and starts again after.
+  dbzip="$dir/xferdb.zip"
+  before=$(container_started b "$db")
+  out=$(api serviceTransfer.export "{\"serviceId\":\"$db\",\"secrets\":\"encrypted\",\"passphrase\":\"e2e passphrase 42\",\"volumes\":[\"data\"]}") ||
+    { bad "serviceTransfer.export of xferdb failed"; return 1; }
+  expect "the database's export stops it" json_ok "$out" '.stopsService == true'
+  code=$(curl -sS -m 900 -o "$dbzip" -w '%{http_code}' "$(panel_url)$(printf '%s' "$out" | jq -r .download.url)") || code=000
+  expect "xferdb's download answered 200" test "$code" = 200
+  expect "unzip -t passes on xferdb's file" unzip -tq "$dbzip"
+  expect "the export says it held xferdb stopped and started it again" json_ok "$(api services.get "{\"serviceId\":\"$db\"}")" '.transfer.kind=="export" and .transfer.status=="done" and (.transfer.stopped|not) and (.stopped|not)'
+  wait_for 300 "xferdb running again" svc_running "$db" || bad "xferdb did not run again after its export ($(svc_status "$db"))"
+  after=$(container_started b "$db")
+  expect "its container started again after the export ($before -> $after)" test "$before" != "$after"
+  expect "the audit log has both finished downloads" json_ok "$(api audit.list '{"opId":"serviceTransfer.exportFinished","limit":5}')" '.entries | length >= 2'
+
+  # Import xfer into e2e-imports on C.
   prevwild=$(api nodes.get "{\"nodeId\":\"$nc\"}" | jq -r '.wildcardDomain // empty')
   [ -n "$prevwild" ] || api nodes.updateSettings "{\"nodeId\":\"$nc\",\"wildcardDomain\":\"$(wildcard_of c)\"}" >/dev/null || bad "C's wildcard domain could not be set"
   out=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "not the passphrase" "$mf")" 2>&1 || true)
@@ -4393,36 +4491,73 @@ check_42() {
   expect "an edited manifest is refused (tampered)" has_text "$out" '"tampered"'
   preview=$(api serviceTransfer.importBegin "$(p42_begin "$zip" "e2e passphrase 42" "$mf")") || { bad "serviceTransfer.importBegin failed"; return 1; }
   imp=$(printf '%s' "$preview" | jq -r .importId)
-  ev "import preview: $(printf '%s' "$preview" | jq -c '{service: .service.name, blockers, needs, domains: [.domains[] | {host, status, action}], autoDomain, samePanel: .file.samePanel}')"
+  ev "import preview: $(printf '%s' "$preview" | jq -c '{service: .service.name, blockers, needs, domains: [.domains[] | {host, status, action}], data: .data.volumes, samePanel: .file.samePanel}')"
   expect "its own domain is in use on this panel, so it is skipped" json_ok "$preview" "[.domains[] | select(.host==\"$host\" and .status==\"usedHere\" and .action==\"skip\")] | length == 1"
-  expect "nothing blocks it" json_ok "$preview" '(.blockers | length) == 0 and (.needs | length) == 0'
+  expect "its volume's data is in the file and picked" json_ok "$preview" '[.data.volumes[] | select(.name=="data" and .inFile and .include)] | length == 1'
   ref=$(jq -nc --arg p "$(project_id e2e-imports)" --arg i "$imp" '{projectId:$p, importId:$i}')
   preview=$(api serviceTransfer.setChoices "$(printf '%s' "$ref" | jq -c --arg n "$nc" '. + {choices:{nodeId:$n, autoDomain:true, deployWhenReady:false}}')") ||
     bad "serviceTransfer.setChoices failed"
+  expect "nothing blocks it on C" json_ok "$preview" '(.blockers | length) == 0 and (.needs | length) == 0'
   auto=$(printf '%s' "$preview" | jq -r '.autoDomain.host // empty')
   expect "C's automatic domain is offered ($auto)" test -n "$auto"
   out=$(api serviceTransfer.import "$ref") || { bad "serviceTransfer.import failed"; return 1; }
   newid=$(printf '%s' "$out" | jq -r .service.id)
-  expect "it is created stopped, with nothing left to upload" json_ok "$out" '.service.stopped and (.pending | length) == 0'
+  expect "it is created stopped, waiting for the volume's data" json_ok "$out" ".service.stopped and ([.pending[] | select(.entry==\"$entry\" and .kind==\"volume\")] | length) == 1"
+  out=$(api services.start "{\"serviceId\":\"$newid\"}" 2>&1 || true)
+  expect "it cannot start before its data is in (importing)" has_text "$out" '"importing"'
+  unzip -p "$zip" "$entry" >"$dir/data.tar.gz"
+  res=$(p42_upload "$ref" "$entry" "$dir/data.tar.gz") || bad "uploading xfer's volume data failed: $res"
+  expect "the volume's data went up ($res)" json_ok "$res" '.done == true'
+  expect "the import is done" json_ok "$(api serviceTransfer.getImport "$ref")" '.status == "done"'
   envsrc=$(api env.get "{\"serviceId\":\"$src\"}" | jq -r .text)
   envnew=$(api env.get "{\"serviceId\":\"$newid\"}" | jq -r .text)
   expect "the env came along as it was" test "$envsrc" = "$envnew"
   expect "the cron job came along" json_ok "$(api cron.list "{\"serviceId\":\"$newid\"}")" '[.jobs[] | select(.name=="tick" and .enabled)] | length == 1'
-  expect "the volume came along, empty (volume data is not in this version's files)" json_ok "$(api services.get "{\"serviceId\":\"$newid\"}")" '[.volumes[] | select(.name=="data" and .kind=="volume")] | length == 1'
   api services.start "{\"serviceId\":\"$newid\"}" >/dev/null || bad "services.start (first deploy of the import) failed"
   st=$(wait_deploy "$newid" 300)
   expect "the import's first deploy on C went live" test "$st" = live
+  got=$(api files.read "{\"serviceId\":\"$newid\",\"volume\":\"data\",\"path\":\"/marker.txt\"}" | jq -r '.content // .text // empty')
+  expect "/marker.txt came along in the volume ($got)" test "$got" = "$marker"
   if [ -n "$auto" ]; then
     wait_for 60 "the automatic domain's route" sh -c '[ "$(curl -s -o /dev/null -m 5 -w "%{http_code}" -H "Host: $1" "http://$2/")" = 401 ]' _ "$auto" "$(node_ip c)" || true
     expect "$auto answers 401 without the basic auth password" test "$(curl -s -o /dev/null -m 5 -w '%{http_code}' -H "Host: $auto" "http://$(node_ip c)/")" = 401
     expect "and 200 with it (the hash came along)" sh -c 'curl -fsS -m 5 -u e2e:e2e-basic-pass -H "Host: $1" "http://$2/" | grep -q Hostname' _ "$auto" "$(node_ip c)"
   fi
+
+  # Import the database into e2e-imports on C: its rows come with its logins.
+  out=$(p42_import "$dbzip" "$nc") || { bad "importing xferdb failed"; return 1; }
+  newdb=$(printf '%s' "$out" | jq -r .service.id)
+  res=$(p42_upload "$(printf '%s' "$out" | jq -c .ref)" services/xferdb/volumes/data.tar.gz <(unzip -p "$dbzip" services/xferdb/volumes/data.tar.gz)) ||
+    bad "uploading xferdb's data failed: $res"
+  expect "xferdb's data went up ($res)" json_ok "$res" '.done == true'
+  api services.start "{\"serviceId\":\"$newdb\"}" >/dev/null || bad "services.start of the imported xferdb failed"
+  wait_for 300 "the imported xferdb running" svc_running "$newdb" || bad "the imported xferdb did not run ($(svc_status "$newdb"))"
+  wait_for 90 "the imported xferdb accepting" pg_exec c "$newdb" "select 1" || true
+  expect "the marker row is in the imported xferdb on C" test "$(pg_exec c "$newdb" "select note from marker" | tr -d '\r')" = "$dbmark"
+
+  # A flipped byte in the volume's data: the upload fails on its sha256 and discarding leaves nothing.
+  flipped="$dir/flipped.zip"
+  p42_flip "$zip" "$flipped" "$entry" || { bad "flipping a byte of the zip failed"; return 1; }
+  out=$(p42_import "$flipped" "$nc") || { bad "importing the flipped file failed"; return 1; }
+  imp=$(printf '%s' "$out" | jq -r .service.id)
+  ref=$(printf '%s' "$out" | jq -c .ref)
+  unzip -p "$flipped" "$entry" >"$dir/flipped.tar.gz" 2>/dev/null || true
+  res=$(p42_upload "$ref" "$entry" "$dir/flipped.tar.gz" || true)
+  expect "the flipped data is refused (checksum: $res)" has_text "$res" '"checksum"'
+  expect "discarding it deletes the service it made" json_ok "$(api serviceTransfer.discardImport "$ref")" '.deletedService == true'
+  expect "no such service is left" test -z "$(service_id e2e-imports "$(printf '%s' "$out" | jq -r .service.name)")"
+  wait_for 120 "C dropping the discarded service's folder" on_node c "test ! -e $BRAND_DATA_DIR/services/$imp" ||
+    bad "C kept $BRAND_DATA_DIR/services/$imp after the discard"
+
+  # The sources are untouched.
   expect "the source still answers on B" sh -c 'curl -fsS -m 5 -u e2e:e2e-basic-pass -H "Host: $1" "http://$2/" | grep -q Hostname' _ "$host" "$(node_ip b)"
-  expect "the audit log has the finished download" json_ok "$(api audit.list '{"opId":"serviceTransfer.exportFinished","limit":5}')" '.entries | length >= 1'
+  expect "its marker is still on B" test "$(api files.read "{\"serviceId\":\"$src\",\"volume\":\"data\",\"path\":\"/marker.txt\"}" | jq -r '.content // .text // empty')" = "$marker"
+  expect "xferdb on B still has its row" test "$(pg_exec b "$db" "select note from marker" | tr -d '\r')" = "$dbmark"
 
   [ -n "$prevwild" ] || api nodes.updateSettings "{\"nodeId\":\"$nc\",\"wildcardDomain\":null}" >/dev/null || true
-  delete_service e2e-imports xfer
+  for n in xfer xfer-2 xferdb; do delete_service e2e-imports "$n"; done
   delete_service e2e-exports xfer
+  delete_service e2e-exports xferdb
   rm -rf "$dir"
 }
 

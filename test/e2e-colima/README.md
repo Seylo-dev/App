@@ -105,14 +105,18 @@ refreshed version instead of N.
   failure part holds C's agents' TLS port with a relay (`e2e-p41-hold`) so the panel cannot start
   there. If the check stops half way, the next run moves the panel back to A first (state
   `p41-panel-on`).
-- Check 42 exports a whoami service of its own (`xfer` in `e2e-exports` on B, with env, a volume, a
-  cron job and basic auth on its automatic domain) with a passphrase and imports it into `e2e-imports`
-  on C the way the CLI will: `unzip -p` the small entries into `serviceTransfer.importBegin`. It checks
-  the zip with `unzip -t`, Python's `zipfile` and the manifest's sha256 of every entry, that the secret
-  value and the host name are nowhere in it, the wrong passphrase and an edited manifest refused, and
-  that env, cron job, the (empty) volume and the basic auth hash came along on C's automatic domain. It
-  sets C's wildcard domain when C has none and clears it again. Volume data is not in 0.2.9's files
-  (written for 0.2.9, not run yet).
+- Check 42 exports a whoami service of its own (`xfer` in `e2e-exports` on B, with env, a volume holding
+  `/marker.txt`, a cron job and basic auth on its automatic domain) with its volume data while it keeps
+  running (`stopService` off, its route answers throughout), and a Postgres (`xferdb`, a marker row) with
+  its data, which stops for the download and starts again. Both go with a passphrase into `e2e-imports` on
+  C the way the CLI will: `unzip -p` the small entries into `serviceTransfer.importBegin`, the volume data
+  in 32 MiB parts with `curl -T` to `serviceTransfer.uploadTicket` links. It checks the zips with
+  `unzip -t`, Python's `zipfile` and the manifest's sha256 of every entry, that the secret value and the
+  host name are nowhere in the clear entries, that the wrong passphrase and an edited manifest are
+  refused, that env, cron job, `/marker.txt`, the marker row and the basic auth hash (on C's automatic
+  domain) came along, and that a copy with one flipped byte in the volume data fails its sha256 on upload
+  and discarding it leaves no service and no `services/<id>` folder on C. It sets C's wildcard domain when
+  C has none and clears it again (written for 0.2.9, not run yet).
 - Check 40 runs Tailscale against `e2e-headscale` (`headscale/headscale:v0.29.7`, pinned by digest, on A;
   `infra.sh` starts it with a certificate from `serve.sh`'s test CA, so run `serve.sh` first). A's own
   tailscaled is the owner's server (kernel mode, or userspace when A has no `/dev/net/tun`), C's tailscaled
