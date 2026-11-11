@@ -23,7 +23,7 @@ export default {
   pending: "The change to {pending} did not finish, so the database still runs {image}. Pick it again to retry, or stay on {image}.",
   customToggle: "Use another tag of this version",
   customLabel: "Image",
-  customHint: "Another exact tag or digest of {repo} for {version}. Not tested by Seylo.",
+  customHint: "Another exact release tag of {repo} {version}, like {image}, without a digest. Not tested by Seylo.",
   confirm: {
     titlePatch: "Update to {image}?",
     titleLine: "Change {engine} to {version}?",

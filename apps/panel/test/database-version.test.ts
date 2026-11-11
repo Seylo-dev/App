@@ -124,8 +124,6 @@ describe("version rules", () => {
   test("custom images: the engine's official repository with an exact release of the line it claims", () => {
     expect(customImage("mongo", null, "8.0", "mongo:8.0.40")).toBe("mongo:8.0.40");
     expect(customImage("mongo", null, "8.0", "docker.io/library/mongo:8.0.40")).toBe("mongo:8.0.40");
-    const digest = `sha256:${"a".repeat(64)}`;
-    expect(customImage("mongo", null, "8.0", `mongo@${digest}`)).toBe(`mongo@${digest}`);
     expect(customImage("postgres", null, "17", "postgres:17.7-alpine")).toBe("postgres:17.7-alpine");
     expect(customImage("postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg17-trixie")).toBe("pgvector/pgvector:0.8.8-pg17-trixie");
     expect(customImage("valkey", null, "9.1", "valkey/valkey:9.1.4-alpine")).toBe("valkey/valkey:9.1.4-alpine");
@@ -150,6 +148,16 @@ describe("version rules", () => {
       ["postgres", null, "17", "pgvector/pgvector:0.8.8-pg17"],
       ["postgres", "pgvector", "17", "postgres:17.7"],
       ["postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg18"],
+      // A digest could be any version: a downgrade or a major would pass as a patch.
+      ["mongo", null, "8.0", `mongo@sha256:${"a".repeat(64)}`],
+      ["mongo", null, "8.0", `mongo:8.0.40@sha256:${"a".repeat(64)}`],
+      ["postgres", null, "17", `postgres@sha256:${"a".repeat(64)}`],
+      // Debian instead of the catalog's Alpine (or another Debian than pgvector's trixie): another C library's collation.
+      ["postgres", null, "17", "postgres:17.7"],
+      ["postgres", null, "17", "postgres:17.7-bookworm"],
+      ["postgres", null, "17", "postgres:17.7-trixie"],
+      ["postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg17"],
+      ["postgres", "pgvector", "17", "pgvector/pgvector:0.8.8-pg17-bookworm"],
       ["keydb", null, "6.3", "eqalpha/keydb:x86_64_v6.3.4"],
       ["dragonfly", null, "2.0", "ghcr.io/dragonflydb/dragonfly:v2.0.3"],
     ] as const) {
@@ -369,6 +377,16 @@ describe("databases.versionChoices and setVersion", () => {
     const latest = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "8.0", image: "mongo:latest" }, { cookie });
     expect(latest.status).toBe(400);
     expect(latest.body.error.details.reason).toBe("customImage");
+    // A digest-only image of another version would pass as a patch of the line it claims.
+    const digest = await callOp(
+      panel,
+      dbOps.setVersion,
+      { serviceId: mongo.serviceId, version: "8.0", image: `mongo@sha256:${"b".repeat(64)}` },
+      { cookie },
+    );
+    expect(digest.status).toBe(400);
+    expect(digest.body.error.details.reason).toBe("customImage");
+    expect(specImage(mongo.serviceId)).toBe("mongo:8.0.34");
     // A custom image of the same line is a patch update.
     const custom = await callOp(panel, dbOps.setVersion, { serviceId: mongo.serviceId, version: "8.0", image: "mongo:8.0.40" }, { cookie });
     expect(custom.status).toBe(200);
@@ -379,6 +397,25 @@ describe("databases.versionChoices and setVersion", () => {
     expect(major.status).toBe(409);
     expect(major.body.error.details.reason).toBe("postgresMajor");
     expect(major.body.error.message).toContain("dump and restore");
+    // The Debian image of the same major is no patch: its C library sorts text in another order.
+    const debian = await callOp(
+      panel,
+      dbOps.setVersion,
+      { serviceId: pg.serviceId, version: "17", image: "postgres:17.7-bookworm" },
+      { cookie },
+    );
+    expect(debian.status).toBe(400);
+    expect(debian.body.error.details.reason).toBe("customImage");
+    expect(debian.body.error.message).toContain("sorts text differently");
+    expect(specImage(pg.serviceId)).toBe("postgres:17.6-alpine");
+    const alpine = await callOp(
+      panel,
+      dbOps.setVersion,
+      { serviceId: pg.serviceId, version: "17", image: "postgres:17.7-alpine" },
+      { cookie },
+    );
+    expect(alpine.status).toBe(200);
+    expect(specImage(pg.serviceId)).toBe("postgres:17.7-alpine");
 
     const maria = await createDb("mariadb", "10.11");
     const skip = await callOp(panel, dbOps.setVersion, { serviceId: maria.serviceId, version: "11.8", confirmNoBackup: true }, { cookie });

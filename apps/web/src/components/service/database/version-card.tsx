@@ -227,7 +227,7 @@ function VersionDialog({ service, data, choice, onClose }: { service: ServiceDet
                 <Field
                   label={t("databaseVersion.customLabel")}
                   htmlFor="dv-image"
-                  hint={t("databaseVersion.customHint", { repo: repositoryOf(choice.image), version: choice.version })}
+                  hint={t("databaseVersion.customHint", { repo: repositoryOf(choice.image), version: choice.version, image: choice.image })}
                 >
                   <Input id="dv-image" className="font-mono" value={image} onChange={(e) => setImage(e.target.value)} />
                 </Field>

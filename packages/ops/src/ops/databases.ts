@@ -295,12 +295,12 @@ export const setVersion = defineOp({
   kind: "destructive",
   summary: "Change a database's version",
   description:
-    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an explicit tag or digest instead of the catalog's (not tested by Seylo), judged by the version line it claims.",
+    "Moves a database to another version line of its engine, or to the newest pinned image of its own line (a patch update), and deploys it: the database restarts on the same data, a short outage. Check databases.versionChoices first. Downgrades are refused for every engine, and so are Postgres majors (dump and restore into a new database instead); MongoDB, MariaDB and MySQL go one line at a time, and MongoDB's featureCompatibilityVersion is raised to the running version first. A change of version line needs a successful backup from the last 24 hours, or confirmNoBackup: true. image takes the engine's own official image with an exact release tag of the version line instead of the catalog's (not tested by Seylo), judged like the catalog's image of that line; digests are refused (they do not show the version), and a Postgres tag keeps the catalog's base system (-alpine, pgvector's -trixie).",
   input: Type.Object({
     serviceId: Id,
     /** A catalog version of the database's engine, for example "8.0". */
     version: Type.String({ maxLength: 20, pattern: "^[0-9A-Za-z._-]+$" }),
-    /** The engine's official image with an explicit tag or digest, for example "mongo:8.0.40"; never latest. */
+    /** The engine's official image with an exact release tag, for example "mongo:8.0.40"; never latest or a digest. */
     image: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     /** Change the version line without a backup from the last 24 hours. */
     confirmNoBackup: Type.Optional(Type.Boolean()),

@@ -150,10 +150,14 @@ export function officialRepository(engine: DatabaseEngine, variant: string | nul
 
 /**
  * A custom image for a version line, as stored: the engine's own official
- * repository (docker.io, written without it) with an exact tag of that
- * line ("mongo:8.0.40", "postgres:17.7-alpine", for pgvector
- * "pgvector/pgvector:0.8.8-pg17-trixie") or a digest. Floating tags (latest,
- * "8.0") are refused: a redeploy must run the same bytes.
+ * repository (docker.io, written without it) with an exact release tag of
+ * that line ("mongo:8.0.40", "postgres:17.7-alpine", for pgvector
+ * "pgvector/pgvector:0.8.8-pg17-trixie"). Floating tags (latest, "8.0")
+ * are refused: a redeploy must run the same bytes. So are digests: the
+ * rules judge the version in the tag, and a digest could be any version
+ * (a downgrade or a major passing as a patch). A Postgres tag keeps the
+ * catalog's base system ("-alpine", pgvector's "-trixie"): another C
+ * library sorts text differently under the same indexes.
  */
 export function customImage(engine: DatabaseEngine, variant: string | null, version: string, image: string): string {
   const repo = officialRepository(engine, variant);
@@ -164,25 +168,40 @@ export function customImage(engine: DatabaseEngine, variant: string | null, vers
   const bare = repo.includes("/") ? name : name.replace(/^library\//, "");
   const match = /^([a-z0-9][a-z0-9._/-]*?)(?::([A-Za-z0-9_][A-Za-z0-9_.-]{0,127}))?(?:@(sha256:[a-f0-9]{64}))?$/.exec(bare);
   if (!match || match[1] !== repo)
-    throw new OpError("BAD_REQUEST", `Use ${label}'s official image, ${repo}, with a tag or a digest.`, field);
+    throw new OpError("BAD_REQUEST", `Use ${label}'s official image, ${repo}, with an exact release tag.`, field);
   const tag = match[2];
-  const digest = match[3];
-  if (!tag && !digest) throw new OpError("BAD_REQUEST", `Give ${repo} an exact tag or a digest, for example ${repo}:<version>.`, field);
-  if (tag) {
-    const claims =
-      variant === "pgvector"
-        ? new RegExp(`^\\d+(\\.\\d+)*-pg${escapeRegExp(version)}(-|$)`).test(tag)
-        : new RegExp(`^v?${escapeRegExp(version)}\\.\\d`).test(tag);
-    if (!claims) {
-      throw new OpError(
-        "BAD_REQUEST",
-        `${repo}:${tag} is not an exact ${label} ${version} release. Use a tag such as ${version}.<patch>.`,
-        field,
-      );
-    }
+  if (match[3]) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `Give ${repo} an exact release tag without a digest: the change is judged by the version in the tag, which a digest does not show.`,
+      field,
+    );
   }
-  return `${repo}${tag ? `:${tag}` : ""}${digest ? `@${digest}` : ""}`;
+  const catalogTag =
+    engineVersions(engine, variant)
+      ?.find((v) => v.version === version)
+      ?.image.split(":")[1] ?? "";
+  const example = variant === "pgvector" ? `<release>-pg${version}${baseOf(catalogTag)}` : `${version}.<patch>${baseOf(catalogTag)}`;
+  if (!tag) throw new OpError("BAD_REQUEST", `Give ${repo} an exact release tag, for example ${repo}:${example}.`, field);
+  const claims =
+    variant === "pgvector"
+      ? new RegExp(`^\\d+(\\.\\d+)*-pg${escapeRegExp(version)}(-|$)`).test(tag)
+      : new RegExp(`^v?${escapeRegExp(version)}\\.\\d`).test(tag);
+  if (!claims) {
+    throw new OpError("BAD_REQUEST", `${repo}:${tag} is not an exact ${label} ${version} release. Use a tag such as ${example}.`, field);
+  }
+  if (engine === "postgres" && baseOf(tag) !== baseOf(catalogTag)) {
+    throw new OpError(
+      "BAD_REQUEST",
+      `${repo}:${tag} is built on another base system than the catalog's ${repo}:${catalogTag}: its C library sorts text differently, which breaks the indexes on text columns. Use a tag such as ${example}.`,
+      field,
+    );
+  }
+  return `${repo}:${tag}`;
 }
+
+/** What follows the release in a tag: "-alpine" of "17.6-alpine", "-trixie" of pgvector's "0.8.7-pg17-trixie". */
+const baseOf = (tag: string) => tag.replace(/^v?\d+(?:\.\d+)*(?:-pg\d+)?/, "");
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
