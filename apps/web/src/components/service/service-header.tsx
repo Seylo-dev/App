@@ -7,6 +7,7 @@ import { Button } from "@seylo/ui/components/button";
 import { Chip } from "@seylo/ui/components/chip";
 import { ConfirmDialog } from "@seylo/ui/components/confirm-dialog";
 import { toast } from "@seylo/ui/components/toast";
+import { IconArrowUpRight, IconServer2 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { t } from "../../i18n/t";
@@ -31,6 +32,7 @@ export function ServiceHeader({ service }: { service: ServiceDetail }) {
       <ServiceStatusChip status={service.status} />
       {service.placements.map((p) => (
         <Chip key={p.nodeId} tone="track">
+          <IconServer2 size={13} stroke={1.8} aria-hidden="true" className="shrink-0 text-muted-foreground" />
           {p.nodeName}
           {p.replicas > 1 && <span className="font-mono text-muted-foreground">×{p.replicas}</span>}
         </Chip>
@@ -48,8 +50,9 @@ function HeaderAddress({ service, href }: { service: ServiceDetail; href: string
   if (isDatabaseKind(service.kind)) return <DatabaseSubtitle serviceId={service.id} />;
   if (href)
     return (
-      <a href={href} target="_blank" rel="noreferrer" className="font-mono text-[12.5px]">
+      <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 font-mono text-[12.5px]">
         {service.address}
+        <IconArrowUpRight size={13} stroke={1.8} aria-hidden="true" className="shrink-0" />
       </a>
     );
   if (service.address) return <span className="font-mono text-[12.5px] text-muted-foreground">{service.address}</span>;
