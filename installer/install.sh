@@ -1386,7 +1386,19 @@ wait_connected() {
 		warn "the agent has not connected to the panel at $PANEL_URL after $JOIN_WAIT seconds"
 		[ -z "$reason" ] || say "Last error: $reason"
 		addr=$(panel_address)
-		JOIN_HINT="Check that this server can reach $addr: the panel's server must accept connections on port ${addr##*:} (3443 is the agents' port of a panel without a domain), and no firewall or cloud security group on the way may block it."
+		case $reason in
+		*"Traefik's own certificate"*)
+			# The name reaches a server with no certificate for it yet (seylo's conn.certificateHint).
+			JOIN_HINT="${addr%:*} has no certificate yet: open the panel's Settings > General and check the panel domain's status (Let's Encrypt reaches it on port 80)."
+			;;
+		*"TLS inspection"* | *"x509:"* | *"pinned key"*)
+			# The certificate that came is not the panel's: most often a firewall or proxy that decrypts HTTPS.
+			JOIN_HINT="This server did not get the panel's certificate for ${addr%:*} (the error above names who issued the one it got). A firewall or proxy on this server's network that decrypts HTTPS (TLS inspection) does this: exempt ${addr%:*} from it, or join with the panel's IP address and its pinned key, the second command in the panel's Add node dialog."
+			;;
+		*)
+			JOIN_HINT="Check that this server can reach $addr: the panel's server must accept connections on port ${addr##*:} (3443 is the agents' port of a panel without a domain), and no firewall or cloud security group on the way may block it."
+			;;
+		esac
 		;;
 	esac
 	# join_done is about this warning: it does not count as one more above.

@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"slices"
+	"strings"
 
 	"github.com/coder/websocket"
 
@@ -133,7 +136,7 @@ func Dial(ctx context.Context, opts DialOptions) (*WebSocket, error) {
 		Subprotocols: []string{Subprotocol},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("dial panel: %w", err)
+		return nil, fmt.Errorf("dial panel: %w%s", err, certificateHint(opts.URL, err))
 	}
 	if c.Subprotocol() != Subprotocol {
 		c.Close(websocket.StatusProtocolError, "subprotocol not negotiated")
@@ -144,6 +147,69 @@ func Dial(ctx context.Context, opts DialOptions) (*WebSocket, error) {
 		ws.ServerSPKI = SPKIFingerprint(resp.TLS.PeerCertificates[0])
 	}
 	return ws, nil
+}
+
+// pinMismatchError is ErrPinMismatch with who issued the certificate that
+// came instead (errors.Is(err, ErrPinMismatch) holds).
+type pinMismatchError struct{ issuer string }
+
+func (e *pinMismatchError) Error() string {
+	return fmt.Sprintf("%s (the certificate presented was issued by %s)", ErrPinMismatch.Error(), e.issuer)
+}
+
+func (e *pinMismatchError) Unwrap() error { return ErrPinMismatch }
+
+// IssuerName is a certificate's issuer for people: organization and common
+// name, for example "Fortinet, FG800D5818800524"; "an unnamed issuer" when
+// both are empty.
+func IssuerName(cert *x509.Certificate) string {
+	var parts []string
+	for _, o := range cert.Issuer.Organization {
+		if o = strings.TrimSpace(o); o != "" {
+			parts = append(parts, o)
+		}
+	}
+	if cn := strings.TrimSpace(cert.Issuer.CommonName); cn != "" && !slices.Contains(parts, cn) {
+		parts = append(parts, cn)
+	}
+	if len(parts) == 0 {
+		return "an unnamed issuer"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// certificateHint says what a refused certificate most likely means, for
+// the dial error people read in seylo status and the installer: "" when
+// the failure is not about the certificate.
+//
+// A certificate from a CA this server does not trust is, on a panel with a
+// public certificate, nearly always a firewall or proxy that decrypts HTTPS
+// on the way (TLS inspection: FortiGate, Zscaler, Palo Alto and the like
+// re-sign every site with their own CA). Traefik's own self-signed
+// certificate means the panel's server has no certificate for the name yet.
+func certificateHint(rawURL string, err error) string {
+	host := rawURL
+	if u, perr := url.Parse(rawURL); perr == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	var pinned *pinMismatchError
+	if errors.As(err, &pinned) {
+		return fmt.Sprintf(". %s did not present the panel's pinned key: a firewall or proxy on this server's network may decrypt HTTPS (TLS inspection), or the address leads to another server", host)
+	}
+	var verify *tls.CertificateVerificationError
+	if !errors.As(err, &verify) || len(verify.UnverifiedCertificates) == 0 {
+		return ""
+	}
+	var unknown x509.UnknownAuthorityError
+	if !errors.As(err, &unknown) {
+		return ""
+	}
+	leaf := verify.UnverifiedCertificates[0]
+	issuer := IssuerName(leaf)
+	if strings.EqualFold(leaf.Issuer.CommonName, "TRAEFIK DEFAULT CERT") {
+		return fmt.Sprintf(". %s answers with Traefik's own certificate: the panel's server has no certificate for that name yet (see the panel domain's status)", host)
+	}
+	return fmt.Sprintf(". The certificate for %s was issued by %s, which this server does not trust. If that is not who issued the panel's certificate, a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt %s from it, or join with the panel's IP address and --pin", host, issuer, host)
 }
 
 // SPKIFingerprint returns the SHA-256 of a certificate's public key. Pinning
@@ -168,7 +234,7 @@ func PinnedTLSConfig(pin []byte) *tls.Config {
 				return ErrPinMismatch
 			}
 			if subtle.ConstantTimeCompare(SPKIFingerprint(cs.PeerCertificates[0]), pin) != 1 {
-				return ErrPinMismatch
+				return &pinMismatchError{issuer: IssuerName(cs.PeerCertificates[0])}
 			}
 			return nil
 		},

@@ -686,6 +686,25 @@ expect_ok "an agent that is not up yet is reported with what seylo status said, 
   "Last error: no agent socket at $BRAND_DATA_DIR/agent.sock: is the agent running?" "Check that this server can reach panel.example.com:443"
 FAKE_STATUS=$unreachable INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel 'https://[2001:db8::7]' --token t --binary "$T/local-binary"
 expect_ok "an IPv6 panel without a port is reached on 443" "Check that this server can reach [2001:db8::7]:443"
+# A firewall that decrypts HTTPS re-signs the panel's certificate: not a port problem.
+inspected="Node:    n1 (n1)
+Agent:   $V
+Panel:   https://panel.example.com (waiting)
+Error:   dial panel: failed to WebSocket dial: failed to send handshake request: Get \"https://panel.example.com/api/agent/connect\": tls: failed to verify certificate: x509: certificate signed by unknown authority. The certificate for panel.example.com was issued by Fortinet, FG800D5818800524, which this server does not trust. If that is not who issued the panel's certificate, a firewall or proxy on this server's network decrypts HTTPS (TLS inspection): exempt panel.example.com from it, or join with the panel's IP address and --pin (retrying at 10:32:36)"
+FAKE_STATUS=$inspected INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
+expect_ok "a certificate a firewall re-signed gets the TLS inspection hint, not the port one" \
+  "issued by Fortinet, FG800D5818800524" "| This server did not get the panel's certificate for panel.example.com" \
+  "TLS inspection) does this: exempt panel.example.com from it" "the second command in the panel's Add node dialog"
+has "must accept connections on port" && flunk "the TLS inspection hint replaces the port hint" "$OUT" || pass "the TLS inspection hint replaces the port hint"
+# A 0.2.7 agent says only x509: the same hint.
+FAKE_STATUS="Panel:   https://panel.example.com (waiting)
+Error:   dial panel: tls: failed to verify certificate: x509: certificate signed by unknown authority" INSTALLER_TEST_JOIN_WAIT=0 \
+  run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
+expect_ok "an x509 error alone gets the TLS inspection hint" "| This server did not get the panel's certificate for panel.example.com"
+FAKE_STATUS="Panel:   https://panel.example.com (waiting)
+Error:   dial panel: x509: certificate signed by unknown authority. panel.example.com answers with Traefik's own certificate: the panel's server has no certificate for that name yet (see the panel domain's status)" \
+  INSTALLER_TEST_JOIN_WAIT=0 run_installer none "$PLACEHOLDER_INSTALLER" join --panel https://panel.example.com --token t --binary "$T/local-binary"
+expect_ok "Traefik's own certificate points at the panel domain's status" "| panel.example.com has no certificate yet: open the panel's Settings > General"
 started=$(date +%s)
 FAKE_STATUS="Panel:   https://192.0.2.10:3443 (rejected)
 Error:   the panel refused the join: the token is unknown, used or expired" INSTALLER_TEST_JOIN_WAIT=30 \
