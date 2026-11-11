@@ -21,11 +21,12 @@ import (
 	"github.com/seylo-dev/app/go/internal/proxy"
 )
 
-// TestIntegrationDatabaseTLS: exposed Redis, Mongo, Valkey, KeyDB,
-// Dragonfly and ClickHouse (native port) through the gate, which
-// terminates TLS. Real clients (redis-cli and valkey-cli --tls, mongosh
-// tls=true, clickhouse-client --secure) in containers connect to the host
-// port; plain connections are refused.
+// TestIntegrationDatabaseTLS: exposed Redis, Mongo (7.0 and the catalog's
+// 9.0), Valkey, KeyDB, Dragonfly and ClickHouse (native port) through the
+// gate, which terminates TLS. Real clients (redis-cli and valkey-cli
+// --tls, mongosh tls=true from the server's own image, clickhouse-client
+// --secure) in containers connect to the host port; plain connections are
+// refused.
 func TestIntegrationDatabaseTLS(t *testing.T) {
 	if os.Getenv("SEYLO_IT") != "1" {
 		t.Skip("integration test: run with scripts/dev/vm-gotest.sh")
@@ -48,7 +49,7 @@ func TestIntegrationDatabaseTLS(t *testing.T) {
 	t.Cleanup(func() {
 		cctx, ccancel := context.WithTimeout(context.Background(), time.Minute)
 		defer ccancel()
-		for _, n := range []string{"redis", "mongo", "valkey", "keydb", "dragonfly", "clickhouse"} {
+		for _, n := range []string{"redis", "mongo", "mongo90", "valkey", "keydb", "dragonfly", "clickhouse"} {
 			_ = d.RemoveContainer(cctx, prefix+"-"+n)
 		}
 		_, _ = d.Client().NetworkRemove(cctx, net1, client.NetworkRemoveOptions{})
@@ -64,6 +65,8 @@ func TestIntegrationDatabaseTLS(t *testing.T) {
 	}{
 		"redis": {"redis:7.4-alpine", agentv1.DatabaseEngine_DATABASE_ENGINE_REDIS, []string{"redis-server", "--requirepass", "pw"}, nil},
 		"mongo": {"mongo:7.0", agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, nil, []string{"MONGO_INITDB_ROOT_USERNAME=root", "MONGO_INITDB_ROOT_PASSWORD=pw"}},
+		// The newest line, which databases.setVersion moves 8.0 databases to.
+		"mongo90": {imageMongo90, agentv1.DatabaseEngine_DATABASE_ENGINE_MONGO, nil, []string{"MONGO_INITDB_ROOT_USERNAME=root", "MONGO_INITDB_ROOT_PASSWORD=pw"}},
 		// The engines added in 0.2, as the panel runs them.
 		"valkey": {imageValkey, agentv1.DatabaseEngine_DATABASE_ENGINE_VALKEY,
 			[]string{"sh", "-c", `exec docker-entrypoint.sh valkey-server --requirepass "$VALKEY_PASSWORD" --appendonly yes`}, []string{"VALKEY_PASSWORD=pw"}},
@@ -132,20 +135,27 @@ func TestIntegrationDatabaseTLS(t *testing.T) {
 	if out, _ := client("redis:7.4-alpine", append(append([]string{"redis-cli"}, redisAddr...), "PING")...); strings.Contains(out, "PONG") {
 		t.Fatalf("plain redis answered through the TLS port: %s", out)
 	}
-	mongoURL := "mongodb://root:pw@" + net.JoinHostPort(hostIP, strconv.Itoa(int(ports["mongo"]))) + "/admin?tls=true&tlsAllowInvalidCertificates=true"
-	for {
-		out, err := client("mongo:7.0", "mongosh", "--quiet", mongoURL, "--eval", "db.runCommand({ping: 1}).ok")
-		if err == nil && strings.TrimSpace(out) == "1" {
-			break
+	for _, name := range []string{"mongo", "mongo90"} {
+		image := engines[name].image
+		mongoURL := "mongodb://root:pw@" + net.JoinHostPort(hostIP, strconv.Itoa(int(ports[name]))) + "/admin?tls=true&tlsAllowInvalidCertificates=true"
+		for {
+			out, err := client(image, "mongosh", "--quiet", mongoURL, "--eval", `db.runCommand({ping: 1}).ok + " " + db.version()`)
+			if f := strings.Fields(out); err == nil && len(f) == 2 && f[0] == "1" {
+				// The server behind the port is the one of this image.
+				if !strings.HasPrefix(image, "mongo:"+f[1][:3]) {
+					t.Fatalf("%s answered as MongoDB %s", image, f[1])
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s over TLS: %v %s", image, err, out)
+			}
+			time.Sleep(2 * time.Second)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("mongo over TLS: %v %s", err, out)
+		plainURL := strings.Replace(mongoURL, "tls=true&tlsAllowInvalidCertificates=true", "serverSelectionTimeoutMS=3000", 1)
+		if out, err := client(image, "mongosh", "--quiet", plainURL, "--eval", "db.runCommand({ping: 1}).ok"); err == nil && strings.TrimSpace(out) == "1" {
+			t.Fatalf("plain %s answered through the TLS port: %s", image, out)
 		}
-		time.Sleep(2 * time.Second)
-	}
-	plainURL := strings.Replace(mongoURL, "tls=true&tlsAllowInvalidCertificates=true", "serverSelectionTimeoutMS=3000", 1)
-	if out, err := client("mongo:7.0", "mongosh", "--quiet", plainURL, "--eval", "db.runCommand({ping: 1}).ok"); err == nil && strings.TrimSpace(out) == "1" {
-		t.Fatalf("plain mongo answered through the TLS port: %s", out)
 	}
 	// Valkey, KeyDB and Dragonfly through the gate with valkey-cli --tls
 	// (one client for every Redis-like engine).
