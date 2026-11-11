@@ -17,6 +17,7 @@ import { ParentCrumb } from "../../../../../components/service/parent-crumb";
 import { ServiceHeader } from "../../../../../components/service/service-header";
 import { ServiceHeaderSkeleton, UsageStripSkeleton } from "../../../../../components/service/service-skeletons";
 import { prefetchServiceLayout } from "../../../../../components/service/tab-prefetch";
+import { TransferNote } from "../../../../../components/service/transfer/transfer-note";
 import { UsageStrip } from "../../../../../components/service/usage-strip";
 import { useService } from "../../../../../components/service/use-service";
 import { tabsFor } from "../../../../../components/service-tabs";
@@ -61,6 +62,7 @@ function ServiceLayout() {
         <OpErrorNote error={service.error} />
       )}
       {service.data && <DataCopyNote service={service.data} />}
+      {service.data && <TransferNote service={service.data} />}
       {service.isPending && <UsageStripSkeleton />}
       {service.data && service.data.kind !== "compose" && <UsageStrip service={service.data} />}
       {/*

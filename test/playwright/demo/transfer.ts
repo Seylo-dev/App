@@ -1,7 +1,8 @@
 // Demo data for service export and import (service-transfer.spec.ts): what
 // serviceTransfer.exportPreview says for the api service, an export file
-// written by the panel's own zip writer (and two damaged ones), and the
-// import preview the review page starts from.
+// written by the panel's own zip writer (with an uploaded archive or a
+// volume's data, and two damaged ones), and the import preview the review
+// page starts from.
 
 import { createHash } from "node:crypto";
 import { writeZip, type ZipEntryInput } from "../../../packages/zip/src/write";
@@ -27,24 +28,31 @@ export const exportPreview = {
     upload: null,
   },
   volumes: [{ name: "uploads", mountPath: "/app/uploads" }],
+  data: { blocker: null, database: false, running: true, node: { id: ids.de, name: "fsn-1" } },
   sourceLogin: { kind: "gitCredential", name: "deploy-bot" },
   leftOut: [
     { what: "Deploy history, logs and built images", why: "They belong to this panel; the import builds or pulls the service again." },
-    { what: "Volume data", why: "Volumes arrive empty. Volume data comes with a later version of export." },
   ],
 };
 
 const mtime = new Date("2026-11-11T12:00:00Z");
 const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
-/** A real export file of the web service: encrypted, with an uploaded archive of `archiveBytes` bytes. */
-export async function exportFile(archiveBytes = 300_000): Promise<Buffer> {
+/**
+ * A real export file of the web service: encrypted, with an uploaded
+ * archive of `archiveBytes` bytes, or (volumeBytes) the data of its volume
+ * data instead.
+ */
+export async function exportFile(archiveBytes = 300_000, options: { volumeBytes?: number } = {}): Promise<Buffer> {
   const enc = new TextEncoder();
   const readme = enc.encode("Seylo service export: web\n");
   const secrets = enc.encode(JSON.stringify({ v: 1, kdf: { name: "scrypt", N: 65536, r: 8, p: 1, salt: "AAAAAAAAAAAAAAAAAAAAAA", check: "AAAAAAAAAAAAAAAAAAAAAA" }, cipher: "aes-256-gcm", iv: "AAAAAAAAAAAAAAAA", tag: "AAAAAAAAAAAAAAAAAAAAAA", data: "" }));
   const archive = new Uint8Array(archiveBytes).map((_, i) => (i * 7) % 251);
   archive[0] = 0x1f;
   archive[1] = 0x8b;
+  const volume = options.volumeBytes ? new Uint8Array(options.volumeBytes).map((_, i) => (i * 13) % 253) : null;
+  const archiveEntry = volume ? "services/web/volumes/data.tar.gz" : "services/web/source/upload.tar.gz";
+  const body = volume ?? archive;
   const manifest = enc.encode(
     JSON.stringify({
       format: "service-export",
@@ -57,14 +65,16 @@ export async function exportFile(archiveBytes = 300_000): Promise<Buffer> {
       entries: [
         { path: "README.txt", size: readme.length, sha256: sha(readme) },
         { path: "secrets.enc", size: secrets.length, sha256: sha(secrets) },
-        { path: "services/web/source/upload.tar.gz", size: archive.length, sha256: sha(archive) },
+        volume
+          ? { path: archiveEntry, size: body.length, sha256: sha(body), unpackedBytes: body.length * 300, files: 1200 }
+          : { path: archiveEntry, size: body.length, sha256: sha(body) },
       ],
     }),
   );
   const entries: ZipEntryInput[] = [
     { name: "README.txt", method: "deflate", mtime, body: readme },
     { name: "secrets.enc", method: "deflate", mtime, body: secrets },
-    { name: "services/web/source/upload.tar.gz", method: "store", mtime, body: archive },
+    { name: archiveEntry, method: "store", mtime, body },
     { name: "manifest.json", method: "deflate", mtime, body: manifest },
     { name: "manifest.sig", method: "deflate", mtime, body: enc.encode('{"alg":"HMAC-SHA256","value":"00"}') },
   ];
@@ -120,6 +130,8 @@ export function importPreview(overrides: Record<string, unknown> = {}) {
       ],
       autoDomain: true,
       upload: true,
+      volumes: [],
+      confirmData: false,
       sharedVariables: "addMissing",
       cronJobs: "asInFile",
       uptimeChecks: "asInFile",
@@ -167,9 +179,18 @@ export function importPreview(overrides: Record<string, unknown> = {}) {
       imageDigest: null,
     },
     extras: { cronJobs: 1, uptimeChecks: 0, maintenance: false, tunnel: true, deployTrigger: true, exposures: [], alerts: [], backups: [] },
-    data: { volumes: [], upload: { fileName: "web.tar.gz", sizeBytes: 300_000 } },
+    data: { volumes: [], upload: { fileName: "web.tar.gz", sizeBytes: 300_000 }, neededBytes: 0, node: { freeBytes: null, totalBytes: null } },
     skipped: [{ what: "Previews", why: "Previews arrive off; turn them on on the Previews tab." }],
     expiresAt: new Date(Date.now() + 24 * 3600_000).toISOString(),
   };
   return { ...base, ...overrides };
+}
+
+/** sha256 of the manifest.json inside a file exportFile wrote (what getImport answers as manifestSha256). */
+export async function manifestSha256(zip: Buffer): Promise<string> {
+  const { bytesSource, openZip, readEntry } = await import("../../../packages/zip/src/read");
+  const source = bytesSource(new Uint8Array(zip));
+  const opened = await openZip(source);
+  const entry = opened.entries.find((e) => e.name === "manifest.json");
+  return sha(await readEntry(source, entry as NonNullable<typeof entry>, { maxBytes: 1 << 20 }));
 }

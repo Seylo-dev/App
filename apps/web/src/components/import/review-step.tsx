@@ -24,6 +24,7 @@ type Choices = ImportPreview["choices"];
 export type ImportResult = (typeof serviceTransfer.importService.output)["static"];
 
 const key = (d: { host: string; pathPrefix: string }) => `${d.host}${d.pathPrefix}`;
+const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"]);
 
 export function ReviewStep({
   preview: initial,
@@ -384,10 +385,55 @@ export function ReviewStep({
       </SectionCard>
 
       {(preview.data.volumes.length > 0 || preview.data.upload) && (
-        <SectionCard title={t("serviceTransfer.review.data")}>
-          <div className="flex flex-col gap-1.5 text-[13px] text-ink-strong">
-            {preview.data.volumes.length > 0 && (
-              <span>{t("serviceTransfer.review.volumes", { volumes: preview.data.volumes.map((v) => v.name).join(", ") })}</span>
+        <SectionCard title={t("serviceTransfer.review.data")} description={t("serviceTransfer.review.dataHint")}>
+          <div className="flex flex-col gap-2 text-[13px] text-ink-strong" data-testid="import-data">
+            {preview.data.volumes.map((v) =>
+              v.inFile ? (
+                <CheckLabel
+                  key={v.name}
+                  checked={v.include}
+                  disabled={save.isPending}
+                  onCheckedChange={(on) => {
+                    const inFile = preview.data.volumes.filter((x) => x.inFile).map((x) => x.name);
+                    const picked = preview.choices.volumes ?? [];
+                    // A database's data goes whole or not at all; the panel keeps it that way too.
+                    const next = databaseKinds.has(preview.service.kind)
+                      ? on === true
+                        ? inFile
+                        : []
+                      : on === true
+                        ? [...picked, v.name]
+                        : picked.filter((n) => n !== v.name);
+                    choose({ volumes: next });
+                  }}
+                >
+                  {t("serviceTransfer.review.volume", {
+                    name: v.name,
+                    path: v.mountPath,
+                    size: formatBytes(v.sizeBytes ?? 0),
+                    unpacked: formatBytes(v.unpackedBytes ?? 0),
+                  })}
+                </CheckLabel>
+              ) : (
+                <span key={v.name} className="text-muted-foreground">
+                  {t("serviceTransfer.review.volumeEmpty", { name: v.name, path: v.mountPath })}
+                </span>
+              ),
+            )}
+            {preview.data.neededBytes > 0 && (
+              <span className="text-muted-foreground">
+                {preview.data.node.freeBytes === null
+                  ? t("serviceTransfer.review.roomUnknown", { needed: formatBytes(preview.data.neededBytes) })
+                  : t("serviceTransfer.review.room", {
+                      needed: formatBytes(preview.data.neededBytes),
+                      free: formatBytes(preview.data.node.freeBytes),
+                    })}
+              </span>
+            )}
+            {(preview.choices.confirmData === true || preview.needs.some((n) => n.field === "confirmData")) && (
+              <CheckLabel checked={preview.choices.confirmData === true} onCheckedChange={(v) => choose({ confirmData: v === true })}>
+                {t("serviceTransfer.review.confirmData")}
+              </CheckLabel>
             )}
             {preview.data.upload && (
               <span>

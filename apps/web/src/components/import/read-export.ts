@@ -1,7 +1,7 @@
 // Reads an export file in the browser: only its central directory and its
 // small entries, never the whole file (the reader slices the File). What
 // the panel needs goes to serviceTransfer.importBegin as text; the uploaded
-// archive's bytes are sliced from the file when they go up. The panel
+// archive's and the volumes' bytes are sliced from the file when they go up. The panel
 // checks everything again; this is for the person, so a damaged or wrong
 // file is refused before anything is sent.
 
@@ -20,6 +20,8 @@ export interface ExportFile {
   services: { path: string; json: string }[];
   /** The uploaded archive's entry, when the file has one. */
   upload: ZipEntry | null;
+  /** Volume data entries, by name in the file. */
+  volumes: ZipEntry[];
 }
 
 export class ExportFileError extends Error {}
@@ -74,14 +76,21 @@ export async function readExport(file: Blob): Promise<ExportFile> {
     secretsEnc: await text(serviceTransfer.entryPatterns.secrets, limits.documentBytes * 1.5),
     services,
     upload: opened.entries.find((e) => serviceTransfer.entryPatterns.upload.test(e.name)) ?? null,
+    volumes: opened.entries.filter((e) => serviceTransfer.entryPatterns.volume.test(e.name)),
   };
 }
 
+/** The entry of the file an import waits for (the uploaded archive or a volume's data). */
+export function entryOf(file: ExportFile, name: string): ZipEntry | null {
+  if (file.upload?.name === name) return file.upload;
+  return file.volumes.find((e) => e.name === name) ?? null;
+}
+
 /**
- * The archive's bytes as they go up: a slice of the file when stored (the
+ * An entry's bytes as they go up: a slice of the file when stored (the
  * export's way), inflated first when a zip tool deflated it on a re-zip.
  */
-export async function archiveBytes(file: ExportFile, entry: ZipEntry): Promise<Blob> {
+export async function entryBytes(file: ExportFile, entry: ZipEntry): Promise<Blob> {
   if (entry.method === "store") return file.file.slice(entry.dataOffset, entry.dataOffset + entry.compressedSize);
   return new Response(entryStream(blobSource(file.file), entry)).blob();
 }

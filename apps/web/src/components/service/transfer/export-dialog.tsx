@@ -1,13 +1,17 @@
 // "Export…" on a service's Settings tab: what goes in the file and what
-// stays out (serviceTransfer.exportPreview), the passphrase or leaving
-// secret values out, and the download. serviceTransfer.export answers with
-// a one-minute link the browser opens as a download; a stale session gets
-// the re-auth dialog first (lib/reauth.ts).
+// stays out (serviceTransfer.exportPreview), which volumes' data goes in
+// and whether the service stops while it is read (a database always does),
+// the passphrase or leaving secret values out, and the download.
+// serviceTransfer.export answers with a one-minute link the browser opens
+// as a download; a stale session gets the re-auth dialog first
+// (lib/reauth.ts). While the download runs the dialog shows its progress
+// from ServiceDetail.transfer, and at the end the zip's sha256.
 
 import { serviceTransfer } from "@seylo/ops";
 import { useOp, useOpMutation } from "@seylo/ops/react";
 import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
+import { CopyField } from "@seylo/ui/components/copy-field";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@seylo/ui/components/dialog";
 import { Input } from "@seylo/ui/components/input";
 import { RadioCard, RadioGroup } from "@seylo/ui/components/radio-group";
@@ -23,7 +27,6 @@ import { OpErrorNote, retryOp } from "../op-state";
 import type { ServiceDetail } from "../use-service";
 
 const minPassphrase = serviceTransfer.transferLimits.passphraseMin;
-const databaseKinds = new Set(["postgres", "mysql", "mariadb", "mongo", "redis", "valkey", "keydb", "dragonfly", "clickhouse"]);
 
 /** Opens a download link: the response is an attachment, so the page stays. */
 function startDownload(url: string, fileName: string): void {
@@ -50,6 +53,8 @@ export function ExportDialog({
   const [passphrase, setPassphrase] = useState("");
   const [again, setAgain] = useState("");
   const [sourceLogin, setSourceLogin] = useState(false);
+  const [volumes, setVolumes] = useState<string[] | null>(null);
+  const [stopService, setStopService] = useState(true);
   const [done, setDone] = useState<{ exportId: string; fileName: string } | null>(null);
 
   useEffect(() => {
@@ -57,6 +62,7 @@ export function ExportDialog({
       setPassphrase("");
       setAgain("");
       setDone(null);
+      setVolumes(null);
     }
   }, [open]);
 
@@ -71,6 +77,10 @@ export function ExportDialog({
   const link = useOpMutation(serviceTransfer.exportLink, { onSuccess: (res) => startDownload(res.download.url, res.fileName) });
 
   const p = preview.data;
+  // Every volume's data by default, when it can go.
+  const dataAllowed = p ? p.data.blocker === null && !(p.data.database && secrets === "omitted") : false;
+  const picked = dataAllowed ? (volumes ?? p?.volumes.map((v) => v.name) ?? []) : [];
+  const stops = picked.length > 0 && p?.data.running === true && (p.data.database || stopService);
   const short = secrets === "encrypted" && passphrase.length > 0 && passphrase.length < minPassphrase;
   const mismatch = secrets === "encrypted" && again.length > 0 && again !== passphrase;
   const ready = secrets === "omitted" || (passphrase.length >= minPassphrase && again === passphrase);
@@ -83,6 +93,7 @@ export function ExportDialog({
       secrets,
       ...(secrets === "encrypted" ? { passphrase } : {}),
       ...(secrets === "encrypted" && p.sourceLogin ? { includeSourceLogin: sourceLogin } : {}),
+      ...(picked.length > 0 ? { volumes: picked, stopService: p.data.database || stopService } : {}),
     });
   };
   const runError = run.error && !isReauthCancelled(run.error) ? run.error : null;
@@ -97,6 +108,7 @@ export function ExportDialog({
               <DialogDescription>{t("serviceTransfer.export.started", { file: done.fileName })}</DialogDescription>
             </div>
             <p className="m-0 text-[13px] text-muted-foreground">{t("serviceTransfer.export.startedHint")}</p>
+            <ExportProgress service={service} exportId={done.exportId} />
             {link.error && !isReauthCancelled(link.error) && <OpErrorNote error={link.error} />}
             <div className="flex justify-end gap-2">
               <Button onClick={() => link.mutate({ serviceId: service.id, exportId: done.exportId })} disabled={link.isPending}>
@@ -127,7 +139,18 @@ export function ExportDialog({
               </Alert>
             ) : (
               <>
-                <Includes preview={p} name={service.name} kind={service.kind} />
+                <Includes preview={p} />
+                {p.volumes.length > 0 && (
+                  <DataChoice
+                    preview={p}
+                    name={service.name}
+                    picked={picked}
+                    onPick={setVolumes}
+                    stopService={stopService}
+                    onStopService={setStopService}
+                    passphraseNeeded={p.data.database && secrets === "omitted"}
+                  />
+                )}
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("serviceTransfer.export.secrets")}</span>
                   <RadioGroup
@@ -189,7 +212,10 @@ export function ExportDialog({
                     })}
                   </CheckLabel>
                 )}
-                {p.includes.upload && <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceTransfer.export.notEncrypted")}</p>}
+                {(p.includes.upload || picked.length > 0) && (
+                  <p className="m-0 text-[12.5px] text-muted-foreground">{t("serviceTransfer.export.notEncrypted")}</p>
+                )}
+                {stops && <Alert tone="warning">{t("serviceTransfer.export.stopsUntil", { name: service.name })}</Alert>}
                 {p.leftOut.length > 0 && (
                   <details className="text-[12.5px] text-muted-foreground">
                     <summary className="cursor-pointer">{t("serviceTransfer.export.leftOut")}</summary>
@@ -224,7 +250,7 @@ export function ExportDialog({
 
 type Preview = (typeof serviceTransfer.exportPreview.output)["static"];
 
-function Includes({ preview: p, name, kind }: { preview: Preview; name: string; kind: string }) {
+function Includes({ preview: p }: { preview: Preview }) {
   const i = p.includes;
   const hosts = i.domains.map((d) => (d.pathPrefix === "/" ? d.host : `${d.host}${d.pathPrefix}`));
   const lines = [
@@ -254,13 +280,103 @@ function Includes({ preview: p, name, kind }: { preview: Preview; name: string; 
           </li>
         ))}
       </ul>
-      {p.volumes.length > 0 && (
-        <p className="m-0 text-[12.5px] text-muted-foreground">
-          {databaseKinds.has(kind)
-            ? t("serviceTransfer.export.databaseData", { name })
-            : t("serviceTransfer.export.volumes", { volumes: p.volumes.map((v) => v.name).join(", ") })}
-        </p>
+    </div>
+  );
+}
+
+/** Which volumes' data goes in, and whether the service stops while it is read. */
+function DataChoice({
+  preview: p,
+  name,
+  picked,
+  onPick,
+  stopService,
+  onStopService,
+  passphraseNeeded,
+}: {
+  preview: Preview;
+  name: string;
+  picked: string[];
+  onPick: (volumes: string[]) => void;
+  stopService: boolean;
+  onStopService: (on: boolean) => void;
+  passphraseNeeded: boolean;
+}) {
+  const all = p.volumes.map((v) => v.name);
+  const blocked = p.data.blocker !== null || passphraseNeeded;
+  return (
+    <div className="flex flex-col gap-2 text-[13px]" data-testid="export-data">
+      <span className="text-xs font-medium text-muted-foreground">{t("serviceTransfer.export.dataTitle")}</span>
+      {p.data.blocker ? (
+        <p className="m-0 text-muted-foreground">{t("serviceTransfer.export.dataBlocked", { reason: p.data.blocker.message })}</p>
+      ) : passphraseNeeded ? (
+        <p className="m-0 text-muted-foreground">{t("serviceTransfer.export.databaseNeedsPassphrase")}</p>
+      ) : null}
+      {p.data.database ? (
+        <CheckLabel checked={!blocked && picked.length > 0} disabled={blocked} onCheckedChange={(v) => onPick(v === true ? all : [])}>
+          {t("serviceTransfer.export.databaseVolume", { name })}
+        </CheckLabel>
+      ) : (
+        p.volumes.map((v) => (
+          <CheckLabel
+            key={v.name}
+            checked={!blocked && picked.includes(v.name)}
+            disabled={blocked}
+            onCheckedChange={(on) => onPick(on === true ? [...picked, v.name] : picked.filter((n) => n !== v.name))}
+          >
+            {t("serviceTransfer.export.volume", { name: v.name, path: v.mountPath })}
+          </CheckLabel>
+        ))
       )}
+      {!blocked && picked.length > 0 && p.data.running && (
+        <CheckLabel checked={p.data.database || stopService} disabled={p.data.database} onCheckedChange={(v) => onStopService(v === true)}>
+          {p.data.database ? t("serviceTransfer.export.databaseStop", { name }) : t("serviceTransfer.export.stop", { name })}
+        </CheckLabel>
+      )}
+      {picked.length === 0 && !blocked && <p className="m-0 text-muted-foreground">{t("serviceTransfer.export.noData")}</p>}
+    </div>
+  );
+}
+
+/** The running download of this export, from the service page's live state. */
+function ExportProgress({ service, exportId }: { service: ServiceDetail; exportId: string }) {
+  const cancel = useOpMutation(serviceTransfer.cancelExport);
+  const transfer = service.transfer?.kind === "export" && service.transfer.id === exportId ? service.transfer : null;
+  if (!transfer) return <p className="m-0 text-[13px] text-muted-foreground">{t("serviceTransfer.export.progress.waiting")}</p>;
+  if (transfer.status === "done") {
+    return (
+      <div className="flex flex-col gap-1.5 text-[13px]">
+        <span className="text-ink-strong">{t("serviceTransfer.export.progress.finished")}</span>
+        {transfer.sha256 && <CopyField value={transfer.sha256} />}
+      </div>
+    );
+  }
+  if (transfer.status !== "streaming") {
+    return (
+      <Alert tone="danger" role="alert">
+        {t("serviceTransfer.export.progress.ended", { error: transfer.error ?? t("common.unknownError") })}
+      </Alert>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2 text-[13px]" aria-live="polite">
+      <span className="text-ink-strong">
+        {transfer.stopped
+          ? t("serviceTransfer.export.progress.streamingStopped", { size: formatBytes(transfer.bytes), name: service.name })
+          : t("serviceTransfer.export.progress.streaming", { size: formatBytes(transfer.bytes) })}
+      </span>
+      {transfer.volumes.length > 0 && (
+        <div className="flex justify-start">
+          <Button
+            variant="ghost"
+            disabled={cancel.isPending}
+            onClick={() => cancel.mutate({ serviceId: service.id, exportId: transfer.id })}
+          >
+            {t("serviceTransfer.export.progress.stop")}
+          </Button>
+        </div>
+      )}
+      {cancel.error && <OpErrorNote error={cancel.error} />}
     </div>
   );
 }
