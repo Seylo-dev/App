@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,12 +46,15 @@ func stageSetup(t *testing.T, keepLoopback bool) {
 // movedPanel is the same panel at another address, as a move leaves it:
 // the panel id, the identity key and the node's key are the old panel's;
 // its TLS key is its own here (the real move ships the old one; the pin
-// is whatever StagePanelAddress names).
+// is whatever StagePanelAddress names). Its /api/health names the move.
+// It takes agents at once, as after the switch; RefuseAgents(true) makes
+// it the moved panel before it.
 func movedPanel(t *testing.T, from *rpctest.FakePanel, nodeID string) *rpctest.FakePanel {
 	t.Helper()
 	to := rpctest.NewFakePanel(t, rpctest.WithTLS())
 	to.PanelID, to.EdgeKey, to.EdgePrivate = from.PanelID, from.EdgeKey, from.EdgePrivate
 	to.AddNode(nodeID, from.NodeKey(nodeID))
+	to.SetHealthMove(stageMove)
 	return to
 }
 
@@ -188,6 +192,105 @@ func TestStagedAddressOfAnotherPanelIsNotTaken(t *testing.T) {
 	}
 }
 
+// Before its switch the moved panel answers agents with 503. A node whose
+// old panel went away for a while dials it, gets no session, keeps its
+// address and comes back to the old panel; after the switch it moves.
+func TestStandbyPanelSendsTheNodeBack(t *testing.T) {
+	stageSetup(t, false)
+	old := rpctest.NewFakePanel(t, rpctest.WithTLS())
+	layout := joined(t, old)
+	startDaemon(t, layout)
+	nodeID := old.WaitConnected("")
+	moved := movedPanel(t, old, nodeID)
+	moved.RefuseAgents(true)
+	pin := conn.FormatPin(moved.SPKI())
+	if _, err := stage(t, old, nodeID, &agentv1.StagePanelAddressRequest{MoveId: stageMove, PanelUrl: moved.URL(), PanelPin: pin, Probe: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The node loses the old panel (503 at the HTTP level, as from a
+	// panel that does not take agents) and tries the moved one, twice.
+	old.RefuseAgents(true)
+	old.DropConnections()
+	moved.WaitConnects(2)
+	if hellos := moved.Hellos(); len(hellos) != 0 {
+		t.Fatalf("the moved panel on standby got %d hellos", len(hellos))
+	}
+	if cfg := loadCfg(t, layout); cfg.PanelURL != old.URL() || cfg.PanelPin != conn.FormatPin(old.SPKI()) || cfg.Staged == nil || cfg.StagedMove != stageMove {
+		t.Fatalf("a 503 from the staged address changed config.yml: %+v", cfg)
+	}
+	// The old panel is back: so is the node.
+	old.RefuseAgents(false)
+	old.WaitConnected(nodeID)
+	if cfg := loadCfg(t, layout); cfg.PanelURL != old.URL() || cfg.Staged == nil {
+		t.Fatalf("config = %+v", cfg)
+	}
+
+	// The switch: the old panel goes, the moved one takes agents.
+	retire(old)
+	moved.RefuseAgents(false)
+	moved.WaitConnected(nodeID)
+	waitUntil(t, "the staged address as panel_url", func() bool {
+		cfg, _ := LoadConfig(layout.ConfigFile())
+		return cfg != nil && cfg.PanelURL == moved.URL() && cfg.PanelPin == pin && cfg.Staged == nil && cfg.StagedMove == ""
+	})
+}
+
+// commitWaiter is the update service of a target node: the moved panel of
+// stageMove waits there for its switch while waits is set.
+type commitWaiter struct {
+	arrivals
+	waits atomic.Bool
+}
+
+func (w *commitWaiter) AwaitsCommit(id string) bool { return id == stageMove && w.waits.Load() }
+
+// The target's own agent never dials its staged address (the moved panel
+// on its own machine) before the old panel committed the switch there,
+// however long the old panel is gone.
+func TestTargetDialsTheMovedPanelOnlyAfterTheSwitch(t *testing.T) {
+	stageSetup(t, false)
+	w := &commitWaiter{}
+	w.waits.Store(true)
+	owners = append(owners, owner{"test-target", func(d *Deps) error {
+		d.Updater = w
+		return nil
+	}, func(*Registry, *Deps) error { return nil }})
+	old := rpctest.NewFakePanel(t, rpctest.WithTLS())
+	layout := joined(t, old)
+	startDaemon(t, layout)
+	nodeID := old.WaitConnected("")
+	moved := movedPanel(t, old, nodeID)
+	pin := conn.FormatPin(moved.SPKI())
+	if _, err := stage(t, old, nodeID, &agentv1.StagePanelAddressRequest{MoveId: stageMove, PanelUrl: moved.URL(), PanelPin: pin, Probe: true}); err != nil {
+		t.Fatal(err)
+	}
+	old.RefuseAgents(true)
+	old.DropConnections()
+	// Many times stagedAfter, with the old panel refusing every connect.
+	n := old.Connects()
+	waitUntil(t, "connects to the old panel", func() bool { return old.Connects() >= n+5 || moved.Connects() > 0 })
+	if got := moved.Connects(); got != 0 {
+		t.Fatalf("the target dialed the moved panel %d times before the switch", got)
+	}
+	if cfg := loadCfg(t, layout); cfg.PanelURL != old.URL() || cfg.Staged == nil {
+		t.Fatalf("config = %+v", cfg)
+	}
+
+	// The old panel committed the switch here.
+	w.waits.Store(false)
+	moved.WaitConnected(nodeID)
+	waitUntil(t, "the staged address as panel_url", func() bool {
+		cfg, _ := LoadConfig(layout.ConfigFile())
+		return cfg != nil && cfg.PanelURL == moved.URL() && cfg.Staged == nil
+	})
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !slices.Equal(w.ids, []string{stageMove}) {
+		t.Fatalf("arrivals = %v", w.ids)
+	}
+}
+
 // ImportPanelData, ImportRegistry, StartMovedPanel and CommitMovedPanel
 // ship the panel's keys or switch the nodes: refused over a plain-HTTP
 // session from another host, like StagePanelAddress. Loopback is the
@@ -300,10 +403,25 @@ func TestStagePanelAddressRules(t *testing.T) {
 	}
 }
 
+// healthServer answers /api/health over TLS with body, like a panel.
+func healthServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/health" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestStagePanelAddressProbe(t *testing.T) {
 	ctx := context.Background()
-	srv := httptest.NewTLSServer(http.NotFoundHandler())
-	defer srv.Close()
+	// The moved panel on standby names its move in its health answer.
+	srv := healthServer(t, http.StatusOK, `{"status":"ok","version":"0.2.8","moveId":"`+stageMove+`"}`)
 	pin := conn.FormatPin(conn.SPKIFingerprint(srv.Certificate()))
 
 	c := stageConnector(t, "https://198.51.100.4:3443")
@@ -316,6 +434,26 @@ func TestStagePanelAddressProbe(t *testing.T) {
 	}
 	if got := loadCfgAt(t, c.cfgPath); got.Staged == nil || got.Staged.PanelURL != srv.URL {
 		t.Fatalf("not staged: %+v", got)
+	}
+
+	// The right key but not the moved panel of this move: the old panel
+	// (no move in its answer), another move's copy, or no panel at all.
+	for name, srv := range map[string]*httptest.Server{
+		"old panel":     healthServer(t, http.StatusOK, `{"status":"ok","version":"0.2.8"}`),
+		"another move":  healthServer(t, http.StatusOK, `{"status":"ok","version":"0.2.8","moveId":"mv00000000000002"}`),
+		"not found":     httptest.NewTLSServer(http.NotFoundHandler()),
+		"not json":      healthServer(t, http.StatusOK, `ok`),
+		"standby error": healthServer(t, http.StatusServiceUnavailable, `{"status":"unavailable"}`),
+	} {
+		c := stageConnector(t, "https://198.51.100.4:3443")
+		_, err := c.StagePanelAddress(ctx, &agentv1.StagePanelAddressRequest{MoveId: stageMove, PanelUrl: srv.URL, PanelPin: conn.FormatPin(conn.SPKIFingerprint(srv.Certificate())), Probe: true})
+		if s := rpc.StatusOf(err); s.GetCode() != agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION || detailsReason(err) != reasonProbe || !strings.Contains(s.GetMessage(), "old panel") {
+			t.Errorf("%s: %v", name, s)
+		}
+		if loadCfgAt(t, c.cfgPath).Staged != nil {
+			t.Errorf("%s: staged", name)
+		}
+		srv.Close()
 	}
 
 	// Another key at that address, or nothing listening: refused, nothing staged.
@@ -397,6 +535,22 @@ func TestStagedAddressTiming(t *testing.T) {
 	c.primaryFailed(cfg)
 	if !c.useStaged || c.useFallback {
 		t.Fatalf("after stagedAfter: staged %v, fallback %v", c.useStaged, c.useFallback)
+	}
+
+	// On the target, until the switch: the staged address waits.
+	w := &commitWaiter{}
+	w.waits.Store(true)
+	cfg.StagedMove = stageMove
+	c = &connector{deps: &Deps{Updater: w}, logger: slog.New(slog.DiscardHandler), primaryDown: time.Now().Add(-2 * time.Hour)}
+	c.primaryFailed(cfg)
+	if c.useStaged {
+		t.Fatal("the target dials its staged address before the switch")
+	}
+	w.waits.Store(false)
+	c.useFallback = false
+	c.primaryFailed(cfg)
+	if !c.useStaged {
+		t.Fatal("the target does not dial its staged address after the switch")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -68,6 +69,13 @@ type FakePanel struct {
 	drops uint64
 	// signAccepts adds HelloAccepted.panel_signature.
 	signAccepts bool
+	// refuseAgents answers /api/agent/connect with 503, like a retired
+	// panel or a moved one before its switch.
+	refuseAgents bool
+	// connects counts /api/agent/connect requests, refused ones included.
+	connects int
+	// healthMove is the "moveId" /api/health names ("" for none).
+	healthMove string
 }
 
 // Report is one delivered outbox report.
@@ -110,6 +118,7 @@ func NewFakePanel(tb testing.TB, opts ...FakePanelOption) *FakePanel {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/agent/connect", p.serveAgent)
+	mux.HandleFunc("/api/health", p.serveHealth)
 	p.mux = mux
 	if cfg.tls {
 		p.Server = httptest.NewTLSServer(mux)
@@ -359,7 +368,58 @@ func (p *FakePanel) WaitReports(n int) []Report {
 	return p.Reports()
 }
 
+// RefuseAgents makes /api/agent/connect answer 503 with Retry-After before
+// any WebSocket (refuse true), like a retired panel or a moved panel
+// before its switch, or take agents again (false).
+func (p *FakePanel) RefuseAgents(refuse bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.refuseAgents = refuse
+}
+
+// Connects counts the requests to /api/agent/connect, refused ones too.
+func (p *FakePanel) Connects() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.connects
+}
+
+// WaitConnects waits until /api/agent/connect got n requests in total.
+func (p *FakePanel) WaitConnects(n int) {
+	p.tb.Helper()
+	p.waitFor(fmt.Sprintf("%d connect requests", n), func() bool { return p.connects >= n })
+}
+
+// SetHealthMove makes /api/health name this move ("moveId"), as a moved
+// panel does while it waits for its switch ("" for none).
+func (p *FakePanel) SetHealthMove(moveID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.healthMove = moveID
+}
+
+func (p *FakePanel) serveHealth(w http.ResponseWriter, _ *http.Request) {
+	p.mu.Lock()
+	body := map[string]string{"status": "ok", "version": "test"}
+	if p.healthMove != "" {
+		body["moveId"] = p.healthMove
+	}
+	p.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 func (p *FakePanel) serveAgent(w http.ResponseWriter, r *http.Request) {
+	p.mu.Lock()
+	p.connects++
+	refuse := p.refuseAgents
+	p.notify()
+	p.mu.Unlock()
+	if refuse {
+		w.Header().Set("Retry-After", "10")
+		http.Error(w, "this panel does not take agents now", http.StatusServiceUnavailable)
+		return
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{conn.Subprotocol}})
 	if err != nil {
 		return

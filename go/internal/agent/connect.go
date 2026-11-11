@@ -82,6 +82,9 @@ type connector struct {
 	// useStaged makes the next attempt dial config.yml's staged address
 	// (panel_stage.go).
 	useStaged bool
+	// stagedHeld is the move whose staged address waits for its switch on
+	// this node (stagedWaits), logged once.
+	stagedHeld string
 	// primaryDown is when connects to panel_url started failing (zero
 	// while they work); standingTried is the last standing fallback dial.
 	primaryDown, standingTried time.Time
@@ -191,7 +194,7 @@ func (c *connector) connectOnce(ctx context.Context) error {
 	cfg := c.config()
 	target := primaryTarget(cfg)
 	switch {
-	case c.useStaged && cfg.Staged != nil:
+	case c.useStaged && cfg.Staged != nil && !c.stagedWaits(cfg):
 		target = stagedTarget(cfg)
 		c.logger.Warn("the panel's address does not answer; trying the address the panel staged for its move to another node",
 			"panel_url", cfg.PanelURL, "staged", target.url, "move_id", cfg.StagedMove)
@@ -244,13 +247,14 @@ func (c *connector) connectOnce(ctx context.Context) error {
 // once during a move's first cycle, after standingFallbackAfter of failed
 // connects for a standing fallback (then again every standingFallbackAfter).
 // A staged address (the panel moving to another node) goes first once
-// connects failed for stagedAfter: from then on every other attempt dials it.
+// connects failed for stagedAfter: from then on every other attempt dials
+// it, unless the moved panel on this node still waits for its switch.
 func (c *connector) primaryFailed(cfg FileConfig) {
 	now := time.Now()
 	if c.primaryDown.IsZero() {
 		c.primaryDown = now
 	}
-	if cfg.Staged != nil && now.Sub(c.primaryDown) >= stagedAfter {
+	if cfg.Staged != nil && now.Sub(c.primaryDown) >= stagedAfter && !c.stagedWaits(cfg) {
 		c.useStaged = true
 		return
 	}

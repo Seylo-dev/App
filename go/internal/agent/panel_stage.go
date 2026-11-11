@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,11 +22,19 @@ import (
 // node (StagePanelAddress): https://<target>:<agents' TLS port> with the
 // pin of the agents' TLS key, which moves with the panel, and
 // https://127.0.0.1:<port> on the target itself. The address is checked
-// first by a TLS dial with the pin. It is kept apart from the fallback and
-// survives reconnects to the old panel. Once panel_url stops answering
-// (the connections fail; a refusal does not count) for stagedAfter, the
-// agent dials the staged address, and the usual checks apply there (the
-// panel id before anything is signed, the identity key after). Once a
+// first by an HTTPS GET of /api/health with the pin, whose answer must
+// name the move ("moveId"): the old panel presents the same key, so the
+// pin alone does not tell an address that still leads to it. It is kept
+// apart from the fallback and survives reconnects to the old panel. Once
+// panel_url stops answering (the connections fail; a refusal does not
+// count) for stagedAfter, the agent dials the staged address, and the
+// usual checks apply there (the panel id before anything is signed, the
+// identity key after). Until the old panel commits the switch on the
+// target (CommitMovedPanel), the moved panel answers agents with 503:
+// like any dial that gets no WebSocket, that sends the node back to
+// panel_url, so a node whose old panel only went away for a while comes
+// back to it. The target's own agent does not even dial its staged
+// address before the switch (update.PanelMover.AwaitsCommit). Once a
 // session there is accepted, it is panel_url: the old address and the
 // fallback are forgotten, since the old panel was retired and must never
 // get a node back. The panel's own node, which dials loopback over plain
@@ -82,6 +92,31 @@ func (c *connector) promoteStaged(to panelTarget) {
 // the panel moved to.
 type panelArrival interface{ PanelArrived(moveID string) }
 
+// commitWait is the part of update.Service that knows whether the moved
+// panel of a move waits on this node for its switch.
+type commitWait interface{ AwaitsCommit(moveID string) bool }
+
+// stagedWaits reports whether the staged address must not be dialed yet:
+// this node is the target of that move and the old panel has not
+// committed the switch here. Dialing it earlier would reach the moved
+// panel on this machine while the old panel may still abort the move.
+func (c *connector) stagedWaits(cfg FileConfig) bool {
+	if cfg.Staged == nil || c.deps == nil {
+		return false
+	}
+	w, ok := c.deps.Updater.(commitWait)
+	if !ok || !w.AwaitsCommit(cfg.StagedMove) {
+		c.stagedHeld = ""
+		return false
+	}
+	if c.stagedHeld != cfg.StagedMove {
+		c.stagedHeld = cfg.StagedMove
+		c.logger.Warn("the panel's address does not answer; the moved panel on this node waits for the old panel to switch to it, so this node keeps dialing the old address",
+			"panel_url", cfg.PanelURL, "staged", cfg.Staged.PanelURL, "move_id", cfg.StagedMove)
+	}
+	return true
+}
+
 // stageError is a refusal with a reason in the status details.
 func stageError(code agentv1.StatusCode, reason, msg string) error {
 	e := rpc.NewError(code, msg)
@@ -105,10 +140,13 @@ func (c *connector) StagePanelAddress(ctx context.Context, req *agentv1.StagePan
 	var took time.Duration
 	if req.GetProbe() {
 		started := time.Now()
-		if err := probePanel(ctx, target); err != nil {
+		if err := probePanel(ctx, target, req.GetMoveId()); err != nil {
 			msg := fmt.Sprintf("this node cannot reach the panel's new address %s: %v", target.url, err)
-			if errors.Is(err, conn.ErrPinMismatch) {
+			switch {
+			case errors.Is(err, conn.ErrPinMismatch):
 				msg = fmt.Sprintf("%s answers with another key than the panel's agents' TLS key", target.url)
+			case errors.Is(err, errNotMovedPanel):
+				msg = fmt.Sprintf("%s answers, but %v; the address may still lead to the old panel", target.url, err)
 			}
 			return nil, stageError(agentv1.StatusCode_STATUS_CODE_FAILED_PRECONDITION, reasonProbe, msg)
 		}
@@ -190,10 +228,16 @@ func parseStagedTarget(raw, pin string) (panelTarget, error) {
 	return panelTarget{url: "https://" + u.Host, pin: conn.FormatPin(b)}, nil
 }
 
-// probePanel checks this node reaches target: a TLS handshake with the
-// pin, through the proxy the agent's own connection uses, and any HTTP
-// answer. No WebSocket: the old panel still holds this node's session.
-func probePanel(ctx context.Context, target panelTarget) error {
+// errNotMovedPanel: the probed address answers, but not as the moved panel
+// of the move.
+var errNotMovedPanel = errors.New("the panel there is not the moved copy of this move")
+
+// probePanel checks this node reaches the moved panel of move moveID at
+// target: a TLS handshake with the pin, through the proxy the agent's own
+// connection uses, and a /api/health answer that names the move. The old
+// panel presents the same pin and never names a move. No WebSocket: the
+// old panel still holds this node's session.
+func probePanel(ctx context.Context, target panelTarget, moveID string) error {
 	pin, err := conn.ParsePin(target.pin)
 	if err != nil {
 		return err
@@ -216,5 +260,18 @@ func probePanel(ctx context.Context, target panelTarget) error {
 		}
 		return err
 	}
-	return res.Body.Close()
+	defer res.Body.Close()
+	var body struct {
+		MoveID string `json:"moveId"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&body); err != nil {
+		return fmt.Errorf("%w: HTTP %d without a health answer", errNotMovedPanel, res.StatusCode)
+	}
+	if body.MoveID != moveID {
+		if body.MoveID == "" {
+			return fmt.Errorf("%w: HTTP %d, its health answer names no move", errNotMovedPanel, res.StatusCode)
+		}
+		return fmt.Errorf("%w: HTTP %d, its health answer names move %q", errNotMovedPanel, res.StatusCode, body.MoveID)
+	}
+	return nil
 }
