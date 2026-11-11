@@ -6,8 +6,8 @@
 // the ops that set it run; database and Box specs are built from their
 // engine, never taken from the file.
 
-import { parseEnv } from "@seylo/env-analyzer";
-import { boxes as boxOps, databases as dbOps, OpError, type serviceTransfer as transferOps } from "@seylo/ops";
+import { type EnvEntry, parseEnv } from "@seylo/env-analyzer";
+import { boxes as boxOps, databases as dbOps, env as envOps, OpError, type serviceTransfer as transferOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
@@ -69,8 +69,8 @@ export interface Plan {
   materialize: Omit<Materialize, "createdBy">;
   pick: AccessOption | null;
   credential: FileCredential | null;
-  /** The project's shared variables to write first (null: leave them). */
-  sharedEnv: string | null;
+  /** Shared variables to add (or, with overwrite, replace) in the project's shared env, merged into the stored text at import. */
+  sharedLines: SharedLine[];
   /** Domains by key whose basic auth users need a password from the import call. */
   passwordsNeeded: Map<string, string[]>;
   /** Uptime check URLs to check against internal targets before they are created. */
@@ -82,6 +82,13 @@ export interface Plan {
   /** Repository hooks to create after the transaction (sources read through an account or a provider). */
   hooks: boolean;
   pendingUpload: { path: string; size: number; sha256: string; fileName: string } | null;
+}
+
+/** A shared variable's line from the file, and whether it replaces a different value here. */
+export interface SharedLine {
+  key: string;
+  line: string;
+  overwrite: boolean;
 }
 
 const bcryptHash = /^\$2[aby]\$(0[4-9]|1[0-2])\$[./A-Za-z0-9]{53}$/;
@@ -336,15 +343,16 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
 
   // Shared variables it reads: missing ones can be added, differing ones are kept unless overwritten.
   const sharedChoice = choicesIn.sharedVariables ?? "addMissing";
-  const projectText = readProjectEnv(ctx.db, ctx.secrets, projectId).text;
-  const projectEnv = parseEnv(projectText);
+  const projectEnv = parseEnv(readProjectEnv(ctx.db, ctx.secrets, projectId).text);
+  const refusedShared: string[] = [];
   const sharedState = doc.env.shared.map((key) => {
     const here = projectEnv.entries.find((e) => e.key === key);
     // The file has each line as it was written there ("KEY=value", quotes and all).
     const line = secrets?.shared[key];
-    const fileEntry = line === undefined ? undefined : parseEnv(line).entries.find((e) => e.key === key);
+    const fileEntry = line === undefined ? undefined : sharedLineEntry(key, line);
+    if (line !== undefined && !fileEntry) refusedShared.push(key);
     const state: "missing" | "same" | "differs" | "noValue" = !fileEntry
-      ? here
+      ? here && line === undefined
         ? "same"
         : "noValue"
       : !here
@@ -354,24 +362,21 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
           : "differs";
     return { name: key, state, line: fileEntry ? line : undefined, here };
   });
-  let sharedEnv: string | null = null;
+  const sharedLines: SharedLine[] = [];
   const toWrite = sharedState.filter(
     (s) => s.line !== undefined && (s.state === "missing" || (sharedChoice === "overwrite" && s.state === "differs")),
   );
   if (sharedChoice !== "skip" && toWrite.length > 0) {
     if (can("env.edit")) {
-      let text = projectText;
-      // Replace from the end so earlier ranges stay put, then add the missing ones.
-      for (const s of toWrite.filter((t) => t.here).sort((a, b) => (b.here?.range.start ?? 0) - (a.here?.range.start ?? 0))) {
-        const range = s.here?.range as { start: number; end: number };
-        text = `${text.slice(0, range.start)}${s.line}${text.slice(range.end)}`;
-      }
-      const added = toWrite.filter((t) => !t.here).map((t) => t.line);
-      if (added.length) text = `${text.replace(/\n*$/, "")}${text.trim() ? "\n" : ""}${added.join("\n")}\n`;
-      sharedEnv = text;
+      for (const s of toWrite) sharedLines.push({ key: s.name, line: s.line as string, overwrite: s.state === "differs" });
     } else noPermission("Shared variables", "env.edit");
   }
-  const missingShared = sharedState.filter((s) => s.state === "noValue" || (s.state === "missing" && sharedChoice === "skip"));
+  if (refusedShared.length)
+    warnings.push({
+      reason: "sharedRefused",
+      message: `The file's values of ${refusedShared.join(", ")} are not one KEY=value line without references, as shared variables need: they are left out.`,
+    });
+  const missingShared = sharedState.filter((s) => (s.state === "noValue" && !s.here) || (s.state === "missing" && sharedChoice === "skip"));
   if (missingShared.length)
     warnings.push({
       reason: "missingShared",
@@ -804,7 +809,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
     preview,
     pick,
     credential,
-    sharedEnv,
+    sharedLines,
     passwordsNeeded,
     checkTargets: checks.map((c) => c.url),
     envText,
@@ -857,6 +862,54 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       deployTrigger,
     },
   };
+}
+
+/**
+ * The entry of a shared variable's line from the file when it is what
+ * env.setShared takes for that one variable: a single KEY=value of this
+ * key over the whole line, without syntax problems or references (shared
+ * variables cannot reference services). Otherwise undefined: one value
+ * could carry more lines, and so variables the review page never shows.
+ */
+function sharedLineEntry(key: string, line: string): EnvEntry | undefined {
+  const parsed = parseEnv(line);
+  const [entry] = parsed.entries;
+  if (!entry || parsed.entries.length !== 1 || parsed.problems.length > 0) return undefined;
+  if (entry.key !== key || entry.references.length > 0 || entry.range.start !== 0 || entry.range.end !== line.length) return undefined;
+  return entry;
+}
+
+/**
+ * The project's shared env text with an import's lines: an overwrite
+ * replaces the variable's line, a variable that is not there is added at
+ * the end, and one someone added since the preview is left alone. Null
+ * when nothing changes. The import runs it on the text stored at that
+ * moment, inside its transaction, so a save in between is kept.
+ */
+export function mergeSharedLines(text: string, lines: readonly SharedLine[]): string | null {
+  const entries = parseEnv(text).entries;
+  let merged = text;
+  const replaced = lines
+    .flatMap((l) => {
+      const here = entries.find((e) => e.key === l.key);
+      return here && l.overwrite ? [{ line: l.line, range: here.range }] : [];
+    })
+    .sort((a, b) => b.range.start - a.range.start);
+  // From the end, so earlier ranges stay put.
+  for (const r of replaced) merged = `${merged.slice(0, r.range.start)}${r.line}${merged.slice(r.range.end)}`;
+  const added = lines.filter((l) => !entries.some((e) => e.key === l.key)).map((l) => l.line);
+  if (added.length) merged = `${merged.replace(/\n*$/, "")}${merged.trim() ? "\n" : ""}${added.join("\n")}\n`;
+  if (merged === text) return null;
+  if (!Value.Check(envOps.setShared.input.properties.text, merged)) {
+    throw new OpError(
+      "BAD_REQUEST",
+      "The project's shared variables would pass 256 KiB with the file's. Leave them out, or make room first.",
+      {
+        field: "sharedVariables",
+      },
+    );
+  }
+  return merged;
 }
 
 /** The source line of the preview, from the file (no ids needed). */

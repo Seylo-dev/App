@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { deployments as deploymentOps, projects, services as serviceOps, serviceTransfer as transferOps } from "@seylo/ops";
+import { deployments as deploymentOps, env, projects, services as serviceOps, serviceTransfer as transferOps } from "@seylo/ops";
 import { and, eq } from "drizzle-orm";
 import {
   alertRules,
@@ -21,15 +21,18 @@ import {
   uptimeChecks,
   volumes,
 } from "../src/db/schema";
-import { readProjectEnv, readServiceEnv } from "../src/modules/env/store";
+import { readProjectEnv, readServiceEnv, writeProjectEnv } from "../src/modules/env/store";
 import { materializeService } from "../src/modules/services/portable";
 import { defaultSpec } from "../src/modules/services/spec";
 import { sweepTransfers } from "../src/modules/serviceTransfer";
 import { scryptLimits } from "../src/modules/serviceTransfer/crypto";
+import { mergeSharedLines } from "../src/modules/serviceTransfer/plan";
+import { setTargetResolver } from "../src/modules/uptime/targets";
 import { callOp, createApiKey, createUser, grant } from "./helpers";
 import {
   begin,
   closeSides,
+  craft,
   download,
   entriesOf,
   exportZip,
@@ -444,6 +447,98 @@ describe("import on the same panel", () => {
     const ref = { projectId: b.projectId, importId: begun.body.importId };
     expect((await callOp(b.panel, transferOps.discardImport, ref, { cookie: b.cookie })).body).toEqual({ deletedService: false });
     expect(b.panel.deps.db.select().from(serviceImports).all()).toEqual([]);
+  });
+});
+
+describe("shared variables from the file", () => {
+  test("only one KEY=value line of that variable, without references, is taken; anything else is left out", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const file = await exportZip(a, await makeApp(a));
+    const real = "DATABASE_URL=postgres://real/db\n";
+    expect((await callOp(b.panel, env.setShared, { projectId: b.projectId, text: real }, { cookie: b.cookie })).status).toBe(200);
+    const crafted = await craft(file.bytes, b.projectId, (plain) => {
+      const web = plain.services.web;
+      web.doc.env.shared = ["MULTI", "REF", "COMMENT", "OTHER", "QUOTED", "SENTRY_DSN"];
+      web.shared = {
+        // Shown as one variable, but a second line would override the project's DATABASE_URL.
+        MULTI: "MULTI=1\nDATABASE_URL=postgres://attacker/db",
+        REF: "REF=${{web.SECRET}}",
+        COMMENT: "COMMENT=1 # DATABASE_URL",
+        OTHER: "SOMETHING_ELSE=1",
+        QUOTED: 'QUOTED="one\ntwo"',
+        SENTRY_DSN: "SENTRY_DSN=https://key@sentry.example/1",
+      };
+    });
+    const begun = await callOp(b.panel, transferOps.importBegin, crafted, { cookie: b.cookie });
+    expect(begun.status).toBe(200);
+    expect(begun.body.env.shared).toEqual([
+      { name: "MULTI", state: "noValue" },
+      { name: "REF", state: "noValue" },
+      { name: "COMMENT", state: "noValue" },
+      { name: "OTHER", state: "noValue" },
+      { name: "QUOTED", state: "missing" },
+      { name: "SENTRY_DSN", state: "missing" },
+    ]);
+    const warning = begun.body.warnings.find((w: { reason: string }) => w.reason === "sharedRefused");
+    expect(warning?.message).toContain("MULTI, REF, COMMENT, OTHER");
+    expect(JSON.stringify(begun.body).includes("attacker")).toBe(false);
+    // Overwrite takes only what was shown, too.
+    await callOp(
+      b.panel,
+      transferOps.setChoices,
+      { projectId: b.projectId, importId: begun.body.importId, choices: { sharedVariables: "overwrite" } },
+      { cookie: b.cookie },
+    );
+    const done = await callOp(
+      b.panel,
+      transferOps.importService,
+      { projectId: b.projectId, importId: begun.body.importId },
+      { cookie: b.cookie },
+    );
+    expect(done.status).toBe(200);
+    expect(readProjectEnv(b.panel.deps.db, b.panel.deps.secrets, b.projectId).text).toBe(
+      `${real}QUOTED="one\ntwo"\nSENTRY_DSN=https://key@sentry.example/1\n`,
+    );
+  });
+
+  test("they are merged into the text stored when the import writes, so a save in between stays", async () => {
+    const a = await side();
+    const b = await side("node-b");
+    const file = await exportZip(a, await makeApp(a));
+    const db = b.panel.deps.db;
+    writeProjectEnv(db, b.panel.deps.secrets, b.projectId, "KEEP=1\n", null);
+    const begun = await begin(b, file.bytes);
+    let saved = false;
+    // Someone saves the shared variables while the import checks its uptime targets: after its plan, before its transaction.
+    setTargetResolver(async () => {
+      if (!saved) writeProjectEnv(db, b.panel.deps.secrets, b.projectId, "KEEP=1\nEDITED=2\n", null);
+      saved = true;
+      return ["93.184.216.34"];
+    });
+    try {
+      const done = await callOp(
+        b.panel,
+        transferOps.importService,
+        { projectId: b.projectId, importId: begun.body.importId },
+        { cookie: b.cookie },
+      );
+      expect(done.status).toBe(200);
+    } finally {
+      setTargetResolver(null);
+    }
+    expect(saved).toBe(true);
+    expect(readProjectEnv(db, b.panel.deps.secrets, b.projectId).text).toBe("KEEP=1\nEDITED=2\nSENTRY_DSN=https://key@sentry.example/1\n");
+  });
+
+  test("mergeSharedLines adds, overwrites only when asked, and keeps what appeared since the preview", () => {
+    const add = { key: "B", line: "B=2", overwrite: false };
+    expect(mergeSharedLines("A=1\n", [add])).toBe("A=1\nB=2\n");
+    expect(mergeSharedLines("", [add])).toBe("B=2\n");
+    // B was added by someone else since the preview: theirs stays.
+    expect(mergeSharedLines("A=1\nB=mine\n", [add])).toBeNull();
+    expect(mergeSharedLines('A=1\nexport B="old"\nC=3\n', [{ key: "B", line: "B=new", overwrite: true }])).toBe("A=1\nB=new\nC=3\n");
+    expect(() => mergeSharedLines("A=1\n", [{ key: "B", line: `B=${"x".repeat(262_144)}`, overwrite: false }])).toThrow("256 KiB");
   });
 });
 

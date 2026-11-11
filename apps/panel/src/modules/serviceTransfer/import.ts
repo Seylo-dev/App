@@ -19,7 +19,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { ensurePanelId } from "../../settings";
 import { queueDeploy } from "../deployments/queue";
 import { hashBasicAuthPassword } from "../domains/checks";
-import { writeProjectEnv } from "../env/store";
+import { readProjectEnv, writeProjectEnv } from "../env/store";
 import { openFirstRun } from "../exposures/logic";
 import { assertGitSourceTarget, gitCaller } from "../git/targets";
 import { accountById } from "../github/account";
@@ -38,7 +38,7 @@ import { deployTriggerPath } from "../webhooks/trigger";
 import { aadFor, assertPassphrase, checkKdf, decryptSecrets, deriveKeys, type SecretsEnvelope, verifyManifest } from "./crypto";
 import { checkDocument, checkManifest, manifestEntry } from "./document";
 import { sourceFor } from "./mapping";
-import { type ImportRow, type Opened, planImport } from "./plan";
+import { type ImportRow, mergeSharedLines, type Opened, planImport } from "./plan";
 import type { ServiceSecrets } from "./snapshot";
 import { forgetOpened, loadImport, openedOf } from "./store";
 
@@ -239,7 +239,11 @@ export const importService = implement(transferOps.importService, async (input, 
   const userId = user?.id ?? null;
   const upload = plan.pendingUpload;
   const created = ctx.db.transaction((tx) => {
-    if (plan.sharedEnv !== null) writeProjectEnv(tx, ctx.secrets, row.projectId, plan.sharedEnv, userId);
+    // Merged into what is stored now, not what the preview read: a save in between is kept.
+    if (plan.sharedLines.length) {
+      const shared = mergeSharedLines(readProjectEnv(tx, ctx.secrets, row.projectId).text, plan.sharedLines);
+      if (shared !== null) writeProjectEnv(tx, ctx.secrets, row.projectId, shared, userId);
+    }
     let spec = m.spec;
     if (plan.credential) {
       const c = plan.credential;
