@@ -4372,9 +4372,9 @@ check_43() {
   wait_for 120 "mongosh on 8.0" p43_sees "db.version()" '8\.0\.' ||
     bad "MongoDB 8.0 never answered"
   out=$(p43_js "db.t.findOne().v")
-  expect "the document survives the upgrade ($(printf '%s' "$out" | tail -1))" sh -c "printf '%s' '$out' | grep -q e2e-43"
+  expect "the document survives the upgrade ($(printf '%s' "$out" | grep -m1 -o 'e2e-43'))" sh -c "printf '%s' '$out' | grep -q e2e-43"
   out=$(p43_js "db.adminCommand({getParameter: 1, featureCompatibilityVersion: 1}).featureCompatibilityVersion.version")
-  expect "8.0 runs with featureCompatibilityVersion 7.0 until the next step ($(printf '%s' "$out" | tail -1))" sh -c "printf '%s' '$out' | grep -q '7\.0'"
+  expect "8.0 runs with featureCompatibilityVersion 7.0 until the next step ($(printf '%s' "$out" | grep -m1 -oE '[0-9]+\.[0-9]+'))" sh -c "printf '%s' '$out' | grep -qE '(^|> )7\.0$'"
   ev "database: $(api databases.get "{\"serviceId\":\"$db\"}" | jq -c '{engine, version}'), choices now: $(api databases.versionChoices "{\"serviceId\":\"$db\"}" | jq -c '{image, choices: [.choices[] | {version, allowed, reason}]}')"
 
   expect "going back to 7.0 is refused (downgrade)" refused_with downgrade api databases.setVersion "{\"serviceId\":\"$db\",\"version\":\"7.0\",\"confirmNoBackup\":true}"
