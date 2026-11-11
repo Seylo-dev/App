@@ -581,7 +581,9 @@ describe("cloning databases and data", () => {
     const copied = await callOp(panel, serviceOps.clone, { serviceId: id, projectId: blog, nodeId: nodeB, data: "copy" }, { cookie });
     expect(copied.status).toBe(200);
     expect(copied.body.copied.databaseLogins).toBe(true);
-    expect(secretsOf(copied.body.service.id)).toEqual({ admin_password: before.admin_password });
+    const copiedSecrets = secretsOf(copied.body.service.id);
+    expect(Object.keys(copiedSecrets)).toEqual(["admin_password"]);
+    expect(copiedSecrets.admin_password).toBe(before.admin_password);
     // The copied data has the old user: the clone's agent retires it there too.
     expect(exposedUserOf(copied.body.service.id)).toBe("external");
     expect(copied.body.dataCopy).toMatchObject({ status: "queued", fromName: "db", volumes: ["data"] });
