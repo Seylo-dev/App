@@ -379,7 +379,7 @@ test("mcp.info and switching the server", async () => {
     readOnlyByDefault: true,
     url: "http://localhost:3000/mcp",
   });
-  expect(info.body.snippets["claude-code"]).toBe("claude mcp add --transport http seylo http://localhost:3000/mcp");
+  expect(info.body.snippets["claude-code"]).toBe("claude mcp add --transport http --scope user seylo http://localhost:3000/mcp");
   expect(info.body.installLinks.cursor).toStartWith("https://cursor.com/en/install-mcp?name=seylo&config=");
   expect(info.body.tools.total).toBeGreaterThan(info.body.tools.destructive);
   const on = await callOp(panel, mcp.update, { enabled: true }, { cookie });

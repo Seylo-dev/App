@@ -44,9 +44,9 @@ test.describe("MCP setup", () => {
 
     // Claude Code: the command and the /mcp sign-in line, no button.
     await expect(tab("Claude Code")).toBeChecked();
-    await expect(code).toHaveText(`claude mcp add --transport http ${slug} ${url}`);
+    await expect(code).toHaveText(`claude mcp add --transport http --scope user ${slug} ${url}`);
     await expect(card.getByText(`then run /mcp in Claude Code and pick ${slug} to sign in.`)).toBeVisible();
-    await expect(card.getByRole("link", { name: /^(Add to|Install in|Open Claude)/ })).toHaveCount(0);
+    await expect(card.getByRole("link", { name: /^(Add to|Install in|Copy the URL)/ })).toHaveCount(0);
 
     // Cursor: the "Add to Cursor" web link, base64 of the server's JSON, in a new tab.
     await tab("Cursor").click();
@@ -78,20 +78,26 @@ test.describe("MCP setup", () => {
     expect(href.slice(gooseStart.length)).toMatch(/^[^ +&]+$/);
     await expect(goose).not.toHaveAttribute("target");
 
-    // Claude: no install link, so the button opens the connectors page and the snippet is the URL to paste.
+    // Claude: no install link, so the button copies the URL and opens the connectors page.
     await tab("Claude Desktop").click();
-    const claude = card.getByRole("link", { name: "Open Claude connectors" });
+    const claude = card.getByRole("link", { name: "Copy the URL and open Claude" });
     await expect(claude).toHaveAttribute("href", "https://claude.ai/customize/connectors");
     await expect(claude).toHaveAttribute("target", "_blank");
     await expect(code).toHaveText(url);
-    await expect(card.getByText("click Add custom connector and paste this URL")).toBeVisible();
+    await expect(card.getByText("click Add custom connector and paste it")).toBeVisible();
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const opened = page.context().waitForEvent("page");
+    await claude.click();
+    await (await opened).close();
+    await expect(page.getByText("URL copied: paste it in Add custom connector")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
 
     // Codex and Gemini CLI: one command each.
     await tab("Codex").click();
     await expect(code).toHaveText(`codex mcp add ${slug} --url ${url}`);
     await tab("Gemini CLI").click();
     await expect(code).toHaveText(`gemini mcp add --transport http ${slug} ${url}`);
-    await expect(card.getByRole("link", { name: /^(Add to|Install in|Open Claude)/ })).toHaveCount(0);
+    await expect(card.getByRole("link", { name: /^(Add to|Install in|Copy the URL)/ })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 

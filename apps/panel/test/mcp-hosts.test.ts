@@ -14,7 +14,7 @@ test("every host has a snippet, and install links only for hosts the card knows"
 
 test("snippets: the commands and configs to paste, the server named seylo", () => {
   expect(mcpSnippets(url)).toEqual({
-    "claude-code": "claude mcp add --transport http seylo https://panel.acme.dev/mcp",
+    "claude-code": "claude mcp add --transport http --scope user seylo https://panel.acme.dev/mcp",
     "claude-desktop": "https://panel.acme.dev/mcp",
     cursor: '{\n  "mcpServers": {\n    "seylo": {\n      "url": "https://panel.acme.dev/mcp"\n    }\n  }\n}',
     vscode: `code --add-mcp '{"name":"seylo","type":"http","url":"https://panel.acme.dev/mcp"}'`,

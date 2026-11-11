@@ -128,7 +128,7 @@ export const fixtures: Record<string, unknown> = {
     url: "https://panel.acme.dev/mcp",
     oauthMetadataUrl: "https://panel.acme.dev/.well-known/oauth-authorization-server",
     snippets: {
-      "claude-code": "claude mcp add --transport http seylo https://panel.acme.dev/mcp",
+      "claude-code": "claude mcp add --transport http --scope user seylo https://panel.acme.dev/mcp",
       "claude-desktop": "https://panel.acme.dev/mcp",
       cursor: '{\n  "mcpServers": {\n    "seylo": {\n      "url": "https://panel.acme.dev/mcp"\n    }\n  }\n}',
       vscode: `code --add-mcp '{"name":"seylo","type":"http","url":"https://panel.acme.dev/mcp"}'`,

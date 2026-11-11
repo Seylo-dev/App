@@ -9,6 +9,7 @@ import { Alert } from "@seylo/ui/components/alert";
 import { Button } from "@seylo/ui/components/button";
 import { CodeBlock } from "@seylo/ui/components/code-block";
 import { Segmented, SegmentedItem } from "@seylo/ui/components/segmented";
+import { toast } from "@seylo/ui/components/toast";
 import { IconExternalLink, IconPlugConnected } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -70,12 +71,21 @@ export function McpSafetyNote({ info }: { info: Pick<McpInfo, "askBeforeDestruct
  * open in a new tab without a referrer, since the panel's URL is in the
  * link; app links (goose://) open the app from this tab.
  */
-export function InstallLink({ host, href }: { host: string; href: string }) {
+export function InstallLink({ host, href, copies }: { host: string; href: string; copies?: string }) {
   const web = href.startsWith("https:");
   const Icon = web ? IconExternalLink : IconPlugConnected;
+  // Claude has no install link: the click puts the URL on the clipboard on the way to its connectors page.
+  const copy = copies
+    ? () => {
+        void navigator.clipboard
+          ?.writeText(copies)
+          .then(() => toast.success(t("settingsKeys.mcp.copiedForClaude")))
+          .catch(() => undefined);
+      }
+    : undefined;
   return (
     <Button asChild size="sm" variant="primary" className="self-start">
-      <a href={href} {...(web ? { target: "_blank", rel: "noreferrer" } : {})}>
+      <a href={href} onClick={copy} {...(web ? { target: "_blank", rel: "noreferrer" } : {})}>
         <Icon size={15} stroke={1.8} />
         {installLabel(host)}
       </a>
@@ -98,7 +108,7 @@ export function McpHostSetup({ info }: { info: Pick<McpInfo, "snippets" | "insta
           </SegmentedItem>
         ))}
       </Segmented>
-      {link && <InstallLink host={host} href={link} />}
+      {link && <InstallLink host={host} href={link} copies={host === "claude-desktop" ? snippet : undefined} />}
       {known(host) && <p className="m-0 text-[12.5px] text-muted-foreground">{t(`settingsKeys.mcp.hostHints.${host}`, { name: slug })}</p>}
       <CodeBlock code={snippet} tone="dark" maxHeight={260} />
     </div>

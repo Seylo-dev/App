@@ -3,10 +3,12 @@
 // install link where the tool publishes a format. The server is named after
 // the brand slug everywhere. Formats come from each tool's own docs:
 //
-//   Claude Code  claude mcp add --transport http <name> <url>
+//   Claude Code  claude mcp add --transport http --scope user <name> <url> (code.claude.com/docs/en/mcp:
+//                user scope works in every project; no URL scheme adds a server)
 //   Claude       Customize > Connectors > Add custom connector, paste the
 //                URL (claude.com/docs/connectors/custom/add-unlisted); no
-//                install link, so the link opens that page
+//                install link or pre-filled dialog exists, so the button
+//                copies the URL and opens that page
 //   Cursor       the "Add to Cursor" web link of cursor.com/docs/context/mcp/install-links:
 //                https://cursor.com/en/install-mcp?name=<name>&config=<base64 of the server's JSON>,
 //                which opens cursor://anysphere.cursor-deeplink/mcp/install with the same values
@@ -38,7 +40,7 @@ function shellWord(text: string): string {
 /** What to run or paste for each host, keyed like mcpHosts. */
 export function mcpSnippets(url: string, name: string = slug): Record<string, string> {
   return {
-    "claude-code": `claude mcp add --transport http ${name} ${url}`,
+    "claude-code": `claude mcp add --transport http --scope user ${name} ${url}`,
     // A custom connector takes the URL itself.
     "claude-desktop": url,
     // ~/.cursor/mcp.json or a project's .cursor/mcp.json.

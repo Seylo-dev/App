@@ -97,16 +97,18 @@ export default {
       goose: "goose",
     },
     install: {
-      "claude-desktop": "Open Claude connectors",
+      "claude-desktop": "Copy the URL and open Claude",
       cursor: "Add to Cursor",
       vscode: "Install in VS Code",
       goose: "Add to goose",
     },
     installIn: "Install in {host}",
+    copiedForClaude: "URL copied: paste it in Add custom connector",
     hostHints: {
-      "claude-code": "Run it in a terminal, then run /mcp in Claude Code and pick {name} to sign in.",
+      "claude-code":
+        "Run it once in a terminal (--scope user adds it for every project), then run /mcp in Claude Code and pick {name} to sign in.",
       "claude-desktop":
-        "In Claude (the desktop app or claude.ai), open Customize > Connectors, click Add custom connector and paste this URL. If it asks how Claude signs in, pick Register automatically. Claude connects from Anthropic's servers, so the panel must be reachable from the internet.",
+        "Claude has no install link, so the button copies this URL and opens Customize > Connectors: click Add custom connector and paste it. If it asks how Claude signs in, pick Register automatically. On a Team or Enterprise plan an owner can add it once for everyone in Organization settings > Connectors, and members only click Connect. Claude connects from Anthropic's servers, so the panel must be reachable from the internet.",
       cursor: "Or paste this into ~/.cursor/mcp.json, or .cursor/mcp.json in a project. Cursor signs in through your browser.",
       vscode: "Or run this in a terminal. VS Code opens your browser to sign in the first time it starts the server.",
       codex: "Run it in a terminal. Codex opens your browser to sign in; codex mcp login {name} signs in again later.",
