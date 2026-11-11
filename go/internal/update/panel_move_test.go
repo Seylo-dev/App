@@ -487,6 +487,7 @@ func TestImportPanelDataManifestRules(t *testing.T) {
 		"tailnet socket":   {entry("tailnet.sock")},
 		"telemetry switch": {entry("telemetry-off")},
 		"ip access switch": {entry("ip-access-on")},
+		"switch marker":    {entry("move-commit")},
 		"unclean":          {entry("branding/../x")},
 		"dot slash":        {entry("./x")},
 		"absolute":         {entry("/etc/passwd")},

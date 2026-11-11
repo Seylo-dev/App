@@ -34,6 +34,9 @@ var neverMoved = map[string]string{
 	"join-token":    "the installer's join token",
 	"telemetry-off": "the installer's telemetry switch",
 	"ip-access-on":  "the IP access switch",
+	// Only CommitMovedPanel writes it, on the target: one that came along
+	// would end the moved panel's standby before the switch.
+	commitMarker: "the switch marker of a moved panel",
 }
 
 // neverMovedSuffixes: a key rotation that did not finish (".new"), and
