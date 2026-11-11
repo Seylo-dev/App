@@ -94,7 +94,7 @@ export function transferHttp(deps: Deps) {
           .from(serviceExports)
           .where(and(eq(serviceExports.id, exportId), eq(serviceExports.status, "ready")))
           .get();
-        if (!found || !found.payloadSealed || found.createdAt.getTime() <= started.getTime() - exportReadyMs) return null;
+        if (!found?.payloadSealed || found.createdAt.getTime() <= started.getTime() - exportReadyMs) return null;
         tx.update(serviceExports)
           .set({ status: "streaming", startedAt: started, payloadSealed: null })
           .where(eq(serviceExports.id, found.id))
@@ -230,7 +230,7 @@ export function transferHttp(deps: Deps) {
         const ticket = redeemed.data;
         const row = deps.db.select().from(serviceImports).where(eq(serviceImports.id, ticket.importId)).get();
         const entry = row?.entries.find((e) => e.path === ticket.entry);
-        if (!row || row.status !== "receiving" || !row.serviceId || !entry || entry.status === "done") {
+        if (row?.status !== "receiving" || !row.serviceId || !entry || entry.status === "done") {
           return plain(409, "CONFLICT", "This import is not waiting for that entry.");
         }
         const declared = request.headers.get("content-length");

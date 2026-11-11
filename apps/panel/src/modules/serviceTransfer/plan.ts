@@ -7,7 +7,7 @@
 // engine, never taken from the file.
 
 import { parseEnv } from "@seylo/env-analyzer";
-import { databases as dbOps, OpError, serviceTransfer as transferOps } from "@seylo/ops";
+import { boxes as boxOps, databases as dbOps, OpError, type serviceTransfer as transferOps } from "@seylo/ops";
 import type { Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
@@ -174,7 +174,7 @@ export function planImport(ctx: OpContext, row: ImportRow, opened: Opened, choic
       }
     }
   }
-  if (doc.kind === "box" && doc.box?.repository && !Value.Check(transferOps.PortableSource.anyOf[1].properties.url, doc.box.repository)) {
+  if (doc.kind === "box" && doc.box?.repository && !Value.Check(boxOps.create.input.properties.repository, doc.box.repository)) {
     blockers.push({ reason: "badDocument", message: "The Box's repository URL is not one this panel accepts." });
   }
 

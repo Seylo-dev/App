@@ -17,6 +17,7 @@ import { implement, type OpContext } from "../../ops/implement";
 import { ensurePanelId } from "../../settings";
 import { loadService, type ServiceRow } from "../services/rows";
 import { aadFor, encryptSecrets, newExportKeys } from "./crypto";
+import { checkDocument } from "./document";
 import { readmeText } from "./readme";
 import { exportBlockers, snapshotService } from "./snapshot";
 
@@ -98,6 +99,16 @@ export const exportService = implement(transferOps.exportService, async (input, 
     });
   }
   const snap = snapshotService(ctx, svc, { sourceLogin: input.includeSourceLogin === true && input.secrets === "encrypted" });
+  // The file must pass the importer's own check: items it would skip stay out here too, and say so.
+  const fit = checkDocument(snap.doc, {
+    name: svc.name,
+    kind: svc.kind,
+    path: `services/${svc.name}/`,
+    agentVersion: null,
+    counts: { envKeys: 0, fileMounts: 0, domains: 0, volumes: 0, cronJobs: 0, uptimeChecks: 0 },
+  });
+  snap.doc = fit.doc;
+  snap.leftOut.push(...fit.skipped);
   if (input.includeSourceLogin && input.secrets !== "encrypted") {
     throw new OpError("BAD_REQUEST", "A git credential or registry login only goes in an encrypted file.", { field: "includeSourceLogin" });
   }
@@ -194,7 +205,7 @@ export const exportLink = implement(transferOps.exportLink, (input, ctx) => {
     )
     .get();
   const user = userOf(ctx.principal);
-  if (!row || !row.payloadSealed || (row.createdBy !== null && row.createdBy !== user?.id)) {
+  if (!row?.payloadSealed || (row.createdBy !== null && row.createdBy !== user?.id)) {
     throw new OpError("NOT_FOUND", "This export is not waiting for its download any more. Export again.", { reason: "expired" });
   }
   return { fileName: row.fileName, download: issueLink(ctx, svc, row.id) };
